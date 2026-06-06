@@ -495,65 +495,7 @@ export const formatDateLocalISO = (date: Date) => {
     return `${year}-${month}-${day}`;
 };
 
-export type SistemaStatus = 'ideia' | 'prototipacao' | 'desenvolvimento' | 'testes' | 'producao';
 
-export interface Sistema {
-    id: string;
-    nome: string;
-    repositorio_principal?: string;
-    objetivo_negocio?: string;
-    status: SistemaStatus;
-    link_documentacao?: string;
-    link_google_ai_studio?: string;
-    link_hospedado?: string;
-    data_criacao: string;
-    data_atualizacao: string;
-    github_rag_synced_at?: string;
-}
-
-export type WorkItemPhase = 'planejamento' | 'prototipagem' | 'desenvolvimento' | 'testes' | 'producao';
-export type WorkItemPriority = 'Baixa' | 'Média' | 'Alta' | 'Crítica';
-export type WorkItemOccurrenceType = 'Bug' | 'Melhoria';
-export type WorkItemOccurrenceStatus = 'Pendente' | 'Corrigido' | 'Ignorado';
-export type WorkItemEnvironment = 'Local' | 'Staging';
-
-export interface QualityLog {
-    id: string;
-    tipo: WorkItemOccurrenceType;
-    descricao: string;
-    evidencia?: string;
-    status: WorkItemOccurrenceStatus;
-    ambiente: WorkItemEnvironment;
-    data_criacao: string;
-}
-
-export interface WorkItemAudit {
-    id: string;
-    timestamp: string;
-    usuario: string;
-    fase_anterior: WorkItemPhase | 'novo';
-    fase_nova: WorkItemPhase;
-}
-
-export interface WorkItem {
-    id: string;
-    sistema_id: string;
-    tipo: 'desenvolvimento' | 'ajuste' | 'log';
-    descricao: string;
-    concluido: boolean;
-    data_criacao: string;
-    data_conclusao?: string;
-    pool_dados?: PoolItem[];
-}
-
-export interface AjusteSistema {
-    id: string;
-    sistema_id: string;
-    tarefa_id: string;
-    titulo: string;
-    data_criacao: string;
-    status: Status;
-}
 
 export interface GoogleCalendarEvent {
     id: string;
@@ -597,7 +539,6 @@ export interface BaseConhecimento {
     cor?: string;
     emoji?: string;
     tipo?: string;
-    sistema_id?: string;
     data_criacao: string;
     data_atualizacao: string;
     configuracao_rag: {

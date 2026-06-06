@@ -117,7 +117,6 @@ interface TaskExecutionViewProps {
   isSyncing: boolean;
   isNotificationCenterOpen: boolean;
   onOpenNotes: () => void;
-  onOpenLog: () => void;
   onOpenShopping: () => void;
   onOpenTranscription: () => void;
   onOpenMeetingTranscription: () => void;
@@ -176,7 +175,6 @@ export const TaskExecutionView = ({
   isSyncing,
   isNotificationCenterOpen,
   onOpenNotes,
-  onOpenLog,
   onOpenShopping,
   onOpenTranscription,
   onOpenMeetingTranscription,
@@ -1639,7 +1637,6 @@ export const TaskExecutionView = ({
                 isSyncing={isSyncing}
                 isNotificationCenterOpen={isNotificationCenterOpen}
                 onOpenNotes={onOpenNotes}
-                onOpenLog={onOpenLog}
                 onOpenCopiloto={() => {
                   if (isDesktopViewport) {
                     setIsCopilotCollapsed(false);
@@ -1707,7 +1704,6 @@ export const TaskExecutionView = ({
               isSyncing={isSyncing}
               isNotificationCenterOpen={isNotificationCenterOpen}
               onOpenNotes={onOpenNotes}
-              onOpenLog={onOpenLog}
               onOpenCopiloto={() => {
                 if (isDesktopViewport) {
                   setIsCopilotCollapsed(false);

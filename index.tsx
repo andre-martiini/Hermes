@@ -6,8 +6,8 @@ import {
   BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings,
   FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight,
   DailyHabits, HealthSettings, ExerciseLog, ExerciseSettings, PullupPhase, HermesNotification, AppSettings,
-  formatDate, formatDateLocalISO, Sistema, SistemaStatus, WorkItem, WorkItemPhase,
-  WorkItemPriority, QualityLog, WorkItemAudit, GoogleCalendarEvent,
+  formatDate, formatDateLocalISO, 
+  GoogleCalendarEvent,
   PoolItem, CustomNotification, HealthExam, ConhecimentoItem, UndoAction, HermesModalProps,
   ShoppingItem, Projeto, SlideHistoryEntry, BaseConhecimento, TipoAcao, Servico, Toast,
   HealthTelegramReminder
@@ -49,7 +49,6 @@ import { DayView } from './src/views/DayView';
 import { CalendarView } from './src/views/CalendarView';
 import { CategoryView } from './src/views/CategoryView';
 import { TaskExecutionView } from './src/views/TaskExecutionView';
-import { SistemaExecutionView } from './src/views/SistemaExecutionView';
 import { PublicScholarshipRegistration } from './src/components/public/PublicScholarshipRegistration';
 import PublicFinancePortal from './src/components/public/PublicFinancePortal';
 import PublicShoppingPortal from './src/components/public/PublicShoppingPortal';
@@ -124,176 +123,7 @@ const getBucketStartDate = (label: string): string => {
   return '';
 };
 // -----------------------------------------------------------------------------
-const QuickLogModal = ({ isOpen, onClose, onAddLog, unidades }: { isOpen: boolean, onClose: () => void, onAddLog: (text: string, systemId: string) => void, unidades: { id: string, nome: string }[] }) => {
-  const [textInput, setTextInput] = useState('');
-  const [selectedSystem, setSelectedSystem] = useState('');
-  const [isRecording, setIsRecording] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const systems = useMemo(() => unidades.filter(u => u.nome.startsWith('SISTEMA:')), [unidades]);
-  const streamRef = useRef<MediaStream | null>(null);
-  useEffect(() => {
-    if (systems.length > 0 && !selectedSystem) {
-      setSelectedSystem(systems[0].id);
-    }
-  }, [systems, selectedSystem]);
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.stop();
-      }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, []);
-  if (!isOpen) return null;
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) audioChunksRef.current.push(event.data);
-      };
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/m4a' });
-        await handleProcessAudio(audioBlob);
-        stream.getTracks().forEach(track => track.stop());
-      };
-      streamRef.current = stream;
-      mediaRecorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      console.error("Erro ao acessar microfone:", err);
-      alert("Permissão de microfone negada ou não disponível.");
-    }
-  };
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  };
-  const handleProcessAudio = async (audioBlob: Blob) => {
-    setIsProcessing(true);
-    try {
-      const reader = new FileReader();
-      reader.readAsDataURL(audioBlob);
-      reader.onloadend = async () => {
-        try {
-          const base64String = (reader.result as string).split(',')[1];
-          const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
-          const response = await transcribeFunc({ audioBase64: base64String });
-          const data = response.data as { raw: string, refined: string };
-          if (data.refined) {
-            const newText = textInput ? textInput + '\n' + data.refined : data.refined;
-            setTextInput(newText);
-            if (selectedSystem) {
-              onAddLog(newText, selectedSystem);
-              setTextInput('');
-              onClose();
-            }
-          }
-        } catch (error) {
-          console.error("Erro ao transcrever:", error);
-          alert("Erro ao processar áudio via Hermes AI.");
-        } finally {
-          setIsProcessing(false);
-        }
-      };
-    } catch (error) {
-      console.error("Erro ao ler áudio:", error);
-      setIsProcessing(false);
-    }
-  };
-  return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-950/90 animate-in fade-in">
-      <div className="bg-white w-full max-w-2xl rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 border border-border-grid">
-        <div className="p-8 border-b border-border-grid bg-slate-50 flex items-center justify-between">
-          <div>
-            <h3 className="text-2xl font-black text-slate-900 tracking-tight font-mono">Log Rápido</h3>
-            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1 font-mono">Registro de Sistema</p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-none transition-colors">
-            <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-        <div className="p-8 space-y-6">
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1 font-mono">Sistema</label>
-            <select
-              value={selectedSystem}
-              onChange={(e) => setSelectedSystem(e.target.value)}
-              className="w-full bg-slate-50 border border-border-grid rounded-none px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:ring-1 focus:ring-primary-tactile font-mono"
-            >
-              <option value="" disabled>Selecione um sistema</option>
-              {systems.map(s => (
-                <option key={s.id} value={s.id}>{s.nome.replace('SISTEMA:', '').trim()}</option>
-              ))}
-            </select>
-          </div>
-          <div className="bg-slate-50 p-2 rounded-none border border-border-grid flex items-center gap-4 focus-within:border-primary-tactile transition-all">
-            <button
-              onClick={isRecording ? stopRecording : startRecording}
-              disabled={isProcessing}
-              className={`p-4 rounded-none transition-all flex-shrink-0 ${isRecording
-                ? 'bg-rose-600 text-white animate-pulse shadow-lg'
-                : isProcessing
-                  ? 'bg-violet-100 text-violet-600 cursor-wait'
-                  : 'bg-white border border-border-grid text-slate-400 hover:text-violet-600'
-                }`}
-            >
-              {isProcessing ? (
-                <div className="w-5 h-5 border-2 border-violet-600 border-t-transparent rounded-none animate-spin"></div>
-              ) : isRecording ? (
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
-              ) : (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-              )}
-            </button>
-            <input
-              autoFocus
-              type="text"
-              disabled={isRecording || isProcessing}
-              placeholder={isRecording ? "Gravando..." : isProcessing ? "Processando..." : "Descreva o ajuste..."}
-              className="flex-1 bg-transparent border-none outline-none py-4 text-base font-bold text-slate-800 placeholder:text-slate-300 font-mono"
-              value={textInput}
-              onChange={e => setTextInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && textInput.trim() && selectedSystem) {
-                  onAddLog(textInput, selectedSystem);
-                  setTextInput('');
-                  onClose();
-                }
-              }}
-            />
-          </div>
-          <div className="flex gap-4">
-            <button onClick={onClose} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none transition-all font-mono">Cancelar</button>
-            <button
-              onClick={() => {
-                if (textInput.trim() && selectedSystem) {
-                  onAddLog(textInput, selectedSystem);
-                  setTextInput('');
-                  onClose();
-                }
-              }}
-              disabled={!textInput.trim() || !selectedSystem}
-              className="flex-none w-16 md:w-auto md:flex-1 bg-slate-900 text-white py-4 rounded-none text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2 font-mono"
-            >
-              <svg className="w-5 h-5 md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-              <span className="hidden md:inline">Registrar Log</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
+
 const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean, onClose: () => void, showToast: (m: string, t: 'success' | 'error' | 'info') => void }) => {
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -1150,24 +980,7 @@ const App: React.FC = () => {
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [isCompletedLogsOpen, setIsCompletedLogsOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const handleCopyBacklog = async () => {
-    const activeItems = workItems.filter(w => !w.concluido);
-    if (activeItems.length === 0) {
-      showToast("Nenhum item pendente para copiar.", "info");
-      return;
-    }
-    const text = activeItems.map(item => {
-      const systemName = unidades.find(u => u.id === item.sistema_id)?.nome.replace('SISTEMA:', '').trim() || 'Sistema Desconhecido';
-      return `[${systemName}] ${item.descricao}`;
-    }).join('\n');
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast("Backlog copiado para a área de transferência!", "success");
-    } catch (err) {
-      console.error('Failed to copy: ', err);
-      showToast("Erro ao copiar.", "error");
-    }
-  };
+
   // Finance State
   const [financeTransactions, setFinanceTransactions] = useState<FinanceTransaction[]>([]);
   const [financeGoals, setFinanceGoals] = useState<FinanceGoal[]>([]);
@@ -1194,30 +1007,13 @@ const App: React.FC = () => {
   const [exerciseSettings, setExerciseSettings] = useState<ExerciseSettings>({});
   const [healthTelegramReminders, setHealthTelegramReminders] = useState<HealthTelegramReminder[]>([]);
   // Systems State
-  const [sistemasDetalhes, setSistemasDetalhes] = useState<Sistema[]>([]);
-  const [workItems, setWorkItems] = useState<WorkItem[]>([]);
-  const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
-  const [selectedWorkItem, setSelectedWorkItem] = useState<WorkItem | null>(null);
-  const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
   const [isPgdTerminalOpen, setIsPgdTerminalOpen] = useState(false);
   const [pgdTerminalLogs, setPgdTerminalLogs] = useState<string[]>([]);
-  const [isModalCompletedLogsOpen, setIsModalCompletedLogsOpen] = useState(false);
-  const [isQuickLogModalOpen, setIsQuickLogModalOpen] = useState(false);
   const [isShoppingAIModalOpen, setIsShoppingAIModalOpen] = useState(false);
   const [isTranscriptionAIModalOpen, setIsTranscriptionAIModalOpen] = useState(false);
-  const [editingResource, setEditingResource] = useState<{ field: string, label: string, value: string } | null>(null);
-  const [newLogText, setNewLogText] = useState('');
-  const [newLogTipo, setNewLogTipo] = useState<'desenvolvimento' | 'ajuste' | 'geral'>('geral');
-  const [newLogAttachments, setNewLogAttachments] = useState<PoolItem[]>([]);
-  const [editingWorkItem, setEditingWorkItem] = useState<WorkItem | null>(null);
-  const [editingWorkItemText, setEditingWorkItemText] = useState('');
-  const [editingWorkItemAttachments, setEditingWorkItemAttachments] = useState<PoolItem[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isRecordingLog, setIsRecordingLog] = useState(false);
-  const [isSyncingGithub, setIsSyncingGithub] = useState(false);
   const [isProcessingLog, setIsProcessingLog] = useState(false);
-  const [sistemaFilterStatus, setSistemaFilterStatus] = useState<string>('todos');
-  const [sistemaSearch, setSistemaSearch] = useState('');
   const logMediaRecorderRef = useRef<MediaRecorder | null>(null);
   const logAudioChunksRef = useRef<Blob[]>([]);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -1235,7 +1031,6 @@ const App: React.FC = () => {
   const [pgdGeneratingByEntrega, setPgdGeneratingByEntrega] = useState<Record<string, boolean>>({});
   const [pgdRawTextProcessingByEntrega, setPgdRawTextProcessingByEntrega] = useState<Record<string, boolean>>({});
   const [unidades, setUnidades] = useState<{ id: string, nome: string }[]>([]);
-  const [sistemasAtivos, setSistemasAtivos] = useState<string[]>([]);
   // Knowledge State
   const [knowledgeItems, setKnowledgeItems] = useState<ConhecimentoItem[]>([]);
   const [knowledgeBases, setKnowledgeBases] = useState<BaseConhecimento[]>([]);
@@ -1407,59 +1202,12 @@ const App: React.FC = () => {
       setIsRecordingLog(false);
     }
   };
-  // Cleanup on unmount for log recording
-  useEffect(() => {
-    return () => {
-      if (logMediaRecorderRef.current && logMediaRecorderRef.current.state !== 'inactive') {
-        logMediaRecorderRef.current.stop();
-      }
-    };
-  }, []);
-  const handleProcessLogAudio = async (audioBlob: Blob) => {
-    setIsProcessingLog(true);
-    try {
-      const reader = new FileReader();
-      reader.readAsDataURL(audioBlob);
-      reader.onloadend = async () => {
-        try {
-          const base64String = (reader.result as string).split(',')[1];
-          const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
-          const response = await transcribeFunc({ audioBase64: base64String });
-          const data = response.data as { raw: string, refined: string };
-          if (data.refined) {
-            if (viewMode === 'sistemas-dev' && selectedSystemId) {
-              await handleCreateWorkItem(selectedSystemId, 'geral', data.refined, newLogAttachments);
-              setNewLogText('');
-              setNewLogAttachments([]);
-              showToast("Log registrado via IA!", "success");
-            } else {
-              setNewLogText(prev => prev ? prev + '\n' + data.refined : data.refined);
-            }
-          }
-        } catch (error) {
-          console.error("Erro ao transcrever:", error);
-          showToast("Erro ao processar áudio via Hermes AI.", "error");
-        } finally {
-          setIsProcessingLog(false);
-        }
-      };
-    } catch (error) {
-      console.error("Erro ao ler áudio:", error);
-      setIsProcessingLog(false);
-    }
-  };
   // Finance Sync
   useEffect(() => {
     if (!user) return;
-    const unsubSistemas = onSnapshot(collection(db, 'sistemas_detalhes'), (snapshot) => {
-      setSistemasDetalhes(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Sistema)));
-    }, handleSnapshotError('sistemas_detalhes'));
     const unsubGoogleCalendar = onSnapshot(collection(db, 'google_calendar_events'), (snapshot) => {
       setGoogleCalendarEvents(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as GoogleCalendarEvent)));
     }, handleSnapshotError('google_calendar_events'));
-    const unsubWorkItems = onSnapshot(collection(db, 'sistemas_work_items'), (snapshot) => {
-      setWorkItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as WorkItem)));
-    }, handleSnapshotError('sistemas_work_items'));
     const unsubTransactions = onSnapshot(collection(db, 'finance_transactions'), (snapshot) => {
       setFinanceTransactions(snapshot.docs
         .map(d => ({ id: d.id, ...d.data() } as FinanceTransaction))
@@ -1528,15 +1276,8 @@ const App: React.FC = () => {
     const unsubKnowledgeBases = onSnapshot(collection(db, 'knowledge_bases'), (snapshot) => {
       setKnowledgeBases(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as BaseConhecimento)));
     }, handleSnapshotError('knowledge_bases'));
-    const unsubscribeSistemasAtivos = onSnapshot(doc(db, 'configuracoes', 'sistemas'), (docSnap) => {
-      if (docSnap.exists()) {
-        setSistemasAtivos(docSnap.data().lista || []);
-      }
-    }, handleSnapshotError('configuracoes/sistemas'));
     return () => {
-      unsubSistemas();
       unsubGoogleCalendar();
-      unsubWorkItems();
       unsubTransactions();
       unsubGoals();
       unsubSettings();
@@ -1555,7 +1296,6 @@ const App: React.FC = () => {
       unsubKnowledge();
       unsubMasterKnowledge();
       unsubKnowledgeBases();
-      unsubscribeSistemasAtivos();
     };
   }, [user]);
   // Finance Processing Logic (The Listener)
@@ -1828,15 +1568,6 @@ const App: React.FC = () => {
     } else if (viewMode === 'gallery') {
       md = generateActionsMarkdown(tarefas.filter(t => t.status !== 'excluído' as any));
       filename = 'hermes_acoes';
-    } else if (viewMode === 'sistemas-dev') {
-      const sys = selectedSystemId ? unidades.find(u => u.id === selectedSystemId)?.nome : 'Todos os Sistemas';
-      md = generateMarkdown(
-        `Módulo de Sistemas: ${sys}`,
-        'Logs e itens de trabalho.',
-        { 'Descrição': 'O que foi feito', 'Tipo': 'Classificação' },
-        [{ title: 'Work Items', data: workItems.filter(w => !selectedSystemId || w.sistema_id === selectedSystemId).map(w => ({ Descrição: w.descricao, Tipo: w.tipo, Data: new Date(w.data_criacao).toLocaleDateString() })) }]
-      );
-      filename = 'hermes_sistemas';
     }
     if (md) downloadMarkdown(filename, md);
     else showToast('Exportação não disponível para esta visão.', 'info');
@@ -1921,7 +1652,7 @@ const App: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [completedLimit, setCompletedLimit] = useState(10);
   const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude' | 'servicos'>('dashboard');
-  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev' | 'knowledge' | 'services' | 'rag-bases' | 'concluidas'>('dashboard');
+  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'finance' | 'saude' | 'ferramentas' | 'knowledge' | 'services' | 'rag-bases' | 'concluidas'>('dashboard');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
   const [isSidebarRetracted, setIsSidebarRetracted] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
@@ -2056,30 +1787,24 @@ const App: React.FC = () => {
       }
     }
   }, [tarefas.length > 0]);
-  const handleDashboardNavigate = (view: 'gallery' | 'finance' | 'saude' | 'sistemas-dev') => {
+  const handleDashboardNavigate = (view: 'gallery' | 'finance' | 'saude') => {
     setViewMode(view);
-    if (view === 'gallery' || view === 'sistemas-dev') setActiveModule('acoes');
+    if (view === 'gallery') setActiveModule('acoes');
     else if (view === 'finance') setActiveModule('financeiro');
     else if (view === 'saude') setActiveModule('saude');
   };
   // Sync state changes with history to enable back button
   useEffect(() => {
     // Only push if we are NOT at dashboard (root)
-    if (activeModule !== 'dashboard' || viewMode !== 'dashboard' || selectedSystemId || isLogsModalOpen || activeFerramenta) {
-      window.history.pushState({ activeModule, viewMode, selectedSystemId, isLogsModalOpen, activeFerramenta }, "", window.location.pathname);
+    if (activeModule !== 'dashboard' || viewMode !== 'dashboard' || activeFerramenta) {
+      window.history.pushState({ activeModule, viewMode, activeFerramenta }, "", window.location.pathname);
     }
-  }, [activeModule, viewMode, selectedSystemId, isLogsModalOpen, activeFerramenta]);
+  }, [activeModule, viewMode, activeFerramenta]);
   // Handle hardware/browser back button
   useEffect(() => {
     const handlePopState = (e: PopStateEvent) => {
       if (isPgdTerminalOpen) {
         setIsPgdTerminalOpen(false);
-        e.preventDefault();
-      } else if (isLogsModalOpen) {
-        setIsLogsModalOpen(false);
-        e.preventDefault();
-      } else if (selectedSystemId) {
-        setSelectedSystemId(null);
         e.preventDefault();
       } else if (activeFerramenta) {
         setActiveFerramenta(null);
@@ -2104,7 +1829,7 @@ const App: React.FC = () => {
     }
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [activeModule, viewMode, selectedSystemId, isLogsModalOpen, isPgdTerminalOpen, activeFerramenta, lastBackPress]);
+  }, [activeModule, viewMode, isPgdTerminalOpen, activeFerramenta, lastBackPress]);
   useEffect(() => {
     let eventSource: EventSource | null = null;
     if (isPgdTerminalOpen) {
@@ -2122,7 +1847,7 @@ const App: React.FC = () => {
   }, [isPgdTerminalOpen]);
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [isHabitsReminderOpen, setIsHabitsReminderOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'notifications' | 'context' | 'sistemas'>('notifications');
+  const [settingsTab, setSettingsTab] = useState<'notifications' | 'context'>('notifications');
   // --- HermesNotification System & App Settings ---
   const emitNotification = async (title: string, message: string, type: 'info' | 'warning' | 'success' | 'error' = 'info', link?: string, id?: string) => {
     const newNotif: HermesNotification = {
@@ -2233,10 +1958,6 @@ const App: React.FC = () => {
       case 'saude':
         setActiveModule('saude');
         setViewMode('saude');
-        break;
-      case 'sistemas':
-        setActiveModule('acoes');
-        setViewMode('sistemas-dev');
         break;
       case '@SipacTrackingTool':
         setActiveModule('acoes');
@@ -2867,17 +2588,6 @@ const App: React.FC = () => {
           showToast("Ação não encontrada.", "error");
         }
         break;
-      case 'sistemas':
-        const workItem = workItems.find(w => w.id === id);
-        if (workItem) {
-          setSelectedSystemId(workItem.sistema_id);
-          setViewMode('sistemas-dev');
-          setActiveModule('acoes');
-          // setIsLogsModalOpen(true); // Opcional: abrir modal se existir
-        } else {
-          showToast("Log de sistema não encontrado.", "error");
-        }
-        break;
       case 'saude':
         const exam = exams.find(e => e.id === id);
         if (exam) {
@@ -2890,18 +2600,6 @@ const App: React.FC = () => {
       default:
         showToast("Módulo não mapeado para navegação.", "info");
     }
-  };
-  const handleFinalizeIdeaConversion = async (sistemaId: string) => {
-    if (!convertingIdea) return;
-    const unit = unidades.find(u => u.id === sistemaId);
-    if (!unit) return;
-    // Criar o log no sistema ao invés de uma tarefa geral (ação)
-    await handleCreateWorkItem(sistemaId, 'ajuste', convertingIdea.text, [], true);
-    // Remover a nota original após a conversão bem-sucedida
-    await deleteDoc(doc(db, 'brainstorm_ideas', convertingIdea.id));
-    setIsSystemSelectorOpen(false);
-    setConvertingIdea(null);
-    showToast("Nota convertida em log do sistema com sucesso!", "success");
   };
   const handleConvertToTask = (idea: BrainstormIdea) => {
     const timeMatch = idea.text.match(/\[Horário:\s*(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\]/);
@@ -2917,76 +2615,6 @@ const App: React.FC = () => {
     });
     setConvertingIdea(idea); // To delete after save
     setIsCreateModalOpen(true);
-  };
-  const handleUpdateSistema = async (id: string, updates: Partial<Sistema>) => {
-    try {
-      // Check if document exists first or use setDoc with merge
-      await setDoc(doc(db, 'sistemas_detalhes', id), {
-        ...updates,
-        data_atualizacao: new Date().toISOString()
-      }, { merge: true });
-      showToast("Sistema atualizado!", "success");
-    } catch (err) {
-      console.error(err);
-      showToast("Erro ao atualizar sistema.", "error");
-    }
-  };
-  const handleSyncGithubRepo = async (sistemaId: string, repoUrl: string) => {
-    if (!repoUrl) {
-      showToast("Configure o repositório antes de sincronizar.", "error");
-      return;
-    }
-    setIsSyncingGithub(true);
-    try {
-      const fn = httpsCallable(functions, 'sync_github_repo');
-      const result = await fn({ sistema_id: sistemaId, repo_url: repoUrl });
-      const data = result.data as any;
-      showToast(`RAG sincronizado! ${data.chunks_created} chunks criados para "${data.repo_name}".`, "success");
-    } catch (err: any) {
-      const msg = err?.message || "Erro ao sincronizar repositório.";
-      if (msg.includes('Token GitHub')) {
-        showToast("Repositório privado â€” configure um GitHub Token em sistema/api_keys no Firestore.", "error");
-      } else {
-        showToast(msg, "error");
-      }
-    } finally {
-      setIsSyncingGithub(false);
-    }
-  };
-  const handleCreateWorkItem = async (sistemaId: string, tipo: 'desenvolvimento' | 'ajuste' | 'log' | 'geral', descricao: string, attachments: PoolItem[] = [], suppressToast = false) => {
-    const finalTipo = tipo === 'geral' ? 'log' : tipo;
-    try {
-      if (!descricao.trim()) return;
-      const docRef = await addDoc(collection(db, 'sistemas_work_items'), {
-        sistema_id: sistemaId,
-        tipo: finalTipo,
-        descricao,
-        concluido: false,
-        data_criacao: new Date().toISOString(),
-        pool_dados: attachments
-      });
-      // Mirror to Knowledge base
-      if (attachments.length > 0) {
-        for (const item of attachments) {
-          const knowledgeItem: ConhecimentoItem = {
-            id: item.id,
-            titulo: item.nome || 'Sem título',
-            tipo_arquivo: item.tipo === 'link' ? 'link' : (item.nome?.split('.').pop()?.toLowerCase() || 'unknown'),
-            url_drive: item.valor,
-            tamanho: 0,
-            data_criacao: item.data_criacao,
-            origem: { modulo: 'sistemas', id_origem: docRef.id }
-          };
-          setDoc(doc(db, 'conhecimento', item.id), knowledgeItem).catch(console.error);
-        }
-      }
-      if (!suppressToast) {
-        showToast(`${tipo === 'desenvolvimento' ? 'Desenvolvimento' : 'Ajuste'} registrado!`, "success");
-      }
-    } catch (err) {
-      console.error(err);
-      showToast("Erro ao criar item.", "error");
-    }
   };
   const handleShoppingAIConfirm = async (confirmedItems: ShoppingAIConfirmItem[]) => {
     try {
@@ -3033,34 +2661,6 @@ const App: React.FC = () => {
     } catch (err) {
       console.error(err);
       showToast('Erro ao atualizar planejamento.', 'error');
-    }
-  };
-  const handleUpdateWorkItem = async (id: string, updates: Partial<WorkItem>) => {
-    try {
-      const cleanUpdates = JSON.parse(JSON.stringify(updates));
-      await updateDoc(doc(db, 'sistemas_work_items', id), {
-        ...cleanUpdates
-      } as any);
-      // Mirror to Knowledge base
-      if (updates.pool_dados && updates.pool_dados.length > 0) {
-        for (const item of updates.pool_dados) {
-          const knowledgeItem: ConhecimentoItem = {
-            id: item.id,
-            titulo: item.nome || 'Sem título',
-            tipo_arquivo: item.tipo === 'link' ? 'link' : (item.nome?.split('.').pop()?.toLowerCase() || 'unknown'),
-            url_drive: item.valor,
-            tamanho: 0,
-            data_criacao: item.data_criacao,
-            origem: { modulo: 'sistemas', id_origem: id },
-            categoria: 'Sistemas'
-          };
-          setDoc(doc(db, 'conhecimento', item.id), knowledgeItem).catch(console.error);
-        }
-      }
-      showToast("Item de trabalho atualizado!", "success");
-    } catch (err) {
-      console.error(err);
-      showToast("Erro ao atualizar item.", "error");
     }
   };
   const handleFileUploadToDrive = async (file: File) => {
@@ -3110,21 +2710,6 @@ const App: React.FC = () => {
     }, handleSnapshotError('exames'));
     return () => unsub();
   }, [user]);
-  const handleDeleteWorkItem = async (id: string) => {
-    const item = workItems.find(w => w.id === id);
-    if (!item) return;
-    try {
-      await deleteDoc(doc(db, 'sistemas_work_items', id));
-      pushToUndoStack("Excluir Log", async () => {
-        const { id: _, ...data } = item;
-        await setDoc(doc(db, 'sistemas_work_items', id), data);
-      });
-      showToast("Item de trabalho removido.", "info");
-    } catch (err) {
-      console.error(err);
-      showToast("Erro ao remover item.", "error");
-    }
-  };
   const handleArchiveIdea = async (id: string) => {
     try {
       const idea = brainstormIdeas.find(i => i.id === id);
@@ -3364,22 +2949,6 @@ const App: React.FC = () => {
     } catch (error: any) {
       console.error("Erro ao gerar slides:", error);
       throw error;
-    }
-  };
-  const handleAddQuickLog = async (text: string, systemId: string) => {
-    try {
-      await handleCreateWorkItem(systemId, 'desenvolvimento', text, [], true);
-      showToast("Log registrado!", "success", {
-        label: "Ver sistema",
-        onClick: () => {
-          setActiveModule('acoes');
-          setViewMode('sistemas-dev');
-          setSelectedSystemId(systemId);
-        }
-      });
-    } catch (err) {
-      console.error(err);
-      showToast("Erro ao registrar log.", "error");
     }
   };
   const generateDynamicTagsForTask = async (
@@ -4705,9 +4274,7 @@ const App: React.FC = () => {
                 { id: 'servicos', label: 'Serviços', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>, active: activeModule === 'servicos' && viewMode === 'services', onClick: () => { setActiveModule('servicos'); setViewMode('services'); } },
                 { id: 'finance', label: 'Financeiro', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>, active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
                 { id: 'saude', label: 'Saúde', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>, active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
-                { id: 'contacts', label: 'Contatos', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>, active: viewMode === 'contacts', onClick: () => { setActiveModule('acoes'); setViewMode('contacts'); } },
-                { id: 'sistemas', label: 'Sistemas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>, active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
-                { id: 'conhecimento', label: 'Conhecimento', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>, active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
+                { id: 'contacts', label: 'Contatos', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>, active: viewMode === 'contacts', onClick: () => { setActiveModule('acoes'); setViewMode('contacts'); } },                { id: 'conhecimento', label: 'Conhecimento', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>, active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
                 { id: 'rag-bases', label: 'Bases RAG', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>, active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
                 { id: 'ferramentas', label: 'Ferramentas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>, active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
               ].map(item => (
@@ -4825,7 +4392,7 @@ const App: React.FC = () => {
                       isNotificationCenterOpen={isNotificationCenterOpen}
                       onOpenCopiloto={() => setIsCopilotoOpen(true)}
                       onOpenNotes={() => setIsQuickNoteModalOpen(true)}
-                      onOpenLog={() => { setIsQuickLogModalOpen(true); setIsMobileMenuOpen(false); }}
+                      
                       onOpenShopping={() => { setIsShoppingAIModalOpen(true); setIsMobileMenuOpen(false); }}
                       onOpenTranscription={() => { setIsTranscriptionAIModalOpen(true); setIsMobileMenuOpen(false); }}
                       onOpenWhatsAppTranscription={() => {
@@ -4851,7 +4418,7 @@ const App: React.FC = () => {
                       onCreateAction={() => setIsCreateModalOpen(true)}
                       isDark={isDarkTheme}
                     />
-                    {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && (
+                    {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && (
                       <button
                         onClick={() => setIsCreateModalOpen(true)}
                         className="bg-slate-900 text-white p-1.5 rounded-lg md:rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
@@ -4957,16 +4524,15 @@ const App: React.FC = () => {
                           {viewMode === 'services' ? 'Serviços' :
                             viewMode === 'rag-bases' ? 'Bases RAG' :
                               viewMode === 'knowledge' ? 'Conhecimento' :
-                                viewMode === 'sistemas-dev' ? 'Sistemas' :
-                                  viewMode === 'ferramentas' ? 'Ferramentas' :
-                                    activeModule === 'dashboard' ? 'Dashboard' :
-                                      activeModule === 'acoes' ? 'Ações' :
-                                        activeModule === 'financeiro' ? 'Financeiro' :
-                                          activeModule === 'saude' ? 'Saúde' : 'Hermes'}
+                                viewMode === 'ferramentas' ? 'Ferramentas' :
+                                  activeModule === 'dashboard' ? 'Dashboard' :
+                                    activeModule === 'acoes' ? 'Ações' :
+                                      activeModule === 'financeiro' ? 'Financeiro' :
+                                        activeModule === 'saude' ? 'Saúde' : 'Hermes'}
                         </h1>
                       </div>
                     </div>
-                    {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'services' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
+                    {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'services' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
                       <nav className={`flex gap-1`}>
                         <button
                           onClick={() => {
@@ -4987,27 +4553,7 @@ const App: React.FC = () => {
                       </nav>
                     )}
                   </div>
-                  {viewMode === 'sistemas-dev' && !selectedSystemId && (
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={handleCopyBacklog}
-                        className="bg-violet-600 text-white px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-violet-700 transition-all flex items-center gap-3"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
-                        Copiar <span className="hidden lg:inline">Tudo</span>
-                      </button>
-                      <button
-                        onClick={() => {
-                          setSettingsTab('sistemas');
-                          setIsSettingsModalOpen(true);
-                        }}
-                        className="bg-slate-900 text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center gap-2"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
-                        Novo <span className="hidden lg:inline">Sistema</span>
-                      </button>
-                    </div>
-                  )}
+
                   {/* Finance Controls */}
                   {viewMode === 'finance' && (
                     <div className="flex items-center gap-4">
@@ -5064,7 +4610,7 @@ const App: React.FC = () => {
                     </div>
                   )}
                   {/* Standard Action Buttons (Search, Sync, Create) */}
-                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && (
+                  {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && (
                     <div className="flex items-center gap-4">
                       {activeModule !== 'dashboard' && (
                         <div className={`hidden lg:flex items-center border rounded-none px-4 py-2 w-64 group focus-within:ring-1 focus-within:ring-primary-tactile transition-all ${inputSurfaceClass} border-border-grid`}>
@@ -5106,7 +4652,7 @@ const App: React.FC = () => {
                     isNotificationCenterOpen={isNotificationCenterOpen}
                     onOpenCopiloto={() => setIsCopilotoOpen(true)}
                     onOpenNotes={() => setIsQuickNoteModalOpen(true)}
-                    onOpenLog={() => setIsQuickLogModalOpen(true)}
+                    
                     onOpenShopping={() => setIsShoppingAIModalOpen(true)}
                     onOpenTranscription={() => setIsTranscriptionAIModalOpen(true)}
                     onOpenWhatsAppTranscription={() => {
@@ -5143,9 +4689,7 @@ const App: React.FC = () => {
                       { label: 'PGD', active: activeModule === 'acoes' && viewMode === 'pgc', onClick: () => { setActiveModule('acoes'); setViewMode('pgc'); } },
                       { label: 'Financeiro', active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
                       { label: 'Saúde', active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
-                      { label: 'Contatos', active: viewMode === 'contacts', onClick: () => { setActiveModule('acoes'); setViewMode('contacts'); } },
-                      { label: 'Sistemas', active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
-                      { label: 'Conhecimento', active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
+                      { label: 'Contatos', active: viewMode === 'contacts', onClick: () => { setActiveModule('acoes'); setViewMode('contacts'); } },                      { label: 'Conhecimento', active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
                       { label: 'Bases RAG', active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
                       { label: 'Ferramentas', active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
                     ].map((item, idx) => (
@@ -5223,12 +4767,9 @@ const App: React.FC = () => {
                         healthSettings={healthSettings}
                         exerciseLogs={exerciseLogs}
                         unidades={unidades}
-                        sistemasDetalhes={sistemasDetalhes}
-                        workItems={workItems}
                         currentMonth={currentMonth}
                         currentYear={currentYear}
                         onNavigate={handleDashboardNavigate}
-                        onOpenBacklog={handleCopyBacklog}
                       />
                     </div>
                   </>
@@ -5580,38 +5121,6 @@ const App: React.FC = () => {
                     onAnalysePatterns={handleAnalysePatterns}
                     isDark={isDarkTheme}
                   />
-                ) : viewMode === 'sistemas' ? (
-                  <div className="animate-in space-y-8">
-                    <div className="bg-white p-8 rounded-none md:rounded-[2rem] border border-slate-200 shadow-xl">
-                      <h3 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-3">
-                        <span className="w-2 h-8 bg-amber-500 rounded-full"></span>
-                        Desenvolvimento de Sistemas
-                      </h3>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                      {(sistemasAtivos.length > 0
-                        ? sistemasAtivos
-                        : Array.from(new Set(tarefas.filter(t => t.area_tematica === 'SISTEMAS').map(t => t.sistema || 'OUTROS')))
-                      ).map(sistema => (
-                        <div key={sistema} className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-lg flex flex-col">
-                          <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
-                            <h4 className="text-xs font-black uppercase tracking-[0.2em]">{sistema}</h4>
-                            <span className="bg-white/20 px-3 py-1 rounded-full text-[10px] font-black">{tarefas.filter(t => t.area_tematica === 'SISTEMAS' && (t.sistema || 'OUTROS') === sistema).length}</span>
-                          </div>
-                          <div className="p-6 space-y-4 flex-1 bg-slate-50">
-                            {tarefas.filter(t => t.area_tematica === 'SISTEMAS' && (t.sistema || 'OUTROS') === sistema).map(t => (
-                              <div key={t.id} className="bg-white p-4 rounded-lg md:rounded-xl border border-slate-200 shadow-sm hover:border-amber-400 transition-all cursor-pointer" onClick={() => setSelectedTask(t)}>
-                                <div className={`text-[8px] font-black mb-1.5 uppercase ${STATUS_COLORS[normalizeStatus(t.status)] || ''} border-none p-0 bg-transparent`}>
-                                  {t.status}
-                                </div>
-                                <div className="text-[11px] font-bold text-slate-700 leading-tight">{t.titulo}</div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
                 ) : viewMode === 'saude' ? (
                   <HealthView
                     weights={healthWeights}
@@ -5848,993 +5357,6 @@ const App: React.FC = () => {
                       }}
                       showConfirm={showAlert}
                     />
-                  </div>
-                ) : viewMode === 'sistemas-dev' ? (
-                  <div className="animate-in fade-in duration-500 pb-20 font-mono">
-                    {!selectedSystemId ? (
-                      /* TABLE VIEW */
-                      (() => {
-                        const sistemasUnits = unidades.filter(u => u.nome.startsWith('SISTEMA:'));
-                        const statusDotMap: Record<string, string> = { ideia: 'bg-slate-400', prototipacao: 'bg-amber-400', desenvolvimento: 'bg-blue-500', testes: 'bg-orange-400', producao: 'bg-emerald-500' };
-                        const statusLabelMap: Record<string, string> = { ideia: 'Ideia', prototipacao: 'Protótipo', desenvolvimento: 'Dev', testes: 'Testes', producao: 'Produção' };
-                        const statusPillMap: Record<string, string> = { ideia: 'bg-slate-100 text-slate-600', prototipacao: 'bg-amber-100 text-amber-700', desenvolvimento: 'bg-blue-100 text-blue-700', testes: 'bg-orange-100 text-orange-700', producao: 'bg-emerald-100 text-emerald-700' };
-                        const filtered = sistemasUnits.filter(unit => {
-                          const sysD = sistemasDetalhes.find(s => s.id === unit.id);
-                          const name = unit.nome.replace('SISTEMA:', '').trim().toLowerCase();
-                          const matchesSearch = name.includes(sistemaSearch.toLowerCase());
-                          const matchesFilter = sistemaFilterStatus === 'todos' || (sysD?.status || 'ideia') === sistemaFilterStatus;
-                          return matchesSearch && matchesFilter;
-                        });
-                        return (
-                          <div className="space-y-4">
-                            {/* Toolbar */}
-                                                        {/* Toolbar Industrial */}
-                            <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between border-b-4 border-slate-900 pb-6">
-                              <div>
-                                <h3 className="text-2xl font-black uppercase tracking-tighter">SYS_REGISTRY::NODES</h3>
-                                <div className="flex items-center gap-3 mt-1">
-                                  <div className="w-2 h-2 bg-emerald-500 animate-pulse" />
-                                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em]">Active_Cores: {sistemasUnits.length}</p>
-                                </div>
-                              </div>
-                              <div className="relative">
-                                <input
-                                  type="text"
-                                  placeholder="SEARCH_CORE_ID..."
-                                  value={sistemaSearch}
-                                  onChange={e => setSistemaSearch(e.target.value)}
-                                  className="w-full md:w-80 bg-white border-2 border-slate-900 px-6 py-3 text-xs font-black uppercase tracking-widest outline-none focus:bg-slate-50 transition-all placeholder:text-slate-300"
-                                />
-                              </div>
-                            </div>
-                            {/* Table */}
-                                                        <div className="border-4 border-slate-900 bg-white shadow-[8px_8px_0px_rgba(15,23,42,1)] overflow-x-auto">
-                              <table className="w-full text-left border-collapse font-mono">
-                                <thead>
-                                  <tr className="bg-slate-900 text-white border-b-4 border-slate-900">
-                                    <th className="px-6 py-5 text-[10px] font-black uppercase tracking-[0.3em]">Kernel_ID</th>
-                                    <th className="px-6 py-5 text-[10px] font-black uppercase tracking-[0.3em] text-center">Active_Actions</th>
-                                    <th className="px-6 py-5 text-[10px] font-black uppercase tracking-[0.3em] text-right">Last_Sync</th>
-                                  </tr>
-                                </thead>
-                                                                <tbody>
-                                  {filtered.map((unit, idx) => {
-                                    const sysD = sistemasDetalhes.find(s => s.id === unit.id);
-                                    const systemName = unit.nome.replace('SISTEMA:', '').trim();
-                                    
-                                    // Contagem de aÃ§Ãµes vinculadas (Kernel Logic)
-                                    const systemBaseIds = knowledgeBases.filter(b => b.sistema_id === unit.id).map(b => b.id);
-                                    const systemKnowledgeIds = new Set(
-                                      knowledgeItems.filter(item => item.base_id && systemBaseIds.includes(item.base_id)).map(item => item.id)
-                                    );
-                                    const linkedCount = tarefas.filter(t =>
-                                      (t.base_conhecimento && systemBaseIds.includes(t.base_conhecimento)) ||
-                                      (t.knowledge_item_ids || []).some(id => systemKnowledgeIds.has(id)) ||
-                                      t.sistema === systemName
-                                    ).length;
-                                    return (
-                                      <tr 
-                                        key={unit.id} 
-                                        onClick={() => setSelectedSystemId(unit.id)}
-                                        className="group border-b-2 border-slate-100 hover:bg-slate-50 transition-all cursor-pointer active:bg-slate-100"
-                                      >
-                                        <td className="px-6 py-6">
-                                          <div className="flex items-center gap-4">
-                                            <div className="w-1.5 h-6 bg-primary-tactile group-hover:h-10 transition-all" />
-                                            <div className="flex flex-col">
-                                                <span className="text-sm font-black uppercase tracking-tight group-hover:text-primary-tactile">{systemName}</span>
-                                                <span className="text-[8px] font-bold text-slate-400 tracking-widest mt-0.5">KERNEL_NODE::{unit.id.slice(0,8)}</span>
-                                            </div>
-                                          </div>
-                                        </td>
-                                        <td className="px-6 py-6 text-center">
-                                          <div className="inline-flex flex-col items-center">
-                                            <span className="text-lg font-black text-slate-900 leading-none">
-                                              {String(linkedCount).padStart(3, '0')}
-                                            </span>
-                                            <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest mt-1">ACTIONS</span>
-                                          </div>
-                                        </td>
-                                        <td className="px-6 py-6 text-right">
-                                          <p className="text-[11px] font-black text-slate-900">
-                                            {sysD?.data_atualizacao ? new Date(sysD.data_atualizacao).toLocaleDateString('pt-BR') : 'NEVER'}
-                                          </p>
-                                          <p className="text-[8px] font-bold text-slate-400 uppercase mt-0.5 tracking-tighter">
-                                            SYNC_TIMESTAMP
-                                          </p>
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        );
-                      })()
-                    ) : (
-                      /* DETAIL VIEW â€” renderizado pelo SistemaExecutionView overlay */
-                      (() => {
-                        const unit = unidades.find(u => u.id === selectedSystemId);
-                        if (!unit) return null;
-                        return (
-                          <div className="animate-in fade-in duration-300 flex flex-col gap-4">
-                            <button
-                              onClick={() => setSelectedSystemId(null)}
-                              className="flex items-center gap-2 text-slate-500 hover:text-slate-800 font-bold text-xs uppercase tracking-widest transition-colors w-fit"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
-                              Voltar para Lista
-                            </button>
-                            <div className="border border-slate-200 rounded-[2rem] overflow-hidden shadow-xl bg-white">
-                              {(
-                                /* VISÃO DETALHADA - SISTEMA SELECIONADO */
-                                (() => {
-                                  const unit = unidades.find(u => u.id === selectedSystemId);
-                                  if (!unit) return null;
-                                  const sysDetails = sistemasDetalhes.find(s => s.id === unit.id) || {
-                                    id: unit.id,
-                                    nome: unit.nome.replace('SISTEMA:', '').trim(),
-                                    status: 'ideia' as SistemaStatus,
-                                    data_criacao: new Date().toISOString(),
-                                    data_atualizacao: new Date().toISOString()
-                                  };
-                                  const systemName = unit.nome.replace('SISTEMA:', '').trim();
-                                  const systemWorkItems = workItems.filter(w => w.sistema_id === unit.id);
-                                  const activeWorkItems = systemWorkItems.filter(w => !w.concluido);
-                                  const completedWorkItems = systemWorkItems.filter(w => w.concluido);
-                                  const ajustesPendentesCount = activeWorkItems.length;
-                                  const latestWorkItem = [...systemWorkItems].sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime())[0];
-                                  const systemBaseIds = knowledgeBases.filter(base => base.sistema_id === unit.id).map(base => base.id);
-                                  const systemKnowledgeIds = new Set(knowledgeItems.filter(item => item.base_id && systemBaseIds.includes(item.base_id)).map(item => item.id));
-                                  const linkedTasks = tarefas.filter(task =>
-                                    task.base_conhecimento && systemBaseIds.includes(task.base_conhecimento)
-                                    || (task.knowledge_item_ids || []).some(id => systemKnowledgeIds.has(id))
-                                    || task.sistema === systemName
-                                  );
-                                  const steps: SistemaStatus[] = ['ideia', 'prototipacao', 'desenvolvimento', 'testes', 'producao'];
-                                  const stepLabels: Record<string, string> = { ideia: 'Ideia', prototipacao: 'Protótipo', desenvolvimento: 'Dev', testes: 'Testes', producao: 'Produção' };
-                                  const resourceItems = [
-                                    { field: 'repositorio_principal', label: 'Repositório', shortLabel: 'Repo', value: sysDetails.repositorio_principal || '', tone: 'slate', empty: 'Não configurado' },
-                                    { field: 'link_documentacao', label: 'Documentação', shortLabel: 'Docs', value: sysDetails.link_documentacao || '', tone: 'violet', empty: 'Sem documentação' },
-                                    { field: 'link_google_ai_studio', label: 'AI Studio', shortLabel: 'AI', value: sysDetails.link_google_ai_studio || '', tone: 'blue', empty: 'Sem workspace' },
-                                    { field: 'link_hospedado', label: 'Hospedagem', shortLabel: 'App', value: sysDetails.link_hospedado || '', tone: 'emerald', empty: 'Sem link público' }
-                                  ];
-                                  const resourceToneClasses: Record<string, string> = {
-                                    slate: 'border-slate-200 bg-white text-slate-600',
-                                    violet: 'border-violet-200 bg-violet-50/60 text-violet-700',
-                                    blue: 'border-blue-200 bg-blue-50/60 text-blue-700',
-                                    emerald: 'border-emerald-200 bg-emerald-50/70 text-emerald-700'
-                                  };
-                                  const statusTheme: Record<SistemaStatus, { panel: string; pill: string; accent: string; helper: string }> = {
-                                    ideia: { panel: 'bg-slate-50', pill: 'bg-slate-100 text-slate-700', accent: 'bg-slate-500', helper: 'Hipóteses, escopo inicial e definição do que vale perseguir.' },
-                                    prototipacao: { panel: 'bg-amber-50', pill: 'bg-amber-100 text-amber-700', accent: 'bg-amber-500', helper: 'Experimentos rápidos, prova de conceito e validação inicial.' },
-                                    desenvolvimento: { panel: 'bg-blue-50', pill: 'bg-blue-100 text-blue-700', accent: 'bg-blue-500', helper: 'Construção principal, ajustes técnicos e integração com base RAG.' },
-                                    testes: { panel: 'bg-orange-50', pill: 'bg-orange-100 text-orange-700', accent: 'bg-orange-500', helper: 'Validação, correções finais e fechamento de pendências.' },
-                                    producao: { panel: 'bg-emerald-50', pill: 'bg-emerald-100 text-emerald-700', accent: 'bg-emerald-500', helper: 'Operação estável, documentação e manutenção evolutiva.' }
-                                  };
-                                  const currentStatusTheme = statusTheme[sysDetails.status] ?? statusTheme['ideia'];
-                                  const summaryItems = [
-                                    { label: 'Ativos', value: String(activeWorkItems.length) },
-                                    { label: 'Concluídos', value: String(completedWorkItems.length) },
-                                    { label: 'Recursos', value: `${resourceItems.filter(item => item.value).length}/4` },
-                                    { label: 'Ações', value: String(linkedTasks.length) }
-                                  ];
-                                  return (
-                                    <div className="animate-in fade-in duration-300 flex flex-col h-full">
-                                      <div className="flex-1 bg-white rounded-none overflow-hidden">
-                                        {/* Status Stepper */}
-                                        <div className={`${currentStatusTheme.panel} border-b border-slate-100 p-4 md:p-8 flex flex-col items-center gap-4 md:gap-6`}>
-                                          <div className="w-full flex items-center justify-between">
-                                            <div>
-                                              <div className="flex items-center gap-2 flex-wrap">
-                                                <h2 className="text-lg md:text-2xl font-black text-slate-900 tracking-tight uppercase">{systemName}</h2>
-                                                <span className={`px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${currentStatusTheme.pill}`}>{stepLabels[sysDetails.status]}</span>
-                                              </div>
-                                              <p className="text-[10px] font-bold text-slate-500 mt-1">{currentStatusTheme.helper}</p>
-                                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1.5">{ajustesPendentesCount} demanda{ajustesPendentesCount !== 1 ? 's' : ''} aberta{ajustesPendentesCount !== 1 ? 's' : ''}</p>
-                                            </div>
-                                          </div>
-                                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 w-full">
-                                            {summaryItems.map(item => (
-                                              <div key={item.label} className="bg-white border border-slate-200 rounded-xl px-3 py-2.5">
-                                                <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">{item.label}</div>
-                                                <div className="text-sm font-black text-slate-800 mt-1 truncate">{item.value}</div>
-                                              </div>
-                                            ))}
-                                          </div>
-                                          <div className="flex flex-wrap items-center justify-center bg-slate-200/50 p-1 rounded-xl md:rounded-2xl gap-1 w-full md:w-auto">
-                                            {steps.map((step, idx) => {
-                                              const isActive = sysDetails.status === step;
-                                              const stepLabels: Record<string, string> = {
-                                                ideia: 'Ideia',
-                                                prototipacao: 'Protótipo',
-                                                desenvolvimento: 'Dev',
-                                                testes: 'Testes',
-                                                producao: 'Produção'
-                                              };
-                                              return (
-                                                <React.Fragment key={step}>
-                                                  <button
-                                                    onClick={() => handleUpdateSistema(unit.id, { status: step })}
-                                                    className={`flex-1 md:flex-none px-2 md:px-4 py-2 rounded-lg md:rounded-xl text-[8px] md:text-[9px] font-black uppercase tracking-widest transition-all ${isActive
-                                                      ? `${currentStatusTheme.accent} text-white shadow-lg`
-                                                      : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'
-                                                      }`}
-                                                  >
-                                                    {stepLabels[step]}
-                                                  </button>
-                                                  {idx < steps.length - 1 && (
-                                                    <div className="hidden md:flex items-center text-slate-300 px-1">
-                                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
-                                                    </div>
-                                                  )}
-                                                </React.Fragment>
-                                              );
-                                            })}
-                                          </div>
-                                        </div>
-                                        <div className="p-0 md:p-6 grid grid-cols-1 lg:grid-cols-[320px,minmax(0,1fr)] gap-0 md:gap-6">
-                                          {/* Coluna 2: Links e Recursos (Topo no mobile) */}
-                                          <div className="order-1 md:order-1 space-y-0 md:space-y-4">
-                                            <div className="p-4 md:p-0">
-                                              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                                                <span className="w-1 h-3 bg-violet-500 rounded-full"></span>
-                                                Recursos
-                                              </h4>
-                                            </div>
-                                            <div className="grid grid-cols-1 gap-2 px-4 md:px-0 mb-6 md:mb-0">
-                                              {/* Repositório */}
-                                              <button
-                                                onClick={() => setEditingResource({ field: 'repositorio_principal', label: 'Repositório', value: sysDetails.repositorio_principal || '' })}
-                                                className="group bg-slate-900 p-3 rounded-xl border border-slate-800 hover:border-slate-600 hover:shadow-md transition-all text-left flex items-center justify-between gap-3 relative overflow-hidden min-h-[72px]"
-                                              >
-                                                <div className="absolute top-0 right-0 w-24 h-24 bg-violet-500/10 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
-                                                <div className="relative z-10 flex items-center gap-3 min-w-0">
-                                                  <div className="w-9 h-9 bg-white/10 text-white rounded-lg flex items-center justify-center shrink-0">
-                                                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" /></svg>
-                                                  </div>
-                                                  <div className="min-w-0">
-                                                    <h5 className="text-[10px] font-black text-white uppercase tracking-widest leading-none">Repo</h5>
-                                                    <p className="text-[10px] text-slate-400 mt-1 truncate">{sysDetails.repositorio_principal || 'Nao configurado'}</p>
-                                                  </div>
-                                                </div>
-                                                <div className="relative z-10 shrink-0">
-                                                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{sysDetails.repositorio_principal ? 'Editar' : 'Configurar'}</span>
-                                                </div>
-                                              </button>
-                                              {/* Documentação */}
-                                              <button
-                                                onClick={() => setEditingResource({ field: 'link_documentacao', label: 'Documentação', value: sysDetails.link_documentacao || '' })}
-                                                className="group bg-white p-3 rounded-xl border border-slate-200 hover:border-violet-300 hover:shadow-md transition-all text-left flex items-center justify-between gap-3 relative overflow-hidden min-h-[72px]"
-                                              >
-                                                <div className="absolute top-0 right-0 w-24 h-24 bg-violet-500/5 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
-                                                <div className="relative z-10 flex items-center gap-3 min-w-0">
-                                                  <div className="w-9 h-9 bg-violet-100 text-violet-600 rounded-lg flex items-center justify-center shrink-0">
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                                                  </div>
-                                                  <div className="min-w-0">
-                                                    <h5 className="text-[10px] font-black text-slate-900 uppercase tracking-widest leading-none">Docs</h5>
-                                                    <p className="text-[10px] text-slate-500 mt-1 truncate">{sysDetails.link_documentacao || 'Sem documentacao'}</p>
-                                                  </div>
-                                                </div>
-                                                <div className="relative z-10 shrink-0">
-                                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{sysDetails.link_documentacao ? 'Editar' : 'Configurar'}</span>
-                                                </div>
-                                              </button>
-                                              {/* AI Studio */}
-                                              <button
-                                                onClick={() => setEditingResource({ field: 'link_google_ai_studio', label: 'AI Studio', value: sysDetails.link_google_ai_studio || '' })}
-                                                className="group bg-white p-3 rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all text-left flex items-center justify-between gap-3 relative overflow-hidden min-h-[72px]"
-                                              >
-                                                <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
-                                                <div className="relative z-10 flex items-center gap-3 min-w-0">
-                                                  <div className="w-9 h-9 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center shrink-0">
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                                                  </div>
-                                                  <div className="min-w-0">
-                                                    <h5 className="text-[10px] font-black text-slate-900 uppercase tracking-widest leading-none">AI</h5>
-                                                    <p className="text-[10px] text-slate-500 mt-1 truncate">{sysDetails.link_google_ai_studio || 'Sem workspace'}</p>
-                                                  </div>
-                                                </div>
-                                                <div className="relative z-10 shrink-0">
-                                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{sysDetails.link_google_ai_studio ? 'Editar' : 'Configurar'}</span>
-                                                </div>
-                                              </button>
-                                              {/* Link Hospedado */}
-                                              <button
-                                                onClick={() => setEditingResource({ field: 'link_hospedado', label: 'Hospedagem', value: sysDetails.link_hospedado || '' })}
-                                                className="group bg-emerald-50 p-3 rounded-xl border border-emerald-100 hover:border-emerald-300 hover:shadow-md transition-all text-left flex items-center justify-between gap-3 relative overflow-hidden min-h-[72px]"
-                                              >
-                                                <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
-                                                <div className="relative z-10 flex items-center gap-3 min-w-0">
-                                                  <div className="w-9 h-9 bg-emerald-100 text-emerald-600 rounded-lg flex items-center justify-center shrink-0">
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
-                                                  </div>
-                                                  <div className="min-w-0">
-                                                    <h5 className="text-[10px] font-black text-emerald-900 uppercase tracking-widest leading-none">App</h5>
-                                                    <p className="text-[10px] text-emerald-700/70 mt-1 truncate">{sysDetails.link_hospedado || 'Sem link publico'}</p>
-                                                  </div>
-                                                </div>
-                                                <div className="relative z-10 shrink-0">
-                                                  <span className="text-[10px] font-bold text-emerald-600/60 uppercase tracking-widest">{sysDetails.link_hospedado ? 'Editar' : 'Configurar'}</span>
-                                                </div>
-                                              </button>
-                                            </div>
-                                            {/* Sincronizar RAG do GitHub */}
-                                            {sysDetails.repositorio_principal && (
-                                              <div className="px-4 md:px-0 mt-4 md:mt-6">
-                                                <button
-                                                  onClick={() => handleSyncGithubRepo(unit.id, sysDetails.repositorio_principal!)}
-                                                  disabled={isSyncingGithub}
-                                                  className="w-full flex items-center justify-between gap-3 p-3 md:p-4 rounded-2xl border border-dashed border-violet-300 hover:border-violet-500 hover:bg-violet-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
-                                                >
-                                                  <div className="flex items-center gap-3">
-                                                    <div className="w-7 h-7 bg-violet-100 text-violet-600 rounded-lg flex items-center justify-center shrink-0">
-                                                      {isSyncingGithub ? (
-                                                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
-                                                      ) : (
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                                                      )}
-                                                    </div>
-                                                    <div className="text-left">
-                                                      <p className="text-[10px] font-black text-violet-700 uppercase tracking-widest leading-none">
-                                                        {isSyncingGithub ? 'Sincronizando...' : 'Sincronizar RAG'}
-                                                      </p>
-                                                      <p className="text-[9px] text-slate-400 mt-0.5">
-                                                        {sysDetails.github_rag_synced_at
-                                                          ? `Última sync: ${new Date(sysDetails.github_rag_synced_at).toLocaleDateString('pt-BR')}`
-                                                          : 'Nunca sincronizado'}
-                                                      </p>
-                                                    </div>
-                                                  </div>
-                                                  <svg className="w-3.5 h-3.5 text-violet-400 group-hover:text-violet-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
-                                                </button>
-                                              </div>
-                                            )}
-                                          </div>
-                                          {/* Coluna 1: Logs de Trabalho (Abaixo no mobile) */}
-                                          <div className="order-2 md:order-2 space-y-0 md:space-y-4">
-                                            <div className="bg-white border-0 md:border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden flex flex-col min-h-[400px] md:min-h-[600px] shadow-none md:shadow-sm">
-                                              {/* Novo Log Input */}
-                                              <div className="p-4 md:p-5 border-b border-slate-100 bg-slate-50">
-                                                <div className="flex flex-col gap-4">
-                                                  <div className="flex items-center justify-between gap-4">
-                                                    <div className="flex items-center gap-2">
-                                                      <div className="p-1.5 bg-violet-600 text-white rounded-lg">
-                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                                      </div>
-                                                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nova Demanda</h4>
-                                                    </div>
-                                                  </div>
-                                                  <div className="flex flex-col gap-4">
-                                                    <div className="relative">
-                                                      <WysiwygEditor
-                                                        value={newLogText}
-                                                        onChange={setNewLogText}
-                                                        onPaste={async (e: React.ClipboardEvent) => {
-                                                          const items = e.clipboardData?.items;
-                                                          if (!items) return;
-                                                          for (let i = 0; i < items.length; i++) {
-                                                            if (items[i].type.indexOf('image') !== -1) {
-                                                              const file = items[i].getAsFile();
-                                                              if (file) {
-                                                                e.preventDefault();
-                                                                const item = await handleFileUploadToDrive(file);
-                                                                if (item) setNewLogAttachments(prev => [...prev, item]);
-                                                              }
-                                                            }
-                                                          }
-                                                        }}
-                                                        placeholder="O que foi feito no sistema?"
-                                                        className="bg-white min-h-[110px] pb-10"
-                                                      />
-                                                      <div className="absolute right-4 top-4 flex flex-col gap-2">
-                                                        <button
-                                                          onClick={isRecordingLog ? stopLogRecording : startLogRecording}
-                                                          disabled={isProcessingLog}
-                                                          className={`p-3 rounded-xl transition-all ${isRecordingLog
-                                                            ? 'bg-emerald-600 text-white animate-pulse shadow-lg'
-                                                            : isProcessingLog
-                                                              ? 'bg-violet-100 text-violet-600 cursor-wait'
-                                                              : 'bg-slate-100 text-slate-400 hover:text-violet-600'
-                                                            }`}
-                                                          title="Transcrever áudio"
-                                                        >
-                                                          {isProcessingLog ? (
-                                                            <div className="w-5 h-5 border-2 border-violet-600 border-t-transparent rounded-full animate-spin"></div>
-                                                          ) : isRecordingLog ? (
-                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                                                          ) : (
-                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-                                                          )}
-                                                        </button>
-                                                      </div>
-                                                      <label className={`absolute left-3 bottom-2 p-2 rounded-xl transition-all ${isUploading ? 'bg-violet-100 animate-pulse pointer-events-none' : 'text-slate-400 hover:text-violet-600 hover:bg-violet-50'} cursor-pointer`}>
-                                                        <input
-                                                          type="file"
-                                                          accept="image/*"
-                                                          className="hidden"
-                                                          onChange={async (e) => {
-                                                            const file = e.target.files?.[0];
-                                                            if (file) {
-                                                              const item = await handleFileUploadToDrive(file);
-                                                              if (item) setNewLogAttachments(prev => [...prev, item]);
-                                                            }
-                                                          }}
-                                                        />
-                                                        {isUploading ? (
-                                                          <div className="w-4 h-4 border-2 border-violet-600 border-t-transparent rounded-full animate-spin"></div>
-                                                        ) : (
-                                                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-                                                        )}
-                                                      </label>
-                                                    </div>
-                                                    <div className="flex flex-wrap gap-2">
-                                                      {newLogAttachments.map((at, i) => (
-                                                        <div key={i} className="relative group/at">
-                                                          <img src={at.valor} alt="preview" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
-                                                          <button
-                                                            onClick={() => setNewLogAttachments(prev => prev.filter((_, idx) => idx !== i))}
-                                                            className="absolute -top-1 -right-1 bg-rose-500 text-white rounded-full p-0.5 opacity-0 group-hover/at:opacity-100 transition-all z-10"
-                                                          >
-                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                                                          </button>
-                                                        </div>
-                                                      ))}
-                                                    </div>
-                                                    <button
-                                                      onClick={() => {
-                                                        handleCreateWorkItem(unit.id, 'geral', newLogText, newLogAttachments);
-                                                        setNewLogText('');
-                                                        setNewLogAttachments([]);
-                                                      }}
-                                                      disabled={!newLogText.trim()}
-                                                      className="w-full bg-slate-900 text-white py-3 rounded-none md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 disabled:grayscale"
-                                                    >
-                                                      Registrar
-                                                    </button>
-                                                  </div>
-                                                </div>
-                                              </div>
-                                              <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-white space-y-6 pb-24">
-                                                <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/70">
-                                                  <div className="flex items-start justify-between gap-4">
-                                                    <div>
-                                                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Demandas registradas</h5>
-                                                      <p className="text-sm font-semibold text-slate-700 mt-2">
-                                                        {systemWorkItems.length === 0
-                                                          ? 'Nenhuma demanda registrada para este sistema.'
-                                                          : `${systemWorkItems.length} demanda(s) registrada(s). ${activeWorkItems.length} ainda aberta(s).`}
-                                                      </p>
-                                                      <p className="text-[10px] text-slate-500 mt-2">
-                                                        {latestWorkItem
-                                                          ? `Ultimo registro em ${new Date(latestWorkItem.data_criacao).toLocaleDateString('pt-BR')}.`
-                                                          : 'Use o campo acima para guardar ideias, melhorias e ajustes para fazer depois.'}
-                                                      </p>
-                                                    </div>
-                                                    {latestWorkItem && (
-                                                      <button
-                                                        onClick={() => {
-                                                          setEditingWorkItem(latestWorkItem);
-                                                          setEditingWorkItemText(latestWorkItem.descricao);
-                                                          setEditingWorkItemAttachments(latestWorkItem.pool_dados || []);
-                                                        }}
-                                                        className="shrink-0 text-[9px] font-black uppercase tracking-widest text-violet-600 hover:text-violet-800"
-                                                      >
-                                                        Ver ultimo
-                                                      </button>
-                                                    )}
-                                                  </div>
-                                                </div>
-                                                <div className="space-y-3">
-                                                  <div className="flex items-center justify-between gap-4">
-                                                    <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-violet-500 pl-3">Acoes vinculadas</h5>
-                                                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">{linkedTasks.length} acao{linkedTasks.length !== 1 ? 'es' : ''}</span>
-                                                  </div>
-                                                  {linkedTasks.length > 0 ? (
-                                                    <div className="space-y-2">
-                                                      {linkedTasks
-                                                        .sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime())
-                                                        .slice(0, 8)
-                                                        .map(task => (
-                                                          <button
-                                                            key={task.id}
-                                                            onClick={() => setSelectedTask(task)}
-                                                            className="w-full text-left border border-slate-200 rounded-xl px-4 py-3 bg-white hover:border-violet-300 hover:bg-violet-50/30 transition-all"
-                                                          >
-                                                            <div className="flex items-start justify-between gap-3">
-                                                              <div className="min-w-0">
-                                                                <div className="flex items-center gap-2 flex-wrap">
-                                                                  <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${STATUS_COLORS[normalizeStatus(task.status)] || 'bg-slate-100 text-slate-600'}`}>
-                                                                    {task.status}
-                                                                  </span>
-                                                                  {task.base_conhecimento && <span className="text-[8px] font-black uppercase tracking-widest text-violet-600">RAG</span>}
-                                                                </div>
-                                                                <p className="text-sm font-semibold text-slate-800 mt-2 truncate">{task.titulo}</p>
-                                                                <p className="text-[10px] text-slate-500 mt-1 truncate">
-                                                                  {task.data_limite ? `Prazo: ${new Date(task.data_limite).toLocaleDateString('pt-BR')}` : 'Sem prazo definido'}
-                                                                </p>
-                                                              </div>
-                                                              <svg className="w-4 h-4 text-slate-300 shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
-                                                            </div>
-                                                          </button>
-                                                        ))}
-                                                    </div>
-                                                  ) : (
-                                                    <div className="text-center py-12 bg-slate-50 rounded-xl border-2 border-dashed border-slate-100">
-                                                      <p className="text-slate-300 font-black text-[10px] uppercase tracking-widest italic">Nenhuma acao vinculada</p>
-                                                      <p className="text-[10px] text-slate-400 mt-2">Acoes com base RAG deste sistema aparecerao aqui.</p>
-                                                    </div>
-                                                  )}
-                                                </div>
-                                                {/* Listagem de Logs */}
-                                                <div className="hidden">
-                                                  {/* Ativos (Não concluídos) */}
-                                                  <div className="space-y-3">
-                                                    <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-violet-500 pl-3">Logs Ativos</h5>
-                                                    {activeWorkItems.sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime()).map(log => (
-                                                      <div key={log.id} className="group bg-slate-50 border border-slate-100 rounded-none md:rounded-xl p-4 hover:border-violet-200 hover:bg-white transition-all">
-                                                        <div className="flex flex-col md:flex-row items-start justify-between gap-3 md:gap-4">
-                                                          <div className="flex-1 space-y-2 w-full">
-                                                            <div className="flex items-center gap-3 flex-wrap">
-                                                              <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${log.tipo === 'desenvolvimento' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'}`}>
-                                                                {log.tipo === 'ajuste' ? 'log' : log.tipo}
-                                                              </span>
-                                                              <span className="text-[8px] font-black text-slate-300 uppercase">{new Date(log.data_criacao).toLocaleDateString('pt-BR')}</span>
-                                                              {log.pool_dados && log.pool_dados.length > 0 && <span className="text-[8px] font-black text-emerald-600 uppercase">{log.pool_dados.length} anexo{log.pool_dados.length !== 1 ? 's' : ''}</span>}
-                                                            </div>
-                                                            <p className="text-sm font-medium text-slate-700 leading-relaxed break-words">{log.descricao}</p>
-                                                            {log.pool_dados && log.pool_dados.length > 0 && (
-                                                              <div className="flex flex-wrap gap-2 mt-2">
-                                                                {log.pool_dados.map((at, i) => (
-                                                                  <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block">
-                                                                    <img src={at.valor} alt="preview" className="w-12 h-12 object-cover rounded-lg border border-slate-100 hover:scale-105 transition-transform shadow-sm" />
-                                                                  </a>
-                                                                ))}
-                                                              </div>
-                                                            )}
-                                                          </div>
-                                                          <div className="flex gap-1 items-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                                                            <button
-                                                              onClick={() => {
-                                                                setEditingWorkItem(log);
-                                                                setEditingWorkItemText(log.descricao);
-                                                                setEditingWorkItemAttachments(log.pool_dados || []);
-                                                              }}
-                                                              className="p-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-all"
-                                                              title="Editar"
-                                                            >
-                                                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                                            </button>
-                                                            <button
-                                                              onClick={() => {
-                                                                if (confirmDeleteLogId === log.id) {
-                                                                  handleDeleteWorkItem(log.id);
-                                                                  setConfirmDeleteLogId(null);
-                                                                } else {
-                                                                  setConfirmDeleteLogId(log.id);
-                                                                  setTimeout(() => setConfirmDeleteLogId(null), 3000);
-                                                                }
-                                                              }}
-                                                              className={`p-2 rounded-lg transition-colors ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'}`}
-                                                              title="Excluir"
-                                                            >
-                                                              {confirmDeleteLogId === log.id ? (
-                                                                <svg className="w-4 h-4 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                              ) : (
-                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                              )}
-                                                            </button>
-                                                            <button
-                                                              onClick={() => handleUpdateWorkItem(log.id, { concluido: true, data_conclusao: new Date().toISOString() })}
-                                                              className="w-10 h-10 rounded-full border-2 border-slate-200 flex items-center justify-center text-slate-300 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-50 transition-all group/check ml-2"
-                                                            >
-                                                              <svg className="w-5 h-5 opacity-0 group-hover/check:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                            </button>
-                                                          </div>
-                                                        </div>
-                                                      </div>
-                                                    ))}
-                                                    {systemWorkItems.filter(w => !w.concluido).length === 0 && (
-                                                      <div className="text-center py-12 bg-slate-50 rounded-none md:rounded-3xl border-2 border-dashed border-slate-100">
-                                                        <p className="text-slate-300 font-black text-[10px] uppercase tracking-widest italic">Nenhum log ativo</p>
-                                                      </div>
-                                                    )}
-                                                  </div>
-                                                  {/* Concluídos */}
-                                                  {systemWorkItems.filter(w => w.concluido).length > 0 && (
-                                                    <div className="space-y-4 pt-8">
-                                                      <button
-                                                        onClick={() => setIsCompletedLogsOpen(!isCompletedLogsOpen)}
-                                                        className="w-full flex items-center justify-between group cursor-pointer"
-                                                      >
-                                                        <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-emerald-500 pl-3">Concluídos ({systemWorkItems.filter(w => w.concluido).length})</h5>
-                                                        <svg className={`w-4 h-4 text-slate-300 transition-transform ${isCompletedLogsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" /></svg>
-                                                      </button>
-                                                      {isCompletedLogsOpen && (
-                                                        <div className="space-y-3 opacity-60 animate-in slide-in-from-top-2 duration-200">
-                                                          {systemWorkItems.filter(w => w.concluido).sort((a, b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()).map(log => (
-                                                            <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 md:gap-4">
-                                                              <div className="flex-1 flex items-center gap-4 w-full">
-                                                                <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
-                                                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                                </div>
-                                                                <p className="text-xs font-medium text-slate-500 line-clamp-1">{log.descricao}</p>
-                                                                {log.pool_dados && log.pool_dados.length > 0 && (
-                                                                  <div className="flex flex-wrap gap-1 mt-1">
-                                                                    {log.pool_dados.map((at, i) => (
-                                                                      <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block">
-                                                                        <img src={at.valor} alt="preview" className="w-8 h-8 object-cover rounded border border-slate-100 opacity-60 hover:opacity-100 transition-opacity" />
-                                                                      </a>
-                                                                    ))}
-                                                                  </div>
-                                                                )}
-                                                              </div>
-                                                              <div className="flex gap-2 items-center">
-                                                                <button
-                                                                  onClick={() => {
-                                                                    setEditingWorkItem(log);
-                                                                    setEditingWorkItemText(log.descricao);
-                                                                  }}
-                                                                  className="p-1.5 text-slate-300 hover:text-violet-600 rounded-lg transition-all"
-                                                                  title="Editar"
-                                                                >
-                                                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                                                </button>
-                                                                <button
-                                                                  onClick={() => {
-                                                                    if (confirmDeleteLogId === log.id) {
-                                                                      handleDeleteWorkItem(log.id);
-                                                                      setConfirmDeleteLogId(null);
-                                                                    } else {
-                                                                      setConfirmDeleteLogId(log.id);
-                                                                      setTimeout(() => setConfirmDeleteLogId(null), 3000);
-                                                                    }
-                                                                  }}
-                                                                  className={`p-1.5 rounded-lg transition-colors ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-300 hover:text-rose-600'}`}
-                                                                  title="Excluir"
-                                                                >
-                                                                  {confirmDeleteLogId === log.id ? (
-                                                                    <svg className="w-3.5 h-3.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                                  ) : (
-                                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                                  )}
-                                                                </button>
-                                                                <button
-                                                                  onClick={() => handleUpdateWorkItem(log.id, { concluido: false })}
-                                                                  className="text-[9px] font-black text-slate-300 hover:text-violet-600 uppercase ml-2"
-                                                                >
-                                                                  Reabrir
-                                                                </button>
-                                                              </div>
-                                                            </div>
-                                                          ))}
-                                                        </div>
-                                                      )}
-                                                    </div>
-                                                  )}
-                                                </div>
-                                              </div>
-                                            </div>
-                                          </div>
-                                        </div>
-                                        {/* Modal de Edição de Recurso (Link) */}
-                                        {editingResource && (
-                                          <div className="fixed inset-0 z-[400] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 md:p-8 animate-in zoom-in-95 duration-300">
-                                            <div className="bg-white w-full max-w-lg rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden">
-                                              <div className="p-8 border-b border-slate-100 flex items-center justify-between">
-                                                <h3 className="text-xl font-black text-slate-900 tracking-tight">Editar {editingResource.label}</h3>
-                                                <button onClick={() => setEditingResource(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-                                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                                                </button>
-                                              </div>
-                                              <div className="p-8 space-y-6">
-                                                <div className="space-y-2">
-                                                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">URL do Recurso</label>
-                                                  <input
-                                                    type="text"
-                                                    value={editingResource.value}
-                                                    onChange={(e) => setEditingResource({ ...editingResource, value: e.target.value })}
-                                                    placeholder="https://..."
-                                                    className="w-full bg-slate-50 border border-slate-200 rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-violet-500 transition-all"
-                                                  />
-                                                </div>
-                                                <div className="flex gap-4">
-                                                  <button
-                                                    onClick={() => setEditingResource(null)}
-                                                    className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none md:rounded-2xl transition-all"
-                                                  >
-                                                    Cancelar
-                                                  </button>
-                                                  <button
-                                                    onClick={() => {
-                                                      handleUpdateSistema(unit.id, { [editingResource.field]: editingResource.value });
-                                                      setEditingResource(null);
-                                                    }}
-                                                    className="flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all"
-                                                  >
-                                                    Salvar Link
-                                                  </button>
-                                                </div>
-                                              </div>
-                                            </div>
-                                          </div>
-                                        )}
-                                        {/* Modal de Logs Full-screen */}
-                                        {isLogsModalOpen && (
-                                          <div className={`fixed inset-0 z-[35] bg-white flex flex-col ${isSidebarRetracted ? 'md:pl-24' : 'md:pl-72'} pt-[60px] md:pt-[72px] animate-in fade-in duration-300`}>
-                                            <div className="bg-white w-full h-full flex flex-col overflow-hidden shadow-2xl">
-                                              <div className="p-6 md:p-10 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0 z-10">
-                                                <div className="flex items-center gap-4">
-                                                  <div className="p-3 bg-violet-100 text-violet-600 rounded-none md:rounded-2xl">
-                                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                                  </div>
-                                                  <div>
-                                                    <h3 className="text-2xl font-black text-slate-900 tracking-tight">Registro de Atividades</h3>
-                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">{systemName}</p>
-                                                  </div>
-                                                </div>
-                                                <button
-                                                  onClick={() => setIsLogsModalOpen(false)}
-                                                  className="p-3 bg-slate-100 text-slate-500 rounded-full hover:bg-slate-200 transition-all active:scale-95"
-                                                >
-                                                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                                                </button>
-                                              </div>
-                                              <div className="flex-1 overflow-y-auto p-6 md:p-12 space-y-12">
-                                                <div className="space-y-6">
-                                                  <div className="flex items-center justify-between">
-                                                    <h5 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] border-l-4 border-violet-500 pl-4">Logs em Aberto</h5>
-                                                    <span className="bg-violet-100 text-violet-600 text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest">
-                                                      {systemWorkItems.filter(w => !w.concluido).length} Pendentes
-                                                    </span>
-                                                  </div>
-                                                  <div className="grid grid-cols-1 gap-6">
-                                                    {systemWorkItems.filter(w => !w.concluido).sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime()).map(log => (
-                                                      <div key={log.id} className="bg-slate-50 border border-slate-100 rounded-none md:rounded-[2.5rem] p-8 md:p-10 hover:shadow-xl hover:bg-white transition-all group relative overflow-hidden">
-                                                        {/* Decorative accent */}
-                                                        <div className="absolute top-0 left-0 w-1.5 h-full bg-violet-500 opacity-20 group-hover:opacity-100 transition-opacity"></div>
-                                                        <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-8">
-                                                          <div className="flex-1 min-w-0 space-y-4">
-                                                            <div className="flex items-center flex-wrap gap-3">
-                                                              <span className={`text-[9px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest shadow-sm ${log.tipo === 'desenvolvimento' ? 'bg-violet-600 text-white' : 'bg-slate-200 text-slate-700'}`}>
-                                                                {log.tipo === 'ajuste' ? 'log' : log.tipo}
-                                                              </span>
-                                                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{new Date(log.data_criacao).toLocaleDateString('pt-BR')}</span>
-                                                            </div>
-                                                            <div className="space-y-4">
-                                                              <p className="text-base md:text-xl font-bold text-slate-800 leading-[1.6] tracking-tight">{log.descricao}</p>
-                                                              {log.pool_dados && log.pool_dados.length > 0 && (
-                                                                <div className="flex flex-wrap gap-3 mt-6">
-                                                                  {log.pool_dados.map((at, i) => (
-                                                                    <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block relative group/preview">
-                                                                      <div className="absolute inset-0 bg-violet-600/20 opacity-0 group-hover/preview:opacity-100 rounded-2xl transition-all z-10 flex items-center justify-center">
-                                                                        <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                                                                      </div>
-                                                                      <img src={at.valor} alt="preview" className="w-24 h-24 object-cover rounded-2xl border-2 border-white shadow-md hover:scale-105 transition-transform" />
-                                                                    </a>
-                                                                  ))}
-                                                                </div>
-                                                              )}
-                                                            </div>
-                                                          </div>
-                                                          <div className="flex items-center gap-3 shrink-0 self-end lg:self-start bg-white lg:bg-transparent p-2 lg:p-0 rounded-2xl shadow-sm lg:shadow-none border lg:border-none border-slate-100">
-                                                            <button
-                                                              onClick={() => {
-                                                                setEditingWorkItem(log);
-                                                                setEditingWorkItemText(log.descricao);
-                                                                setEditingWorkItemAttachments(log.pool_dados || []);
-                                                              }}
-                                                              className="p-4 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-2xl transition-all"
-                                                              title="Editar"
-                                                            >
-                                                              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                                            </button>
-                                                            <button
-                                                              onClick={() => {
-                                                                if (confirmDeleteLogId === log.id) {
-                                                                  handleDeleteWorkItem(log.id);
-                                                                  setConfirmDeleteLogId(null);
-                                                                } else {
-                                                                  setConfirmDeleteLogId(log.id);
-                                                                  setTimeout(() => setConfirmDeleteLogId(null), 3000);
-                                                                }
-                                                              }}
-                                                              className={`p-4 rounded-2xl transition-all ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-lg shadow-rose-200' : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'}`}
-                                                              title="Excluir"
-                                                            >
-                                                              {confirmDeleteLogId === log.id ? (
-                                                                <svg className="w-6 h-6 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                              ) : (
-                                                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                              )}
-                                                            </button>
-                                                            <button
-                                                              onClick={() => handleUpdateWorkItem(log.id, { concluido: true, data_conclusao: new Date().toISOString() })}
-                                                              className="w-16 h-16 rounded-full bg-white border-2 border-slate-200 flex items-center justify-center text-slate-300 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-50 transition-all shadow-sm ml-2 group/check"
-                                                            >
-                                                              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                            </button>
-                                                          </div>
-                                                        </div>
-                                                      </div>
-                                                    ))}
-                                                  </div>
-                                                </div>
-                                                {systemWorkItems.filter(w => w.concluido).length > 0 && (
-                                                  <div className="space-y-6">
-                                                    <button
-                                                      onClick={() => setIsModalCompletedLogsOpen(!isModalCompletedLogsOpen)}
-                                                      className="w-full flex items-center justify-between group cursor-pointer"
-                                                    >
-                                                      <h5 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] border-l-4 border-emerald-500 pl-4">Concluídos ({systemWorkItems.filter(w => w.concluido).length})</h5>
-                                                      <svg className={`w-5 h-5 text-slate-300 transition-transform ${isModalCompletedLogsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" /></svg>
-                                                    </button>
-                                                    {isModalCompletedLogsOpen && (
-                                                      <div className="grid grid-cols-1 gap-4 opacity-80 animate-in slide-in-from-top-4 duration-300">
-                                                        {systemWorkItems.filter(w => w.concluido).sort((a, b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()).map(log => (
-                                                          <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-[2rem] p-8 flex flex-col md:flex-row md:items-center justify-between gap-6 hover:shadow-md transition-all">
-                                                            <div className="flex-1 min-w-0 space-y-3">
-                                                              <div className="flex items-center gap-3">
-                                                                <span className="text-[10px] font-black text-emerald-500 bg-emerald-50 px-3 py-1 rounded-full uppercase tracking-widest">Concluído em {new Date(log.data_conclusao!).toLocaleDateString('pt-BR')}</span>
-                                                              </div>
-                                                              <p className="text-base font-bold text-slate-500 leading-relaxed line-clamp-2 hover:line-clamp-none transition-all">{log.descricao}</p>
-                                                              {log.pool_dados && log.pool_dados.length > 0 && (
-                                                                <div className="flex flex-wrap gap-2 mt-3">
-                                                                  {log.pool_dados.map((at, i) => (
-                                                                    <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block relative group/preview">
-                                                                      <img src={at.valor} alt="preview" className="w-12 h-12 object-cover rounded-xl border border-slate-100 opacity-60 hover:opacity-100 transition-opacity shadow-sm" />
-                                                                    </a>
-                                                                  ))}
-                                                                </div>
-                                                              )}
-                                                            </div>
-                                                            <div className="flex gap-4 items-center shrink-0">
-                                                              <button
-                                                                onClick={() => {
-                                                                  setEditingWorkItem(log);
-                                                                  setEditingWorkItemText(log.descricao);
-                                                                }}
-                                                                className="p-3 text-slate-300 hover:text-violet-600 hover:bg-violet-50 rounded-xl transition-all"
-                                                                title="Editar"
-                                                              >
-                                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                                              </button>
-                                                              <button
-                                                                onClick={() => {
-                                                                  if (confirmDeleteLogId === log.id) {
-                                                                    handleDeleteWorkItem(log.id);
-                                                                    setConfirmDeleteLogId(null);
-                                                                  } else {
-                                                                    setConfirmDeleteLogId(log.id);
-                                                                    setTimeout(() => setConfirmDeleteLogId(null), 3000);
-                                                                  }
-                                                                }}
-                                                                className={`p-3 rounded-xl transition-all ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-lg' : 'text-slate-300 hover:text-rose-600 hover:bg-rose-50'}`}
-                                                                title="Excluir"
-                                                              >
-                                                                {confirmDeleteLogId === log.id ? (
-                                                                  <svg className="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                                ) : (
-                                                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                                )}
-                                                              </button>
-                                                              <button
-                                                                onClick={() => handleUpdateWorkItem(log.id, { concluido: false })}
-                                                                className="px-6 py-3 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-violet-600 transition-all shadow-md active:scale-95 ml-2"
-                                                              >
-                                                                Reabrir
-                                                              </button>
-                                                            </div>
-                                                          </div>
-                                                        ))}
-                                                      </div>
-                                                    )}
-                                                  </div>
-                                                )}
-                                              </div>
-                                            </div>
-                                          </div>
-                                        )}
-                                        {/* Modal de Edição de Log */}
-                                        {editingWorkItem && (
-                                          <div className="fixed inset-0 z-[500] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 md:p-8 animate-in zoom-in-95 duration-300">
-                                            <div className="bg-white w-full max-w-2xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden">
-                                              <div className="p-8 border-b border-slate-100 flex items-center justify-between">
-                                                <div className="flex items-center gap-4">
-                                                  <div className="p-3 bg-violet-100 text-violet-600 rounded-2xl">
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                                  </div>
-                                                  <h3 className="text-xl font-black text-slate-900 tracking-tight">Editar Registro</h3>
-                                                </div>
-                                                <button onClick={() => setEditingWorkItem(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400">
-                                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                                                </button>
-                                              </div>
-                                              <div className="p-8 space-y-6">
-                                                <div className="space-y-4">
-                                                  <div className="space-y-2">
-                                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Descrição</label>
-                                                    <WysiwygEditor
-                                                      value={editingWorkItemText}
-                                                      onChange={setEditingWorkItemText}
-                                                      className="bg-slate-50 min-h-[120px]"
-                                                    />
-                                                  </div>
-                                                  <div className="space-y-2">
-                                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Anexos (Drive)</label>
-                                                    <div className="flex flex-wrap gap-2">
-                                                      {editingWorkItemAttachments.map((at, i) => (
-                                                        <div key={i} className="relative group/at">
-                                                          <img src={at.valor} alt="preview" className="w-20 h-20 object-cover rounded-xl border border-slate-200" />
-                                                          <button
-                                                            onClick={() => setEditingWorkItemAttachments(prev => prev.filter((_, idx) => idx !== i))}
-                                                            className="absolute -top-2 -right-2 bg-rose-500 text-white rounded-full p-1 opacity-0 group-hover/at:opacity-100 transition-all z-10 shadow-lg"
-                                                          >
-                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                                                          </button>
-                                                        </div>
-                                                      ))}
-                                                      <label className={`w-20 h-20 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center cursor-pointer hover:border-violet-400 hover:bg-violet-50 transition-all ${isUploading ? 'animate-pulse pointer-events-none' : ''}`}>
-                                                        <input
-                                                          type="file"
-                                                          accept="image/*"
-                                                          className="hidden"
-                                                          onChange={async (e) => {
-                                                            const file = e.target.files?.[0];
-                                                            if (file) {
-                                                              const item = await handleFileUploadToDrive(file);
-                                                              if (item) setEditingWorkItemAttachments(prev => [...prev, item]);
-                                                            }
-                                                          }}
-                                                        />
-                                                        {isUploading ? (
-                                                          <div className="w-5 h-5 border-2 border-violet-600 border-t-transparent rounded-full animate-spin"></div>
-                                                        ) : (
-                                                          <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-                                                        )}
-                                                      </label>
-                                                    </div>
-                                                  </div>
-                                                </div>
-                                                <div className="flex gap-4 pt-4">
-                                                  <button
-                                                    onClick={() => setEditingWorkItem(null)}
-                                                    className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none md:rounded-[1.5rem] transition-all"
-                                                  >
-                                                    Cancelar
-                                                  </button>
-                                                  <button
-                                                    onClick={() => {
-                                                      handleUpdateWorkItem(editingWorkItem.id, {
-                                                        descricao: editingWorkItemText,
-                                                        tipo: editingWorkItem.tipo,
-                                                        pool_dados: editingWorkItemAttachments
-                                                      });
-                                                      setEditingWorkItem(null);
-                                                      setEditingWorkItemAttachments([]);
-                                                    }}
-                                                    disabled={!editingWorkItemText.trim()}
-                                                    className="flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-[1.5rem] text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50"
-                                                  >
-                                                    Salvar Alterações
-                                                  </button>
-                                                </div>
-                                              </div>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })()
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })()
-                    )}
                   </div>
                 ) : (
                   <div className={`actions-pgd-view space-y-3 md:space-y-6 ${isDarkTheme ? 'actions-view-dark' : ''}`}>
@@ -7374,7 +5896,7 @@ const App: React.FC = () => {
                 isSyncing={isSyncing}
                 isNotificationCenterOpen={isNotificationCenterOpen}
                 onOpenNotes={() => setIsQuickNoteModalOpen(true)}
-                onOpenLog={() => setIsQuickLogModalOpen(true)}
+                
                 onOpenShopping={() => setIsShoppingAIModalOpen(true)}
                 onOpenCopiloto={() => setIsCopilotoOpen(true)}
                 onOpenTranscription={() => setIsTranscriptionAIModalOpen(true)}
@@ -7434,39 +5956,7 @@ const App: React.FC = () => {
           )
         }
         {/* â”€â”€ Sistema Execution View (full-screen overlay) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        {selectedSystemId && viewMode === 'sistemas-dev' && (() => {
-          const unit = unidades.find(u => u.id === selectedSystemId);
-          if (!unit) return null;
-          const sysDetails = sistemasDetalhes.find(s => s.id === selectedSystemId) || {
-            id: selectedSystemId,
-            nome: unit.nome.replace('SISTEMA:', '').trim(),
-            status: 'ideia' as SistemaStatus,
-            data_criacao: new Date().toISOString(),
-            data_atualizacao: new Date().toISOString(),
-          };
-          return (
-            <SistemaExecutionView
-              unit={unit}
-              sysDetails={sysDetails}
-              workItems={workItems}
-              tarefas={tarefas}
-              knowledgeBases={knowledgeBases}
-              knowledgeItems={knowledgeItems}
-              onClose={() => setSelectedSystemId(null)}
-              onUpdateSistema={handleUpdateSistema}
-              onCreateWorkItem={handleCreateWorkItem}
-              onUpdateWorkItem={handleUpdateWorkItem}
-              onDeleteWorkItem={handleDeleteWorkItem}
-              onSyncGithubRepo={handleSyncGithubRepo}
-              isSyncingGithub={isSyncingGithub}
-              onSelectTask={setSelectedTask}
-              showToast={showToast}
-              handleFileUploadToDrive={handleFileUploadToDrive}
-              isUploading={isUploading}
-              isDark={isDarkTheme}
-            />
-          );
-        })()}
+        
         {
           isTerminalOpen && (
             <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/90 animate-in fade-in duration-300">
@@ -7735,16 +6225,6 @@ const App: React.FC = () => {
               onClose={() => setIsQuickNoteModalOpen(false)}
               onAddIdea={handleAddTextIdea}
               showAlert={showAlert}
-            />
-          )
-        }
-        {
-          isQuickLogModalOpen && (
-            <QuickLogModal
-              isOpen={isQuickLogModalOpen}
-              onClose={() => setIsQuickLogModalOpen(false)}
-              onAddLog={handleAddQuickLog}
-              unidades={unidades}
             />
           )
         }

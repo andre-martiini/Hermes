@@ -66,13 +66,13 @@ export const SettingsModal = ({
   onDeleteUnidade: (id: string) => void,
   onUpdateUnidade: (id: string, updates: any) => void,
   onEmitNotification: (title: string, message: string, type: 'info' | 'warning' | 'success' | 'error') => void,
-  initialTab?: 'notifications' | 'context' | 'sistemas' | 'google',
+  initialTab?: 'notifications' | 'context' | 'google',
   themeMode: ThemeMode,
   onThemeModeChange: (mode: ThemeMode) => void,
   showConfirm: (title: string, message: string, onConfirm: () => void, onCancel?: () => void) => void
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
-  const [activeTab, setActiveTab] = useState<'notifications' | 'context' | 'sistemas' | 'google'>(initialTab || 'notifications');
+  const [activeTab, setActiveTab] = useState<'notifications' | 'context' | 'google'>(initialTab || 'notifications');
   const [newUnidadeNome, setNewUnidadeNome] = useState('');
   const [newKeywordMap, setNewKeywordMap] = useState<{ [key: string]: string }>({});
   const [newCustom, setNewCustom] = useState<Partial<CustomNotification>>({
@@ -87,6 +87,8 @@ export const SettingsModal = ({
 
   // Check for protected units only for deletion logic, not for hiding them
   // We process all units from the 'unidades' prop.
+
+  const isDarkTheme = themeMode === 'dark';
 
   const handleAddKeyword = (uId: string, current: string[]) => {
     const val = newKeywordMap[uId]?.trim();
@@ -129,13 +131,6 @@ export const SettingsModal = ({
               title="Contexto & Áreas"
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>
-            </button>
-            <button
-              onClick={() => setActiveTab('sistemas')}
-              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'sistemas' ? 'bg-slate-900 text-white border border-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}
-              title="Sistemas"
-            >
-              <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2-2v10a2 2 0 002 2z" /></svg>
             </button>
             <button
               onClick={() => setActiveTab('google')}
@@ -620,95 +615,6 @@ export const SettingsModal = ({
                       Criar
                     </button>
                   </div>
-                </div>
-              </div>
-            </div>
-          ) : activeTab === 'sistemas' ? (
-            <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
-              <div className="space-y-4">
-                <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
-                  <span className="w-2 h-2 bg-violet-500 rounded-full"></span>
-                  Sistemas em Desenvolvimento
-                </h4>
-
-                <p className="text-xs text-slate-500 font-medium">
-                  Cadastre os sistemas que você está desenvolvendo para gerenciá-los no módulo Sistemas.
-                </p>
-
-                {/* Lista de Sistemas */}
-                <div className="space-y-3">
-                  {unidades.filter(u => u.nome.startsWith('SISTEMA:')).length > 0 ? (
-                    unidades.filter(u => u.nome.startsWith('SISTEMA:')).map(sistema => (
-                      <div key={sistema.id} className="bg-violet-50 border border-violet-100 rounded-none md:rounded-2xl p-6 group hover:border-violet-300 transition-all">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-violet-500 rounded-lg md:rounded-xl flex items-center justify-center">
-                              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                              </svg>
-                            </div>
-                            <div>
-                              <p className="text-sm font-black text-slate-900">{sistema.nome.replace('SISTEMA:', '').trim()}</p>
-                              <p className="text-[10px] text-slate-500 font-medium">Sistema cadastrado</p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => { if (pendingDeleteUnidadeId !== sistema.id) { setPendingDeleteUnidadeId(sistema.id); window.setTimeout(() => setPendingDeleteUnidadeId((current) => (current === sistema.id ? null : current)), 3500); return; } setPendingDeleteUnidadeId(null); onDeleteUnidade(sistema.id); }}
-                            className={`opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 rounded-lg md:rounded-xl transition-all ${pendingDeleteUnidadeId === sistema.id ? 'bg-rose-500 text-white' : 'hover:bg-rose-100 text-rose-600'}`}
-                            title={pendingDeleteUnidadeId === sistema.id ? "Confirmar remoção" : "Remover sistema"}
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-12 bg-slate-50 rounded-none md:rounded-2xl border-2 border-dashed border-slate-200">
-                      <div className="w-16 h-16 bg-violet-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <svg className="w-8 h-8 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                        </svg>
-                      </div>
-                      <p className="text-slate-400 font-bold text-sm">Nenhum sistema cadastrado</p>
-                      <p className="text-slate-400 text-xs mt-1">Adicione seu primeiro sistema abaixo</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Formulário para adicionar novo sistema */}
-                <div className="bg-gradient-to-br from-violet-50 to-purple-50 border-2 border-violet-200 rounded-none md:rounded-2xl p-6">
-                  <p className="text-[10px] font-black text-violet-600 uppercase tracking-widest text-center mb-4">Cadastrar Novo Sistema</p>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="Nome do Sistema (ex: Hermes, Portal Web, API REST)"
-                      value={newUnidadeNome}
-                      onChange={(e) => setNewUnidadeNome(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && newUnidadeNome.trim()) {
-                          onAddUnidade(`SISTEMA: ${newUnidadeNome.trim()}`);
-                          setNewUnidadeNome('');
-                        }
-                      }}
-                      className="flex-1 bg-white border border-violet-100 rounded-lg md:rounded-xl px-4 py-3 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-violet-500 outline-none shadow-sm"
-                    />
-                    <button
-                      onClick={() => {
-                        if (newUnidadeNome.trim()) {
-                          onAddUnidade(`SISTEMA: ${newUnidadeNome.trim()}`);
-                          setNewUnidadeNome('');
-                        }
-                      }}
-                      className="bg-violet-600 text-white px-6 py-3 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-violet-700 transition-all shadow-lg shadow-violet-200"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" />
-                      </svg>
-                    </button>
-                  </div>
-                  <p className="text-[9px] text-violet-600 font-medium mt-2 text-center">Pressione Enter ou clique no botão + para adicionar</p>
                 </div>
               </div>
             </div>
@@ -1365,7 +1271,6 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                         <option value="GERAL">Geral</option>
                         <option value="SAÚDE">Saúde</option>
                         <option value="FINANCEIRO">Financeiro</option>
-                        <option value="SISTEMA">Sistema</option>
                         <option value="NÃO CLASSIFICADA">Não Classificada</option>
                         {unidades.map(u => (
                           <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
@@ -1731,7 +1636,6 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                 <option value="GERAL">Geral</option>
                 <option value="SAÚDE">Saúde</option>
                 <option value="FINANCEIRO">Financeiro</option>
-                <option value="SISTEMA">Sistema</option>
                 <option value="NÃO CLASSIFICADA">Não Classificada</option>
                 {unidades.map(u => (
                   <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>

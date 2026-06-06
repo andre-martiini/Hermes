@@ -377,23 +377,6 @@ def _summarize_pending_batch_reschedule(batch_reschedule: dict) -> str:
     return "\n".join(lines)
 
 
-def _summarize_proposed_diagnosis(diagnosis: dict) -> str:
-    mode = diagnosis.get("mode") or "repo"
-    lines = ["", "<b>Card de diagnostico de codigo</b>"]
-    if mode == "snippet":
-        lines.append(f"Modo: snippet")
-        if diagnosis.get("fileName"):
-            lines.append(f"Arquivo: {html.escape(str(diagnosis.get('fileName')))}")
-    else:
-        lines.append("Modo: repositorio")
-        if diagnosis.get("sistemaId"):
-            lines.append(f"Sistema: {html.escape(str(diagnosis.get('sistemaId')))}")
-    if diagnosis.get("descricaoProblema"):
-        lines.append(f"Pedido: {html.escape(str(diagnosis.get('descricaoProblema'))[:500])}")
-    lines.append("No Telegram, use os botoes abaixo para iniciar ou cancelar.")
-    return "\n".join(lines)
-
-
 def _summarize_memory_conflict(conflict: dict) -> str:
     lines = [
         "",
@@ -428,16 +411,6 @@ def _build_web_copilot_telegram_adaptation(session: dict, delegated: dict, deleg
         rows.append([
             {"text": "Confirmar tudo", "callback_data": "webbatch_confirm"},
             {"text": "Cancelar", "callback_data": "webbatch_cancel"},
-        ])
-
-    diagnosis = delegated.get("proposedDiagnosis")
-    if isinstance(diagnosis, dict):
-        pending_cards["diagnosis"] = diagnosis
-        extra_lines.append(_summarize_proposed_diagnosis(diagnosis))
-        label = "Analisar snippet" if diagnosis.get("mode") == "snippet" else "Analisar repositorio"
-        rows.append([
-            {"text": label, "callback_data": "webdiag_confirm"},
-            {"text": "Cancelar", "callback_data": "webdiag_cancel"},
         ])
 
     memory_conflict = delegated.get("pendingMemoryConflict")
@@ -1357,7 +1330,6 @@ def _fetch_acao_snapshot(db, task_id: str) -> dict | None:
             "status": data.get("status", ""),
             "area": data.get("area_tematica", ""),
             "area_tematica": data.get("area_tematica", ""),
-            "sistema_id": data.get("sistema_id") or None,
             "descricao": (data.get("descricao") or "")[:500],
             "notas": (data.get("notas") or "")[:400],
             "sintese": (data.get("sintese_demanda") or data.get("demanda") or "")[:400],
@@ -1516,20 +1488,7 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         else:
             session.pop("pending_web_cards", None)
 
-    def _resolve_diagnosis_system_id(diagnosis: dict) -> str:
-        raw = str(diagnosis.get("sistemaId") or "").strip()
-        if raw and raw not in ("None", "null", "undefined"):
-            return raw
-        task_id = session.get("acao_id") or diagnosis.get("taskId")
-        if not task_id:
-            return ""
-        try:
-            task_doc = db.collection("tarefas").document(str(task_id)).get()
-            if task_doc.exists:
-                return str((task_doc.to_dict() or {}).get("sistema_id") or "").strip()
-        except Exception as exc:
-            print(f"[TelegramCards] Falha ao resolver sistema do diagnostico: {exc}")
-        return ""
+
 
     if data.startswith("health_pain:"):
         parts = data.split(":")
@@ -1707,33 +1666,10 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         _persist_callback_turn("Botão: cancelar reagendamento em lote", response_text)
         _send_telegram_message(token, chat_id, response_text)
 
-    elif data == "webdiag_confirm":
-        _answer_callback_query(token, query_id, "Iniciando diagnóstico...")
-        try:
-            job_id = f"card_{chat_id}_{int(time.time() * 1000)}"
-            db.collection("telegram_inbound").document(job_id).set({
-                "chat_id": chat_id,
-                "callback_action": "webdiag_confirm",
-                "callback_query_id": query_id,
-                "from_user": callback_query.get("from") or {},
-                "received_at": firestore.SERVER_TIMESTAMP,
-                "processed": False,
-            })
-            response_text = "Diagnóstico iniciado. Isso pode levar alguns minutos."
-            _persist_callback_turn("Botão: iniciar diagnóstico", response_text)
-            _send_telegram_message(token, chat_id, response_text)
         except Exception as exc:
             response_text = f"Erro ao iniciar diagnóstico: {exc}"
             _persist_callback_turn("Botão: iniciar diagnóstico", response_text)
             _send_telegram_message(token, chat_id, response_text)
-
-    elif data == "webdiag_cancel":
-        _answer_callback_query(token, query_id, "Diagnóstico cancelado.")
-        _clear_pending_web_card("diagnosis")
-        _save_session(db, chat_id, session)
-        response_text = "Diagnóstico cancelado. Nada foi iniciado."
-        _persist_callback_turn("Botão: cancelar diagnóstico", response_text)
-        _send_telegram_message(token, chat_id, response_text)
 
     elif data in ("webmem_keep_old", "webmem_keep_new"):
         decision = "manter_existente" if data == "webmem_keep_old" else "substituir_pelo_novo"
@@ -2245,7 +2181,6 @@ def _build_system_instruction_guarded_v2(
         f"Titulo: {titulo}\n"
         f"Area: {acao_snapshot.get('area_tematica', acao_snapshot.get('area', ''))}\n"
         f"Status: {acao_snapshot.get('status', '')}\n"
-        f"Sistema ID: {acao_snapshot.get('sistema_id') or 'nao informado'}\n"
         f"Descricao: {acao_snapshot.get('descricao', '') or 'nao informada'}\n"
         f"Sintese: {acao_snapshot.get('sintese', '') or 'nao informada'}\n"
         f"Plano de Acao:\n{plano_lines}\n"
@@ -2258,7 +2193,7 @@ def _build_system_instruction_guarded_v2(
         "MODO CONTEXTO TRANCADO ATIVADO - REGRAS ABSOLUTAS:\n"
         "1. O historico de conversas anteriores foi isolado. Concentre-se exclusivamente nesta acao.\n"
         "2. Use SOMENTE os dados desta secao ao descrever a acao. PROIBIDO usar RAG ou inferencia.\n"
-        "3. Este payload replica a estrutura de contexto da interface web: sistema_id, plano atual, diario integral, tags e arquivos disponiveis.\n"
+        "3. Este payload replica a estrutura de contexto da interface web: plano atual, diario integral, tags e arquivos disponiveis.\n"
         "4. Ao receber perguntas sobre a acao, responda com base nos dados acima.\n"
         "5. Se o usuario pedir para atualizar, criar passos ou registrar progresso, use as ferramentas disponiveis.\n"
         "6. Se o usuario pedir links ou anexos, cite apenas as URLs/DRIVE_FILE_ID listados em Arquivos Disponiveis. Nunca use rotulos clicaveis como 'Acessar Pasta' sem mostrar a URL real.\n"
@@ -2623,85 +2558,6 @@ def _send_contextual_response(
     return message_id
 
 
-def _executar_diagnostico_repositorio(db, fc, sistema_id_contexto=None):
-    """Executa a lógica de busca no GitHub para a ferramenta de diagnóstico."""
-    kwargs = dict(fc.args or {})
-    sistema_id = kwargs.get("sistema_id") or sistema_id_contexto
-    caminho = (kwargs.get("caminho_arquivo") or "").strip("/")
-
-    if not sistema_id:
-        return "Erro: sistema_id não informado e não encontrado no contexto atual. Por favor, informe o ID do sistema."
-
-    try:
-        # Busca o repositório principal no documento do sistema
-        doc = db.collection("sistemas").document(sistema_id).get()
-        if not doc.exists:
-            doc = db.collection("sistemas_detalhes").document(sistema_id).get()
-        
-        if not doc.exists:
-            return f"Erro: Sistema '{sistema_id}' não encontrado na base de dados."
-        
-        data_doc = doc.to_dict() or {}
-        repo_url = data_doc.get("repositorio_principal", "").strip()
-        if not repo_url:
-            return f"Erro: O sistema '{sistema_id}' não possui um 'repositorio_principal' configurado."
-        
-        # Parse URL do GitHub (https://github.com/owner/repo)
-        match = re.match(r'https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$', repo_url)
-        if not match:
-            return f"Erro: URL de repositório inválida ou não suportada: {repo_url}"
-        
-        owner, repo = match.group(1), match.group(2)
-        
-        # Credenciais (GitHub Token)
-        github_token = os.environ.get("GITHUB_TOKEN")
-        if not github_token:
-            keys_doc = db.collection("system").document("api_keys").get()
-            github_token = (keys_doc.to_dict() or {}).get("github_token")
-
-        headers = {"Accept": "application/vnd.github.v3+json"}
-        if github_token:
-            headers["Authorization"] = f"token {github_token}"
-        
-        # Chamada à API do GitHub
-        api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{caminho}"
-        resp = _requests.get(api_url, headers=headers, timeout=20)
-        
-        if resp.status_code == 404:
-            return f"Erro: Caminho '{caminho or 'raiz'}' não encontrado no repositório {owner}/{repo}."
-        if resp.status_code != 200:
-            return f"Erro ao acessar GitHub (HTTP {resp.status_code}): {resp.text[:200]}"
-        
-        gh_data = resp.json()
-        if isinstance(gh_data, list):
-            # É um diretório - listar arquivos
-            lines = [f"📂 Arquivos em {owner}/{repo}/{caminho or 'raiz'}:"]
-            for item in gh_data:
-                tipo = "📁 " if item["type"] == "dir" else "📄 "
-                lines.append(f"{tipo}{item['path']}")
-            return "\n".join(lines)
-        else:
-            # É um arquivo - retornar conteúdo
-            content_b64 = gh_data.get("content", "")
-            if not content_b64:
-                return f"Arquivo '{caminho}' está vazio ou não possui conteúdo legível via API."
-            
-            try:
-                # GitHub retorna base64 com quebras de linha
-                content = base64.b64decode(content_b64.replace("\n", "")).decode("utf-8", errors="replace")
-                
-                # Limite de contexto do Gemini (conforme solicitado: ~12.000 caracteres)
-                if len(content) > 12000:
-                    content = content[:12000] + "\n\n[...conteúdo truncado para preservar contexto...]"
-                
-                return f"📄 Conteúdo de {caminho}:\n\n```\n{content}\n```"
-            except Exception as dec_err:
-                return f"Erro ao decodificar conteúdo do arquivo: {dec_err}"
-                
-    except Exception as e:
-        return f"Erro técnico ao processar diagnóstico do repositório: {str(e)}"
-
-
 def _run_gemini_turn(
     db,
     gemini_key: str,
@@ -2742,10 +2598,7 @@ def _run_gemini_turn(
         else:
             try:
                 kwargs = dict(fc.args or {})
-                if fc.name == "diagnosticar_repositorio":
-                    result = _executar_diagnostico_repositorio(db, fc, sistema_id_contexto=sistema_id_contexto)
-                else:
-                    result = fn(**kwargs)
+                result = fn(**kwargs)
                 result_text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
             except Exception as tool_err:
                 result_text = f"Erro ao executar {fc.name}: {tool_err}"
@@ -2856,91 +2709,6 @@ def _run_gemini_turn(
 # ---------------------------------------------------------------------------
 # Main processing logic
 # ---------------------------------------------------------------------------
-
-def _process_telegram_card_job(db, data: dict):
-    """Processes long-running Telegram card callbacks from the async worker."""
-    action = data.get("callback_action")
-    chat_id = str(data.get("chat_id") or "")
-    if not chat_id:
-        return
-
-    token = _get_telegram_token(db)
-    session = _get_session(db, chat_id)
-    copilot_session_id = _ensure_copilot_session(
-        db,
-        chat_id,
-        session,
-        first_text=f"[Card Telegram] {action}",
-        from_user=data.get("from_user") or {},
-    )
-
-    def _persist_callback_turn(user_label: str, assistant_text: str):
-        _persist_copilot_message(db, copilot_session_id, "user", user_label, source="telegram_callback")
-        _persist_copilot_message(db, copilot_session_id, "assistant", assistant_text, source="telegram_callback")
-
-    if action != "webdiag_confirm":
-        _send_telegram_message(token, chat_id, f"Acao de card nao reconhecida: {html.escape(str(action))}")
-        return
-
-    diagnosis = (session.get("pending_web_cards") or {}).get("diagnosis")
-    if not isinstance(diagnosis, dict):
-        response_text = "Nao encontrei um diagnostico pendente para iniciar."
-        _persist_callback_turn("Botao: iniciar diagnostico", response_text)
-        _send_telegram_message(token, chat_id, response_text)
-        return
-
-    def _resolve_system_id() -> str:
-        raw = str(diagnosis.get("sistemaId") or "").strip()
-        if raw and raw not in ("None", "null", "undefined"):
-            return raw
-        task_id = session.get("acao_id") or diagnosis.get("taskId")
-        if not task_id:
-            return ""
-        try:
-            task_doc = db.collection("tarefas").document(str(task_id)).get()
-            if task_doc.exists:
-                return str((task_doc.to_dict() or {}).get("sistema_id") or "").strip()
-        except Exception as exc:
-            print(f"[TelegramCards] Falha ao resolver sistema do diagnostico: {exc}")
-        return ""
-
-    try:
-        mode = diagnosis.get("mode") or "repo"
-        payload = {
-            "sessionId": copilot_session_id,
-            "mode": mode,
-            "descricaoProblema": diagnosis.get("descricaoProblema") or "",
-            "taskId": session.get("acao_id") or None,
-            "bridgeChannel": "telegram",
-        }
-        if mode == "snippet":
-            payload["codeSnippet"] = diagnosis.get("codeSnippet") or ""
-            payload["fileName"] = diagnosis.get("fileName") or "snippet"
-        else:
-            payload["sistemaId"] = _resolve_system_id()
-
-        result = _call_web_callable(
-            function_name="diagnosticar_codigo",
-            data=payload,
-            user_uid=session.get("userId"),
-            timeout=300,
-        )
-        diag_id = result.get("diagId") or result.get("diag_id") or ""
-        cards = session.get("pending_web_cards") or {}
-        cards.pop("diagnosis", None)
-        if cards:
-            session["pending_web_cards"] = cards
-        else:
-            session.pop("pending_web_cards", None)
-        _save_session(db, chat_id, session)
-        response_text = "Diagnostico concluido." + (f"\nAbrir no Hermes: tool:diagnosis:{diag_id}" if diag_id else "")
-        _persist_callback_turn("Botao: iniciar diagnostico", response_text)
-        _send_telegram_message(token, chat_id, response_text)
-    except Exception as exc:
-        response_text = f"Erro ao iniciar diagnostico: {exc}"
-        _persist_callback_turn("Botao: iniciar diagnostico", response_text)
-        _send_telegram_message(token, chat_id, response_text)
-
 
 def _process_telegram_message(db, data: dict):
     """Full processing pipeline for one incoming Telegram message."""
@@ -3999,17 +3767,6 @@ def _process_telegram_message(db, data: dict):
         )
         return f"Proposta financeira gerada. Draft: {draft}\n\n[SISTEMA: Os botões de confirmação serão anexados automaticamente a esta resposta.]"
 
-    def diagnosticar_repositorio(sistema_id: str = None, caminho_arquivo: str = None):
-        """
-        Analisa o código-fonte de um sistema via GitHub. Se caminho_arquivo for omitido, lista os arquivos da raiz.
-        
-        Args:
-          sistema_id: ID do sistema para diagnosticar. Se não informado, usa o contexto atual.
-          caminho_arquivo: Caminho do arquivo específico (ex: 'functions/main.py'). Se vazio, lista a raiz.
-        """
-        # Esta função é um placeholder; a execução real é interceptada em _run_gemini_turn
-        return "[EXECUÇÃO PENDENTE]"
-
     def schedule_whatsapp_message(contact_number: str, message: str, scheduled_time: str) -> str:
         """
         Prepara uma mensagem de WhatsApp para confirmacao por botoes.
@@ -4048,7 +3805,6 @@ def _process_telegram_message(db, data: dict):
         registrar_item_financeiro_v2,
         propor_acao_para_confirmacao,
         propor_lancamento_financeiro,
-        diagnosticar_repositorio,
         schedule_whatsapp_message,
         agendar_lembrete_acao,
     ]
@@ -4076,7 +3832,7 @@ def _process_telegram_message(db, data: dict):
             tools_list=tools_list,
             function_map=function_map,
             perf_state=perf_state,
-            sistema_id_contexto=session.get("sistema_id") or (acao_snapshot.get("sistema_id") if acao_snapshot else None),
+            sistema_id_contexto=None,
         )
     except Exception as gemini_err:
         if processing_msg_id:
@@ -4372,9 +4128,7 @@ def on_telegram_inbound(event: Event[DocumentSnapshot]) -> None:
 
     try:
         db = _get_db()
-        if data.get("callback_action"):
-            _process_telegram_card_job(db, data)
-        else:
+        if not data.get("callback_action"):
             _process_telegram_message(db, data)
     except Exception as e:
         print(f"[on_telegram_inbound] Unhandled error: {e}")

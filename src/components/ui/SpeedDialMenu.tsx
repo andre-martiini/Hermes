@@ -8,7 +8,6 @@ interface SpeedDialMenuProps {
   isSyncing: boolean;
   isNotificationCenterOpen: boolean;
   onOpenNotes: () => void;
-  onOpenLog: () => void;
   onOpenCopiloto: () => void;
   onOpenShopping: () => void;
   onOpenTranscription: () => void;
@@ -32,7 +31,7 @@ interface SpeedDialMenuProps {
 
 export const SpeedDialMenu = ({
   notifications, isSyncing, isNotificationCenterOpen,
-  onOpenNotes, onOpenLog, onOpenCopiloto, onOpenShopping, onOpenTranscription, onOpenWhatsAppTranscription, onOpenMeetingTranscription, onToggleNotifications,
+  onOpenNotes, onOpenCopiloto, onOpenShopping, onOpenTranscription, onOpenWhatsAppTranscription, onOpenMeetingTranscription, onToggleNotifications,
   onSync, onOpenSettings, onCloseNotifications,
   onMarkAsRead, onDismiss, onUpdateOverdue, onNavigate,
   onCreateAction,
@@ -111,17 +110,6 @@ export const SpeedDialMenu = ({
       icon: (
         <svg className="w-7 h-7 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 18a6 6 0 006-6V8a6 6 0 10-12 0v4a6 6 0 006 6zm0 0v3m-4 0h8" />
-        </svg>
-      ),
-    },
-    {
-      label: 'Log de Sistema',
-      color: 'text-violet-600',
-      badge: null as React.ReactNode,
-      onClick: () => { setOpen(false); onOpenLog(); },
-      icon: (
-        <svg className="w-7 h-7 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
         </svg>
       ),
     },

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
     Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry,
-    HealthWeight, DailyHabits, HealthSettings, WorkItem, Sistema, ExerciseLog
+    HealthWeight, DailyHabits, HealthSettings, ExerciseLog
 } from './types';
 
 interface DashboardViewProps {
@@ -16,12 +16,9 @@ interface DashboardViewProps {
     healthSettings: HealthSettings;
     exerciseLogs: ExerciseLog[];
     unidades: { id: string, nome: string }[];
-    sistemasDetalhes: Sistema[];
-    workItems: WorkItem[];
     currentMonth: number;
     currentYear: number;
-    onNavigate: (view: 'gallery' | 'finance' | 'saude' | 'sistemas-dev') => void;
-    onOpenBacklog: () => void;
+    onNavigate: (view: 'gallery' | 'finance' | 'saude') => void;
 }
 
 // --- SUBCOMPONENTES MOVIDOS PARA FORA ---
@@ -122,54 +119,6 @@ const BarChart = ({ data, color, isDark = false, maxHeight = 65 }: { data: numbe
     );
 };
 
-const SystemsHeatmap = ({ data, isDark = false }: { data: {id: string, name: string, count: number, lastSync?: string}[], isDark?: boolean }) => {
-    const max = Math.max(...data.map(d => d.count), 1);
-    
-    const getInitials = (name: string) => {
-        if (!name) return '?';
-        const cleanName = name.replace(/^SISTEMA:?\s*/i, '').replace(/[–—\-]/g, ' ');
-        const words = cleanName.split(/\s+/).filter(w => w.length > 0 && !['DE', 'DO', 'DA', 'DOS', 'DAS', 'COM', 'EM', 'PARA'].includes(w.toUpperCase()));
-        
-        const acronym = words.find(w => w.length >= 2 && w === w.toUpperCase() && !/^\d+$/.test(w));
-        if (acronym) return acronym.slice(0, 3);
-
-        if (words.length === 0) return '?';
-        if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-        return words.map(w => w[0]).join('').toUpperCase().slice(0, 3);
-    };
-
-    return (
-        <div className="flex flex-wrap gap-1.5 md:gap-2">
-            {data.map((item, i) => {
-                const intensity = item.count === 0 ? 0 : Math.min(Math.max(Math.ceil((item.count / max) * 5), 1), 5);
-                const bgClasses = [
-                    isDark ? 'bg-sky-950/20 text-slate-400/70 border-sky-900/30' : 'bg-sky-200/20 text-sky-900/20 border-sky-900/10', // 0
-                    isDark ? 'bg-sky-800 text-white border-sky-700' : 'bg-sky-200 text-sky-900 border-sky-300', // 1
-                    isDark ? 'bg-sky-700 text-white border-sky-600' : 'bg-sky-300 text-sky-950 border-sky-400', // 2
-                    isDark ? 'bg-sky-600 text-white border-sky-500' : 'bg-sky-400 text-sky-950 border-sky-500', // 3
-                    isDark ? 'bg-sky-500 text-white border-sky-400' : 'bg-sky-500 text-white border-sky-600', // 4
-                    isDark ? 'bg-sky-400 text-white border-sky-300' : 'bg-sky-600 text-white border-sky-700', // 5
-                ];
-
-                return (
-                    <div 
-                        key={item.id}
-                        title={`${item.name || 'Sistema'}${item.lastSync ? ` (Sinc: ${new Date(item.lastSync).toLocaleDateString('pt-BR')})` : ''}: ${item.count} ações`}
-                        className={`w-12 h-12 md:w-16 md:h-16 flex flex-col items-center justify-center transition-all hover:scale-105 cursor-help border-b-2 ${bgClasses[intensity]}`}
-                    >
-                        <span className="text-[10px] md:text-sm font-bold font-mono leading-none">
-                            {getInitials(item.name)}
-                        </span>
-                        <span className={`text-[8px] md:text-[9px] font-bold font-lcd mt-0.5 ${intensity > 2 ? 'opacity-70' : 'opacity-40'}`}>
-                            {item.count}
-                        </span>
-                    </div>
-                );
-            })}
-        </div>
-    );
-};
-
 const HiddenMoney = ({ className = "", compact = false }: { className?: string, compact?: boolean }) => (
     <span className={`inline-block font-black tracking-normal select-none font-lcd ${className}`} aria-label="valor oculto">
         <span className="font-mono">R$</span> {compact ? '••••' : '••••••'}
@@ -211,12 +160,9 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     healthSettings = {} as HealthSettings,
     exerciseLogs = [] as ExerciseLog[],
     unidades = [],
-    sistemasDetalhes = [],
-    workItems = [],
     currentMonth = new Date().getMonth(),
     currentYear = new Date().getFullYear(),
-    onNavigate,
-    onOpenBacklog
+    onNavigate
 }) => {
     const [isFinanceVisible, setIsFinanceVisible] = useState(false);
 
@@ -246,8 +192,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     const actionsByArea = useMemo(() => {
         const counts: Record<string, number> = {};
         inProgressActions.forEach(t => {
-            let area = t.area_tematica || 'GERAL';
-            area = area.replace('SISTEMA:', '').trim();
+            const area = t.area_tematica || 'GERAL';
             counts[area] = (counts[area] || 0) + 1;
         });
         return Object.entries(counts).sort((a, b) => b[1] - a[1]);
@@ -387,24 +332,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         return exerciseLogs.find(l => l.id === key) || null;
     }, [exerciseLogs]);
 
-    // --- SYSTEMS LOGIC ---
-    const systemsByPhase = useMemo(() => {
-        const phases: Record<string, number> = { ideia: 0, prototipacao: 0, desenvolvimento: 0, testes: 0, producao: 0 };
-        sistemasDetalhes.forEach(sys => { if (phases[sys.status] !== undefined) phases[sys.status]++; });
-        return Object.entries(phases);
-    }, [sistemasDetalhes]);
 
-    const systemsByAdjustments = useMemo(() => {
-        return sistemasDetalhes.map(sys => {
-            const activeWorkItems = workItems.filter(w => w.sistema_id === sys.id && !w.concluido);
-            return {
-                id: sys.id,
-                name: sys.nome || 'Sistema',
-                count: activeWorkItems.length,
-                lastSync: sys.github_rag_synced_at
-            };
-        }).sort((a, b) => b.count - a.count);
-    }, [sistemasDetalhes, workItems]);
 
     return (
         <div className="animate-in fade-in duration-700 flex flex-col h-full lg:h-[calc(100vh-5rem)] p-1 md:p-2 lg:p-1 w-full max-w-[1600px] mx-auto overflow-hidden">
@@ -568,15 +496,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                     </div>
                 </DashboardCard>
 
-                {/* CARD: SISTEMAS */}
-                <DashboardCard title="Sistemas" iconColor="bg-primary-tactile" onRedirect={() => onNavigate('sistemas-dev')} isDark={isDark}>
-                    <div className={`h-full flex flex-col gap-4 p-2 md:p-4 rounded-none bg-transparent`}>
-                        <div className="flex-1 overflow-y-auto pr-1">
-                            <p className={`text-[10px] font-bold uppercase tracking-widest mb-4 font-mono ${isDark ? 'text-slate-400' : 'text-on-surface/40'}`}>// MAPA DE CALOR OPERACIONAL</p>
-                            <SystemsHeatmap data={systemsByAdjustments} isDark={isDark} />
-                        </div>
-                    </div>
-                </DashboardCard>
+
 
             </div>
         </div>

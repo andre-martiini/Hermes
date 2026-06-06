@@ -4,7 +4,6 @@ import { ShoppingListTool } from './ShoppingListTool';
 import { TranscriptionTool } from './TranscriptionTool';
 import { ChoirRehearsalsTool } from './ChoirRehearsalsTool';
 import { MeetingTranscriptionTool } from './MeetingTranscriptionTool';
-import { DiagnosticoTool } from './DiagnosticoTool';
 import { PopManagerTool } from './PopManagerTool';
 import { SipacTrackingTool } from './SipacTrackingTool';
 
@@ -141,27 +140,7 @@ export const toolsRegistry: ToolMetadata[] = [
         },
         component: TranscriptionTool
     },
-    {
-        id: 'DiagnosticoTool',
-        ui_metadata: {
-            title: 'Diagnóstico de Código',
-            description: 'Análise de código e diagnóstico de erros.',
-            icon: 'code',
-            category: 'Desenvolvimento',
-            tag: '@DiagnosticoTool'
-        },
-        keys: ['diagnóstico', 'código', 'erro de código', 'bug', 'analisar código'],
-        parametersSchema: {
-            type: 'object',
-            properties: {
-                initialCode: {
-                    type: 'string',
-                    description: 'O código ou mensagem de erro para diagnosticar.'
-                }
-            }
-        },
-        component: DiagnosticoTool
-    },
+
     {
         id: 'MeetingTranscriptionTool',
         ui_metadata: {

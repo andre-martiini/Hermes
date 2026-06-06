@@ -8,12 +8,11 @@ import { ShoppingListTool } from './ShoppingListTool';
 import { TranscriptionTool } from './TranscriptionTool';
 import { ChoirRehearsalsTool } from './ChoirRehearsalsTool';
 import { MeetingTranscriptionTool } from './MeetingTranscriptionTool';
-import { DiagnosticoTool } from './DiagnosticoTool';
 import { PopManagerTool } from './PopManagerTool';
 import { SipacTrackingTool } from './SipacTrackingTool';
 import { LongTranscriptionTool } from './LongTranscriptionTool';
 
-type FerramentaAtiva = 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'diagnostico' | 'pop_manager' | 'whatsapp_assistant' | 'sipac_tracking' | 'long_transcription' | null;
+type FerramentaAtiva = 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'pop_manager' | 'whatsapp_assistant' | 'sipac_tracking' | 'long_transcription' | null;
 
 interface FerramentasViewProps {
   ideas: BrainstormIdea[];
@@ -21,7 +20,6 @@ interface FerramentasViewProps {
   onArchiveIdea: (id: string) => void;
   onAddTextIdea: (text: string) => void;
   onUpdateIdea: (id: string, text: string) => void;
-  onConvertToLog: (idea: BrainstormIdea) => void;
   onConvertToTask: (idea: BrainstormIdea) => void;
   activeTool: FerramentaAtiva;
   setActiveTool: (tool: FerramentaAtiva) => void;
@@ -32,7 +30,6 @@ interface FerramentasViewProps {
   knowledgeItems: ConhecimentoItem[];
   onUploadFile: (file: File) => Promise<ConhecimentoItem | null>;
   initialDraftId?: string;
-  initialDiagnosisId?: string;
   pendingSharedAudioFile?: File | null;
   onPendingSharedAudioFileConsumed?: () => void;
   pendingSharedVideoFile?: File | null;
@@ -46,7 +43,6 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   onArchiveIdea,
   onAddTextIdea,
   onUpdateIdea,
-  onConvertToLog,
   onConvertToTask,
   activeTool,
   setActiveTool,
@@ -57,7 +53,6 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   knowledgeItems,
   onUploadFile,
   initialDraftId,
-  initialDiagnosisId,
   pendingSharedAudioFile,
   onPendingSharedAudioFileConsumed,
   pendingSharedVideoFile,
@@ -146,9 +141,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
     return <MeetingTranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} />;
   }
 
-  if (activeTool === 'diagnostico') {
-    return <DiagnosticoTool onBack={() => setActiveTool(null)} initialDiagnosisId={initialDiagnosisId} />;
-  }
+
 
   if (activeTool === 'sipac_tracking') {
     return <SipacTrackingTool onBack={() => setActiveTool(null)} isDark={isDark} />;
@@ -435,7 +428,6 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
                     ) : (
                       <>
                         <button onClick={() => { setEditingId(idea.id); setEditText(idea.text); }} className="text-slate-300 hover:text-blue-600 p-1.5 rounded-none transition-colors" title="Editar"><svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg></button>
-                        <button onClick={() => onConvertToLog(idea)} className="text-slate-300 hover:text-violet-600 p-1.5 rounded-none transition-colors" title="Converter em Registro"><svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg></button>
                         <button onClick={() => onConvertToTask(idea)} className="text-slate-300 hover:text-sky-600 p-1.5 rounded-none transition-colors" title="Converter em Ação"><svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 002 2h2a2 2 0 012-2h2a2 2 0 012 2" /></svg></button>
                         <button onClick={() => { navigator.clipboard.writeText(idea.text).then(() => { setCopiedId(idea.id); setTimeout(() => setCopiedId(null), 2000); }); }} className={`p-1.5 rounded-none transition-colors ${copiedId === idea.id ? 'text-emerald-500 bg-emerald-50' : 'text-slate-300 hover:text-blue-600'}`}>{copiedId === idea.id ? <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg> : <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>}</button>
                       </>
