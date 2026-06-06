@@ -201,7 +201,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                         <p className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest">SAIR DO MÓDULO</p>
                     </div>
                     <div className="flex items-center gap-2 mb-1">
-                        <div className="w-2 h-2 bg-violet-500"></div>
+                        <div className="w-2 h-2 bg-slate-400"></div>
                         <p className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest">SYSTEM: ÁREAS TEMÁTICAS</p>
                     </div>
                     <h2 className={`text-sm font-mono font-black uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Conhecimento das Áreas</h2>
@@ -218,17 +218,16 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                             className={`w-full flex items-center gap-3 px-6 py-4 border-b text-left transition-all group relative ${selectedBaseId === base.id ? (isDark ? 'bg-slate-800 border-slate-800' : 'bg-slate-50 border-slate-100') : (isDark ? 'border-slate-800/60 hover:bg-slate-800/40' : 'border-slate-100 hover:bg-slate-50/50')}`}
                         >
                             {selectedBaseId === base.id && (
-                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-violet-600"></div>
+                                <div className="absolute left-0 top-0 bottom-0 w-1" style={{ backgroundColor: base.cor || '#6b7280' }}></div>
                             )}
                             <div className="flex flex-col flex-1 min-w-0">
                                 <div className="flex items-center justify-between mb-1">
                                     <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">ÁREA-{String(idx + 1).padStart(3, '0')}</span>
-                                    <span className={`text-[10px] font-mono font-black ${selectedBaseId === base.id ? 'text-violet-600' : 'text-slate-400'}`}>
+                                    <span className={`text-[10px] font-mono font-black ${selectedBaseId === base.id ? 'text-slate-600' : 'text-slate-400'}`}>
                                         ITEMS: {items.filter(i => i.base_id === base.id).length}
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <span className="text-lg flex-shrink-0">{base.emoji || '📁'}</span>
                                     <span className={`text-sm font-mono font-black truncate uppercase tracking-tight ${selectedBaseId === base.id ? (isDark ? 'text-slate-100' : 'text-slate-900') : (isDark ? 'text-slate-400' : 'text-slate-600')}`}>
                                         {base.nome}
                                     </span>
@@ -250,14 +249,14 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                                 className={`w-full px-3 py-2 text-xs font-mono font-bold border rounded-none outline-none transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
                             />
                             <div className="flex gap-2">
-                                <button onClick={handleCreateBase} className={`flex-1 py-2 text-white rounded-none text-[10px] font-mono font-black uppercase tracking-widest transition-colors ${isDark ? 'bg-violet-600 hover:bg-violet-700' : 'bg-slate-900 hover:bg-black'}`}>Criar</button>
+                                <button onClick={handleCreateBase} className={`flex-1 py-2 text-white rounded-none text-[10px] font-mono font-black uppercase tracking-widest transition-colors ${isDark ? 'bg-slate-600 hover:bg-slate-700' : 'bg-slate-900 hover:bg-black'}`}>Criar</button>
                                 <button onClick={() => setIsCreatingBase(false)} className={`flex-1 py-2 border rounded-none text-[10px] font-mono font-black uppercase tracking-widest transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>Cancelar</button>
                             </div>
                         </div>
                     ) : (
                         <button
                             onClick={() => setIsCreatingBase(true)}
-                            className={`w-full flex items-center justify-center gap-2 px-3 py-3 border border-dashed transition-all text-[10px] font-mono font-black uppercase tracking-widest ${isDark ? 'border-slate-700 text-slate-400 hover:border-violet-400 hover:text-violet-400 bg-slate-800/40 hover:bg-slate-800' : 'border-slate-300 text-slate-400 hover:border-violet-400 hover:text-violet-600'}`}
+                            className={`w-full flex items-center justify-center gap-2 px-3 py-3 border border-dashed transition-all text-[10px] font-mono font-black uppercase tracking-widest ${isDark ? 'border-slate-700 text-slate-400 hover:border-slate-400 hover:text-slate-300 bg-slate-800/40 hover:bg-slate-800' : 'border-slate-300 text-slate-400 hover:border-slate-500 hover:text-slate-600'}`}
                         >
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" />
@@ -272,7 +271,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
             <main className={`flex-1 flex flex-col h-full overflow-hidden ${mobileView === 'bases' ? 'hidden md:flex' : 'flex'}`}>
                 {!selectedBase ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-center p-12">
-                        <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mb-4 ${isDark ? 'bg-violet-950/40 text-violet-400' : 'bg-violet-50 text-violet-300'}`}>
+                        <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mb-4 ${isDark ? 'bg-slate-800 text-slate-500' : 'bg-slate-100 text-slate-400'}`}>
                             <svg className="w-10 h-10 text-inherit" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                             </svg>
@@ -559,7 +558,7 @@ const EditBaseModal: React.FC<EditBaseModalProps> = ({ base, onSave, onDelete, o
             <div className={`rounded-none shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}>
                 <div className={`p-8 border-b flex items-center justify-between ${isDark ? 'border-slate-800 bg-slate-900/80' : 'border-slate-200 bg-slate-50'}`}>
                     <div>
-                        <p className="text-[10px] font-mono font-black text-violet-500 uppercase tracking-widest mb-1">SYSTEM CONFIGURATION</p>
+                        <p className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-1">SYSTEM CONFIGURATION</p>
                         <h2 className={`text-sm font-mono font-black uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Configurar Área Temática</h2>
                     </div>
                     <button onClick={onClose} className={`w-10 h-10 flex items-center justify-center border transition-colors ${isDark ? 'border-slate-700 bg-slate-800 text-slate-300 hover:text-slate-100 hover:bg-slate-700' : 'border-slate-200 bg-white text-slate-400 hover:text-slate-600'}`}>
@@ -641,7 +640,7 @@ const EditBaseModal: React.FC<EditBaseModalProps> = ({ base, onSave, onDelete, o
                                     value={tagsInput}
                                     onChange={e => setTagsInput(e.target.value)}
                                     placeholder="PROCEDIMENTO, PROTOCOLO, REUNIÃO..."
-                                    className={`w-full px-4 py-2.5 text-[10px] font-mono font-bold border rounded-none outline-none transition-colors uppercase ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
+                                    className={`w-full px-4 py-2.5 text-[10px] font-mono font-bold border rounded-none outline-none transition-colors uppercase ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-slate-400 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-slate-400 placeholder:text-slate-400'}`}
                                 />
                                 <p className={`text-[9px] font-mono mt-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Separe as tags por vírgula</p>
                             </div>
@@ -650,7 +649,7 @@ const EditBaseModal: React.FC<EditBaseModalProps> = ({ base, onSave, onDelete, o
                 </div>
 
                 <div className={`p-8 border-t flex gap-3 ${isDark ? 'border-slate-800 bg-slate-900/80' : 'border-slate-200 bg-slate-50'}`}>
-                    <button onClick={handleSave} className={`flex-1 py-4 text-white rounded-none text-[10px] font-mono font-black uppercase tracking-widest transition-all ${isDark ? 'bg-violet-600 hover:bg-violet-700' : 'bg-slate-900 hover:bg-black'}`}>Atualizar Sistema</button>
+                    <button onClick={handleSave} className={`flex-1 py-4 text-white rounded-none text-[10px] font-mono font-black uppercase tracking-widest transition-all ${isDark ? 'bg-slate-600 hover:bg-slate-700' : 'bg-slate-900 hover:bg-black'}`}>Atualizar Sistema</button>
                     <button onClick={onClose} className={`flex-1 py-4 border rounded-none text-[10px] font-mono font-black uppercase tracking-widest transition-all ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>Cancelar</button>
                     <button onClick={onDelete} className={`w-14 flex items-center justify-center border rounded-none transition-all ${isDark ? 'bg-rose-950/40 text-rose-400 border-rose-800/60 hover:bg-rose-900/60' : 'bg-rose-50 text-rose-600 border-rose-100 hover:bg-rose-100'}`}>
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
