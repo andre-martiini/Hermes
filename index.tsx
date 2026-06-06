@@ -1745,7 +1745,7 @@ const App: React.FC = () => {
   }, [tarefas, selectedTask]);
   const [planosTrabalho, setPlanosTrabalho] = useState<PlanoTrabalho[]>([]);
   const [statusFilter, setStatusFilter] = useState<Status[]>(['em andamento', 'stand-by', 'cgby' as any]);
-  const [areaFilter, setAreaFilter] = useState<string>('TODAS');
+  const [areaFilter, setAreaFilter] = useState<string[]>([]);
   const [sortOption, setSortOption] = useState<SortOption>('date-asc');
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -3821,15 +3821,15 @@ const App: React.FC = () => {
         return matchesStatus || shouldShowAsStandby || tStatus === 'concluido';
       });
     }
-    if (areaFilter !== 'TODAS') {
-      const norm = (val: any) => (val || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-      const filterNorm = norm(areaFilter);
+    if (areaFilter.length > 0) {
+      const norm = (val: any) => (val || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
       result = result.filter(t => {
         const cat = norm(t.area_tematica);
-        if (filterNorm === 'CLC') return cat === 'CLC';
-        if (filterNorm === 'ASSISTENCIA') return cat === 'ASSISTENCIA' || cat === 'ASSISTENCIA ESTUDANTIL';
-        if (filterNorm === 'NAO CLASSIFICADA') return !t.area_tematica || cat === 'NAO CLASSIFICADA';
-        return cat === filterNorm;
+        return areaFilter.some(f => {
+          const filterNorm = norm(f);
+          if (filterNorm === 'NAO CLASSIFICADA') return !t.area_tematica || cat === 'NAO CLASSIFICADA';
+          return cat === filterNorm;
+        });
       });
     }
     // Sempre remove excluídos
@@ -4649,6 +4649,43 @@ const App: React.FC = () => {
                       </nav>
                     )}
                   </div>
+
+                  {/* Área Temática Multi-Filter */}
+                  {(viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia' || viewMode === 'concluidas') && activeModule === 'acoes' && knowledgeBases.length > 0 && (
+                    <div className={`flex items-center gap-1.5 flex-wrap py-2 px-1 border-t ${isDarkTheme ? 'border-slate-800' : 'border-slate-100'}`}>
+                      <span className={`text-[9px] font-mono font-black uppercase tracking-widest mr-1 ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>Filtrar:</span>
+                      {areaFilter.length > 0 && (
+                        <button
+                          onClick={() => setAreaFilter([])}
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-none text-[9px] font-mono font-black uppercase tracking-widest transition-all border ${isDarkTheme ? 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600' : 'border-slate-300 bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                        >
+                          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
+                          Limpar
+                        </button>
+                      )}
+                      {knowledgeBases.map(base => {
+                        const isActive = areaFilter.includes(base.nome);
+                        const baseColor = base.cor || '#6b7280';
+                        return (
+                          <button
+                            key={base.id}
+                            onClick={() => {
+                              setAreaFilter(prev =>
+                                prev.includes(base.nome)
+                                  ? prev.filter(a => a !== base.nome)
+                                  : [...prev, base.nome]
+                              );
+                            }}
+                            className={`px-2.5 py-1 rounded-none text-[9px] font-mono font-black uppercase tracking-widest transition-all border ${isActive ? 'text-white border-transparent' : (isDarkTheme ? 'border-slate-700 text-slate-400 hover:border-slate-500' : 'border-slate-200 text-slate-500 hover:border-slate-400')}`}
+                            style={isActive ? { backgroundColor: baseColor, borderColor: baseColor } : {}}
+                          >
+                            {isActive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/70 mr-1.5 align-middle" />}
+                            {base.nome}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
 
                   {/* Finance Controls */}
                   {viewMode === 'finance' && (
