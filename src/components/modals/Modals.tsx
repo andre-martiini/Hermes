@@ -105,36 +105,36 @@ export const SettingsModal = ({
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center p-0 md:p-4 bg-slate-950/90 animate-in fade-in duration-300">
-      <div className="bg-white w-full h-full md:h-auto md:max-w-2xl rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh] border-2 border-slate-900">
-        <div className="p-8 border-b border-border-grid bg-slate-50 flex flex-col gap-6 flex-shrink-0">
+      <div className={`${isDarkTheme ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-900'} w-full h-full md:h-auto md:max-w-2xl rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh] border-2`}>
+        <div className={`p-8 border-b ${isDarkTheme ? 'border-slate-800 bg-slate-950' : 'border-border-grid bg-slate-50'} flex flex-col gap-6 flex-shrink-0`}>
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-2xl font-black text-slate-900 tracking-tight font-mono uppercase">Configurações</h3>
+              <h3 className={`text-2xl font-black ${isDarkTheme ? 'text-white' : 'text-slate-900'} tracking-tight font-mono uppercase`}>Configurações</h3>
               <p className="text-slate-400 text-[9px] font-black uppercase tracking-[0.2em] font-mono">Painel de Preferências :: System_Admin</p>
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-none transition-colors border border-transparent hover:border-border-grid">
-              <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+            <button onClick={onClose} className={`p-2 rounded-none transition-colors border border-transparent ${isDarkTheme ? 'hover:bg-slate-800 hover:border-slate-700' : 'hover:bg-slate-200 hover:border-border-grid'}`}>
+              <svg className={`w-6 h-6 ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
 
-          <div className="flex bg-slate-200 p-1 rounded-none gap-1 border border-border-grid">
+          <div className={`flex ${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-slate-200 border-border-grid'} p-1 rounded-none gap-1 border`}>
             <button
               onClick={() => setActiveTab('notifications')}
-              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'notifications' ? 'bg-slate-900 text-white border border-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}
+              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'notifications' ? 'bg-slate-900 text-white border border-slate-900' : (isDarkTheme ? 'text-slate-500 hover:text-slate-300 hover:bg-slate-700/50' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50')}`}
               title="Notificações"
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
             </button>
             <button
               onClick={() => setActiveTab('context')}
-              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'context' ? 'bg-slate-900 text-white border border-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}
+              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'context' ? 'bg-slate-900 text-white border border-slate-900' : (isDarkTheme ? 'text-slate-500 hover:text-slate-300 hover:bg-slate-700/50' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50')}`}
               title="Contexto & Áreas"
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>
             </button>
             <button
               onClick={() => setActiveTab('google')}
-              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'google' ? 'bg-slate-900 text-white border border-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}
+              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'google' ? 'bg-slate-900 text-white border border-slate-900' : (isDarkTheme ? 'text-slate-500 hover:text-slate-300 hover:bg-slate-700/50' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50')}`}
               title="Google"
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" /></svg>
@@ -143,13 +143,13 @@ export const SettingsModal = ({
         </div>
       </div>
 
-        <div className="p-8 space-y-10 overflow-y-auto custom-scrollbar flex-1 dark:bg-slate-950">
+        <div className={`p-8 space-y-10 overflow-y-auto custom-scrollbar flex-1 ${isDarkTheme ? 'bg-slate-900' : ''}`}>
           <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500">
-            <h4 className="text-[10px] font-black text-slate-900 dark:text-slate-100 uppercase tracking-[0.2em] border-b border-slate-100 dark:border-slate-800 pb-2 flex items-center gap-2">
-              <span className="w-2 h-2 bg-slate-900 dark:bg-slate-100 rounded-full"></span>
+            <h4 className={`text-[10px] font-black ${isDarkTheme ? 'text-slate-100 border-slate-800' : 'text-slate-900 border-slate-100'} uppercase tracking-[0.2em] border-b pb-2 flex items-center gap-2`}>
+              <span className={`w-2 h-2 ${isDarkTheme ? 'bg-slate-100' : 'bg-slate-900'} rounded-full`}></span>
               Aparência
             </h4>
-            <div className="p-5 bg-slate-50 dark:bg-slate-900 rounded-none md:rounded-2xl border border-slate-100 dark:border-slate-800">
+            <div className={`p-5 ${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-100'} rounded-none border`}>
               <div className="grid grid-cols-3 gap-2">
                 {[
                   { mode: 'light' as ThemeMode, label: 'Claro', desc: 'Interface clara' },
@@ -160,12 +160,12 @@ export const SettingsModal = ({
                     key={option.mode}
                     onClick={() => onThemeModeChange(option.mode)}
                     className={`min-h-[72px] rounded-none border px-3 py-3 text-left transition-all font-mono ${themeMode === option.mode
-                      ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 border-slate-900 dark:border-slate-100 shadow-lg'
-                      : 'bg-white dark:bg-slate-950 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600'
+                      ? 'bg-slate-900 text-white border-slate-900'
+                      : (isDarkTheme ? 'bg-slate-950 text-slate-400 border-slate-700 hover:border-slate-500' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400')
                       }`}
                   >
                     <p className="text-[10px] font-black uppercase tracking-widest leading-none">{option.label}</p>
-                    <p className={`text-[8px] font-bold uppercase tracking-wider mt-2 leading-tight ${themeMode === option.mode ? 'text-white/70 dark:text-slate-600' : 'text-slate-400 dark:text-slate-500'}`}>{option.desc}</p>
+                    <p className={`text-[8px] font-bold uppercase tracking-wider mt-2 leading-tight ${themeMode === option.mode ? 'text-white/70' : (isDarkTheme ? 'text-slate-500' : 'text-slate-400')}`}>{option.desc}</p>
                   </button>
                 ))}
               </div>
@@ -175,17 +175,17 @@ export const SettingsModal = ({
             <>
 
 
-              {/* Geral / SaÃºde Section */}
+              {/* Geral / Saúde Section */}
               <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500">
-                <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
+                <h4 className={`text-[10px] font-black ${isDarkTheme ? 'text-slate-100 border-slate-800' : 'text-slate-900 border-slate-100'} uppercase tracking-[0.2em] border-b pb-2 flex items-center gap-2`}>
                   <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
-                  Geral / SaÃºde
+                  Geral / Saúde
                 </h4>
 
-                <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
+                <div className={`flex items-center justify-between p-6 ${isDarkTheme ? 'bg-slate-800 border-slate-700 hover:border-blue-500/50' : 'bg-slate-50 border-slate-100 hover:border-blue-200'} rounded-none border group transition-all`}>
                   <div className="flex-1">
-                    <p className="text-sm font-bold text-slate-900 mb-1">Hábitos de Hoje</p>
-                    <p className="text-[11px] text-slate-500 font-medium">Abrir lembrete para marcar hábitos cumpridos</p>
+                    <p className={`text-sm font-bold ${isDarkTheme ? 'text-white' : 'text-slate-900'} mb-1`}>Hábitos de Hoje</p>
+                    <p className={`text-[11px] ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'} font-medium`}>Abrir lembrete para marcar hábitos cumpridos</p>
                   </div>
                   <div className="flex items-center gap-4">
                     <input
@@ -198,7 +198,7 @@ export const SettingsModal = ({
                           habitsReminder: { ...localSettings.notifications.habitsReminder, time: e.target.value }
                         }
                       })}
-                      className="bg-white border-none rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-blue-500"
+                      className={`border rounded-none px-3 py-1.5 text-xs font-bold focus:ring-2 focus:ring-blue-500 ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-900'}`}
                     />
                     <button
                       onClick={() => setLocalSettings({
@@ -215,11 +215,11 @@ export const SettingsModal = ({
                   </div>
                 </div>
 
-                <div className="flex flex-col p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-rose-200 transition-all gap-4">
+                <div className={`flex flex-col p-6 ${isDarkTheme ? 'bg-slate-800 border-slate-700 hover:border-rose-500/50' : 'bg-slate-50 border-slate-100 hover:border-rose-200'} rounded-none border group transition-all gap-4`}>
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
-                      <p className="text-sm font-bold text-slate-900 mb-1">Lembrete de Pesagem</p>
-                      <p className="text-[11px] text-slate-500 font-medium">Registrar peso na balança</p>
+                      <p className={`text-sm font-bold ${isDarkTheme ? 'text-white' : 'text-slate-900'} mb-1`}>Lembrete de Pesagem</p>
+                      <p className={`text-[11px] ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'} font-medium`}>Registrar peso na balança</p>
                     </div>
                     <button
                       onClick={() => setLocalSettings({
@@ -245,7 +245,7 @@ export const SettingsModal = ({
                             weighInReminder: { ...localSettings.notifications.weighInReminder, frequency: e.target.value as any }
                           }
                         })}
-                        className="bg-white border-none rounded-lg px-3 py-1.5 text-[10px] font-black uppercase text-slate-900 focus:ring-2 focus:ring-rose-500"
+                        className={`border rounded-none px-3 py-1.5 text-[10px] font-black uppercase focus:ring-2 focus:ring-rose-500 ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-900'}`}
                       >
                         <option value="weekly">Semanal</option>
                         <option value="biweekly">Quinzenal</option>
@@ -260,7 +260,7 @@ export const SettingsModal = ({
                             weighInReminder: { ...localSettings.notifications.weighInReminder, dayOfWeek: Number(e.target.value) }
                           }
                         })}
-                        className="bg-white border-none rounded-lg px-3 py-1.5 text-[10px] font-black uppercase text-slate-900 focus:ring-2 focus:ring-rose-500"
+                        className={`border rounded-none px-3 py-1.5 text-[10px] font-black uppercase focus:ring-2 focus:ring-rose-500 ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-900'}`}
                       >
                         <option value={0}>Domingo</option>
                         <option value={1}>Segunda</option>
@@ -280,7 +280,7 @@ export const SettingsModal = ({
                             weighInReminder: { ...localSettings.notifications.weighInReminder, time: e.target.value }
                           }
                         })}
-                        className="bg-white border-none rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-rose-500"
+                        className={`border rounded-none px-3 py-1.5 text-xs font-bold focus:ring-2 focus:ring-rose-500 ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-900'}`}
                       />
                     </div>
                   )}
@@ -289,15 +289,15 @@ export const SettingsModal = ({
 
               {/* Financeiro / ações Section */}
               <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500 delay-100">
-                <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
+                <h4 className={`text-[10px] font-black ${isDarkTheme ? 'text-slate-100 border-slate-800' : 'text-slate-900 border-slate-100'} uppercase tracking-[0.2em] border-b pb-2 flex items-center gap-2`}>
                   <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
-                  Financeiro / ações
+                  Financeiro / Ações
                 </h4>
 
-                <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-emerald-200 transition-all">
+                <div className={`flex items-center justify-between p-6 ${isDarkTheme ? 'bg-slate-800 border-slate-700 hover:border-emerald-500/50' : 'bg-slate-50 border-slate-100 hover:border-emerald-200'} rounded-none border group transition-all`}>
                   <div className="flex-1">
-                    <p className="text-sm font-bold text-slate-900 mb-1">Risco Orçamentário</p>
-                    <p className="text-[11px] text-slate-500 font-medium">Avisar se gastos estiverem acima do esperado</p>
+                    <p className={`text-sm font-bold ${isDarkTheme ? 'text-white' : 'text-slate-900'} mb-1`}>Risco Orçamentário</p>
+                    <p className={`text-[11px] ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'} font-medium`}>Avisar se gastos estiverem acima do esperado</p>
                   </div>
                   <button
                     onClick={() => setLocalSettings({
@@ -313,10 +313,10 @@ export const SettingsModal = ({
                   </button>
                 </div>
 
-                <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
+                <div className={`flex items-center justify-between p-6 ${isDarkTheme ? 'bg-slate-800 border-slate-700 hover:border-blue-500/50' : 'bg-slate-50 border-slate-100 hover:border-blue-200'} rounded-none border group transition-all`}>
                   <div className="flex-1">
-                    <p className="text-sm font-bold text-slate-900 mb-1">ações Vencidas</p>
-                    <p className="text-[11px] text-slate-500 font-medium">Alertar sobre tarefas fora do prazo</p>
+                    <p className={`text-sm font-bold ${isDarkTheme ? 'text-white' : 'text-slate-900'} mb-1`}>Ações Vencidas</p>
+                    <p className={`text-[11px] ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'} font-medium`}>Alertar sobre tarefas fora do prazo</p>
                   </div>
                   <button
                     onClick={() => setLocalSettings({
@@ -332,11 +332,11 @@ export const SettingsModal = ({
                   </button>
                 </div>
 
-                <div className="flex flex-col p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-amber-200 transition-all gap-4">
+                <div className={`flex flex-col p-6 ${isDarkTheme ? 'bg-slate-800 border-slate-700 hover:border-amber-500/50' : 'bg-slate-50 border-slate-100 hover:border-amber-200'} rounded-none border group transition-all gap-4`}>
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
-                      <p className="text-sm font-bold text-slate-900 mb-1">Audit PGD</p>
-                      <p className="text-[11px] text-slate-500 font-medium">Verificar vÃ­nculos antes do fim do mês</p>
+                      <p className={`text-sm font-bold ${isDarkTheme ? 'text-white' : 'text-slate-900'} mb-1`}>Audit PGD</p>
+                      <p className={`text-[11px] ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'} font-medium`}>Verificar vínculos antes do fim do mês</p>
                     </div>
                     <button
                       onClick={() => setLocalSettings({
@@ -353,7 +353,7 @@ export const SettingsModal = ({
                   </div>
                   {localSettings.notifications.pgcAudit.enabled && (
                     <div className="flex items-center gap-3">
-                      <span className="text-[10px] font-black text-slate-400 uppercase">Avisar</span>
+                      <span className={`text-[10px] font-black ${isDarkTheme ? 'text-slate-400' : 'text-slate-400'} uppercase`}>Avisar</span>
                       <input
                         type="number"
                         min="1"
@@ -366,7 +366,7 @@ export const SettingsModal = ({
                             pgcAudit: { ...localSettings.notifications.pgcAudit, daysBeforeEnd: Number(e.target.value) }
                           }
                         })}
-                        className="w-16 bg-white border-2 border-slate-100 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
+                        className={`w-16 border-2 rounded-none px-3 py-1.5 text-xs font-bold focus:ring-2 focus:ring-amber-500 outline-none ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-100 text-slate-900'}`}
                       />
                       <span className="text-[10px] font-black text-slate-400 uppercase">dias antes</span>
                     </div>
@@ -376,14 +376,14 @@ export const SettingsModal = ({
 
               {/* Notificações Personalizadas Section */}
               <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500 delay-150">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                  <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] flex items-center gap-2">
+                <div className={`flex items-center justify-between border-b ${isDarkTheme ? 'border-slate-800' : 'border-slate-100'} pb-2`}>
+                  <h4 className={`text-[10px] font-black ${isDarkTheme ? 'text-slate-100' : 'text-slate-900'} uppercase tracking-[0.2em] flex items-center gap-2`}>
                     <span className="w-2 h-2 bg-purple-500 rounded-full"></span>
                     Personalizadas
                   </h4>
                   <button
                     onClick={() => setIsAddingCustom(!isAddingCustom)}
-                    className="text-[10px] font-black uppercase text-blue-600 hover:bg-blue-50 px-2 py-1 rounded transition-colors"
+                    className={`text-[10px] font-black uppercase text-blue-500 ${isDarkTheme ? 'hover:bg-slate-800' : 'hover:bg-blue-50'} px-2 py-1 rounded-none transition-colors`}
                   >
                     {isAddingCustom ? 'Cancelar' : '+ Nova'}
                   </button>
@@ -391,17 +391,17 @@ export const SettingsModal = ({
 
                 {/* Form de Adição */}
                 {isAddingCustom && (
-                  <div className="bg-slate-50 p-4 rounded-xl border border-blue-100 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2">
+                  <div className={`${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-blue-100'} p-4 rounded-none border flex flex-col gap-3 animate-in fade-in slide-in-from-top-2`}>
                     <input
                       type="text"
                       placeholder="Mensagem da notificação..."
-                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                      className={`w-full border rounded-none px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-blue-500 outline-none ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-900'}`}
                       value={newCustom.message || ''}
                       onChange={e => setNewCustom({ ...newCustom, message: e.target.value })}
                     />
                     <div className="flex gap-2">
                       <select
-                        className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-[10px] font-black uppercase text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                        className={`border rounded-none px-3 py-2 text-[10px] font-black uppercase outline-none focus:ring-2 focus:ring-blue-500 ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-700'}`}
                         value={newCustom.frequency}
                         onChange={e => setNewCustom({ ...newCustom, frequency: e.target.value as any })}
                       >
@@ -411,7 +411,7 @@ export const SettingsModal = ({
                       </select>
                       <input
                         type="time"
-                        className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                        className={`border rounded-none px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-900'}`}
                         value={newCustom.time || ''}
                         onChange={e => setNewCustom({ ...newCustom, time: e.target.value })}
                       />
@@ -438,12 +438,12 @@ export const SettingsModal = ({
 
                     {newCustom.frequency === 'monthly' && (
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-black text-slate-400 uppercase">Dia do mês:</span>
+                        <span className={`text-[10px] font-black ${isDarkTheme ? 'text-slate-400' : 'text-slate-400'} uppercase`}>Dia do mês:</span>
                         <input
                           type="number"
                           min="1"
                           max="31"
-                          className="w-12 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                          className={`w-12 border rounded-none px-2 py-1 text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-900'}`}
                           value={newCustom.dayOfMonth || 1}
                           onChange={e => setNewCustom({ ...newCustom, dayOfMonth: Number(e.target.value) })}
                         />
@@ -472,7 +472,7 @@ export const SettingsModal = ({
                         setIsAddingCustom(false);
                         setNewCustom({ frequency: 'daily', time: '09:00', enabled: true, daysOfWeek: [], dayOfMonth: 1 });
                       }}
-                      className="bg-blue-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-colors disabled:opacity-50"
+                      className="bg-slate-900 text-white py-2 rounded-none text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition-colors disabled:opacity-50 font-mono"
                     >
                       Salvar Notificação
                     </button>
@@ -482,9 +482,9 @@ export const SettingsModal = ({
                 {/* Lista de Notificações Custom */}
                 <div className="grid grid-cols-1 gap-3">
                   {(localSettings.notifications.custom || []).map(notif => (
-                    <div key={notif.id} className="p-4 bg-white border border-slate-100 rounded-xl flex items-center justify-between group hover:border-purple-200 transition-all shadow-sm">
+                    <div key={notif.id} className={`p-4 ${isDarkTheme ? 'bg-slate-800 border-slate-700 hover:border-purple-500/50' : 'bg-white border-slate-100 hover:border-purple-200'} border rounded-none flex items-center justify-between group transition-all`}>
                       <div>
-                        <p className="text-xs font-bold text-slate-900 line-clamp-1">{notif.message}</p>
+                        <p className={`text-xs font-bold ${isDarkTheme ? 'text-white' : 'text-slate-900'} line-clamp-1`}>{notif.message}</p>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="text-[9px] font-black text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded uppercase">
                             {notif.time}
@@ -521,7 +521,7 @@ export const SettingsModal = ({
                     </div>
                   ))}
                   {(localSettings.notifications.custom || []).length === 0 && !isAddingCustom && (
-                    <div className="text-center py-6 text-slate-300 text-[10px] font-black uppercase tracking-widest italic border-2 border-dashed border-slate-50 rounded-xl">
+                    <div className={`text-center py-6 text-[10px] font-black uppercase tracking-widest font-mono border-2 border-dashed rounded-none ${isDarkTheme ? 'text-slate-600 border-slate-800' : 'text-slate-300 border-slate-100'}`}>
                       Nenhuma notificação personalizada
                     </div>
                   )}
@@ -532,26 +532,26 @@ export const SettingsModal = ({
           ) : activeTab === 'context' ? (
             /* Unidades / áreas e Palavras-Chave TAB */
             <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
-              <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
+              <h4 className={`text-[10px] font-black ${isDarkTheme ? "text-slate-100 border-slate-800" : "text-slate-900 border-slate-100"} uppercase tracking-[0.2em] border-b pb-2 flex items-center gap-2`}>
                 <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
-                Ãreas e Palavras-Chave
+                Áreas e Palavras-Chave
               </h4>
 
               <div className="space-y-4">
                 {unidades.map((u) => {
                   const isProtected = ['CLC', 'ASSISTÊNCIA', 'ASSISTÊNCIA ESTUDANTIL'].includes(u.nome.toUpperCase());
                   return (
-                    <div key={u.id} className={`p-6 bg-slate-50 rounded-none md:rounded-[2rem] border ${isProtected ? 'border-amber-200 bg-amber-50/30' : 'border-slate-100'} space-y-4 shadow-sm`}>
+                    <div key={u.id} className={`p-6 rounded-none border space-y-4 ${isProtected ? (isDarkTheme ? 'border-amber-700/50 bg-amber-950/20' : 'border-amber-200 bg-amber-50/30') : (isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-100')}`}>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <h5 className="text-xs font-black text-slate-900 uppercase tracking-widest">{u.nome}</h5>
-                          {isProtected && <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest">Protegido</span>}
+                          <h5 className={`text-xs font-black ${isDarkTheme ? 'text-white' : 'text-slate-900'} uppercase tracking-widest`}>{u.nome}</h5>
+                          {isProtected && <span className={`${isDarkTheme ? 'bg-amber-900/40 text-amber-400 border border-amber-700/50' : 'bg-amber-100 text-amber-700'} px-2 py-0.5 rounded-none text-[8px] font-black uppercase tracking-widest`}>Protegido</span>}
                         </div>
 
                         {!isProtected && (
                           <button
                             onClick={() => { if (pendingDeleteUnidadeId !== u.id) { setPendingDeleteUnidadeId(u.id); window.setTimeout(() => setPendingDeleteUnidadeId((current) => (current === u.id ? null : current)), 3500); return; } setPendingDeleteUnidadeId(null); onDeleteUnidade(u.id); }}
-                            className={`p-2 rounded-full transition-all ${pendingDeleteUnidadeId === u.id ? 'bg-rose-500 text-white' : 'text-rose-300 hover:text-rose-600 hover:bg-rose-50'}`}
+                            className={`p-2 rounded-none transition-all ${pendingDeleteUnidadeId === u.id ? 'bg-rose-500 text-white' : (isDarkTheme ? 'text-rose-400 hover:text-rose-300 hover:bg-rose-950/30' : 'text-rose-300 hover:text-rose-600 hover:bg-rose-50')}`}
                             title={pendingDeleteUnidadeId === u.id ? "Confirmar remoção" : "Remover Área"}
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
@@ -560,8 +560,8 @@ export const SettingsModal = ({
                       </div>
 
                       {/* Peso de Gravidade (G) do Score GUT — 1 a 5 */}
-                      <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-none md:rounded-xl px-3 py-2">
-                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">Gravidade (G)</span>
+                      <div className={`flex items-center justify-between gap-3 border rounded-none px-3 py-2 ${isDarkTheme ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <span className={`text-[9px] font-black uppercase tracking-[0.2em] ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'}`}>Gravidade (G)</span>
                         <div className="flex items-center gap-1">
                           {[1, 2, 3, 4, 5].map((n) => {
                             const current = Number(u.peso_gravidade) || 1;
@@ -571,7 +571,7 @@ export const SettingsModal = ({
                                 key={n}
                                 type="button"
                                 onClick={() => onUpdateUnidade(u.id, { peso_gravidade: n })}
-                                className={`w-7 h-7 rounded-full text-[10px] font-black transition-all ${active ? 'bg-slate-900 text-white scale-110' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
+                                className={`w-7 h-7 rounded-none text-[10px] font-black transition-all ${active ? 'bg-slate-900 text-white scale-110' : (isDarkTheme ? 'bg-slate-600 text-slate-400 hover:bg-slate-500' : 'bg-slate-100 text-slate-400 hover:bg-slate-200')}`}
                                 title={`Definir gravidade ${n}`}
                               >
                                 {n}
@@ -583,7 +583,7 @@ export const SettingsModal = ({
 
                       <div className="flex flex-wrap gap-2">
                         {(u.palavras_chave || []).map((kw, i) => (
-                          <span key={i} className="inline-flex items-center gap-1 px-3 py-1 bg-white border border-slate-200 rounded-full text-[9px] font-black text-slate-600 uppercase group/kw">
+                          <span key={i} className={`inline-flex items-center gap-1 px-3 py-1 border rounded-none text-[9px] font-black uppercase group/kw ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-slate-300' : 'bg-white border-slate-200 text-slate-600'}`}>
                             {kw}
                             <button onClick={() => handleRemoveKeyword(u.id, u.palavras_chave || [], kw)} className="text-slate-300 hover:text-rose-500 transition-colors">
                               <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -602,11 +602,11 @@ export const SettingsModal = ({
                           value={newKeywordMap[u.id] || ''}
                           onChange={(e) => setNewKeywordMap({ ...newKeywordMap, [u.id]: e.target.value })}
                           onKeyDown={(e) => e.key === 'Enter' && handleAddKeyword(u.id, u.palavras_chave || [])}
-                          className="flex-1 bg-white border border-slate-200 rounded-lg md:rounded-xl px-4 py-2 text-[10px] font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                          className={`flex-1 border rounded-none px-4 py-2 text-[10px] font-bold focus:ring-2 focus:ring-blue-500 outline-none font-mono ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-900'}`}
                         />
                         <button
                           onClick={() => handleAddKeyword(u.id, u.palavras_chave || [])}
-                          className="bg-blue-600 text-white px-4 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-md shadow-blue-100"
+                          className="bg-slate-900 text-white px-4 rounded-none text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all font-mono"
                         >
                           Add
                         </button>
@@ -615,15 +615,15 @@ export const SettingsModal = ({
                   );
                 })}
 
-                <div className="p-6 bg-blue-50/50 rounded-none md:rounded-[2rem] border-2 border-dashed border-blue-200 flex flex-col gap-4">
-                  <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest text-center">Cadastrar Nova Ãrea de Contexto</p>
+                <div className={`p-6 rounded-none border-2 border-dashed flex flex-col gap-4 ${isDarkTheme ? 'bg-slate-800/50 border-slate-700' : 'bg-blue-50/50 border-blue-200'}`}>
+                  <p className={`text-[10px] font-black uppercase tracking-widest text-center font-mono ${isDarkTheme ? 'text-slate-400' : 'text-blue-600'}`}>Cadastrar Nova Área de Contexto</p>
                   <div className="flex gap-2">
                     <input
                       type="text"
                       placeholder="Nome da Unidade (ex: DEV, MARKETING)"
                       value={newUnidadeNome}
                       onChange={(e) => setNewUnidadeNome(e.target.value)}
-                      className="flex-1 bg-white border border-blue-100 rounded-lg md:rounded-xl px-4 py-3 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
+                      className={`flex-1 border rounded-none px-4 py-3 text-xs font-bold focus:ring-2 focus:ring-blue-500 outline-none font-mono ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white placeholder:text-slate-500' : 'bg-white border-blue-100 text-slate-900'}`}
                     />
                     <button
                       onClick={() => {
@@ -632,7 +632,7 @@ export const SettingsModal = ({
                           setNewUnidadeNome('');
                         }
                       }}
-                      className="bg-blue-600 text-white px-6 py-3 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-200"
+                      className="bg-slate-900 text-white px-6 py-3 rounded-none text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all font-mono"
                     >
                       Criar
                     </button>
@@ -647,32 +647,32 @@ export const SettingsModal = ({
                 Integração Google Drive
               </h4>
 
-              <div className="p-6 bg-slate-50 rounded-none md:rounded-[2rem] border border-slate-100 space-y-4 shadow-sm">
-                <p className="text-xs text-slate-500 font-medium">
+              <div className={`p-6 rounded-none border space-y-4 ${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+                <p className={`text-xs font-medium ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'}`}>
                   Configure a pasta do Google Drive onde os arquivos do Pool de Dados serão armazenados.
                 </p>
 
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">ID da Pasta no Drive</label>
+                  <label className={`text-[10px] font-black uppercase tracking-widest pl-1 ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>ID da Pasta no Drive</label>
                   <input
                     type="text"
                     value={localSettings.googleDriveFolderId || ''}
                     onChange={(e) => setLocalSettings({ ...localSettings, googleDriveFolderId: e.target.value })}
                     placeholder="Ex: 1a2b3c4d5e6f7g8h9i0j..."
-                    className="w-full bg-white border border-slate-200 rounded-lg md:rounded-xl px-4 py-3 text-xs font-mono text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                    className={`w-full border rounded-none px-4 py-3 text-xs font-mono focus:ring-2 focus:ring-blue-500 outline-none ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-900'}`}
                   />
-                  <p className="text-[9px] text-slate-400 italic">
+                  <p className={`text-[9px] italic ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>
                     O ID da pasta é a parte final da URL da pasta no Google Drive.
                   </p>
                 </div>
               </div>
 
-              <div className="p-6 bg-amber-50 rounded-none md:rounded-[2rem] border border-amber-100">
+              <div className={`p-6 rounded-none border ${isDarkTheme ? 'bg-amber-950/20 border-amber-800/40' : 'bg-amber-50 border-amber-100'}`}>
                 <div className="flex gap-3">
                   <svg className="w-5 h-5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
                   <div>
-                    <p className="text-xs font-bold text-amber-800 uppercase tracking-wider mb-1">Nota sobre Permissões</p>
-                    <p className="text-[10px] text-amber-700 leading-relaxed">
+                    <p className={`text-xs font-bold uppercase tracking-wider mb-1 ${isDarkTheme ? 'text-amber-300' : 'text-amber-800'}`}>Nota sobre Permissões</p>
+                    <p className={`text-[10px] leading-relaxed ${isDarkTheme ? 'text-amber-400' : 'text-amber-700'}`}>
                       Ao adicionar novos escopos (como Google Drive), pode ser necessário re-autenticar o sistema usando o <strong>setup_credentials.bat</strong> para que o Hermes tenha permissão de escrita.
                     </p>
                   </div>
@@ -682,8 +682,8 @@ export const SettingsModal = ({
           ) : null}
         </div>
 
-        <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4 flex-shrink-0">
-          <button onClick={onClose} className="flex-1 px-8 py-4 rounded-none text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all font-mono border border-border-grid">Cancelar</button>
+        <div className={`p-8 border-t flex gap-4 flex-shrink-0 ${isDarkTheme ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-100'}`}>
+          <button onClick={onClose} className={`flex-1 px-8 py-4 rounded-none text-[10px] font-black uppercase tracking-widest transition-all font-mono border ${isDarkTheme ? 'text-slate-400 hover:bg-slate-800 border-slate-700' : 'text-slate-500 hover:bg-slate-200 border-border-grid'}`}>Cancelar</button>
           <button
             onClick={() => {
               onSave(localSettings);
@@ -733,7 +733,7 @@ export const DailyHabitsModal = ({
         <div className="p-8 space-y-3">
           {[
             { id: 'noSugar', label: 'Sem Açúcar', color: 'rose' },
-            { id: 'noAlcohol', label: 'Sem Ãlcool', color: 'purple' },
+            { id: 'noAlcohol', label: 'Sem Álcool', color: 'purple' },
             { id: 'noSnacks', label: 'Sem Lanches/Delivery', color: 'orange' },
 
             { id: 'eatUntil18', label: 'Comer até as 18h', color: 'blue' },

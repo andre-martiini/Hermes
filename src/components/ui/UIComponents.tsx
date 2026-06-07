@@ -248,7 +248,7 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
   };
 
   const getHighlightClass = (name?: string) => {
-    if (isDark || !name || name === 'NÃO CLASSIFICADA') return '';
+    if (!name || name === 'NÃO CLASSIFICADA') return '';
     const baseColor = getBaseColor(name);
     // If we have a dynamic color, we'll use inline style instead
     if (baseColor) return '__dynamic__';
@@ -401,11 +401,16 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
             className={`cursor-pointer hover:underline decoration-1 ${highlighted ? `text-[15px] md:text-lg font-black` : `text-[13px] md:text-[15px] font-medium`} leading-snug transition-colors whitespace-normal break-words font-mono ${isCompleted ? 'line-through text-slate-400' : ''}`}
           >
             {highlightClass === '__dynamic__' ? (
-              <span style={{ backgroundColor: `${getBaseColor(task.area_tematica)}18`, padding: '0 3px', margin: '0 -3px' }}>
+              <span style={{
+                backgroundColor: `${getBaseColor(task.area_tematica)}${isDark ? '35' : '18'}`,
+                ...(isDark ? { color: getBaseColor(task.area_tematica) ?? undefined } : {}),
+                padding: '0 3px',
+                margin: '0 -3px'
+              }}>
                 {task.titulo}
               </span>
             ) : highlightClass ? (
-              <span className={highlightClass}>
+              <span className={isDark ? '' : highlightClass}>
                 {task.titulo}
               </span>
             ) : task.titulo}

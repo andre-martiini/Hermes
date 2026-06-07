@@ -1276,7 +1276,9 @@ const App: React.FC = () => {
       setMasterKnowledge(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     }, handleSnapshotError('conhecimento_mestre'));
     const unsubKnowledgeBases = onSnapshot(collection(db, 'knowledge_bases'), (snapshot) => {
-      setKnowledgeBases(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as BaseConhecimento)));
+      const allBases = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as BaseConhecimento));
+      const uniqueBases = allBases.filter((b, i, arr) => arr.findIndex(x => x.nome === b.nome) === i);
+      setKnowledgeBases(uniqueBases);
       setIsKnowledgeBasesLoaded(true);
     }, handleSnapshotError('knowledge_bases'));
     return () => {
