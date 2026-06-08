@@ -3990,17 +3990,19 @@ const App: React.FC = () => {
       return { hasInstitucional: false, cumprida: true };
     }
     const todayStr = formatDateLocalISO(hoje);
-    const institucionais = activeTasks.filter(t => computeGravidade(t.area_tematica, gravityMap) === 5);
-    if (institucionais.length === 0) {
+    // Inclui tarefas concluídas para detectar ações institucionais encerradas hoje
+    const todasInstitucionais = filteredAndSortedTarefas.filter(t => computeGravidade(t.area_tematica, gravityMap) === 5);
+    if (todasInstitucionais.length === 0) {
       return { hasInstitucional: false, cumprida: true };
     }
     const isToday = (val: any) => String(val || '').slice(0, 10) === todayStr;
-    const cumprida = institucionais.some(t =>
+    const cumprida = todasInstitucionais.some(t =>
+      isToday(t.data_conclusao) ||
       (t.acompanhamento || []).some(e => isToday(e?.data)) ||
       (t.plano_acao_historico || []).some(h => isToday(h?.data))
     );
     return { hasInstitucional: true, cumprida };
-  }, [activeTasks, gravityMap]);
+  }, [filteredAndSortedTarefas, gravityMap]);
 
   useEffect(() => {
     if (!hasAutoExpanded && Object.keys(tarefasAgrupadas).length > 0) {
