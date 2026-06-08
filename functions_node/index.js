@@ -606,6 +606,46 @@ exports.consultarProcessoSipac = functions.runWith({
     }
 });
 
+function buildSipacChangeSummary(oldData, newResult) {
+    const changes = [];
+
+    const oldStatus = (oldData.status || '').trim();
+    const newStatus = (newResult.status || '').trim();
+    if (oldStatus && newStatus && oldStatus !== newStatus) {
+        changes.push(`📋 Status: ${oldStatus} → ${newStatus}`);
+    }
+
+    const oldUnit = (oldData.unidadeAtual || '').trim();
+    const newUnit = (newResult.unidadeAtual || '').trim();
+    if (oldUnit && newUnit && oldUnit !== newUnit) {
+        changes.push(`📍 Movimentado: ${oldUnit} → ${newUnit}`);
+    }
+
+    const oldDocCount = Array.isArray(oldData.documentos)
+        ? oldData.documentos.length
+        : parseInt(oldData.totalDocumentos || '0', 10);
+    const newDocCount = Array.isArray(newResult.documentos) ? newResult.documentos.length : 0;
+    if (newDocCount > oldDocCount) {
+        const diff = newDocCount - oldDocCount;
+        const newDocs = newResult.documentos.slice(-diff);
+        const docDetails = newDocs.map(d => `${d.tipo || 'Documento'} (${d.data || ''})`).join(', ');
+        changes.push(`📄 ${diff} novo(s) documento(s): ${docDetails}`);
+    }
+
+    const oldMovCount = Array.isArray(oldData.movimentacoes) ? oldData.movimentacoes.length : 0;
+    const newMovCount = Array.isArray(newResult.movimentacoes) ? newResult.movimentacoes.length : 0;
+    if (newMovCount > oldMovCount) {
+        const diff = newMovCount - oldMovCount;
+        const newMovs = newResult.movimentacoes.slice(-diff);
+        const movDetails = newMovs
+            .map(m => `${m.unidadeOrigem || ''} → ${m.unidadeDestino || ''} (${m.data || ''})`)
+            .join('; ');
+        changes.push(`🔄 ${diff} nova(s) movimentação(ões): ${movDetails}`);
+    }
+
+    return changes.length > 0 ? changes.join('\n') : null;
+}
+
 exports.scheduledSipacSync = functions.runWith({
     timeoutSeconds: 540,
     memory: '2GB'
@@ -645,10 +685,15 @@ exports.scheduledSipacSync = functions.runWith({
                 });
 
                 const notificationId = `sipac_${numeroProcesso.replace(/[^\d]/g, '')}_${Date.now()}`;
+                const changeSummary = buildSipacChangeSummary(data, result);
+                const baseMessage = `O processo foi atualizado.\nStatus atual: ${result.status}\nLocalização: ${result.unidadeAtual}`;
+                const notificationMessage = changeSummary
+                    ? `${baseMessage}\n\nO que mudou:\n${changeSummary}`
+                    : baseMessage;
                 const notificationDoc = {
                     id: notificationId,
                     title: `Alteração no SIPAC: ${numeroProcesso}`,
-                    message: `O processo foi atualizado. Status: ${result.status}. Localização: ${result.unidadeAtual}.`,
+                    message: notificationMessage,
                     type: 'info',
                     timestamp: new Date().toISOString(),
                     isRead: false,
