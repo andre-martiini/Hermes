@@ -1781,7 +1781,7 @@ export const TaskExecutionView = ({
             </div>
             {/* Copiloto em Modo de Foco lateral */}
             <div 
-              className="w-full lg:w-[440px] shrink-0 border-l border-border-grid flex flex-col bg-[#050505]"
+              className="w-full lg:w-[440px] shrink-0 border-l border-border-grid flex flex-col min-h-0 overflow-hidden bg-[#050505]"
               style={{ width: isDesktopViewport ? copilotPanelWidth : '100%' }}
             >
               <HermesCopilotoDrawer

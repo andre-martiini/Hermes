@@ -2114,14 +2114,18 @@ def normalizar_area_tematica(valor: str, areas_validas: list[str]) -> str:
 
 def _build_system_instruction(copilot_core: str, copilot_soul: str, contexto_ativo: str) -> str:
     from datetime import datetime as _dt
-    today = _dt.now(timezone.utc).strftime("%Y-%m-%d")
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("America/Sao_Paulo")
+    now_local = _dt.now(tz)
+    today = now_local.strftime("%Y-%m-%d")
+    time_str = now_local.strftime("%H:%M")
     ctx_hint = (
         f"\n\n<b>Contexto ativo:</b> {contexto_ativo}"
         if contexto_ativo != "geral"
         else ""
     )
     return (
-        f"Você é o Copiloto Hermes, estrategista sênior de processos. Hoje é {today}."
+        f"Você é o Copiloto Hermes, estrategista sênior de processos. Hoje é {today} e o horário local atual é {time_str}."
         f"{ctx_hint}\n\n"
         "## CORE ESTÁTICO DO COPILOTO\n"
         f"{copilot_core}\n\n"
@@ -2137,7 +2141,7 @@ def _build_system_instruction(copilot_core: str, copilot_soul: str, contexto_ati
         "## REGRAS ABSOLUTAS\n"
         "1. JAMAIS expanda siglas arbitrariamente.\n"
         "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
-        "3. Agendamento/Agenda: Você DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horário de funcionamento: 08:00 às 19:00, janela D+7. Se houver conflito em horário específico, pergunte se força inserção ou busca outro slot. Na criação, use os campos horario_inicio e horario_fim.\n"
+        "3. Agendamento/Agenda: Por padrão, ao propor ou criar uma ação, NÃO proponha nem defina horários de início/fim (campos horario_inicio e horario_fim devem ser nulos/vazios), definindo apenas o dia (data_limite). SÓ preencha horario_inicio e horario_fim se o usuário pedir explicitamente para agendar um horário específico. Nesse caso, você DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horário de funcionamento: 08:00 às 19:00, janela D+7. Se o agendamento for para hoje, o horário inicial DEVE ser sempre posterior ao horário local atual. Se houver conflito em horário específico, pergunte se força inserção ou busca outro slot.\n"
         "4. Para criar uma nova ação, você DEVE usar obrigatoriamente a ferramenta propor_acao_para_confirmacao. Ela gerará botões de ✅/❌ para o usuário confirmar o registro.\n"
         "5. Links de tarefas: use o formato task:{ID} no texto (ex: 'Ação task:abc123').\n"
         "6. Acione salvar_memoria_global apenas para fatos duráveis e preferências estáveis.\n"
@@ -2151,15 +2155,18 @@ def _build_system_instruction_guarded(
     acao_snapshot: dict | None = None,
 ) -> str:
     from datetime import datetime as _dt
-
-    today = _dt.now(timezone.utc).strftime("%Y-%m-%d")
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("America/Sao_Paulo")
+    now_local = _dt.now(tz)
+    today = now_local.strftime("%Y-%m-%d")
+    time_str = now_local.strftime("%H:%M")
     ctx_hint = (
         f"\n\n<b>Contexto ativo:</b> {contexto_ativo}"
         if contexto_ativo != "geral"
         else ""
     )
     base = (
-        f"Voce e o Copiloto Hermes, estrategista senior de processos. Hoje e {today}."
+        f"Voce e o Copiloto Hermes, estrategista senior de processos. Hoje e {today} e o horario local atual e {time_str}."
         f"{ctx_hint}\n\n"
         "## CORE ESTATICO DO COPILOTO\n"
         f"{copilot_core}\n\n"
@@ -2176,7 +2183,7 @@ def _build_system_instruction_guarded(
         "1. JAMAIS expanda siglas arbitrariamente.\n"
         "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
         "4. Se o pedido for sobre dados internos do Hermes, tarefas, acoes, historico, agenda ou documentos do sistema, NUNCA use internet como fallback. Nesses casos, use apenas ferramentas internas. Se nao encontrar nada apos usar as ferramentas, admita explicitamente que nao encontrou nos registros do sistema.\n"
-        "5. Agendamento/Agenda: Voce DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horario de funcionamento: 08:00 as 19:00, janela D+7. Se houver conflito em horario especifico, pergunte se forca insercao ou busca outro slot. Na criacao, use os campos horario_inicio e horario_fim.\n"
+        "5. Agendamento/Agenda: Por padrao, ao propor ou criar uma acao, NAO proponha nem defina horarios de inicio/fim (campos horario_inicio e horario_fim devem ser nulos/vazios), definindo apenas o dia (data_limite). SO preencha horario_inicio e horario_fim se o usuario pedir explicitamente para agendar um horario especifico. Nesse caso, voce DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horario de funcionamento: 08:00 as 19:00, janela D+7. Se o agendamento for para hoje, o horario inicial DEVE ser sempre posterior ao horario local atual. Se houver conflito em horario especifico, pergunte se forca insercao ou busca outro slot.\n"
         "6. Para criar uma nova ação, você DEVE usar obrigatoriamente a ferramenta propor_acao_para_confirmacao. Isso apresentará os botões de ✅/❌ ao usuário.\n"
         "7. Links de tarefas: use o formato task:{ID} no texto (ex: 'Acao task:abc123').\n"
         "8. Acione salvar_memoria_global apenas para fatos duraveis e preferencias estaveis.\n"
@@ -2220,15 +2227,18 @@ def _build_system_instruction_guarded_v2(
     acao_snapshot: dict | None = None,
 ) -> str:
     from datetime import datetime as _dt
-
-    today = _dt.now(timezone.utc).strftime("%Y-%m-%d")
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("America/Sao_Paulo")
+    now_local = _dt.now(tz)
+    today = now_local.strftime("%Y-%m-%d")
+    time_str = now_local.strftime("%H:%M")
     ctx_hint = (
         f"\n\n<b>Contexto ativo:</b> {contexto_ativo}"
         if contexto_ativo != "geral"
         else ""
     )
     base = (
-        f"Voce e o Copiloto Hermes, estrategista senior de processos. Hoje e {today}."
+        f"Voce e o Copiloto Hermes, estrategista senior de processos. Hoje e {today} e o horario local atual e {time_str}."
         f"{ctx_hint}\n\n"
         "## CORE ESTATICO DO COPILOTO\n"
         f"{copilot_core}\n\n"
@@ -2245,7 +2255,7 @@ def _build_system_instruction_guarded_v2(
         "1. JAMAIS expanda siglas arbitrariamente.\n"
         "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
         "4. Se o pedido for sobre dados internos do Hermes, tarefas, acoes, historico, agenda ou documentos do sistema, NUNCA use internet como fallback. Nesses casos, use apenas ferramentas internas. Se nao encontrar nada apos usar as ferramentas, admita explicitamente que nao encontrou nos registros do sistema.\n"
-        "5. Agendamento/Agenda: Voce DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horario de funcionamento: 08:00 as 19:00, janela D+7. Se houver conflito em horario especifico, pergunte se forca insercao ou busca outro slot. Na criacao, use os campos horario_inicio e horario_fim.\n"
+        "5. Agendamento/Agenda: Por padrao, ao propor ou criar uma acao, NAO proponha nem defina horarios de inicio/fim (campos horario_inicio e horario_fim devem ser nulos/vazios), definindo apenas o dia (data_limite). SO preencha horario_inicio e horario_fim se o usuario pedir explicitamente para agendar um horario especifico. Nesse caso, voce DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horario de funcionamento: 08:00 as 19:00, janela D+7. Se o agendamento for para hoje, o horario inicial DEVE ser sempre posterior ao horario local atual. Se houver conflito em horario especifico, pergunte se forca insercao ou busca outro slot.\n"
         "6. Para criar uma nova ação, você DEVE usar obrigatoriamente a ferramenta propor_acao_para_confirmacao. Isso apresentará os botões de ✅/❌ ao usuário.\n"
         "7. Links de tarefas: use o formato task:{ID} no texto (ex: 'Acao task:abc123').\n"
         "8. Acione salvar_memoria_global apenas para fatos duraveis e preferencias estaveis.\n"
@@ -3615,9 +3625,37 @@ def _process_telegram_message(db, data: dict):
         # Garante que o copiloto só use áreas temáticas existentes (fallback 'GERAL').
         area_tematica = normalizar_area_tematica(area_tematica, _areas_validas)
         now_iso = datetime.now(timezone.utc).isoformat()
-        today = (datetime.now(timezone.utc)).strftime("%Y-%m-%d")
-        if not data_limite or str(data_limite) < today:
-            data_limite = today
+
+        # Normalização de horários
+        def normalize_hhmm(t_str: str) -> str | None:
+            if not t_str:
+                return None
+            t_str = str(t_str).strip()
+            if ":" not in t_str:
+                return None
+            try:
+                h, m = t_str.split(":")
+                return f"{int(h):02d}:{int(m):02d}"
+            except:
+                return t_str
+
+        horario_inicio = normalize_hhmm(horario_inicio)
+        horario_fim = normalize_hhmm(horario_fim)
+
+        from zoneinfo import ZoneInfo
+        from datetime import datetime as _dt
+        tz = ZoneInfo("America/Sao_Paulo")
+        now_local = _dt.now(tz)
+        today_local = now_local.strftime("%Y-%m-%d")
+
+        if not data_limite or str(data_limite) < today_local:
+            data_limite = today_local
+
+        if data_limite == today_local and horario_inicio:
+            current_time_str = now_local.strftime("%H:%M")
+            if horario_inicio < current_time_str:
+                return f"ERRO|Não é possível agendar um horário anterior ao horário atual ({current_time_str}). Por favor, escolha um horário posterior."
+
         task_id = str(_uuid.uuid4())[:20]
         plano_convertido = [
             {"id": str(_uuid.uuid4())[:8], "text": str(p), "completed": False}
@@ -3862,10 +3900,37 @@ def _process_telegram_message(db, data: dict):
         Gera uma proposta de criação de ação para o usuário confirmar via botões.
         Use esta ferramenta SEMPRE antes de criar uma ação.
         """
-        today_str = (datetime.now(timezone.utc)).strftime("%Y-%m-%d")
-        eff_limit = data_limite or today_str
-        if eff_limit < today_str:
-            eff_limit = today_str
+        # Normalização de horários
+        def normalize_hhmm(t_str: str) -> str | None:
+            if not t_str:
+                return None
+            t_str = str(t_str).strip()
+            if ":" not in t_str:
+                return None
+            try:
+                h, m = t_str.split(":")
+                return f"{int(h):02d}:{int(m):02d}"
+            except:
+                return t_str
+
+        horario_inicio = normalize_hhmm(horario_inicio)
+        horario_fim = normalize_hhmm(horario_fim)
+
+        from zoneinfo import ZoneInfo
+        from datetime import datetime as _dt
+        tz = ZoneInfo("America/Sao_Paulo")
+        now_local = _dt.now(tz)
+        today_local = now_local.strftime("%Y-%m-%d")
+
+        eff_limit = data_limite or today_local
+        if eff_limit < today_local:
+            eff_limit = today_local
+
+        if eff_limit == today_local and horario_inicio:
+            current_time_str = now_local.strftime("%H:%M")
+            if horario_inicio < current_time_str:
+                return f"ERRO|Não é possível propor um horário anterior ao horário atual ({current_time_str}). Por favor, escolha um horário posterior."
+
         pending_data = {
             "titulo": titulo,
             "descricao": descricao,

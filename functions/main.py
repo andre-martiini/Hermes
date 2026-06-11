@@ -8003,6 +8003,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             plano_acao: list[str] = [],
             sourceGmailMessageId: str = None,
             sourceKnowledgeText: str = None,
+            horario_inicio: str = None,
+            horario_fim: str = None,
         ):
             """
             Cria uma nova ação/tarefa no sistema Hermes após confirmação explícita do usuário.
@@ -8018,8 +8020,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             - plano_acao: lista de strings com os passos do plano (opcional)
             - sourceGmailMessageId: se a ação veio de um e-mail, passe o ID da mensagem para controle de duplicação.
             - sourceKnowledgeText: se houver texto do e-mail longo a ser arquivado, passe-o aqui para instanciar um Nó de RAG.
+            - horario_inicio: horário de início no formato HH:MM (se agendado)
+            - horario_fim: horário de fim no formato HH:MM (se agendado)
             Retorna o ID da tarefa criada ou mensagem de erro.
-            NÃO use horários — ações criadas pelo copiloto nunca têm horário_inicio nem horário_fim.
             """
             try:
                 import uuid as _uuid
@@ -8029,10 +8032,47 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 area_tematica = normalizar_area_tematica(area_tematica, _areas_validas)
 
                 now_iso = _dt.now(_tz.utc).isoformat()
-                today_brt = (_dt.now(_tz.utc) + timedelta(hours=-3)).date().isoformat()
+                
+                # Normalização de horários e timezone local
+                def normalize_hhmm(t_str: str) -> str | None:
+                    if not t_str:
+                        return None
+                    t_str = str(t_str).strip()
+                    if ":" not in t_str:
+                        return None
+                    try:
+                        h, m = t_str.split(":")
+                        return f"{int(h):02d}:{int(m):02d}"
+                    except:
+                        return t_str
+
+                horario_inicio = normalize_hhmm(horario_inicio)
+                horario_fim = normalize_hhmm(horario_fim)
+
+                from zoneinfo import ZoneInfo
+                tz = ZoneInfo("America/Sao_Paulo")
+                now_local = _dt.now(tz)
+                today_brt = now_local.strftime("%Y-%m-%d")
+
                 if not data_limite or str(data_limite) < today_brt:
                     data_limite = today_brt
+
+                if data_limite == today_brt and horario_inicio:
+                    current_time_str = now_local.strftime("%H:%M")
+                    if horario_inicio < current_time_str:
+                        return f"ERRO|Não é possível agendar um horário anterior ao horário atual ({current_time_str}). Por favor, escolha um horário posterior."
+
                 task_id = str(_uuid.uuid4())[:20]
+
+                # Reuso da lógica de reagendamento se houver horários
+                try:
+                    import hermes_calendar_tools as hc_tools
+                    c_service = get_calendar_service()
+                    c_id = get_target_calendar_id(db)
+                    if c_service and c_id and horario_inicio and horario_fim:
+                        hc_tools.reagendar_acoes_hermes(db, c_service, c_id, data_limite, horario_inicio, horario_fim)
+                except Exception as e:
+                    print(f"[Copiloto] Erro ao reagendar iterativo: {e}")
 
                 # Converte lista de strings em array de objetos para o React
                 plano_convertido = [
@@ -8044,7 +8084,6 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     for passo in (plano_acao or [])
                     if str(passo).strip()
                 ]
-
 
                 source_knowledge_id = None
                 if sourceKnowledgeText:
@@ -8102,8 +8141,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "pool_dados": [],
                     "plano_acao_historico": [],
                     "sync_status": "new",
-                    "horario_inicio": None,
-                    "horario_fim": None,
+                    "horario_inicio": horario_inicio,
+                    "horario_fim": horario_fim,
 
                     "sourceGmailMessageId": sourceGmailMessageId or None,
                     "sourceKnowledgeId": source_knowledge_id or None,}
@@ -8856,7 +8895,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         model_id = COPILOT_CHAT_MODEL
         
         from datetime import datetime
-        today_str = datetime.now().strftime("%Y-%m-%d")
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("America/Sao_Paulo")
+        now_local = datetime.now(tz)
+        today_str = now_local.strftime("%Y-%m-%d")
+        time_str = now_local.strftime("%H:%M")
 
         # Busca catálogo de sistemas para o "de-para" exato que o usuário solicitou
         try:
@@ -8989,21 +9032,23 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "  3. Baseie sua resposta EXCLUSIVAMENTE no retorno desta ferramenta.\n"
             "  4. Se a ferramenta declarar que a informação não existe, reproduza essa declaração sem inventar alternativas.\n"
             "NUNCA misture dados numéricos (valores, itens, quantidades) de processos ou documentos distintos.\n\n"
-            "## CRIAÇÃO E ALOCAÇÃO DE AÇÕES NA AGENDA (CRÍTICO)\n\n"
-            "Quando o usuário solicitar a criação ou agendamento de uma ação/tarefa, siga OBRIGATORIAMENTE este protocolo:\n\n"
-            "ETAPA 0 — VERIFICAÇÃO DE DISPONIBILIDADE NA AGENDA:\n"
-            "Você DEVE usar consultar_agenda(data_inicio, data_fim) ou encontrar_slot_livre(data) ANTES de apresentar qualquer proposta ao usuário.\n"
-            "Se o usuário pedir um horário específico (ex: 'amanhã às 14h') e houver colisão (conflito detectado): trave a inserção perguntando se ele quer Forçar a sobreposição ou Buscar próximo horário livre.\n"
-            "Se o usuário for flexível ('agende para amanhã'), use encontrar_slot_livre para acomodar no primeiro espaço vazio (duração padrão 30min).\n"
-            "Restrição: A agenda opera estritamente entre 08:00 e 19:00, dentro de uma janela de 7 dias úteis.\n\n"
+            "## CRIAÇÃO E ALOCAÇÃO DE AÇÕES (CRÍTICO)\n\n"
+            "Quando o usuário solicitar a criação de uma ação/tarefa, siga OBRIGATORIAMENTE este protocolo:\n\n"
+            "1. POR PADRÃO (Criação Normal): Não proponha nem defina horários de início/fim (campos horario_inicio e horario_fim devem ser nulos/vazios), definindo apenas o dia/prazo (data_limite). Apresente o draft ao usuário mostrando o horário como vazio/não definido.\n"
+            "2. SE O USUÁRIO PEDIR EXPLICITAMENTE PARA AGENDAR UM HORÁRIO ESPECÍFICO:\n"
+            "   - Você DEVE usar consultar_agenda(data_inicio, data_fim) ou encontrar_slot_livre(data) ANTES de apresentar qualquer proposta ao usuário.\n"
+            "   - Se o agendamento for para hoje, o horário inicial DEVE ser sempre posterior ao horário local atual.\n"
+            "   - Se houver colisão (conflito detectado): trave a inserção perguntando se ele quer Forçar a sobreposição ou Buscar próximo horário livre.\n"
+            "   - Restrição: A agenda opera estritamente entre 08:00 e 19:00, dentro de uma janela de 7 dias úteis.\n\n"
             "ETAPA 1 — DRAFT (apresentar antes de criar):\n"
             "Apresente um resumo estruturado para o usuário confirmar:\n"
-            "  📋 **Draft da Ação na Agenda**\n"
+            "  📋 **Draft da Ação**\n"
             "  - **Título:** [título]\n"
-            "  - **Início/Fim:** [ex: 2026-05-15 14:00 às 14:30]\n"
+            "  - **Prazo:** [ex: 2026-05-15]\n"
+            "  - **Horário:** [vazio/não definido, OU início/fim ex: 14:00 às 14:30 se pedido e validado]\n"
             "  - **Área Temática:** [área ou projeto baseada no contexto; PERGUNTE SE FOR AMBÍGUA]\n"
             "  - **Tipo:** [fast / deep]\n"
-            "  Confirma a alocação desta ação?\n\n"
+            "  Confirma a criação desta ação?\n\n"
             "ETAPA 2 — CONFIRMAÇÃO:\n"
             "Só chame criar_acao_no_sistema após receber confirmação explícita ('sim', 'confirma', 'pode criar', 'ok', etc.).\n"
             "Se o usuário ajustar algum campo no draft, incorpore as correções antes de criar.\n\n"
@@ -9205,7 +9250,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         )
         system_instruction = (
             system_instruction_static
-            + f"\n\nHoje é {today_str}. "
+            + f"\n\nHoje é {today_str} e o horário local atual é {time_str}. "
             + (f"CONTEXTO TÉCNICO VINCULADO (OBRIGATÓRIO): "
                + (f"sistemaId={system_id}, " if system_id else "")
                + (f"taskId={task_id}. " if task_id else "") if (system_id or task_id) else "")
