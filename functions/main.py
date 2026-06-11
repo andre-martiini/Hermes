@@ -26,13 +26,11 @@ from security_portals import (
     generatePgdFromDiariesAI,
     generatePgdFromRawTextAI,
     getPublicFinancePortal,
-    getPublicScholarshipProject,
     getPublicShoppingPortal,
     matchShoppingItemsAI,
     mutateShoppingList,
     mutatePublicShoppingPortal,
     submitPublicFinanceTransaction,
-    submitPublicScholarshipRegistration,
 )
 from pdf_precision import extract_pdf_text_with_fallback, is_pdf_mime_type
 
@@ -83,6 +81,8 @@ from gemini_cost_controls import (
     log_gemini_usage,
     GEMINI_ROUTING_MODEL,
     GEMINI_BALANCED_MODEL,
+    GEMINI_FRONTIER_MODEL,
+    generate_content_logged,
 )
 
 
@@ -9609,45 +9609,6 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             _function_map[f"acionar_{tool_id}"] = _make_tool_invoker(tool_id)
 
 
-        # Reassign map for old static tools if needed but we just updated it above
-        _old_function_map = {
-            'buscar_e_analisar_email': buscar_e_analisar_email,
-            'consultar_historico_acoes': consultar_historico_acoes,
-            'buscar_arquivos_acervo': buscar_arquivos_acervo,
-            'obter_contexto_tela': obter_contexto_tela,
-            'pesquisar_internet': pesquisar_internet,
-            'ler_pagina_web': ler_pagina_web,
-            'ler_documento_na_integra': ler_documento_na_integra,
-            'registrar_correcao_procedimento': registrar_correcao_procedimento,
-            'salvar_memoria_global': salvar_memoria_global,
-            'salvar_pop_global': salvar_pop_global,
-            'resolver_conflito_memoria': resolver_conflito_memoria,
-            'atualizar_personalidade': atualizar_personalidade,
-            'resolver_conflito_procedimento': resolver_conflito_procedimento,
-            'criar_acao_no_sistema': criar_acao_no_sistema,
-            'editar_plano_acao': editar_plano_acao,
-            'preparar_edicao_acao': preparar_edicao_acao,
-            'registrar_no_diario': registrar_no_diario,
-            'gerar_imagem': gerar_imagem,
-            'gerar_relatorio': gerar_relatorio,
-            'gerar_rascunho_formulario': gerar_rascunho_formulario,
-            'consultar_agenda': consultar_agenda,
-            'encontrar_slot_livre': encontrar_slot_livre,
-            'preparar_reagendamento_em_lote': preparar_reagendamento_em_lote,
-            'preparar_remocao_horarios_em_lote': preparar_remocao_horarios_em_lote,
-            'consultar_financas_v2': consultar_financas_v2,
-            'consultar_saude': consultar_saude,
-            'registrar_item_financeiro_v2': registrar_item_financeiro_v2,
-            'calculadora': calculadora,
-            'agendar_lembrete_acao': agendar_lembrete_acao,
-            'buscar_contato': buscar_contato,
-            'preparar_vinculo_contatos': preparar_vinculo_contatos,
-            'preparar_atualizacao_contato': preparar_atualizacao_contato,
-            'registrar_interacao_contato': registrar_interacao_contato,
-            'consultar_processo_sipac_copiloto': consultar_processo_sipac_copiloto,
-            'incorporar_documento_especifico_sipac_no_rag_da_acao': incorporar_documento_especifico_sipac_no_rag_da_acao,
-            'acompanhar_processo_sipac_copiloto': acompanhar_processo_sipac_copiloto,
-        }
         # Ferramentas internas que não devem aparecer para o usuário
         _HIDDEN_TOOLS = {'registrar_correcao_procedimento', 'resolver_conflito_memoria'}
 
@@ -10864,17 +10825,20 @@ def buscar_procedimento_internal(query_text: str, area_tematica: str = None):
             vector_field="embedding",
             query_vector=Vector(query_vector),
             distance_measure=DistanceMeasure.COSINE,
-            limit=5
+            limit=5,
+            distance_result_field="vector_distance"
         )
 
         nodes_raw = []
         for ndoc in vector_query.stream():
             nd = ndoc.to_dict() or {}
+            distance = nd.pop("vector_distance", 1.0)
+            score = 1.0 - float(distance)
             nodes_raw.append({
                 "titulo": nd.get("titulo"),
                 "resumo": nd.get("resumo"),
                 "area_tematica": nd.get("area_tematica"),
-                "score": nd.get("__vector_distance__", 0.0) # find_nearest retorna distância
+                "score": score
             })
         
         nodes_raw.sort(key=lambda x: x["score"], reverse=True)
@@ -12326,9 +12290,12 @@ SNAPSHOT:
 
     try:
         client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model="gemini-3.5-flash",
+        response = generate_content_logged(
+            client,
+            model=GEMINI_FRONTIER_MODEL,
             contents=prompt,
+            feature="resumo_financeiro",
+            db=get_db(),
             config=types.GenerateContentConfig(
                 temperature=0.4,
                 max_output_tokens=800,
@@ -12431,9 +12398,12 @@ SNAPSHOT:
 
     try:
         client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model="gemini-3.5-flash",
+        response = generate_content_logged(
+            client,
+            model=GEMINI_FRONTIER_MODEL,
             contents=prompt,
+            feature="resumo_saude",
+            db=get_db(),
             config=types.GenerateContentConfig(
                 temperature=0.35,
                 max_output_tokens=1024,

@@ -1,8 +1,6 @@
 import React from 'react';
-import { SlidesTool } from './SlidesTool';
 import { ShoppingListTool } from './ShoppingListTool';
 import { TranscriptionTool } from './TranscriptionTool';
-import { ChoirRehearsalsTool } from './ChoirRehearsalsTool';
 import { MeetingTranscriptionTool } from './MeetingTranscriptionTool';
 import { PopManagerTool } from './PopManagerTool';
 import { SipacTrackingTool } from './SipacTrackingTool';
@@ -28,28 +26,6 @@ export interface ToolMetadata {
 }
 
 export const toolsRegistry: ToolMetadata[] = [
-    {
-        id: 'SlidesTool',
-        ui_metadata: {
-            title: 'Gerador de Slides',
-            description: 'Cria apresentações profissionais a partir de textos base.',
-            icon: 'slides',
-            category: 'Produtividade',
-            tag: '@SlidesTool'
-        },
-        keys: ['apresentação', 'slides', 'powerpoint', 'gerar slides', 'apresentacao'],
-        parametersSchema: {
-            type: 'object',
-            properties: {
-                initialRascunho: {
-                    type: 'string',
-                    description: 'O texto base ou rascunho para gerar os slides.'
-                }
-            },
-            required: ['initialRascunho']
-        },
-        component: SlidesTool
-    },
     {
         id: 'ShoppingListTool',
         ui_metadata: {
@@ -156,22 +132,6 @@ export const toolsRegistry: ToolMetadata[] = [
             properties: {}
         },
         component: MeetingTranscriptionTool
-    },
-    {
-        id: 'ChoirRehearsalsTool',
-        ui_metadata: {
-            title: 'Ensaios de Coro',
-            description: 'Gestão de repertório, partituras e áudios.',
-            icon: 'music',
-            category: 'Música',
-            tag: '@ChoirRehearsalsTool'
-        },
-        keys: ['coro', 'ensaio', 'repertório', 'partitura', 'música', 'coral'],
-        parametersSchema: {
-            type: 'object',
-            properties: {}
-        },
-        component: ChoirRehearsalsTool
     },
     {
         id: 'PopManagerTool',

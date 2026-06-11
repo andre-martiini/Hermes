@@ -50,12 +50,10 @@ import { DayView } from './src/views/DayView';
 import { CalendarView } from './src/views/CalendarView';
 import { CategoryView } from './src/views/CategoryView';
 import { TaskExecutionView } from './src/views/TaskExecutionView';
-import { PublicScholarshipRegistration } from './src/components/public/PublicScholarshipRegistration';
 import PublicFinancePortal from './src/components/public/PublicFinancePortal';
 import PublicShoppingPortal from './src/components/public/PublicShoppingPortal';
 import { TranscriptionTool } from './src/components/tools/TranscriptionTool';
 import { ShoppingListTool } from './src/components/tools/ShoppingListTool';
-import { SlidesTool } from './src/components/tools/SlidesTool';
 import { FerramentasView } from './src/components/tools/FerramentasView';
 import { QuickNoteModal } from './src/components/modals/QuickNoteModal';
 import { SpeedDialMenu } from './src/components/ui/SpeedDialMenu';
@@ -953,11 +951,6 @@ const App: React.FC = () => {
       window.removeEventListener(INTERNAL_NAVIGATION_EVENT, syncRoute as EventListener);
     };
   }, []);
-  // Public Route Interception
-  void routeTick;
-  if (pathname.startsWith('/join/')) {
-    return <PublicScholarshipRegistration />;
-  }
   if (pathname.startsWith('/gastos-externos')) {
     return <PublicFinancePortal />;
   }

@@ -3,16 +3,14 @@ import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/firebase';
 import { BrainstormIdea, formatDate, ConhecimentoItem } from '@/types';
 import { AutoExpandingTextarea } from '../ui/UIComponents';
-import { SlidesTool } from './SlidesTool';
 import { ShoppingListTool } from './ShoppingListTool';
 import { TranscriptionTool } from './TranscriptionTool';
-import { ChoirRehearsalsTool } from './ChoirRehearsalsTool';
 import { MeetingTranscriptionTool } from './MeetingTranscriptionTool';
 import { PopManagerTool } from './PopManagerTool';
 import { SipacTrackingTool } from './SipacTrackingTool';
 import { LongTranscriptionTool } from './LongTranscriptionTool';
 
-type FerramentaAtiva = 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'pop_manager' | 'whatsapp_assistant' | 'sipac_tracking' | 'long_transcription' | null;
+type FerramentaAtiva = 'brainstorming' | 'shopping' | 'transcription' | 'meeting_transcription' | 'pop_manager' | 'whatsapp_assistant' | 'sipac_tracking' | 'long_transcription' | null;
 
 interface FerramentasViewProps {
   ideas: BrainstormIdea[];
@@ -114,10 +112,6 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
     });
   };
 
-  if (activeTool === 'slides') {
-    return <SlidesTool onBack={() => setActiveTool(null)} showToast={showToast} initialDraftId={initialDraftId} />;
-  }
-
   if (activeTool === 'shopping') {
     return <ShoppingListTool onBack={() => setActiveTool(null)} showToast={showToast} />;
   }
@@ -126,16 +120,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
     return <TranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} initialFile={pendingSharedAudioFile} onInitialFileConsumed={onPendingSharedAudioFileConsumed} />;
   }
 
-  if (activeTool === 'choir_rehearsals') {
-    return <ChoirRehearsalsTool
-      onBack={() => setActiveTool(null)}
-      showToast={showToast}
-      knowledgeItems={knowledgeItems}
-      onUploadFile={onUploadFile}
-      initialFile={pendingSharedVideoFile}
-      onInitialFileConsumed={onPendingSharedVideoFileConsumed}
-    />;
-  }
+
 
   if (activeTool === 'meeting_transcription') {
     return <MeetingTranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} />;
@@ -231,16 +216,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
         lineColor: 'group-hover:bg-blue-500',
         icon: <svg className="w-6 h-6 md:w-7 md:h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
       },
-      {
-        id: 'slides',
-        code: 'ID-002',
-        title: 'Gerador de Slides',
-        desc: 'Crie apresentações profissionais a partir de textos base.',
-        dotColor: 'bg-orange-500',
-        iconClasses: isDark ? 'text-orange-400 group-hover:bg-orange-600' : 'text-orange-600 group-hover:bg-orange-600',
-        lineColor: 'group-hover:bg-orange-500',
-        icon: <svg className="w-6 h-6 md:w-7 md:h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" /></svg>
-      },
+
       {
         id: 'shopping',
         code: 'ID-003',
@@ -261,16 +237,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
         lineColor: 'group-hover:bg-purple-500',
         icon: <svg className="w-6 h-6 md:w-7 md:h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
       },
-      {
-        id: 'choir_rehearsals',
-        code: 'ID-005',
-        title: 'Ensaios do Coral',
-        desc: 'Gestão de repertório, partituras e áudios.',
-        dotColor: 'bg-rose-500',
-        iconClasses: isDark ? 'text-rose-400 group-hover:bg-rose-600' : 'text-rose-600 group-hover:bg-rose-600',
-        lineColor: 'group-hover:bg-rose-500',
-        icon: <svg className="w-6 h-6 md:w-7 md:h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
-      },
+
       {
         id: 'meeting_transcription',
         code: 'ID-006',
