@@ -527,7 +527,9 @@ def _write_to_indice_artefatos(
         "url": url,
         "tipo_mime": tipo_mime,
         "resumo_semantico": resumo,
-        "embedding": embedding,
+        # Vector é obrigatório: listas simples não entram no índice vetorial
+        # e ficam invisíveis ao find_nearest usado nas buscas do acervo.
+        "embedding": Vector(list(map(float, embedding))) if embedding else embedding,
         "tags": tags,
         "origem": origem,
         "indexed_at": firestore.SERVER_TIMESTAMP,
@@ -990,7 +992,7 @@ Responda APENAS com uma das opções acima, sem mais texto."""
         "id": new_id,
         "titulo": _derive_node_title(summary, area_tematica, api_key),
         "area_tematica": area_tematica,
-        "embedding": embedding,
+        "embedding": Vector(list(map(float, embedding))),
         "n_tasks": 0,
         "task_ids": [],
         "resumo": summary[:600],
@@ -1068,7 +1070,7 @@ Resumo:"""
         if task_id not in existing_ids:
             existing_ids.append(task_id)
         node_ref.update({
-            "embedding": new_centroid,
+            "embedding": Vector(list(map(float, new_centroid))),
             "n_tasks": n + 1,
             "task_ids": existing_ids,
             "resumo": summary[:600],

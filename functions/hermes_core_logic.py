@@ -2088,8 +2088,16 @@ def _load_telegram_media_bytes(media_bytes_b64: str | None, storage_path: str | 
 # Gemini orchestration
 # ---------------------------------------------------------------------------
 
+_AREAS_VALIDAS_CACHE: tuple | None = None  # (monotonic_ts, list[str])
+_AREAS_VALIDAS_TTL = 300  # unidades mudam raramente; evita stream da coleção a cada mensagem
+
+
 def carregar_areas_tematicas_validas(db) -> list[str]:
     """Lista canonica de areas tematicas = nomes das Unidades + GERAL/NAO CLASSIFICADA."""
+    global _AREAS_VALIDAS_CACHE
+    now = time.monotonic()
+    if _AREAS_VALIDAS_CACHE and (now - _AREAS_VALIDAS_CACHE[0]) < _AREAS_VALIDAS_TTL:
+        return _AREAS_VALIDAS_CACHE[1]
     nomes = []
     try:
         for d in db.collection('unidades').stream():
@@ -2100,7 +2108,10 @@ def carregar_areas_tematicas_validas(db) -> list[str]:
         print(f"[areas_validas] Falha ao carregar unidades: {e}")
     base = ['GERAL', 'NÃO CLASSIFICADA']
     # preserva ordem e remove duplicados
-    return base + [n for n in nomes if n not in base]
+    resultado = base + [n for n in nomes if n not in base]
+    if nomes:  # não cacheia resultado de falha
+        _AREAS_VALIDAS_CACHE = (now, resultado)
+    return resultado
 
 
 def normalizar_area_tematica(valor: str, areas_validas: list[str]) -> str:

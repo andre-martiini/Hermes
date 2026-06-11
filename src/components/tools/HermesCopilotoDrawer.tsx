@@ -373,6 +373,7 @@ interface Session {
     taskId?: string;
     systemId?: string;
     isTemporary?: boolean;
+    copilotStatus?: string;
 }
 
 interface HermesCopilotoDrawerProps {
@@ -621,6 +622,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const [isRecording, setIsRecording] = useState(false);
     const [isProcessingMic, setIsProcessingMic] = useState(false);
     const isBlocked = isLoading || uploadPhase !== 'idle' || isTranscribing || isProcessingMic;
+    // Status efêmero gravado pelo backend no doc da sessão durante o processamento
+    const copilotStatus = sessions.find(s => s.id === currentSessionId)?.copilotStatus;
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
     const micStreamRef = useRef<MediaStream | null>(null);
@@ -2712,6 +2715,11 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         {uploadPhase !== 'idle' && (
                                             <span className="text-[10px] font-bold text-slate-500 ml-2">
                                                 {uploadPhaseLabel[uploadPhase]}
+                                            </span>
+                                        )}
+                                        {uploadPhase === 'idle' && copilotStatus && (
+                                            <span className="text-[10px] font-bold text-slate-500 ml-2">
+                                                {copilotStatus}
                                             </span>
                                         )}
                                     </div>

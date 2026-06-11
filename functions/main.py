@@ -3,6 +3,7 @@
 from firebase_functions import firestore_fn, scheduler_fn, options, https_fn, pubsub_fn, storage_fn
 
 from firebase_admin import initialize_app, firestore, get_app
+from google.cloud.firestore_v1.vector import Vector as FsVector
 import json
 import base64
 from datetime import datetime, timedelta, timezone
@@ -73,8 +74,16 @@ from hermes_core_logic import (  # noqa: F401 — registra as Cloud Functions
     on_telegram_inbound,
     carregar_areas_tematicas_validas,
     normalizar_area_tematica,
+    _get_telegram_token,
+    _get_allowed_chat_id,
+    _send_telegram_message,
 )
-from gemini_cost_controls import check_and_increment_limit
+from gemini_cost_controls import (
+    check_and_increment_limit,
+    log_gemini_usage,
+    GEMINI_ROUTING_MODEL,
+    GEMINI_BALANCED_MODEL,
+)
 
 
 # Inicializa o Firebase Admin apenas uma vez no escopo global
@@ -137,10 +146,15 @@ def _is_retryable_gemini_server_error(error: Exception) -> bool:
 _DOC_CACHE: dict = {}
 _DOC_CACHE_TTL = 60  # seconds
 
-# Cache da coleção pops_diretrizes. Mantemos curto porque POP recém-criado
-# precisa ser observado pelo copiloto na conversa seguinte.
+# Cache da coleção pops_diretrizes. Um POP recém-criado passa a valer na
+# próxima janela de TTL — sem revalidação em caso de miss (a revalidação
+# anulava o cache, já que a maioria das mensagens não aciona POP nenhum).
 _POPS_DATA_CACHE: tuple | None = None  # (monotonic_ts, list[dict])
-_POPS_DATA_TTL = 30
+_POPS_DATA_TTL = 60
+
+# Cache genérico de coleções-catálogo que mudam raramente (sistemas, unidades).
+_COLLECTION_CACHE: dict = {}  # collection -> (monotonic_ts, list[dict])
+_COLLECTION_CACHE_TTL = 300  # seconds
 
 # Cache de _bootstrap_user_ai_profile por UID (TTL 60 s)
 _PROFILE_CACHE: dict = {}  # uid -> (monotonic_ts, dict)
@@ -154,6 +168,17 @@ def _cached_doc_get(db, collection: str, document: str):
     doc = db.collection(collection).document(document).get()
     _DOC_CACHE[key] = (now, doc)
     return doc
+
+
+def _cached_collection_list(db, collection: str, ttl: int = _COLLECTION_CACHE_TTL) -> list[dict]:
+    """Lista documentos de uma coleção-catálogo com cache por instância (TTL padrão 5 min)."""
+    now = time.monotonic()
+    cached = _COLLECTION_CACHE.get(collection)
+    if cached and (now - cached[0]) < ttl:
+        return cached[1]
+    docs = [{"id": d.id, **(d.to_dict() or {})} for d in db.collection(collection).stream()]
+    _COLLECTION_CACHE[collection] = (now, docs)
+    return docs
 
 
 def get_genai_module():
@@ -4745,10 +4770,8 @@ def _match_pop_directives(db, prompt: str) -> list[dict]:
 
     try:
         now = time.monotonic()
-        used_cache = False
         if _POPS_DATA_CACHE and (now - _POPS_DATA_CACHE[0]) < _POPS_DATA_TTL:
             all_pops = _POPS_DATA_CACHE[1]
-            used_cache = True
         else:
             all_pops = [
                 {"id": d.id, **( d.to_dict() or {})}
@@ -4814,17 +4837,6 @@ def _match_pop_directives(db, prompt: str) -> list[dict]:
             return matched
 
         matched = _collect_matches(all_pops)
-
-        # Se o cache estiver velho e ainda dentro do TTL, um POP cadastrado há
-        # segundos pode não existir na lista local. Em caso de miss, revalida.
-        if not matched and used_cache:
-            refreshed_at = time.monotonic()
-            all_pops = [
-                {"id": d.id, **(d.to_dict() or {})}
-                for d in db.collection("pops_diretrizes").stream()
-            ]
-            _POPS_DATA_CACHE = (refreshed_at, all_pops)
-            matched = _collect_matches(all_pops)
 
     except Exception as pop_err:
         print(f"[POP] Erro ao buscar diretrizes: {pop_err}")
@@ -4952,6 +4964,44 @@ def _find_similar_memory_nodes(db, fato: str, api_key: str, limit: int = 5):
         print(f"[Memoria] Falha ao gerar embedding da consulta: {exc}")
         return []
 
+    # Caminho rápido: vector search nativo do Firestore (exige índice vetorial
+    # composto tipo+embedding em knowledge_nodes e embeddings gravados como
+    # Vector — ver scripts/backfill_embeddings_vector.py).
+    try:
+        from google.cloud.firestore_v1.vector import Vector
+        from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
+        snaps = (
+            db.collection("knowledge_nodes")
+            .where(filter=FieldFilter("tipo", "in", sorted(MEMORY_NODE_TYPES)))
+            .find_nearest(
+                vector_field="embedding",
+                query_vector=Vector(query_embedding),
+                distance_measure=DistanceMeasure.COSINE,
+                limit=max(limit, 5),
+                distance_result_field="vector_distance",
+            )
+            .get()
+        )
+        candidates = []
+        for snap in snaps:
+            data = snap.to_dict() or {}
+            distance = data.pop("vector_distance", None)
+            if distance is None:
+                continue
+            candidates.append({
+                "id": snap.id,
+                "similarity": 1.0 - float(distance),
+                "data": data,
+            })
+        if candidates:
+            candidates.sort(key=lambda item: item["similarity"], reverse=True)
+            return candidates[:limit]
+    except Exception as exc:
+        print(f"[Memoria] find_nearest indisponível, usando varredura local: {exc}")
+
+    # Fallback: varredura local (índice ausente ou embeddings legados em formato lista)
     candidates = []
     for snap in db.collection("knowledge_nodes").limit(200).stream():
         data = snap.to_dict() or {}
@@ -5175,7 +5225,7 @@ def _save_memory_node(
             "tipo": categoria_norm,
             "resumo": fato[:600],
             "texto_memoria": fato,
-            "embedding": embedding,
+            "embedding": FsVector(embedding),
             "data_atualizacao": now,
             "origem_memoria": "copiloto",
             "ultima_sessao_id": session_id,
@@ -5228,7 +5278,7 @@ def _save_memory_node(
         "tipo": categoria_norm,
         "resumo": fato[:600],
         "texto_memoria": fato,
-        "embedding": embedding,
+        "embedding": FsVector(embedding),
         "area_tematica": "GLOBAL",
         "n_tasks": 0,
         "task_ids": [],
@@ -5261,6 +5311,75 @@ def _format_pending_memory_conflict(conflict_data: dict | None) -> str:
         "Se o usuário decidir, use resolver_conflito_memoria(memoria_id, decisao, fato_atualizado, categoria).\n"
         "decisao = 'manter_existente' ou 'substituir_pelo_novo'.\n"
     )
+
+
+@scheduler_fn.on_schedule(
+    schedule="30 20 * * *",
+    timezone="America/Sao_Paulo",
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=60,
+)
+def relatorio_diario_custo_gemini(event: scheduler_fn.ScheduledEvent):
+    """Watchdog de custo: resume o uso diário de tokens Gemini (system_usage/gemini)
+    e envia no Telegram, com alerta se estourar o orçamento (system/cost_controls)."""
+    db = get_db()
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+
+        day = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+        usage_doc = (
+            db.collection("system_usage").document("gemini")
+            .collection("daily").document(day).get()
+        )
+        if not usage_doc.exists:
+            print(f"[CustoGemini] Sem uso registrado em {day}.")
+            return
+        data = usage_doc.to_dict() or {}
+
+        budget = 5.0
+        try:
+            cfg = _cached_doc_get(db, "system", "cost_controls")
+            if cfg.exists:
+                budget = float((cfg.to_dict() or {}).get("daily_budget_usd", budget))
+        except Exception:
+            pass
+
+        cost = float(data.get("estimated_usd") or 0.0)
+        calls = int(data.get("calls") or 0)
+        tokens = data.get("tokens") or {}
+        features = data.get("features") or {}
+        top_features = sorted(
+            features.items(),
+            key=lambda kv: int((kv[1] or {}).get("tokens_total") or 0),
+            reverse=True,
+        )[:3]
+
+        lines = [
+            f"💰 <b>Uso Gemini — {day}</b>",
+            f"Custo estimado: <b>${cost:.2f}</b> (orçamento: ${budget:.2f})",
+            f"Chamadas: {calls} | Tokens: {int(tokens.get('total') or 0):,}".replace(",", "."),
+            f"Entrada: {int(tokens.get('input') or 0):,} | Saída: {int(tokens.get('output') or 0):,}".replace(",", "."),
+        ]
+        if top_features:
+            lines.append("Top consumidores:")
+            for name, fdata in top_features:
+                lines.append(f"  • {name}: {int((fdata or {}).get('tokens_total') or 0):,} tokens".replace(",", "."))
+        if cost > budget:
+            lines.insert(0, "⚠️ <b>ORÇAMENTO DIÁRIO ESTOURADO</b>")
+
+        message = "\n".join(lines)
+        print(f"[CustoGemini] {message}")
+
+        chat_id = _get_allowed_chat_id()
+        if not chat_id:
+            keys = (_cached_doc_get(db, "system", "api_keys").to_dict() or {})
+            chat_id = keys.get("telegram_chat_id") or keys.get("allowed_telegram_chat_id")
+        if chat_id:
+            _send_telegram_message(_get_telegram_token(db), chat_id, message)
+        else:
+            print("[CustoGemini] Nenhum chat_id do Telegram configurado; resumo apenas nos logs.")
+    except Exception as exc:
+        print(f"[CustoGemini] Falha no relatório diário: {exc}")
 
 
 @scheduler_fn.on_schedule(
@@ -5351,7 +5470,7 @@ def consolidar_memorias_copiloto(event: scheduler_fn.ScheduledEvent):
                 "tipo": merged_tipo,
                 "texto_memoria": merged_text,
                 "resumo": merged_text[:600],
-                "embedding": merged_embedding,
+                "embedding": FsVector(merged_embedding),
                 "data_atualizacao": _iso_now_utc(),
                 "consolidado_em": firestore.SERVER_TIMESTAMP,
                 "origem_curadoria": "llm_cron",
@@ -6711,6 +6830,27 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception as session_err:
                 print(f"[Memoria] Falha ao ler conflito pendente da sessão {session_id}: {session_err}")
 
+        def _set_copilot_status(status_text: str | None):
+            """Status efêmero no doc da sessão — o frontend exibe via onSnapshot
+            enquanto a resposta é processada. None limpa o campo."""
+            if session_ref is None:
+                return
+            try:
+                if status_text:
+                    session_ref.set({
+                        "copilotStatus": status_text,
+                        "copilotStatusAt": firestore.SERVER_TIMESTAMP,
+                    }, merge=True)
+                else:
+                    session_ref.update({
+                        "copilotStatus": firestore.DELETE_FIELD,
+                        "copilotStatusAt": firestore.DELETE_FIELD,
+                    })
+            except Exception:
+                pass
+
+        _set_copilot_status("Analisando sua solicitação...")
+
         # --- DEFINIÇÃO DE FERRAMENTAS ---
         _perf_mark(perf_state, "web.session_context")
         def consultar_historico_acoes(query: str, area_tematica: str = None, data_limite_inicio: str = None, data_limite_fim: str = None, ultimas_n_acoes: int = 20, status: str = None):
@@ -7141,7 +7281,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "url": url,
                     "tipo_mime": "application/pdf",
                     "resumo_semantico": resumo,
-                    "embedding": embedding,
+                    "embedding": FsVector(list(map(float, embedding))),
                     "tags": ["SIPAC", doc_alvo.get('tipo', 'Documento')],
                     "origem": "tarefa",
                     "task_id": target_task_id,
@@ -8893,7 +9033,19 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         # Configuração do Chat com ferramentas
         model_id = COPILOT_CHAT_MODEL
-        
+
+        # Roteamento de modelo: smalltalk óbvio (saudação/agradecimento/confirmação
+        # curta sem anexo) não precisa do modelo frontier — cai para o tier barato.
+        _SMALLTALK_RE = re.compile(
+            r"^(oi|ol[aá]|bom dia|boa tarde|boa noite|obrigad[oa]|valeu|ok|blz|beleza|"
+            r"tudo bem|e a[ií]|opa|show|top|perfeito|excelente|legal|entendi|"
+            r"haha+|kk+|rsrs+)[\s!.,?😀-🙏]*$",
+            re.IGNORECASE,
+        )
+        if not drive_file_id and not task_id and len(prompt) <= 40 and _SMALLTALK_RE.match(prompt.strip()):
+            model_id = GEMINI_BALANCED_MODEL
+            print(f"[Copiloto] Smalltalk detectado — usando modelo {model_id}")
+
         from datetime import datetime
         from zoneinfo import ZoneInfo
         tz = ZoneInfo("America/Sao_Paulo")
@@ -8903,17 +9055,47 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         # Busca catálogo de sistemas para o "de-para" exato que o usuário solicitou
         try:
-            sistemas_docs = db.collection('sistemas_detalhes').get()
+            sistemas_docs = _cached_collection_list(db, 'sistemas_detalhes')
             catalogo_sistemas = []
-            for s_doc in sistemas_docs:
-                s_data = s_doc.to_dict()
+            for s_data in sistemas_docs:
                 s_nome = s_data.get('nome', 'Sem Nome')
-                s_id = s_doc.id
+                s_id = s_data['id']
                 catalogo_sistemas.append(f"- {s_nome}: {s_id}")
             sistemas_str = "\n".join(catalogo_sistemas) if catalogo_sistemas else "Nenhum sistema cadastrado."
         except Exception as e:
             print(f"Erro ao buscar catálogo de sistemas: {e}")
             sistemas_str = "Erro ao carregar catálogo."
+
+        # --- RECUPERAÇÃO DE HISTÓRICO DA SESSÃO ---
+        # Carregado antes da montagem do prompt: o texto recente também alimenta
+        # o gating dos protocolos condicionais (slides, formulários, etc.).
+        history = []
+        history_plain = ""
+        if session_id:
+            try:
+                msg_docs = db.collection('sessoes_copiloto').document(session_id)\
+                    .collection('mensagens')\
+                    .order_by('timestamp', direction=firestore.Query.DESCENDING)\
+                    .limit(6).get()
+
+                # Inverte para ordem cronológica conforme exigido pelo SDK
+                raw_msgs = list(reversed(msg_docs))
+                _history_texts = []
+                for mdoc in raw_msgs:
+                    m = mdoc.to_dict()
+                    # Mapeia roles: o SDK espera 'user' ou 'model' (não 'assistant')
+                    role = m.get('role')
+                    if role == 'assistant':
+                        role = 'model'
+
+                    history.append(types.Content(
+                        role=role,
+                        parts=[types.Part(text=m.get('content'))]
+                    ))
+                    _history_texts.append(str(m.get('content') or ""))
+                history_plain = " ".join(_history_texts)
+            except Exception as e:
+                print(f"Erro ao carregar histórico da sessão {session_id}: {e}")
 
         mode_context = ""
         if copilot_mode == "finance":
@@ -8965,7 +9147,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "noSugar, noAlcohol, noSnacks, workout, eatUntil18, eatSlowly. Streak = dias consecutivos com >=4/6 hábitos.\n\n"
             )
 
-        system_instruction_static = (
+        system_instruction_nucleo = (
             "Você é o Copiloto Hermes, estrategista sênior de processos."
             "\n\n## CORE ESTÁTICO DO COPILOTO\n"
             f"{copilot_core.get('content', '')}\n\n"
@@ -9137,6 +9319,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Após chamar com sucesso, sua resposta de texto DEVE ser APENAS:\n"
             "  🕐 Preparei a remoção de horários. Verifique o card abaixo e confirme ou cancele.\n"
             "Para alteração do plano de ação (passos), use o fluxo de EDIÇÃO DE PLANO DE AÇÃO acima.\n\n"
+        )
+
+        protocolo_reagendamento_lote = (
             "## REAGENDAMENTO EM LOTE — REDISTRIBUIÇÃO DE AÇÕES (CRÍTICO)\n\n"
             "Quando o usuário pedir para mover, reagendar ou redistribuir múltiplas ações de uma vez "
             "(ex: 'mova as ações de hoje para a próxima semana', 'redistribua 5 por semana'), "
@@ -9160,6 +9345,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "A confirmação ocorre pelo clique no botão do card — não pelo chat de texto.\n\n"
             "PARÂMETRO justificativa: gere automaticamente uma frase concisa descrevendo o reagendamento "
             "(ex: 'Reagendamento em lote das ações de 2026-04-25 para a semana de 2026-04-28.').\n\n"
+        )
+
+        protocolo_relatorios = (
             "## GERAÇÃO DE RELATÓRIOS — PROTOCOLO COLLECT-THEN-REPORT\n\n"
             "Quando o usuário solicitar um relatório, análise formal, resumo executivo ou documento consolidado:\n\n"
             "ETAPA 1 — COLETA DE CONTEXTO:\n"
@@ -9180,6 +9368,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "  - **Seções:** [lista das seções]\n"
             "  Clique no botão abaixo para abrir o relatório completo.\n"
             "NÃO reproduza o conteúdo do relatório no chat — ele está disponível no modal de leitura.\n\n"
+        )
+
+        protocolo_slides = (
             "## GERAÇÃO DE APRESENTAÇÃO DE SLIDES — PADRÃO DRAFT-FIRST (CRÍTICO)\n\n"
             "Quando o usuário solicitar uma apresentação de slides, siga OBRIGATORIAMENTE este protocolo:\n\n"
             "ETAPA 1 — ESQUELETO (Preview):\n"
@@ -9204,7 +9395,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Você NÃO chama nenhuma ferramenta nesta etapa — apenas oriente o usuário a clicar em 'Confirmar'.\n"
             "Após o link tool:slides:{id} aparecer no chat, responda:\n"
             "  ✅ Apresentação pronta! Clique em **Abrir Apresentação** para editar e exportar.\n\n"
-                        "## GERAÇÃO DE FORMULÁRIO GOOGLE — PADRÃO DRAFT-FIRST (CRÍTICO)\n\n"
+        )
+
+        protocolo_formularios = (
+            "## GERAÇÃO DE FORMULÁRIO GOOGLE — PADRÃO DRAFT-FIRST (CRÍTICO)\n\n"
             "Quando o usuário solicitar a criação de um formulário, questionário ou pesquisa de qualquer tipo, siga OBRIGATORIAMENTE este protocolo:\n\n"
             "ETAPA 1 — ESQUELETO (Preview):\n"
             "Nunca chame APIs externas. Emita o bloco [FORM]...[/FORM] para exibir um rascunho visual ao usuário.\n"
@@ -9222,7 +9416,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "ETAPA 3 — CONFIRMAÇÃO:\n"
             "Após confirmação do usuário, o FRONTEND chamará a Cloud Function criar_formulario_google e inserirá o link de sucesso diretamente no chat.\n"
             "Você NÃO chama nenhuma ferramenta nesta etapa — apenas oriente o usuário a clicar em 'Confirmar e Gerar Link' no card de rascunho de formulário.\n\n"
+        )
 
+        protocolo_diagramas = (
             "## DIAGRAMAS E VISUALIZAÇÕES — RENDERIZAÇÃO DIRETA (CRÍTICO)\n\n"
             "REGRA ABSOLUTA: Sempre que o usuário pedir um diagrama, fluxograma, fluxo, mapa, grafo, sequência, "
             "hierarquia, cronograma, mapa mental ou qualquer visualização estrutural, você DEVE obrigatoriamente "
@@ -9237,6 +9433,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Não explique o diagrama antes de gerá-lo, a menos que seja explicitamente solicitado.\n"
             "Escolha o tipo de diagrama mais adequado: flowchart, sequenceDiagram, classDiagram, "
             "stateDiagram-v2, erDiagram, gantt, mindmap, timeline, pie, quadrantChart, xychart-beta, etc.\n\n"
+        )
+
+        system_instruction_governanca = (
             "## GOVERNANCA DE FONTES — REGRA CRITICA\n"
             "Quando descrever uma tarefa encontrada por consultar_historico_acoes, "
             "use SOMENTE os campos retornados por essa ferramenta (Titulo, Status, Prazo, Area, Descricao, Tags, Sintese, Plano de Acao, Diario de Bordo, Notas). "
@@ -9248,6 +9447,35 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "12. Para novos registros, use `registrar_item_financeiro_v2` sempre apresentando um rascunho para o usuário confirmar antes.\n"
             "Caso a ferramenta retorne que não há dados, relate isso honestamente. Não tente usar o RAG para buscar dados financeiros internos.\n"
         )
+
+        # ─── PROTOCOLOS CONDICIONAIS ─────────────────────────────────────────
+        # Protocolos de fluxos raros (slides, formulários, relatórios, lote,
+        # diagramas) só entram no prompt quando o assunto aparece na mensagem ou
+        # no histórico recente — corta ~3k tokens da maioria das chamadas.
+        _gate_text = _normalize_pop_text(f"{prompt} {history_plain}")
+
+        def _protocolo_ativo(*kws: str) -> bool:
+            return any(k in _gate_text for k in kws)
+
+        _gate_reagendamento = _protocolo_ativo("reagend", "redistribu", "remarc", "mover", "mova", "lote", "horario")
+        _gate_relatorios = _protocolo_ativo("relatorio", "resumo executivo", "consolidad", "sintese", "balanco")
+        _gate_slides = _protocolo_ativo("apresenta", "slide", "powerpoint", "pptx", "deck", "palestra")
+        _gate_formularios = _protocolo_ativo("formul", "question", "enquete", "pesquisa", "survey")
+        _gate_diagramas = _protocolo_ativo(
+            "diagrama", "fluxograma", "mapa mental", "mermaid", "grafo", "gantt",
+            "cronograma", "linha do tempo", "organograma", "visualiza", "timeline"
+        )
+
+        system_instruction_static = (
+            system_instruction_nucleo
+            + (protocolo_reagendamento_lote if _gate_reagendamento else "")
+            + (protocolo_relatorios if _gate_relatorios else "")
+            + (protocolo_slides if _gate_slides else "")
+            + (protocolo_formularios if _gate_formularios else "")
+            + (protocolo_diagramas if _gate_diagramas else "")
+            + system_instruction_governanca
+        )
+
         system_instruction = (
             system_instruction_static
             + f"\n\nHoje é {today_str} e o horário local atual é {time_str}. "
@@ -9259,31 +9487,6 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             + "NUNCA invente outra): " + ", ".join(_areas_validas)
             + ". Se nenhuma se encaixar, use 'GERAL'."
         )
-
-        # --- RECUPERAÇÃO DE HISTÓRICO DA SESSÃO ---
-        history = []
-        if session_id:
-            try:
-                msg_docs = db.collection('sessoes_copiloto').document(session_id)\
-                    .collection('mensagens')\
-                    .order_by('timestamp', direction=firestore.Query.DESCENDING)\
-                    .limit(6).get()
-                
-                # Inverte para ordem cronológica conforme exigido pelo SDK
-                raw_msgs = list(reversed(msg_docs))
-                for mdoc in raw_msgs:
-                    m = mdoc.to_dict()
-                    # Mapeia roles: o SDK espera 'user' ou 'model' (não 'assistant')
-                    role = m.get('role')
-                    if role == 'assistant':
-                        role = 'model'
-                    
-                    history.append(types.Content(
-                        role=role,
-                        parts=[types.Part(text=m.get('content'))]
-                    ))
-            except Exception as e:
-                print(f"Erro ao carregar histórico da sessão {session_id}: {e}")
 
         # --- ROTEADOR DE INTENÇÃO (heurístico + LLM fallback) ---
         # Passo 1: regex barato — evita chamada LLM na maioria dos casos.
@@ -9297,12 +9500,13 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         if _CORRECAO_KEYWORDS.search(prompt):
             try:
                 _intent_resp = client.models.generate_content(
-                    model="gemini-3.5-flash",
+                    model=GEMINI_ROUTING_MODEL,
                     contents=f"Responda só 'CORRECAO' ou 'NORMAL': o usuário está corrigindo um procedimento?\nMensagem: {prompt}",
                     config=types.GenerateContentConfig(
                         http_options=types.HttpOptions(timeout=3000)
                     )
                 )
+                log_gemini_usage(_intent_resp, model=GEMINI_ROUTING_MODEL, feature="copilot_intent_router", db=db)
                 if "CORRECAO" in (_intent_resp.text or "").upper():
                     _correcao_hint = (
                         "\n\n## [DIRETIVA DO MOTOR DE EVOLUÇÃO — NÃO REVELAR AO USUÁRIO]\n"
@@ -9447,48 +9651,60 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         # Ferramentas internas que não devem aparecer para o usuário
         _HIDDEN_TOOLS = {'registrar_correcao_procedimento', 'resolver_conflito_memoria'}
 
+        # Ferramentas sempre disponíveis (núcleo operacional do copiloto)
+        static_tools = [
+            consultar_historico_acoes,
+            buscar_arquivos_acervo,
+            obter_contexto_tela,
+            pesquisar_internet,
+            ler_pagina_web,
+            ler_documento_na_integra,
+            registrar_correcao_procedimento,
+            salvar_memoria_global,
+            salvar_pop_global,
+            resolver_conflito_memoria,
+            atualizar_personalidade,
+            resolver_conflito_procedimento,
+            criar_acao_no_sistema,
+            editar_plano_acao,
+            preparar_edicao_acao,
+            registrar_no_diario,
+            consultar_agenda,
+            encontrar_slot_livre,
+            consultar_financas_v2,
+            consultar_saude,
+            registrar_item_financeiro_v2,
+            calculadora,
+            agendar_lembrete_acao,
+            buscar_contato,
+            preparar_vinculo_contatos,
+            preparar_atualizacao_contato,
+            registrar_interacao_contato,
+        ]
+        # Ferramentas de fluxos raros: só declaradas quando o assunto aparece na
+        # conversa — menos tokens de schema e roteamento mais limpo para o modelo.
+        if _protocolo_ativo("mail", "caixa de entrada", "inbox"):
+            static_tools.append(buscar_e_analisar_email)
+        if _protocolo_ativo("imagem", "figura", "ilustra", "foto", "banner", "logo", "desenh"):
+            static_tools.append(gerar_imagem)
+        if _gate_relatorios:
+            static_tools.append(gerar_relatorio)
+        if _gate_formularios:
+            static_tools.append(gerar_rascunho_formulario)
+        if _gate_reagendamento:
+            static_tools.append(preparar_reagendamento_em_lote)
+            static_tools.append(preparar_remocao_horarios_em_lote)
+        if _protocolo_ativo("sipac", "processo", "protocolo"):
+            static_tools.append(consultar_processo_sipac_copiloto)
+            static_tools.append(incorporar_documento_especifico_sipac_no_rag_da_acao)
+            static_tools.append(acompanhar_processo_sipac_copiloto)
+
         chat = client.chats.create(
             model=model_id,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction + _correcao_hint,
                 http_options=types.HttpOptions(timeout=COPILOT_MODEL_TIMEOUT_MS),
-                tools=[
-                    buscar_e_analisar_email,
-                    consultar_historico_acoes,
-                    buscar_arquivos_acervo,
-                    obter_contexto_tela,
-                    pesquisar_internet,
-                    ler_pagina_web,
-                    ler_documento_na_integra,
-                    registrar_correcao_procedimento,
-                    salvar_memoria_global,
-                    salvar_pop_global,
-                    resolver_conflito_memoria,
-                    atualizar_personalidade,
-                    resolver_conflito_procedimento,
-                    criar_acao_no_sistema,
-                    editar_plano_acao,
-                    preparar_edicao_acao,
-                    registrar_no_diario,
-                    gerar_imagem,
-                    gerar_relatorio,
-                    gerar_rascunho_formulario,
-                    consultar_agenda,
-                    encontrar_slot_livre,
-                    preparar_reagendamento_em_lote,
-                    consultar_financas_v2,
-                    consultar_saude,
-                    registrar_item_financeiro_v2,
-                    calculadora,
-                    agendar_lembrete_acao,
-                    buscar_contato,
-                    preparar_vinculo_contatos,
-                    preparar_atualizacao_contato,
-                    registrar_interacao_contato,
-                    consultar_processo_sipac_copiloto,
-                    incorporar_documento_especifico_sipac_no_rag_da_acao,
-                    acompanhar_processo_sipac_copiloto,
-                ] + dynamic_tools,
+                tools=static_tools + dynamic_tools,
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             ),
             history=history
@@ -9500,6 +9716,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         # Gemini File API (sem parsers locais) e grava no indice_artefatos (RAG).
         file_context = ""
         if drive_file_id:
+            _set_copilot_status(f"Processando arquivo: {drive_file_name}...")
             try:
                 import io
                 import os
@@ -9684,6 +9901,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                                 ])
                             ]
                         )
+                    log_gemini_usage(extraction_response, model=model_id, feature="copilot_file_ingestion", db=db)
                     extraction_text = extraction_response.text.strip()
                     # Remove blocos de código caso o modelo os inclua mesmo instruído
                     if extraction_text.startswith("```"):
@@ -9888,6 +10106,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         response = None
         try:
             response = chat.send_message(final_prompt)
+            log_gemini_usage(response, model=model_id, feature="copilot_web", db=db, extra={"round": 0, "session_id": session_id})
             _perf_mark(perf_state, "web.first_model_response")
         except Exception as _first_send_err:
             if not _is_copilot_deadline_error(_first_send_err):
@@ -9910,6 +10129,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         http_options=types.HttpOptions(timeout=COPILOT_MODEL_RETRY_TIMEOUT_MS),
                     ),
                 )
+                log_gemini_usage(response, model=COPILOT_FALLBACK_MODEL, feature="copilot_web_fallback", db=db)
                 _perf_mark(perf_state, "web.first_model_fallback")
             except Exception as _fallback_err:
                 print(f"[Copiloto] Fallback rapido tambem falhou: {_fallback_err}")
@@ -9933,7 +10153,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             fcs = response.function_calls
             if not fcs:
                 break
-            
+
+            _friendly_tools = ", ".join(sorted({fc.name.replace("_", " ") for fc in fcs}))
+            _set_copilot_status(f"Executando: {_friendly_tools}...")
+
             function_response_parts = []
             # Constraint: Se mais de 3 roundtrips, forçar consolidação ou emitir aviso parcial
             if _round >= 3:
@@ -10065,8 +10288,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 _perf_mark(perf_state, "web.soft_deadline")
                 break
 
+            _set_copilot_status("Consolidando resposta...")
             try:
                 response = chat.send_message(function_response_parts)
+                log_gemini_usage(response, model=model_id, feature="copilot_web", db=db, extra={"round": _round + 1, "session_id": session_id})
                 _perf_mark(perf_state, "web.tool_roundtrip")
             except Exception as _send_err:
                 if _is_copilot_deadline_error(_send_err):
@@ -10096,6 +10321,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                             _reduced_parts.append(_p)
                     try:
                         response = chat.send_message(_reduced_parts)
+                        log_gemini_usage(response, model=model_id, feature="copilot_web", db=db, extra={"round": _round + 1, "retry": True})
                         _perf_mark(perf_state, "web.tool_roundtrip_retry")
                     except Exception as _retry_err:
                         if _is_copilot_deadline_error(_retry_err):
@@ -10129,6 +10355,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 except Exception as e:
                     print(f"Erro ao salvar invocação de ferramenta no Firestore: {e}")
 
+            _set_copilot_status(None)
             _perf_mark(perf_state, "web.tool_invocation_persist")
             _perf_log(
                 "web.askCopiloto.complete",
@@ -10230,6 +10457,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 print(f"Erro ao salvar resposta no Firestore: {e}")
 
         # Tenta extrair título sugerido se for início de sessão
+        _set_copilot_status(None)
         _perf_mark(perf_state, "web.response_persist")
         suggested_title = None
         if prompt and len(prompt) < 100:
@@ -10258,6 +10486,16 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
     except Exception as e:
         print(f"Erro em askCopilotoHermes: {e}")
+        # Limpa o status efêmero da sessão (o helper pode não existir se o erro
+        # ocorreu antes da sua definição, por isso a limpeza inline).
+        if session_id:
+            try:
+                db.collection('sessoes_copiloto').document(session_id).update({
+                    "copilotStatus": firestore.DELETE_FIELD,
+                    "copilotStatusAt": firestore.DELETE_FIELD,
+                })
+            except Exception:
+                pass
         _perf_log("web.askCopiloto.error", perf_state, {"session_id": session_id, "task_id": task_id, "error": str(e)})
         import traceback
         print(traceback.format_exc())

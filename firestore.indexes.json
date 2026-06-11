@@ -46,6 +46,29 @@
       "fields": [
         { "fieldPath": "embedding", "vectorConfig": { "dimension": 768, "flat": {} } }
       ]
+    },
+    {
+      "collectionGroup": "knowledge_nodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "embedding", "vectorConfig": { "dimension": 768, "flat": {} } }
+      ]
+    },
+    {
+      "collectionGroup": "knowledge_nodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tipo", "order": "ASCENDING" },
+        { "fieldPath": "embedding", "vectorConfig": { "dimension": 768, "flat": {} } }
+      ]
+    },
+    {
+      "collectionGroup": "knowledge_nodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "area_tematica", "order": "ASCENDING" },
+        { "fieldPath": "embedding", "vectorConfig": { "dimension": 768, "flat": {} } }
+      ]
     }
   ],
   "fieldOverrides": [

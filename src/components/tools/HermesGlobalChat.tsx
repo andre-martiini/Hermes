@@ -127,6 +127,7 @@ interface Session {
   systemId?: string | null;
   copilotMode?: CopilotMode;
   copilotScope?: 'global' | string;
+  copilotStatus?: string;
 }
 
 interface Message {
@@ -1072,7 +1073,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                       <img src="/logo.png" alt="" className="h-full w-full object-contain" />
                     </div>
                     <div className={`border px-4 py-3 font-mono text-[10px] font-black uppercase tracking-widest ${raisedClass} ${mutedClass}`}>
-                      {uploadPhase === 'uploading' ? 'Enviando arquivo...' : uploadPhase === 'processing' ? 'Processando contexto...' : 'Pensando...'}
+                      {uploadPhase === 'uploading' ? 'Enviando arquivo...' : uploadPhase === 'processing' ? 'Processando contexto...' : (sessions.find(s => s.id === currentSessionId)?.copilotStatus || 'Pensando...')}
                     </div>
                   </div>
                 )}
