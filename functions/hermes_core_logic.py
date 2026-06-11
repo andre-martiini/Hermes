@@ -4178,7 +4178,7 @@ def _process_telegram_message(db, data: dict):
 # ---------------------------------------------------------------------------
 
 @https_fn.on_request(
-    cors=options.CorsOptions(cors_origins="*", cors_methods=["GET", "POST"]),
+    cors=options.CorsOptions(cors_origins=["https://app.hermes.com", "http://localhost:3001", "http://localhost:5173", "http://localhost:3025", "http://127.0.0.1:3001", "http://127.0.0.1:5173", "http://127.0.0.1:3025"], cors_methods=["GET", "POST"]),
     timeout_sec=10,
     memory=options.MemoryOption.GB_1,
 )
