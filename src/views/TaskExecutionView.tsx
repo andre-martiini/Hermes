@@ -499,6 +499,9 @@ export const TaskExecutionView = ({
   const [planDraft, setPlanDraft] = useState<ActionPlanItem[]>([]);
   const [newPlanItemText, setNewPlanItemText] = useState('');
   const newPlanItemRef = useRef<HTMLInputElement>(null);
+  const [isHandlePressed, setIsHandlePressed] = useState(false);
+  const [dragSourceIdx, setDragSourceIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   // Proposal editing (Feature 1 & 2)
   const [editingProposal, setEditingProposal] = useState<{ msgIndex: number; items: ActionPlanItem[] } | null>(null);
@@ -717,6 +720,10 @@ export const TaskExecutionView = ({
     if (!item) return;
     const newCompleted = !item.completed;
     const updated = items.map(i => i.id === itemId ? { ...i, completed: newCompleted } : i);
+    const sorted = [
+      ...updated.filter(i => i.completed),
+      ...updated.filter(i => !i.completed)
+    ];
 
     let updatedAcompanhamento = [...(currentTaskData.acompanhamento || [])];
 
@@ -734,10 +741,10 @@ export const TaskExecutionView = ({
       }
     }
 
-    const allCompleted = updated.length > 0 && updated.every(i => i.completed);
+    const allCompleted = sorted.length > 0 && sorted.every(i => i.completed);
 
     onSave(task.id, {
-      plano_acao: updated,
+      plano_acao: sorted,
       acompanhamento: updatedAcompanhamento,
       ...(allCompleted && { status: 'concluído' })
     });
@@ -1334,7 +1341,12 @@ export const TaskExecutionView = ({
 
   // ─── Plan Modal ───────────────────────────────────────────────
   const openPlanModal = () => {
-    setPlanDraft((currentTaskData.plano_acao || []).map(i => ({ ...i })));
+    const rawPlan = (currentTaskData.plano_acao || []).map(i => ({ ...i }));
+    const sorted = [
+      ...rawPlan.filter(i => i.completed),
+      ...rawPlan.filter(i => !i.completed)
+    ];
+    setPlanDraft(sorted);
     setNewPlanItemText('');
     setShowPlanModal(true);
   };
@@ -1342,15 +1354,25 @@ export const TaskExecutionView = ({
   const addPlanDraftItem = () => {
     const text = newPlanItemText.trim();
     if (!text) return;
-    setPlanDraft(prev => [...prev, { id: crypto.randomUUID(), text, completed: false }]);
+    setPlanDraft(prev => {
+      const updated = [...prev, { id: crypto.randomUUID(), text, completed: false }];
+      return [
+        ...updated.filter(i => i.completed),
+        ...updated.filter(i => !i.completed)
+      ];
+    });
     setNewPlanItemText('');
     setTimeout(() => newPlanItemRef.current?.focus(), 50);
   };
 
   const savePlanDraft = () => {
-    const allCompleted = planDraft.length > 0 && planDraft.every(i => i.completed);
+    const sorted = [
+      ...planDraft.filter(i => i.completed),
+      ...planDraft.filter(i => !i.completed)
+    ];
+    const allCompleted = sorted.length > 0 && sorted.every(i => i.completed);
     onSave(task.id, { 
-      plano_acao: planDraft,
+      plano_acao: sorted,
       ...(allCompleted && { status: 'concluído' })
     });
     setShowPlanModal(false);
@@ -1358,6 +1380,35 @@ export const TaskExecutionView = ({
     if (allCompleted) {
       showToast('Status atualizado para Concluído!', 'success');
     }
+  };
+
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', index.toString());
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (dragSourceIdx === null || dragSourceIdx === index) return;
+    setDragOverIdx(index);
+  };
+
+  const handleDragEnd = () => {
+    if (dragSourceIdx !== null && dragOverIdx !== null && dragSourceIdx !== dragOverIdx) {
+      const newItems = [...planDraft];
+      const [removed] = newItems.splice(dragSourceIdx, 1);
+      newItems.splice(dragOverIdx, 0, removed);
+
+      const sorted = [
+        ...newItems.filter(i => i.completed),
+        ...newItems.filter(i => !i.completed)
+      ];
+
+      setPlanDraft(sorted);
+    }
+    setDragSourceIdx(null);
+    setDragOverIdx(null);
+    setIsHandlePressed(false);
   };
 
   const handleInsightApply = () => {
@@ -2506,11 +2557,49 @@ export const TaskExecutionView = ({
                 <p className={`text-xs text-center py-6 ${mutedText}`}>Nenhum passo ainda. Adicione abaixo.</p>
               )}
               {planDraft.map((item, idx) => (
-                <div key={item.id} className={`flex items-center gap-3 px-3 py-2.5 rounded-none border group transition-all ${isDark ? 'bg-white/5 border-white/10 hover:border-white/20' : 'bg-slate-50 border-slate-100 hover:border-border-grid'}`}>
-                  {/* Index badge */}
-                  <span className={`shrink-0 w-5 h-5 rounded-none flex items-center justify-center text-[9px] font-black ${item.completed ? 'bg-emerald-500 text-white' : isDark ? 'bg-white/10 text-white/40' : 'bg-slate-200 text-slate-500'}`}>
-                    {item.completed ? <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : idx + 1}
+                <div
+                  key={item.id}
+                  draggable={isHandlePressed && dragSourceIdx === idx}
+                  onDragStart={(e) => handleDragStart(e, idx)}
+                  onDragOver={(e) => handleDragOver(e, idx)}
+                  onDragEnd={handleDragEnd}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-none border group transition-all 
+                    ${dragSourceIdx === idx ? 'opacity-40 bg-blue-500/10' : ''} 
+                    ${dragOverIdx === idx ? 'border-blue-500 border-dashed' : ''}
+                    ${isDark ? 'bg-white/5 border-white/10 hover:border-white/20' : 'bg-slate-50 border-slate-100 hover:border-border-grid'}
+                  `}
+                >
+                  {/* Drag Handle */}
+                  <span
+                    onMouseDown={() => {
+                      setIsHandlePressed(true);
+                      setDragSourceIdx(idx);
+                    }}
+                    onMouseUp={() => setIsHandlePressed(false)}
+                    className={`shrink-0 cursor-grab active:cursor-grabbing p-1 text-slate-400 hover:text-slate-600 transition-colors ${isDark ? 'text-white/40 hover:text-white/70' : ''}`}
+                    title="Arrastar para reordenar"
+                  >
+                    <svg className="w-3 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M9 5a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm0 7a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm0 7a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm10-14a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm0 7a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm0 7a2 2 0 1 1-4 0 2 2 0 0 1 4 0z" />
+                    </svg>
                   </span>
+
+                  {/* Toggle Index / Completed Badge */}
+                  <button
+                    onClick={() => {
+                      const newCompleted = !item.completed;
+                      const updated = planDraft.map(i => i.id === item.id ? { ...i, completed: newCompleted } : i);
+                      const sorted = [
+                        ...updated.filter(i => i.completed),
+                        ...updated.filter(i => !i.completed)
+                      ];
+                      setPlanDraft(sorted);
+                    }}
+                    title={item.completed ? "Marcar como não concluído" : "Marcar como concluído"}
+                    className={`shrink-0 w-5 h-5 rounded-none flex items-center justify-center text-[9px] font-black transition-all ${item.completed ? 'bg-emerald-500 text-white' : isDark ? 'bg-white/10 text-white/40 hover:bg-white/20' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'}`}
+                  >
+                    {item.completed ? <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : idx + 1}
+                  </button>
 
                   {/* Editable text */}
                   <input
