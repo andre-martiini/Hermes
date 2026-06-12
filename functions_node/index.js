@@ -28,15 +28,38 @@ async function getGoogleAuth() {
         credsData.client_secret,
         credsData.token_uri
     );
+    let expiryMillis = null;
+    if (credsData.expiry_date) {
+        if (typeof credsData.expiry_date.toMillis === 'function') {
+            expiryMillis = credsData.expiry_date.toMillis();
+        } else if (typeof credsData.expiry_date === 'number') {
+            expiryMillis = credsData.expiry_date;
+        } else if (typeof credsData.expiry_date === 'string') {
+            expiryMillis = Date.parse(credsData.expiry_date);
+        } else if (credsData.expiry_date._seconds !== undefined) {
+            expiryMillis = credsData.expiry_date._seconds * 1000 + Math.floor((credsData.expiry_date._nanoseconds || 0) / 1000000);
+        }
+    } else if (credsData.expiry) {
+        if (typeof credsData.expiry.toMillis === 'function') {
+            expiryMillis = credsData.expiry.toMillis();
+        } else if (typeof credsData.expiry === 'number') {
+            expiryMillis = credsData.expiry;
+        } else if (typeof credsData.expiry === 'string') {
+            expiryMillis = Date.parse(credsData.expiry);
+        } else if (credsData.expiry._seconds !== undefined) {
+            expiryMillis = credsData.expiry._seconds * 1000 + Math.floor((credsData.expiry._nanoseconds || 0) / 1000000);
+        }
+    }
+
     oauth2Client.setCredentials({
         access_token: credsData.token,
         refresh_token: credsData.refresh_token,
-        expiry_date: credsData.expiry_date
+        expiry_date: expiryMillis
     });
 
     const shouldRefresh = Boolean(
         credsData.refresh_token &&
-        (!credsData.expiry_date || Date.now() >= credsData.expiry_date - 60_000)
+        (!expiryMillis || Date.now() >= expiryMillis - 60_000)
     );
 
     if (shouldRefresh) {
@@ -690,10 +713,15 @@ exports.scheduledSipacSync = functions.runWith({
                 const notificationMessage = changeSummary
                     ? `${baseMessage}\n\nO que mudou:\n${changeSummary}`
                     : baseMessage;
+                const assuntoLabel = result.assuntoDetalhado
+                    || (result.assuntoCodigo && result.assuntoDescricao
+                        ? `${result.assuntoCodigo} - ${result.assuntoDescricao}`
+                        : (result.assuntoDescricao || result.assuntoCodigo || ''));
                 const notificationDoc = {
                     id: notificationId,
                     title: `Alteração no SIPAC: ${numeroProcesso}`,
                     message: notificationMessage,
+                    assunto: assuntoLabel,
                     type: 'info',
                     timestamp: new Date().toISOString(),
                     isRead: false,

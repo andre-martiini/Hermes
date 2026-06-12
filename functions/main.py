@@ -454,13 +454,30 @@ def get_google_creds(scopes=None):
             f"{GOOGLE_REAUTH_MESSAGE} Escopos ausentes: {', '.join(missing_scopes)}"
         )
 
+    expiry_val = creds_data.get('expiry_date') or creds_data.get('expiry')
+    parsed_expiry = None
+    if expiry_val:
+        from datetime import datetime, timezone
+        if isinstance(expiry_val, datetime):
+            parsed_expiry = expiry_val
+        elif isinstance(expiry_val, (int, float)):
+            if expiry_val > 1e11:  # milliseconds
+                expiry_val = expiry_val / 1000.0
+            parsed_expiry = datetime.fromtimestamp(expiry_val, timezone.utc)
+        elif isinstance(expiry_val, str):
+            try:
+                parsed_expiry = datetime.fromisoformat(expiry_val.replace('Z', '+00:00'))
+            except ValueError:
+                pass
+
     creds = Credentials(
         token=creds_data.get('token'),
         refresh_token=creds_data.get('refresh_token'),
         token_uri=creds_data.get('token_uri'),
         client_id=creds_data.get('client_id'),
         client_secret=creds_data.get('client_secret'),
-        scopes=stored_scopes
+        scopes=stored_scopes,
+        expiry=parsed_expiry
     )
 
     # Verifica se o token expirou e tenta renovar
@@ -470,6 +487,7 @@ def get_google_creds(scopes=None):
             # Salva o NOVO token de volta no Firestore para evitar falhas futuras
             db.collection('system').document('google_credentials').update({
                 'token': creds.token,
+                'expiry_date': creds.expiry,
                 'updated_at': firestore.SERVER_TIMESTAMP
             })
             print("Token Google renovado e salvo no Firestore com sucesso.")
@@ -2185,6 +2203,9 @@ def _build_telegram_notification_message(notif: dict) -> str:
         'info': '🔔',
     }
     lines = [f"{icons.get(n_type, '🔔')} Hermes - {title}"]
+    assunto = str(notif.get('assunto') or '').strip()
+    if assunto:
+        lines.extend(["", f"📝 <b>Assunto Detalhado:</b> {assunto}"])
     if message:
         lines.extend(["", message])
     if link:
