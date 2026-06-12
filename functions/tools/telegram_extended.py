@@ -28,6 +28,15 @@ def _normalize_pop_text(text):
     return "".join(ch for ch in unicodedata.normalize("NFKD", (text or "").lower()) if not unicodedata.combining(ch)).strip()
 
 
+def _diary_date_key(entry):
+    val = entry.get("data") or ""
+    if isinstance(val, datetime):
+        if val.tzinfo is not None:
+            return val.astimezone(timezone.utc).replace(tzinfo=None).isoformat()
+        return val.isoformat()
+    return str(val)
+
+
 def execute(tool_name: str, slots: dict, db) -> str:
     if tool_name == "obter_contexto_tela":
         task_id = slots.get("task_id") or slots.get("id_tarefa")
@@ -38,7 +47,7 @@ def execute(tool_name: str, slots: dict, db) -> str:
             return "Tarefa não identificada no banco de dados."
         task_data = doc_snap.to_dict() or {}
         diario_full = []
-        for entry in sorted(task_data.get("acompanhamento", []), key=lambda x: x.get("data", "")):
+        for entry in sorted(task_data.get("acompanhamento", []), key=_diary_date_key):
             diario_full.append(f"[{entry.get('data')}] {entry.get('nota')}")
         arquivos_disponiveis = []
         for item in task_data.get("pool_dados", []):

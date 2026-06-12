@@ -7021,7 +7021,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 
                 # Diário Integral
                 diario_full = []
-                for e in sorted(t.get('acompanhamento', []), key=lambda x: x.get('data', '')):
+                def _dk(x):
+                    v = x.get('data') or ''
+                    if isinstance(v, datetime):
+                        return v.astimezone(timezone.utc).replace(tzinfo=None).isoformat() if v.tzinfo else v.isoformat()
+                    return str(v)
+                for e in sorted(t.get('acompanhamento', []), key=_dk):
                     diario_full.append(f"[{e.get('data')}] {e.get('nota')}")
 
                 # Mapeamento de arquivos para leitura profunda on-demand
