@@ -9501,7 +9501,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "10. Você NUNCA deve inventar, supor ou estimar valores financeiros (gastos, rendas ou saldos).\n"
             "11. Para qualquer dúvida sobre finanças, use EXCLUSIVAMENTE a ferramenta `consultar_financas_v2`.\n"
             "12. Para novos registros, use `registrar_item_financeiro_v2` sempre apresentando um rascunho para o usuário confirmar antes.\n"
-            "Caso a ferramenta retorne que não há dados, relate isso honestamente. Não tente usar o RAG para buscar dados financeiros internos.\n"
+            "Caso a ferramenta retorne que não há dados, relate isso honestamente. Não tente usar o RAG para buscar dados financeiros internos.\n\n"
+            "## DIRETRIZ DE EFICIÊNCIA (PREVENÇÃO DE LOOPS)\n"
+            "Para perguntas diretas de classificação (ex: CONARQ), resumo ou extração de dados: use as ferramentas necessárias para ler o contexto, mas limite sua busca externa (internet, acervo). Se após 1 ou 2 tentativas de busca você não encontrar a tabela ou regra exata, PARE IMEDIATAMENTE. Consolide o que sabe e informe ao usuário que a informação específica não está disponível. NUNCA realize buscas exaustivas sequenciais.\n"
         )
 
         # ─── PROTOCOLOS CONDICIONAIS ─────────────────────────────────────────
