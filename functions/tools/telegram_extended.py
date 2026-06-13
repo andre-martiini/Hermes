@@ -38,8 +38,40 @@ def execute(tool_name: str, slots: dict, db) -> str:
             return "Tarefa não identificada no banco de dados."
         task_data = doc_snap.to_dict() or {}
         diario_full = []
-        for entry in sorted(task_data.get("acompanhamento", []), key=lambda x: x.get("data", "")):
-            diario_full.append(f"[{entry.get('data')}] {entry.get('nota')}")
+        def _obter_data_ordenacao(entry):
+            d = entry.get('data')
+            if not d:
+                return ""
+            if isinstance(d, str):
+                return d
+            import datetime as _datetime
+            if isinstance(d, _datetime.datetime):
+                if d.tzinfo is None:
+                    d = d.replace(tzinfo=_datetime.timezone.utc)
+                return d.isoformat()
+            if isinstance(d, _datetime.date):
+                return d.isoformat()
+            if hasattr(d, 'isoformat'):
+                try:
+                    return d.isoformat()
+                except Exception:
+                    pass
+            return str(d)
+
+        for entry in sorted(task_data.get("acompanhamento", []), key=_obter_data_ordenacao):
+            d_val = entry.get('data')
+            if not d_val:
+                d_str = ""
+            elif isinstance(d_val, str):
+                d_str = d_val
+            elif hasattr(d_val, "strftime"):
+                try:
+                    d_str = d_val.strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    d_str = str(d_val)
+            else:
+                d_str = str(d_val)
+            diario_full.append(f"[{d_str}] {entry.get('nota')}")
         arquivos_disponiveis = []
         for item in task_data.get("pool_dados", []):
             if item.get("tipo") != "arquivo":

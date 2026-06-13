@@ -54,12 +54,12 @@ async function uploadCredentials() {
             scopes: tokenData.scopes || ['https://www.googleapis.com/auth/tasks'],
             updated_at: admin.firestore.FieldValue.serverTimestamp()
         };
-
-        // Adiciona expiry_date apenas se existir
-        if (tokenData.expiry_date) {
+        // Adiciona expiry_date apenas se existir (suporta key 'expiry' ou 'expiry_date')
+        if (tokenData.expiry) {
+            firestoreData.expiry_date = tokenData.expiry;
+        } else if (tokenData.expiry_date) {
             firestoreData.expiry_date = tokenData.expiry_date;
         }
-
         // Remove campos vazios
         Object.keys(firestoreData).forEach(key => {
             if (firestoreData[key] === '' || firestoreData[key] === null) {

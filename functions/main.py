@@ -7021,8 +7021,40 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 
                 # Diário Integral
                 diario_full = []
-                for e in sorted(t.get('acompanhamento', []), key=lambda x: x.get('data', '')):
-                    diario_full.append(f"[{e.get('data')}] {e.get('nota')}")
+                def _obter_data_ordenacao(entry):
+                    d = entry.get('data')
+                    if not d:
+                        return ""
+                    if isinstance(d, str):
+                        return d
+                    import datetime as _datetime
+                    if isinstance(d, _datetime.datetime):
+                        if d.tzinfo is None:
+                            d = d.replace(tzinfo=_datetime.timezone.utc)
+                        return d.isoformat()
+                    if isinstance(d, _datetime.date):
+                        return d.isoformat()
+                    if hasattr(d, 'isoformat'):
+                        try:
+                            return d.isoformat()
+                        except Exception:
+                            pass
+                    return str(d)
+
+                for e in sorted(t.get('acompanhamento', []), key=_obter_data_ordenacao):
+                    d_val = e.get('data')
+                    if not d_val:
+                        d_str = ""
+                    elif isinstance(d_val, str):
+                        d_str = d_val
+                    elif hasattr(d_val, "strftime"):
+                        try:
+                            d_str = d_val.strftime("%Y-%m-%d %H:%M:%S")
+                        except Exception:
+                            d_str = str(d_val)
+                    else:
+                        d_str = str(d_val)
+                    diario_full.append(f"[{d_str}] {e.get('nota')}")
 
                 # Mapeamento de arquivos para leitura profunda on-demand
                 # Retrocompatibilidade: tenta drive_file_id direto; se ausente, extrai da URL via regex

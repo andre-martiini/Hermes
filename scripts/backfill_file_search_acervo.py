@@ -140,6 +140,22 @@ def get_drive_credentials(db):
     if not snap.exists:
         raise RuntimeError("Credenciais Google nao encontradas em system/google_credentials.")
     data = snap.to_dict() or {}
+    expiry_val = data.get("expiry_date") or data.get("expiry")
+    parsed_expiry = None
+    if expiry_val:
+        from datetime import datetime, timezone
+        if isinstance(expiry_val, datetime):
+            parsed_expiry = expiry_val
+        elif isinstance(expiry_val, (int, float)):
+            if expiry_val > 1e11:  # milliseconds
+                expiry_val = expiry_val / 1000.0
+            parsed_expiry = datetime.fromtimestamp(expiry_val, timezone.utc)
+        elif isinstance(expiry_val, str):
+            try:
+                parsed_expiry = datetime.fromisoformat(expiry_val.replace('Z', '+00:00'))
+            except ValueError:
+                pass
+
     creds = Credentials(
         token=data.get("token"),
         refresh_token=data.get("refresh_token"),
@@ -147,11 +163,16 @@ def get_drive_credentials(db):
         client_id=data.get("client_id"),
         client_secret=data.get("client_secret"),
         scopes=["https://www.googleapis.com/auth/drive"],
+        expiry=parsed_expiry,
     )
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
         db.collection("system").document("google_credentials").update(
-            {"token": creds.token, "updated_at": firestore.SERVER_TIMESTAMP}
+            {
+                "token": creds.token,
+                "expiry_date": creds.expiry,
+                "updated_at": firestore.SERVER_TIMESTAMP
+            }
         )
     return creds
 

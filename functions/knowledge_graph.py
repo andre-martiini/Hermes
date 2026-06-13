@@ -197,9 +197,29 @@ def _build_clean_diary(task_data: dict) -> str:
         "=== DIÁRIO DE BORDO ===",
     ]
 
+    def _obter_data_ordenacao(entry):
+        d = entry.get('data')
+        if not d:
+            return ""
+        if isinstance(d, str):
+            return d
+        import datetime as _datetime
+        if isinstance(d, _datetime.datetime):
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=_datetime.timezone.utc)
+            return d.isoformat()
+        if isinstance(d, _datetime.date):
+            return d.isoformat()
+        if hasattr(d, 'isoformat'):
+            try:
+                return d.isoformat()
+            except Exception:
+                pass
+        return str(d)
+
     entries = sorted(
         task_data.get("acompanhamento", []),
-        key=lambda e: e.get("data", ""),
+        key=_obter_data_ordenacao,
     )
     for entry in entries:
         nota = (entry.get("nota") or "").strip()
@@ -208,10 +228,25 @@ def _build_clean_diary(task_data: dict) -> str:
         if any(nota.startswith(prefix) for prefix in NOISE_PREFIXES):
             continue
         date_label = entry.get("data", "")
-        try:
-            date_label = datetime.fromisoformat(date_label).strftime("%d/%m/%Y %H:%M")
-        except Exception:
-            pass
+        if date_label:
+            if isinstance(date_label, str):
+                try:
+                    val = date_label.strip()
+                    if val.endswith('Z'):
+                        val = val[:-1] + '+00:00'
+                    dt = datetime.fromisoformat(val)
+                    date_label = dt.strftime("%d/%m/%Y %H:%M")
+                except Exception:
+                    pass
+            elif hasattr(date_label, "strftime"):
+                try:
+                    date_label = date_label.strftime("%d/%m/%Y %H:%M")
+                except Exception:
+                    pass
+            else:
+                date_label = str(date_label)
+        else:
+            date_label = ""
         lines.append(f"[{date_label}] {nota}")
 
     # Decisões consolidadas do chat (apenas mensagens longas do assistente, sem artefatos)
@@ -280,6 +315,22 @@ def _get_google_creds_kg(db):
     if not creds_doc.exists:
         raise RuntimeError("Credenciais Google nao encontradas no Firestore.")
     d = creds_doc.to_dict()
+    expiry_val = d.get("expiry_date") or d.get("expiry")
+    parsed_expiry = None
+    if expiry_val:
+        from datetime import datetime, timezone
+        if isinstance(expiry_val, datetime):
+            parsed_expiry = expiry_val
+        elif isinstance(expiry_val, (int, float)):
+            if expiry_val > 1e11:  # milliseconds
+                expiry_val = expiry_val / 1000.0
+            parsed_expiry = datetime.fromtimestamp(expiry_val, timezone.utc)
+        elif isinstance(expiry_val, str):
+            try:
+                parsed_expiry = datetime.fromisoformat(expiry_val.replace('Z', '+00:00'))
+            except ValueError:
+                pass
+
     creds = Credentials(
         token=d.get("token"),
         refresh_token=d.get("refresh_token"),
@@ -287,12 +338,17 @@ def _get_google_creds_kg(db):
         client_id=d.get("client_id"),
         client_secret=d.get("client_secret"),
         scopes=["https://www.googleapis.com/auth/drive"],
+        expiry=parsed_expiry,
     )
     if creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
             db.collection("system").document("google_credentials").update(
-                {"token": creds.token, "updated_at": firestore.SERVER_TIMESTAMP}
+                {
+                    "token": creds.token,
+                    "expiry_date": creds.expiry,
+                    "updated_at": firestore.SERVER_TIMESTAMP
+                }
             )
         except Exception as exc:
             print(f"[KG Artefato] Falha ao renovar token Google: {exc}")

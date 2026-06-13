@@ -1311,14 +1311,49 @@ def _fetch_acao_snapshot(db, task_id: str) -> dict | None:
         acomp_raw = data.get("acompanhamento") or []
         acomp_entries = []
         diario_full = []
-        for entry in sorted(acomp_raw, key=lambda e: e.get("data", "")):
+
+        def _obter_data_ordenacao(entry):
+            d = entry.get('data')
+            if not d:
+                return ""
+            if isinstance(d, str):
+                return d
+            import datetime as _datetime
+            if isinstance(d, _datetime.datetime):
+                if d.tzinfo is None:
+                    d = d.replace(tzinfo=_datetime.timezone.utc)
+                return d.isoformat()
+            if isinstance(d, _datetime.date):
+                return d.isoformat()
+            if hasattr(d, 'isoformat'):
+                try:
+                    return d.isoformat()
+                except Exception:
+                    pass
+            return str(d)
+
+        def _formatar_data_curta(entry):
+            d_val = entry.get('data')
+            if not d_val:
+                return ""
+            if isinstance(d_val, str):
+                return d_val[:10]
+            elif hasattr(d_val, "strftime"):
+                try:
+                    return d_val.strftime("%Y-%m-%d")
+                except Exception:
+                    return str(d_val)[:10]
+            else:
+                return str(d_val)[:10]
+
+        for entry in sorted(acomp_raw, key=_obter_data_ordenacao):
             nota = (entry.get("nota") or "").strip()
-            data_entry = (entry.get("data") or "")[:10]
+            data_entry = _formatar_data_curta(entry)
             if nota:
                 diario_full.append(f"[{data_entry}] {nota[:500]}")
-        for entry in sorted(acomp_raw, key=lambda e: e.get("data", ""), reverse=True)[:3]:
+        for entry in sorted(acomp_raw, key=_obter_data_ordenacao, reverse=True)[:3]:
             nota = (entry.get("nota") or "").strip()
-            data_entry = (entry.get("data") or "")[:10]
+            data_entry = _formatar_data_curta(entry)
             if nota:
                 acomp_entries.append(f"[{data_entry}] {nota[:300]}")
 
