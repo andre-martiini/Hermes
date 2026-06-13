@@ -1914,7 +1914,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 content_parts.append(types.Part.from_bytes(data=pdf_data, mime_type="application/pdf"))
             
             try:
-                response = client.models.generate_content(model="gemini-3.5-flash", contents=content_parts)
+                response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=content_parts)
                 res_text = response.text.strip()
                 if "```json" in res_text:
                     res_text = res_text.split("```json")[-1].split("```")[0].strip()
@@ -2927,7 +2927,7 @@ def process_vectorization(task_id):
 
                     # Extração de texto via Gemini 1.5 Flash
 
-                    response = client.models.generate_content(model="gemini-3.5-flash", contents=[
+                    response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=[
 
                         "Extraia todo o texto relevante deste documento para indexação. Se for HTML, ignore tags. Se for PDF, faça OCR se necessário.",
 
@@ -3177,7 +3177,7 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
     """
 
     try:
-        response = client.models.generate_content(model="gemini-3.5-flash", contents=prompt)
+        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=prompt)
         text = response.text
         # Limpeza para garantir JSON puro
         if "```json" in text:
@@ -3765,7 +3765,7 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
         """
 
-        result = gemini_client.models.generate_content(model="gemini-3.5-flash", contents=prompt)
+        result = gemini_client.models.generate_content(model="gemini-3.1-flash-lite", contents=prompt)
 
         texto_refinado = result.text
 
@@ -3998,7 +3998,7 @@ def start_file_indexing(item_id, item_data):
 
 
 
-        response = client.models.generate_content(model="gemini-3.5-flash", contents=parts)
+        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=parts)
 
         res_text = response.text
 
@@ -5196,7 +5196,7 @@ def _classify_memory_candidate(api_key: str, fato: str, categoria: str) -> dict:
             f"Fato candidato: {fato}"
         )
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-3.1-flash-lite",
             contents=prompt
         )
         raw_text = (response.text or "").strip()
@@ -5473,7 +5473,7 @@ def consolidar_memorias_copiloto(event: scheduler_fn.ScheduledEvent):
                 f"Memórias:\n{json.dumps(group, ensure_ascii=False)}"
             )
             response = client.models.generate_content(
-                model="gemini-3.5-flash",
+                model="gemini-3.1-flash-lite",
                 contents=prompt
             )
             raw_text = (response.text or "").strip()
@@ -5874,7 +5874,7 @@ def gerarSlidesIA(req: https_fn.CallableRequest):
 
 
 
-        response = client.models.generate_content(model="gemini-3.5-flash", contents=[
+        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=[
 
             system_instruction,
 
@@ -6176,7 +6176,7 @@ def corrigir_sintaxe_mermaid(req: https_fn.CallableRequest):
         )
 
         response = client.models.generate_content(
-            model='gemini-3.5-flash',
+            model='gemini-3.1-flash-lite',
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 temperature=0.1,
@@ -6316,7 +6316,7 @@ def processInvoiceOCR(req: https_fn.CallableRequest):
 
 
 
-        response = client.models.generate_content(model="gemini-3.5-flash", contents=parts)
+        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=parts)
 
         res_text = response.text
 
@@ -6450,7 +6450,7 @@ def transcrever_audio(req: https_fn.CallableRequest):
         Texto: "{texto_bruto}"
         """
 
-        response = gemini_client.models.generate_content(model="gemini-3.5-flash", contents=prompt)
+        response = gemini_client.models.generate_content(model="gemini-3.1-flash-lite", contents=prompt)
         texto_refinado = response.text
 
         return {
@@ -6684,7 +6684,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
         {prompt}
         """
 
-        response = client.models.generate_content(model="gemini-3.5-flash", contents=[system_instruction, full_prompt])
+        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=[system_instruction, full_prompt])
 
         result = (response.text or "").strip()
         if not result:
@@ -6735,7 +6735,7 @@ def askChatbot(req: https_fn.CallableRequest):
 
         client = genai.Client(api_key=gemini_key)
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-3.1-flash-lite",
             contents=[
                 "Você é um assistente de reunião em pt-BR. Responda com objetividade, "
                 "baseando-se no contexto recebido. Se o contexto estiver incompleto, "
@@ -7321,7 +7321,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     f"CONTEÚDO:\n{doc_text[:6000]}"
                 )
                 summary_resp = client.models.generate_content(
-                    model="gemini-3.5-flash",
+                    model="gemini-3.1-flash-lite",
                     contents=summary_prompt
                 )
                 resumo = (summary_resp.text or "").strip()
@@ -8580,7 +8580,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     skeleton_prompt += f'- Inclua obrigatoriamente: {secoes_customizadas}\n'
 
                 skeleton_resp = client.models.generate_content(
-                    model="gemini-3.5-flash",
+                    model="gemini-3.1-flash-lite",
                     contents=skeleton_prompt
                 )
                 skeleton_text = skeleton_resp.text or ""
@@ -8617,7 +8617,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     )
                     try:
                         sect_resp = client.models.generate_content(
-                            model="gemini-3.5-flash",
+                            model="gemini-3.1-flash-lite",
                             contents=section_prompt
                         )
                         return secao, (sect_resp.text or "*(conteúdo indisponível)*")
@@ -11135,7 +11135,7 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
         3. insight: Um breve comentário seu sobre por que isso é importante ou o que você notou de especial.
         """
 
-        response = client.models.generate_content(model="gemini-3.5-flash", contents=prompt)
+        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=prompt)
         res_text = response.text
 
         json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
@@ -11296,7 +11296,7 @@ def processar_correcoes_pendentes(event: scheduler_fn.ScheduledEvent) -> None:
                             f'{{\"aprovado\": true_ou_false, \"resumo\": \"motivo em 1 frase\"}}'
                         )
                         _comp_resp    = _evo_client.models.generate_content(
-                            model="gemini-3.5-flash",
+                            model="gemini-3.1-flash-lite",
                             contents=_comp_prompt
                         )
                         _comp_text    = (_comp_resp.text or '').strip()
@@ -12207,7 +12207,7 @@ RESPONDA APENAS COM JSON VÁLIDO (sem markdown):
 Se SEM_INSIGHT: {{"nivel": null, "texto": null, "alvo": null, "plano_proposto": null, "acoes_propostas": null}}"""
 
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-3.1-flash-lite",
             contents=prompt,
             config={"temperature": 0.3, "max_output_tokens": 1024}
         )
@@ -12275,7 +12275,7 @@ def classificarAreaTematica(req: https_fn.CallableRequest) -> dict:
     client = genai.Client(api_key=api_key)
     try:
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-3.1-flash-lite",
             contents=f"Classifique a Area Tematica do seguinte texto como uma de: Saude, Financeira, Nenhuma. Retorne APENAS a palavra correta.\n\nTexto: {texto}",
             config=types.GenerateContentConfig(
                 temperature=0.0,
@@ -12819,7 +12819,7 @@ def generate_contact_summary(req: https_fn.CallableRequest):
         """
         
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-3.1-flash-lite",
             contents=prompt
         )
         
@@ -12998,7 +12998,7 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
     """Transcreve arquivos pesados de áudio/vídeo enviados para `long_transcriptions/{uid}/{id}.{ext}`.
 
     Fluxo: (vídeo) extrai só o áudio via ffmpeg embutido -> Files API do Gemini ->
-    transcrição literal com gemini-3.5-flash -> grava no Firestore -> expurga o binário original.
+    transcrição literal com gemini-3.1-flash-lite -> grava no Firestore -> expurga o binário original.
     """
     import os as _os
     import time as _time
@@ -13111,7 +13111,7 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
             "Responda apenas com o texto transcrito."
         )
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-3.1-flash-lite",
             contents=[
                 types.Content(parts=[
                     types.Part.from_uri(
