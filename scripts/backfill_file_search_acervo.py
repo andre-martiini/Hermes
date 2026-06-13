@@ -156,6 +156,9 @@ def get_drive_credentials(db):
             except ValueError:
                 pass
 
+        if parsed_expiry and parsed_expiry.tzinfo is not None:
+            parsed_expiry = parsed_expiry.astimezone(timezone.utc).replace(tzinfo=None)
+
     creds = Credentials(
         token=data.get("token"),
         refresh_token=data.get("refresh_token"),

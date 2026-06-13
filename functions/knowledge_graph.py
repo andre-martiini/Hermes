@@ -331,6 +331,9 @@ def _get_google_creds_kg(db):
             except ValueError:
                 pass
 
+        if parsed_expiry and parsed_expiry.tzinfo is not None:
+            parsed_expiry = parsed_expiry.astimezone(timezone.utc).replace(tzinfo=None)
+
     creds = Credentials(
         token=d.get("token"),
         refresh_token=d.get("refresh_token"),
