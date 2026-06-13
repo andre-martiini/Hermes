@@ -159,13 +159,14 @@ def get_drive_credentials(db):
         if parsed_expiry and parsed_expiry.tzinfo is not None:
             parsed_expiry = parsed_expiry.astimezone(timezone.utc).replace(tzinfo=None)
 
+    stored_scopes = data.get("scopes") or ["https://www.googleapis.com/auth/drive"]
     creds = Credentials(
         token=data.get("token"),
         refresh_token=data.get("refresh_token"),
         token_uri=data.get("token_uri"),
         client_id=data.get("client_id"),
         client_secret=data.get("client_secret"),
-        scopes=["https://www.googleapis.com/auth/drive"],
+        scopes=stored_scopes,
         expiry=parsed_expiry,
     )
     if creds.expired and creds.refresh_token:
