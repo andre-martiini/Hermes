@@ -10307,6 +10307,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
             _set_copilot_status("Consolidando resposta...")
             try:
+                if _round == _max_iter - 1:
+                    function_response_parts.append(
+                        types.Part(text="\n\n[AVISO DE LIMITE] O limite de consultas internas foi atingido. Por favor, responda ao usuário consolidando as informações obtidas até agora da melhor forma possível. Não acione mais nenhuma ferramenta.")
+                    )
                 response = chat.send_message(function_response_parts)
                 log_gemini_usage(response, model=model_id, feature="copilot_web", db=db, extra={"round": _round + 1, "session_id": session_id})
                 _perf_mark(perf_state, "web.tool_roundtrip")
@@ -10398,7 +10402,13 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 result_text = response.text or ""
             except Exception as _text_err:
                 print(f"[Copiloto] response.text falhou: {_text_err}")
-                result_text = ""
+                if response and response.function_calls:
+                    result_text = (
+                        "Cheguei ao limite de consultas internas tentando obter os dados do seu documento. "
+                        "Por favor, tente refazer a pergunta de forma mais direta ou focar em um trecho específico."
+                    )
+                else:
+                    result_text = "Desculpe, ocorreu uma instabilidade ao processar a resposta. Por favor, tente novamente."
         # Extração de Proposta [PROPOSAL]{...}[/PROPOSAL]
         proposal_data = None
         clean_text = result_text
