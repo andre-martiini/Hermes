@@ -108,8 +108,8 @@ COPILOT_MODEL_TIMEOUT_MS = 70000
 COPILOT_MODEL_RETRY_TIMEOUT_MS = 30000
 COPILOT_TOOL_TIMEOUT_SEC = 45
 COPILOT_TOOL_TIMEOUT_ASYNC_SEC = 150
-COPILOT_CHAT_MODEL = os.environ.get("COPILOT_CHAT_MODEL", "gemini-3.5-flash")
-COPILOT_FALLBACK_MODEL = os.environ.get("COPILOT_FALLBACK_MODEL", "gemini-3.5-flash")
+COPILOT_CHAT_MODEL = os.environ.get("COPILOT_CHAT_MODEL", "gemini-3.1-flash-lite")
+COPILOT_FALLBACK_MODEL = os.environ.get("COPILOT_FALLBACK_MODEL", "gemini-3.1-flash-lite")
 COPILOT_DEADLINE_FALLBACK_TEXT = (
     "O modelo de IA demorou demais para concluir esta resposta e eu interrompi a chamada "
     "antes de estourar o tempo da conversa. Tente dividir o pedido em partes menores, "
@@ -229,7 +229,7 @@ def get_db():
     return firestore.client()
 
 
-DESCRIPTION_SYNTHESIS_MODEL = os.environ.get("DESCRIPTION_SYNTHESIS_MODEL", "gemini-3.5-flash")
+DESCRIPTION_SYNTHESIS_MODEL = os.environ.get("DESCRIPTION_SYNTHESIS_MODEL", "gemini-3.1-flash-lite")
 DESCRIPTION_SYNTHESIS_BATCH_LIMIT = 50
 
 
