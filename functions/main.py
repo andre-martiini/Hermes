@@ -110,6 +110,19 @@ COPILOT_TOOL_TIMEOUT_SEC = 45
 COPILOT_TOOL_TIMEOUT_ASYNC_SEC = 150
 COPILOT_CHAT_MODEL = os.environ.get("COPILOT_CHAT_MODEL", "gemini-3.1-flash-lite")
 COPILOT_FALLBACK_MODEL = os.environ.get("COPILOT_FALLBACK_MODEL", "gemini-3.1-flash-lite")
+# Temperatura do chat do copiloto. O default do SDK (~1.0) é alto demais para um
+# assistente que executa ferramentas e gerencia tarefas — eleva a variância e o
+# risco de alucinação. 0.3 mantém alguma fluência nos textos (slides/relatórios)
+# sem a aleatoriedade que faz o modelo "lite" escorregar. Ajustável por env.
+try:
+    COPILOT_TEMPERATURE = float(os.environ.get("COPILOT_TEMPERATURE", "0.3"))
+except (TypeError, ValueError):
+    COPILOT_TEMPERATURE = 0.3
+# Escalonamento por complexidade: comandos que disparam muitas funções de uma vez
+# ou descrevem várias tarefas encadeadas saturam o flash-lite. Nesses casos — e só
+# neles — subimos para um tier mais forte. Heurística pura, sem chamada extra de LLM.
+COPILOT_AUTO_ESCALATE = os.environ.get("COPILOT_AUTO_ESCALATE", "1") != "0"
+COPILOT_COMPLEX_MODEL = os.environ.get("COPILOT_COMPLEX_MODEL", GEMINI_FRONTIER_MODEL)
 COPILOT_DEADLINE_FALLBACK_TEXT = (
     "O modelo de IA demorou demais para concluir esta resposta e eu interrompi a chamada "
     "antes de estourar o tempo da conversa. Tente dividir o pedido em partes menores, "
@@ -9700,6 +9713,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             preparar_atualizacao_contato,
             registrar_interacao_contato,
         ]
+        # Contagem das ferramentas sempre-ativas, antes dos appends condicionais
+        # abaixo — usada como sinal de complexidade para o escalonamento de modelo.
+        _n_base_tools = len(static_tools)
         # Ferramentas de fluxos raros: só declaradas quando o assunto aparece na
         # conversa — menos tokens de schema e roteamento mais limpo para o modelo.
         if _protocolo_ativo("mail", "caixa de entrada", "inbox"):
@@ -9718,10 +9734,39 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             static_tools.append(incorporar_documento_especifico_sipac_no_rag_da_acao)
             static_tools.append(acompanhar_processo_sipac_copiloto)
 
+        # ─── ESCALONAMENTO POR COMPLEXIDADE ──────────────────────────────────────
+        # Só atua quando o modelo ainda é o tier padrão (não mexe no downgrade de
+        # smalltalk). Sinais: muitas funções raras ativadas juntas, muitos cards
+        # interativos em jogo, ou linguagem de múltiplas tarefas encadeadas. Em todos
+        # os casos a heurística é local (regex + contagem) — não custa latência.
+        if COPILOT_AUTO_ESCALATE and model_id == COPILOT_CHAT_MODEL:
+            n_rare = len(static_tools) - _n_base_tools
+            n_dynamic = len(dynamic_tools)
+            _MULTITASK_RE = re.compile(
+                r"(e (depois|também|tambem)|al[ée]m disso|todas as|todos os|em lote|"
+                r"v[áa]ri[oa]s|cada (uma|um)|para cada|por fim|primeiro.*depois|"
+                r"\d+[\).]\s)",
+                re.IGNORECASE,
+            )
+            multitask = bool(_MULTITASK_RE.search(prompt or ""))
+            long_prompt = len(prompt or "") > 320
+            escalate = (
+                n_rare >= 2
+                or n_dynamic >= 4
+                or (multitask and (n_rare >= 1 or n_dynamic >= 1 or long_prompt))
+            )
+            if escalate:
+                model_id = COPILOT_COMPLEX_MODEL
+                print(
+                    f"[Copiloto] Complexidade alta (rare={n_rare}, dynamic={n_dynamic}, "
+                    f"multitask={multitask}, long={long_prompt}) — escalando para {model_id}"
+                )
+
         chat = client.chats.create(
             model=model_id,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction + _correcao_hint,
+                temperature=COPILOT_TEMPERATURE,
                 http_options=types.HttpOptions(timeout=COPILOT_MODEL_TIMEOUT_MS),
                 tools=static_tools + dynamic_tools,
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
