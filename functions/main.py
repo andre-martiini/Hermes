@@ -12342,6 +12342,9 @@ def classificarAreaTematica(req: https_fn.CallableRequest) -> dict:
 # Import daily WIP reset job
 from daily_reset_job import daily_wip_reset_and_degradation
 
+# Import daily morning briefing job
+from daily_morning_briefing import briefing_matinal_acoes
+
 
 @https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=60)
 def gerarResumoFinanceiro(req: https_fn.CallableRequest):
