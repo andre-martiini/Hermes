@@ -16,6 +16,6 @@ Este diretório é um bundle [Open Knowledge Format](https://github.com/ — ver
 - [Integrações](/docs/okf/integracoes/index.md) — WhatsApp e modelos Gemini.
 - [Guias](/docs/okf/guias/index.md) — primeiros passos para rodar o sistema.
 - [UI](/docs/okf/ui/index.md) — decisões de interface.
-- [Copiloto](/docs/okf/copiloto/index.md) — handoffs de otimização do Copiloto Hermes.
+- [Copiloto](/docs/okf/copiloto/index.md) — documentação viva sobre arquitetura e funcionamento do Copiloto Hermes.
 
 Ver [log.md](/docs/okf/log.md) para o histórico de mudanças deste bundle.
