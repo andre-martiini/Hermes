@@ -789,7 +789,7 @@ def log_to_firestore(sync_ref, logs, message, force_update=False):
 
     elif "[PIX]" in message_upper:
 
-        emit_notification_backend("Novo Pix Recebido", message, 'success', 'financeiro')
+        emit_notification_backend("Gasto Realizado via Pix", message, 'expense', 'financeiro')
 
 
 
@@ -2217,6 +2217,7 @@ def _build_telegram_notification_message(notif: dict) -> str:
         'warning': '⚠️',
         'error': '🚨',
         'info': '🔔',
+        'expense': '💸',
     }
     lines = [f"{icons.get(n_type, '🔔')} Hermes - {title}"]
     assunto = str(notif.get('assunto') or '').strip()
@@ -12340,6 +12341,9 @@ def classificarAreaTematica(req: https_fn.CallableRequest) -> dict:
 
 # Import daily WIP reset job
 from daily_reset_job import daily_wip_reset_and_degradation
+
+# Import daily morning briefing job
+from daily_morning_briefing import briefing_matinal_acoes
 
 
 @https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=60)

@@ -148,13 +148,6 @@ def log_gemini_usage(
         )
         model_key = _safe_key(model)
         feature_key = _safe_key(feature)
-        updates = {
-            "date": day,
-            "updated_at": firestore.SERVER_TIMESTAMP,
-            "calls": firestore.Increment(1),
-            f"models.{model_key}.calls": firestore.Increment(1),
-            f"features.{feature_key}.calls": firestore.Increment(1),
-        }
         prompt_tokens = _usage_int(usage, "prompt_token_count", "promptTokenCount")
         output_tokens = _usage_int(usage, "candidates_token_count", "candidatesTokenCount")
         cached_tokens = _usage_int(
@@ -162,16 +155,35 @@ def log_gemini_usage(
             "cached_content_token_count",
             "cachedContentTokenCount",
         )
+
+        # Dicts aninhados de fato: `set(merge=True)` não expande chaves com
+        # ponto em field paths (só `update()` faz isso), então usar
+        # "tokens.total" como string viraria um campo literal com ponto
+        # no nome em vez de tokens: {total: ...}.
+        model_fields: dict[str, Any] = {"calls": firestore.Increment(1)}
+        feature_fields: dict[str, Any] = {"calls": firestore.Increment(1)}
+        tokens_fields: dict[str, Any] = {}
+
         if total_tokens:
-            updates["tokens.total"] = firestore.Increment(total_tokens)
-            updates[f"models.{model_key}.tokens_total"] = firestore.Increment(total_tokens)
-            updates[f"features.{feature_key}.tokens_total"] = firestore.Increment(total_tokens)
+            tokens_fields["total"] = firestore.Increment(total_tokens)
+            model_fields["tokens_total"] = firestore.Increment(total_tokens)
+            feature_fields["tokens_total"] = firestore.Increment(total_tokens)
         if prompt_tokens:
-            updates["tokens.input"] = firestore.Increment(prompt_tokens)
+            tokens_fields["input"] = firestore.Increment(prompt_tokens)
         if output_tokens:
-            updates["tokens.output"] = firestore.Increment(output_tokens)
+            tokens_fields["output"] = firestore.Increment(output_tokens)
         if cached_tokens:
-            updates["tokens.cached_input"] = firestore.Increment(cached_tokens)
+            tokens_fields["cached_input"] = firestore.Increment(cached_tokens)
+
+        updates: dict[str, Any] = {
+            "date": day,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+            "calls": firestore.Increment(1),
+            "models": {model_key: model_fields},
+            "features": {feature_key: feature_fields},
+        }
+        if tokens_fields:
+            updates["tokens"] = tokens_fields
         if estimated_usd is not None:
             updates["estimated_usd"] = firestore.Increment(float(estimated_usd))
         doc.set(updates, merge=True)
