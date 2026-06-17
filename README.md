@@ -93,8 +93,8 @@ Hermes/
 ├── functions/              # Cloud Function para sincronização
 │   ├── main.py            # Código principal da função
 │   ├── setup_credentials.py  # Script de configuração
-│   ├── requirements.txt   # Dependências Python
-│   └── DEPLOY.md          # Guia de deploy detalhado
+│   └── requirements.txt   # Dependências Python
+├── docs/okf/               # Documentação operacional (Open Knowledge Format)
 ├── public/                # Arquivos estáticos
 ├── index.tsx              # Aplicação React principal
 ├── firebase.ts            # Configuração Firebase
@@ -133,6 +133,10 @@ gcloud projects add-iam-policy-binding SEU_PROJECT_ID \
   --member="serviceAccount:SEU_PROJECT_ID@appspot.gserviceaccount.com" \
   --role="roles/datastore.user"
 ```
+
+## 📚 Documentação operacional
+
+Guias de deploy, billing, sincronização, integrações e handoffs do Copiloto vivem em [`docs/okf/`](docs/okf/index.md), no formato [Open Knowledge Format](docs/okf/index.md) (markdown + frontmatter YAML).
 
 ## 📄 Licença
 
