@@ -136,7 +136,7 @@ gcloud projects add-iam-policy-binding SEU_PROJECT_ID \
 
 ## 📚 Documentação operacional
 
-Guias de deploy, billing, sincronização, integrações e handoffs do Copiloto vivem em [`docs/okf/`](docs/okf/index.md), no formato [Open Knowledge Format](docs/okf/index.md) (markdown + frontmatter YAML).
+Arquitetura (schema do Firestore, mapa de Cloud Functions, convenções de frontend), guias de deploy, billing, sincronização e integrações vivem em [`docs/okf/`](docs/okf/index.md), no formato [Open Knowledge Format](docs/okf/index.md) (markdown + frontmatter YAML). Recomendado para desenvolvedores e agentes de IA externos que vão atuar no sistema.
 
 ## 📄 Licença
 
