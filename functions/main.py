@@ -789,7 +789,7 @@ def log_to_firestore(sync_ref, logs, message, force_update=False):
 
     elif "[PIX]" in message_upper:
 
-        emit_notification_backend("Novo Pix Recebido", message, 'success', 'financeiro')
+        emit_notification_backend("Gasto Realizado via Pix", message, 'expense', 'financeiro')
 
 
 
@@ -2217,6 +2217,7 @@ def _build_telegram_notification_message(notif: dict) -> str:
         'warning': '⚠️',
         'error': '🚨',
         'info': '🔔',
+        'expense': '💸',
     }
     lines = [f"{icons.get(n_type, '🔔')} Hermes - {title}"]
     assunto = str(notif.get('assunto') or '').strip()
