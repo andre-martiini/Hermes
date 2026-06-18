@@ -9,6 +9,7 @@ interface TranscriptionToolProps {
   isEmbedded?: boolean;
   initialFile?: File | null;
   onInitialFileConsumed?: () => void;
+  onSendToCopiloto?: (text: string) => void;
 }
 
 const TRANSCRIPTION_HISTORY_KEY = 'hermes_transcription_history';
@@ -24,7 +25,7 @@ interface TranscriptionHistoryEntry {
 
 type ThemeMode = 'light' | 'dark' | 'system';
 
-export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, showToast, initialText, isEmbedded, initialFile, onInitialFileConsumed }) => {
+export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, showToast, initialText, isEmbedded, initialFile, onInitialFileConsumed, onSendToCopiloto }) => {
   const [file, setFile] = useState<File | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -198,6 +199,14 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
     }
   };
 
+  const sendToCopiloto = (text?: string) => {
+    const target = text || transcription?.refined;
+    if (target && onSendToCopiloto) {
+      onSendToCopiloto(target);
+      showToast("Texto enviado ao Copiloto Hermes!", "success");
+    }
+  };
+
   const isDarkTheme = themeMode === 'dark' || (themeMode === 'system' && prefersDark);
   const panelClass = isDarkTheme
     ? 'bg-[#121826] border-slate-700/80 text-slate-100 shadow-[0_20px_60px_rgba(2,6,23,0.45)]'
@@ -314,13 +323,24 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                <div className="flex items-center justify-between gap-3 mb-5 md:mb-6">
                  <h3 className={`text-xl font-black ${titleClass}`}>Resultado</h3>
                  {transcription && (
-                   <button
-                     onClick={() => copyToClipboard()}
-                     className="flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-600 rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all shrink-0"
-                   >
-                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                     Copiar
-                   </button>
+                   <div className="flex items-center gap-2 shrink-0">
+                     {onSendToCopiloto && (
+                       <button
+                         onClick={() => sendToCopiloto()}
+                         className="flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-600 rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-blue-100 transition-all"
+                       >
+                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                         Enviar ao Copiloto
+                       </button>
+                     )}
+                     <button
+                       onClick={() => copyToClipboard()}
+                       className="flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-600 rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all"
+                     >
+                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                       Copiar
+                     </button>
+                   </div>
                  )}
                </div>
 
