@@ -99,10 +99,26 @@ jobs:
       - name: Instalar Firebase CLI
         run: npm install -g firebase-tools
 
+      # As APIs do Google Cloud usadas pelo deploy (ex.: firebaserules.googleapis.com,
+      # usada para publicar as regras do Storage) ocasionalmente respondem com
+      # erros transitorios (503 Service Unavailable). Tentamos novamente com
+      # backoff antes de desistir, em vez de falhar o deploy inteiro de cara.
       - name: Deploy (hosting + functions + firestore indexes + storage)
-        run: >-
-          firebase deploy
-          --only hosting,functions,firestore:indexes,storage
-          --project gestao-hermes
-          --non-interactive
-          --force
+        run: |
+          attempt=1
+          max_attempts=5
+          until firebase deploy \
+            --only hosting,functions,firestore:indexes,storage \
+            --project gestao-hermes \
+            --non-interactive \
+            --force
+          do
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "Deploy falhou apos $attempt tentativas."
+              exit 1
+            fi
+            wait_seconds=$((attempt * 30))
+            echo "Deploy falhou (tentativa $attempt de $max_attempts). Aguardando ${wait_seconds}s antes de tentar novamente..."
+            sleep "$wait_seconds"
+            attempt=$((attempt + 1))
+          done
