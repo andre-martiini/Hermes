@@ -148,6 +148,8 @@ interface HermesGlobalChatProps {
   copilotMode?: CopilotMode;
   onOpenTask?: (taskId: string) => void;
   onOpenTool?: (tool: string, id: string) => void;
+  initialPrompt?: string | null;
+  onInitialPromptConsumed?: () => void;
 }
 
 const withClientTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
@@ -203,6 +205,8 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   copilotMode = 'default',
   onOpenTask,
   onOpenTool,
+  initialPrompt,
+  onInitialPromptConsumed,
 }) => {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -315,6 +319,12 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
     setShowTools(false);
     setShowMobileHistory(false);
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !initialPrompt) return;
+    sendMessage(initialPrompt);
+    onInitialPromptConsumed?.();
+  }, [isOpen, initialPrompt]);
 
   useEffect(() => {
     if (!currentSessionId) {

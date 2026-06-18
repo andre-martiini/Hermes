@@ -33,6 +33,7 @@ interface FerramentasViewProps {
   pendingSharedVideoFile?: File | null;
   onPendingSharedVideoFileConsumed?: () => void;
   isDark?: boolean;
+  onSendToCopiloto?: (text: string) => void;
 }
 
 export const FerramentasView: React.FC<FerramentasViewProps> = ({
@@ -56,6 +57,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   pendingSharedVideoFile,
   onPendingSharedVideoFileConsumed,
   isDark = false,
+  onSendToCopiloto,
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [textInput, setTextInput] = useState('');
@@ -117,7 +119,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   }
 
   if (activeTool === 'transcription') {
-    return <TranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} initialFile={pendingSharedAudioFile} onInitialFileConsumed={onPendingSharedAudioFileConsumed} />;
+    return <TranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} initialFile={pendingSharedAudioFile} onInitialFileConsumed={onPendingSharedAudioFileConsumed} onSendToCopiloto={onSendToCopiloto} />;
   }
 
 

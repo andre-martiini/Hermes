@@ -1016,6 +1016,7 @@ const App: React.FC = () => {
   const [isCopilotoOpen, setIsCopilotoOpen] = useState(false);
   const [copilotoAutoStartMic, setCopilotoAutoStartMic] = useState(false);
   const [copilotoMode, setCopilotoMode] = useState<'default' | 'finance' | 'saude'>('default');
+  const [copilotoInitialPrompt, setCopilotoInitialPrompt] = useState<string | null>(null);
   const [isQuickNoteModalOpen, setIsQuickNoteModalOpen] = useState(false);
   const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
   // Estados PGC
@@ -5506,6 +5507,12 @@ const App: React.FC = () => {
                     pendingSharedVideoFile={pendingSharedVideoFile}
                     onPendingSharedVideoFileConsumed={() => setPendingSharedVideoFile(null)}
                     isDark={isDarkTheme}
+                    onSendToCopiloto={(text) => {
+                      setCopilotoMode('default');
+                      setCopilotoAutoStartMic(false);
+                      setCopilotoInitialPrompt(text);
+                      setIsCopilotoOpen(true);
+                    }}
                   />
                 ) : viewMode === 'services' ? (
                   <ServicesView
@@ -6717,9 +6724,11 @@ const App: React.FC = () => {
         }
         <HermesGlobalChat
           isOpen={isCopilotoOpen}
-          onClose={() => { setIsCopilotoOpen(false); setCopilotoAutoStartMic(false); setCopilotoMode('default'); }}
+          onClose={() => { setIsCopilotoOpen(false); setCopilotoAutoStartMic(false); setCopilotoMode('default'); setCopilotoInitialPrompt(null); }}
           autoStartMic={copilotoAutoStartMic}
           copilotMode={copilotoMode}
+          initialPrompt={copilotoInitialPrompt}
+          onInitialPromptConsumed={() => setCopilotoInitialPrompt(null)}
           isDark={isDarkTheme}
           userId={user?.uid || ''}
           onOpenTask={async (id) => {
