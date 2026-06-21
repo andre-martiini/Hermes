@@ -76,6 +76,78 @@ class TestSimulationEngine(unittest.TestCase):
         self.assertIn("plan_ready", types_seen)
         self.assertIn("agent_assigned", types_seen)
 
+    def test_agent_decides_branch_and_prunes_the_other(self):
+        # "decidir" gera um no' de decisao com dois ramos (sem acao sensivel concorrente).
+        self.engine.start("Decidir a estrategia geral")
+        self.engine.run_until_idle()
+        # O agente decidiu sozinho (no' nao-critico): nada parou para humano.
+        self.assertFalse(self.store.list_pending_handoffs())
+        types_seen = {e.type for e in self.store.list_events()}
+        self.assertIn("decision_made", types_seen)
+        self.assertIn("branch_pruned", types_seen)
+        # Exatamente um ramo concluido e um podado.
+        ramos = [t for t in self.store.list_tasks() if t.title.startswith("Caminho")]
+        self.assertEqual(len(ramos), 2)
+        self.assertEqual(sorted(t.status for t in ramos),
+                         sorted([TaskStatus.DONE, TaskStatus.SKIPPED]))
+
+    def test_human_only_step_creates_handoff_and_pauses(self):
+        # "assinar contrato" => passo so'-humano (handoff de trabalho), sem acao sensivel.
+        self.engine.start("Assinar o contrato final")
+        self.engine.run_until_idle()
+        handoffs = self.store.list_pending_handoffs()
+        self.assertTrue(len(handoffs) >= 1)
+        hand = handoffs[0]
+        self.assertEqual(hand.kind, "work")
+        task = self.store.get_task(hand.task_id)
+        self.assertEqual(task.status, TaskStatus.AWAITING_HUMAN)
+        self.assertNotEqual(self.store.get_sim().status, SimStatus.DONE)
+
+        # A pessoa faz e devolve o resultado; o fluxo retoma e fecha.
+        self.engine.resolve_handoff(hand.id, result="Contrato assinado em 21/06.")
+        self.engine.run_until_idle()
+        self.assertEqual(self.store.get_task(hand.task_id).status, TaskStatus.DONE)
+        self.assertEqual(self.store.get_sim().status, SimStatus.DONE)
+
+    def test_critical_decision_requires_human(self):
+        # decisao + contexto juridico => no' critico: SO' humano escolhe o ramo.
+        self.engine.start("Decidir juridicamente e assinar a renegociacao do contrato")
+        self.engine.run_until_idle()
+        decision_handoffs = [h for h in self.store.list_pending_handoffs()
+                             if h.kind == "decision"]
+        self.assertTrue(len(decision_handoffs) >= 1,
+                        "no' de decisao critico deveria virar handoff de decisao")
+        hand = decision_handoffs[0]
+        # Humano escolhe o segundo ramo.
+        escolha = hand.options[1]
+        self.engine.resolve_handoff(hand.id, chosen_branch_id=escolha["id"])
+        self.engine.run_until_idle()
+        decision_task = self.store.get_task(hand.task_id)
+        self.assertEqual(decision_task.status, TaskStatus.DONE)
+        self.assertEqual(decision_task.chosen_branch_id, escolha["id"])
+
+    def test_start_from_action_uses_action_plan(self):
+        action = {
+            "id": "tarefa_real_123",
+            "titulo": "Organizar evento de fim de ano",
+            "descricao": "Planejar e executar a confraternizacao",
+            "plano_de_acao": [
+                {"text": "Levantar orcamento financeiro do evento", "completed": False},
+                {"text": "Comprar materiais e itens de decoracao", "completed": False},
+                {"text": "Assinar o contrato com o buffet", "completed": False},
+            ],
+        }
+        sim = self.engine.start_from_action(action)
+        self.assertEqual(sim.source_action_id, "tarefa_real_123")
+        # Cada passo do plano virou uma tarefa (+ consolidacao).
+        titulos = [t.title for t in self.store.list_tasks()]
+        self.assertIn("Levantar orcamento financeiro do evento", titulos)
+        # O passo de assinatura nasceu como handoff humano.
+        self.engine.run_until_idle()
+        human_steps = [t for t in self.store.list_tasks()
+                       if t.executor_type == "human"]
+        self.assertTrue(len(human_steps) >= 1)
+
 
 if __name__ == "__main__":
     unittest.main()

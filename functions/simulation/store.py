@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from .models import Agent, Approval, SimEvent, Simulation, Task
+from .models import Agent, Approval, Handoff, SimEvent, Simulation, Task
 
 
 class SimulationStore(Protocol):
@@ -37,6 +37,11 @@ class SimulationStore(Protocol):
     def get_approval(self, approval_id: str) -> Approval | None: ...
     def list_pending_approvals(self) -> list[Approval]: ...
 
+    def add_handoff(self, handoff: Handoff) -> None: ...
+    def update_handoff(self, handoff: Handoff) -> None: ...
+    def get_handoff(self, handoff_id: str) -> Handoff | None: ...
+    def list_pending_handoffs(self) -> list[Handoff]: ...
+
 
 class InMemoryStore:
     """Implementacao em memoria. Util para testes e para a UI consumir via export."""
@@ -47,6 +52,7 @@ class InMemoryStore:
         self._tasks: dict[str, Task] = {}
         self._events: list[SimEvent] = []
         self._approvals: dict[str, Approval] = {}
+        self._handoffs: dict[str, Handoff] = {}
 
     # Simulation
     def save_sim(self, sim: Simulation) -> None:
@@ -98,6 +104,20 @@ class InMemoryStore:
     def list_pending_approvals(self) -> list[Approval]:
         from .models import ApprovalStatus
         return [a for a in self._approvals.values() if a.status == ApprovalStatus.PENDING]
+
+    # Handoffs
+    def add_handoff(self, handoff: Handoff) -> None:
+        self._handoffs[handoff.id] = handoff
+
+    def update_handoff(self, handoff: Handoff) -> None:
+        self._handoffs[handoff.id] = handoff
+
+    def get_handoff(self, handoff_id: str) -> Handoff | None:
+        return self._handoffs.get(handoff_id)
+
+    def list_pending_handoffs(self) -> list[Handoff]:
+        from .models import HandoffStatus
+        return [h for h in self._handoffs.values() if h.status == HandoffStatus.PENDING]
 
 
 # Raiz fixa do namespace isolado. Nenhuma escrita acontece fora daqui.
@@ -152,12 +172,20 @@ class FirestoreSimulationStore:
 
     update_task = add_task
 
+    @staticmethod
+    def _task_from_dict(data: dict) -> Task:
+        from .models import Branch
+        data = dict(data)
+        data["branches"] = [Branch(**b) if isinstance(b, dict) else b
+                            for b in data.get("branches", [])]
+        return Task(**data)
+
     def get_task(self, task_id: str) -> Task | None:
         snap = self._coll("tasks").document(task_id).get()
-        return Task(**snap.to_dict()) if snap.exists else None
+        return self._task_from_dict(snap.to_dict()) if snap.exists else None
 
     def list_tasks(self) -> list[Task]:
-        return [Task(**d.to_dict()) for d in self._coll("tasks").stream()]
+        return [self._task_from_dict(d.to_dict()) for d in self._coll("tasks").stream()]
 
     def add_event(self, event: SimEvent) -> None:
         self._coll("events").document(event.id).set(event.to_dict())
@@ -179,3 +207,17 @@ class FirestoreSimulationStore:
         from .models import ApprovalStatus
         q = self._coll("approvals").where("status", "==", ApprovalStatus.PENDING)
         return [Approval(**d.to_dict()) for d in q.stream()]
+
+    def add_handoff(self, handoff: Handoff) -> None:
+        self._coll("handoffs").document(handoff.id).set(handoff.to_dict())
+
+    update_handoff = add_handoff
+
+    def get_handoff(self, handoff_id: str) -> Handoff | None:
+        snap = self._coll("handoffs").document(handoff_id).get()
+        return Handoff(**snap.to_dict()) if snap.exists else None
+
+    def list_pending_handoffs(self) -> list[Handoff]:
+        from .models import HandoffStatus
+        q = self._coll("handoffs").where("status", "==", HandoffStatus.PENDING)
+        return [Handoff(**d.to_dict()) for d in q.stream()]

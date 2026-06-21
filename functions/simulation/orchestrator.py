@@ -13,11 +13,30 @@ from __future__ import annotations
 import json
 from typing import Callable
 
-from .models import Task
+from .models import Branch, ExecutorType, Task, TaskKind
 from .roles import Sector, SECTOR_TOOLS
 
 # Assinatura de um planner: (objetivo, setores_disponiveis) -> lista de Task
 Planner = Callable[[str, list[str]], list[Task]]
+
+
+# Sinais de que um passo SO' um humano pode fazer/decidir (handoff obrigatorio).
+HUMAN_ONLY_KEYWORDS = (
+    "assinar", "assinatura", "contrato", "juridic", "jurídic", "rescis",
+    "demit", "demiss", "politic", "política", "autoriza verba", "decisao final",
+    "decisão final", "homologa",
+)
+
+# Sinais de que ha' uma bifurcacao a decidir (no' de decisao com ramos).
+DECISION_KEYWORDS = (
+    "decidir", "renegoci", "escolher", "avaliar opcoes", "avaliar opções",
+    "definir estrategia", "definir estratégia",
+)
+
+
+def _is_human_only(text: str) -> bool:
+    t = text.lower()
+    return any(k in t for k in HUMAN_ONLY_KEYWORDS)
 
 
 # Palavras-chave -> (setor, ferramenta sugerida, titulo)
@@ -66,6 +85,20 @@ def heuristic_planner(goal: str, sectors: list[str]) -> list[Task]:
             params={"contexto": goal},
         ))
 
+    # No' de decisao com ramos, quando o objetivo sugere uma bifurcacao.
+    if any(k in g for k in DECISION_KEYWORDS) and Sector.DIRETORIA in sectors:
+        tasks.extend(_build_decision_subtree(goal, human_critical=_is_human_only(goal)))
+
+    # Passo so'-humano (handoff): assinatura, decisao juridica/politica, etc.
+    if _is_human_only(g):
+        tasks.append(Task(
+            title="Formalizar/assinar (somente humano)",
+            sector=Sector.DIRETORIA,
+            description=f"Etapa que exige uma pessoa: {goal}",
+            executor_type=ExecutorType.HUMAN,
+            params={"contexto": goal},
+        ))
+
     # A Diretoria sempre fecha consolidando um relatorio, dependendo das demais.
     consolidacao = Task(
         title="Consolidar resultados e gerar relatorio executivo",
@@ -77,6 +110,43 @@ def heuristic_planner(goal: str, sectors: list[str]) -> list[Task]:
     )
     tasks.append(consolidacao)
     return tasks
+
+
+def _build_decision_subtree(goal: str, human_critical: bool = False) -> list[Task]:
+    """Cria um no' de decisao com dois ramos mutuamente exclusivos.
+
+    O engine, ao resolver a decisao, ativa o ramo escolhido e poda o outro.
+    Se `human_critical`, a decisao e' um no' critico: so' um humano escolhe.
+    """
+    ramo_a = Task(
+        title="Caminho A: avaliar manter o fornecedor atual",
+        sector=Sector.AQUISICOES,
+        tool="obter_portal_compras_publico",
+        params={"contexto": goal},
+    )
+    ramo_b = Task(
+        title="Caminho B: prospectar novo fornecedor",
+        sector=Sector.CONHECIMENTO,
+        tool="pesquisar_internet",
+        params={"contexto": goal},
+    )
+    decisao = Task(
+        title="Decidir a estrategia",
+        sector=Sector.DIRETORIA,
+        kind=TaskKind.DECISION,
+        executor_type=ExecutorType.HUMAN if human_critical else ExecutorType.AGENT,
+        description=f"Bifurcacao do objetivo: {goal}",
+        branches=[
+            Branch(label="Manter fornecedor atual", unlocks=[ramo_a.id],
+                   criteria="Quando ja' ha' relacao boa e custo aceitavel."),
+            Branch(label="Buscar novo fornecedor", unlocks=[ramo_b.id],
+                   criteria="Quando o custo atual e' alto ou ha' risco de fornecimento."),
+        ],
+    )
+    # Os ramos so' ficam prontos depois que a decisao for resolvida.
+    ramo_a.depends_on = [decisao.id]
+    ramo_b.depends_on = [decisao.id]
+    return [decisao, ramo_a, ramo_b]
 
 
 def make_gemini_planner(api_key: str, model: str | None = None) -> Planner:
@@ -135,6 +205,63 @@ def make_gemini_planner(api_key: str, model: str | None = None) -> Planner:
         return heuristic_planner(goal, sectors)
 
     return _planner
+
+
+def route_sector(text: str, sectors: list[str]) -> tuple[str, str | None]:
+    """Roteia um texto livre (ex: um passo do plano) para (setor, ferramenta)."""
+    t = text.lower()
+    for keywords, sector, tool, _title in _KEYWORD_ROUTING:
+        if sector in sectors and any(k in t for k in keywords):
+            return sector, tool
+    fallback = Sector.PROJETOS if Sector.PROJETOS in sectors else sectors[0]
+    return fallback, "criar_acao_no_sistema"
+
+
+def plan_from_action(action: dict, sectors: list[str],
+                     planner: Planner | None = None) -> list[Task]:
+    """Decompoe a partir de uma Tarefa real do Hermes (leitura, sem escrever nela).
+
+    Usa o plano de acao existente (`plano_de_acao`/`plan`) como esqueleto: cada
+    passo vira uma tarefa roteada para um setor. Passos com cara de 'so' humano'
+    ja' nascem como handoff. Sem plano, cai no planner de objetivo livre.
+    """
+    title = action.get("titulo") or action.get("title") or "Acao"
+    desc = action.get("descricao") or action.get("description") or ""
+    goal = f"{title}. {desc}".strip()
+
+    plano = action.get("plano_de_acao") or action.get("plan") or []
+    steps = [
+        (item.get("text") if isinstance(item, dict) else str(item))
+        for item in plano
+    ]
+    steps = [s for s in steps if s]
+
+    if not steps:
+        return plan(goal, sectors, planner)
+
+    tasks: list[Task] = []
+    for step in steps:
+        sector, tool = route_sector(step, sectors)
+        human = _is_human_only(step)
+        tasks.append(Task(
+            title=step,
+            sector=sector,
+            description=f"Passo da acao '{title}'",
+            executor_type=ExecutorType.HUMAN if human else ExecutorType.AGENT,
+            tool=None if human else tool,
+            params={"contexto": goal},
+        ))
+
+    consolidacao = Task(
+        title="Consolidar resultados e gerar relatorio executivo",
+        sector=Sector.DIRETORIA,
+        description=f"Sintese final da acao: {title}",
+        tool="gerar_relatorio",
+        params={"contexto": goal},
+        depends_on=[t.id for t in tasks],
+    )
+    tasks.append(consolidacao)
+    return tasks
 
 
 def plan(goal: str, sectors: list[str], planner: Planner | None = None) -> list[Task]:

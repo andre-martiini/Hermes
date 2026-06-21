@@ -39,19 +39,30 @@ def main(argv: list[str]) -> int:
     engine.run_until_idle()
     seen = _print_events(store, seen)
 
-    pendentes = store.list_pending_approvals()
-    while pendentes:
-        print("\n⏸️  Acoes aguardando o PRESIDENTE (voce):")
-        for appr in pendentes:
+    while store.list_pending_approvals() or store.list_pending_handoffs():
+        # Aprovacoes: o agente fez, o presidente valida.
+        for appr in store.list_pending_approvals():
             task = store.get_task(appr.task_id)
             agent = next(a for a in store.list_agents() if a.id == appr.agent_id)
-            print(f"   - {agent.name} quer '{task.title}' via {appr.tool}")
-            # No demo, o presidente aprova tudo automaticamente.
+            print(f"\n⏸️  [APROVACAO] {agent.name} quer '{task.title}' via {appr.tool}")
             engine.resolve_approval(appr.id, approved=True, decided_by="demo")
+
+        # Handoffs: passo so'-humano; a pessoa executa/decide e devolve.
+        for hand in store.list_pending_handoffs():
+            task = store.get_task(hand.task_id)
+            if hand.kind == "decision":
+                escolha = hand.options[0] if hand.options else None
+                print(f"\n🙋 [HUMANO DECIDE] '{task.title}' -> {escolha['label'] if escolha else 'n/a'}")
+                engine.resolve_handoff(hand.id, chosen_branch_id=escolha["id"] if escolha else None,
+                                       decided_by="demo")
+            else:
+                print(f"\n🙋 [HUMANO EXECUTA] '{task.title}'")
+                engine.resolve_handoff(hand.id, result="Feito manualmente pela pessoa.",
+                                       decided_by="demo")
+
         seen = _print_events(store, seen)
         engine.run_until_idle()
         seen = _print_events(store, seen)
-        pendentes = store.list_pending_approvals()
 
     print(f"\n✅ Status final: {store.get_sim().status}")
     print(f"   Agentes ociosos: "
