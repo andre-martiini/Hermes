@@ -223,13 +223,6 @@ export interface BrainstormIdea {
     status?: 'active' | 'archived';
 }
 
-export interface SlideHistoryEntry {
-    id: string;
-    title: string;
-    createdAt: string;
-    slides: any[];
-    rascunho: string;
-}
 export interface FinanceTransaction {
     id: string;
     description: string;
@@ -525,7 +518,6 @@ export interface ConhecimentoItem {
         modulo: string;
         id_origem: string;
     } | null;
-    slides_data?: any;
     parent_id?: string | null;
     is_folder?: boolean;
     orphan_action_title?: string;

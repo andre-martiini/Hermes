@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import copy
 from datetime import datetime, timezone
 from typing import Any
 
@@ -20,6 +21,19 @@ GEMINI_TRANSCRIPTION_MODEL = os.environ.get("GEMINI_TRANSCRIPTION_MODEL", GEMINI
 GEMINI_IMAGE_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
 GEMINI_TTS_MODEL = os.environ.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
 GEMINI_EMBEDDING_MODEL = os.environ.get("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
+GEMINI_FLEX_TIMEOUT_MS = int(os.environ.get("GEMINI_FLEX_TIMEOUT_MS", "600000"))
+GEMINI_FLEX_FALLBACK_TO_STANDARD = os.environ.get("GEMINI_FLEX_FALLBACK_TO_STANDARD", "1") != "0"
+
+
+_DEFAULT_FLEX_FEATURES = {
+    "knowledge_graph.artifact_text_extraction",
+    "knowledge_graph.artifact_summary",
+    "security_portals.pgd_from_diaries",
+    "security_portals.pgd_from_raw_text",
+    "telegram_extended.report_skeleton",
+    "telegram_extended.report_section",
+    "simulation.orchestrator.plan",
+}
 
 
 # Text-token estimate for Gemini Developer API paid tier, USD per 1M tokens.
@@ -68,6 +82,99 @@ def _safe_key(value: str | None) -> str:
     return (key or "unknown")[:90]
 
 
+def _csv_env_set(name: str) -> set[str] | None:
+    raw = os.environ.get(name)
+    if raw is None:
+        return None
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+def should_use_flex(feature: str) -> bool:
+    """Return whether a feature should use Gemini Flex inference."""
+    if os.environ.get("HERMES_GEMINI_FLEX_ENABLED", "1") == "0":
+        return False
+
+    disabled = _csv_env_set("HERMES_GEMINI_FLEX_DISABLED_FEATURES") or set()
+    if feature in disabled:
+        return False
+
+    configured = _csv_env_set("HERMES_GEMINI_FLEX_FEATURES")
+    allowed = configured if configured is not None else _DEFAULT_FLEX_FEATURES
+    return "*" in allowed or feature in allowed
+
+
+def _is_flex_capacity_error(error: Exception) -> bool:
+    code = getattr(error, "code", None)
+    status = str(getattr(error, "status", "") or "").upper()
+    full_text = f"{error} {status}".upper()
+    return code in {429, 503} or any(
+        token in full_text
+        for token in (
+            "RESOURCE_EXHAUSTED",
+            "TOO MANY REQUESTS",
+            "429",
+            "UNAVAILABLE",
+            "SERVICE UNAVAILABLE",
+            "503",
+        )
+    )
+
+
+def _plain_config(config: Any) -> dict[str, Any]:
+    data = _plain(config)
+    return data if isinstance(data, dict) else {}
+
+
+def _with_service_tier(config: Any, tier: str | None) -> Any:
+    """Return a config with service_tier set, preserving existing options when possible."""
+    if tier is None:
+        return config
+
+    if config is None:
+        return {
+            "service_tier": tier,
+            "http_options": {"timeout": GEMINI_FLEX_TIMEOUT_MS},
+        }
+
+    if isinstance(config, dict):
+        updated = dict(config)
+        updated["service_tier"] = tier
+        http_options = dict(updated.get("http_options") or {})
+        http_options.setdefault("timeout", GEMINI_FLEX_TIMEOUT_MS)
+        updated["http_options"] = http_options
+        return updated
+
+    http_options = getattr(config, "http_options", None)
+    updates: dict[str, Any] = {"service_tier": tier}
+    if http_options is None:
+        updates["http_options"] = {"timeout": GEMINI_FLEX_TIMEOUT_MS}
+
+    model_copy = getattr(config, "model_copy", None)
+    if callable(model_copy):
+        try:
+            return model_copy(update=updates)
+        except Exception:
+            pass
+
+    try:
+        cloned = copy.copy(config)
+        for key, value in updates.items():
+            setattr(cloned, key, value)
+        return cloned
+    except Exception:
+        data = _plain_config(config)
+        data.update(updates)
+        if "http_options" not in data:
+            data["http_options"] = {"timeout": GEMINI_FLEX_TIMEOUT_MS}
+        return data
+
+
+def _set_request_config(kwargs: dict[str, Any], config: Any) -> dict[str, Any]:
+    updated = dict(kwargs)
+    updated["config"] = config
+    return updated
+
+
 def _usage_dict(response: Any) -> dict[str, Any]:
     usage = getattr(response, "usage_metadata", None)
     if not usage:
@@ -88,7 +195,7 @@ def _usage_int(usage: dict[str, Any], *names: str) -> int:
     return 0
 
 
-def _estimate_usd(model: str, usage: dict[str, Any]) -> float | None:
+def _estimate_usd(model: str, usage: dict[str, Any], service_tier: str | None = None) -> float | None:
     price = _MODEL_PRICE_USD_PER_MTOK.get(model)
     if not price:
         return None
@@ -105,6 +212,8 @@ def _estimate_usd(model: str, usage: dict[str, Any]) -> float | None:
         + cached_tokens * price.get("cached_input", price["input"])
         + output_tokens * price["output"]
     ) / 1_000_000
+    if service_tier == "flex":
+        cost *= 0.5
     return round(cost, 8)
 
 
@@ -119,7 +228,8 @@ def log_gemini_usage(
     """Log Gemini token usage without ever failing the caller."""
     usage = _usage_dict(response)
     total_tokens = _usage_int(usage, "total_token_count", "totalTokenCount")
-    estimated_usd = _estimate_usd(model, usage)
+    service_tier = str((extra or {}).get("service_tier") or "").strip().lower() or None
+    estimated_usd = _estimate_usd(model, usage, service_tier=service_tier)
     payload = {
         "feature": feature,
         "model": model,
@@ -201,8 +311,29 @@ def generate_content_logged(
     db: Any = None,
     **kwargs: Any,
 ) -> Any:
-    response = client.models.generate_content(model=model, contents=contents, **kwargs)
-    log_gemini_usage(response, model=model, feature=feature, db=db)
+    use_flex = should_use_flex(feature)
+    call_kwargs = kwargs
+    if use_flex:
+        call_kwargs = _set_request_config(kwargs, _with_service_tier(kwargs.get("config"), "flex"))
+
+    try:
+        response = client.models.generate_content(model=model, contents=contents, **call_kwargs)
+    except Exception as exc:
+        if not (use_flex and GEMINI_FLEX_FALLBACK_TO_STANDARD and _is_flex_capacity_error(exc)):
+            raise
+        print(f"[GeminiFlex] feature={feature} model={model} flex unavailable; retrying standard: {exc}")
+        response = client.models.generate_content(model=model, contents=contents, **kwargs)
+        log_gemini_usage(
+            response,
+            model=model,
+            feature=feature,
+            db=db,
+            extra={"service_tier": "standard", "flex_fallback": True},
+        )
+        return response
+
+    extra = {"service_tier": "flex"} if use_flex else None
+    log_gemini_usage(response, model=model, feature=feature, db=db, extra=extra)
     return response
 
 

@@ -25,6 +25,12 @@ Desde o início/meados de 2025, o Google migrou para as séries Gemini 2.0 e 2.5
 
 - **Compatibilidade:** modelos Flash-Lite (2.0 e 2.5) podem ter limitações ao combinar Function Calling customizado com a tool nativa de Google Search em certas versões de SDK, gerando `400 INVALID_ARGUMENT`.
 - **Preferência:** sempre usar a série 2.5 quando possível; evitar referenciar modelos 1.5.
+- **Flex inference:** chamadas de bastidor e tolerantes a latência passam pelo wrapper `generate_content_logged`, que pode enviar `service_tier=flex` para reduzir custo. O comportamento é controlado por env:
+  - `HERMES_GEMINI_FLEX_ENABLED=0` desativa Flex globalmente.
+  - `HERMES_GEMINI_FLEX_FEATURES=feature.a,feature.b` substitui a allowlist padrão; `*` ativa para todas as chamadas logadas.
+  - `HERMES_GEMINI_FLEX_DISABLED_FEATURES=feature.a` remove features específicas.
+  - `GEMINI_FLEX_FALLBACK_TO_STANDARD=0` desativa fallback automático para Standard quando Flex retorna 429/503.
+  - `GEMINI_FLEX_TIMEOUT_MS` ajusta timeout por requisição Flex (padrão 600000 ms).
 - **Tratamento de erros:**
   - `503 UNAVAILABLE`: alta demanda no modelo lite específico. Pausar e tentar novamente, ou trocar temporariamente pelo Pro correspondente se urgente.
   - `403 PERMISSION_DENIED` (vazamento de API key): garantir que as chaves fiquem em arquivos `.env`, nunca hardcoded em `.py`/`.tsx` que possam ir para produção ou repositório público.

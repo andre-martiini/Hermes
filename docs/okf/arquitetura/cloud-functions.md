@@ -59,7 +59,6 @@ O backend roda em Cloud Functions Python (gen2). Há ~78 funções exportadas em
 | Função | Trigger | O que faz |
 |---|---|---|
 | `processarArquivoIA` | Callable | Analisa/extrai conteúdo de arquivo com IA |
-| `gerarSlidesIA` / `criar_apresentacao_slides` | Callable | Gera apresentação de slides via IA |
 | `criar_formulario_google` | Callable | Cria Google Form vinculado a uma tarefa |
 | `corrigir_sintaxe_mermaid` | Callable | Corrige sintaxe de diagramas Mermaid |
 | `processInvoiceOCR` | Callable | OCR de faturas via Gemini Vision |
@@ -79,12 +78,6 @@ O backend roda em Cloud Functions Python (gen2). Há ~78 funções exportadas em
 | `sintetizarDescricaoAcao` | Callable | Sintetiza descrição automática de uma ação |
 | `analisarInsightProativo` | Callable | Gera recomendações proativas |
 | `processar_correcoes_pendentes` | Scheduler (60 min) | Aplica em lote correções enfileiradas |
-
-### Pesquisa profunda
-| Função | Trigger | O que faz |
-|---|---|---|
-| `startDeepResearch` / `cancelDeepResearch` | Callable | Inicia/cancela pesquisa profunda multi-turno |
-| `deep_research_worker` | Firestore create (`deep_research_tasks/{id}`) | Worker que processa a pesquisa |
 
 ### Relatórios
 | Função | Trigger | O que faz |
@@ -130,18 +123,6 @@ O backend roda em Cloud Functions Python (gen2). Há ~78 funções exportadas em
 | `telegramWebhook` | HTTP request | Recebe updates do bot do Telegram |
 | `on_telegram_inbound` | Firestore create (`telegram_inbound/{id}`) | Processa mensagem recebida do Telegram |
 
-## `functions/slides_orchestrator.py`
-
-Pipeline assíncrono de geração de apresentações: strategist → executor → finalize.
-
-| Função | Trigger | O que faz |
-|---|---|---|
-| `iniciarJobSlides` | Callable | Inicia job de geração de slides |
-| `slideStrategistWorker` | PubSub (`slide-strategist`) | Define estratégia/outline da apresentação |
-| `slideExecutorWorker` | PubSub (`slide-executor`) | Gera SVG/PPTX dos slides |
-| `slideFinalizeWorker` | PubSub (`slide-finalize`) | Finaliza e salva a apresentação |
-| `cancelSlideJob` | Callable | Cancela job em progresso |
-
 ## `functions/security_portals.py`
 
 Portais públicos (sem autenticação Firebase) acessados por links externos — ver tokens de registro em `projetos.public_registration_token`.
@@ -164,7 +145,7 @@ Portais públicos (sem autenticação Firebase) acessados por links externos —
 
 - **Callable (síncrono):** frontend chama via `httpsCallable()`; timeout máximo observado de 540s. Usado para a maioria das ações do usuário (Copiloto, geração de conteúdo, sincronizações sob demanda).
 - **Firestore trigger (assíncrono):** uma escrita dispara processamento em cascata — principal mecanismo de propagação para o grafo de conhecimento (`on_tarefa_concluida_kg`).
-- **PubSub (enfileirado):** usado para pipelines com múltiplos estágios (slides) ou processamento pesado desacoplado da resposta ao usuário (vetorização, artefatos do grafo).
+- **PubSub (enfileirado):** usado para processamento pesado desacoplado da resposta ao usuário (vetorização, artefatos do grafo).
 - **Scheduler (cron):** sincronizações periódicas, reminders, relatórios de custo, limpeza/reset diário.
 - **HTTP request puro:** apenas o webhook do Telegram.
 

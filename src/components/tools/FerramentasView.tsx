@@ -27,7 +27,6 @@ interface FerramentasViewProps {
   showAlert: (title: string, msg: string) => void;
   knowledgeItems: ConhecimentoItem[];
   onUploadFile: (file: File) => Promise<ConhecimentoItem | null>;
-  initialDraftId?: string;
   pendingSharedAudioFile?: File | null;
   onPendingSharedAudioFileConsumed?: () => void;
   pendingSharedVideoFile?: File | null;
@@ -51,7 +50,6 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   showAlert,
   knowledgeItems,
   onUploadFile,
-  initialDraftId,
   pendingSharedAudioFile,
   onPendingSharedAudioFileConsumed,
   pendingSharedVideoFile,

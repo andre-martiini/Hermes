@@ -9,13 +9,13 @@ import {
   formatDate, formatDateLocalISO, 
   GoogleCalendarEvent,
   PoolItem, CustomNotification, HealthExam, ConhecimentoItem, UndoAction, HermesModalProps,
-  ShoppingItem, Projeto, SlideHistoryEntry, BaseConhecimento, TipoAcao, Servico, Toast,
+  ShoppingItem, Projeto, BaseConhecimento, TipoAcao, Servico, Toast,
   HealthTelegramReminder
 } from './types';
 import HealthView from './HealthView';
 import { GoogleHealthService } from './GoogleHealthService';
 import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscriptionTool';
-import { STATUS_COLORS, PROJECT_COLORS, SLIDES_HISTORY_KEY } from './constants';
+import { STATUS_COLORS, PROJECT_COLORS } from './constants';
 import { db, functions, auth, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, getDoc, getDocs, where } from 'firebase/firestore';
@@ -1038,8 +1038,7 @@ const App: React.FC = () => {
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
-  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'whatsapp_assistant' | 'diagnostico' | 'pop_manager' | 'sipac_tracking' | null>(null);
-  const [initialDraftId, setInitialDraftId] = useState<string | undefined>(undefined);
+  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'whatsapp_assistant' | 'diagnostico' | 'pop_manager' | 'sipac_tracking' | null>(null);
   const [initialDiagnosisId, setInitialDiagnosisId] = useState<string | undefined>(undefined);
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
   const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
@@ -2987,16 +2986,6 @@ const App: React.FC = () => {
     } catch (error: any) {
       console.error("Erro no processamento IA:", error);
       return { success: false, error: error.message };
-    }
-  };
-  const handleGenerateSlides = async (text: string) => {
-    const gerarSlidesIA = httpsCallable(functions, 'gerarSlidesIA');
-    try {
-      const result = await gerarSlidesIA({ rascunho: text });
-      return result.data;
-    } catch (error: any) {
-      console.error("Erro ao gerar slides:", error);
-      throw error;
     }
   };
   const generateDynamicTagsForTask = async (
@@ -5500,7 +5489,6 @@ const App: React.FC = () => {
                     showAlert={showAlert}
                     knowledgeItems={knowledgeItems}
                     onUploadFile={handleUploadKnowledgeFile}
-                    initialDraftId={initialDraftId}
                     initialDiagnosisId={initialDiagnosisId}
                     pendingSharedAudioFile={pendingSharedAudioFile}
                     onPendingSharedAudioFileConsumed={() => setPendingSharedAudioFile(null)}
@@ -6398,10 +6386,7 @@ const App: React.FC = () => {
                   setSelectedTask(null);
                   setActiveModule('acoes');
                   setViewMode('ferramentas');
-                  if (tool === 'slides') {
-                    setActiveFerramenta('slides');
-                    setInitialDraftId(id);
-                  } else if (tool === 'diagnostico') {
+                  if (tool === 'diagnostico') {
                     setActiveFerramenta('diagnostico');
                     setInitialDiagnosisId(id);
                   }
@@ -6749,10 +6734,7 @@ const App: React.FC = () => {
             setCopilotoMode('default');
             setActiveModule('acoes');
             setViewMode('ferramentas');
-            if (tool === 'slides') {
-              setActiveFerramenta('slides');
-              setInitialDraftId(id);
-            } else if (tool === 'diagnostico') {
+            if (tool === 'diagnostico') {
               setActiveFerramenta('diagnostico');
               setInitialDiagnosisId(id);
             }

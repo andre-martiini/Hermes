@@ -10,8 +10,7 @@ import { buildDiaryRichNote, ensureHttpUrl, getRenamedFileName, parseDiaryRichNo
 import { NotificationCenter } from '../components/ui/UIComponents';
 import { db, functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
-import { getAuth } from 'firebase/auth';
-import { setDoc, doc, onSnapshot, addDoc, collection, serverTimestamp, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
+import { setDoc, doc, addDoc, collection, serverTimestamp, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 import { DiarioBordoUI } from './DiarioBordoUI';
 import { SpeedDialMenu } from '../components/ui/SpeedDialMenu';
 import { HermesCopilotoDrawer } from '../components/tools/HermesCopilotoDrawer';
@@ -334,72 +333,11 @@ export const TaskExecutionView = ({
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(currentTaskData.chat_history || []);
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
-  const [pendingDeepResearchId, setPendingDeepResearchId] = useState<string | null>(null);
-  const [isDeepResearching, setIsDeepResearching] = useState(false);
-  const [deepResearchTopic, setDeepResearchTopic] = useState('');
-  const [showDeepResearchModal, setShowDeepResearchModal] = useState(false);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [showArtifacts, setShowArtifacts] = useState(false);
   const [copiedArtifactId, setCopiedArtifactId] = useState<string | null>(null);
   const [isChatFocused, setIsChatFocused] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null!);
-
-  useEffect(() => {
-    if (!pendingDeepResearchId) return;
-
-    // Fallback timer aligned with backend runtime envelope.
-    const fallbackTimer = setTimeout(() => {
-      setIsDeepResearching(false);
-      showToast('A pesquisa profunda pode ter falhado por timeout (mais de 12 minutos).', 'error');
-      setPendingDeepResearchId(null);
-    }, 12 * 60 * 1000);
-
-    const unsub = onSnapshot(
-      doc(db, 'deep_research_tasks', pendingDeepResearchId),
-      (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        if (data.status === 'COMPLETED' || data.status === 'FAILED' || data.status === 'CANCELLED') {
-          setIsDeepResearching(false);
-          if (data.status === 'COMPLETED') {
-            const links = [
-              data.html_link ? `HTML: ${data.html_link}` : null,
-              data.pdf_link && data.pdf_link !== 'N/A' ? `PDF: ${data.pdf_link}` : null,
-            ].filter(Boolean).join('\n');
-            const assistantMsg: ChatMessage = {
-              role: 'assistant',
-              content: `Pesquisa profunda concluída e salva no acervo global.${links ? `\n\n${links}` : ''}`,
-            };
-            setChatMessages(prev => {
-              const updated = [...prev, assistantMsg];
-              onSave(task.id, { chat_history: updated });
-              return updated;
-            });
-            showToast('Pesquisa Profunda concluída e salva no acervo global.', 'success');
-          } else if (data.status === 'CANCELLED') {
-            showToast('Pesquisa Profunda cancelada.', 'info');
-          } else {
-            showToast('Pesquisa Profunda falhou.', 'error');
-          }
-          setPendingDeepResearchId(null);
-          clearTimeout(fallbackTimer);
-        }
-      }
-      },
-      (err) => {
-        console.error('[Firestore] Listener falhou (deep_research_tasks):', err);
-        setIsDeepResearching(false);
-        setPendingDeepResearchId(null);
-        clearTimeout(fallbackTimer);
-        showToast('Nao foi possivel acompanhar a pesquisa profunda por permissao do Firestore.', 'error');
-      }
-    );
-
-    return () => {
-      unsub();
-      clearTimeout(fallbackTimer);
-    };
-  }, [pendingDeepResearchId, showToast, onSave, task.id]);
 
   useEffect(() => {
     setChatMessages(currentTaskData.chat_history || []);
@@ -1227,76 +1165,7 @@ export const TaskExecutionView = ({
     if (!msg) return;
     setChatInput('');
 
-    if (msg.startsWith('/pesquisa-profunda')) {
-      const topic = msg.replace('/pesquisa-profunda', '').trim();
-      if (!topic) {
-        showToast('Por favor, informe um tema. Ex: /pesquisa-profunda Inteligência Artificial', 'info');
-        return;
-      }
-      setDeepResearchTopic(topic);
-      setShowDeepResearchModal(true);
-      return;
-    }
-
-    if (msg.startsWith('/cancelar-pesquisa')) {
-      const parts = msg.split(' ');
-      const idToCancel = parts.length > 1 ? parts[1] : pendingDeepResearchId;
-      if (!idToCancel) {
-        showToast('Nenhuma pesquisa em andamento ou ID inválido.', 'info');
-        return;
-      }
-      try {
-        const fn = httpsCallable(functions, 'cancelDeepResearch');
-        await fn({ taskId: idToCancel });
-        showToast('Solicitação de cancelamento enviada.', 'success');
-      } catch (e) {
-        console.error('Erro ao cancelar:', e);
-        showToast('Erro ao cancelar pesquisa.', 'error');
-      }
-      return;
-    }
-
     sendChatMessage(msg);
-  };
-
-  const confirmDeepResearch = async () => {
-    const topic = deepResearchTopic.trim();
-    if (!topic) {
-      setShowDeepResearchModal(false);
-      showToast('Por favor, informe um tema para a pesquisa profunda.', 'info');
-      return;
-    }
-
-    const auth = getAuth();
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      setShowDeepResearchModal(false);
-      showToast('Você precisa estar autenticado para iniciar a pesquisa profunda.', 'error');
-      return;
-    }
-
-    setShowDeepResearchModal(false);
-    setIsDeepResearching(true);
-
-    // Add to chat immediately
-    const userMsg: ChatMessage = { role: 'user', content: `/pesquisa-profunda ${topic}` };
-    const sysMsg: ChatMessage = { role: 'assistant', content: `Iniciando pesquisa profunda sobre: "${topic}". Isso pode levar cerca de 8 a 9 minutos. Use /cancelar-pesquisa para interromper.` };
-    const updatedHistory = [...chatMessages, userMsg, sysMsg];
-    setChatMessages(updatedHistory);
-    onSave(task.id, { chat_history: updatedHistory });
-
-    try {
-      const fn = httpsCallable(functions, 'startDeepResearch');
-      const res = await fn({ topic });
-      const data = res.data as { taskId: string };
-      setPendingDeepResearchId(data.taskId);
-      showToast(`Pesquisa iniciada. ID: ${data.taskId}`, 'success');
-      setDeepResearchTopic('');
-    } catch (e) {
-      console.error(e);
-      showToast('Erro ao iniciar pesquisa profunda.', 'error');
-      setIsDeepResearching(false);
-    }
   };
 
   const handleSummarizeWithAI = async () => {
@@ -2660,61 +2529,6 @@ export const TaskExecutionView = ({
       {/* ══════════════════════════════════════════════════════════
           NOTIFICATION CENTER
       ══════════════════════════════════════════════════════════ */}
-      {showDeepResearchModal && (
-        <div className="fixed inset-0 z-[340] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className={`w-full max-w-lg rounded-none shadow-2xl border-2 p-8 ${isDark ? 'bg-[#0a0a0a] border-white/20 text-white' : 'bg-white border-slate-900 text-slate-900'}`}>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-base font-black tracking-tight">Iniciar Pesquisa Profunda</h3>
-                <p className={`mt-1 text-xs leading-relaxed ${mutedText}`}>
-                  A execução é assíncrona e pode levar cerca de 8 a 9 minutos. O resultado será salvo no acervo global.
-                </p>
-              </div>
-              <button
-                onClick={() => setShowDeepResearchModal(false)}
-                className={`p-2 rounded-none transition-all ${isDark ? 'hover:bg-white/10 text-white/40' : 'hover:bg-slate-100 text-slate-400'}`}
-                aria-label="Fechar modal"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="mt-5 space-y-2">
-              <label className={labelCls}>Tema da Pesquisa</label>
-              <textarea
-                value={deepResearchTopic}
-                onChange={e => setDeepResearchTopic(e.target.value)}
-                placeholder="Ex.: panorama regulatório e jurisprudencial sobre uso de IA generativa na administração pública"
-                className={`min-h-[140px] w-full resize-y rounded-none border p-4 text-sm outline-none transition-all ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/25' : 'bg-slate-50 border-border-grid text-slate-900 placeholder:text-slate-400'}`}
-              />
-              <p className={`text-[10px] ${mutedText}`}>
-                Use um tema específico. Quanto melhor o escopo, melhor o relatório final.
-              </p>
-            </div>
-
-            <div className="mt-6 flex items-center justify-end gap-3">
-              <button
-                onClick={() => setShowDeepResearchModal(false)}
-                className={`px-4 py-2 text-sm font-bold rounded-none transition-all ${isDark ? 'text-white/40 hover:text-white/70' : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={confirmDeepResearch}
-                disabled={isDeepResearching || !deepResearchTopic.trim()}
-                className="px-5 py-2 rounded-none bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-black shadow-lg transition-all"
-              >
-                Iniciar pesquisa
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-
-
       {/* ══════════════════════════════════════════════════════════
           INSIGHT MODAL
       ══════════════════════════════════════════════════════════ */}

@@ -52,19 +52,13 @@ Documentos vetorizados por `process_vectorization` — uso decrescente, mantido 
 ## Copiloto e jobs de IA assíncronos
 
 ### `sessoes_copiloto` (+ subcoleção `mensagens`)
-Sessões de conversa multi-turno com o Copiloto: `userId`, `lastMessageAt`, `task_id`, `session_id`; subcoleção `sessoes_copiloto/{id}/mensagens` guarda o histórico (`ChatMessage`: role, content, timestamp). Escrito por `askCopilotoHermes`, `deep_research_worker`. Índice: `userId+lastMessageAt` (DESC).
+Sessões de conversa multi-turno com o Copiloto: `userId`, `lastMessageAt`, `task_id`, `session_id`; subcoleção `sessoes_copiloto/{id}/mensagens` guarda o histórico (`ChatMessage`: role, content, timestamp). Escrito por `askCopilotoHermes`. Índice: `userId+lastMessageAt` (DESC).
 
 ### `usuarios`
 Perfis de IA por usuário (preferências, sinais aprendidos): criado por `_bootstrap_user_ai_profile`, atualizado por `_save_user_profile_signal`.
 
 ### `correcoes_pendentes`
 Fila de correções a aplicar em tarefas, detectadas por callables diversas; processada em lote por `processar_correcoes_pendentes` (scheduler, a cada 60 min).
-
-### `deep_research_tasks`
-Tarefas de pesquisa profunda do Copiloto: `query`, `status`, `user_id`, `timestamp`. Criado por `startDeepResearch`, processado por `deep_research_worker`, cancelável via `cancelDeepResearch`.
-
-### `slide_jobs` e `slides_drafts`
-Jobs e rascunhos de geração de apresentações (pipeline `slides_orchestrator.py`: strategist → executor → finalize). `slide_jobs`: `userId`, `timestamp`, `job_id`, `output_file_id`. Índice: `userId+timestamp` (DESC).
 
 ### `long_transcriptions`
 Transcrições de áudio longo via Google Speech-to-Text: `userId`, `createdAt`. Criado por `transcreverAudio` e pelo trigger de Storage `on_long_transcription_uploaded`. Índice: `userId+createdAt` (DESC).
@@ -129,7 +123,7 @@ Exames e consultas médicas: `titulo`, `doutor_local`, `resultados`, `data`, `ti
 |---|---|---|
 | `notificacoes` | Notificações do app, espelhadas no Telegram | `emit_notification_backend`, trigger `on_notificacao_created` |
 | `system_reminders` | Cache para evitar duplicar reminders já enviados | `check_and_send_reminders` |
-| `relatorios` | Relatórios gerados (PGD, resumos, pesquisa profunda) | `salvarRelatorioNoDrive`, `startDeepResearch`, callables de resumo |
+| `relatorios` | Relatórios gerados (PGD e resumos) | `salvarRelatorioNoDrive`, callables de resumo |
 | `google_calendar_events` | Eventos do Google Calendar sincronizados | `sync_google_calendar`, `run_full_sync` |
 | `sipac_processos` | Processos SIPAC sincronizados (scraper externo via PubSub) | trigger `on_processo_updated` |
 | `whatsapp_outbox` | Fila de mensagens WhatsApp agendadas | `schedule_whatsapp_message` (tools) |

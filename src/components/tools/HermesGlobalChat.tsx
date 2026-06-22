@@ -770,10 +770,6 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
               </button>
             );
           }
-          if (href.includes('tool:slides:')) {
-            const id = href.split('tool:slides:')[1];
-            return <button type="button" onClick={() => onOpenTool?.('slides', id)} className="mx-1 inline-flex border border-border-grid px-2 py-1 font-mono text-[10px] font-black uppercase tracking-widest text-violet-600">{props.children}</button>;
-          }
           if (href.includes('tool:diagnosis:')) {
             const id = href.split('tool:diagnosis:')[1];
             return <button type="button" onClick={() => onOpenTool?.('diagnostico', id)} className="mx-1 inline-flex border border-border-grid px-2 py-1 font-mono text-[10px] font-black uppercase tracking-widest text-blue-600">{props.children}</button>;
