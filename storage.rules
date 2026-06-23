@@ -15,6 +15,18 @@ service firebase.storage {
       allow update: if false;
     }
 
+    // Transcrição rápida: arquivo efêmero usado para contornar o limite de 32MB
+    // de payload das Cloud Functions. O backend baixa, processa e expurga.
+    match /quick_transcriptions/{userId}/{fileName} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null
+                    && request.auth.uid == userId
+                    && (request.resource.contentType.matches('audio/.*')
+                        || request.resource.contentType.matches('video/.*'));
+      allow delete: if request.auth != null && request.auth.uid == userId;
+      allow update: if false;
+    }
+
     // Demais caminhos: sem acesso direto pelo cliente (backend usa Admin SDK e ignora regras).
     match /{allPaths=**} {
       allow read, write: if false;

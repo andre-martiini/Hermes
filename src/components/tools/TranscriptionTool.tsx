@@ -1,6 +1,7 @@
 ﻿import React, { useState, useRef, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '@/firebase';
+import { ref, uploadBytes } from 'firebase/storage';
+import { functions, storage, auth } from '@/firebase';
 
 interface TranscriptionToolProps {
   onBack: () => void;
@@ -132,8 +133,8 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
   };
 
   const handleFileSelection = (selectedFile: File) => {
-    if (selectedFile.size > 40 * 1024 * 1024) {
-      showToast("Arquivo muito grande (máx. 40MB). Para vídeos/áudios longos, use Transcrições Longas.", "error");
+    if (selectedFile.size > 200 * 1024 * 1024) {
+      showToast("Arquivo muito grande (máx. 200MB). Para vídeos/áudios muito longos, use Transcrições Longas.", "error");
       return;
     }
     setFile(selectedFile);
@@ -152,38 +153,31 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
   const handleTranscribe = async () => {
     if (!file) return;
 
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      showToast("Você precisa estar autenticado para transcrever.", "error");
+      return;
+    }
+
     setIsProcessing(true);
     try {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onloadend = async () => {
-        try {
-          const base64String = (reader.result as string).split(',')[1];
-          const extension = `.${file.name.split('.').pop()?.toLowerCase() || 'm4a'}`;
+      const extension = `.${file.name.split('.').pop()?.toLowerCase() || 'm4a'}`;
+      const storagePath = `quick_transcriptions/${uid}/${Date.now()}${extension}`;
 
-          const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
-          const response = await transcribeFunc({
-            audioBase64: base64String,
-            extension: extension
-          });
+      // Upload direto pro Storage: evita o limite de 32MB de payload das Cloud Functions.
+      await uploadBytes(ref(storage, storagePath), file, { contentType: file.type || 'application/octet-stream' });
 
-          const data = response.data as { raw: string, refined: string };
-          setTranscription(data);
-          saveToHistory(data, file.name, file.size);
-          showToast("Transcrição concluída!", "success");
-        } catch (error) {
-          console.error("Erro ao transcrever:", error);
-          showToast("Erro ao processar áudio.", "error");
-        } finally {
-          setIsProcessing(false);
-        }
-      };
-      reader.onerror = () => {
-        showToast("Erro ao ler arquivo.", "error");
-        setIsProcessing(false);
-      }
+      const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
+      const response = await transcribeFunc({ storagePath, extension });
+
+      const data = response.data as { raw: string, refined: string };
+      setTranscription(data);
+      saveToHistory(data, file.name, file.size);
+      showToast("Transcrição concluída!", "success");
     } catch (error) {
-      console.error(error);
+      console.error("Erro ao transcrever:", error);
+      showToast("Erro ao processar áudio.", "error");
+    } finally {
       setIsProcessing(false);
     }
   };

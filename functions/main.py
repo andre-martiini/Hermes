@@ -3634,7 +3634,7 @@ _TRANSCRICAO_RAPIDA_VIDEO_EXTS = {
 
 @https_fn.on_call(
     memory=options.MemoryOption.GB_1,
-    timeout_sec=180
+    timeout_sec=300
 )
 
 
@@ -3647,13 +3647,15 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
 
 
-    Recebe áudio ou vídeo em Base64, transcreve com Groq (Whisper) e refina com Gemini.
+    Recebe o caminho de um áudio ou vídeo já enviado para `quick_transcriptions/{uid}/{nome}`
 
-    Quando o arquivo é vídeo, extrai a faixa de áudio com FFmpeg antes de transcrever.
+    no Storage, transcreve com Groq (Whisper) e refina com Gemini. Quando o arquivo é vídeo,
+
+    extrai a faixa de áudio com FFmpeg antes de transcrever. O binário é expurgado do Storage
+
+    ao final (sucesso ou erro).
 
     """
-
-    import base64
 
     import subprocess
 
@@ -3663,9 +3665,19 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
     import imageio_ffmpeg
 
+    from firebase_admin import storage as admin_storage
+
     from groq import Groq
 
     from google import genai
+
+
+
+    if not req.auth:
+
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="Login necessário.")
+
+    uid = req.auth.uid
 
 
 
@@ -3711,7 +3723,7 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
     data = req.data
 
-    audio_base64 = data.get('audioBase64')
+    storage_path = data.get('storagePath')
 
     extension = data.get('extension', '.m4a')
 
@@ -3723,9 +3735,15 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
 
 
-    if not audio_base64:
+    if not storage_path:
 
-        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="Áudio não fornecido.")
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="Caminho do arquivo não fornecido.")
+
+
+
+    if not storage_path.startswith(f"quick_transcriptions/{uid}/"):
+
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.PERMISSION_DENIED, message="Caminho de arquivo inválido.")
 
 
 
@@ -3733,17 +3751,19 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
     extracted_audio_filename = None
 
+    blob = None
+
     try:
 
-        # 1. Decodificar Base64 para arquivo temporário
+        # 1. Baixar o binário do Storage para arquivo temporário
 
-        audio_data = base64.b64decode(audio_base64)
+        blob = admin_storage.bucket().blob(storage_path)
 
-        with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as temp_audio:
+        fd, temp_filename = tempfile.mkstemp(suffix=extension)
 
-            temp_audio.write(audio_data)
+        os.close(fd)
 
-            temp_filename = temp_audio.name
+        blob.download_to_filename(temp_filename)
 
 
 
@@ -3838,6 +3858,16 @@ def transcreverAudio(req: https_fn.CallableRequest):
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=f"Falha ao processar áudio: {str(e)}")
 
     finally:
+
+        if blob is not None:
+
+            try:
+
+                blob.delete()
+
+            except Exception as e:
+
+                print(f"Falha ao expurgar {storage_path}: {e}")
 
         if temp_filename and os.path.exists(temp_filename):
 
