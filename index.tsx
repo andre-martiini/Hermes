@@ -2906,14 +2906,19 @@ const App: React.FC = () => {
     }
   };
   const handleDeleteBase = async (id: string) => {
-    try {
-      // TODO: Add confirmation dialog
-      await deleteDoc(doc(db, 'knowledge_bases', id));
-      showToast("Base de conhecimento removida.", "info");
-    } catch (e) {
-      console.error(e);
-      showToast("Erro ao remover base de conhecimento.", "error");
-    }
+    showConfirm(
+      "Confirmar Exclusão",
+      "Deseja realmente remover esta base de conhecimento?",
+      async () => {
+        try {
+          await deleteDoc(doc(db, 'knowledge_bases', id));
+          showToast("Base de conhecimento removida.", "info");
+        } catch (e) {
+          console.error(e);
+          showToast("Erro ao remover base de conhecimento.", "error");
+        }
+      }
+    );
   };
   const handleRenameActionFromKnowledge = async (taskId: string, title: string) => {
     const trimmedTitle = title.trim();
