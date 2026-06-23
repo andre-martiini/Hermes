@@ -357,6 +357,30 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
               value={textDraft}
               onChange={(e) => setTextDraft(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') addTextItem(); }}
+              onPaste={async (e) => {
+                const pastedItems = e.clipboardData.items;
+                let audioFile: File | null = null;
+                for (let i = 0; i < pastedItems.length; i++) {
+                  if (pastedItems[i].type.startsWith('audio/') || pastedItems[i].type.startsWith('video/')) {
+                    audioFile = pastedItems[i].getAsFile();
+                    break;
+                  }
+                }
+                
+                // Executa apenas se for desktop (ex: largura da janela >= 768px)
+                if (audioFile && window.innerWidth >= 768) {
+                  e.preventDefault();
+                  showToast('Áudio colado! Transcrevendo automaticamente...', 'info');
+                  try {
+                    const result = await transcribeFile(audioFile, () => {});
+                    setTextDraft((prev) => prev ? prev + '\n' + result.refined : result.refined);
+                    showToast('Áudio transcrito com sucesso!', 'success');
+                  } catch (error) {
+                    console.error('[BatchTranscriptionTool] Erro na transcrição automática:', error);
+                    showToast('Erro ao transcrever o áudio.', 'error');
+                  }
+                }
+              }}
               placeholder="Cole aqui uma mensagem de texto da conversa..."
               className={`flex-1 px-4 py-2.5 border rounded-none-none text-sm font-medium outline-none ${
                 isDark ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-900 placeholder:text-slate-400'
