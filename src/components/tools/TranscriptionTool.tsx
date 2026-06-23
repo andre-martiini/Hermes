@@ -1,7 +1,11 @@
 ﻿import React, { useState, useRef, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { ref, uploadBytes } from 'firebase/storage';
+import { ref, uploadBytesResumable } from 'firebase/storage';
 import { functions, storage, auth } from '@/firebase';
+
+// A partir deste tempo de processamento no backend (upload já concluído),
+// exibimos um aviso de que o processo continua em andamento (e não travou).
+const PROCESSING_STILL_RUNNING_THRESHOLD_MS = 15000;
 
 interface TranscriptionToolProps {
   onBack: () => void;
@@ -32,6 +36,8 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
   const [isProcessing, setIsProcessing] = useState(false);
   const [transcription, setTranscription] = useState<{ raw: string, refined: string } | null>(initialText ? { raw: initialText, refined: '' } : null);
   const [dragOver, setDragOver] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [isStillProcessing, setIsStillProcessing] = useState(false);
   const [history, setHistory] = useState<TranscriptionHistoryEntry[]>([]);
   const [pendingDeleteHistoryId, setPendingDeleteHistoryId] = useState<string | null>(null);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
@@ -160,12 +166,29 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
     }
 
     setIsProcessing(true);
+    setUploadProgress(0);
+    setIsStillProcessing(false);
+    let stillProcessingTimer: ReturnType<typeof setTimeout> | null = null;
     try {
       const extension = `.${file.name.split('.').pop()?.toLowerCase() || 'm4a'}`;
       const storagePath = `quick_transcriptions/${uid}/${Date.now()}${extension}`;
 
       // Upload direto pro Storage: evita o limite de 32MB de payload das Cloud Functions.
-      await uploadBytes(ref(storage, storagePath), file, { contentType: file.type || 'application/octet-stream' });
+      await new Promise<void>((resolve, reject) => {
+        const task = uploadBytesResumable(ref(storage, storagePath), file, { contentType: file.type || 'application/octet-stream' });
+        task.on(
+          'state_changed',
+          (snapshot) => {
+            setUploadProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
+          },
+          (error) => reject(error),
+          () => resolve(),
+        );
+      });
+
+      // Upload concluído: a partir daqui o backend processa (extração de áudio, Groq, Gemini).
+      setUploadProgress(null);
+      stillProcessingTimer = setTimeout(() => setIsStillProcessing(true), PROCESSING_STILL_RUNNING_THRESHOLD_MS);
 
       const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
       const response = await transcribeFunc({ storagePath, extension });
@@ -178,6 +201,9 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
       console.error("Erro ao transcrever:", error);
       showToast("Erro ao processar áudio.", "error");
     } finally {
+      if (stillProcessingTimer) clearTimeout(stillProcessingTimer);
+      setUploadProgress(null);
+      setIsStillProcessing(false);
       setIsProcessing(false);
     }
   };
@@ -281,10 +307,27 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                          <audio controls src={audioUrl} className="w-full mt-2" />
                        )
                      )}
+                     {isProcessing && (
+                       <div className="w-full space-y-1.5">
+                         {uploadProgress !== null ? (
+                           <>
+                             <div className={`h-1.5 w-full rounded-none-none overflow-hidden ${isDarkTheme ? 'bg-slate-800' : 'bg-slate-200'}`}>
+                               <div className="h-full bg-blue-500 transition-all" style={{ width: `${uploadProgress}%` }} />
+                             </div>
+                             <p className={`text-[10px] font-bold ${tertiaryTextClass}`}>Enviando arquivo... {uploadProgress}%</p>
+                           </>
+                         ) : (
+                           <p className={`text-[10px] font-bold ${tertiaryTextClass}`}>
+                             {isStillProcessing ? 'Ainda processando... arquivos maiores podem levar mais tempo, não travou.' : 'Processando transcrição...'}
+                           </p>
+                         )}
+                       </div>
+                     )}
                      <div className="flex flex-col sm:flex-row w-full gap-3 mt-2">
                        <button
                          onClick={() => { setFile(null); setAudioUrl(null); setTranscription(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
-                         className={`flex-1 px-5 py-3 rounded-none-none md:rounded-none-none text-[10px] font-black uppercase tracking-widest transition-all border ${buttonNeutralClass}`}
+                         disabled={isProcessing}
+                         className={`flex-1 px-5 py-3 rounded-none-none md:rounded-none-none text-[10px] font-black uppercase tracking-widest transition-all border ${buttonNeutralClass} ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
                        >
                          Remover
                        </button>
