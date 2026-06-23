@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '@/firebase';
+import { ref, uploadBytes } from 'firebase/storage';
+import { functions, storage, auth } from '@/firebase';
 
 interface BatchTranscriptionToolProps {
   onBack: () => void;
@@ -188,15 +189,17 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
   };
 
   const transcribeFile = async (file: File): Promise<{ raw: string; refined: string }> => {
-    const base64 = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+    const uid = auth.currentUser?.uid;
+    if (!uid) throw new Error('Você precisa estar autenticado para transcrever.');
+
     const extension = `.${file.name.split('.').pop()?.toLowerCase() || 'm4a'}`;
+    const storagePath = `quick_transcriptions/${uid}/${Date.now()}_${Math.random().toString(36).slice(2)}${extension}`;
+
+    // Upload direto pro Storage: evita o limite de 32MB de payload das Cloud Functions.
+    await uploadBytes(ref(storage, storagePath), file, { contentType: file.type || 'application/octet-stream' });
+
     const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
-    const response = await transcribeFunc({ audioBase64: base64, extension });
+    const response = await transcribeFunc({ storagePath, extension });
     return response.data as { raw: string; refined: string };
   };
 
