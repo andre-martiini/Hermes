@@ -4,6 +4,7 @@ import { TranscriptionTool } from './TranscriptionTool';
 import { MeetingTranscriptionTool } from './MeetingTranscriptionTool';
 import { PopManagerTool } from './PopManagerTool';
 import { SipacTrackingTool } from './SipacTrackingTool';
+import { BatchTranscriptionTool } from './BatchTranscriptionTool';
 
 export interface ToolParameterSchema {
     type: string;
@@ -115,6 +116,22 @@ export const toolsRegistry: ToolMetadata[] = [
             }
         },
         component: TranscriptionTool
+    },
+    {
+        id: 'BatchTranscriptionTool',
+        ui_metadata: {
+            title: 'Transcrição em Lote',
+            description: 'Transcreva várias mensagens do WhatsApp (áudio, vídeo e texto) em ordem e gere um documento único.',
+            icon: 'transcription',
+            category: 'Produtividade',
+            tag: '@BatchTranscriptionTool'
+        },
+        keys: ['lote', 'transcrição em lote', 'várias mensagens', 'sequência de áudios', 'transcrever vários'],
+        parametersSchema: {
+            type: 'object',
+            properties: {}
+        },
+        component: BatchTranscriptionTool
     },
 
     {

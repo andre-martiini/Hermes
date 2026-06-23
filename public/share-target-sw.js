@@ -13,6 +13,10 @@ self.addEventListener('fetch', (event) => {
           const filesToStore = [];
           if (audioFile && audioFile.size > 0) filesToStore.push({ file: audioFile, type: 'audio' });
           if (videoFile && videoFile.size > 0) filesToStore.push({ file: videoFile, type: 'video' });
+          // Mensagem de texto compartilhada sem arquivo (ex: texto do WhatsApp) também entra na fila do lote.
+          if (filesToStore.length === 0 && ((text && text.trim()) || (title && title.trim()))) {
+            filesToStore.push({ file: null, type: 'text' });
+          }
           
           // Abre o IndexedDB
           const openRequest = indexedDB.open('hermes-share-db', 1);

@@ -132,12 +132,9 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
   };
 
   const handleFileSelection = (selectedFile: File) => {
-    const ext = selectedFile.name.split('.').pop()?.toLowerCase();
-    if (selectedFile.size > 25 * 1024 * 1024) {
-        if (selectedFile.size > 6 * 1024 * 1024) {
-          showToast("Arquivo muito grande. Limite sugerido: 6MB.", "error");
-          return;
-        }
+    if (selectedFile.size > 40 * 1024 * 1024) {
+      showToast("Arquivo muito grande (máx. 40MB). Para vídeos/áudios longos, use Transcrições Longas.", "error");
+      return;
     }
     setFile(selectedFile);
     setAudioUrl(URL.createObjectURL(selectedFile));
@@ -266,7 +263,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                   type="file"
                   ref={fileInputRef}
                   className="hidden"
-                  accept="audio/*,video/mp4,video/mpeg"
+                  accept="audio/*,video/*"
                   onChange={(e) => {
                     if (e.target.files && e.target.files.length > 0) {
                       handleFileSelection(e.target.files[0]);
@@ -284,7 +281,11 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                        <p className={`text-sm font-bold ${secondaryTextClass}`}>{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                      </div>
                      {audioUrl && (
-                       <audio controls src={audioUrl} className="w-full mt-2" />
+                       file.type.startsWith('video/') ? (
+                         <video controls src={audioUrl} className="w-full mt-2 max-h-48 rounded-none-none" />
+                       ) : (
+                         <audio controls src={audioUrl} className="w-full mt-2" />
+                       )
                      )}
                      <div className="flex flex-col sm:flex-row w-full gap-3 mt-2">
                        <button
@@ -308,11 +309,11 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                        <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
                     </div>
                     <div className="space-y-1">
-                      <p className={`text-lg md:text-xl font-black leading-tight ${primaryTextClass}`}>Arraste e solte o áudio aqui</p>
-                      <p className={`text-sm md:text-base font-medium ${secondaryTextClass}`}>Ou clique para selecionar (MP3, OGG, WAV, MP4)</p>
+                      <p className={`text-lg md:text-xl font-black leading-tight ${primaryTextClass}`}>Arraste e solte o áudio ou vídeo aqui</p>
+                      <p className={`text-sm md:text-base font-medium ${secondaryTextClass}`}>Ou clique para selecionar (MP3, OGG, WAV, MP4, MOV...)</p>
                       <p className={`text-xs md:text-sm font-semibold mt-2 ${tertiaryTextClass}`}>Você também pode colar (`Ctrl+V`) o arquivo direto.</p>
                     </div>
-                    <label className={`w-full sm:w-auto px-6 py-3 border rounded-none-none md:rounded-none-none text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer select-none text-center ${fileButtonClass}`}><input type="file" className="hidden" accept="audio/*,video/mp4,video/mpeg" onChange={(e) => { if (e.target.files && e.target.files.length > 0) handleFileSelection(e.target.files[0]); }} />Selecionar Arquivo</label>
+                    <label className={`w-full sm:w-auto px-6 py-3 border rounded-none-none md:rounded-none-none text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer select-none text-center ${fileButtonClass}`}><input type="file" className="hidden" accept="audio/*,video/*" onChange={(e) => { if (e.target.files && e.target.files.length > 0) handleFileSelection(e.target.files[0]); }} />Selecionar Arquivo</label>
                   </>
                 )}
               </div>
