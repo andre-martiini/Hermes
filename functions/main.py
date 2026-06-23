@@ -3627,7 +3627,15 @@ def removerLembreteDoGoogleTasks(req: https_fn.CallableRequest):
     )
 
 
-@https_fn.on_call()
+_TRANSCRICAO_RAPIDA_VIDEO_EXTS = {
+    "mp4", "mov", "mkv", "avi", "webm", "m4v", "wmv", "flv", "mpeg", "mpg", "3gp", "ts"
+}
+
+
+@https_fn.on_call(
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=180
+)
 
 
 
@@ -3639,15 +3647,21 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
 
 
-    Recebe áudio em Base64, transcreve com Groq (Whisper) e refina com Gemini.
+    Recebe áudio ou vídeo em Base64, transcreve com Groq (Whisper) e refina com Gemini.
+
+    Quando o arquivo é vídeo, extrai a faixa de áudio com FFmpeg antes de transcrever.
 
     """
 
     import base64
 
+    import subprocess
+
     import tempfile
 
     import os
+
+    import imageio_ffmpeg
 
     from groq import Groq
 
@@ -3717,6 +3731,8 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
     temp_filename = None
 
+    extracted_audio_filename = None
+
     try:
 
         # 1. Decodificar Base64 para arquivo temporário
@@ -3731,15 +3747,43 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
 
 
+        # 1.1 Se for vídeo, extrair apenas a faixa de áudio antes de transcrever
+
+        is_video = extension.lstrip('.').lower() in _TRANSCRICAO_RAPIDA_VIDEO_EXTS
+
+        transcribe_filename = temp_filename
+
+        if is_video:
+
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+            fd, extracted_audio_filename = tempfile.mkstemp(suffix=".m4a")
+
+            os.close(fd)
+
+            subprocess.run(
+
+                [ffmpeg_exe, "-y", "-i", temp_filename, "-vn", "-acodec", "aac", "-b:a", "128k", extracted_audio_filename],
+
+                check=True,
+
+                capture_output=True,
+
+            )
+
+            transcribe_filename = extracted_audio_filename
+
+
+
         # 2. Transcrição via Groq (Whisper Large V3 Turbo)
 
         client = Groq(api_key=GROQ_API_KEY)
 
-        with open(temp_filename, "rb") as file_stream:
+        with open(transcribe_filename, "rb") as file_stream:
 
             transcription = client.audio.transcriptions.create(
 
-                file=(os.path.basename(temp_filename), file_stream), 
+                file=(os.path.basename(transcribe_filename), file_stream),
 
                 model="whisper-large-v3-turbo",
 
@@ -3800,6 +3844,16 @@ def transcreverAudio(req: https_fn.CallableRequest):
             try:
 
                 os.remove(temp_filename)
+
+            except:
+
+                pass
+
+        if extracted_audio_filename and os.path.exists(extracted_audio_filename):
+
+            try:
+
+                os.remove(extracted_audio_filename)
 
             except:
 

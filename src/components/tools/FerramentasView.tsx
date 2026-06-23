@@ -9,8 +9,9 @@ import { MeetingTranscriptionTool } from './MeetingTranscriptionTool';
 import { PopManagerTool } from './PopManagerTool';
 import { SipacTrackingTool } from './SipacTrackingTool';
 import { LongTranscriptionTool } from './LongTranscriptionTool';
+import { BatchTranscriptionTool } from './BatchTranscriptionTool';
 
-type FerramentaAtiva = 'brainstorming' | 'shopping' | 'transcription' | 'meeting_transcription' | 'pop_manager' | 'whatsapp_assistant' | 'sipac_tracking' | 'long_transcription' | null;
+type FerramentaAtiva = 'brainstorming' | 'shopping' | 'transcription' | 'meeting_transcription' | 'pop_manager' | 'whatsapp_assistant' | 'sipac_tracking' | 'long_transcription' | 'batch_transcription' | null;
 
 interface FerramentasViewProps {
   ideas: BrainstormIdea[];
@@ -27,10 +28,6 @@ interface FerramentasViewProps {
   showAlert: (title: string, msg: string) => void;
   knowledgeItems: ConhecimentoItem[];
   onUploadFile: (file: File) => Promise<ConhecimentoItem | null>;
-  pendingSharedAudioFile?: File | null;
-  onPendingSharedAudioFileConsumed?: () => void;
-  pendingSharedVideoFile?: File | null;
-  onPendingSharedVideoFileConsumed?: () => void;
   isDark?: boolean;
   onSendToCopiloto?: (text: string) => void;
 }
@@ -50,10 +47,6 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   showAlert,
   knowledgeItems,
   onUploadFile,
-  pendingSharedAudioFile,
-  onPendingSharedAudioFileConsumed,
-  pendingSharedVideoFile,
-  onPendingSharedVideoFileConsumed,
   isDark = false,
   onSendToCopiloto,
 }) => {
@@ -117,10 +110,12 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   }
 
   if (activeTool === 'transcription') {
-    return <TranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} initialFile={pendingSharedAudioFile} onInitialFileConsumed={onPendingSharedAudioFileConsumed} onSendToCopiloto={onSendToCopiloto} />;
+    return <TranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} onSendToCopiloto={onSendToCopiloto} />;
   }
 
-
+  if (activeTool === 'batch_transcription') {
+    return <BatchTranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} isDark={isDark} onSendToCopiloto={onSendToCopiloto} />;
+  }
 
   if (activeTool === 'meeting_transcription') {
     return <MeetingTranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} />;
@@ -277,6 +272,16 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
         iconClasses: isDark ? 'text-purple-400 group-hover:bg-purple-600' : 'text-purple-600 group-hover:bg-purple-600',
         lineColor: 'group-hover:bg-purple-500',
         icon: <svg className="w-6 h-6 md:w-7 md:h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0-4a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+      },
+      {
+        id: 'batch_transcription',
+        code: 'ID-010',
+        title: 'Transcrição em Lote',
+        desc: 'Sequencie áudios, vídeos e textos do WhatsApp em um único documento.',
+        dotColor: 'bg-purple-500',
+        iconClasses: isDark ? 'text-purple-400 group-hover:bg-purple-600' : 'text-purple-600 group-hover:bg-purple-600',
+        lineColor: 'group-hover:bg-purple-500',
+        icon: <svg className="w-6 h-6 md:w-7 md:h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h7" /></svg>
       }
     ];
 

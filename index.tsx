@@ -1038,7 +1038,7 @@ const App: React.FC = () => {
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
-  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'whatsapp_assistant' | 'diagnostico' | 'pop_manager' | 'sipac_tracking' | null>(null);
+  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'shopping' | 'transcription' | 'batch_transcription' | 'meeting_transcription' | 'whatsapp_assistant' | 'diagnostico' | 'pop_manager' | 'sipac_tracking' | null>(null);
   const [initialDiagnosisId, setInitialDiagnosisId] = useState<string | undefined>(undefined);
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
   const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
@@ -1753,40 +1753,17 @@ const App: React.FC = () => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [exams, setExams] = useState<HealthExam[]>([]);
   const [lastBackPress, setLastBackPress] = useState(0);
-  const [pendingSharedAudioFile, setPendingSharedAudioFile] = useState<File | null>(null);
-  const [pendingSharedVideoFile, setPendingSharedVideoFile] = useState<File | null>(null);
-  // Escuta o redirecionamento do Share Target (Android Share Intent PWA)
+  // Escuta o redirecionamento do Share Target (Android Share Intent PWA).
+  // Os itens compartilhados ficam persistidos no IndexedDB 'hermes-share-db' e são
+  // drenados pelo próprio BatchTranscriptionTool, permitindo acumular vários
+  // compartilhamentos (áudio/vídeo/texto) antes de processar o lote.
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('sharedIntent') === 'true') {
-      const openRequest = indexedDB.open('hermes-share-db', 1);
-      openRequest.onsuccess = (e: any) => {
-        const db = e.target.result;
-        if (!db.objectStoreNames.contains('shared-files')) return;
-        const transaction = db.transaction('shared-files', 'readwrite');
-        const store = transaction.objectStore('shared-files');
-        const getRequest = store.getAll();
-        getRequest.onsuccess = () => {
-          const items = getRequest.result;
-          if (items && items.length > 0) {
-            for (const item of items) {
-              if (item.fileType === 'audio') {
-                setActiveModule('acoes');
-                setViewMode('ferramentas');
-                setActiveFerramenta('transcription');
-                setPendingSharedAudioFile(item.file);
-              } else if (item.fileType === 'video') {
-                setActiveModule('acoes');
-                setViewMode('ferramentas');
-                setActiveFerramenta('choir_rehearsals');
-                setPendingSharedVideoFile(item.file);
-              }
-              store.delete(item.id);
-            }
-          }
-          window.history.replaceState({}, document.title, window.location.pathname);
-        };
-      };
+      setActiveModule('acoes');
+      setViewMode('ferramentas');
+      setActiveFerramenta('batch_transcription');
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
   // Escuta abertura de tarefa via URL (?task=ID)
@@ -5490,10 +5467,6 @@ const App: React.FC = () => {
                     knowledgeItems={knowledgeItems}
                     onUploadFile={handleUploadKnowledgeFile}
                     initialDiagnosisId={initialDiagnosisId}
-                    pendingSharedAudioFile={pendingSharedAudioFile}
-                    onPendingSharedAudioFileConsumed={() => setPendingSharedAudioFile(null)}
-                    pendingSharedVideoFile={pendingSharedVideoFile}
-                    onPendingSharedVideoFileConsumed={() => setPendingSharedVideoFile(null)}
                     isDark={isDarkTheme}
                     onSendToCopiloto={(text) => {
                       setCopilotoMode('default');
