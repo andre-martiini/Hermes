@@ -16,10 +16,11 @@ import HealthView from './HealthView';
 import { GoogleHealthService } from './GoogleHealthService';
 import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscriptionTool';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
-import { db, functions, auth, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
+import { db, functions, auth, storage, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, getDoc, getDocs, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
+import { ref, uploadBytes } from 'firebase/storage';
 import FinanceView from './FinanceView';
 import DashboardView from './DashboardView';
 import { MobileShortcutsView } from './src/views/MobileShortcutsView';
@@ -230,51 +231,49 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
   }, []);
   const handleTranscribe = async (selectedFile: File | null = file) => {
     if (!selectedFile) return;
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      showToast("Você precisa estar autenticado para transcrever.", "error");
+      return;
+    }
     setIsProcessing(true);
     try {
-      const reader = new FileReader();
-      reader.readAsDataURL(selectedFile);
-      reader.onloadend = async () => {
-        try {
-          const base64String = (reader.result as string).split(',')[1];
-          const extension = `.${selectedFile.name.split('.').pop()?.toLowerCase() || 'm4a'}`;
-          const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
-          const response = await transcribeFunc({ audioBase64: base64String, extension });
-          const data = response.data as { raw: string, refined: string };
-          setTranscription(data);
-          // Also save to history for compatibility with the tool
-          const saved = localStorage.getItem('hermes_transcription_history');
-          const history = saved ? JSON.parse(saved) : [];
-          const newEntry = {
-            id: Date.now().toString(),
-            fileName: selectedFile.name,
-            fileSize: selectedFile.size,
-            date: new Date().toISOString(),
-            raw: data.raw,
-            refined: data.refined
-          };
-          localStorage.setItem('hermes_transcription_history', JSON.stringify([newEntry, ...history].slice(0, 50)));
-          try {
-            await navigator.clipboard.writeText(data.refined || data.raw || '');
-            showToast("Transcrição copiada!", "success");
-            if (isMobileViewport) {
-              window.setTimeout(() => {
-                setFile(null);
-                setTranscription(null);
-              }, 450);
-            }
-          } catch (clipboardError) {
-            console.error('Erro ao copiar transcrição:', clipboardError);
-            showToast("Transcrição pronta, mas não foi possível copiar.", "error");
-          }
-        } catch (error) {
-          console.error(error);
-          showToast("Erro ao processar áudio.", "error");
-        } finally {
-          setIsProcessing(false);
-        }
+      const extension = `.${selectedFile.name.split('.').pop()?.toLowerCase() || 'm4a'}`;
+      const storagePath = `quick_transcriptions/${uid}/${Date.now()}${extension}`;
+      await uploadBytes(ref(storage, storagePath), selectedFile, { contentType: selectedFile.type || 'application/octet-stream' });
+      const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
+      const response = await transcribeFunc({ storagePath, extension });
+      const data = response.data as { raw: string, refined: string };
+      setTranscription(data);
+      // Also save to history for compatibility with the tool
+      const saved = localStorage.getItem('hermes_transcription_history');
+      const history = saved ? JSON.parse(saved) : [];
+      const newEntry = {
+        id: Date.now().toString(),
+        fileName: selectedFile.name,
+        fileSize: selectedFile.size,
+        date: new Date().toISOString(),
+        raw: data.raw,
+        refined: data.refined
       };
-    } catch (e) {
+      localStorage.setItem('hermes_transcription_history', JSON.stringify([newEntry, ...history].slice(0, 50)));
+      try {
+        await navigator.clipboard.writeText(data.refined || data.raw || '');
+        showToast("Transcrição copiada!", "success");
+        if (isMobileViewport) {
+          window.setTimeout(() => {
+            setFile(null);
+            setTranscription(null);
+          }, 450);
+        }
+      } catch (clipboardError) {
+        console.error('Erro ao copiar transcrição:', clipboardError);
+        showToast("Transcrição pronta, mas não foi possível copiar.", "error");
+      }
+    } catch (error) {
+      console.error(error);
+      showToast("Erro ao processar áudio.", "error");
+    } finally {
       setIsProcessing(false);
     }
   };
@@ -4458,7 +4457,7 @@ const App: React.FC = () => {
                       onOpenWhatsAppTranscription={() => {
                         setActiveModule('acoes');
                         setViewMode('ferramentas');
-                        setActiveFerramenta('transcription');
+                        setActiveFerramenta('batch_transcription');
                         setIsMobileMenuOpen(false);
                       }}
                       onOpenMeetingTranscription={() => {
@@ -4778,7 +4777,7 @@ const App: React.FC = () => {
                     onOpenWhatsAppTranscription={() => {
                       setActiveModule('acoes');
                       setViewMode('ferramentas');
-                      setActiveFerramenta('transcription');
+                      setActiveFerramenta('batch_transcription');
                     }}
                     onOpenMeetingTranscription={() => {
                       setActiveModule('acoes');

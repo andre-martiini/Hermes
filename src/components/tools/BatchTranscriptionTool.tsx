@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { ref, uploadBytes } from 'firebase/storage';
+import { ref, uploadBytesResumable } from 'firebase/storage';
 import { functions, storage, auth } from '@/firebase';
+
+// A partir deste tempo de processamento no backend (upload já concluído),
+// exibimos um aviso de que o processo continua em andamento (e não travou).
+const PROCESSING_STILL_RUNNING_THRESHOLD_MS = 15000;
 
 interface BatchTranscriptionToolProps {
   onBack: () => void;
@@ -23,6 +27,8 @@ interface BatchItem {
   status: BatchItemStatus;
   resultRefined?: string;
   errorMessage?: string;
+  uploadProgress?: number;
+  stillProcessing?: boolean;
 }
 
 const SHARE_DB_NAME = 'hermes-share-db';
@@ -188,7 +194,10 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
     setItems((prev) => prev.map((i) => (i.localId === localId ? { ...i, ...patch } : i)));
   };
 
-  const transcribeFile = async (file: File): Promise<{ raw: string; refined: string }> => {
+  const transcribeFile = async (
+    file: File,
+    onUploadProgress: (pct: number | null) => void,
+  ): Promise<{ raw: string; refined: string }> => {
     const uid = auth.currentUser?.uid;
     if (!uid) throw new Error('Você precisa estar autenticado para transcrever.');
 
@@ -196,7 +205,16 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
     const storagePath = `quick_transcriptions/${uid}/${Date.now()}_${Math.random().toString(36).slice(2)}${extension}`;
 
     // Upload direto pro Storage: evita o limite de 32MB de payload das Cloud Functions.
-    await uploadBytes(ref(storage, storagePath), file, { contentType: file.type || 'application/octet-stream' });
+    await new Promise<void>((resolve, reject) => {
+      const task = uploadBytesResumable(ref(storage, storagePath), file, { contentType: file.type || 'application/octet-stream' });
+      task.on(
+        'state_changed',
+        (snapshot) => onUploadProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)),
+        (error) => reject(error),
+        () => resolve(),
+      );
+    });
+    onUploadProgress(null);
 
     const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
     const response = await transcribeFunc({ storagePath, extension });
@@ -213,21 +231,29 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      updateItem(item.localId, { status: 'processando' });
+      updateItem(item.localId, { status: 'processando', uploadProgress: undefined, stillProcessing: false });
+      let stillProcessingTimer: ReturnType<typeof setTimeout> | null = null;
       try {
         if (item.kind === 'text') {
           sections.push(`[${i + 1}] Texto\n${item.text}`);
           updateItem(item.localId, { status: 'concluido' });
         } else if (item.file) {
-          const result = await transcribeFile(item.file);
+          const result = await transcribeFile(item.file, (pct) => {
+            updateItem(item.localId, { uploadProgress: pct ?? undefined });
+            if (pct === null) {
+              stillProcessingTimer = setTimeout(() => updateItem(item.localId, { stillProcessing: true }), PROCESSING_STILL_RUNNING_THRESHOLD_MS);
+            }
+          });
           sections.push(`[${i + 1}] ${item.kind === 'video' ? 'Vídeo' : 'Áudio'} — ${item.file.name}\n${result.refined}`);
-          updateItem(item.localId, { status: 'concluido', resultRefined: result.refined });
+          updateItem(item.localId, { status: 'concluido', resultRefined: result.refined, uploadProgress: undefined, stillProcessing: false });
           if (item.dbId) processedDbIds.push(item.dbId);
         }
       } catch (error) {
         console.error('[BatchTranscriptionTool] Erro ao processar item:', error);
-        updateItem(item.localId, { status: 'erro', errorMessage: 'Falha ao transcrever.' });
+        updateItem(item.localId, { status: 'erro', errorMessage: 'Falha ao transcrever.', uploadProgress: undefined, stillProcessing: false });
         failed.push(item.label);
+      } finally {
+        if (stillProcessingTimer) clearTimeout(stillProcessingTimer);
       }
     }
 
@@ -380,6 +406,18 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
                     {item.file ? ` · ${formatBytes(item.file.size)}` : ''}
                   </p>
                   {item.errorMessage && <p className="text-[10px] font-mono text-red-500 mt-1">{item.errorMessage}</p>}
+                  {item.status === 'processando' && (
+                    typeof item.uploadProgress === 'number' ? (
+                      <div className="mt-1.5">
+                        <div className={`h-1 w-full rounded-none-none overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}>
+                          <div className="h-full bg-blue-500 transition-all" style={{ width: `${item.uploadProgress}%` }} />
+                        </div>
+                        <p className={`text-[9px] font-mono mt-1 ${textMuted}`}>Enviando... {item.uploadProgress}%</p>
+                      </div>
+                    ) : item.stillProcessing ? (
+                      <p className="text-[10px] font-mono text-amber-500 mt-1">Ainda processando... não travou, pode levar mais alguns instantes.</p>
+                    ) : null
+                  )}
                 </div>
                 <span className={`shrink-0 text-[9px] font-mono font-black uppercase tracking-widest px-2 py-1 border rounded-none-none ${statusStyle[item.status]}`}>
                   {statusLabel[item.status]}
