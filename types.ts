@@ -37,6 +37,7 @@ export interface ActionPlanItem {
 export interface ChatMessage {
     role: 'user' | 'assistant';
     content: string;
+    subtype?: 'proactive_insight' | string;
     isArtifact?: boolean;
     proposedPlan?: ActionPlanItem[];
     timestamp?: string;

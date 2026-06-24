@@ -11647,6 +11647,10 @@ REGRAS ADICIONAIS:
 - Só critique a "Data de Execução" se ela for DEPOIS do "Prazo Final" (se existir).
 - Seja conciso e evite ser óbvio.
 
+ESTILO:
+- Escreva o campo "texto" sem saudacao, preambulo ou encerramento. Maximo 1 a 3 bullets curtos, ou uma frase direta.
+- Para insights proativos, aponte somente a correlacao, ponto cego ou proximo passo objetivo.
+
 REGRAS:
 - Só retorne insight se for genuinamente valioso. Evite insights genéricos ou óbvios.
 - Para alvo "plano", inclua plano_proposto com todos os itens revisados (array de objetos com "id", "text", "completed").

@@ -183,6 +183,9 @@ interface Message {
     id?: string;
     role: 'user' | 'assistant';
     content: string;
+    subtype?: 'proactive_insight' | string;
+    insightNivel?: 1 | 2 | 3;
+    insightAlvo?: 'diario' | 'plano' | 'acoes';
     isArtifact?: boolean;
     toolInvocation?: { intent: string, tool_id: string, parametros: any };
     proposedPlan?: any[];
@@ -1929,16 +1932,25 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                         {messages.map((msg, i) => {
                             const messageKey = msg.id || `${msg.role}-${i}`;
                             const messageTimestamp = formatMessageTimestamp(msg.timestamp);
+                            const isProactiveInsight = msg.subtype === 'proactive_insight';
                             return (
                                 <div key={messageKey} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                                     <div className={`group relative max-w-[90%] min-w-0 px-4 py-3 rounded-none text-xs font-medium leading-relaxed shadow-sm break-words [overflow-wrap:anywhere] [&_*]:max-w-full font-mono ${msg.role === 'user'
-                                        ? isDark
-                                            ? 'bg-blue-600 text-white rounded-br-none'
-                                            : 'bg-blue-600 text-white rounded-br-none'
-                                        : isDark
-                                            ? 'bg-slate-800 text-slate-100 border border-slate-700 rounded-bl-none'
-                                            : 'bg-slate-100 text-slate-700 rounded-bl-none'
+                                        ? 'bg-blue-600 text-white rounded-br-none'
+                                        : isProactiveInsight
+                                            ? isDark
+                                                ? 'bg-indigo-950/30 text-indigo-100 border border-indigo-500/20 rounded-bl-none'
+                                                : 'bg-indigo-50 text-indigo-900 border border-indigo-100 rounded-bl-none'
+                                            : isDark
+                                                ? 'bg-slate-800 text-slate-100 border border-slate-700 rounded-bl-none'
+                                                : 'bg-slate-100 text-slate-700 rounded-bl-none'
                                         }`}>
+                                        {isProactiveInsight && (
+                                            <div className={`mb-1 flex items-center gap-1 text-[10px] font-black uppercase tracking-wider ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}>
+                                                <span aria-hidden="true">{"\uD83E\uDD16"}</span>
+                                                <span>Hermes</span>
+                                            </div>
+                                        )}
                                         <div className={`absolute right-2 top-2 flex gap-1 opacity-0 transition-all group-hover:opacity-100`}>
                                             <button
                                                 type="button"
