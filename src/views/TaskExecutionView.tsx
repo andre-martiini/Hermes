@@ -356,7 +356,7 @@ export const TaskExecutionView = ({
     [currentTaskData.plano_acao]
   );
 
-  // Proactive insight: debounce 8s after diary or plan changes
+  // Proactive insight: debounce 10s after diary or plan changes
   useEffect(() => {
     if (!insightMountedRef.current) {
       insightMountedRef.current = true;
@@ -383,14 +383,22 @@ export const TaskExecutionView = ({
         });
         const d = res.data as any;
         if (d.nivel != null && d.texto) {
-          setInsightState({ nivel: d.nivel, texto: d.texto, alvo: d.alvo, planoProposto: d.planoProposto });
+          const nextInsight = {
+            nivel: d.nivel,
+            texto: d.texto,
+            alvo: d.alvo,
+            planoProposto: d.planoProposto,
+            acoesPropostas: d.acoesPropostas
+          } as NonNullable<InsightState>;
+          setInsightState(nextInsight);
+          await persistProactiveInsight(nextInsight);
         }
       } catch {
         // silent fail — insight is non-critical
       } finally {
         setIsAnalyzingInsight(false);
       }
-    }, 8000);
+    }, 10000);
 
     return () => { if (insightDebounceRef.current) clearTimeout(insightDebounceRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -458,6 +466,63 @@ export const TaskExecutionView = ({
   const insightDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const insightMountedRef = useRef(false);
   const insightApplyingRef = useRef(false);
+  const lastPersistedInsightSignatureRef = useRef<string | null>(null);
+
+  const ensureTaskCopilotSession = async () => {
+    const existingQ = query(
+      collection(db, 'sessoes_copiloto'),
+      where('userId', '==', copilotoUserId),
+      orderBy('lastMessageAt', 'desc'),
+      limit(50)
+    );
+    const existingSnap = await getDocs(existingQ);
+    const existingTaskSession = existingSnap.docs.find(sessionDoc => {
+      const data = sessionDoc.data();
+      return data.taskId === task.id && !data.isTemporary;
+    });
+    if (existingTaskSession) return existingTaskSession.id;
+
+    const sessRef = await addDoc(collection(db, 'sessoes_copiloto'), {
+      title: currentTaskData.titulo ? `Acao: ${currentTaskData.titulo}`.slice(0, 80) : 'Acao em acompanhamento',
+      userId: copilotoUserId,
+      taskId: task.id,
+      systemId: currentTaskData.sistema || null,
+      isTemporary: false,
+      createdAt: serverTimestamp(),
+      lastMessageAt: serverTimestamp()
+    });
+    return sessRef.id;
+  };
+
+  const persistProactiveInsight = async (insight: NonNullable<InsightState>) => {
+    const signature = JSON.stringify({
+      taskId: task.id,
+      nivel: insight.nivel,
+      alvo: insight.alvo,
+      texto: insight.texto,
+      diario: insightDiarioSignature,
+      plano: insightPlanoSignature,
+    });
+    if (lastPersistedInsightSignatureRef.current === signature) return;
+    lastPersistedInsightSignatureRef.current = signature;
+
+    try {
+      const sessionId = await ensureTaskCopilotSession();
+      await addDoc(collection(db, 'sessoes_copiloto', sessionId, 'mensagens'), {
+        role: 'assistant',
+        subtype: 'proactive_insight',
+        insightNivel: insight.nivel,
+        insightAlvo: insight.alvo,
+        content: insight.texto,
+        timestamp: serverTimestamp()
+      });
+      await setDoc(doc(db, 'sessoes_copiloto', sessionId), {
+        lastMessageAt: serverTimestamp()
+      }, { merge: true });
+    } catch (err) {
+      console.error('[Insight] Erro ao registrar insight no chat:', err);
+    }
+  };
 
   // Tags
   const [tagInput, setTagInput] = useState('');
