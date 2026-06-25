@@ -165,6 +165,8 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
   const [isSaving, setIsSaving] = useState(false);
   const [editingDraft, setEditingDraft] = useState<StrategyDraft | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<EstrategiaPessoal | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [metricInputs, setMetricInputs] = useState<Record<string, string>>({});
   const [indicatorNotes, setIndicatorNotes] = useState<Record<string, string>>({});
   const [expandedIndicators, setExpandedIndicators] = useState<Record<string, boolean>>({});
@@ -388,6 +390,26 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
       showToast?.(error?.message || 'Erro ao registrar marco.', 'error');
     }
   };
+
+  const confirmDeleteStrategy = async () => {
+    if (!deleteTarget?.id) return;
+    setIsDeleting(true);
+    try {
+      await deleteDoc(doc(db, 'estrategia_pessoal', deleteTarget.id));
+      setExpandedIndicators(prev => {
+        const next = { ...prev };
+        delete next[deleteTarget.id!];
+        return next;
+      });
+      setDeleteTarget(null);
+      showToast?.('Objetivo excluído.', 'success');
+    } catch (error: any) {
+      showToast?.(error?.message || 'Erro ao excluir objetivo.', 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const renderDraftEditor = ({
     draft,
     index,
@@ -551,6 +573,41 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                   </React.Fragment>
                 ))}
               </section>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur-sm">
+          <div className={`w-full max-w-md border shadow-2xl ${panelClass}`}>
+            <div className={`border-b p-4 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <p className={`text-[10px] font-black uppercase tracking-[0.22em] ${mutedClass}`}>Confirmar exclusão</p>
+              <h3 className="mt-1 text-xl font-black tracking-tight">Excluir objetivo?</h3>
+            </div>
+            <div className="p-4">
+              <p className={`text-sm font-semibold leading-relaxed ${mutedClass}`}>
+                Esta ação removerá o objetivo estratégico e seus registros associados. A exclusão não pode ser desfeita.
+              </p>
+              <div className={`mt-4 border p-3 ${softPanelClass}`}>
+                <p className="text-sm font-black leading-snug">{deleteTarget.objetivoMacro}</p>
+              </div>
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  disabled={isDeleting}
+                  onClick={() => setDeleteTarget(null)}
+                  className={`px-4 py-2 text-[10px] font-black uppercase tracking-widest disabled:opacity-50 ${softPanelClass}`}
+                >
+                  Cancelar
+                </button>
+                <button
+                  disabled={isDeleting}
+                  onClick={confirmDeleteStrategy}
+                  className="bg-rose-600 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-50"
+                >
+                  {isDeleting ? 'Excluindo...' : 'Excluir definitivamente'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -761,7 +818,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                   </div>
                   <div className="mt-4 flex justify-end gap-2">
                     <button onClick={() => { setEditingId(item.id || null); setEditingDraft(strategyToDraft(item)); }} className={`px-3 py-2 text-[10px] font-black uppercase tracking-widest ${softPanelClass}`}>Editar</button>
-                    <button onClick={() => item.id && deleteDoc(doc(db, 'estrategia_pessoal', item.id))} className="bg-rose-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white">Excluir</button>
+                    <button onClick={() => setDeleteTarget(item)} className="bg-rose-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white">Excluir</button>
                   </div>
                 </article>
               );
