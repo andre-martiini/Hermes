@@ -25,7 +25,6 @@ if CURRENT_DIR not in sys.path:
 from security_portals import (
     generatePgdFromDiariesAI,
     generatePgdFromRawTextAI,
-    getPublicFinancePortal,
     getPublicShoppingPortal,
     matchShoppingItemsAI,
     mutateShoppingList,
