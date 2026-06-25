@@ -2,11 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { addDoc, collection, deleteDoc, doc, onSnapshot, query, Timestamp, updateDoc, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../../firebase';
-import { EstrategiaIndicadorSucesso, EstrategiaPessoal, EstrategiaPilar, EstrategiaStatus, EstrategiaTipoMeta } from '../../types';
+import { EstrategiaIndicadorSucesso, EstrategiaMarco, EstrategiaPessoal, EstrategiaPilar, EstrategiaStatus, EstrategiaTipoMeta } from '../../types';
 
 type StrategyIndicatorDraft = EstrategiaIndicadorSucesso;
+type StrategyMilestoneDraft = EstrategiaMarco;
 
-type StrategyDraft = Omit<EstrategiaPessoal, 'id' | 'userId' | 'timestamp' | 'metricaAlvo' | 'indicadoresSucesso'> & {
+type StrategyDraft = Omit<EstrategiaPessoal, 'id' | 'userId' | 'timestamp' | 'metricaAlvo' | 'indicadoresSucesso' | 'marcos'> & {
   metricaAlvo?: {
     valorInicial?: number | string;
     valorAtual: number | string;
@@ -14,6 +15,7 @@ type StrategyDraft = Omit<EstrategiaPessoal, 'id' | 'userId' | 'timestamp' | 'me
     unidade: string;
   };
   indicadoresSucesso?: StrategyIndicatorDraft[];
+  marcos?: StrategyMilestoneDraft[];
 };
 
 interface StrategyDashboardViewProps {
@@ -35,6 +37,7 @@ const emptyDraft: StrategyDraft = {
   objetivoMacro: '',
   tipoMeta: 'relativa_qualitativa',
   indicadoresSucesso: [{ id: 'draft-indicador-1', descricao: '', concluido: false }],
+  marcos: [{ id: 'draft-marco-1', descricao: '', concluido: false }],
   diretrizesDerivadas: [''],
   status: 'ativo',
 };
@@ -42,10 +45,15 @@ const emptyDraft: StrategyDraft = {
 const normalizeList = (items?: string[]) => (items || []).map(item => item.trim()).filter(Boolean);
 const parseMetricNumber = (value: number | string | undefined) => Number(String(value ?? 0).replace(',', '.')) || 0;
 const createIndicatorId = () => `indicador-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const createMilestoneId = () => `marco-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const createRecordId = () => `registro-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const getPersistedIndicatorId = (item: string | EstrategiaIndicadorSucesso, index: number) => {
   if (typeof item !== 'string' && item.id) return item.id;
   return `indicador-legado-${index}`;
+};
+const getPersistedMilestoneId = (item: string | EstrategiaMarco, index: number) => {
+  if (typeof item !== 'string' && item.id) return item.id;
+  return `marco-legado-${index}`;
 };
 
 const toIndicatorDrafts = (items?: Array<string | EstrategiaIndicadorSucesso>): StrategyIndicatorDraft[] => {
@@ -85,6 +93,43 @@ const normalizeIndicators = (items?: StrategyIndicatorDraft[]): EstrategiaIndica
     })
     .filter(item => item.descricao);
 
+const toMilestoneDrafts = (items?: Array<string | EstrategiaMarco>): StrategyMilestoneDraft[] => {
+  const converted = (items || []).map((item, index) => {
+    if (typeof item === 'string') {
+      return { id: getPersistedMilestoneId(item, index), descricao: item, concluido: false };
+    }
+    return {
+      id: getPersistedMilestoneId(item, index),
+      descricao: item.descricao || '',
+      concluido: Boolean(item.concluido),
+      dataConclusao: item.dataConclusao,
+      evidencia: item.evidencia || '',
+      registros: item.registros || [],
+    };
+  }).filter(item => item.descricao.trim() || item.evidencia?.trim());
+  return converted.length ? converted : [{ id: createMilestoneId(), descricao: '', concluido: false }];
+};
+
+const normalizeMilestones = (items?: StrategyMilestoneDraft[]): EstrategiaMarco[] =>
+  (items || [])
+    .map(item => {
+      const normalized: EstrategiaMarco = {
+        id: item.id || createMilestoneId(),
+        descricao: item.descricao.trim(),
+        concluido: Boolean(item.concluido),
+        registros: item.registros || [],
+      };
+      if (normalized.concluido) {
+        normalized.dataConclusao = item.dataConclusao || new Date().toISOString();
+      }
+      const evidencia = item.evidencia?.trim();
+      if (evidencia) {
+        normalized.evidencia = evidencia;
+      }
+      return normalized;
+    })
+    .filter(item => item.descricao);
+
 const computeProgress = (item: EstrategiaPessoal) => {
   const metric = item.metricaAlvo;
   if (!metric || !Number.isFinite(metric.valorAtual) || !Number.isFinite(metric.valorObjetivo)) {
@@ -106,6 +151,7 @@ const strategyToDraft = (item: EstrategiaPessoal): StrategyDraft => ({
   tipoMeta: item.tipoMeta,
   metricaAlvo: item.metricaAlvo,
   indicadoresSucesso: toIndicatorDrafts(item.indicadoresSucesso),
+  marcos: toMilestoneDrafts(item.marcos),
   diretrizesDerivadas: item.diretrizesDerivadas?.length ? item.diretrizesDerivadas : [''],
   status: item.status,
 });
@@ -169,6 +215,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
   const [isDeleting, setIsDeleting] = useState(false);
   const [metricInputs, setMetricInputs] = useState<Record<string, string>>({});
   const [indicatorNotes, setIndicatorNotes] = useState<Record<string, string>>({});
+  const [milestoneNotes, setMilestoneNotes] = useState<Record<string, string>>({});
   const [expandedIndicators, setExpandedIndicators] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -220,6 +267,15 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
     }));
   };
 
+  const updateDraftMilestone = (index: number, valueIndex: number, updates: Partial<StrategyMilestoneDraft>) => {
+    setDrafts(prev => prev.map((draft, idx) => {
+      if (idx !== index) return draft;
+      const nextList = [...(draft.marcos || [])];
+      nextList[valueIndex] = { ...(nextList[valueIndex] || { id: createMilestoneId(), descricao: '', concluido: false }), ...updates };
+      return { ...draft, marcos: nextList };
+    }));
+  };
+
   const updateManualList = (field: 'diretrizesDerivadas', valueIndex: number, value: string) => {
     setManualDraft(prev => {
       const nextList = [...(prev[field] || [])];
@@ -233,6 +289,14 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
       const nextList = [...(prev.indicadoresSucesso || [])];
       nextList[valueIndex] = { ...(nextList[valueIndex] || { id: createIndicatorId(), descricao: '', concluido: false }), ...updates };
       return { ...prev, indicadoresSucesso: nextList };
+    });
+  };
+
+  const updateManualMilestone = (valueIndex: number, updates: Partial<StrategyMilestoneDraft>) => {
+    setManualDraft(prev => {
+      const nextList = [...(prev.marcos || [])];
+      nextList[valueIndex] = { ...(nextList[valueIndex] || { id: createMilestoneId(), descricao: '', concluido: false }), ...updates };
+      return { ...prev, marcos: nextList };
     });
   };
 
@@ -255,6 +319,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
           unidade: String(proposal.metricaAlvo.unidade || ''),
         } : undefined,
         indicadoresSucesso: toIndicatorDrafts(normalizeList(proposal.indicadoresSucesso)),
+        marcos: toMilestoneDrafts(normalizeList(proposal.marcos)),
         diretrizesDerivadas: normalizeList(proposal.diretrizesDerivadas).length ? normalizeList(proposal.diretrizesDerivadas) : [''],
         status: 'ativo',
       })));
@@ -284,6 +349,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
       objetivoMacro: draft.objetivoMacro.trim(),
       tipoMeta: draft.tipoMeta,
       indicadoresSucesso: normalizeIndicators(draft.indicadoresSucesso),
+      marcos: normalizeMilestones(draft.marcos),
       diretrizesDerivadas: normalizeList(draft.diretrizesDerivadas),
       status: draft.status,
       timestamp: Timestamp.now(),
@@ -391,6 +457,36 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
     }
   };
 
+  const completeMilestone = async (item: EstrategiaPessoal, milestoneIndex: number) => {
+    if (!item.id) return;
+    const milestones = toMilestoneDrafts(item.marcos);
+    const current = milestones[milestoneIndex];
+    if (!current) return;
+    const noteKey = `${item.id}:${current.id}`;
+    const note = (milestoneNotes[noteKey] || '').trim();
+    const record = {
+      id: createRecordId(),
+      data: new Date().toISOString(),
+      nota: note || 'Marco concluído',
+    };
+    milestones[milestoneIndex] = {
+      ...current,
+      concluido: true,
+      dataConclusao: record.data,
+      evidencia: note || current.evidencia,
+      registros: [...(current.registros || []), record],
+    };
+    try {
+      await updateDoc(doc(db, 'estrategia_pessoal', item.id), {
+        marcos: normalizeMilestones(milestones),
+      });
+      setMilestoneNotes(prev => ({ ...prev, [noteKey]: '' }));
+      showToast?.('Marco concluído.', 'success');
+    } catch (error: any) {
+      showToast?.(error?.message || 'Erro ao concluir marco.', 'error');
+    }
+  };
+
   const confirmDeleteStrategy = async () => {
     if (!deleteTarget?.id) return;
     setIsDeleting(true);
@@ -416,6 +512,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
     onChange,
     onListChange,
     onIndicatorChange,
+    onMilestoneChange,
     onSave,
     onCancel,
   }: {
@@ -424,6 +521,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
     onChange: (updates: Partial<StrategyDraft>) => void;
     onListChange: (field: 'diretrizesDerivadas', valueIndex: number, value: string) => void;
     onIndicatorChange: (valueIndex: number, updates: Partial<StrategyIndicatorDraft>) => void;
+    onMilestoneChange: (valueIndex: number, updates: Partial<StrategyMilestoneDraft>) => void;
     onSave: () => void;
     onCancel?: () => void;
   }) => (
@@ -462,13 +560,20 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
           <label className="text-[10px] font-black uppercase tracking-widest">Unidade<input className={`${inputClass} mt-1`} value={draft.metricaAlvo?.unidade || ''} onChange={e => onChange({ metricaAlvo: { valorInicial: draft.metricaAlvo?.valorInicial, valorAtual: draft.metricaAlvo?.valorAtual ?? '', valorObjetivo: draft.metricaAlvo?.valorObjetivo ?? '', unidade: e.target.value } })} /></label>
         </div>
       )}
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
+      <div className="mt-3 grid gap-3 md:grid-cols-3">
         <div>
-          <p className="mb-2 text-[10px] font-black uppercase tracking-widest">Indicadores</p>
+          <p className="mb-2 text-[10px] font-black uppercase tracking-widest">Indicadores contínuos</p>
           {(draft.indicadoresSucesso || []).map((value, valueIndex) => (
             <input key={value.id || `${index ?? 'manual'}-indicador-${valueIndex}`} className={`${inputClass} mb-2`} value={value.descricao} onChange={e => onIndicatorChange(valueIndex, { descricao: e.target.value })} />
           ))}
           <button className={`text-[10px] font-black uppercase tracking-widest ${mutedClass}`} onClick={() => onChange({ indicadoresSucesso: [...(draft.indicadoresSucesso || []), { id: createIndicatorId(), descricao: '', concluido: false }] })}>Adicionar indicador</button>
+        </div>
+        <div>
+          <p className="mb-2 text-[10px] font-black uppercase tracking-widest">Marcos pontuais</p>
+          {(draft.marcos || []).map((value, valueIndex) => (
+            <input key={value.id || `${index ?? 'manual'}-marco-${valueIndex}`} className={`${inputClass} mb-2`} value={value.descricao} onChange={e => onMilestoneChange(valueIndex, { descricao: e.target.value })} />
+          ))}
+          <button className={`text-[10px] font-black uppercase tracking-widest ${mutedClass}`} onClick={() => onChange({ marcos: [...(draft.marcos || []), { id: createMilestoneId(), descricao: '', concluido: false }] })}>Adicionar marco</button>
         </div>
         <div>
           <p className="mb-2 text-[10px] font-black uppercase tracking-widest">Diretrizes para IA</p>
@@ -548,6 +653,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                     onChange: updates => setManualDraft(prev => ({ ...prev, ...updates })),
                     onListChange: updateManualList,
                     onIndicatorChange: updateManualIndicator,
+                    onMilestoneChange: updateManualMilestone,
                     onSave: () => saveDraft(manualDraft).then(() => setManualDraft(emptyDraft)),
                   })}
                 </div>
@@ -567,6 +673,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                       onChange: updates => setDrafts(prev => prev.map((item, idx) => idx === index ? { ...item, ...updates } : item)),
                       onListChange: (field, valueIndex, value) => updateDraftList(index, field, valueIndex, value),
                       onIndicatorChange: (valueIndex, updates) => updateDraftIndicator(index, valueIndex, updates),
+                      onMilestoneChange: (valueIndex, updates) => updateDraftMilestone(index, valueIndex, updates),
                       onSave: () => saveDraft(draft, index),
                       onCancel: () => setDrafts(prev => prev.filter((_, idx) => idx !== index)),
                     })}
@@ -628,6 +735,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
               onChange: updates => setManualDraft(prev => ({ ...prev, ...updates })),
               onListChange: updateManualList,
               onIndicatorChange: updateManualIndicator,
+              onMilestoneChange: updateManualMilestone,
               onSave: () => saveDraft(manualDraft).then(() => setManualDraft(emptyDraft)),
             })}
           </div>
@@ -646,6 +754,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                       onChange: updates => setDrafts(prev => prev.map((item, idx) => idx === index ? { ...item, ...updates } : item)),
                       onListChange: (field, valueIndex, value) => updateDraftList(index, field, valueIndex, value),
                       onIndicatorChange: (valueIndex, updates) => updateDraftIndicator(index, valueIndex, updates),
+                      onMilestoneChange: (valueIndex, updates) => updateDraftMilestone(index, valueIndex, updates),
                       onSave: () => saveDraft(draft, index),
                       onCancel: () => setDrafts(prev => prev.filter((_, idx) => idx !== index)),
                     })}
@@ -669,9 +778,11 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
               const pillar = PILLARS.find(p => p.id === item.pilar) || PILLARS[0];
               const progress = computeProgress(item);
               const indicators = toIndicatorDrafts(item.indicadoresSucesso).filter(indicator => indicator.descricao.trim());
+              const milestones = toMilestoneDrafts(item.marcos).filter(milestone => milestone.descricao.trim());
               const indicatorPanelId = `strategy-indicators-${item.id || item.objetivoMacro}`;
               const areIndicatorsExpanded = Boolean(item.id && expandedIndicators[item.id]);
               const indicatorRecordCount = indicators.reduce((sum, indicator) => sum + (indicator.registros || []).length, 0);
+              const completedMilestoneCount = milestones.filter(milestone => milestone.concluido).length;
               if (editingId === item.id && editingDraft) {
                 return (
                   <React.Fragment key={item.id}>
@@ -692,6 +803,14 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                           const list = [...(prev.indicadoresSucesso || [])];
                           list[valueIndex] = { ...(list[valueIndex] || { id: createIndicatorId(), descricao: '', concluido: false }), ...updates };
                           return { ...prev, indicadoresSucesso: list };
+                        });
+                      },
+                      onMilestoneChange: (valueIndex, updates) => {
+                        setEditingDraft(prev => {
+                          if (!prev) return prev;
+                          const list = [...(prev.marcos || [])];
+                          list[valueIndex] = { ...(list[valueIndex] || { id: createMilestoneId(), descricao: '', concluido: false }), ...updates };
+                          return { ...prev, marcos: list };
                         });
                       },
                       onSave: () => saveDraft(editingDraft, undefined, item.id),
@@ -758,7 +877,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                         <span>
                           <span className={`block text-[10px] font-black uppercase tracking-widest ${mutedClass}`}>Detalhes</span>
                           <span className="mt-0.5 block text-xs font-bold">
-                            {indicators.length} indicador{indicators.length === 1 ? '' : 'es'} · {indicatorRecordCount} registro{indicatorRecordCount === 1 ? '' : 's'}
+                            {indicators.length} indicador{indicators.length === 1 ? '' : 'es'} / {indicatorRecordCount} registro{indicatorRecordCount === 1 ? '' : 's'} / {completedMilestoneCount}/{milestones.length} marco{milestones.length === 1 ? '' : 's'}
                           </span>
                         </span>
                         <svg className={`h-4 w-4 transition-transform ${areIndicatorsExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -768,9 +887,9 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                       {areIndicatorsExpanded && (
                         <div id={indicatorPanelId} className="mt-2 space-y-4">
                           <div className="space-y-2">
-                            <p className={`text-[10px] font-black uppercase tracking-widest ${mutedClass}`}>Indicadores</p>
+                            <p className={`text-[10px] font-black uppercase tracking-widest ${mutedClass}`}>Indicadores contínuos</p>
                             {indicators.length === 0 ? (
-                              <p className={`text-xs font-bold ${mutedClass}`}>Nenhum marco registrado.</p>
+                              <p className={`text-xs font-bold ${mutedClass}`}>Nenhum indicador contínuo cadastrado.</p>
                             ) : indicators.map((indicator, indicatorIndex) => (
                               <div key={indicator.id} className={`border p-2 ${softPanelClass}`}>
                                 <div className="flex items-start justify-between gap-2">
@@ -791,19 +910,60 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                                     value={indicatorNotes[`${item.id}:${indicator.id}`] ?? ''}
                                     onChange={(event) => setIndicatorNotes(prev => ({ ...prev, [`${item.id}:${indicator.id}`]: event.target.value }))}
                                     className={`${inputClass} text-xs`}
-                                    placeholder="Escreva o registro do marco"
+                                    placeholder="Escreva o registro do indicador"
                                   />
                                   <button
                                     onClick={() => registerIndicatorNote(item, indicatorIndex)}
                                     className="flex h-9 w-9 shrink-0 items-center justify-center bg-slate-900 text-white transition-all hover:bg-slate-700"
-                                    title="Registrar marco"
-                                    aria-label="Registrar marco"
+                                    title="Registrar indicador"
+                                    aria-label="Registrar indicador"
                                   >
                                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 5v14m7-7H5" />
                                     </svg>
                                   </button>
                                 </div>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="space-y-2">
+                            <p className={`text-[10px] font-black uppercase tracking-widest ${mutedClass}`}>Marcos pontuais</p>
+                            {milestones.length === 0 ? (
+                              <p className={`text-xs font-bold ${mutedClass}`}>Nenhum marco pontual cadastrado.</p>
+                            ) : milestones.map((milestone, milestoneIndex) => (
+                              <div key={milestone.id} className={`border p-2 ${softPanelClass}`}>
+                                <div className="flex items-start justify-between gap-2">
+                                  <span className={`text-sm font-semibold ${milestone.concluido ? 'line-through opacity-70' : ''}`}>{milestone.descricao}</span>
+                                  {milestone.concluido && (
+                                    <span className="bg-emerald-600 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-white">Concluído</span>
+                                  )}
+                                </div>
+                                {milestone.concluido && (
+                                  <p className={`mt-1 text-[10px] font-black uppercase tracking-widest ${mutedClass}`}>
+                                    Concluído em {milestone.dataConclusao ? new Date(milestone.dataConclusao).toLocaleDateString('pt-BR') : 'data não registrada'}
+                                  </p>
+                                )}
+                                {(milestone.registros || []).slice(-2).map(record => (
+                                  <p key={record.id} className={`mt-1 text-xs font-semibold ${mutedClass}`}>
+                                    {new Date(record.data).toLocaleDateString('pt-BR')}: {record.nota}
+                                  </p>
+                                ))}
+                                {!milestone.concluido && (
+                                  <div className="mt-2 flex gap-2">
+                                    <input
+                                      value={milestoneNotes[`${item.id}:${milestone.id}`] ?? ''}
+                                      onChange={(event) => setMilestoneNotes(prev => ({ ...prev, [`${item.id}:${milestone.id}`]: event.target.value }))}
+                                      className={`${inputClass} text-xs`}
+                                      placeholder="Evidência ou nota de conclusão"
+                                    />
+                                    <button
+                                      onClick={() => completeMilestone(item, milestoneIndex)}
+                                      className="shrink-0 bg-emerald-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white"
+                                    >
+                                      Concluir
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>

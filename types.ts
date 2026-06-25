@@ -275,6 +275,19 @@ export interface EstrategiaIndicadorSucesso {
     }>;
 }
 
+export interface EstrategiaMarco {
+    id: string;
+    descricao: string;
+    concluido: boolean;
+    dataConclusao?: string;
+    evidencia?: string;
+    registros?: Array<{
+        id: string;
+        data: string;
+        nota: string;
+    }>;
+}
+
 export interface EstrategiaPessoal {
     id?: string;
     userId: string;
@@ -294,6 +307,7 @@ export interface EstrategiaPessoal {
         nota?: string;
     }>;
     indicadoresSucesso?: Array<string | EstrategiaIndicadorSucesso>;
+    marcos?: Array<string | EstrategiaMarco>;
     diretrizesDerivadas: string[];
     status: EstrategiaStatus;
     timestamp: any;

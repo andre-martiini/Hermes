@@ -6692,6 +6692,7 @@ def refinarDiretrizesEstrategicas(req: https_fn.CallableRequest):
                     "pilar": value.get("pilar"),
                     "objetivoMacro": value.get("objetivoMacro"),
                     "tipoMeta": value.get("tipoMeta"),
+                    "marcos": value.get("marcos", []),
                     "diretrizesDerivadas": value.get("diretrizesDerivadas", []),
                 })
 
@@ -6703,7 +6704,8 @@ REGRAS:
 - Use pilares exatamente entre: carreira, financas, saude, intelectual, estilo_vida.
 - tipoMeta deve ser "absoluta" quando houver valor numerico rastreavel; caso contrario "relativa_qualitativa".
 - Para metas absolutas, preencha metricaAlvo com valorAtual, valorObjetivo e unidade. Se nao houver valor atual, use 0.
-- Para metas qualitativas, sugira 3 a 5 indicadoresSucesso objetivos e observaveis.
+- indicadoresSucesso deve conter sinais continuos/recorrentes de progresso, nao entregas pontuais.
+- marcos deve conter 1 a 5 entregas pontuais que possam ser concluidas definitivamente.
 - diretrizesDerivadas deve conter 2 a 5 frases concisas para orientar uma IA de forma passiva no chat global.
 - Nao crie tarefas operacionais diarias.
 - Preserve a autonomia do usuario: escreva como contexto estrategico, nao como ordens intrusivas.
@@ -6717,6 +6719,7 @@ FORMATO:
       "tipoMeta": "absoluta",
       "metricaAlvo": {{"valorAtual": 0, "valorObjetivo": 100, "unidade": "string"}},
       "indicadoresSucesso": ["string"],
+      "marcos": ["string"],
       "diretrizesDerivadas": ["string"]
     }}
   ]
@@ -6758,6 +6761,11 @@ INTENCAO DO USUARIO:
                 for item in (proposal.get("indicadoresSucesso") or [])
                 if str(item).strip()
             ][:5]
+            marcos = [
+                str(item).strip()
+                for item in (proposal.get("marcos") or [])
+                if str(item).strip()
+            ][:5]
             diretrizes = [
                 str(item).strip()
                 for item in (proposal.get("diretrizesDerivadas") or [])
@@ -6768,6 +6776,7 @@ INTENCAO DO USUARIO:
                 "objetivoMacro": str(proposal.get("objetivoMacro") or "").strip(),
                 "tipoMeta": tipo_meta,
                 "indicadoresSucesso": indicadores,
+                "marcos": marcos,
                 "diretrizesDerivadas": diretrizes,
             }
             if tipo_meta == "absoluta":
@@ -6789,6 +6798,9 @@ INTENCAO DO USUARIO:
                     "Definir criterios observaveis de progresso",
                     "Revisar a intencao em ciclos mensais",
                     "Registrar evidencias de avanco"
+                ],
+                "marcos": [
+                    "Definir primeira entrega pontual do objetivo"
                 ],
                 "diretrizesDerivadas": [
                     "Considere esta intencao apenas quando o usuario pedir alinhamento estrategico.",
