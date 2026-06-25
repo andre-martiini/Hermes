@@ -23,7 +23,6 @@ if CURRENT_DIR not in sys.path:
     sys.path.insert(0, CURRENT_DIR)
 
 from security_portals import (
-    generatePgdFromDiariesAI,
     generatePgdFromRawTextAI,
     getPublicShoppingPortal,
     matchShoppingItemsAI,
