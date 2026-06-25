@@ -258,6 +258,47 @@ export interface FinanceSettings {
     externalToken?: string;
 }
 
+export type EstrategiaPilar = 'carreira' | 'financas' | 'saude' | 'intelectual' | 'estilo_vida';
+export type EstrategiaTipoMeta = 'absoluta' | 'relativa_qualitativa';
+export type EstrategiaStatus = 'ativo' | 'concluido' | 'revisar';
+
+export interface EstrategiaIndicadorSucesso {
+    id: string;
+    descricao: string;
+    concluido: boolean;
+    dataConclusao?: string;
+    evidencia?: string;
+    registros?: Array<{
+        id: string;
+        data: string;
+        nota: string;
+    }>;
+}
+
+export interface EstrategiaPessoal {
+    id?: string;
+    userId: string;
+    pilar: EstrategiaPilar;
+    objetivoMacro: string;
+    tipoMeta: EstrategiaTipoMeta;
+    metricaAlvo?: {
+        valorInicial?: number;
+        valorAtual: number;
+        valorObjetivo: number;
+        unidade: string;
+    };
+    historicoMetrica?: Array<{
+        id: string;
+        data: string;
+        valor: number;
+        nota?: string;
+    }>;
+    indicadoresSucesso?: Array<string | EstrategiaIndicadorSucesso>;
+    diretrizesDerivadas: string[];
+    status: EstrategiaStatus;
+    timestamp: any;
+}
+
 
 export interface FixedBill {
     id: string;

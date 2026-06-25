@@ -229,6 +229,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
   const [loadingEditId, setLoadingEditId] = useState<string | null>(null);
+  const [strategyDirectives, setStrategyDirectives] = useState<string[]>([]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -305,6 +306,36 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
       },
       (error) => setFooterError(error?.message || 'Erro ao carregar histórico do copiloto.'),
     );
+  }, [isOpen, userId, copilotMode]);
+
+  useEffect(() => {
+    if (!isOpen || !userId || copilotMode !== 'default') {
+      setStrategyDirectives([]);
+      return;
+    }
+    let cancelled = false;
+    const loadStrategyDirectives = async () => {
+      try {
+        const snap = await getDocs(query(
+          collection(db, 'estrategia_pessoal'),
+          where('userId', '==', userId),
+          where('status', '==', 'ativo')
+        ));
+        if (cancelled) return;
+        const directives = snap.docs.flatMap((strategyDoc) => {
+          const data = strategyDoc.data() as any;
+          return Array.isArray(data.diretrizesDerivadas) ? data.diretrizesDerivadas : [];
+        }).map(value => String(value || '').trim()).filter(Boolean);
+        setStrategyDirectives(Array.from(new Set(directives)).slice(0, 24));
+      } catch (error) {
+        console.warn('[HermesGlobalChat] Falha ao carregar diretrizes estratégicas', error);
+        if (!cancelled) setStrategyDirectives([]);
+      }
+    };
+    loadStrategyDirectives();
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen, userId, copilotMode]);
 
   useEffect(() => {
@@ -608,6 +639,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
         driveFileName,
         copilotMode,
         copilotScope: 'global',
+        strategyDirectives,
         routingIndex: getRoutingIndex(),
       }), COPILOTO_CALLABLE_TIMEOUT_MS, 'O copiloto demorou demais para responder.');
 

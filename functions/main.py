@@ -6656,6 +6656,165 @@ def askChatbot(req: https_fn.CallableRequest):
 
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=120
+)
+def refinarDiretrizesEstrategicas(req: https_fn.CallableRequest):
+    """
+    Refina uma intencao estrategica em propostas editaveis para estrategia_pessoal.
+    Nao persiste dados: a validacao humana acontece no frontend.
+    """
+    from google import genai
+    from google.genai import types
+
+    data = req.data or {}
+    intencao = str(data.get("intencao") or "").strip()
+    user_uid = req.auth.uid if req.auth else str(data.get("userId") or "").strip()
+    pilares_validos = {"carreira", "financas", "saude", "intelectual", "estilo_vida"}
+
+    if not intencao:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="Intencao estrategica e obrigatoria."
+        )
+
+    try:
+        db = get_db()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
+        gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        if not gemini_key:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="Chave Gemini nao configurada."
+            )
+
+        contexto_previo = []
+        if user_uid:
+            for doc_snap in db.collection("estrategia_pessoal").where("userId", "==", user_uid).where("status", "==", "ativo").limit(12).stream():
+                value = doc_snap.to_dict() or {}
+                contexto_previo.append({
+                    "pilar": value.get("pilar"),
+                    "objetivoMacro": value.get("objetivoMacro"),
+                    "tipoMeta": value.get("tipoMeta"),
+                    "diretrizesDerivadas": value.get("diretrizesDerivadas", []),
+                })
+
+        refinement_prompt = f"""
+Voce e um arquiteto de estrategia pessoal. Transforme a intencao livre do usuario em 1 a 5 propostas estruturadas.
+
+REGRAS:
+- Responda somente JSON valido.
+- Use pilares exatamente entre: carreira, financas, saude, intelectual, estilo_vida.
+- tipoMeta deve ser "absoluta" quando houver valor numerico rastreavel; caso contrario "relativa_qualitativa".
+- Para metas absolutas, preencha metricaAlvo com valorAtual, valorObjetivo e unidade. Se nao houver valor atual, use 0.
+- Para metas qualitativas, sugira 3 a 5 indicadoresSucesso objetivos e observaveis.
+- diretrizesDerivadas deve conter 2 a 5 frases concisas para orientar uma IA de forma passiva no chat global.
+- Nao crie tarefas operacionais diarias.
+- Preserve a autonomia do usuario: escreva como contexto estrategico, nao como ordens intrusivas.
+
+FORMATO:
+{{
+  "propostas": [
+    {{
+      "pilar": "carreira",
+      "objetivoMacro": "string",
+      "tipoMeta": "absoluta",
+      "metricaAlvo": {{"valorAtual": 0, "valorObjetivo": 100, "unidade": "string"}},
+      "indicadoresSucesso": ["string"],
+      "diretrizesDerivadas": ["string"]
+    }}
+  ]
+}}
+
+CONTEXTO ESTRATEGICO JA ATIVO:
+{json.dumps(contexto_previo, ensure_ascii=False)}
+
+INTENCAO DO USUARIO:
+{intencao}
+"""
+
+        client = genai.Client(api_key=gemini_key)
+        response = client.models.generate_content(
+            model=GEMINI_ROUTING_MODEL,
+            contents=refinement_prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.2,
+                http_options=types.HttpOptions(timeout=60000),
+            )
+        )
+        log_gemini_usage(response, model=GEMINI_ROUTING_MODEL, feature="estrategia_pessoal_refinar", db=db)
+        raw_text = (response.text or "").strip()
+        try:
+            parsed = json.loads(raw_text)
+        except Exception:
+            match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+            parsed = json.loads(match.group(0)) if match else {}
+
+        propostas = []
+        for proposal in parsed.get("propostas", []):
+            if not isinstance(proposal, dict):
+                continue
+            pilar = proposal.get("pilar") if proposal.get("pilar") in pilares_validos else "carreira"
+            tipo_meta = "absoluta" if proposal.get("tipoMeta") == "absoluta" else "relativa_qualitativa"
+            indicadores = [
+                str(item).strip()
+                for item in (proposal.get("indicadoresSucesso") or [])
+                if str(item).strip()
+            ][:5]
+            diretrizes = [
+                str(item).strip()
+                for item in (proposal.get("diretrizesDerivadas") or [])
+                if str(item).strip()
+            ][:5]
+            item = {
+                "pilar": pilar,
+                "objetivoMacro": str(proposal.get("objetivoMacro") or "").strip(),
+                "tipoMeta": tipo_meta,
+                "indicadoresSucesso": indicadores,
+                "diretrizesDerivadas": diretrizes,
+            }
+            if tipo_meta == "absoluta":
+                metric = proposal.get("metricaAlvo") or {}
+                item["metricaAlvo"] = {
+                    "valorAtual": float(metric.get("valorAtual") or 0),
+                    "valorObjetivo": float(metric.get("valorObjetivo") or 0),
+                    "unidade": str(metric.get("unidade") or "").strip(),
+                }
+            if item["objetivoMacro"] and item["diretrizesDerivadas"]:
+                propostas.append(item)
+
+        if not propostas:
+            propostas = [{
+                "pilar": "intelectual",
+                "objetivoMacro": intencao[:220],
+                "tipoMeta": "relativa_qualitativa",
+                "indicadoresSucesso": [
+                    "Definir criterios observaveis de progresso",
+                    "Revisar a intencao em ciclos mensais",
+                    "Registrar evidencias de avanco"
+                ],
+                "diretrizesDerivadas": [
+                    "Considere esta intencao apenas quando o usuario pedir alinhamento estrategico.",
+                    "Evite transformar esta diretriz em pressao operacional diaria.",
+                    "Priorize recomendacoes que preservem foco e consistencia de longo prazo."
+                ],
+            }]
+
+        return {"propostas": propostas[:5]}
+
+    except https_fn.HttpsError:
+        raise
+    except Exception as e:
+        print(f"Erro em refinarDiretrizesEstrategicas: {e}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message="Falha ao refinar diretrizes estrategicas."
+        )
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
     memory=options.MemoryOption.GB_2,
     timeout_sec=COPILOT_FUNCTION_TIMEOUT_SEC
 )
@@ -6679,6 +6838,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
     drive_file_name = (data.get('driveFileName') or 'documento').strip()
     routing_index = data.get('routingIndex') or []
     copilot_mode = (data.get('copilotMode') or 'default').strip()
+    strategy_directives_raw = data.get('strategyDirectives') or []
+    strategy_directives = [
+        str(item).strip()
+        for item in strategy_directives_raw
+        if str(item).strip()
+    ][:24] if isinstance(strategy_directives_raw, list) else []
     user_uid = req.auth.uid if req.auth else None
 
     def _copilot_remaining_sec() -> float:
@@ -9400,8 +9565,20 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             + system_instruction_governanca
         )
 
+        strategy_context = ""
+        if copilot_mode == "default" and strategy_directives:
+            strategy_lines = "\n".join(f"- {directive}" for directive in strategy_directives)
+            strategy_context = (
+                "\n\n## DIRETRIZES ESTRATEGICAS PESSOAIS (PASSIVAS)\n"
+                "Estas diretrizes vieram do modulo estrategia_pessoal e servem apenas como pano de fundo do chat global.\n"
+                "Use-as somente quando o usuario pedir explicitamente alinhamento de vida, estrategia pessoal, decisoes de longo prazo, prioridades macro ou coerencia com objetivos pessoais.\n"
+                "Nao use estas diretrizes para interferir em tarefas operacionais, nao transforme metas de vida em cobrancas e nao mencione este contexto espontaneamente.\n"
+                f"{strategy_lines}\n"
+            )
+
         system_instruction = (
             system_instruction_static
+            + strategy_context
             + f"\n\nHoje é {today_str} e o horário local atual é {time_str}. "
             + (f"CONTEXTO TÉCNICO VINCULADO (OBRIGATÓRIO): "
                + (f"sistemaId={system_id}, " if system_id else "")
