@@ -77,14 +77,6 @@ const TOOL_LABELS: Record<string, string> = {
   registrar_item_financeiro_v2: 'Item financeiro',
 };
 
-const QUICK_PROMPTS = [
-  'Planeje minhas prioridades para hoje com base nas ações pendentes.',
-  'Crie uma ação objetiva para uma demanda nova.',
-  'Consulte minha agenda e sugira um bloco livre de trabalho focado.',
-  'Busque no acervo documentos relacionados ao tema que eu informar.',
-  'Transforme este contexto em checklist operacional.',
-];
-
 type CopilotMode = 'default' | 'finance' | 'saude';
 type UploadPhase = 'idle' | 'uploading' | 'processing';
 
@@ -216,6 +208,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showTools, setShowTools] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [showMobileHistory, setShowMobileHistory] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [pastedContext, setPastedContext] = useState<{ text: string; name: string } | null>(null);
@@ -818,7 +811,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
 
   return (
     <div
-      className={`fixed inset-0 z-[700] flex ${shellClass}`}
+      className="fixed inset-0 z-[700] flex justify-end"
       onDragEnter={(event) => {
         if (!Array.from(event.dataTransfer.types).includes('Files') || isBlocked) return;
         event.preventDefault();
@@ -837,6 +830,8 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
       }}
       onDrop={handleDrop}
     >
+      <div className="absolute inset-0 bg-slate-950/50" onClick={onClose} aria-hidden="true" />
+      <div className={`relative flex h-full w-full ${showHistory ? 'max-w-[920px]' : 'max-w-[640px]'} shadow-2xl duration-300 animate-in slide-in-from-right ${shellClass}`}>
       {isDragActive && (
         <div className={`pointer-events-none absolute inset-0 z-[900] flex items-center justify-center border-4 ${isDark ? 'border-blue-400 bg-blue-500/10' : 'border-blue-500 bg-blue-50/80'}`}>
           <div className={`border px-8 py-6 text-center ${raisedClass}`}>
@@ -846,7 +841,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
         </div>
       )}
 
-      <aside className={`${showMobileHistory ? 'fixed inset-0 z-[820] flex' : 'hidden'} md:relative md:z-auto md:flex md:w-[300px] lg:w-[340px] shrink-0 flex-col border-r ${sidebarClass}`}>
+      <aside className={`${showMobileHistory ? 'fixed inset-0 z-[820] flex' : showHistory ? 'hidden md:flex' : 'hidden'} md:relative md:z-auto md:w-[300px] lg:w-[340px] shrink-0 flex-col border-r ${sidebarClass}`}>
         <div className={`flex h-16 shrink-0 items-center justify-between border-b px-4 ${isDark ? 'border-white/10' : 'border-border-grid'}`}>
           <div className="flex min-w-0 items-center gap-3">
             <div className={`flex h-9 w-9 items-center justify-center border p-1.5 ${isDark ? 'border-white/10 bg-slate-950' : 'border-border-grid bg-surface'}`}>
@@ -927,7 +922,19 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
       <main className={`flex min-w-0 flex-1 flex-col border-l-0 ${panelClass}`}>
         <header className={`flex h-16 shrink-0 items-center justify-between border-b px-4 md:px-6 ${isDark ? 'border-white/10' : 'border-border-grid'}`}>
           <div className="flex min-w-0 items-center gap-3">
-            <button type="button" onClick={() => setShowMobileHistory(true)} className={`p-2 md:hidden ${hoverClass}`} aria-label="Abrir histórico">
+            <button
+              type="button"
+              onClick={() => {
+                if (window.innerWidth < 768) {
+                  setShowMobileHistory(true);
+                  return;
+                }
+                setShowHistory(prev => !prev);
+              }}
+              className={`border px-3 py-2 font-mono text-[9px] font-black uppercase tracking-widest transition-all ${showHistory ? (isDark ? 'border-blue-400/40 bg-blue-500/10 text-blue-200' : 'border-slate-900 bg-slate-100 text-slate-900') : `${isDark ? 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-white' : 'border-border-grid text-slate-500 hover:bg-white hover:text-slate-900'}`}`}
+              aria-label="Abrir histórico"
+              aria-pressed={showHistory}
+            >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
             </button>
             <div className={`hidden h-9 w-9 items-center justify-center border p-1.5 md:flex ${isDark ? 'border-white/10 bg-slate-950' : 'border-border-grid bg-white'}`}>
@@ -938,9 +945,14 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
               <p className={`truncate font-mono text-[9px] font-black uppercase tracking-[0.18em] ${mutedClass}`}>Chat {modeLabel} · {currentSessionId ? 'conversa ativa' : 'nova conversa'}</p>
             </div>
           </div>
-          <button type="button" onClick={onClose} className={`border px-3 py-2 font-mono text-[9px] font-black uppercase tracking-widest transition-all ${isDark ? 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-white' : 'border-border-grid text-slate-500 hover:bg-white hover:text-slate-900'}`}>
-            Fechar
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button type="button" onClick={startNewConversation} className={`hidden border px-3 py-2 font-mono text-[9px] font-black uppercase tracking-widest transition-all sm:inline-flex ${isDark ? 'border-white/10 text-slate-300 hover:bg-white/5 hover:text-white' : 'border-border-grid text-slate-600 hover:bg-white hover:text-slate-900'}`}>
+              Nova conversa
+            </button>
+            <button type="button" onClick={onClose} className={`border px-3 py-2 font-mono text-[9px] font-black uppercase tracking-widest transition-all ${isDark ? 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-white' : 'border-border-grid text-slate-500 hover:bg-white hover:text-slate-900'}`}>
+              Fechar
+            </button>
+          </div>
         </header>
 
         <div className={`min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8 ${isDark ? 'bg-[#191c1c]' : 'bg-white'}`}>
@@ -956,21 +968,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                     <h3 className={`mt-1 text-2xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Como posso ajudar?</h3>
                   </div>
                 </div>
-                <div className="grid gap-2 md:grid-cols-2">
-                  {QUICK_PROMPTS.map((prompt) => (
-                    <button
-                      key={prompt}
-                      type="button"
-                      onClick={() => {
-                        setInput(prompt);
-                        setTimeout(() => textareaRef.current?.focus(), 0);
-                      }}
-                      className={`border p-4 text-left text-sm font-bold leading-relaxed transition-all ${raisedClass} ${isDark ? 'hover:border-blue-400/40 hover:bg-blue-500/10' : 'hover:border-slate-900 hover:bg-white'}`}
-                    >
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
+                <p className={`max-w-xl text-sm font-semibold leading-7 ${textSoftClass}`}>Pronto para conversar.</p>
               </div>
             ) : (
               <div className="space-y-8">
@@ -1192,6 +1190,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
           </div>
         </footer>
       </main>
+      </div>
     </div>
   );
 };

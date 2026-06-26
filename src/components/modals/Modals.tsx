@@ -9,6 +9,7 @@ import {
 } from '../../../types';
 import { formatDate, formatDateLocalISO } from '../../../types';
 import { detectAreaFromTitle, callScrapeSipac } from '../../utils/helpers';
+import { isOperationalArea, STRATEGIC_AREA_OPTIONS } from '../../utils/strategicAreas';
 import { WysiwygEditor } from '../ui/UIComponents';
 
 type ThemeMode = 'system' | 'dark' | 'light';
@@ -539,7 +540,7 @@ export const SettingsModal = ({
 
               <div className="space-y-4">
                 {unidades.map((u) => {
-                  const isProtected = ['CLC', 'ASSISTÊNCIA', 'ASSISTÊNCIA ESTUDANTIL'].includes(u.nome.toUpperCase());
+                  const isProtected = isOperationalArea(u.nome) || u.nome.toUpperCase() === 'ASSISTÊNCIA';
                   return (
                     <div key={u.id} className={`p-6 rounded-none border space-y-4 ${isProtected ? (isDarkTheme ? 'border-amber-700/50 bg-amber-950/20' : 'border-amber-200 bg-amber-50/30') : (isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-100')}`}>
                       <div className="flex items-center justify-between">
@@ -970,7 +971,8 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
       const tagsDisponiveis = [
         'GERAL',
         'NÃO CLASSIFICADA',
-        ...unidades.map(u => u.nome.toUpperCase())
+        ...STRATEGIC_AREA_OPTIONS.map(option => option.value),
+        ...unidades.filter(u => isOperationalArea(u.nome)).map(u => u.nome.toUpperCase())
       ];
 
       const unit = formData.area_tematica && formData.area_tematica !== 'GERAL' && formData.area_tematica !== 'NÃO CLASSIFICADA'
@@ -1291,12 +1293,17 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                         className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
                       >
                         <option value="GERAL">Geral</option>
-                        <option value="SAÚDE">Saúde</option>
-                        <option value="FINANCEIRO">Financeiro</option>
                         <option value="NÃO CLASSIFICADA">Não Classificada</option>
-                        {unidades.map(u => (
-                          <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
-                        ))}
+                        <optgroup label="Estratégicas">
+                          {STRATEGIC_AREA_OPTIONS.map(option => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Operacionais">
+                          {unidades.filter(u => isOperationalArea(u.nome)).map(u => (
+                            <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                          ))}
+                        </optgroup>
                       </select>
                     </div>
                   </div>
@@ -1431,7 +1438,9 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                   extra_context_id: extraContextId,
                   knowledge_item_ids: extraContextFiles.filter(f => f.status === 'ready').map(f => f.id)
                 } : {}),
-                ...(selectedReuniao?.firestoreId ? { reuniao_vinculada_id: selectedReuniao.firestoreId } : {})
+                ...(selectedReuniao?.firestoreId ? { reuniao_vinculada_id: selectedReuniao.firestoreId } : {}),
+                ...(initialData?.estrategia_indicador_id ? { estrategia_indicador_id: initialData.estrategia_indicador_id } : {}),
+                ...(initialData?.estrategia_objetivo_id ? { estrategia_objetivo_id: initialData.estrategia_objetivo_id } : {})
               });
               onClose();
             }}
@@ -1656,12 +1665,17 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                 className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
               >
                 <option value="GERAL">Geral</option>
-                <option value="SAÚDE">Saúde</option>
-                <option value="FINANCEIRO">Financeiro</option>
                 <option value="NÃO CLASSIFICADA">Não Classificada</option>
-                {unidades.map(u => (
-                  <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
-                ))}
+                <optgroup label="Estratégicas">
+                  {STRATEGIC_AREA_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="Operacionais">
+                  {unidades.filter(u => isOperationalArea(u.nome)).map(u => (
+                    <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                  ))}
+                </optgroup>
               </select>
             </div>
           </div>

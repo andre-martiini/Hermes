@@ -1,5 +1,6 @@
 import React from 'react';
 import { Tarefa } from '../../../types';
+import { normalizeAreaName } from '../../utils/strategicAreas';
 import { TaskActionSelector } from './TaskActionSelector';
 
 interface TaskCardProps {
@@ -41,14 +42,21 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         }
     }
 
-    const areaStyles = degradationStyles || (task.area_tematica === 'CLC'
+    const areaName = normalizeAreaName(task.area_tematica);
+    const areaStyles = degradationStyles || (areaName === 'CLC'
         ? isDark ? 'bg-blue-900/20 border-blue-800/50 text-blue-400 hover:border-blue-700' : 'bg-white border-blue-200 text-blue-700 hover:border-blue-400'
-        : task.area_tematica === 'ASSISTÊNCIA' || task.area_tematica === 'ASSISTÊNCIA ESTUDANTIL'
+        : areaName === 'ASSISTENCIA' || areaName === 'ASSISTENCIA ESTUDANTIL'
             ? isDark ? 'bg-purple-900/20 border-purple-800/50 text-purple-400 hover:border-purple-700' : 'bg-white border-purple-200 text-purple-700 hover:border-purple-400'
-        : task.area_tematica === 'SAÚDE' || task.area_tematica === 'SAUDE'
+        : areaName === 'SAUDE'
             ? isDark ? 'bg-rose-900/20 border-rose-800/50 text-rose-400 hover:border-rose-700' : 'bg-white border-rose-200 text-rose-700 hover:border-rose-400'
-        : task.area_tematica === 'FINANCEIRO' || task.area_tematica === 'FINANCEIRA'
+        : areaName === 'FINANCEIRO' || areaName === 'FINANCEIRA' || areaName === 'FINANCAS'
             ? isDark ? 'bg-emerald-900/20 border-emerald-800/50 text-emerald-400 hover:border-emerald-700' : 'bg-white border-emerald-200 text-emerald-700 hover:border-emerald-400'
+        : areaName === 'CARREIRA'
+            ? isDark ? 'bg-blue-900/20 border-blue-800/50 text-blue-400 hover:border-blue-700' : 'bg-white border-blue-200 text-blue-700 hover:border-blue-400'
+        : areaName === 'INTELECTUAL'
+            ? isDark ? 'bg-amber-900/20 border-amber-800/50 text-amber-400 hover:border-amber-700' : 'bg-white border-amber-200 text-amber-700 hover:border-amber-400'
+        : areaName === 'ESTILO DE VIDA'
+            ? isDark ? 'bg-cyan-900/20 border-cyan-800/50 text-cyan-400 hover:border-cyan-700' : 'bg-white border-cyan-200 text-cyan-700 hover:border-cyan-400'
             : isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600' : 'bg-white border-border-grid text-slate-600 hover:border-slate-400');
 
     const [isMenuOpen, setIsMenuOpen] = React.useState(false);

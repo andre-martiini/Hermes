@@ -1,16 +1,21 @@
 import React from 'react';
 import { Tarefa, formatDate, formatDateLocalISO } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
+import { normalizeAreaName } from '../utils/strategicAreas';
 
 export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onAnalysePatterns, isDark = false }: { tasks: Tarefa[], viewMode: string, onSelectTask: (t: Tarefa) => void, onExecuteTask: (t: Tarefa) => void, onAnalysePatterns?: (cat: string) => void, isDark?: boolean }) => {
   const isCLC = viewMode === 'licitacoes';
-  const areaTematica = isCLC ? 'CLC' : 'ASSISTÊNCIA';
+  const areaTematica = isCLC ? 'CLC' : 'ASSISTÊNCIA ESTUDANTIL';
+  const matchesArea = (task: Tarefa) => {
+    const area = normalizeAreaName(task.area_tematica);
+    return isCLC ? area === 'CLC' : area === 'ASSISTENCIA' || area === 'ASSISTENCIA ESTUDANTIL';
+  };
   const color = isCLC ? 'blue' : 'emerald';
   const title = isCLC ? 'Licitações' : 'Assistência Estudantil';
 
   const todayStr = formatDateLocalISO(new Date());
 
-  const pendentes = tasks.filter(t => t.area_tematica === areaTematica && normalizeStatus(t.status) !== 'concluido' && t.status !== 'excluído' as any);
+  const pendentes = tasks.filter(t => matchesArea(t) && normalizeStatus(t.status) !== 'concluido' && t.status !== 'excluído' as any);
 
   const getRelevantDate = (t: Tarefa) => {
     const isConcluido = normalizeStatus(t.status) === 'concluido';
@@ -20,7 +25,7 @@ export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onA
 
   const historyTasks = tasks
     .filter(t => {
-      const isCat = t.area_tematica === areaTematica;
+      const isCat = matchesArea(t);
       const isNotExcluded = t.status !== 'excluído' as any;
       const isConcluido = normalizeStatus(t.status) === 'concluido';
       const hasStarted = t.data_criacao && t.data_criacao <= todayStr;

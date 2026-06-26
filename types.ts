@@ -106,6 +106,8 @@ export interface Tarefa {
     kg_crystallized?: boolean;           // true após a Fase 2 ser concluída
     artefatos_kg?: ArtefatoKG[];         // Artefatos indexados pelo módulo de artefatos
     auto_data_atualizada?: boolean;
+    estrategia_objetivo_id?: string;
+    estrategia_indicador_id?: string;
 }
 
 export interface ArtefatoKG {

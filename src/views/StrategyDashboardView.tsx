@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { addDoc, collection, deleteDoc, doc, onSnapshot, query, Timestamp, updateDoc, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../../firebase';
-import { EstrategiaIndicadorSucesso, EstrategiaMarco, EstrategiaPessoal, EstrategiaPilar, EstrategiaStatus, EstrategiaTipoMeta } from '../../types';
+import { EstrategiaIndicadorSucesso, EstrategiaMarco, EstrategiaPessoal, EstrategiaPilar, EstrategiaStatus, EstrategiaTipoMeta, Tarefa } from '../../types';
 
 type StrategyIndicatorDraft = EstrategiaIndicadorSucesso;
 type StrategyMilestoneDraft = EstrategiaMarco;
@@ -22,6 +22,8 @@ interface StrategyDashboardViewProps {
   userId: string;
   isDark?: boolean;
   showToast?: (msg: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
+  tarefas?: Tarefa[];
+  onCreateIndicadorAction?: (item: EstrategiaPessoal, indicator: EstrategiaIndicadorSucesso) => void;
 }
 
 const PILLARS: Array<{ id: EstrategiaPilar; label: string; accent: string }> = [
@@ -200,7 +202,7 @@ const getInputClass = (isDark: boolean) =>
     isDark ? 'border-slate-700 bg-slate-950 text-slate-100 focus:ring-slate-500' : 'border-slate-200 bg-white text-slate-900 focus:ring-slate-900'
   }`;
 
-export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ userId, isDark = false, showToast }) => {
+export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ userId, isDark = false, showToast, tarefas = [], onCreateIndicadorAction }) => {
   const [items, setItems] = useState<EstrategiaPessoal[]>([]);
   const [intention, setIntention] = useState('');
   const [drafts, setDrafts] = useState<StrategyDraft[]>([]);
@@ -244,6 +246,14 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
   }, [items]);
 
   const filteredItems = selectedPillar === 'todos' ? items : items.filter(item => item.pilar === selectedPillar);
+  const getIndicatorActions = (objectiveId?: string, indicatorId?: string) => {
+    if (!objectiveId || !indicatorId) return [];
+    return tarefas.filter(task => task.estrategia_objetivo_id === objectiveId && task.estrategia_indicador_id === indicatorId && task.status !== 'excluído');
+  };
+  const isTaskCompleted = (task: Tarefa) => {
+    const normalized = String(task.status || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    return normalized === 'concluido';
+  };
   const panelClass = isDark ? 'bg-slate-950 text-slate-100 border-slate-800' : 'bg-white text-slate-900 border-slate-200';
   const softPanelClass = isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200';
   const mutedClass = isDark ? 'text-slate-400' : 'text-slate-500';
@@ -781,7 +791,8 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
               const milestones = toMilestoneDrafts(item.marcos).filter(milestone => milestone.descricao.trim());
               const indicatorPanelId = `strategy-indicators-${item.id || item.objetivoMacro}`;
               const areIndicatorsExpanded = Boolean(item.id && expandedIndicators[item.id]);
-              const indicatorRecordCount = indicators.reduce((sum, indicator) => sum + (indicator.registros || []).length, 0);
+              const indicatorActionCount = indicators.reduce((sum, indicator) => sum + getIndicatorActions(item.id, indicator.id).length, 0);
+              const completedIndicatorActionCount = indicators.reduce((sum, indicator) => sum + getIndicatorActions(item.id, indicator.id).filter(isTaskCompleted).length, 0);
               const completedMilestoneCount = milestones.filter(milestone => milestone.concluido).length;
               if (editingId === item.id && editingDraft) {
                 return (
@@ -877,7 +888,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                         <span>
                           <span className={`block text-[10px] font-black uppercase tracking-widest ${mutedClass}`}>Detalhes</span>
                           <span className="mt-0.5 block text-xs font-bold">
-                            {indicators.length} indicador{indicators.length === 1 ? '' : 'es'} / {indicatorRecordCount} registro{indicatorRecordCount === 1 ? '' : 's'} / {completedMilestoneCount}/{milestones.length} marco{milestones.length === 1 ? '' : 's'}
+                            {indicators.length} indicador{indicators.length === 1 ? '' : 'es'} / {completedIndicatorActionCount}/{indicatorActionCount} acao{indicatorActionCount === 1 ? '' : 'es'} / {completedMilestoneCount}/{milestones.length} marco{milestones.length === 1 ? '' : 's'}
                           </span>
                         </span>
                         <svg className={`h-4 w-4 transition-transform ${areIndicatorsExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -890,22 +901,42 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                             <p className={`text-[10px] font-black uppercase tracking-widest ${mutedClass}`}>Indicadores contínuos</p>
                             {indicators.length === 0 ? (
                               <p className={`text-xs font-bold ${mutedClass}`}>Nenhum indicador contínuo cadastrado.</p>
-                            ) : indicators.map((indicator, indicatorIndex) => (
+                            ) : indicators.map((indicator, indicatorIndex) => {
+                              const linkedActions = getIndicatorActions(item.id, indicator.id);
+                              const completedLinkedActions = linkedActions.filter(isTaskCompleted);
+                              return (
                               <div key={indicator.id} className={`border p-2 ${softPanelClass}`}>
                                 <div className="flex items-start justify-between gap-2">
                                   <span className="text-sm font-semibold">{indicator.descricao}</span>
-                                  {(indicator.registros || []).length > 0 && (
-                                    <span className="bg-emerald-600 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-white">
-                                      {(indicator.registros || []).length} registro{(indicator.registros || []).length === 1 ? '' : 's'}
-                                    </span>
-                                  )}
+                                  <span className="shrink-0 bg-emerald-600 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-white">
+                                    {completedLinkedActions.length}/{linkedActions.length} acoes
+                                  </span>
                                 </div>
+                                {linkedActions.length > 0 && (
+                                  <div className="mt-2 space-y-1">
+                                    {linkedActions.slice(0, 4).map(action => (
+                                      <div key={action.id} className={`flex items-center justify-between gap-2 border px-2 py-1 text-xs font-semibold ${panelClass}`}>
+                                        <span className={isTaskCompleted(action) ? 'line-through opacity-70' : ''}>{action.titulo}</span>
+                                        <span className={`shrink-0 text-[8px] font-black uppercase tracking-widest ${mutedClass}`}>{action.status}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                                 {(indicator.registros || []).slice(-2).map(record => (
                                   <p key={record.id} className={`mt-1 text-xs font-semibold ${mutedClass}`}>
                                     {new Date(record.data).toLocaleDateString('pt-BR')}: {record.nota}
                                   </p>
                                 ))}
-                                <div className="mt-2 flex gap-2">
+                                <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                                  <button
+                                    type="button"
+                                    onClick={() => onCreateIndicadorAction?.(item, indicator)}
+                                    disabled={!item.id || !onCreateIndicadorAction}
+                                    className="shrink-0 bg-blue-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white transition-all hover:bg-blue-700 disabled:opacity-50"
+                                  >
+                                    Criar acao
+                                  </button>
+                                  <div className="flex flex-1 gap-2">
                                   <input
                                     value={indicatorNotes[`${item.id}:${indicator.id}`] ?? ''}
                                     onChange={(event) => setIndicatorNotes(prev => ({ ...prev, [`${item.id}:${indicator.id}`]: event.target.value }))}
@@ -922,9 +953,11 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 5v14m7-7H5" />
                                     </svg>
                                   </button>
+                                  </div>
                                 </div>
                               </div>
-                            ))}
+                              );
+                            })}
                           </div>
                           <div className="space-y-2">
                             <p className={`text-[10px] font-black uppercase tracking-widest ${mutedClass}`}>Marcos pontuais</p>

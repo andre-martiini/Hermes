@@ -253,11 +253,14 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
     // If we have a dynamic color, we'll use inline style instead
     if (baseColor) return '__dynamic__';
     // Fallback legacy
-    const n = name.toUpperCase();
+    const n = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
     if (n.includes('CLC')) return 'bg-blue-100/70 px-1 -mx-1 rounded-sm decoration-clone';
-    if (n.includes('SAÚDE') || n.includes('SAUDE')) return 'bg-rose-100/70 px-1 -mx-1 rounded-sm decoration-clone';
-    if (n.includes('FINANCEIRO') || n.includes('FINANCEIRA')) return 'bg-emerald-100/70 px-1 -mx-1 rounded-sm decoration-clone';
-    if (n.includes('ASSISTÊNCIA') || n.includes('ESTUDANTIL')) return 'bg-purple-100/70 px-1 -mx-1 rounded-sm decoration-clone';
+    if (n.includes('SAUDE')) return 'bg-rose-100/70 px-1 -mx-1 rounded-sm decoration-clone';
+    if (n.includes('FINANCEIRO') || n.includes('FINANCEIRA') || n.includes('FINANCAS')) return 'bg-emerald-100/70 px-1 -mx-1 rounded-sm decoration-clone';
+    if (n.includes('CARREIRA')) return 'bg-blue-100/70 px-1 -mx-1 rounded-sm decoration-clone';
+    if (n.includes('INTELECTUAL')) return 'bg-amber-100/70 px-1 -mx-1 rounded-sm decoration-clone';
+    if (n.includes('ESTILO DE VIDA')) return 'bg-cyan-100/70 px-1 -mx-1 rounded-sm decoration-clone';
+    if (n.includes('ASSISTENCIA') || n.includes('ESTUDANTIL')) return 'bg-purple-100/70 px-1 -mx-1 rounded-sm decoration-clone';
     return '';
   };
 
@@ -274,11 +277,14 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
       };
     }
     // Fallback legacy
-    const n = name.toUpperCase();
+    const n = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
     if (n.includes('CLC')) return { className: 'bg-blue-50 text-blue-600 border-blue-100' };
-    if (n.includes('SAÚDE') || n.includes('SAUDE')) return { className: 'bg-rose-50 text-rose-600 border-rose-100' };
-    if (n.includes('FINANCEIRO') || n.includes('FINANCEIRA')) return { className: 'bg-emerald-50 text-emerald-600 border-emerald-100' };
-    if (n.includes('ASSISTÊNCIA') || n.includes('ESTUDANTIL')) return { className: 'bg-purple-50 text-purple-600 border-purple-100' };
+    if (n.includes('SAUDE')) return { className: 'bg-rose-50 text-rose-600 border-rose-100' };
+    if (n.includes('FINANCEIRO') || n.includes('FINANCEIRA') || n.includes('FINANCAS')) return { className: 'bg-emerald-50 text-emerald-600 border-emerald-100' };
+    if (n.includes('CARREIRA')) return { className: 'bg-blue-50 text-blue-600 border-blue-100' };
+    if (n.includes('INTELECTUAL')) return { className: 'bg-amber-50 text-amber-600 border-amber-100' };
+    if (n.includes('ESTILO DE VIDA')) return { className: 'bg-cyan-50 text-cyan-600 border-cyan-100' };
+    if (n.includes('ASSISTENCIA') || n.includes('ESTUDANTIL')) return { className: 'bg-purple-50 text-purple-600 border-purple-100' };
     return { className: 'bg-slate-50 text-slate-500 border-slate-100' };
   };
 

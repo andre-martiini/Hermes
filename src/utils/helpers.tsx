@@ -345,12 +345,18 @@ export const detectAreaFromTitle = (titulo: string): Categoria => {
   const assistenciaKeywords = ['assistência', 'assistencia', 'estudantil', 'aluno', 'bolsa', 'auxílio', 'auxilio', 'permanência', 'permanencia'];
   const saudeKeywords = ['saúde', 'saude', 'médico', 'medico', 'exame', 'consulta', 'medicamento', 'hospital', 'biometria', 'peso', 'treino'];
   const financeiroKeywords = ['pagamento', 'boleto', 'conta', 'dinheiro', 'valor', 'reais', 'financeiro', 'banco', 'transferência', 'pix', 'gasto', 'orçamento'];
+  const carreiraKeywords = ['trabalho', 'carreira', 'profissional', 'cliente', 'projeto', 'entrega', 'reuniao', 'reunião'];
+  const intelectualKeywords = ['estudo', 'curso', 'livro', 'leitura', 'pesquisa', 'artigo', 'aprender', 'aprendizado'];
+  const estiloVidaKeywords = ['familia', 'família', 'casa', 'coral', 'lazer', 'viagem', 'rotina', 'vida'];
   const sistemaKeywords = ['sistema', 'bug', 'feature', 'desenvolvimento', 'dev', 'api', 'banco de dados', 'deploy', 'servidor'];
 
   if (clcKeywords.some(keyword => tituloLower.includes(keyword))) return 'CLC';
   if (assistenciaKeywords.some(keyword => tituloLower.includes(keyword))) return 'ASSISTÊNCIA';
-  if (saudeKeywords.some(keyword => tituloLower.includes(keyword))) return 'SAÚDE';
-  if (financeiroKeywords.some(keyword => tituloLower.includes(keyword))) return 'FINANCEIRO';
+  if (saudeKeywords.some(keyword => tituloLower.includes(keyword))) return 'SAUDE';
+  if (financeiroKeywords.some(keyword => tituloLower.includes(keyword))) return 'FINANCAS';
+  if (intelectualKeywords.some(keyword => tituloLower.includes(keyword))) return 'INTELECTUAL';
+  if (estiloVidaKeywords.some(keyword => tituloLower.includes(keyword))) return 'ESTILO DE VIDA';
+  if (carreiraKeywords.some(keyword => tituloLower.includes(keyword))) return 'CARREIRA';
   if (sistemaKeywords.some(keyword => tituloLower.includes(keyword))) return 'SISTEMA';
 
   return 'GERAL';

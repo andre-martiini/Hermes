@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Tarefa, GoogleCalendarEvent, formatDateLocalISO } from '../../../types';
 import { normalizeStatus } from '../../utils/helpers';
+import { normalizeAreaName } from '../../utils/strategicAreas';
 import { timeToMinutes, minutesToTime, getYFromTime, getTimeFromY, snapToGrid, getColumnFromX } from '../../utils/calendarUtils';
 import { PROJECT_COLORS } from '../../../constants';
 import { TaskActionSelector } from './TaskActionSelector';
@@ -377,14 +378,18 @@ export const TimeGrid = ({
                   }
 
                   const taskItem = event.data as Tarefa;
+                  const areaName = normalizeAreaName(taskItem.area_tematica);
                   return (
                     <React.Fragment key={event.id}>
                       <div
                         className={`absolute rounded-none border p-1 shadow-sm group transition-all hover:z-30 cursor-grab active:cursor-grabbing
-                             ${taskItem.area_tematica === 'CLC' ? isDark ? 'bg-blue-900/20 border-blue-800 text-blue-200' : 'bg-blue-50 border-blue-200 text-blue-800' :
-                            taskItem.area_tematica === 'ASSISTÊNCIA' || taskItem.area_tematica === 'ASSISTÊNCIA ESTUDANTIL' ? isDark ? 'bg-purple-900/20 border-purple-800 text-purple-200' : 'bg-purple-50 border-purple-200 text-purple-800' :
-                            taskItem.area_tematica === 'SAÚDE' || taskItem.area_tematica === 'SAUDE' ? isDark ? 'bg-rose-900/20 border-rose-800 text-rose-200' : 'bg-rose-50 border-rose-200 text-rose-800' :
-                            taskItem.area_tematica === 'FINANCEIRO' || taskItem.area_tematica === 'FINANCEIRA' ? isDark ? 'bg-emerald-900/20 border-emerald-800 text-emerald-200' : 'bg-emerald-50 border-emerald-200 text-emerald-800' :
+                             ${areaName === 'CLC' ? isDark ? 'bg-blue-900/20 border-blue-800 text-blue-200' : 'bg-blue-50 border-blue-200 text-blue-800' :
+                            areaName === 'ASSISTENCIA' || areaName === 'ASSISTENCIA ESTUDANTIL' ? isDark ? 'bg-purple-900/20 border-purple-800 text-purple-200' : 'bg-purple-50 border-purple-200 text-purple-800' :
+                            areaName === 'SAUDE' ? isDark ? 'bg-rose-900/20 border-rose-800 text-rose-200' : 'bg-rose-50 border-rose-200 text-rose-800' :
+                            areaName === 'FINANCEIRO' || areaName === 'FINANCEIRA' || areaName === 'FINANCAS' ? isDark ? 'bg-emerald-900/20 border-emerald-800 text-emerald-200' : 'bg-emerald-50 border-emerald-200 text-emerald-800' :
+                            areaName === 'CARREIRA' ? isDark ? 'bg-blue-900/20 border-blue-800 text-blue-200' : 'bg-blue-50 border-blue-200 text-blue-800' :
+                            areaName === 'INTELECTUAL' ? isDark ? 'bg-amber-900/20 border-amber-800 text-amber-200' : 'bg-amber-50 border-amber-200 text-amber-800' :
+                            areaName === 'ESTILO DE VIDA' ? isDark ? 'bg-cyan-900/20 border-cyan-800 text-cyan-200' : 'bg-cyan-50 border-cyan-200 text-cyan-800' :
                               isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-800'}
                              ${isDragging || isResizing ? 'opacity-30' : ''}
                           `}

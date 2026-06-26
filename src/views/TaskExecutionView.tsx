@@ -7,6 +7,7 @@ import {
 } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
 import { buildDiaryRichNote, ensureHttpUrl, getRenamedFileName, parseDiaryRichNote } from '../utils/diaryEntries';
+import { isOperationalArea, STRATEGIC_AREA_OPTIONS } from '../utils/strategicAreas';
 import { NotificationCenter } from '../components/ui/UIComponents';
 import { db, functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
@@ -2093,9 +2094,16 @@ export const TaskExecutionView = ({
                           >
                             <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} value="GERAL">Geral</option>
                             <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} value="NÃO CLASSIFICADA">Não Classificada</option>
-                            {(knowledgeBases || []).map(b => (
-                              <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} key={b.id} value={b.nome.toUpperCase()}>{b.nome}</option>
-                            ))}
+                            <optgroup label="Estratégicas">
+                              {STRATEGIC_AREA_OPTIONS.map(option => (
+                                <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="Operacionais">
+                              {(unidades || []).filter(u => isOperationalArea(u.nome)).map(u => (
+                                <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                              ))}
+                            </optgroup>
                           </select>
                         </div>
 

@@ -10,7 +10,7 @@ import {
   GoogleCalendarEvent,
   PoolItem, CustomNotification, HealthExam, ConhecimentoItem, UndoAction, HermesModalProps,
   ShoppingItem, Projeto, BaseConhecimento, TipoAcao, Servico, Toast,
-  HealthTelegramReminder
+  HealthTelegramReminder, EstrategiaPessoal, EstrategiaIndicadorSucesso
 } from './types';
 import HealthView from './HealthView';
 import { GoogleHealthService } from './GoogleHealthService';
@@ -69,6 +69,7 @@ import {
   getTaskIdFromActionFolderId
 } from './src/utils/knowledgeLogic';
 import { parseDiaryRichNote } from './src/utils/diaryEntries';
+import { getAreaForStrategyPillar, normalizeAreaName } from './src/utils/strategicAreas';
 type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
 type DateFilter = 'today' | 'week' | 'month';
 type ThemeMode = 'system' | 'dark' | 'light';
@@ -2600,9 +2601,10 @@ const App: React.FC = () => {
       case 'tarefas':
         const task = tarefas.find(t => t.id === id);
         if (task) {
+          const taskArea = normalizeAreaName(task.area_tematica);
           setSelectedTask(task);
-          if (task.area_tematica === 'CLC') setViewMode('licitacoes');
-          else if (task.area_tematica === 'ASSISTÃŠNCIA' || task.area_tematica === 'ASSISTÊNCIA') setViewMode('assistencia');
+          if (taskArea === 'CLC') setViewMode('licitacoes');
+          else if (taskArea === 'ASSISTENCIA' || taskArea === 'ASSISTENCIA ESTUDANTIL') setViewMode('assistencia');
           else setViewMode('gallery');
           setActiveModule('acoes');
         } else {
@@ -2638,6 +2640,23 @@ const App: React.FC = () => {
       data_limite: formatDateLocalISO(new Date())
     });
     setConvertingIdea(idea); // To delete after save
+    setIsCreateModalOpen(true);
+  };
+  const handleCreateIndicadorAction = (objective: EstrategiaPessoal, indicator: EstrategiaIndicadorSucesso) => {
+    const today = formatDateLocalISO(new Date());
+    setConvertingIdea(null);
+    setTaskInitialData({
+      titulo: indicator.descricao ? `Acao: ${indicator.descricao}` : 'Acao de indicador estrategico',
+      notas: `Objetivo estrategico: ${objective.objetivoMacro}\nIndicador continuo: ${indicator.descricao}`,
+      descricao: `Registro qualitativo do indicador continuo "${indicator.descricao}" no objetivo "${objective.objetivoMacro}".`,
+      data_inicio: today,
+      data_limite: today,
+      area_tematica: getAreaForStrategyPillar(objective.pilar),
+      status: 'em andamento',
+      tags: ['estrategia', 'indicador-continuo'],
+      estrategia_objetivo_id: objective.id,
+      estrategia_indicador_id: indicator.id,
+    });
     setIsCreateModalOpen(true);
   };
   const handleShoppingAIConfirm = async (confirmedItems: ShoppingAIConfirmItem[]) => {
@@ -3034,7 +3053,7 @@ const App: React.FC = () => {
         google_id: "", // Sinaliza que precisa de PUSH
         data_atualizacao: new Date().toISOString(),
         projeto: 'Google Tasks',
-        contabilizar_meta: inputData.area_tematica === 'CLC' || (inputData.area_tematica === 'ASSISTÃŠNCIA' || inputData.area_tematica === 'ASSISTÊNCIA'),
+        contabilizar_meta: ['CLC', 'ASSISTENCIA', 'ASSISTENCIA ESTUDANTIL'].includes(normalizeAreaName(inputData.area_tematica)),
         acompanhamento: [],
         entregas_relacionadas: []
       }, null);
@@ -3746,8 +3765,8 @@ const App: React.FC = () => {
     emAndamento: tarefas.filter(t => normalizeStatus(t.status) === 'em andamento').length,
     standBy: tarefas.filter(t => normalizeStatus(t.status) === 'stand-by').length,
     concluidas: tarefas.filter(t => normalizeStatus(t.status) === 'concluido').length,
-    clc: tarefas.filter(t => t.area_tematica === 'CLC' && normalizeStatus(t.status) !== 'concluido').length,
-    assistencia: tarefas.filter(t => (t.area_tematica === 'ASSISTÃŠNCIA' || t.area_tematica === 'ASSISTÊNCIA') && normalizeStatus(t.status) !== 'concluido').length,
+    clc: tarefas.filter(t => normalizeAreaName(t.area_tematica) === 'CLC' && normalizeStatus(t.status) !== 'concluido').length,
+    assistencia: tarefas.filter(t => ['ASSISTENCIA', 'ASSISTENCIA ESTUDANTIL'].includes(normalizeAreaName(t.area_tematica)) && normalizeStatus(t.status) !== 'concluido').length,
     geral: tarefas.filter(t => t.area_tematica === 'GERAL' && normalizeStatus(t.status) !== 'concluido').length,
     semTag: tarefas.filter(t => (t.area_tematica === 'NÃO CLASSIFICADA' || !t.area_tematica) && normalizeStatus(t.status) !== 'concluido' && t.status !== 'excluído' as any).length,
   }), [tarefas]);
@@ -4907,6 +4926,8 @@ const App: React.FC = () => {
                     userId={user?.uid || ''}
                     isDark={isDarkTheme}
                     showToast={showToast}
+                    tarefas={tarefas}
+                    onCreateIndicadorAction={handleCreateIndicadorAction}
                   />
                 ) : viewMode === 'gallery' ? (
                   <>
@@ -6694,6 +6715,16 @@ const App: React.FC = () => {
             />
           )
         }
+        {!isCopilotoOpen && !(selectedTask && (taskModalMode === 'execute' || (taskModalMode === 'default' && selectedTask.area_tematica === 'CLC'))) && (
+          <button
+            type="button"
+            aria-label="Copiloto Hermes"
+            onClick={() => setIsCopilotoOpen(true)}
+            className="fixed bottom-6 right-6 z-[600] flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 transition-all hover:-translate-y-0.5 hover:bg-indigo-500 active:scale-95 sm:h-16 sm:w-16"
+          >
+            <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+          </button>
+        )}
         <HermesGlobalChat
           isOpen={isCopilotoOpen}
           onClose={() => { setIsCopilotoOpen(false); setCopilotoAutoStartMic(false); setCopilotoMode('default'); setCopilotoInitialPrompt(null); }}
