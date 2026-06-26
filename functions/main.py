@@ -3721,6 +3721,8 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
     storage_path = data.get('storagePath')
 
+    audio_base64 = data.get('audioBase64')
+
     extension = data.get('extension', '.m4a')
 
 
@@ -3731,13 +3733,17 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
 
 
-    if not storage_path:
+    # Aceita dois fluxos: arquivo já enviado ao Storage (`storagePath`, contorna o
+    # limite de 32MB do Cloud Run para arquivos grandes) ou o binário em base64
+    # diretamente no corpo (`audioBase64`, usado por microfone/WhatsApp no copiloto).
+
+    if not storage_path and not audio_base64:
 
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="Caminho do arquivo não fornecido.")
 
 
 
-    if not storage_path.startswith(f"quick_transcriptions/{uid}/"):
+    if storage_path and not storage_path.startswith(f"quick_transcriptions/{uid}/"):
 
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.PERMISSION_DENIED, message="Caminho de arquivo inválido.")
 
@@ -3751,15 +3757,25 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
     try:
 
-        # 1. Baixar o binário do Storage para arquivo temporário
-
-        blob = admin_storage.bucket().blob(storage_path)
+        # 1. Obter o binário em arquivo temporário (Storage ou base64)
 
         fd, temp_filename = tempfile.mkstemp(suffix=extension)
 
         os.close(fd)
 
-        blob.download_to_filename(temp_filename)
+        if storage_path:
+
+            blob = admin_storage.bucket().blob(storage_path)
+
+            blob.download_to_filename(temp_filename)
+
+        else:
+
+            import base64
+
+            with open(temp_filename, "wb") as audio_file:
+
+                audio_file.write(base64.b64decode(audio_base64))
 
 
 
