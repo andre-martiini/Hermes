@@ -75,6 +75,10 @@ const TOOL_LABELS: Record<string, string> = {
   encontrar_slot_livre: 'Slot livre',
   consultar_financas_v2: 'Finanças',
   registrar_item_financeiro_v2: 'Item financeiro',
+  criar_objetivo_estrategico: 'Objetivo criado',
+  editar_objetivo_estrategico: 'Objetivo editado',
+  gerenciar_item_estrategico: 'Item da estratégia',
+  excluir_objetivo_estrategico: 'Objetivo excluído',
 };
 
 // Ponto 3: ferramentas usadas colapsadas por padrão — um resumo de uma linha que
@@ -108,7 +112,7 @@ const ToolsUsedBadges: React.FC<{ tools: string[]; isDark?: boolean }> = ({ tool
   );
 };
 
-type CopilotMode = 'default' | 'finance' | 'saude';
+type CopilotMode = 'default' | 'finance' | 'saude' | 'estrategia';
 type UploadPhase = 'idle' | 'uploading' | 'processing';
 
 interface FieldChange {
@@ -265,7 +269,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   const dragCounterRef = useRef(0);
 
   const isBlocked = isLoading || uploadPhase !== 'idle' || isProcessingMic || isTranscribing;
-  const modeLabel = copilotMode === 'finance' ? 'Financeiro' : copilotMode === 'saude' ? 'Saúde' : 'Global';
+  const modeLabel = copilotMode === 'finance' ? 'Financeiro' : copilotMode === 'saude' ? 'Saúde' : copilotMode === 'estrategia' ? 'Estratégia' : 'Global';
 
   const shellClass = isDark ? 'bg-[#191c1c] text-slate-100' : 'bg-surface text-slate-900';
   const sidebarClass = isDark ? 'bg-[#151919] border-white/10' : 'bg-white border-border-grid';
@@ -932,7 +936,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                         <p className={`truncate text-xs font-black ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{session.title || 'Nova conversa'}</p>
                         <span className={`shrink-0 font-mono text-[8px] font-black uppercase ${mutedClass}`}>{formatSessionTime(session.lastMessageAt)}</span>
                       </div>
-                      <p className={`mt-1 font-mono text-[8px] font-black uppercase tracking-[0.16em] ${mutedClass}`}>{session.copilotMode === 'finance' ? 'Financeiro' : session.copilotMode === 'saude' ? 'Saúde' : 'Global'}</p>
+                      <p className={`mt-1 font-mono text-[8px] font-black uppercase tracking-[0.16em] ${mutedClass}`}>{session.copilotMode === 'finance' ? 'Financeiro' : session.copilotMode === 'saude' ? 'Saúde' : session.copilotMode === 'estrategia' ? 'Estratégia' : 'Global'}</p>
                     </button>
                     <button
                       type="button"
@@ -995,11 +999,11 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                     <img src="/logo.png" alt="Hermes" className="h-full w-full object-contain" />
                   </div>
                   <div>
-                    <p className={`font-mono text-[10px] font-black uppercase tracking-[0.25em] ${mutedClass}`}>Copiloto global</p>
+                    <p className={`font-mono text-[10px] font-black uppercase tracking-[0.25em] ${mutedClass}`}>{copilotMode === 'estrategia' ? 'Copiloto de estratégia' : 'Copiloto global'}</p>
                     <h3 className={`mt-1 text-2xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Como posso ajudar?</h3>
                   </div>
                 </div>
-                <p className={`max-w-xl text-sm font-semibold leading-7 ${textSoftClass}`}>Pronto para conversar.</p>
+                <p className={`max-w-xl text-sm font-semibold leading-7 ${textSoftClass}`}>{copilotMode === 'estrategia' ? 'Foco nos seus objetivos, pilares, diretrizes, indicadores e marcos. Posso analisar coerência de longo prazo e criar, alterar ou excluir itens da sua estratégia.' : 'Pronto para conversar.'}</p>
               </div>
             ) : (
               <div className="space-y-8">
@@ -1200,7 +1204,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                   }
                 }}
                 disabled={isBlocked}
-                placeholder={isRecording ? 'Gravando... clique no microfone para parar' : isProcessingMic || isTranscribing ? 'Transcrevendo áudio...' : attachedFile || pastedContext ? 'Pergunte sobre o contexto anexado...' : 'Mensagem para o Hermes'}
+                placeholder={isRecording ? 'Gravando... clique no microfone para parar' : isProcessingMic || isTranscribing ? 'Transcrevendo áudio...' : attachedFile || pastedContext ? 'Pergunte sobre o contexto anexado...' : copilotMode === 'estrategia' ? 'Converse sobre seus objetivos e diretrizes...' : 'Mensagem para o Hermes'}
                 className={`min-h-10 flex-1 resize-none overflow-y-hidden bg-transparent px-2 py-2.5 text-sm font-medium leading-5 outline-none disabled:opacity-40 ${isDark ? 'text-slate-100 placeholder:text-slate-600' : 'text-slate-900 placeholder:text-slate-400'}`}
               />
               <button type="button" disabled={isBlocked && !isRecording} onClick={() => isRecording ? stopRecording() : startRecording()} title={isRecording ? 'Parar gravação' : 'Gravar áudio'} className={`flex h-10 w-10 shrink-0 items-center justify-center transition-all disabled:opacity-30 ${isRecording ? 'bg-rose-600 text-white animate-pulse' : hoverClass}`}>

@@ -1016,7 +1016,7 @@ const App: React.FC = () => {
   const [isBatchDescriptionSynthesisRunning, setIsBatchDescriptionSynthesisRunning] = useState(false);
   const [isCopilotoOpen, setIsCopilotoOpen] = useState(false);
   const [copilotoAutoStartMic, setCopilotoAutoStartMic] = useState(false);
-  const [copilotoMode, setCopilotoMode] = useState<'default' | 'finance' | 'saude'>('default');
+  const [copilotoMode, setCopilotoMode] = useState<'default' | 'finance' | 'saude' | 'estrategia'>('default');
   const [copilotoInitialPrompt, setCopilotoInitialPrompt] = useState<string | null>(null);
   const [isQuickNoteModalOpen, setIsQuickNoteModalOpen] = useState(false);
   const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
@@ -6719,7 +6719,12 @@ const App: React.FC = () => {
           <button
             type="button"
             aria-label="Copiloto Hermes"
-            onClick={() => setIsCopilotoOpen(true)}
+            onClick={() => {
+              // No módulo de Estratégia o copiloto abre focado nos objetivos/diretrizes
+              // e com as ferramentas de criação/edição/exclusão habilitadas.
+              setCopilotoMode(viewMode === 'strategy' ? 'estrategia' : 'default');
+              setIsCopilotoOpen(true);
+            }}
             className="fixed bottom-6 right-6 z-[600] flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 transition-all hover:-translate-y-0.5 hover:bg-indigo-500 active:scale-95 sm:h-16 sm:w-16"
           >
             <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
