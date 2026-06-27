@@ -437,13 +437,17 @@ interface HermesCopilotoDrawerProps {
     sessionId?: string | null;
     autoStartMic?: boolean;
     copilotMode?: 'default' | 'finance' | 'saude';
+    /** Sinaliza ao container que houve interação com o copiloto (envio/resposta),
+     *  para que ele saiba que mudanças subsequentes no plano/diário vieram daqui
+     *  e não dispare uma manifestação automática duplicada. */
+    onCopilotActivity?: () => void;
 }
 
 type UploadPhase = 'idle' | 'uploading' | 'processing';
 const MOBILE_BREAKPOINT = 768;
 
 export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
-    isOpen, onClose, taskId, systemId, isDark = false, variant = 'drawer', userId, onOpenTask, onOpenTool, activeDocument, isTemporary, sessionId, autoStartMic = false, copilotMode = 'default' as 'default' | 'finance' | 'saude'
+    isOpen, onClose, taskId, systemId, isDark = false, variant = 'drawer', userId, onOpenTask, onOpenTool, activeDocument, isTemporary, sessionId, autoStartMic = false, copilotMode = 'default' as 'default' | 'finance' | 'saude', onCopilotActivity
 }) => {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -1585,6 +1589,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 ? `📎 ${pasteToSend.name}${text.trim() ? `\n\n${text.trim()}` : ''}`
                 : text;
 
+            // Marca atividade do copiloto: o container usa isto para não disparar
+            // uma manifestação automática quando a mutação resultante vier daqui.
+            onCopilotActivity?.();
+
             // 1. Salva mensagem do usuário no Firestore
             await addDoc(collection(db, 'sessoes_copiloto', sId, 'mensagens'), {
                 role: 'user',
@@ -1619,6 +1627,11 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             if (isCancelledRef.current) return;
 
             const data = response.data as any;
+
+            // Reforça a marca de atividade no retorno: é quando a mutação do
+            // copiloto (plano/diário) efetivamente chega ao Firestore, momento a
+            // partir do qual a janela de supressão do insight precisa valer.
+            onCopilotActivity?.();
 
             // 3. Atualiza título da sessão se for a primeira mensagem
             if (messages.length === 0 && !sessionId) {

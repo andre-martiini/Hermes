@@ -11895,8 +11895,11 @@ RESPONDA APENAS COM JSON VÁLIDO (sem markdown):
 
 Se SEM_INSIGHT: {{"nivel": null, "texto": null, "alvo": null, "plano_proposto": null, "acoes_propostas": null}}"""
 
-        # Roteado pelo logger central: entra na telemetria (system_usage/gemini)
-        # e usa flex tier (-50%) — é uma análise de fundo, tolera latência.
+        # Roteado pelo logger central só para entrar na telemetria
+        # (system_usage/gemini). NÃO habilitar flex aqui: este callable tem
+        # timeout_sec=30 e o flex pode enfileirar por até 600s, fazendo o
+        # Firebase matar a chamada e o frontend perder o insight silenciosamente.
+        # O ganho de -50% num call flash-lite minúsculo não compensa o risco.
         response = generate_content_logged(
             client,
             model=GEMINI_LIGHT_MODEL,

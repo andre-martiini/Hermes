@@ -369,15 +369,15 @@ export const TaskExecutionView = ({
 
     insightDebounceRef.current = setTimeout(async () => {
       if (isAnalyzingInsight) return;
-      // Ponto 2: não emitir manifestação automática quando a última alteração veio
-      // do próprio copiloto. Nesse caso o copiloto já respondeu (agora de forma
+      // Ponto 2: não emitir manifestação automática quando a alteração veio do
+      // próprio copiloto. Nesse caso o copiloto já respondeu (agora de forma
       // crítica/socrática), e um insight automático geraria uma SEGUNDA resposta —
-      // às vezes dissonante. Toda mutação do copiloto (plano, diário, ações) deixa
-      // uma nota de diário marcada com "[Copiloto..." ou "🤖". Insights automáticos
-      // ficam reservados a edições feitas manualmente pelo usuário na interface.
-      const ultimaNota = ((currentTaskData.acompanhamento || []).slice(-1)[0]?.nota || '').trim();
-      const veioDoCopiloto = ultimaNota.includes('[Copiloto') || ultimaNota.includes('🤖');
-      if (veioDoCopiloto) return;
+      // às vezes dissonante. Detectamos a origem pelo timestamp da última atividade
+      // do copiloto (ver lastCopilotActivityRef): se houve interação na janela
+      // recente, a mudança no plano/diário veio dela. Insights automáticos ficam
+      // reservados a edições feitas manualmente pelo usuário na interface.
+      const COPILOT_ACTIVITY_WINDOW_MS = 30000;
+      if (Date.now() - lastCopilotActivityRef.current < COPILOT_ACTIVITY_WINDOW_MS) return;
       setIsAnalyzingInsight(true);
       setInsightState(null);
       try {
@@ -477,6 +477,13 @@ export const TaskExecutionView = ({
   const insightMountedRef = useRef(false);
   const insightApplyingRef = useRef(false);
   const lastPersistedInsightSignatureRef = useRef<string | null>(null);
+  // Origem explícita da mutação: marca o instante da última atividade do copiloto
+  // (envio/resposta no chat desta ação). Quando uma alteração no plano/diário
+  // acontece logo após uma interação do copiloto, ela veio dele — e o copiloto já
+  // respondeu —, então não emitimos uma manifestação automática duplicada. Mais
+  // confiável que inferir a origem do texto livre do diário (notas do copiloto nem
+  // sempre carregam marcador, e marcadores antigos suprimiam edições manuais novas).
+  const lastCopilotActivityRef = useRef<number>(0);
 
   const ensureTaskCopilotSession = async () => {
     const existingQ = query(
@@ -1792,6 +1799,7 @@ export const TaskExecutionView = ({
                 sessionId={tempSessionId}
                 onOpenTask={onOpenCopilotoTask}
                 onOpenTool={onOpenCopilotoTool}
+                onCopilotActivity={() => { lastCopilotActivityRef.current = Date.now(); }}
               />
             </div>
           </div>
@@ -2477,6 +2485,7 @@ export const TaskExecutionView = ({
                   sessionId={tempSessionId}
                   onOpenTask={onOpenCopilotoTask}
                   onOpenTool={onOpenCopilotoTool}
+                  onCopilotActivity={() => { lastCopilotActivityRef.current = Date.now(); }}
                 />
               </div>
             )}
