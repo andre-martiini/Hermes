@@ -9307,6 +9307,65 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "noSugar, noAlcohol, noSnacks, workout, eatUntil18, eatSlowly. Streak = dias consecutivos com >=4/6 hábitos.\n\n"
             )
 
+        elif copilot_mode == "estrategia":
+            # Snapshot completo da estratégia pessoal do usuário, com IDs, para que o
+            # copiloto possa conversar sobre os objetivos e operar as ferramentas CRUD.
+            _estrategia_snapshot = "Nenhum objetivo estratégico cadastrado ainda."
+            try:
+                _estrategia_docs = list(
+                    db.collection('estrategia_pessoal').where('userId', '==', user_uid).limit(40).stream()
+                ) if user_uid else []
+
+                def _fmt_itens_estrategia(itens, prefixo):
+                    linhas = []
+                    for it in (itens or []):
+                        if isinstance(it, str):
+                            linhas.append(f"      - [sem-id] {it}")
+                        else:
+                            marca = "✓" if it.get("concluido") else "○"
+                            linhas.append(f"      - {marca} (id={it.get('id', '?')}) {it.get('descricao', '')}")
+                    return "\n".join(linhas) if linhas else "      - (nenhum)"
+
+                _blocos = []
+                for _doc in _estrategia_docs:
+                    _d = _doc.to_dict() or {}
+                    _metrica = _d.get("metricaAlvo") or {}
+                    _metrica_str = ""
+                    if _d.get("tipoMeta") == "absoluta" and _metrica:
+                        _metrica_str = (
+                            f"\n    Métrica: {_metrica.get('valorAtual', '?')}/{_metrica.get('valorObjetivo', '?')} "
+                            f"{_metrica.get('unidade', '')} (inicial {_metrica.get('valorInicial', '?')})"
+                        )
+                    _diretrizes = _d.get("diretrizesDerivadas") or []
+                    _diretrizes_str = "\n".join(f"      - {dz}" for dz in _diretrizes) if _diretrizes else "      - (nenhuma)"
+                    _blocos.append(
+                        f"• OBJETIVO (id={_doc.id}) | pilar={_d.get('pilar', '?')} | tipo={_d.get('tipoMeta', '?')} | status={_d.get('status', '?')}\n"
+                        f"    \"{_d.get('objetivoMacro', '')}\"{_metrica_str}\n"
+                        f"    Diretrizes:\n{_diretrizes_str}\n"
+                        f"    Indicadores contínuos:\n{_fmt_itens_estrategia(_d.get('indicadoresSucesso'), 'indicador')}\n"
+                        f"    Marcos pontuais:\n{_fmt_itens_estrategia(_d.get('marcos'), 'marco')}"
+                    )
+                if _blocos:
+                    _estrategia_snapshot = "\n\n".join(_blocos)
+            except Exception as _est_err:
+                print(f"[Copiloto] Falha ao carregar snapshot de estratégia: {_est_err}")
+
+            mode_context = (
+                "## MODO ESTRATÉGIA ATIVO\n"
+                "Você foi aberto a partir do módulo de Estratégia do Hermes. Seu foco EXCLUSIVO nesta conversa é a estratégia pessoal do usuário: "
+                "objetivos macro, pilares, diretrizes, indicadores de sucesso e marcos. Converse sobre coerência de longo prazo, prioridades, trade-offs e progresso.\n"
+                "Você tem ferramentas de escrita disponíveis SOMENTE neste modo: criar_objetivo_estrategico, editar_objetivo_estrategico, gerenciar_item_estrategico e excluir_objetivo_estrategico.\n"
+                "REGRAS DE OPERAÇÃO:\n"
+                "1. Sempre apresente um rascunho claro do que pretende criar/alterar/excluir e só execute a ferramenta APÓS confirmação explícita do usuário.\n"
+                "2. Para excluir um objetivo, exija confirmação inequívoca — a operação é irreversível.\n"
+                "3. Use SEMPRE o 'id' exato exibido no snapshot abaixo ao editar, gerenciar itens ou excluir. Nunca invente IDs.\n"
+                "4. Ao editar diretrizes, lembre que a lista é substituída por inteiro: monte a lista final desejada a partir das diretrizes atuais.\n"
+                "5. Para indicadores/marcos individuais use gerenciar_item_estrategico (preserva IDs e ações vinculadas).\n"
+                "6. Não toque em tarefas operacionais, finanças ou outros módulos aqui; mantenha o foco na estratégia.\n\n"
+                "## SNAPSHOT ATUAL DA ESTRATÉGIA DO USUÁRIO\n"
+                f"{_estrategia_snapshot}\n\n"
+            )
+
         system_instruction_nucleo = (
             "Você é o Copiloto Hermes, estrategista sênior de processos."
             "\n\n## CORE ESTÁTICO DO COPILOTO\n"
@@ -9671,6 +9730,285 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception:
                 pass  # Fail-open: timeout ou erro → continua sem hint
 
+        # ─── FERRAMENTAS DO MÓDULO ESTRATÉGIA (CRUD) ─────────────────────────────
+        # Só são declaradas quando copilot_mode == 'estrategia' (ver static_tools).
+        # Operam exclusivamente sobre a coleção estrategia_pessoal do usuário atual.
+        _ESTRATEGIA_PILARES = {'carreira', 'financas', 'saude', 'intelectual', 'estilo_vida'}
+        _ESTRATEGIA_STATUS = {'ativo', 'concluido', 'revisar'}
+        _ESTRATEGIA_TIPOS = {'absoluta', 'relativa_qualitativa'}
+
+        def _novo_id_estrategia(prefixo: str) -> str:
+            import uuid as _uuid
+            return f"{prefixo}-{int(time.time() * 1000)}-{str(_uuid.uuid4())[:6]}"
+
+        def _carregar_objetivo_estrategico(objetivo_id: str):
+            """Carrega um objetivo garantindo posse pelo usuário atual. Retorna (ref, data) ou (None, None)."""
+            if not objetivo_id:
+                return None, None
+            ref = db.collection('estrategia_pessoal').document(str(objetivo_id))
+            snap = ref.get()
+            if not snap.exists:
+                return None, None
+            data = snap.to_dict() or {}
+            if user_uid and data.get('userId') and data.get('userId') != user_uid:
+                return None, None
+            return ref, data
+
+        def criar_objetivo_estrategico(
+            objetivoMacro: str,
+            pilar: str = "carreira",
+            tipoMeta: str = "relativa_qualitativa",
+            status: str = "ativo",
+            diretrizes: list[str] = [],
+            indicadores: list[str] = [],
+            marcos: list[str] = [],
+            metrica_valor_inicial: float = None,
+            metrica_valor_atual: float = None,
+            metrica_valor_objetivo: float = None,
+            metrica_unidade: str = "",
+        ):
+            """
+            [MÓDULO ESTRATÉGIA] Cria um novo objetivo estratégico pessoal em estrategia_pessoal.
+            Use APENAS quando o usuário pedir explicitamente para criar/cadastrar um objetivo, meta ou pilar estratégico.
+            Parâmetros:
+            - objetivoMacro: enunciado do objetivo macro (obrigatório).
+            - pilar: um de 'carreira', 'financas', 'saude', 'intelectual', 'estilo_vida'.
+            - tipoMeta: 'absoluta' (com métrica numérica) ou 'relativa_qualitativa'.
+            - status: 'ativo', 'revisar' ou 'concluido'.
+            - diretrizes: lista de diretrizes derivadas (frases que orientam a IA).
+            - indicadores: lista de descrições de indicadores contínuos de sucesso.
+            - marcos: lista de descrições de marcos pontuais.
+            - metrica_*: só para tipoMeta 'absoluta' (valor inicial/atual/objetivo e unidade).
+            Apresente um rascunho ao usuário e só chame após confirmação explícita.
+            """
+            try:
+                titulo = (objetivoMacro or "").strip()
+                if not titulo:
+                    return json.dumps({"status": "error", "reason": "objetivoMacro_obrigatorio"}, ensure_ascii=False)
+                pilar_norm = (pilar or "carreira").strip().lower()
+                if pilar_norm not in _ESTRATEGIA_PILARES:
+                    pilar_norm = "carreira"
+                tipo_norm = (tipoMeta or "relativa_qualitativa").strip().lower()
+                if tipo_norm not in _ESTRATEGIA_TIPOS:
+                    tipo_norm = "relativa_qualitativa"
+                status_norm = (status or "ativo").strip().lower()
+                if status_norm not in _ESTRATEGIA_STATUS:
+                    status_norm = "ativo"
+
+                diretrizes_clean = [str(d).strip() for d in (diretrizes or []) if str(d).strip()]
+                if not diretrizes_clean:
+                    return json.dumps({"status": "error", "reason": "diretrizes_obrigatorias"}, ensure_ascii=False)
+
+                indicadores_obj = [
+                    {"id": _novo_id_estrategia("indicador"), "descricao": str(d).strip(), "concluido": False, "registros": []}
+                    for d in (indicadores or []) if str(d).strip()
+                ]
+                marcos_obj = [
+                    {"id": _novo_id_estrategia("marco"), "descricao": str(d).strip(), "concluido": False, "registros": []}
+                    for d in (marcos or []) if str(d).strip()
+                ]
+
+                payload = {
+                    "userId": user_uid,
+                    "pilar": pilar_norm,
+                    "objetivoMacro": titulo,
+                    "tipoMeta": tipo_norm,
+                    "indicadoresSucesso": indicadores_obj,
+                    "marcos": marcos_obj,
+                    "diretrizesDerivadas": diretrizes_clean,
+                    "status": status_norm,
+                    "timestamp": firestore.SERVER_TIMESTAMP,
+                }
+
+                if tipo_norm == "absoluta":
+                    val_obj = float(metrica_valor_objetivo or 0)
+                    val_atual = float(metrica_valor_atual or 0)
+                    val_ini = float(metrica_valor_inicial) if metrica_valor_inicial is not None else (val_atual if val_obj < val_atual else 0)
+                    payload["metricaAlvo"] = {
+                        "valorInicial": val_ini,
+                        "valorAtual": val_atual,
+                        "valorObjetivo": val_obj,
+                        "unidade": str(metrica_unidade or "").strip(),
+                    }
+
+                ref = db.collection('estrategia_pessoal').document()
+                ref.set(payload)
+                return json.dumps({
+                    "status": "created",
+                    "objetivo_id": ref.id,
+                    "objetivoMacro": titulo,
+                    "pilar": pilar_norm,
+                }, ensure_ascii=False)
+            except Exception as e:
+                return json.dumps({"status": "error", "reason": str(e)}, ensure_ascii=False)
+
+        def editar_objetivo_estrategico(
+            objetivo_id: str,
+            objetivoMacro: str = None,
+            pilar: str = None,
+            tipoMeta: str = None,
+            status: str = None,
+            diretrizes: list[str] = None,
+            metrica_valor_inicial: float = None,
+            metrica_valor_atual: float = None,
+            metrica_valor_objetivo: float = None,
+            metrica_unidade: str = None,
+        ):
+            """
+            [MÓDULO ESTRATÉGIA] Edita um objetivo estratégico existente (identificado por objetivo_id, visível no snapshot da estratégia).
+            Só passe os campos que devem mudar; os demais são preservados.
+            - diretrizes: se fornecida, SUBSTITUI a lista completa de diretrizes. Para adicionar/remover, envie a lista final desejada (use o snapshot atual como base).
+            - Para gerenciar indicadores ou marcos individualmente, use gerenciar_item_estrategico.
+            Use APENAS após confirmação do usuário.
+            """
+            try:
+                ref, data = _carregar_objetivo_estrategico(objetivo_id)
+                if not ref:
+                    return json.dumps({"status": "error", "reason": "objetivo_nao_encontrado"}, ensure_ascii=False)
+
+                updates = {}
+                if objetivoMacro is not None and str(objetivoMacro).strip():
+                    updates["objetivoMacro"] = str(objetivoMacro).strip()
+                if pilar is not None:
+                    p = str(pilar).strip().lower()
+                    if p in _ESTRATEGIA_PILARES:
+                        updates["pilar"] = p
+                if status is not None:
+                    s = str(status).strip().lower()
+                    if s in _ESTRATEGIA_STATUS:
+                        updates["status"] = s
+                if tipoMeta is not None:
+                    tm = str(tipoMeta).strip().lower()
+                    if tm in _ESTRATEGIA_TIPOS:
+                        updates["tipoMeta"] = tm
+                if diretrizes is not None:
+                    dz = [str(d).strip() for d in (diretrizes or []) if str(d).strip()]
+                    if not dz:
+                        return json.dumps({"status": "error", "reason": "diretrizes_nao_podem_ficar_vazias"}, ensure_ascii=False)
+                    updates["diretrizesDerivadas"] = dz
+
+                # Métrica: só aplica se o objetivo é/torna-se absoluto
+                tipo_final = updates.get("tipoMeta", data.get("tipoMeta"))
+                if tipo_final == "absoluta" and any(v is not None for v in [metrica_valor_inicial, metrica_valor_atual, metrica_valor_objetivo, metrica_unidade]):
+                    metrica = dict(data.get("metricaAlvo") or {})
+                    if metrica_valor_inicial is not None:
+                        metrica["valorInicial"] = float(metrica_valor_inicial)
+                    if metrica_valor_atual is not None:
+                        metrica["valorAtual"] = float(metrica_valor_atual)
+                    if metrica_valor_objetivo is not None:
+                        metrica["valorObjetivo"] = float(metrica_valor_objetivo)
+                    if metrica_unidade is not None:
+                        metrica["unidade"] = str(metrica_unidade).strip()
+                    metrica.setdefault("valorInicial", 0)
+                    metrica.setdefault("valorAtual", 0)
+                    metrica.setdefault("valorObjetivo", 0)
+                    metrica.setdefault("unidade", "")
+                    updates["metricaAlvo"] = metrica
+
+                if not updates:
+                    return json.dumps({"status": "noop", "reason": "nenhum_campo_alterado"}, ensure_ascii=False)
+
+                updates["timestamp"] = firestore.SERVER_TIMESTAMP
+                ref.update(updates)
+                return json.dumps({
+                    "status": "updated",
+                    "objetivo_id": ref.id,
+                    "campos_alterados": [k for k in updates.keys() if k != "timestamp"],
+                }, ensure_ascii=False)
+            except Exception as e:
+                return json.dumps({"status": "error", "reason": str(e)}, ensure_ascii=False)
+
+        def gerenciar_item_estrategico(
+            objetivo_id: str,
+            tipo: str,
+            acao: str,
+            descricao: str = None,
+            item_id: str = None,
+        ):
+            """
+            [MÓDULO ESTRATÉGIA] Gerencia um indicador ou marco dentro de um objetivo, preservando IDs (não quebra ações vinculadas).
+            - tipo: 'indicador' ou 'marco'.
+            - acao: 'adicionar' (precisa de descricao), 'editar' (precisa item_id + descricao), 'remover' (precisa item_id) ou 'concluir' (precisa item_id).
+            - item_id: id do item existente (visível no snapshot).
+            Use APENAS após confirmação do usuário.
+            """
+            try:
+                ref, data = _carregar_objetivo_estrategico(objetivo_id)
+                if not ref:
+                    return json.dumps({"status": "error", "reason": "objetivo_nao_encontrado"}, ensure_ascii=False)
+                tipo_norm = (tipo or "").strip().lower()
+                if tipo_norm not in {"indicador", "marco"}:
+                    return json.dumps({"status": "error", "reason": "tipo_invalido"}, ensure_ascii=False)
+                acao_norm = (acao or "").strip().lower()
+                campo = "indicadoresSucesso" if tipo_norm == "indicador" else "marcos"
+
+                # Normaliza lista existente para objetos
+                from datetime import datetime as _dt, timezone as _tz
+                lista = []
+                for idx, item in enumerate(data.get(campo) or []):
+                    if isinstance(item, str):
+                        lista.append({"id": _novo_id_estrategia(tipo_norm), "descricao": item, "concluido": False, "registros": []})
+                    else:
+                        lista.append({
+                            "id": item.get("id") or _novo_id_estrategia(tipo_norm),
+                            "descricao": item.get("descricao", ""),
+                            "concluido": bool(item.get("concluido")),
+                            "registros": item.get("registros", []),
+                            **({"dataConclusao": item["dataConclusao"]} if item.get("dataConclusao") else {}),
+                            **({"evidencia": item["evidencia"]} if item.get("evidencia") else {}),
+                        })
+
+                if acao_norm == "adicionar":
+                    if not (descricao or "").strip():
+                        return json.dumps({"status": "error", "reason": "descricao_obrigatoria"}, ensure_ascii=False)
+                    novo = {"id": _novo_id_estrategia(tipo_norm), "descricao": descricao.strip(), "concluido": False, "registros": []}
+                    lista.append(novo)
+                    resultado_id = novo["id"]
+                elif acao_norm in {"editar", "remover", "concluir"}:
+                    if not item_id:
+                        return json.dumps({"status": "error", "reason": "item_id_obrigatorio"}, ensure_ascii=False)
+                    alvo = next((it for it in lista if it["id"] == item_id), None)
+                    if not alvo:
+                        return json.dumps({"status": "error", "reason": "item_nao_encontrado"}, ensure_ascii=False)
+                    if acao_norm == "editar":
+                        if not (descricao or "").strip():
+                            return json.dumps({"status": "error", "reason": "descricao_obrigatoria"}, ensure_ascii=False)
+                        alvo["descricao"] = descricao.strip()
+                    elif acao_norm == "remover":
+                        lista = [it for it in lista if it["id"] != item_id]
+                    elif acao_norm == "concluir":
+                        alvo["concluido"] = True
+                        alvo["dataConclusao"] = _dt.now(_tz.utc).isoformat()
+                    resultado_id = item_id
+                else:
+                    return json.dumps({"status": "error", "reason": "acao_invalida"}, ensure_ascii=False)
+
+                ref.update({campo: lista, "timestamp": firestore.SERVER_TIMESTAMP})
+                return json.dumps({
+                    "status": "ok",
+                    "objetivo_id": ref.id,
+                    "tipo": tipo_norm,
+                    "acao": acao_norm,
+                    "item_id": resultado_id,
+                }, ensure_ascii=False)
+            except Exception as e:
+                return json.dumps({"status": "error", "reason": str(e)}, ensure_ascii=False)
+
+        def excluir_objetivo_estrategico(objetivo_id: str):
+            """
+            [MÓDULO ESTRATÉGIA] Exclui DEFINITIVAMENTE um objetivo estratégico (e seus indicadores/marcos/diretrizes).
+            Operação irreversível. Use APENAS após confirmação explícita e inequívoca do usuário.
+            """
+            try:
+                ref, data = _carregar_objetivo_estrategico(objetivo_id)
+                if not ref:
+                    return json.dumps({"status": "error", "reason": "objetivo_nao_encontrado"}, ensure_ascii=False)
+                titulo = data.get("objetivoMacro", "")
+                ref.delete()
+                return json.dumps({"status": "deleted", "objetivo_id": objetivo_id, "objetivoMacro": titulo}, ensure_ascii=False)
+            except Exception as e:
+                return json.dumps({"status": "error", "reason": str(e)}, ensure_ascii=False)
+
 
         dynamic_tools = []
         _function_map = {
@@ -9691,6 +10029,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'editar_plano_acao': editar_plano_acao,
             'preparar_edicao_acao': preparar_edicao_acao,
             'registrar_no_diario': registrar_no_diario,
+            'criar_objetivo_estrategico': criar_objetivo_estrategico,
+            'editar_objetivo_estrategico': editar_objetivo_estrategico,
+            'gerenciar_item_estrategico': gerenciar_item_estrategico,
+            'excluir_objetivo_estrategico': excluir_objetivo_estrategico,
             'gerar_imagem': gerar_imagem,
             'gerar_relatorio': gerar_relatorio,
             'gerar_rascunho_formulario': gerar_rascunho_formulario,
@@ -9815,6 +10157,14 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             static_tools.append(consultar_processo_sipac_copiloto)
             static_tools.append(incorporar_documento_especifico_sipac_no_rag_da_acao)
             static_tools.append(acompanhar_processo_sipac_copiloto)
+
+        # Ferramentas de escrita do módulo Estratégia: só existem quando o copiloto
+        # foi aberto a partir do módulo de Estratégia (copilot_mode == 'estrategia').
+        if copilot_mode == "estrategia":
+            static_tools.append(criar_objetivo_estrategico)
+            static_tools.append(editar_objetivo_estrategico)
+            static_tools.append(gerenciar_item_estrategico)
+            static_tools.append(excluir_objetivo_estrategico)
 
         # ─── ESCALONAMENTO POR COMPLEXIDADE ──────────────────────────────────────
         # Só atua quando o modelo ainda é o tier padrão (não mexe no downgrade de
