@@ -437,10 +437,9 @@ interface HermesCopilotoDrawerProps {
     sessionId?: string | null;
     autoStartMic?: boolean;
     copilotMode?: 'default' | 'finance' | 'saude';
-    /** Sinaliza ao container que houve interação com o copiloto (envio/resposta),
-     *  para que ele saiba que mudanças subsequentes no plano/diário vieram daqui
-     *  e não dispare uma manifestação automática duplicada. */
-    onCopilotActivity?: () => void;
+    /** Sinaliza ao container que um turno do copiloto começou/terminou,
+     *  para que mudanças subsequentes no plano/diário não disparem insight duplicado. */
+    onCopilotActivity?: (phase: 'started' | 'completed' | 'failed' | 'cancelled') => void;
 }
 
 type UploadPhase = 'idle' | 'uploading' | 'processing';
@@ -1531,6 +1530,12 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         const sId = sessionId || currentSessionId;
         const hasFile = !!attachedFile;
         const hasPaste = !!pastedContext;
+        let copilotActivityOpen = false;
+        const closeCopilotActivity = (phase: 'completed' | 'failed' | 'cancelled') => {
+            if (!copilotActivityOpen) return;
+            onCopilotActivity?.(phase);
+            copilotActivityOpen = false;
+        };
 
         if (!sId || (!text.trim() && !hasFile && !hasPaste)) return;
 
@@ -1591,7 +1596,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
             // Marca atividade do copiloto: o container usa isto para não disparar
             // uma manifestação automática quando a mutação resultante vier daqui.
-            onCopilotActivity?.();
+            onCopilotActivity?.('started');
+            copilotActivityOpen = true;
 
             // 1. Salva mensagem do usuário no Firestore
             await addDoc(collection(db, 'sessoes_copiloto', sId, 'mensagens'), {
@@ -1600,7 +1606,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 timestamp: Timestamp.now()
             });
 
-            if (isCancelledRef.current) return;
+            if (isCancelledRef.current) {
+                closeCopilotActivity('cancelled');
+                return;
+            }
 
             // 2. Chama a Cloud Function
             const askCopiloto = httpsCallable(functions, 'askCopilotoHermes', { timeout: COPILOTO_CALLABLE_TIMEOUT_MS });
@@ -1624,14 +1633,17 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 routingIndex: getRoutingIndex()
             }), COPILOTO_CALLABLE_TIMEOUT_MS, COPILOTO_CLIENT_TIMEOUT_MESSAGE);
 
-            if (isCancelledRef.current) return;
+            if (isCancelledRef.current) {
+                closeCopilotActivity('cancelled');
+                return;
+            }
 
             const data = response.data as any;
 
             // Reforça a marca de atividade no retorno: é quando a mutação do
             // copiloto (plano/diário) efetivamente chega ao Firestore, momento a
             // partir do qual a janela de supressão do insight precisa valer.
-            onCopilotActivity?.();
+            closeCopilotActivity('completed');
 
             // 3. Atualiza título da sessão se for a primeira mensagem
             if (messages.length === 0 && !sessionId) {
@@ -1651,11 +1663,13 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
         } catch (err: any) {
             if (isCancelledRef.current || err?.name === 'AbortError') {
+                closeCopilotActivity('cancelled');
                 abortProgress();
                 return;
             }
 
             console.error("Erro no Copiloto:", err);
+            closeCopilotActivity('failed');
 
             const errMsg = getCopilotoErrorMessage(err);
 

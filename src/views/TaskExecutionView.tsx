@@ -369,15 +369,12 @@ export const TaskExecutionView = ({
 
     insightDebounceRef.current = setTimeout(async () => {
       if (isAnalyzingInsight) return;
-      // Ponto 2: não emitir manifestação automática quando a alteração veio do
-      // próprio copiloto. Nesse caso o copiloto já respondeu (agora de forma
-      // crítica/socrática), e um insight automático geraria uma SEGUNDA resposta —
-      // às vezes dissonante. Detectamos a origem pelo timestamp da última atividade
-      // do copiloto (ver lastCopilotActivityRef): se houve interação na janela
-      // recente, a mudança no plano/diário veio dela. Insights automáticos ficam
-      // reservados a edições feitas manualmente pelo usuário na interface.
-      const COPILOT_ACTIVITY_WINDOW_MS = 30000;
-      if (Date.now() - lastCopilotActivityRef.current < COPILOT_ACTIVITY_WINDOW_MS) return;
+      // Não emitir manifestação automática quando a alteração veio do próprio
+      // copiloto. Durante uma resposta longa, o backend pode atualizar plano/diário
+      // antes da resposta final chegar ao navegador; por isso a guarda cobre o
+      // turno inteiro, não só uma janela fixa desde o envio.
+      const insightGuard = copilotInsightGuardRef.current;
+      if (insightGuard.inFlight || Date.now() < insightGuard.suppressUntil) return;
       setIsAnalyzingInsight(true);
       setInsightState(null);
       try {
@@ -458,6 +455,7 @@ export const TaskExecutionView = ({
   const [isHandlePressed, setIsHandlePressed] = useState(false);
   const [dragSourceIdx, setDragSourceIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const getPlanDraftTextRows = (text: string) => Math.max(2, Math.ceil((text || '').length / 58));
 
   // Proposal editing (Feature 1 & 2)
   const [editingProposal, setEditingProposal] = useState<{ msgIndex: number; items: ActionPlanItem[] } | null>(null);
@@ -477,13 +475,29 @@ export const TaskExecutionView = ({
   const insightMountedRef = useRef(false);
   const insightApplyingRef = useRef(false);
   const lastPersistedInsightSignatureRef = useRef<string | null>(null);
-  // Origem explícita da mutação: marca o instante da última atividade do copiloto
-  // (envio/resposta no chat desta ação). Quando uma alteração no plano/diário
-  // acontece logo após uma interação do copiloto, ela veio dele — e o copiloto já
-  // respondeu —, então não emitimos uma manifestação automática duplicada. Mais
-  // confiável que inferir a origem do texto livre do diário (notas do copiloto nem
-  // sempre carregam marcador, e marcadores antigos suprimiam edições manuais novas).
-  const lastCopilotActivityRef = useRef<number>(0);
+  // Origem explícita da mutação: enquanto um turno do copiloto está em andamento,
+  // plano/diário podem mudar pelo backend antes da resposta final voltar. Mantemos
+  // uma janela curta após o fim para absorver a latência do snapshot do Firestore.
+  const copilotInsightGuardRef = useRef<{ inFlight: boolean; suppressUntil: number }>({
+    inFlight: false,
+    suppressUntil: 0,
+  });
+
+  const markCopilotActivity = (phase: 'started' | 'completed' | 'failed' | 'cancelled') => {
+    const now = Date.now();
+    if (phase === 'started') {
+      copilotInsightGuardRef.current = {
+        inFlight: true,
+        suppressUntil: now + 10 * 60 * 1000,
+      };
+      return;
+    }
+
+    copilotInsightGuardRef.current = {
+      inFlight: false,
+      suppressUntil: now + 90 * 1000,
+    };
+  };
 
   const ensureTaskCopilotSession = async () => {
     const existingQ = query(
@@ -1799,7 +1813,7 @@ export const TaskExecutionView = ({
                 sessionId={tempSessionId}
                 onOpenTask={onOpenCopilotoTask}
                 onOpenTool={onOpenCopilotoTool}
-                onCopilotActivity={() => { lastCopilotActivityRef.current = Date.now(); }}
+                onCopilotActivity={markCopilotActivity}
               />
             </div>
           </div>
@@ -2485,7 +2499,7 @@ export const TaskExecutionView = ({
                   sessionId={tempSessionId}
                   onOpenTask={onOpenCopilotoTask}
                   onOpenTool={onOpenCopilotoTool}
-                  onCopilotActivity={() => { lastCopilotActivityRef.current = Date.now(); }}
+                  onCopilotActivity={markCopilotActivity}
                 />
               </div>
             )}
@@ -2523,7 +2537,7 @@ export const TaskExecutionView = ({
                   onDragStart={(e) => handleDragStart(e, idx)}
                   onDragOver={(e) => handleDragOver(e, idx)}
                   onDragEnd={handleDragEnd}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-none border group transition-all 
+                  className={`flex items-start gap-3 px-3 py-2.5 rounded-none border group transition-all 
                     ${dragSourceIdx === idx ? 'opacity-40 bg-blue-500/10' : ''} 
                     ${dragOverIdx === idx ? 'border-blue-500 border-dashed' : ''}
                     ${isDark ? 'bg-white/5 border-white/10 hover:border-white/20' : 'bg-slate-50 border-slate-100 hover:border-border-grid'}
@@ -2536,7 +2550,7 @@ export const TaskExecutionView = ({
                       setDragSourceIdx(idx);
                     }}
                     onMouseUp={() => setIsHandlePressed(false)}
-                    className={`shrink-0 cursor-grab active:cursor-grabbing p-1 text-slate-400 hover:text-slate-600 transition-colors ${isDark ? 'text-white/40 hover:text-white/70' : ''}`}
+                    className={`mt-1 shrink-0 cursor-grab active:cursor-grabbing p-1 text-slate-400 hover:text-slate-600 transition-colors ${isDark ? 'text-white/40 hover:text-white/70' : ''}`}
                     title="Arrastar para reordenar"
                   >
                     <svg className="w-3 h-3.5" fill="currentColor" viewBox="0 0 24 24">
@@ -2556,24 +2570,25 @@ export const TaskExecutionView = ({
                       setPlanDraft(sorted);
                     }}
                     title={item.completed ? "Marcar como não concluído" : "Marcar como concluído"}
-                    className={`shrink-0 w-5 h-5 rounded-none flex items-center justify-center text-[9px] font-black transition-all ${item.completed ? 'bg-emerald-500 text-white' : isDark ? 'bg-white/10 text-white/40 hover:bg-white/20' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'}`}
+                    className={`mt-1 shrink-0 w-5 h-5 rounded-none flex items-center justify-center text-[9px] font-black transition-all ${item.completed ? 'bg-emerald-500 text-white' : isDark ? 'bg-white/10 text-white/40 hover:bg-white/20' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'}`}
                   >
                     {item.completed ? <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : idx + 1}
                   </button>
 
                   {/* Editable text */}
-                  <input
+                  <textarea
                     value={item.text}
                     onChange={e => setPlanDraft(prev => prev.map(i => i.id === item.id ? { ...i, text: e.target.value } : i))}
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); newPlanItemRef.current?.focus(); } }}
-                    className={`flex-1 text-xs font-medium bg-transparent outline-none min-w-0 ${item.completed ? isDark ? 'text-white/30 line-through' : 'text-slate-300 line-through' : isDark ? 'text-white/80' : 'text-slate-700'}`}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); newPlanItemRef.current?.focus(); } }}
+                    rows={getPlanDraftTextRows(item.text)}
+                    className={`flex-1 min-w-0 resize-none overflow-hidden bg-transparent py-1 text-xs font-medium leading-relaxed outline-none whitespace-pre-wrap break-words ${item.completed ? isDark ? 'text-white/30 line-through' : 'text-slate-300 line-through' : isDark ? 'text-white/80' : 'text-slate-700'}`}
                     placeholder="Descreva o passo…"
                   />
 
                   {/* Delete */}
                   <button
                     onClick={() => setPlanDraft(prev => prev.filter(i => i.id !== item.id))}
-                    className={`shrink-0 p-1 rounded-none opacity-0 group-hover:opacity-100 transition-all ${isDark ? 'text-rose-400 hover:bg-rose-500/20' : 'text-rose-400 hover:bg-rose-50'}`}
+                    className={`mt-1 shrink-0 p-1 rounded-none opacity-0 group-hover:opacity-100 transition-all ${isDark ? 'text-rose-400 hover:bg-rose-500/20' : 'text-rose-400 hover:bg-rose-50'}`}
                   >
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                   </button>
