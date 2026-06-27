@@ -77,6 +77,37 @@ const TOOL_LABELS: Record<string, string> = {
   registrar_item_financeiro_v2: 'Item financeiro',
 };
 
+// Ponto 3: ferramentas usadas colapsadas por padrão — um resumo de uma linha que
+// expande os chips ao clicar, para não ocupar espaço no chat.
+const ToolsUsedBadges: React.FC<{ tools: string[]; isDark?: boolean }> = ({ tools, isDark }) => {
+  const [expanded, setExpanded] = useState(false);
+  const unique = [...new Set(tools)].filter((t) => TOOL_LABELS[t]);
+  if (unique.length === 0) return null;
+
+  return (
+    <div className="mb-3">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className={`inline-flex items-center gap-1.5 font-mono text-[8px] font-black uppercase tracking-widest transition-colors ${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
+        title={expanded ? 'Recolher ferramentas' : 'Ver ferramentas usadas'}
+      >
+        <span>🔧 {unique.length} {unique.length === 1 ? 'ferramenta' : 'ferramentas'}</span>
+        <svg className={`h-2.5 w-2.5 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
+      </button>
+      {expanded && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {unique.map((tool) => (
+            <span key={tool} className={`border px-2 py-1 font-mono text-[8px] font-black uppercase tracking-widest ${isDark ? 'border-white/10 bg-white/5 text-slate-300' : 'border-border-grid bg-white text-slate-500'}`}>
+              {TOOL_LABELS[tool]}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 type CopilotMode = 'default' | 'finance' | 'saude';
 type UploadPhase = 'idle' | 'uploading' | 'processing';
 
@@ -995,13 +1026,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                           </button>
                         </div>
                         {msg.toolsUsed && msg.toolsUsed.length > 0 && (
-                          <div className="mb-3 flex flex-wrap gap-1">
-                            {[...new Set(msg.toolsUsed)].map((tool) => TOOL_LABELS[tool] ? (
-                              <span key={tool} className={`border px-2 py-1 font-mono text-[8px] font-black uppercase tracking-widest ${isDark ? 'border-white/10 bg-white/5 text-slate-300' : 'border-border-grid bg-white text-slate-500'}`}>
-                                {TOOL_LABELS[tool]}
-                              </span>
-                            ) : null)}
-                          </div>
+                          <ToolsUsedBadges tools={msg.toolsUsed} isDark={isDark} />
                         )}
                         <div className="break-words [overflow-wrap:anywhere]">
                           {renderMarkdown(msg, messageKey)}

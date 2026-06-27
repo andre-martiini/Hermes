@@ -256,6 +256,65 @@ const WRITE_TOOLS = new Set([
     'registrar_no_diario',
 ]);
 
+// Ponto 3: exibição das ferramentas usadas, colapsada por padrão para não ocupar
+// espaço no chat. Mostra um resumo de uma linha ("N ferramentas") que expande os
+// chips detalhados ao clicar.
+const ToolsUsedBadges: React.FC<{ tools: string[]; isDark?: boolean }> = ({ tools, isDark }) => {
+    const [expanded, setExpanded] = React.useState(false);
+    const unique = React.useMemo(
+        () => [...new Set(tools)].filter(t => TOOL_LABELS[t]),
+        [tools]
+    );
+    if (unique.length === 0) return null;
+
+    return (
+        <div className="mb-2">
+            <button
+                type="button"
+                onClick={() => setExpanded(v => !v)}
+                className={`inline-flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.18em] transition-colors ${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
+                title={expanded ? 'Recolher ferramentas' : 'Ver ferramentas usadas'}
+            >
+                <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                <span>{unique.length} {unique.length === 1 ? 'ferramenta' : 'ferramentas'}</span>
+                <svg className={`w-2.5 h-2.5 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
+            </button>
+            {expanded && (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                    {unique.map(tool => {
+                        const isWrite = WRITE_TOOLS.has(tool);
+                        return (
+                            <span
+                                key={tool}
+                                className={`inline-flex items-center gap-1 rounded-none px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.08em] border ${isWrite
+                                    ? isDark
+                                        ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20'
+                                        : 'text-emerald-700 bg-emerald-50 border-border-grid'
+                                    : isDark
+                                        ? 'text-slate-300 bg-slate-900 border-slate-700'
+                                        : 'text-slate-500 bg-white/90 border-border-grid'
+                                    }`}
+                            >
+                                {isWrite ? (
+                                    <svg className="w-2.5 h-2.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+                                    </svg>
+                                ) : (
+                                    <svg className="w-2.5 h-2.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    </svg>
+                                )}
+                                {TOOL_LABELS[tool]}
+                            </span>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+};
+
 const sanitizeDiagnosisFilePart = (value?: string) =>
     (value || 'diagnostico')
         .toLowerCase()
@@ -1979,43 +2038,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             </button>
                                         </div>
                                         {msg.toolsUsed && msg.toolsUsed.length > 0 && (
-                                            <div className="mb-2.5">
-                                                <div className={`mb-1 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 3a.75.75 0 01.75.75V5a.75.75 0 01-1.5 0V3.75A.75.75 0 019.75 3zm4.5 0a.75.75 0 01.75.75V5a.75.75 0 01-1.5 0V3.75a.75.75 0 01.75-.75zM12 8.25A3.75 3.75 0 108.25 12 3.75 3.75 0 0012 8.25zm7.5 3a.75.75 0 010 1.5H18.25a.75.75 0 010-1.5zM5.75 12a.75.75 0 01-.75.75H3.75a.75.75 0 010-1.5H5a.75.75 0 01.75.75zm10.364 5.614a.75.75 0 011.06 0l.884.884a.75.75 0 11-1.06 1.06l-.884-.883a.75.75 0 010-1.061zm-9.288 0a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.883-.884a.75.75 0 011.061 0zm11.172-11.228a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.883-.884a.75.75 0 011.061 0zm-11.172 0l.884.884a.75.75 0 11-1.06 1.06l-.884-.883a.75.75 0 011.06-1.061zM9.75 19a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-1.25a.75.75 0 01.75-.75zm4.5 0a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-1.25a.75.75 0 01.75-.75zm0 0" /></svg>
-                                                    Ferramentas usadas
-                                                </div>
-                                                <div className="flex flex-wrap gap-1">
-                                                    {[...new Set(msg.toolsUsed)].map(tool => {
-                                                        if (!TOOL_LABELS[tool]) return null;
-                                                        const isWrite = WRITE_TOOLS.has(tool);
-                                                        return (
-                                                            <span
-                                                                key={tool}
-                                                                className={`inline-flex items-center gap-1 rounded-none px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.08em] border ${isWrite
-                                                                    ? isDark
-                                                                        ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20'
-                                                                        : 'text-emerald-700 bg-emerald-50 border-border-grid'
-                                                                    : isDark
-                                                                        ? 'text-slate-300 bg-slate-900 border-slate-700'
-                                                                        : 'text-slate-500 bg-white/90 border-border-grid'
-                                                                    }`}
-                                                            >
-                                                                {isWrite ? (
-                                                                    <svg className="w-2.5 h-2.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-                                                                    </svg>
-                                                                ) : (
-                                                                    <svg className="w-2.5 h-2.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                                    </svg>
-                                                                )}
-                                                                {TOOL_LABELS[tool]}
-                                                            </span>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
+                                            <ToolsUsedBadges tools={msg.toolsUsed} isDark={isDark} />
                                         )}
                                         <CollapsibleContainer maxLines={8}>
                                             <ReactMarkdown
