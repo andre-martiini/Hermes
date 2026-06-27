@@ -369,6 +369,15 @@ export const TaskExecutionView = ({
 
     insightDebounceRef.current = setTimeout(async () => {
       if (isAnalyzingInsight) return;
+      // Ponto 2: não emitir manifestação automática quando a última alteração veio
+      // do próprio copiloto. Nesse caso o copiloto já respondeu (agora de forma
+      // crítica/socrática), e um insight automático geraria uma SEGUNDA resposta —
+      // às vezes dissonante. Toda mutação do copiloto (plano, diário, ações) deixa
+      // uma nota de diário marcada com "[Copiloto..." ou "🤖". Insights automáticos
+      // ficam reservados a edições feitas manualmente pelo usuário na interface.
+      const ultimaNota = ((currentTaskData.acompanhamento || []).slice(-1)[0]?.nota || '').trim();
+      const veioDoCopiloto = ultimaNota.includes('[Copiloto') || ultimaNota.includes('🤖');
+      if (veioDoCopiloto) return;
       setIsAnalyzingInsight(true);
       setInsightState(null);
       try {

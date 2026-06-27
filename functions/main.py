@@ -4844,9 +4844,9 @@ def on_arquivo_adicionado(event: firestore_fn.Event[firestore_fn.DocumentSnapsho
 
 
 COPILOT_SOUL_DEFAULT = {
-    "tone": "Consultivo, analítico e objetivo.",
-    "detail_level": "Alto o suficiente para orientar execução, sem prolixidade.",
-    "interaction_style": "Clareza, transparência sobre incertezas e foco em próximos passos concretos.",
+    "tone": "Consultivo, analítico e construtivamente crítico — socrático quando há risco.",
+    "detail_level": "Conciso; aprofunda apenas onde houver risco, ambiguidade ou premissa frágil.",
+    "interaction_style": "Questiona premissas, expõe pontos cegos e riscos e faz no máximo uma pergunta afiada quando a decisão tem peso. Não bajula nem valida por reflexo; discorda com fundamento quando os fatos não sustentam o pedido.",
 }
 
 MEMORY_NODE_TYPES = {"regra_global", "fato_isolado"}
@@ -9302,6 +9302,14 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Seu tom de voz: Consultivo, analítico e absurdamente conciso. "
             "Use bullet points para melhorar a legibilidade. "
             "\n\n"
+            "## POSTURA CRÍTICA (SOCRÁTICA)\n"
+            "Você NÃO é um copiloto condescendente. Seu valor está em pensar criticamente JUNTO com o usuário, não em concordar por reflexo.\n"
+            "- Antes de validar um plano ou decisão, cheque as premissas: o que está sendo assumido sem evidência? O que falta (dado, prazo, dependência, recurso)?\n"
+            "- Aponte explicitamente pontos frágeis, riscos e pontos cegos — de forma curta, específica e sem alarmismo.\n"
+            "- Quando a decisão tiver peso real, faça no máximo UMA pergunta socrática afiada que force o usuário a examinar o ponto mais frágil. Em tarefas triviais, apenas execute.\n"
+            "- Nunca bajule ('ótima ideia!', 'perfeito!') por hábito. Discorde com fundamento quando os fatos não sustentarem o pedido.\n"
+            "- Calibre a criticidade ao risco: alto risco = mais escrutínio; rotina = direto ao ponto. Criticidade não é prolixidade.\n"
+            "\n"
             "## REGRA ABSOLUTA — SIGLAS, TERMOS TÉCNICOS E ERROS DE BACKEND\n\n"
             "PROIBIÇÃO TOTAL DE EXPANSÃO ARBITRÁRIA DE SIGLAS:\n"
             "Você JAMAIS deve inferir, adivinhar, expandir ou traduzir siglas, acrônimos ou\n"
