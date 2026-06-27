@@ -879,7 +879,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
       <aside className={`${showMobileHistory ? 'fixed inset-0 z-[820] flex' : showHistory ? 'hidden md:flex' : 'hidden'} md:relative md:z-auto md:w-[300px] lg:w-[340px] shrink-0 flex-col border-r ${sidebarClass}`}>
         <div className={`flex h-16 shrink-0 items-center justify-between border-b px-4 ${isDark ? 'border-white/10' : 'border-border-grid'}`}>
           <div className="flex min-w-0 items-center gap-3">
-            <div className={`flex h-9 w-9 items-center justify-center border p-1.5 ${isDark ? 'border-white/10 bg-slate-950' : 'border-border-grid bg-surface'}`}>
+            <div className={`flex h-9 w-9 items-center justify-center border p-1.5 ${isDark ? 'border-white/10 bg-white' : 'border-border-grid bg-surface'}`}>
               <img src="/logo.png" alt="Hermes" className="h-full w-full object-contain" />
             </div>
             <div className="min-w-0">
@@ -972,7 +972,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
             </button>
-            <div className={`hidden h-9 w-9 items-center justify-center border p-1.5 md:flex ${isDark ? 'border-white/10 bg-slate-950' : 'border-border-grid bg-white'}`}>
+            <div className={`hidden h-9 w-9 items-center justify-center border p-1.5 md:flex ${isDark ? 'border-white/10 bg-white' : 'border-border-grid bg-white'}`}>
               <img src="/logo.png" alt="Hermes" className="h-full w-full object-contain" />
             </div>
             <div className="min-w-0">
@@ -995,7 +995,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
             {messages.length === 0 && !isLoading ? (
               <div className="flex flex-1 flex-col justify-center py-10">
                 <div className="mb-8 flex items-center gap-4">
-                  <div className={`flex h-14 w-14 items-center justify-center border p-2.5 ${raisedClass}`}>
+                  <div className={`flex h-14 w-14 items-center justify-center border p-2.5 ${isDark ? 'bg-white border-white/10' : 'bg-white border-border-grid shadow-soft-touch'}`}>
                     <img src="/logo.png" alt="Hermes" className="h-full w-full object-contain" />
                   </div>
                   <div>
@@ -1013,7 +1013,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                   return (
                     <div key={messageKey} className={`group flex gap-4 ${isUser ? 'justify-end' : 'justify-start'}`}>
                       {!isUser && (
-                        <div className={`mt-1 hidden h-8 w-8 shrink-0 items-center justify-center border p-1.5 md:flex ${raisedClass}`}>
+                        <div className={`mt-1 hidden h-8 w-8 shrink-0 items-center justify-center border p-1.5 md:flex ${isDark ? 'bg-white border-white/10' : 'bg-white border-border-grid shadow-soft-touch'}`}>
                           <img src="/logo.png" alt="" className="h-full w-full object-contain" />
                         </div>
                       )}
@@ -1134,7 +1134,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                 })}
                 {isLoading && (
                   <div className="flex items-center gap-3">
-                    <div className={`h-8 w-8 border p-1.5 ${raisedClass}`}>
+                    <div className={`h-8 w-8 border p-1.5 ${isDark ? 'bg-white border-white/10' : 'bg-white border-border-grid shadow-soft-touch'}`}>
                       <img src="/logo.png" alt="" className="h-full w-full object-contain" />
                     </div>
                     <div className={`border px-4 py-3 font-mono text-[10px] font-black uppercase tracking-widest ${raisedClass} ${mutedClass}`}>

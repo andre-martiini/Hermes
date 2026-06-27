@@ -4211,7 +4211,7 @@ const App: React.FC = () => {
     ? 'bg-slate-900 border-white/10 shadow-[0_30px_60px_rgba(0,0,0,0.55)]'
     : 'bg-white border-border-grid shadow-soft-touch';
   const loginLogoTileClass = isDarkTheme
-    ? 'bg-slate-950 border-white/10'
+    ? 'bg-white border-white/10'
     : 'bg-surface border-border-grid';
   const loginTitleClass = isDarkTheme ? 'text-slate-100' : 'text-slate-900';
   const loginMutedClass = isDarkTheme ? 'text-slate-400' : 'text-slate-500';
@@ -4343,7 +4343,7 @@ const App: React.FC = () => {
               className={`flex items-center gap-4 cursor-pointer hover:opacity-80 transition-opacity ${isSidebarRetracted ? 'flex-col' : ''}`}
               onClick={() => setIsSidebarRetracted(!isSidebarRetracted)}
             >
-              <img src="/logo.png" alt="Hermes" className={`${isSidebarRetracted ? 'w-12 h-12' : 'w-11 h-11'} object-contain`} />
+              <img src="/logo.png" alt="Hermes" className={`${isSidebarRetracted ? 'w-12 h-12' : 'w-11 h-11'} object-contain ${isDarkTheme ? 'bg-white rounded p-1' : ''}`} />
               {!isSidebarRetracted && (
                 <div>
                   <h1 className="text-xl font-black tracking-tight font-mono uppercase">Hermes</h1>
@@ -4467,7 +4467,7 @@ const App: React.FC = () => {
                       onClick={() => { setActiveModule('dashboard'); setViewMode('dashboard'); }}
                       className="flex items-center cursor-pointer hover:opacity-80 transition-opacity"
                     >
-                      <img src="/logo.png" alt="Hermes" className="w-9 h-9 object-contain" />
+                      <img src="/logo.png" alt="Hermes" className={`w-9 h-9 object-contain ${isDarkTheme ? 'bg-white rounded p-1' : ''}`} />
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
