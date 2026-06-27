@@ -33,6 +33,7 @@ _DEFAULT_FLEX_FEATURES = {
     "telegram_extended.report_skeleton",
     "telegram_extended.report_section",
     "simulation.orchestrator.plan",
+    "copilot_proactive_insight",
 }
 
 

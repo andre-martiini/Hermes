@@ -76,6 +76,7 @@ from gemini_cost_controls import (
     check_and_increment_limit,
     log_gemini_usage,
     GEMINI_ROUTING_MODEL,
+    GEMINI_LIGHT_MODEL,
     GEMINI_BALANCED_MODEL,
     GEMINI_FRONTIER_MODEL,
     generate_content_logged,
@@ -119,6 +120,19 @@ except (TypeError, ValueError):
 # neles — subimos para um tier mais forte. Heurística pura, sem chamada extra de LLM.
 COPILOT_AUTO_ESCALATE = os.environ.get("COPILOT_AUTO_ESCALATE", "1") != "0"
 COPILOT_COMPLEX_MODEL = os.environ.get("COPILOT_COMPLEX_MODEL", GEMINI_FRONTIER_MODEL)
+# Limiares do escalonamento por complexidade. Defaults conservadores: o modelo
+# frontier custa ~6x o flash-lite por token, então só escalamos com sinais fortes.
+# Tudo ajustável por env para calibrar sem deploy.
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+COPILOT_ESCALATE_RARE_TOOLS = _env_int("COPILOT_ESCALATE_RARE_TOOLS", 3)
+COPILOT_ESCALATE_DYNAMIC_TOOLS = _env_int("COPILOT_ESCALATE_DYNAMIC_TOOLS", 6)
+# Teto de caracteres por mensagem ao recompor o histórico da sessão. Mensagens de
+# assistente (relatórios/markdown longos) inflam o input reenviado a cada turno.
+COPILOT_HISTORY_MSG_MAXCHARS = _env_int("COPILOT_HISTORY_MSG_MAXCHARS", 4000)
 COPILOT_DEADLINE_FALLBACK_TEXT = (
     "O modelo de IA demorou demais para concluir esta resposta e eu interrompi a chamada "
     "antes de estourar o tempo da conversa. Tente dividir o pedido em partes menores, "
@@ -9228,11 +9242,17 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     if role == 'assistant':
                         role = 'model'
 
+                    # Teto por mensagem: relatórios/markdown longos no histórico
+                    # inflam o input reenviado a cada rodada de tool-calling.
+                    _msg_text = str(m.get('content') or "")
+                    if len(_msg_text) > COPILOT_HISTORY_MSG_MAXCHARS:
+                        _msg_text = _msg_text[:COPILOT_HISTORY_MSG_MAXCHARS] + "\n[…trecho truncado para economia de contexto…]"
+
                     history.append(types.Content(
                         role=role,
-                        parts=[types.Part(text=m.get('content'))]
+                        parts=[types.Part(text=_msg_text)]
                     ))
-                    _history_texts.append(str(m.get('content') or ""))
+                    _history_texts.append(_msg_text)
                 history_plain = " ".join(_history_texts)
             except Exception as e:
                 print(f"Erro ao carregar histórico da sessão {session_id}: {e}")
@@ -9812,10 +9832,13 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             )
             multitask = bool(_MULTITASK_RE.search(prompt or ""))
             long_prompt = len(prompt or "") > 320
+            # Limiares conservadores: o frontier custa ~6x por token, então só
+            # escala com sinais REALMENTE fortes. Multitarefa sozinha (sem prompt
+            # longo + carga de ferramentas) não justifica o salto de custo.
             escalate = (
-                n_rare >= 2
-                or n_dynamic >= 4
-                or (multitask and (n_rare >= 1 or n_dynamic >= 1 or long_prompt))
+                n_rare >= COPILOT_ESCALATE_RARE_TOOLS
+                or n_dynamic >= COPILOT_ESCALATE_DYNAMIC_TOOLS
+                or (multitask and long_prompt and (n_rare >= 2 or n_dynamic >= 3))
             )
             if escalate:
                 model_id = COPILOT_COMPLEX_MODEL
@@ -11872,10 +11895,15 @@ RESPONDA APENAS COM JSON VÁLIDO (sem markdown):
 
 Se SEM_INSIGHT: {{"nivel": null, "texto": null, "alvo": null, "plano_proposto": null, "acoes_propostas": null}}"""
 
-        response = client.models.generate_content(
-            model="gemini-3.1-flash-lite",
+        # Roteado pelo logger central: entra na telemetria (system_usage/gemini)
+        # e usa flex tier (-50%) — é uma análise de fundo, tolera latência.
+        response = generate_content_logged(
+            client,
+            model=GEMINI_LIGHT_MODEL,
             contents=prompt,
-            config={"temperature": 0.3, "max_output_tokens": 1024}
+            feature="copilot_proactive_insight",
+            db=db,
+            config={"temperature": 0.3, "max_output_tokens": 1024},
         )
 
         result_text = (response.text or '').strip()
