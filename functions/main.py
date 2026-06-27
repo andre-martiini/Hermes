@@ -9742,15 +9742,16 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             return f"{prefixo}-{int(time.time() * 1000)}-{str(_uuid.uuid4())[:6]}"
 
         def _carregar_objetivo_estrategico(objetivo_id: str):
-            """Carrega um objetivo garantindo posse pelo usuário atual. Retorna (ref, data) ou (None, None)."""
-            if not objetivo_id:
+            """Carrega um objetivo garantindo posse pelo usuário atual. Retorna (ref, data) ou (None, None).
+            Fail-closed: exige usuário autenticado e que o userId do documento bata exatamente."""
+            if not user_uid or not objetivo_id:
                 return None, None
             ref = db.collection('estrategia_pessoal').document(str(objetivo_id))
             snap = ref.get()
             if not snap.exists:
                 return None, None
             data = snap.to_dict() or {}
-            if user_uid and data.get('userId') and data.get('userId') != user_uid:
+            if data.get('userId') != user_uid:
                 return None, None
             return ref, data
 
@@ -9782,6 +9783,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Apresente um rascunho ao usuário e só chame após confirmação explícita.
             """
             try:
+                if not user_uid:
+                    return json.dumps({"status": "error", "reason": "auth_required"}, ensure_ascii=False)
                 titulo = (objetivoMacro or "").strip()
                 if not titulo:
                     return json.dumps({"status": "error", "reason": "objetivoMacro_obrigatorio"}, ensure_ascii=False)
@@ -9933,64 +9936,81 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Use APENAS após confirmação do usuário.
             """
             try:
-                ref, data = _carregar_objetivo_estrategico(objetivo_id)
-                if not ref:
+                if not user_uid or not objetivo_id:
                     return json.dumps({"status": "error", "reason": "objetivo_nao_encontrado"}, ensure_ascii=False)
                 tipo_norm = (tipo or "").strip().lower()
                 if tipo_norm not in {"indicador", "marco"}:
                     return json.dumps({"status": "error", "reason": "tipo_invalido"}, ensure_ascii=False)
                 acao_norm = (acao or "").strip().lower()
-                campo = "indicadoresSucesso" if tipo_norm == "indicador" else "marcos"
-
-                # Normaliza lista existente para objetos
-                from datetime import datetime as _dt, timezone as _tz
-                lista = []
-                for idx, item in enumerate(data.get(campo) or []):
-                    if isinstance(item, str):
-                        lista.append({"id": _novo_id_estrategia(tipo_norm), "descricao": item, "concluido": False, "registros": []})
-                    else:
-                        lista.append({
-                            "id": item.get("id") or _novo_id_estrategia(tipo_norm),
-                            "descricao": item.get("descricao", ""),
-                            "concluido": bool(item.get("concluido")),
-                            "registros": item.get("registros", []),
-                            **({"dataConclusao": item["dataConclusao"]} if item.get("dataConclusao") else {}),
-                            **({"evidencia": item["evidencia"]} if item.get("evidencia") else {}),
-                        })
-
-                if acao_norm == "adicionar":
-                    if not (descricao or "").strip():
-                        return json.dumps({"status": "error", "reason": "descricao_obrigatoria"}, ensure_ascii=False)
-                    novo = {"id": _novo_id_estrategia(tipo_norm), "descricao": descricao.strip(), "concluido": False, "registros": []}
-                    lista.append(novo)
-                    resultado_id = novo["id"]
-                elif acao_norm in {"editar", "remover", "concluir"}:
-                    if not item_id:
-                        return json.dumps({"status": "error", "reason": "item_id_obrigatorio"}, ensure_ascii=False)
-                    alvo = next((it for it in lista if it["id"] == item_id), None)
-                    if not alvo:
-                        return json.dumps({"status": "error", "reason": "item_nao_encontrado"}, ensure_ascii=False)
-                    if acao_norm == "editar":
-                        if not (descricao or "").strip():
-                            return json.dumps({"status": "error", "reason": "descricao_obrigatoria"}, ensure_ascii=False)
-                        alvo["descricao"] = descricao.strip()
-                    elif acao_norm == "remover":
-                        lista = [it for it in lista if it["id"] != item_id]
-                    elif acao_norm == "concluir":
-                        alvo["concluido"] = True
-                        alvo["dataConclusao"] = _dt.now(_tz.utc).isoformat()
-                    resultado_id = item_id
-                else:
+                if acao_norm not in {"adicionar", "editar", "remover", "concluir"}:
                     return json.dumps({"status": "error", "reason": "acao_invalida"}, ensure_ascii=False)
+                campo = "indicadoresSucesso" if tipo_norm == "indicador" else "marcos"
+                ref = db.collection('estrategia_pessoal').document(str(objetivo_id))
 
-                ref.update({campo: lista, "timestamp": firestore.SERVER_TIMESTAMP})
-                return json.dumps({
-                    "status": "ok",
-                    "objetivo_id": ref.id,
-                    "tipo": tipo_norm,
-                    "acao": acao_norm,
-                    "item_id": resultado_id,
-                }, ensure_ascii=False)
+                from datetime import datetime as _dt, timezone as _tz
+
+                # Transação: indispensável porque o loop de tool-calling pode disparar
+                # várias chamadas gerenciar_item_estrategico em paralelo sobre o mesmo
+                # objetivo. Ler/recompor/gravar o array inteiro fora de transação faria
+                # o último writer sobrescrever silenciosamente os demais. A transação
+                # relê dentro do escopo e o Firestore reexecuta sob contenção.
+                @firestore.transactional
+                def _aplicar(transaction):
+                    snap = ref.get(transaction=transaction)
+                    if not snap.exists:
+                        return {"status": "error", "reason": "objetivo_nao_encontrado"}
+                    data = snap.to_dict() or {}
+                    if data.get('userId') != user_uid:
+                        return {"status": "error", "reason": "objetivo_nao_encontrado"}
+
+                    lista = []
+                    for item in (data.get(campo) or []):
+                        if isinstance(item, str):
+                            lista.append({"id": _novo_id_estrategia(tipo_norm), "descricao": item, "concluido": False, "registros": []})
+                        else:
+                            lista.append({
+                                "id": item.get("id") or _novo_id_estrategia(tipo_norm),
+                                "descricao": item.get("descricao", ""),
+                                "concluido": bool(item.get("concluido")),
+                                "registros": item.get("registros", []),
+                                **({"dataConclusao": item["dataConclusao"]} if item.get("dataConclusao") else {}),
+                                **({"evidencia": item["evidencia"]} if item.get("evidencia") else {}),
+                            })
+
+                    if acao_norm == "adicionar":
+                        if not (descricao or "").strip():
+                            return {"status": "error", "reason": "descricao_obrigatoria"}
+                        novo = {"id": _novo_id_estrategia(tipo_norm), "descricao": descricao.strip(), "concluido": False, "registros": []}
+                        lista.append(novo)
+                        resultado_id = novo["id"]
+                    else:  # editar | remover | concluir
+                        if not item_id:
+                            return {"status": "error", "reason": "item_id_obrigatorio"}
+                        alvo = next((it for it in lista if it["id"] == item_id), None)
+                        if not alvo:
+                            return {"status": "error", "reason": "item_nao_encontrado"}
+                        if acao_norm == "editar":
+                            if not (descricao or "").strip():
+                                return {"status": "error", "reason": "descricao_obrigatoria"}
+                            alvo["descricao"] = descricao.strip()
+                        elif acao_norm == "remover":
+                            lista = [it for it in lista if it["id"] != item_id]
+                        elif acao_norm == "concluir":
+                            alvo["concluido"] = True
+                            alvo["dataConclusao"] = _dt.now(_tz.utc).isoformat()
+                        resultado_id = item_id
+
+                    transaction.update(ref, {campo: lista, "timestamp": firestore.SERVER_TIMESTAMP})
+                    return {
+                        "status": "ok",
+                        "objetivo_id": ref.id,
+                        "tipo": tipo_norm,
+                        "acao": acao_norm,
+                        "item_id": resultado_id,
+                    }
+
+                resultado = _aplicar(db.transaction())
+                return json.dumps(resultado, ensure_ascii=False)
             except Exception as e:
                 return json.dumps({"status": "error", "reason": str(e)}, ensure_ascii=False)
 
