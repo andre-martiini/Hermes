@@ -226,6 +226,22 @@ export interface BrainstormIdea {
     status?: 'active' | 'archived';
 }
 
+export interface PaginaMonitorada {
+    id: string;
+    url: string;
+    apelido: string;
+    objetivo: string;
+    seletor_css?: string;
+    hash_atual?: string;
+    texto_atual?: string;
+    ultima_verificacao?: string;
+    ultima_mudanca?: string;
+    ultima_analise?: string;
+    ativo: boolean;
+    userId: string;
+    criado_em: string;
+}
+
 export interface FinanceTransaction {
     id: string;
     description: string;

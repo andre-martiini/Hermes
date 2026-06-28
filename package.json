@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "sync": "node hermes-sync.js",
+    "watch:pages": "python hermes_cli.py watch-pages",
+    "sync:pages": "python hermes_cli.py sync-watch-pages",
     "test": "vitest run src/utils/destructiveActions.test.ts src/utils/shoppingTransitions.test.ts",
     "whatsapp:worker": "npm --prefix services/whatsapp-capture start"
   },

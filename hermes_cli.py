@@ -814,6 +814,189 @@ def watch_commands(db):
     doc_watch = sync_doc_ref.on_snapshot(on_snapshot)
     while True: time.sleep(1)
 
+def _wp_html_to_text(html, seletor_css=None):
+    """Extrai texto visível do HTML. Usa BeautifulSoup se disponível; senão, fallback por regex."""
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, 'html.parser')
+        for tag in soup(['script', 'style', 'noscript', 'svg']):
+            tag.decompose()
+        root = soup
+        if seletor_css:
+            sel = soup.select_one(seletor_css)
+            if sel is not None:
+                root = sel
+        text = root.get_text(separator='\n')
+    except ImportError:
+        cleaned = re.sub(r'(?is)<(script|style|noscript)[^>]*>.*?</\1>', ' ', html)
+        cleaned = re.sub(r'(?s)<[^>]+>', ' ', cleaned)
+        text = cleaned
+    lines = [ln.strip() for ln in text.splitlines()]
+    return '\n'.join(ln for ln in lines if ln)
+
+
+def _wp_fetch_text(url, seletor_css=None, timeout=30):
+    import requests
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.6',
+    }
+    resp = requests.get(url, headers=headers, timeout=timeout)
+    resp.raise_for_status()
+    return _wp_html_to_text(resp.text, seletor_css)
+
+
+def _wp_get_telegram(db):
+    keys = db.collection('system').document('api_keys').get()
+    token = (keys.to_dict() or {}).get('telegram_bot_token') if keys.exists else None
+    token = token or os.environ.get('TELEGRAM_BOT_TOKEN')
+    chat_id = None
+    try:
+        for d in db.collection('usuarios').stream():
+            v = (d.to_dict() or {}).get('telegram_chat_id')
+            if v:
+                chat_id = v
+                break
+    except Exception:
+        pass
+    return token, chat_id
+
+
+def _wp_send_telegram(db, text):
+    import requests
+    token, chat_id = _wp_get_telegram(db)
+    if not token or not chat_id:
+        return False
+    try:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={'chat_id': str(chat_id), 'text': text[:4090], 'parse_mode': 'HTML'},
+            timeout=30,
+        )
+        return resp.ok
+    except Exception:
+        return False
+
+
+def _wp_analisar_mudanca(db, objetivo, texto_antigo, texto_novo):
+    """Pergunta ao Gemini se a mudança avança o objetivo. Retorna dict {avanca, resumo} ou None se indisponível."""
+    keys = db.collection('system').document('api_keys').get()
+    gemini_key = (keys.to_dict() or {}).get('gemini_api_key') if keys.exists else None
+    if not gemini_key:
+        return None
+    try:
+        from google import genai
+    except ImportError:
+        return None
+    client = genai.Client(api_key=gemini_key)
+    prompt = (
+        "Você compara duas versões do texto visível de uma página da web e avalia uma mudança em relação a um OBJETIVO.\n"
+        f"OBJETIVO DO USUÁRIO: {objetivo}\n\n"
+        "--- VERSÃO ANTERIOR ---\n"
+        f"{(texto_antigo or '')[:8000]}\n\n"
+        "--- VERSÃO ATUAL ---\n"
+        f"{(texto_novo or '')[:8000]}\n\n"
+        "Tarefa: (1) descreva objetivamente o que mudou de relevante (ignore rodapé, banners, datas de acesso, contadores triviais). "
+        "(2) decida se a mudança AVANÇA ou ATENDE o objetivo do usuário.\n"
+        "Responda APENAS um JSON: {\"avanca_objetivo\": true|false, \"resumo\": \"explicação objetiva em 1-3 frases\"}"
+    )
+    try:
+        resp = client.models.generate_content(model='gemini-3.1-flash-lite', contents=prompt)
+        raw = (resp.text or '').strip()
+        m = re.search(r'\{.*\}', raw, re.S)
+        if not m:
+            return {'avanca_objetivo': False, 'resumo': raw[:500] or 'Sem resposta do modelo.'}
+        parsed = json.loads(m.group(0))
+        return {
+            'avanca_objetivo': bool(parsed.get('avanca_objetivo')),
+            'resumo': str(parsed.get('resumo') or '').strip()[:1500],
+        }
+    except Exception as e:
+        return {'avanca_objetivo': False, 'resumo': f'Falha na análise: {e}'}
+
+
+def sync_watch_pages(db, log_list=None, sync_ref=None):
+    import hashlib
+    last_ui_update = [0]
+    def log(msg, force_ui=False):
+        print(f"[WatchPages] {msg}")
+        if log_list is not None:
+            log_list.append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+            now_ts = time.time()
+            if sync_ref and (force_ui or now_ts - last_ui_update[0] > 1.2):
+                try: sync_ref.update({'logs': log_list}); last_ui_update[0] = now_ts
+                except: pass
+
+    try:
+        docs = [d for d in db.collection('paginas_monitoradas').stream() if (d.to_dict() or {}).get('ativo')]
+    except Exception as e:
+        log(f"Falha ao ler páginas monitoradas: {e}", force_ui=True)
+        return
+    log(f"Verificando {len(docs)} página(s) ativa(s).")
+
+    for d in docs:
+        data = d.to_dict() or {}
+        url = data.get('url')
+        apelido = data.get('apelido') or url
+        objetivo = data.get('objetivo') or ''
+        if not url:
+            continue
+        try:
+            texto_novo = _wp_fetch_text(url, data.get('seletor_css'))
+        except Exception as e:
+            log(f"Falha ao buscar '{apelido}': {e}")
+            continue
+
+        novo_hash = hashlib.sha256(texto_novo.encode('utf-8')).hexdigest()
+        agora = datetime.now(timezone.utc).isoformat()
+        update = {'ultima_verificacao': agora}
+        hash_antigo = data.get('hash_atual')
+
+        if not hash_antigo:
+            update['hash_atual'] = novo_hash
+            update['texto_atual'] = texto_novo[:20000]
+            d.reference.update(update)
+            log(f"Baseline capturado para '{apelido}'.")
+            continue
+
+        if novo_hash == hash_antigo:
+            d.reference.update(update)
+            continue
+
+        log(f"Mudança detectada em '{apelido}'. Avaliando objetivo com Gemini...")
+        update['hash_atual'] = novo_hash
+        update['ultima_mudanca'] = agora
+        analise = _wp_analisar_mudanca(db, objetivo, data.get('texto_atual', ''), texto_novo)
+        update['texto_atual'] = texto_novo[:20000]
+
+        if analise is None:
+            update['ultima_analise'] = 'Mudança detectada — análise indisponível (configure gemini_api_key / instale google-genai).'
+            _wp_send_telegram(db, f"🔔 <b>{apelido}</b> mudou, mas não foi possível avaliar o objetivo (Gemini indisponível).\n{url}")
+            log(f"'{apelido}' mudou — alerta de fallback enviado (sem LLM).")
+        else:
+            update['ultima_analise'] = analise['resumo']
+            if analise['avanca_objetivo']:
+                msg = f"🔔 <b>{apelido}</b>\n\n{analise['resumo']}\n\n🎯 <i>{objetivo}</i>\n{url}"
+                _wp_send_telegram(db, msg)
+                log(f"ALERTA enviado: '{apelido}' avançou o objetivo.")
+            else:
+                log(f"Mudança em '{apelido}' não avança o objetivo — silencioso.")
+
+        d.reference.update(update)
+
+    log("Verificação concluída.", force_ui=True)
+
+
+def watch_pages_loop(db, interval=1800):
+    print(f"[WatchPages] Monitoramento contínuo iniciado (intervalo {interval}s). Ctrl+C para sair.")
+    while True:
+        try:
+            sync_watch_pages(db)
+        except Exception as e:
+            print(f"[WatchPages] Erro no ciclo: {e}")
+        time.sleep(max(60, interval))
+
+
 def main():
     parser = argparse.ArgumentParser(description='Hermes CLI')
     subparsers = parser.add_subparsers(dest='command')
@@ -822,6 +1005,9 @@ def main():
     subparsers.add_parser('sync-pix')
     subparsers.add_parser('sync-cal')
     subparsers.add_parser('sync-acervo')
+    subparsers.add_parser('sync-watch-pages')
+    wp = subparsers.add_parser('watch-pages')
+    wp.add_argument('--interval', type=int, default=1800, help='Segundos entre verificações (padrão 1800 = 30 min)')
     args = parser.parse_args()
     if not args.command: parser.print_help(); return
     db = init_db()
@@ -830,5 +1016,7 @@ def main():
     elif args.command == 'sync-pix': sync_pix_emails(db)
     elif args.command == 'sync-cal': sync_google_calendar(db)
     elif args.command == 'sync-acervo': sync_google_drive_acervo(db)
+    elif args.command == 'sync-watch-pages': sync_watch_pages(db)
+    elif args.command == 'watch-pages': watch_pages_loop(db, args.interval)
 
 if __name__ == '__main__': main()
