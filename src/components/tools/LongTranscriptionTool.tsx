@@ -238,8 +238,8 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
             </svg>
           </button>
           <div>
-            <p className="text-[10px] font-mono font-black text-blue-500 uppercase tracking-widest mb-0.5">MODULE: ID-009</p>
-            <h2 className={`text-xl font-mono font-black uppercase tracking-tight ${headingColor}`}>Transcrições Longas</h2>
+            <p className="text-[10px] font-mono font-bold text-blue-500 uppercase tracking-wider mb-0.5">MODULE: ID-009</p>
+            <h2 className={`text-xl font-mono font-bold uppercase tracking-tight ${headingColor}`}>Transcrições Longas</h2>
           </div>
         </div>
 
@@ -274,7 +274,7 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
           <svg className={`w-10 h-10 mx-auto mb-3 ${isDark ? 'text-slate-600' : 'text-slate-300'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
           </svg>
-          <p className={`text-sm font-mono font-black uppercase tracking-widest ${headingColor}`}>
+          <p className={`text-sm font-mono font-bold uppercase tracking-wider ${headingColor}`}>
             Arraste áudio ou vídeo aqui
           </p>
           <p className={`text-[11px] font-mono mt-1 ${textMuted}`}>
@@ -284,14 +284,14 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
 
         {/* History */}
         <div className="flex items-center justify-between mb-3">
-          <h3 className={`text-[10px] font-mono font-black uppercase tracking-[0.3em] ${textMuted}`}>Histórico</h3>
+          <h3 className={`text-[10px] font-mono font-bold uppercase tracking-wider ${textMuted}`}>Histórico</h3>
         </div>
 
         {loadingHistory ? (
           <p className={`text-xs font-mono ${textMuted} py-8 text-center`}>Carregando...</p>
         ) : history.length === 0 ? (
           <div className={`border rounded-none-none p-10 text-center ${cardBg}`}>
-            <p className={`text-[10px] font-mono font-black uppercase tracking-[0.2em] ${textMuted}`}>Nenhuma transcrição ainda</p>
+            <p className={`text-[10px] font-mono font-bold uppercase tracking-wider ${textMuted}`}>Nenhuma transcrição ainda</p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -314,7 +314,7 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
                       </p>
                     </div>
                     <span
-                      className={`shrink-0 text-[9px] font-mono font-black uppercase tracking-widest px-2.5 py-1 border rounded-none-none ${statusStyles(
+                      className={`shrink-0 text-[9px] font-mono font-bold uppercase tracking-wider px-2.5 py-1 border rounded-none-none ${statusStyles(
                         item.status,
                         isDark,
                       )}`}
@@ -357,13 +357,13 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
           <div className={`relative w-full max-w-2xl h-full overflow-y-auto shadow-none ${isDark ? 'bg-slate-900' : 'bg-white'}`}>
             <div className={`sticky top-0 z-10 flex items-center justify-between gap-4 p-5 border-b ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
               <div className="min-w-0">
-                <p className={`text-[9px] font-mono font-black text-blue-500 uppercase tracking-widest`}>Transcrição bruta</p>
+                <p className={`text-[9px] font-mono font-bold text-blue-500 uppercase tracking-wider`}>Transcrição bruta</p>
                 <h3 className={`text-sm font-mono font-bold truncate ${headingColor}`}>{selected.fileName}</h3>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <button
                   onClick={() => copyText(selected.transcriptionRaw || '')}
-                  className="bg-blue-600 text-white h-9 px-3 flex items-center gap-1.5 rounded-none-none hover:bg-blue-700 transition-all font-mono text-[10px] font-black uppercase tracking-widest"
+                  className="bg-blue-600 text-white h-9 px-3 flex items-center gap-1.5 rounded-none-none hover:bg-blue-700 transition-all font-mono text-[10px] font-bold uppercase tracking-wider"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />

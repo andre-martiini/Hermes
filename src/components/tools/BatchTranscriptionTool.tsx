@@ -322,8 +322,8 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
             </svg>
           </button>
           <div>
-            <p className="text-[10px] font-mono font-black text-blue-500 uppercase tracking-widest mb-0.5">MODULE: ID-010</p>
-            <h2 className={`text-xl font-mono font-black uppercase tracking-tight ${headingColor}`}>Transcrição em Lote</h2>
+            <p className="text-[10px] font-mono font-bold text-blue-500 uppercase tracking-wider mb-0.5">MODULE: ID-010</p>
+            <h2 className={`text-xl font-mono font-bold uppercase tracking-tight ${headingColor}`}>Transcrição em Lote</h2>
             <p className={`text-[11px] font-mono mt-0.5 ${textMuted}`}>Adicione áudios, vídeos e textos na ordem desejada e gere um documento único.</p>
           </div>
         </div>
@@ -344,7 +344,7 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              className={`px-4 py-2.5 border rounded-none-none text-[10px] font-black uppercase tracking-widest transition-all ${
+              className={`px-4 py-2.5 border rounded-none-none text-[10px] font-bold uppercase tracking-wider transition-all ${
                 isDark ? 'border-slate-600 bg-slate-800 text-slate-200 hover:border-blue-400' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-400 hover:text-blue-600'
               }`}
             >
@@ -388,7 +388,7 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
             />
             <button
               onClick={addTextItem}
-              className={`px-4 py-2.5 border rounded-none-none text-[10px] font-black uppercase tracking-widest transition-all ${
+              className={`px-4 py-2.5 border rounded-none-none text-[10px] font-bold uppercase tracking-wider transition-all ${
                 isDark ? 'border-slate-600 bg-slate-800 text-slate-200 hover:border-blue-400' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-400 hover:text-blue-600'
               }`}
             >
@@ -399,12 +399,12 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
 
         {/* Queue */}
         <div className="flex items-center justify-between mb-3">
-          <h3 className={`text-[10px] font-mono font-black uppercase tracking-[0.3em] ${textMuted}`}>Fila ({items.length})</h3>
+          <h3 className={`text-[10px] font-mono font-bold uppercase tracking-wider ${textMuted}`}>Fila ({items.length})</h3>
           {items.length > 0 && (
             <button
               onClick={handleProcessBatch}
               disabled={isProcessing}
-              className={`px-5 py-2.5 bg-slate-900 text-white rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`px-5 py-2.5 bg-slate-900 text-white rounded-none-none text-[10px] font-bold uppercase tracking-wider hover:bg-blue-600 transition-all ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               {isProcessing ? 'Processando...' : 'Transcrever Lote'}
             </button>
@@ -413,14 +413,14 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
 
         {items.length === 0 ? (
           <div className={`border rounded-none-none p-10 text-center mb-6 ${cardBg}`}>
-            <p className={`text-[10px] font-mono font-black uppercase tracking-[0.2em] ${textMuted}`}>Nenhum item na fila</p>
+            <p className={`text-[10px] font-mono font-bold uppercase tracking-wider ${textMuted}`}>Nenhum item na fila</p>
             <p className={`text-[11px] font-mono mt-2 ${textMuted}`}>Adicione arquivos/textos acima, ou compartilhe mensagens do WhatsApp direto para o Hermes pelo celular.</p>
           </div>
         ) : (
           <div className="space-y-2 mb-6">
             {items.map((item, idx) => (
               <div key={item.localId} className={`border rounded-none-none p-3 md:p-4 flex items-center gap-3 ${cardBg}`}>
-                <span className={`shrink-0 w-7 h-7 flex items-center justify-center rounded-none-none text-[10px] font-mono font-black ${isDark ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+                <span className={`shrink-0 w-7 h-7 flex items-center justify-center rounded-none-none text-[10px] font-mono font-bold ${isDark ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
                   {idx + 1}
                 </span>
                 <div className="min-w-0 flex-1">
@@ -443,7 +443,7 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
                     ) : null
                   )}
                 </div>
-                <span className={`shrink-0 text-[9px] font-mono font-black uppercase tracking-widest px-2 py-1 border rounded-none-none ${statusStyle[item.status]}`}>
+                <span className={`shrink-0 text-[9px] font-mono font-bold uppercase tracking-wider px-2 py-1 border rounded-none-none ${statusStyle[item.status]}`}>
                   {statusLabel[item.status]}
                 </span>
                 {!isProcessing && (
@@ -462,14 +462,14 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
         {finalDocument && (
           <div className={`border rounded-none-none p-4 md:p-5 mb-6 ${cardBg}`}>
             <div className="flex items-center justify-between gap-3 mb-3">
-              <h3 className={`text-[10px] font-mono font-black uppercase tracking-[0.3em] ${textMuted}`}>Documento Final</h3>
+              <h3 className={`text-[10px] font-mono font-bold uppercase tracking-wider ${textMuted}`}>Documento Final</h3>
               <div className="flex items-center gap-2">
                 {onSendToCopiloto && (
-                  <button onClick={sendDocumentToCopiloto} className="px-3 py-2 bg-blue-50 text-blue-600 rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-blue-100 transition-all">
+                  <button onClick={sendDocumentToCopiloto} className="px-3 py-2 bg-blue-50 text-blue-600 rounded-none-none text-[10px] font-bold uppercase tracking-wider hover:bg-blue-100 transition-all">
                     Enviar ao Copiloto
                   </button>
                 )}
-                <button onClick={copyDocument} className="px-3 py-2 bg-emerald-50 text-emerald-600 rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all">
+                <button onClick={copyDocument} className="px-3 py-2 bg-emerald-50 text-emerald-600 rounded-none-none text-[10px] font-bold uppercase tracking-wider hover:bg-emerald-100 transition-all">
                   Copiar
                 </button>
               </div>
@@ -483,7 +483,7 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
         {/* History */}
         {history.length > 0 && (
           <div>
-            <h3 className={`text-[10px] font-mono font-black uppercase tracking-[0.3em] mb-3 ${textMuted}`}>Histórico de Lotes</h3>
+            <h3 className={`text-[10px] font-mono font-bold uppercase tracking-wider mb-3 ${textMuted}`}>Histórico de Lotes</h3>
             <div className="space-y-2">
               {history.map((entry) => (
                 <button

@@ -52,19 +52,19 @@ const FinanceSection = ({ title, children, defaultExpanded = true, disableCollap
     const showChildren = disableCollapse || isExpanded;
 
     return (
-        <div className="bg-surface p-6 md:p-8 rounded-none border-b md:border border-border-grid shadow-none">
+        <div className="bg-surface p-6 md:p-8 rounded-lg border-b md:border border-[#e5e7eb] dark:border-white/10 shadow-none">
             {!disableCollapse ? (
                 <button
                     onClick={() => setIsExpanded(!isExpanded)}
                     className="w-full flex items-center justify-between group"
                 >
-                    <h4 className="text-xl font-mono font-bold text-on-surface uppercase tracking-tight">{title}</h4>
+                    <h4 className="text-xl font-sans font-semibold text-on-surface uppercase tracking-tight">{title}</h4>
                     <svg className={`w-5 h-5 text-slate-300 group-hover:text-primary-tactile transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
                     </svg>
                 </button>
             ) : (
-                <h4 className="text-xl font-mono font-bold text-on-surface uppercase tracking-tight mb-6">{title}</h4>
+                <h4 className="text-xl font-sans font-semibold text-on-surface uppercase tracking-tight mb-6">{title}</h4>
             )}
             {showChildren && (
                 <div className={`${!disableCollapse ? 'mt-6' : ''} animate-in slide-in-from-top-2 duration-300`}>
@@ -444,10 +444,10 @@ const FinanceView = ({
             {/* Header & Tabs removidos - agora no Header global */}
 
             {isSettingsOpen && (
-                <div className="bg-on-surface text-surface p-8 rounded-none shadow-none animate-in slide-in-from-top-4 space-y-10 border-b-4 border-primary-tactile">
+                <div className="bg-on-surface text-surface p-8 rounded-lg shadow-none animate-in slide-in-from-top-4 space-y-10 border-b-4 border-primary-tactile">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                         <div>
-                            <h4 className="text-[10px] font-mono font-bold uppercase tracking-[0.3em] mb-4 text-primary-tactile flex items-center gap-2">
+                            <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.3em] mb-4 text-primary-tactile flex items-center gap-2">
                                 <span className="w-2 h-2 bg-primary-tactile"></span>
                                 BUDGET_PERIOD // {new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}
                             </h4>
@@ -462,13 +462,13 @@ const FinanceView = ({
                                             [periodKey]: Number(e.target.value)
                                         }
                                     })}
-                                    className="bg-white/5 border border-white/20 rounded-none px-4 py-3 text-white font-mono font-bold outline-none focus:ring-1 focus:ring-primary-tactile w-full text-lg"
+                                    className="bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white font-sans font-semibold outline-none focus:ring-1 focus:ring-primary-tactile w-full text-lg"
                                 />
                             </div>
-                            <p className="text-[8px] text-white/30 uppercase mt-2 font-mono font-bold italic tracking-widest">LOCAL_OVERRIDE_ACTIVE</p>
+                            <p className="text-[8px] text-white/30 uppercase mt-2 font-sans font-semibold italic tracking-widest">LOCAL_OVERRIDE_ACTIVE</p>
                         </div>
                         <div>
-                            <h4 className="text-[10px] font-mono font-bold uppercase tracking-[0.3em] mb-4 text-slate-400 flex items-center gap-2">
+                            <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.3em] mb-4 text-slate-400 flex items-center gap-2">
                                 <span className="w-2 h-2 bg-slate-600"></span>
                                 DEFAULT_BUDGET_FALLBACK
                             </h4>
@@ -477,16 +477,16 @@ const FinanceView = ({
                                     type="number"
                                     defaultValue={settings.monthlyBudget}
                                     onBlur={(e) => onUpdateSettings({ ...settings, monthlyBudget: Number(e.target.value) })}
-                                    className="bg-white/5 border border-white/20 rounded-none px-4 py-3 text-white font-mono font-bold outline-none focus:ring-1 focus:ring-primary-tactile w-full text-lg"
+                                    className="bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white font-sans font-semibold outline-none focus:ring-1 focus:ring-primary-tactile w-full text-lg"
                                 />
                             </div>
-                            <p className="text-[8px] text-white/30 uppercase mt-2 font-mono font-bold italic tracking-widest">GLOBAL_SYSTEM_BASELINE</p>
+                            <p className="text-[8px] text-white/30 uppercase mt-2 font-sans font-semibold italic tracking-widest">GLOBAL_SYSTEM_BASELINE</p>
                         </div>
                     </div>
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                         <div>
-                            <h4 className="text-[10px] font-mono font-bold uppercase tracking-[0.3em] mb-4 text-emerald-500 flex items-center gap-2">
+                            <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.3em] mb-4 text-emerald-500 flex items-center gap-2">
                                 <span className="w-2 h-2 bg-emerald-500"></span>
                                 EMERGENCY_RESERVE_TARGET
                             </h4>
@@ -495,11 +495,11 @@ const FinanceView = ({
                                 value={localEmergencyTarget}
                                 onChange={(e) => setLocalEmergencyTarget(Number(e.target.value))}
                                 onBlur={(e) => onUpdateSettings({ ...settings, emergencyReserveTarget: Number(e.target.value) })}
-                                className="bg-white/5 border border-white/20 rounded-none px-4 py-3 text-white font-mono font-bold outline-none focus:ring-1 focus:ring-primary-tactile w-full"
+                                className="bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white font-sans font-semibold outline-none focus:ring-1 focus:ring-primary-tactile w-full"
                             />
                         </div>
                         <div>
-                            <h4 className="text-[10px] font-mono font-bold uppercase tracking-[0.3em] mb-4 text-emerald-500 flex items-center gap-2">
+                            <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.3em] mb-4 text-emerald-500 flex items-center gap-2">
                                 <span className="w-2 h-2 bg-emerald-500"></span>
                                 CURRENT_RESERVE_SYNC
                             </h4>
@@ -508,17 +508,17 @@ const FinanceView = ({
                                 value={localEmergencyCurrent}
                                 onChange={(e) => setLocalEmergencyCurrent(Number(e.target.value))}
                                 onBlur={(e) => onUpdateSettings({ ...settings, emergencyReserveCurrent: Number(e.target.value) })}
-                                className="bg-white/5 border border-white/20 rounded-none px-4 py-3 text-white font-mono font-bold outline-none focus:ring-1 focus:ring-primary-tactile w-full"
+                                className="bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white font-sans font-semibold outline-none focus:ring-1 focus:ring-primary-tactile w-full"
                             />
                         </div>
                     </div>
 
                     {/* Configuração de Gastos Externos Industrial */}
                     <div className="pt-8 border-t border-white/10">
-                        <h4 className="text-[10px] font-mono font-bold uppercase tracking-[0.4em] mb-6 text-purple-400">// EXTERNAL_SPENDING_PORTAL</h4>
+                        <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.4em] mb-6 text-purple-400">// EXTERNAL_SPENDING_PORTAL</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                             <div>
-                                <label className="text-[9px] font-mono font-bold text-white/40 uppercase tracking-widest block mb-2">EXTERNAL_LIMIT_ALLOCATION</label>
+                                <label className="text-[9px] font-sans font-semibold text-white/40 uppercase tracking-widest block mb-2">EXTERNAL_LIMIT_ALLOCATION</label>
                                 <input
                                     type="number"
                                     defaultValue={settings.externalSpendingLimit || 0}
@@ -531,18 +531,18 @@ const FinanceView = ({
                                             token: settings.externalToken
                                         }, { merge: true });
                                     }}
-                                    className="bg-white/5 border border-white/20 rounded-none px-4 py-3 text-white font-mono font-bold outline-none focus:ring-1 focus:ring-primary-tactile w-full"
+                                    className="bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white font-sans font-semibold outline-none focus:ring-1 focus:ring-primary-tactile w-full"
                                 />
                             </div>
                             <div>
-                                <label className="text-[9px] font-mono font-bold text-white/40 uppercase tracking-widest block mb-2">AUTH_TOKEN_GENERATOR</label>
+                                <label className="text-[9px] font-sans font-semibold text-white/40 uppercase tracking-widest block mb-2">AUTH_TOKEN_GENERATOR</label>
                                 <div className="flex gap-2">
                                     <input
                                         type="text"
                                         value={settings.externalToken || ''}
                                         readOnly
                                         placeholder="NULL_TOKEN"
-                                        className="bg-white/5 border border-white/20 rounded-none px-4 py-3 text-white font-mono text-xs outline-none w-full"
+                                        className="bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white font-sans text-xs outline-none w-full"
                                     />
                                     <button
                                         onClick={async () => {
@@ -554,7 +554,7 @@ const FinanceView = ({
                                                 token: newToken
                                             }, { merge: true });
                                         }}
-                                        className="bg-white text-on-surface hover:bg-primary-tactile hover:text-white px-6 py-3 rounded-none text-[10px] font-mono font-bold uppercase tracking-widest transition-all"
+                                        className="bg-white text-on-surface hover:bg-primary-tactile hover:text-white px-6 py-3 rounded-lg text-[10px] font-sans font-semibold uppercase tracking-widest transition-all"
                                     >
                                         GENERATE
                                     </button>
@@ -562,13 +562,13 @@ const FinanceView = ({
                             </div>
                         </div>
                         {settings.externalToken && (
-                            <div className="mt-6 bg-white/5 border border-white/10 p-4 rounded-none flex flex-col md:flex-row items-center justify-between gap-4">
-                                <div className="text-[10px] font-mono text-purple-300 break-all opacity-80 italic">
+                            <div className="mt-6 bg-white/5 border border-white/10 p-4 rounded-lg flex flex-col md:flex-row items-center justify-between gap-4">
+                                <div className="text-[10px] font-sans text-purple-300 break-all opacity-80 italic">
                                     {window.location.origin}/gastos-externos?token={settings.externalToken}
                                 </div>
                                 <button
                                     onClick={() => navigator.clipboard.writeText(`${window.location.origin}/gastos-externos?token=${settings.externalToken}`)}
-                                    className="bg-purple-600/20 text-purple-300 border border-purple-500/30 px-5 py-2 rounded-soft-touch text-[9px] font-mono font-bold uppercase tracking-widest hover:bg-purple-600/40 transition-all flex items-center gap-2"
+                                    className="bg-purple-600/20 text-purple-300 border border-purple-500/30 px-5 py-2 rounded-soft-touch text-[9px] font-sans font-semibold uppercase tracking-widest hover:bg-purple-600/40 transition-all flex items-center gap-2"
                                 >
                                     COPY_LINK_STREAM
                                 </button>
@@ -579,17 +579,17 @@ const FinanceView = ({
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-10 pt-8 border-t border-white/10">
                         {/* Gestão de Categorias de Obrigações Industrial */}
                         <div className="space-y-6">
-                            <h4 className="text-[10px] font-mono font-bold uppercase tracking-[0.3em] text-blue-400">// BILL_TAXONOMY</h4>
+                            <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.3em] text-blue-400">// BILL_TAXONOMY</h4>
                             <div className="flex flex-wrap gap-2">
                                 {(settings.billCategories || ['Conta Fixa', 'Poupança', 'Investimento']).map(cat => (
-                                    <div key={cat} className="flex items-center gap-3 bg-white/5 border border-white/10 px-3 py-1 rounded-none group">
-                                        <span className="text-[10px] font-mono font-bold uppercase tracking-widest">{cat}</span>
+                                    <div key={cat} className="flex items-center gap-3 bg-white/5 border border-white/10 px-3 py-1 rounded-lg group">
+                                        <span className="text-[10px] font-sans font-semibold uppercase tracking-widest">{cat}</span>
                                         <button
                                             onClick={() => onUpdateSettings({
                                                 ...settings,
                                                 billCategories: (settings.billCategories || []).filter(c => c !== cat)
                                             })}
-                                            className="text-white/20 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-all font-mono font-bold text-[10px]"
+                                            className="text-white/20 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-all font-sans font-semibold text-[10px]"
                                         >
                                             ✕
                                         </button>
@@ -600,7 +600,7 @@ const FinanceView = ({
                                 <input
                                     type="text"
                                     placeholder="APPEND_NEW_TAG"
-                                    className="bg-white/5 border border-white/10 rounded-none px-4 py-2 text-[10px] font-mono font-bold uppercase tracking-widest outline-none focus:ring-1 focus:ring-blue-500 w-full"
+                                    className="bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-[10px] font-sans font-semibold uppercase tracking-widest outline-none focus:ring-1 focus:ring-blue-500 w-full"
                                     value={newBillCategoryInput}
                                     onChange={e => setNewBillCategoryInput(e.target.value)}
                                 />
@@ -614,7 +614,7 @@ const FinanceView = ({
                                             setNewBillCategoryInput('');
                                         }
                                     }}
-                                    className="bg-blue-600 text-white px-4 py-2 rounded-soft-touch text-[10px] font-mono font-bold"
+                                    className="bg-blue-600 text-white px-4 py-2 rounded-soft-touch text-[10px] font-sans font-semibold"
                                 >
                                     +
                                 </button>
@@ -623,17 +623,17 @@ const FinanceView = ({
 
                         {/* Gestão de Categorias de Renda Industrial */}
                         <div className="space-y-6">
-                            <h4 className="text-[10px] font-mono font-bold uppercase tracking-[0.3em] text-emerald-400">// INCOME_SOURCES</h4>
+                            <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.3em] text-emerald-400">// INCOME_SOURCES</h4>
                             <div className="flex flex-wrap gap-2">
                                 {(settings.incomeCategories || ['Renda Principal', 'Renda Extra', 'Dividendos', 'Outros']).map(cat => (
-                                    <div key={cat} className="flex items-center gap-3 bg-white/5 border border-white/10 px-3 py-1 rounded-none group">
-                                        <span className="text-[10px] font-mono font-bold uppercase tracking-widest">{cat}</span>
+                                    <div key={cat} className="flex items-center gap-3 bg-white/5 border border-white/10 px-3 py-1 rounded-lg group">
+                                        <span className="text-[10px] font-sans font-semibold uppercase tracking-widest">{cat}</span>
                                         <button
                                             onClick={() => onUpdateSettings({
                                                 ...settings,
                                                 incomeCategories: (settings.incomeCategories || []).filter(c => c !== cat)
                                             })}
-                                            className="text-white/20 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-all font-mono font-bold text-[10px]"
+                                            className="text-white/20 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-all font-sans font-semibold text-[10px]"
                                         >
                                             ✕
                                         </button>
@@ -644,7 +644,7 @@ const FinanceView = ({
                                 <input
                                     type="text"
                                     placeholder="APPEND_NEW_SOURCE"
-                                    className="bg-white/5 border border-white/10 rounded-none px-4 py-2 text-[10px] font-mono font-bold uppercase tracking-widest outline-none focus:ring-1 focus:ring-emerald-500 w-full"
+                                    className="bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-[10px] font-sans font-semibold uppercase tracking-widest outline-none focus:ring-1 focus:ring-emerald-500 w-full"
                                     value={newIncomeCategoryInput}
                                     onChange={e => setNewIncomeCategoryInput(e.target.value)}
                                 />
@@ -658,7 +658,7 @@ const FinanceView = ({
                                             setNewIncomeCategoryInput('');
                                         }
                                     }}
-                                    className="bg-emerald-600 text-white px-4 py-2 rounded-soft-touch text-[10px] font-mono font-bold"
+                                    className="bg-emerald-600 text-white px-4 py-2 rounded-soft-touch text-[10px] font-sans font-semibold"
                                 >
                                     +
                                 </button>
@@ -685,30 +685,30 @@ const FinanceView = ({
                         onOpenFinancialCopilot={onOpenFinancialCopilot}
                     />
                     {/* Budget Bar Section */}
-                    <div className="bg-surface p-6 md:p-8 rounded-none border border-border-grid shadow-none relative overflow-hidden">
+                    <div className="bg-surface p-6 md:p-8 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none relative overflow-hidden">
                         <div className="flex justify-between items-end mb-6">
                             <div>
-                                <h4 className="text-2xl font-mono font-bold text-on-surface tracking-tight mb-1">
+                                <h4 className="text-2xl font-sans font-semibold text-on-surface tracking-tight mb-1">
                                     // GASTO ACUMULADO • {new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}
                                 </h4>
-                                <div className="text-2xl md:text-5xl font-mono font-bold text-on-surface tracking-tighter leading-none">
+                                <div className="text-2xl md:text-5xl font-sans font-semibold text-on-surface tracking-tighter leading-none">
                                     R$ {currentMonthTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     <span className="text-slate-400 text-sm md:text-2xl ml-1">/ {currentBudget.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                                 </div>
                                 <div className="flex flex-wrap gap-4 mt-2">
-                                    <p className="text-slate-500 text-[9px] md:text-[10px] font-mono font-bold uppercase tracking-widest flex items-center gap-1">
+                                    <p className="text-slate-500 text-[9px] md:text-[10px] font-sans font-semibold uppercase tracking-widest flex items-center gap-1">
                                         <span className="w-1 h-1 bg-primary-tactile rounded-full"></span>
                                         DISPONÍVEL: R$ {(currentBudget - currentMonthTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </p>
                                 </div>
                             </div>
-                            <div className={`px-3 py-1.5 rounded-soft-touch text-[9px] md:text-[10px] font-mono font-bold uppercase tracking-widest text-white shadow-sm ${getSprintStatus()}`}>
+                            <div className={`px-3 py-1.5 rounded-soft-touch text-[9px] md:text-[10px] font-sans font-semibold uppercase tracking-widest text-white shadow-sm ${getSprintStatus()}`}>
                                 SPRINT {currentSprint}
                             </div>
                         </div>
 
                         <div className="relative h-4 overflow-visible">
-                            <div className="absolute inset-0 bg-slate-200 rounded-none overflow-hidden border border-border-grid">
+                            <div className="absolute inset-0 bg-slate-200 rounded-lg overflow-hidden border border-[#e5e7eb] dark:border-white/10">
                                 <div
                                     className={`h-full transition-all duration-1000 ${getBudgetColor(budgetPercentage)}`}
                                     style={{ width: `${budgetPercentage}%` }}
@@ -726,19 +726,19 @@ const FinanceView = ({
                                     <div className="relative -translate-x-1/2">
                                         <div className="absolute left-1/2 -top-6 h-6 w-px bg-on-surface/30" />
                                         <div className="absolute left-1/2 top-2 h-2 w-2 -translate-x-1/2 bg-on-surface border border-surface" />
-                                        <div className="absolute left-1/2 -top-10 -translate-x-1/2 whitespace-nowrap bg-on-surface px-2 py-0.5 text-[8px] font-mono font-bold uppercase tracking-widest text-white">
+                                        <div className="absolute left-1/2 -top-10 -translate-x-1/2 whitespace-nowrap bg-on-surface px-2 py-0.5 text-[8px] font-sans font-semibold uppercase tracking-widest text-white">
                                             ATUAL
                                         </div>
                                     </div>
                                 </div>
                             )}
 
-                            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono font-bold text-on-surface/40">
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-sans font-semibold text-on-surface/40">
                                 {budgetPercentage.toFixed(1)}%
                             </div>
                         </div>
 
-                        <div className="mt-4 flex justify-between text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest">
+                        <div className="mt-4 flex justify-between text-[9px] font-sans font-semibold text-slate-500 uppercase tracking-widest">
                             <span>01 / MONTH_START</span>
                             <span>MONTH_END / {daysInMonth}</span>
                         </div>
@@ -770,32 +770,32 @@ const FinanceView = ({
 
                                 {/* Form para Adicionar/Editar Transação Industrial */}
                                 {(isAddingTransaction || editingTransaction) && (
-                                    <div className="mb-8 p-6 bg-slate-50 rounded-none border border-border-grid space-y-4 animate-in slide-in-from-top-4">
-                                        <h5 className="text-[9px] font-mono font-bold uppercase text-primary-tactile tracking-widest flex items-center gap-2">
+                                    <div className="mb-8 p-6 bg-slate-50 rounded-lg border border-[#e5e7eb] dark:border-white/10 space-y-4 animate-in slide-in-from-top-4">
+                                        <h5 className="text-[9px] font-sans font-semibold uppercase text-primary-tactile tracking-widest flex items-center gap-2">
                                             <span className="w-1.5 h-1.5 bg-primary-tactile"></span>
                                             {editingTransaction ? 'EDIT_TRANSACTION_NODE' : 'INITIALIZE_NEW_TRANSACTION'}
                                         </h5>
                                         <input
                                             type="text"
                                             placeholder="DESCRIPTION_LOG"
-                                            className="w-full bg-white border border-border-grid rounded-none px-4 py-3 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
+                                            className="w-full bg-white border border-[#e5e7eb] dark:border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
                                             value={(editingTransaction || newTransaction).description || ''}
                                             onChange={e => editingTransaction ? setEditingTransaction({ ...editingTransaction, description: e.target.value }) : setNewTransaction({ ...newTransaction, description: e.target.value })}
                                         />
                                         <div className="grid grid-cols-2 gap-4">
                                             <div className="relative">
-                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono font-bold text-slate-400">BRL</span>
+                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-sans font-semibold text-slate-400">BRL</span>
                                                 <input
                                                     type="number"
                                                     placeholder="0.00"
-                                                    className="w-full bg-white border border-border-grid rounded-none pl-12 pr-4 py-3 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
+                                                    className="w-full bg-white border border-[#e5e7eb] dark:border-white/10 rounded-lg pl-12 pr-4 py-3 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
                                                     value={(editingTransaction || newTransaction).amount || ''}
                                                     onChange={e => editingTransaction ? setEditingTransaction({ ...editingTransaction, amount: Number(e.target.value) }) : setNewTransaction({ ...newTransaction, amount: Number(e.target.value) })}
                                                 />
                                             </div>
                                             <input
                                                 type="date"
-                                                className="bg-white border border-border-grid rounded-none px-4 py-3 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
+                                                className="bg-white border border-[#e5e7eb] dark:border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
                                                 value={(editingTransaction || newTransaction).date?.split('T')[0] || ''}
                                                 onChange={e => {
                                                     const date = new Date(e.target.value).toISOString();
@@ -808,7 +808,7 @@ const FinanceView = ({
                                         <div className="flex gap-2 pt-2">
                                             <button
                                                 onClick={() => { setIsAddingTransaction(false); setEditingTransaction(null); }}
-                                                className="flex-1 px-4 py-3 border border-border-grid text-slate-400 hover:text-on-surface hover:bg-slate-100 rounded-soft-touch text-[10px] font-mono font-bold uppercase tracking-widest transition-all"
+                                                className="flex-1 px-4 py-3 border border-[#e5e7eb] dark:border-white/10 text-slate-400 hover:text-on-surface hover:bg-slate-100 rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest transition-all"
                                             >
                                                 ABORT
                                             </button>
@@ -826,7 +826,7 @@ const FinanceView = ({
                                                         setNewTransaction({});
                                                     }
                                                 }}
-                                                className="flex-1 px-4 py-3 bg-on-surface text-white rounded-soft-touch text-[10px] font-mono font-bold uppercase tracking-widest hover:bg-primary-tactile transition-all"
+                                                className="flex-1 px-4 py-3 bg-on-surface text-white rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest hover:bg-primary-tactile transition-all"
                                             >
                                                 COMMIT_DATA
                                             </button>
@@ -842,24 +842,24 @@ const FinanceView = ({
                                         })
                                         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
                                         .map(t => (
-                                            <div key={t.id} className="group relative flex flex-col sm:flex-row sm:justify-between sm:items-center p-4 hover:bg-slate-50 rounded-none transition-all border-b border-border-grid last:border-0 gap-3 sm:gap-4">
+                                            <div key={t.id} className="group relative flex flex-col sm:flex-row sm:justify-between sm:items-center p-4 hover:bg-slate-50 rounded-lg transition-all border-b border-[#e5e7eb] dark:border-white/10 last:border-0 gap-3 sm:gap-4">
                                                 <div className="flex items-center gap-4 min-w-0">
-                                                    <div className="w-10 h-10 rounded-none border border-border-grid bg-white flex items-center justify-center text-on-surface font-mono font-bold text-xs shrink-0">
+                                                    <div className="w-10 h-10 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white flex items-center justify-center text-on-surface font-sans font-semibold text-xs shrink-0">
                                                         {String(new Date(t.date).getUTCDate()).padStart(2, '0')}
                                                     </div>
                                                     <div className="min-w-0 flex-1">
-                                                        <div className="text-xs font-mono font-bold text-on-surface uppercase tracking-tight truncate pr-8" title={t.description}>{t.description || 'LOG_ITEM_STREAM'}</div>
-                                                        <div className="text-[9px] text-slate-400 font-mono font-bold uppercase tracking-widest mt-0.5">
+                                                        <div className="text-xs font-sans font-semibold text-on-surface uppercase tracking-tight truncate pr-8" title={t.description}>{t.description || 'LOG_ITEM_STREAM'}</div>
+                                                        <div className="text-[9px] text-slate-400 font-sans font-semibold uppercase tracking-widest mt-0.5">
                                                             {new Date(t.date).toLocaleDateString('pt-BR')} // SPRINT_{t.sprint}
                                                         </div>
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center justify-between sm:justify-end gap-6 w-full sm:w-auto">
-                                                    <div className="font-mono font-bold text-on-surface whitespace-nowrap text-sm">
+                                                    <div className="font-sans font-semibold text-on-surface whitespace-nowrap text-sm">
                                                         - BRL {t.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                     </div>
                                                     <div className="flex sm:hidden group-hover:flex items-center gap-2">
-                                                        <button onClick={() => setEditingTransaction(t)} className="p-2 text-slate-300 hover:text-primary-tactile transition-all border border-transparent hover:border-border-grid rounded-soft-touch">
+                                                        <button onClick={() => setEditingTransaction(t)} className="p-2 text-slate-300 hover:text-primary-tactile transition-all border border-transparent hover:border-[#e5e7eb] dark:border-white/10 rounded-soft-touch">
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                                         </button>
                                                         <button onClick={() => handleTwoStepDelete(`transaction_${t.id}`, () => onDeleteTransaction(t.id))} className={`p-2 rounded-soft-touch transition-all border ${pendingDeleteKey === `transaction_${t.id}` ? 'bg-rose-500 text-white border-rose-600' : 'text-slate-300 border-transparent hover:text-rose-500 hover:border-rose-100'}`}>
@@ -871,7 +871,7 @@ const FinanceView = ({
                                         ))}
                                     {transactions.length === 0 && (
                                         <div className="text-center py-10">
-                                            <p className="text-slate-300 font-black text-xs uppercase tracking-widest">Nenhum gasto registrado este mês</p>
+                                            <p className="text-slate-300 font-bold text-xs uppercase tracking-wider">Nenhum gasto registrado este mês</p>
                                         </div>
                                     )}
                                 </div>
@@ -881,33 +881,33 @@ const FinanceView = ({
                         {/* EMERGENCY & GOALS (RIGHT COLUMN) */}
                         <div className="order-3 md:order-2 space-y-6">
                             {/* Emergency Reserve Section */}
-                            <div className="bg-surface p-6 rounded-none border border-border-grid shadow-none relative overflow-hidden group">
+                            <div className="bg-surface p-6 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none relative overflow-hidden group">
                                 <div className="mt-2">
-                                    <h5 className="text-xl font-mono font-bold text-on-surface flex items-center gap-2">
+                                    <h5 className="text-xl font-sans font-semibold text-on-surface flex items-center gap-2">
                                         RESERVA_EMERGÊNCIA
                                     </h5>
                                     <div className="flex items-end gap-2 mt-2">
                                         <div className="group/edit relative flex items-center">
-                                            <span className="text-2xl font-mono font-bold text-emerald-600">R$ </span>
+                                            <span className="text-2xl font-sans font-semibold text-emerald-600">R$ </span>
                                             <input
                                                 type="number"
-                                                className="text-2xl font-mono font-bold text-emerald-600 bg-transparent border-none outline-none focus:ring-0 w-32 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                className="text-2xl font-sans font-semibold text-emerald-600 bg-transparent border-none outline-none focus:ring-0 w-32 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                                 value={localEmergencyCurrent}
                                                 onChange={(e) => setLocalEmergencyCurrent(Number(e.target.value))}
                                                 onBlur={(e) => onUpdateSettings({ ...settings, emergencyReserveCurrent: Number(e.target.value) })}
                                             />
                                         </div>
-                                        <span className="text-sm font-mono font-bold text-slate-400 mb-1">/ {emergencyReserve.target.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                        <span className="text-sm font-sans font-semibold text-slate-400 mb-1">/ {emergencyReserve.target.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                                     </div>
                                 </div>
-                                <div className="mt-4 h-2 bg-slate-200 rounded-none overflow-hidden border border-border-grid">
+                                <div className="mt-4 h-2 bg-slate-200 rounded-lg overflow-hidden border border-[#e5e7eb] dark:border-white/10">
                                     <div
                                         className="h-full bg-emerald-500 transition-all duration-1000"
                                         style={{ width: `${Math.min((emergencyReserve.current / (emergencyReserve.target || 1)) * 100, 100)}%` }}
                                     ></div>
                                 </div>
                                 {emergencyReserve.current < emergencyReserve.target && (
-                                    <p className="mt-2 text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest italic">STATUS: RESERVA_PENDENTE</p>
+                                    <p className="mt-2 text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-widest italic">STATUS: RESERVA_PENDENTE</p>
                                 )}
                             </div>
 
@@ -924,7 +924,7 @@ const FinanceView = ({
                                                     status: 'active'
                                                 });
                                             }}
-                                            className="bg-primary-tactile/10 text-primary-tactile border border-primary-tactile/20 px-4 py-2 rounded-soft-touch text-[10px] font-mono font-bold uppercase tracking-widest hover:bg-primary-tactile hover:text-white transition-all"
+                                            className="bg-primary-tactile/10 text-primary-tactile border border-primary-tactile/20 px-4 py-2 rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest hover:bg-primary-tactile hover:text-white transition-all"
                                         >
                                                + ADD_NEW_GOAL
                                         </button>
@@ -933,7 +933,7 @@ const FinanceView = ({
                                     {sortedGoals.length > 0 ? (
                                         <div className="space-y-4">
                                             {sortedGoals.map((goal, idx) => (
-                                                <div key={goal.id} className={`p-4 rounded-none border transition-all relative group ${idx === 0 ? 'bg-surface border-primary-tactile border-2' : 'bg-surface border-border-grid opacity-80 hover:opacity-100'}`}>
+                                                <div key={goal.id} className={`p-4 rounded-lg border transition-all relative group ${idx === 0 ? 'bg-surface border-primary-tactile border-2' : 'bg-surface border-[#e5e7eb] dark:border-white/10 opacity-80 hover:opacity-100'}`}>
                                                     <div className="flex flex-col gap-2">
                                                         {/* Setas de reordenação */}
                                                         <div className="absolute left-2 top-1/2 -translate-y-1/2 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
@@ -957,7 +957,7 @@ const FinanceView = ({
 
                                                         {/* Badge P1 + Lixeira */}
                                                         <div className="absolute right-3 top-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                                                            <div className="bg-slate-100 text-slate-500 text-[8px] font-mono font-bold px-1.5 py-0.5 rounded-none border border-border-grid uppercase tracking-widest">{`PRIORITY_${idx + 1}`}</div>
+                                                            <div className="bg-slate-100 text-slate-500 text-[8px] font-sans font-semibold px-1.5 py-0.5 rounded-lg border border-[#e5e7eb] dark:border-white/10 uppercase tracking-widest">{`PRIORITY_${idx + 1}`}</div>
                                                             <button
                                                                 onClick={() => handleTwoStepDelete(`goal_${goal.id}`, () => onDeleteGoal(goal.id))}
                                                                 className={`p-1.5 rounded-soft-touch transition-all ${pendingDeleteKey === `goal_${goal.id}` ? 'bg-accent-tactile text-white scale-110' : 'text-slate-300 hover:text-accent-tactile'}`}
@@ -972,7 +972,7 @@ const FinanceView = ({
                                                             <textarea
                                                                 defaultValue={goal.name}
                                                                 rows={1}
-                                                                className="w-full bg-transparent border-none p-0 font-mono font-bold text-on-surface text-lg outline-none focus:ring-0 rounded-none transition-all resize-none overflow-hidden leading-snug pr-16"
+                                                                className="w-full bg-transparent border-none p-0 font-sans font-semibold text-on-surface text-lg outline-none focus:ring-0 rounded-lg transition-all resize-none overflow-hidden leading-snug pr-16"
                                                                 onInput={(e) => {
                                                                     const el = e.currentTarget;
                                                                     el.style.height = 'auto';
@@ -986,10 +986,10 @@ const FinanceView = ({
                                                                 onClick={(e) => e.stopPropagation()}
                                                             />
                                                             <div className="flex items-baseline gap-1 mt-1">
-                                                                <span className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest">R$ {goal.currentAmount.toLocaleString('pt-BR', { minimumFractionDigits: 0 })} DE</span>
+                                                                <span className="text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-widest">R$ {goal.currentAmount.toLocaleString('pt-BR', { minimumFractionDigits: 0 })} DE</span>
                                                                 <input
                                                                     type="number"
-                                                                    className="bg-transparent border-none p-0 text-[10px] font-mono font-bold text-on-surface w-24 outline-none focus:ring-0 rounded-none"
+                                                                    className="bg-transparent border-none p-0 text-[10px] font-sans font-semibold text-on-surface w-24 outline-none focus:ring-0 rounded-lg"
                                                                     defaultValue={goal.targetAmount}
                                                                     onBlur={(e) => {
                                                                         const newVal = Number(e.target.value);
@@ -1002,7 +1002,7 @@ const FinanceView = ({
                                                         </div>
 
                                                         {/* Barra de progresso */}
-                                                        <div className="h-1 bg-slate-100 rounded-none overflow-hidden w-full border border-border-grid">
+                                                        <div className="h-1 bg-slate-100 rounded-lg overflow-hidden w-full border border-[#e5e7eb] dark:border-white/10">
                                                             <div
                                                                 className={`h-full transition-all duration-1000 ${idx === 0 ? 'bg-primary-tactile' : 'bg-slate-400'}`}
                                                                 style={{ width: `${Math.min((goal.currentAmount / goal.targetAmount) * 100, 100)}%` }}
@@ -1013,8 +1013,8 @@ const FinanceView = ({
                                             ))}
                                         </div>
                                     ) : (
-                                        <div className="p-8 border border-dashed border-border-grid rounded-none text-center">
-                                            <p className="text-slate-400 font-mono font-bold uppercase text-[10px]">NO_GOALS_DEFINED</p>
+                                        <div className="p-8 border border-dashed border-[#e5e7eb] dark:border-white/10 rounded-lg text-center">
+                                            <p className="text-slate-400 font-sans font-semibold uppercase text-[10px]">NO_GOALS_DEFINED</p>
                                         </div>
                                     )}
                                 </FinanceSection>
@@ -1034,45 +1034,45 @@ const FinanceView = ({
 
                     {/* HUB DE SAÚDE FINANCEIRA (COMPARATIVOS) */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-2 bg-surface p-8 rounded-none border border-border-grid shadow-none flex flex-col justify-between relative overflow-hidden group">
+                        <div className="lg:col-span-2 bg-surface p-8 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none flex flex-col justify-between relative overflow-hidden group">
                             <div className="relative z-10">
                                 <div className="mb-6">
-                                    <h4 className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.2em]">COMPARATIVO_MENSAL / REPORT</h4>
+                                    <h4 className="text-[10px] font-sans font-semibold text-slate-400 uppercase tracking-[0.2em]">COMPARATIVO_MENSAL / REPORT</h4>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                     <div>
-                                        <div className="text-[10px] font-mono font-bold text-emerald-600 uppercase mb-2 tracking-widest flex items-center gap-2">
+                                        <div className="text-[10px] font-sans font-semibold text-emerald-600 uppercase mb-2 tracking-widest flex items-center gap-2">
                                             // TOTAL_PREVISTO
                                             {prevIncome > 0 && (
-                                                <span className={`text-[9px] px-1.5 py-0.5 border border-border-grid ${incomeOverallTotal >= prevIncome ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                                                <span className={`text-[9px] px-1.5 py-0.5 border border-[#e5e7eb] dark:border-white/10 ${incomeOverallTotal >= prevIncome ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
                                                     {incomeOverallTotal >= prevIncome ? 'UP' : 'DOWN'} {Math.round(Math.abs((incomeOverallTotal - prevIncome) / prevIncome) * 100)}%
                                                 </span>
                                             )}
                                         </div>
-                                        <div className="text-4xl font-mono font-bold text-on-surface tracking-tighter">
+                                        <div className="text-4xl font-sans font-semibold text-on-surface tracking-tighter">
                                             R$ {incomeOverallTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </div>
                                     </div>
                                     <div>
-                                        <div className="text-[10px] font-mono font-bold text-accent-tactile uppercase mb-2 tracking-widest flex items-center gap-2">
+                                        <div className="text-[10px] font-sans font-semibold text-accent-tactile uppercase mb-2 tracking-widest flex items-center gap-2">
                                             // TOTAL_CONTAS
                                             {prevBills > 0 && (
-                                                <span className={`text-[9px] px-1.5 py-0.5 border border-border-grid ${currentTotalBills <= prevBills ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                                                <span className={`text-[9px] px-1.5 py-0.5 border border-[#e5e7eb] dark:border-white/10 ${currentTotalBills <= prevBills ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
                                                     {currentTotalBills <= prevBills ? 'DOWN' : 'UP'} {Math.round(Math.abs((currentTotalBills - prevBills) / prevBills) * 100)}%
                                                 </span>
                                             )}
                                         </div>
-                                        <div className="text-4xl font-mono font-bold text-on-surface tracking-tighter">
+                                        <div className="text-4xl font-sans font-semibold text-on-surface tracking-tighter">
                                             R$ {currentTotalBills.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </div>
                                     </div>
                                 </div>
                                 <div className="mt-8">
-                                    <div className="flex justify-between text-[10px] font-mono font-bold uppercase tracking-widest mb-2">
+                                    <div className="flex justify-between text-[10px] font-sans font-semibold uppercase tracking-widest mb-2">
                                         <span className="text-slate-400">COMPROMETIMENTO_RENDA ({Math.round((currentTotalBills / (incomeOverallTotal || 1)) * 100)}%)</span>
                                         <span className="text-slate-300 italic">THRESHOLD: 70%</span>
                                     </div>
-                                    <div className="h-2 bg-slate-100 rounded-none overflow-hidden border border-border-grid">
+                                    <div className="h-2 bg-slate-100 rounded-lg overflow-hidden border border-[#e5e7eb] dark:border-white/10">
                                         <div
                                             className={`h-full transition-all duration-1000 ${incomeOverallTotal > 0 && (currentTotalBills / incomeOverallTotal) > 0.7 ? 'bg-accent-tactile' : 'bg-emerald-500'}`}
                                             style={{ width: `${Math.min(incomeOverallTotal > 0 ? (currentTotalBills / incomeOverallTotal) * 100 : 0, 100)}%` }}
@@ -1082,12 +1082,12 @@ const FinanceView = ({
                             </div>
                         </div>
 
-                        <div className={`p-8 rounded-none border border-border-grid shadow-none flex flex-col justify-center items-center text-center transition-all ${incomeOverallTotal - currentTotalBills >= 0 ? 'bg-on-surface text-surface' : 'bg-accent-tactile text-white'}`}>
-                            <h4 className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] mb-2 opacity-60">SALDO_PROJETADO</h4>
-                            <div className="text-4xl md:text-5xl font-mono font-bold tracking-tighter mb-2">
+                        <div className={`p-8 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none flex flex-col justify-center items-center text-center transition-all ${incomeOverallTotal - currentTotalBills >= 0 ? 'bg-on-surface text-surface' : 'bg-accent-tactile text-white'}`}>
+                            <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.2em] mb-2 opacity-60">SALDO_PROJETADO</h4>
+                            <div className="text-4xl md:text-5xl font-sans font-semibold tracking-tighter mb-2">
                                 R$ {(incomeOverallTotal - currentTotalBills).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </div>
-                            <p className="text-[10px] font-mono font-bold uppercase opacity-40 tracking-widest">NET_REMAINING_BALANCE</p>
+                            <p className="text-[10px] font-sans font-semibold uppercase opacity-40 tracking-widest">NET_REMAINING_BALANCE</p>
                         </div>
                     </div>
 
@@ -1096,46 +1096,46 @@ const FinanceView = ({
                     {/* SEÇÃO DE RENDAS / GANHOS */}
                     <FinanceSection title="Rendas e Rendimentos">
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-                            <p className="text-slate-400 font-mono text-[10px] font-bold uppercase tracking-widest">REVENUE_STREAMS / ACTIVE_INCOME</p>
+                            <p className="text-slate-400 font-sans text-[10px] font-bold uppercase tracking-widest">REVENUE_STREAMS / ACTIVE_INCOME</p>
                             <div className="flex gap-3 w-full md:w-auto">
                                 <button
                                     onClick={() => setIsNFSeGeneratorOpen(true)}
-                                    className="flex-1 md:flex-none border border-border-grid bg-surface hover:bg-slate-100 text-on-surface px-5 py-2 flex items-center justify-center gap-2 rounded-soft-touch text-[10px] font-mono font-bold uppercase tracking-widest transition-all"
+                                    className="flex-1 md:flex-none border border-[#e5e7eb] dark:border-white/10 bg-surface hover:bg-slate-100 text-on-surface px-5 py-2 flex items-center justify-center gap-2 rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest transition-all"
                                 >
                                     <svg className="w-4 h-4 text-primary-tactile" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                     NFS-e_GEN
                                 </button>
                                 <button
                                     onClick={() => setIsManagingIncomeRubrics(!isManagingIncomeRubrics)}
-                                    className={`flex-1 md:flex-none px-5 py-2 flex items-center justify-center rounded-soft-touch text-[10px] font-mono font-bold uppercase tracking-widest transition-all border ${isManagingIncomeRubrics ? 'bg-on-surface text-surface border-on-surface' : 'bg-surface text-on-surface border-border-grid hover:bg-slate-100'}`}
+                                    className={`flex-1 md:flex-none px-5 py-2 flex items-center justify-center rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest transition-all border ${isManagingIncomeRubrics ? 'bg-on-surface text-surface border-on-surface' : 'bg-surface text-on-surface border-[#e5e7eb] dark:border-white/10 hover:bg-slate-100'}`}
                                 >
                                     {isManagingIncomeRubrics ? 'CLOSE_RESOURCES' : 'MANAGE_RESOURCES'}
                                 </button>
                                 <button onClick={() => {
                                     setNewIncome({ category: settings.incomeCategories?.[0] || 'Renda Principal' });
                                     setIsAddingIncome(true);
-                                }} className="flex-1 md:flex-none bg-primary-tactile text-white px-5 py-2 flex items-center justify-center rounded-soft-touch text-[10px] font-mono font-bold uppercase tracking-widest transition-all">
+                                }} className="flex-1 md:flex-none bg-primary-tactile text-white px-5 py-2 flex items-center justify-center rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest transition-all">
                                     + ADD_ENTRY
                                 </button>
                             </div>
                         </div>
                                      {/* Gestão de Rubricas de Renda Industrial */}
                         {isManagingIncomeRubrics && (
-                            <div className="bg-on-surface text-surface p-8 rounded-none shadow-none animate-in fade-in slide-in-from-top-4 border-b-4 border-emerald-500">
+                            <div className="bg-on-surface text-surface p-8 rounded-lg shadow-none animate-in fade-in slide-in-from-top-4 border-b-4 border-emerald-500">
                                 <div className="flex justify-between items-center mb-10">
                                     <div>
-                                        <h5 className="text-[10px] font-mono font-bold uppercase tracking-[0.4em] text-emerald-400">// INCOME_STREAMS_REGISTRY</h5>
-                                        <p className="text-emerald-300/30 text-[8px] font-mono font-bold uppercase tracking-widest mt-1">RECURRING_REVENUE_CHANNELS</p>
+                                        <h5 className="text-[10px] font-sans font-semibold uppercase tracking-[0.4em] text-emerald-400">// INCOME_STREAMS_REGISTRY</h5>
+                                        <p className="text-emerald-300/30 text-[8px] font-sans font-semibold uppercase tracking-widest mt-1">RECURRING_REVENUE_CHANNELS</p>
                                     </div>
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
                                     {incomeRubrics.map(rubric => (
-                                        <div key={rubric.id} className="bg-white/5 border border-white/10 p-5 rounded-none flex justify-between items-center group hover:bg-white/10 transition-all">
+                                        <div key={rubric.id} className="bg-white/5 border border-white/10 p-5 rounded-lg flex justify-between items-center group hover:bg-white/10 transition-all">
                                             <div>
-                                                <div className="text-[8px] font-mono font-bold text-emerald-400 uppercase tracking-widest mb-1">{rubric.category} // TAG</div>
-                                                <div className="text-sm font-mono font-bold uppercase tracking-tight">{rubric.description}</div>
-                                                <div className="text-[9px] text-white/30 font-mono font-bold uppercase tracking-widest mt-2 flex items-center gap-2">
+                                                <div className="text-[8px] font-sans font-semibold text-emerald-400 uppercase tracking-widest mb-1">{rubric.category} // TAG</div>
+                                                <div className="text-sm font-sans font-semibold uppercase tracking-tight">{rubric.description}</div>
+                                                <div className="text-[9px] text-white/30 font-sans font-semibold uppercase tracking-widest mt-2 flex items-center gap-2">
                                                     ETA: DAY_{rubric.expectedDay}
                                                     {rubric.defaultAmount ? ` // BRL ${rubric.defaultAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ' // VARIABLE_VAL'}
                                                 </div>
@@ -1158,8 +1158,8 @@ const FinanceView = ({
                                     ))}
                                 </div>
 
-                                <div className="bg-white/5 p-8 rounded-none border border-white/10">
-                                    <h6 className="text-[10px] font-mono font-bold text-white/30 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
+                                <div className="bg-white/5 p-8 rounded-lg border border-white/10">
+                                    <h6 className="text-[10px] font-sans font-semibold text-white/30 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
                                         <span className="w-2 h-2 bg-emerald-500"></span>
                                         {editingIncomeRubric ? 'UPDATE_RESOURCE_NODE' : 'REGISTER_NEW_STREAM'}
                                     </h6>
@@ -1167,26 +1167,26 @@ const FinanceView = ({
                                         <input
                                             type="text"
                                             placeholder="STREAM_IDENTIFIER"
-                                            className="bg-white/5 border border-white/10 rounded-none px-4 py-3 text-xs font-mono font-bold focus:ring-1 focus:ring-emerald-500 outline-none text-white placeholder:text-white/10"
+                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-emerald-500 outline-none text-white placeholder:text-white/10"
                                             value={newIncomeRubric.description || ''}
                                             onChange={e => setNewIncomeRubric({ ...newIncomeRubric, description: e.target.value })}
                                         />
                                         <input
                                             type="number"
                                             placeholder="EXPECTED_DAY"
-                                            className="bg-white/5 border border-white/10 rounded-none px-4 py-3 text-xs font-mono font-bold focus:ring-1 focus:ring-emerald-500 outline-none text-white placeholder:text-white/10"
+                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-emerald-500 outline-none text-white placeholder:text-white/10"
                                             value={newIncomeRubric.expectedDay || ''}
                                             onChange={e => setNewIncomeRubric({ ...newIncomeRubric, expectedDay: Number(e.target.value) })}
                                         />
                                         <input
                                             type="number"
                                             placeholder="BASELINE_VALUE"
-                                            className="bg-white/5 border border-white/10 rounded-none px-4 py-3 text-xs font-mono font-bold focus:ring-1 focus:ring-emerald-500 outline-none text-white placeholder:text-white/10"
+                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-emerald-500 outline-none text-white placeholder:text-white/10"
                                             value={newIncomeRubric.defaultAmount || ''}
                                             onChange={e => setNewIncomeRubric({ ...newIncomeRubric, defaultAmount: e.target.value ? Number(e.target.value) : undefined })}
                                         />
                                         <select
-                                            className="bg-white/5 border border-white/10 rounded-none px-4 py-3 text-xs font-mono font-bold focus:ring-1 focus:ring-emerald-500 outline-none text-white [color-scheme:dark]"
+                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-emerald-500 outline-none text-white [color-scheme:dark]"
                                             value={newIncomeRubric.category}
                                             onChange={e => setNewIncomeRubric({ ...newIncomeRubric, category: e.target.value })}
                                         >
@@ -1207,7 +1207,7 @@ const FinanceView = ({
                                                         setEditingIncomeRubric(null);
                                                     }
                                                 }}
-                                                className="flex-1 bg-white text-on-surface hover:bg-emerald-500 hover:text-white rounded-soft-touch px-4 py-3 text-[10px] font-mono font-bold uppercase tracking-widest transition-all"
+                                                className="flex-1 bg-white text-on-surface hover:bg-emerald-500 hover:text-white rounded-soft-touch px-4 py-3 text-[10px] font-sans font-semibold uppercase tracking-widest transition-all"
                                             >
                                                 {editingIncomeRubric ? 'COMMIT_UP' : 'INITIALIZE'}
                                             </button>
@@ -1217,7 +1217,7 @@ const FinanceView = ({
                                                         setEditingIncomeRubric(null);
                                                         setNewIncomeRubric({ category: 'Renda Principal' });
                                                     }}
-                                                    className="bg-white/10 hover:bg-white/20 text-white rounded-soft-touch px-4 py-3 text-xs font-mono font-bold uppercase tracking-widest transition-all"
+                                                    className="bg-white/10 hover:bg-white/20 text-white rounded-soft-touch px-4 py-3 text-xs font-sans font-semibold uppercase tracking-widest transition-all"
                                                 >
                                                     ✕
                                                 </button>
@@ -1230,36 +1230,36 @@ const FinanceView = ({
 
                         {/* Formulário de Registro de Recebimento Industrial */}
                         {isAddingIncome && (
-                            <div className="bg-surface p-8 rounded-none border border-emerald-500 shadow-none space-y-6 animate-in slide-in-from-top-4 border-l-4">
-                                <h5 className="text-[10px] font-mono font-bold text-emerald-600 uppercase tracking-[0.3em] flex items-center gap-2">
+                            <div className="bg-surface p-8 rounded-lg border border-emerald-500 shadow-none space-y-6 animate-in slide-in-from-top-4 border-l-4">
+                                <h5 className="text-[10px] font-sans font-semibold text-emerald-600 uppercase tracking-[0.3em] flex items-center gap-2">
                                     <span className="w-1.5 h-1.5 bg-emerald-600"></span>
                                     LOG_NEW_REVENUE_EVENT
                                 </h5>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                                     <div className="space-y-1">
-                                        <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest">DESCRIPTION</label>
-                                        <input type="text" placeholder="REVENUE_SOURCE_LOG" className="w-full px-4 py-3 rounded-none border border-border-grid bg-white text-on-surface font-mono font-bold text-xs outline-none focus:ring-1 focus:ring-emerald-500" value={newIncome.description || ''} onChange={(e) => setNewIncome({ ...newIncome, description: e.target.value })} />
+                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">DESCRIPTION</label>
+                                        <input type="text" placeholder="REVENUE_SOURCE_LOG" className="w-full px-4 py-3 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-emerald-500" value={newIncome.description || ''} onChange={(e) => setNewIncome({ ...newIncome, description: e.target.value })} />
                                     </div>
                                     <div className="space-y-1">
-                                        <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest">VALUE_BRL</label>
+                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">VALUE_BRL</label>
                                         <div className="flex gap-0">
-                                            <span className="px-3 py-3 bg-emerald-50 border border-r-0 border-border-grid font-mono font-bold text-emerald-600 text-xs">R$</span>
-                                            <input type="number" placeholder="0.00" className="w-full px-4 py-3 rounded-none border border-border-grid bg-white text-on-surface font-mono font-bold text-xs outline-none focus:ring-1 focus:ring-emerald-500" value={newIncome.amount || ''} onChange={(e) => setNewIncome({ ...newIncome, amount: Number(e.target.value) })} />
+                                            <span className="px-3 py-3 bg-emerald-50 border border-r-0 border-[#e5e7eb] dark:border-white/10 font-sans font-semibold text-emerald-600 text-xs">R$</span>
+                                            <input type="number" placeholder="0.00" className="w-full px-4 py-3 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-emerald-500" value={newIncome.amount || ''} onChange={(e) => setNewIncome({ ...newIncome, amount: Number(e.target.value) })} />
                                         </div>
                                     </div>
                                     <div className="space-y-1">
-                                        <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest">EXPECTED_DAY</label>
-                                        <input type="number" placeholder="1-31" max={31} min={1} className="w-full px-4 py-3 rounded-none border border-border-grid bg-white text-on-surface font-mono font-bold text-xs outline-none focus:ring-1 focus:ring-emerald-500" value={newIncome.day || ''} onChange={(e) => setNewIncome({ ...newIncome, day: Number(e.target.value) })} />
+                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">EXPECTED_DAY</label>
+                                        <input type="number" placeholder="1-31" max={31} min={1} className="w-full px-4 py-3 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-emerald-500" value={newIncome.day || ''} onChange={(e) => setNewIncome({ ...newIncome, day: Number(e.target.value) })} />
                                     </div>
                                     <div className="flex items-end">
-                                        <label className="w-full px-4 py-3 rounded-none border border-border-grid bg-slate-50 font-mono font-bold flex items-center gap-3 text-slate-600 cursor-pointer hover:bg-slate-100 transition-all">
-                                            <input type="checkbox" checked={Boolean(newIncome.isReceived)} onChange={(e) => setNewIncome({ ...newIncome, isReceived: e.target.checked })} className="w-4 h-4 rounded-none border-border-grid text-emerald-600 focus:ring-0 bg-transparent" />
+                                        <label className="w-full px-4 py-3 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-slate-50 font-sans font-semibold flex items-center gap-3 text-slate-600 cursor-pointer hover:bg-slate-100 transition-all">
+                                            <input type="checkbox" checked={Boolean(newIncome.isReceived)} onChange={(e) => setNewIncome({ ...newIncome, isReceived: e.target.checked })} className="w-4 h-4 rounded-lg border-[#e5e7eb] dark:border-white/10 text-emerald-600 focus:ring-0 bg-transparent" />
                                             <span className="text-[10px] uppercase tracking-widest">STATUS_RECEIVED</span>
                                         </label>
                                     </div>
                                 </div>
                                 <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                                    <button onClick={() => setIsAddingIncome(false)} className="px-6 py-3 border border-border-grid rounded-soft-touch text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400 hover:text-on-surface hover:bg-slate-50 transition-all">ABORT_STREAM</button>
+                                    <button onClick={() => setIsAddingIncome(false)} className="px-6 py-3 border border-[#e5e7eb] dark:border-white/10 rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest text-slate-400 hover:text-on-surface hover:bg-slate-50 transition-all">ABORT_STREAM</button>
                                     <button
                                         onClick={async () => {
                                             if (newIncome.description && newIncome.amount && newIncome.day) {
@@ -1274,7 +1274,7 @@ const FinanceView = ({
                                                 setNewIncome({ category: 'Renda Principal', isReceived: false });
                                             }
                                         }}
-                                        className="bg-on-surface text-white px-10 py-3 rounded-soft-touch text-[10px] font-mono font-bold uppercase tracking-widest hover:bg-emerald-600 transition-all"
+                                        className="bg-on-surface text-white px-10 py-3 rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest hover:bg-emerald-600 transition-all"
                                     >
                                         COMMIT_REVENUE
                                     </button>
@@ -1283,9 +1283,9 @@ const FinanceView = ({
                         )}
 
                         {pendingIncomeRubrics.length > 0 && (
-                            <div className="mb-6 rounded-none md:rounded-[2rem] border border-emerald-900/20 bg-emerald-950 p-5 text-white shadow-none md:shadow-xl">
+                            <div className="mb-6 rounded-lg md:rounded-[2rem] border border-emerald-900/20 bg-emerald-950 p-5 text-white shadow-none md:shadow-xl">
                                 <div className="mb-3">
-                                    <h5 className="text-sm font-black uppercase tracking-widest text-emerald-100">Fontes sem lancamento no periodo</h5>
+                                    <h5 className="text-sm font-bold uppercase tracking-wider text-emerald-100">Fontes sem lancamento no periodo</h5>
                                     <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-300/50">Clique em uma fonte para pre-preencher um novo ganho</p>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
@@ -1303,7 +1303,7 @@ const FinanceView = ({
                                                 });
                                                 setIsAddingIncome(true);
                                             }}
-                                            className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-widest transition-colors hover:bg-white/20"
+                                            className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-colors hover:bg-white/20"
                                         >
                                             {rubric.description}
                                         </button>
@@ -1313,47 +1313,47 @@ const FinanceView = ({
                         )}
 
                         <div className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-3">
-                            <div className="rounded-none border border-border-grid bg-emerald-50/50 p-6 shadow-none">
-                                <div className="text-[9px] font-mono font-bold uppercase tracking-[0.2em] text-emerald-600 mb-2">// TOTAL_RECEIVED</div>
-                                <div className="text-3xl font-mono font-bold tracking-tighter text-emerald-700">{formatCurrency(incomeReceivedTotal)}</div>
-                                <div className="mt-3 text-[9px] font-mono font-bold uppercase tracking-widest text-emerald-600/60">{currentMonthIncomeEntries.filter(entry => entry.isReceived).length} NODES_ACKNOWLEDGED</div>
+                            <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-emerald-50/50 p-6 shadow-none">
+                                <div className="text-[9px] font-sans font-semibold uppercase tracking-[0.2em] text-emerald-600 mb-2">// TOTAL_RECEIVED</div>
+                                <div className="text-3xl font-sans font-semibold tracking-tighter text-emerald-700">{formatCurrency(incomeReceivedTotal)}</div>
+                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-widest text-emerald-600/60">{currentMonthIncomeEntries.filter(entry => entry.isReceived).length} NODES_ACKNOWLEDGED</div>
                             </div>
-                            <div className="rounded-none border border-border-grid bg-amber-50/50 p-6 shadow-none">
-                                <div className="text-[9px] font-mono font-bold uppercase tracking-[0.2em] text-amber-600 mb-2">// TOTAL_PENDING</div>
-                                <div className="text-3xl font-mono font-bold tracking-tighter text-amber-700">{formatCurrency(incomePendingTotal)}</div>
-                                <div className="mt-3 text-[9px] font-mono font-bold uppercase tracking-widest text-amber-600/60">{currentMonthIncomeEntries.filter(entry => !entry.isReceived).length} NODES_IN_TRANSIT</div>
+                            <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-amber-50/50 p-6 shadow-none">
+                                <div className="text-[9px] font-sans font-semibold uppercase tracking-[0.2em] text-amber-600 mb-2">// TOTAL_PENDING</div>
+                                <div className="text-3xl font-sans font-semibold tracking-tighter text-amber-700">{formatCurrency(incomePendingTotal)}</div>
+                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-widest text-amber-600/60">{currentMonthIncomeEntries.filter(entry => !entry.isReceived).length} NODES_IN_TRANSIT</div>
                             </div>
-                            <div className="rounded-none border border-border-grid bg-slate-50 p-6 shadow-none">
-                                <div className="text-[9px] font-mono font-bold uppercase tracking-[0.2em] text-slate-500 mb-2">// OVERALL_TOTAL</div>
-                                <div className="text-3xl font-mono font-bold tracking-tighter text-on-surface">{formatCurrency(incomeOverallTotal)}</div>
-                                <div className="mt-3 text-[9px] font-mono font-bold uppercase tracking-widest text-slate-400">{currentMonthIncomeEntries.length} TOTAL_ENTRIES_PERIOD</div>
+                            <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-slate-50 p-6 shadow-none">
+                                <div className="text-[9px] font-sans font-semibold uppercase tracking-[0.2em] text-slate-500 mb-2">// OVERALL_TOTAL</div>
+                                <div className="text-3xl font-sans font-semibold tracking-tighter text-on-surface">{formatCurrency(incomeOverallTotal)}</div>
+                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-widest text-slate-400">{currentMonthIncomeEntries.length} TOTAL_ENTRIES_PERIOD</div>
                             </div>
                         </div>
 
-                        <div className="mb-6 overflow-hidden rounded-none border border-border-grid bg-surface shadow-none">
-                            <div className="border-b border-border-grid bg-slate-50 p-6">
+                        <div className="mb-6 overflow-hidden rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-surface shadow-none">
+                            <div className="border-b border-[#e5e7eb] dark:border-white/10 bg-slate-50 p-6">
                                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
                                     <div className="space-y-1">
-                                        <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest">QUERY_FILTER</label>
+                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">QUERY_FILTER</label>
                                         <input
                                             type="text"
                                             placeholder="SEARCH_BY_DESCRIPTION"
                                             value={incomeSearch}
                                             onChange={(e) => setIncomeSearch(e.target.value)}
-                                            className="w-full rounded-none border border-border-grid bg-white px-4 py-2.5 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500"
+                                            className="w-full rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2.5 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500"
                                         />
                                     </div>
                                     <div className="space-y-1">
-                                        <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest">STATUS_FILTER</label>
-                                        <select value={incomeStatusFilter} onChange={(e) => setIncomeStatusFilter(e.target.value as 'all' | 'received' | 'pending')} className="w-full rounded-none border border-border-grid bg-white px-4 py-2.5 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500">
+                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">STATUS_FILTER</label>
+                                        <select value={incomeStatusFilter} onChange={(e) => setIncomeStatusFilter(e.target.value as 'all' | 'received' | 'pending')} className="w-full rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2.5 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500">
                                             <option value="all">ALL_STATUS</option>
                                             <option value="received">RECEIVED</option>
                                             <option value="pending">PENDING</option>
                                         </select>
                                     </div>
                                     <div className="space-y-1">
-                                        <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest">TAG_FILTER</label>
-                                        <select value={incomeCategoryFilter} onChange={(e) => setIncomeCategoryFilter(e.target.value)} className="w-full rounded-none border border-border-grid bg-white px-4 py-2.5 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500">
+                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">TAG_FILTER</label>
+                                        <select value={incomeCategoryFilter} onChange={(e) => setIncomeCategoryFilter(e.target.value)} className="w-full rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2.5 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500">
                                             <option value="all">ALL_CATEGORIES</option>
                                             {(settings.incomeCategories || []).map(cat => (
                                                 <option key={cat} value={cat}>{cat}</option>
@@ -1361,7 +1361,7 @@ const FinanceView = ({
                                         </select>
                                     </div>
                                     <div className="flex items-end">
-                                        <div className="w-full flex items-center justify-center rounded-soft-touch bg-on-surface text-white px-4 py-2.5 text-[10px] font-mono font-bold uppercase tracking-[0.2em]">
+                                        <div className="w-full flex items-center justify-center rounded-soft-touch bg-on-surface text-white px-4 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-[0.2em]">
                                             COUNT: {visibleIncomeEntries.length}
                                         </div>
                                     </div>
@@ -1369,7 +1369,7 @@ const FinanceView = ({
                             </div>
                             <div className="overflow-x-auto">
                                 <table className="min-w-full text-sm">
-                                    <thead className="bg-slate-100 text-[10px] font-mono uppercase tracking-widest text-slate-500 border-b border-border-grid">
+                                    <thead className="bg-slate-100 text-[10px] font-sans uppercase tracking-widest text-slate-500 border-b border-[#e5e7eb] dark:border-white/10">
                                         <tr>
                                             <th className="px-4 py-3 text-left font-bold">ACK</th>
                                             <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleIncomeSort('description')} className="flex items-center gap-2">DESCRIPTION <span>{incomeSort.key === 'description' ? (incomeSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button></th>
@@ -1380,7 +1380,7 @@ const FinanceView = ({
                                             <th className="px-4 py-3 text-right font-bold">ACTIONS</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-border-grid bg-white">
+                                    <tbody className="divide-y divide-[#e5e7eb] dark:divide-white/10 bg-white">
                                         {visibleIncomeEntries.map(entry => {
                                             const prevEntry = incomeEntries.find(e =>
                                                 e.description === entry.description &&
@@ -1392,9 +1392,9 @@ const FinanceView = ({
 
                                             return (
                                                 <React.Fragment key={entry.id}>
-                                                    <tr className={`cursor-pointer transition-colors font-mono ${isExpanded ? 'bg-slate-50 text-on-surface' : 'hover:bg-slate-50 text-on-surface'}`} onClick={() => setExpandedIncomeId(isExpanded ? null : entry.id)}>
+                                                    <tr className={`cursor-pointer transition-colors font-sans ${isExpanded ? 'bg-slate-50 text-on-surface' : 'hover:bg-slate-50 text-on-surface'}`} onClick={() => setExpandedIncomeId(isExpanded ? null : entry.id)}>
                                                         <td className="px-4 py-4">
-                                                            <input type="checkbox" checked={entry.isReceived} onClick={(e) => e.stopPropagation()} onChange={() => onUpdateIncomeEntry({ ...entry, isReceived: !entry.isReceived })} className="h-4 w-4 rounded-none border-border-grid text-primary-tactile focus:ring-0 bg-transparent" />
+                                                            <input type="checkbox" checked={entry.isReceived} onClick={(e) => e.stopPropagation()} onChange={() => onUpdateIncomeEntry({ ...entry, isReceived: !entry.isReceived })} className="h-4 w-4 rounded-lg border-[#e5e7eb] dark:border-white/10 text-primary-tactile focus:ring-0 bg-transparent" />
                                                         </td>
                                                         <td className="px-4 py-4">
                                                             <div className="font-bold text-xs">{entry.description}</div>
@@ -1407,7 +1407,7 @@ const FinanceView = ({
                                                             {diff !== 0 && <div className={`text-[9px] font-bold ${diff > 0 ? 'text-emerald-600' : 'text-accent-tactile'}`}>{diff > 0 ? '+' : '-'} {formatCurrency(Math.abs(diff))}</div>}
                                                         </td>
                                                         <td className="px-4 py-4">
-                                                            <span className={`inline-flex border border-border-grid px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest ${entry.isReceived ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                                                            <span className={`inline-flex border border-[#e5e7eb] dark:border-white/10 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest ${entry.isReceived ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
                                                                 {entry.isReceived ? 'OK' : 'PENDING'}
                                                             </span>
                                                         </td>
@@ -1424,23 +1424,23 @@ const FinanceView = ({
                                                     </tr>
                                                     {isExpanded && (
                                                         <tr className="bg-slate-50">
-                                                            <td colSpan={7} className="px-4 py-6 border-b border-border-grid">
+                                                            <td colSpan={7} className="px-4 py-6 border-b border-[#e5e7eb] dark:border-white/10">
                                                                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
                                                                     <div className="space-y-1">
-                                                                        <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest block">DESCRIPTION_ID</label>
-                                                                        <input type="text" defaultValue={entry.description} onBlur={(e) => onUpdateIncomeEntry({ ...entry, description: e.target.value })} className="w-full rounded-soft-touch border border-border-grid bg-white px-4 py-2 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500" />
+                                                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest block">DESCRIPTION_ID</label>
+                                                                        <input type="text" defaultValue={entry.description} onBlur={(e) => onUpdateIncomeEntry({ ...entry, description: e.target.value })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500" />
                                                                     </div>
                                                                     <div className="space-y-1">
-                                                                        <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest block">AMOUNT_VAL</label>
-                                                                        <input type="number" defaultValue={entry.amount} onBlur={(e) => onUpdateIncomeEntry({ ...entry, amount: Number(e.target.value) })} className="w-full rounded-soft-touch border border-border-grid bg-white px-4 py-2 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500" />
+                                                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest block">AMOUNT_VAL</label>
+                                                                        <input type="number" defaultValue={entry.amount} onBlur={(e) => onUpdateIncomeEntry({ ...entry, amount: Number(e.target.value) })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500" />
                                                                     </div>
                                                                     <div className="space-y-1">
-                                                                        <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest block">ETA_DAY</label>
-                                                                        <input type="number" min={1} max={31} defaultValue={entry.day} onBlur={(e) => onUpdateIncomeEntry({ ...entry, day: Number(e.target.value) })} className="w-full rounded-soft-touch border border-border-grid bg-white px-4 py-2 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500" />
+                                                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest block">ETA_DAY</label>
+                                                                        <input type="number" min={1} max={31} defaultValue={entry.day} onBlur={(e) => onUpdateIncomeEntry({ ...entry, day: Number(e.target.value) })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500" />
                                                                     </div>
                                                                     <div className="space-y-1">
-                                                                        <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest block">CATEGORY_TAG</label>
-                                                                        <select defaultValue={entry.category} onBlur={(e) => onUpdateIncomeEntry({ ...entry, category: e.target.value })} className="w-full rounded-soft-touch border border-border-grid bg-white px-4 py-2 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500">
+                                                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest block">CATEGORY_TAG</label>
+                                                                        <select defaultValue={entry.category} onBlur={(e) => onUpdateIncomeEntry({ ...entry, category: e.target.value })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500">
                                                                             {(settings.incomeCategories || ['Renda Principal', 'Renda Extra', 'Dividendos', 'Outros']).map(cat => (
                                                                                 <option key={cat} value={cat}>{cat}</option>
                                                                             ))}
@@ -1455,7 +1455,7 @@ const FinanceView = ({
                                         })}
                                         {visibleIncomeEntries.length === 0 && (
                                             <tr>
-                                                <td colSpan={7} className="px-4 py-12 text-center text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400">NO_RECORDS_FOUND / FILTER_MISMATCH</td>
+                                                <td colSpan={7} className="px-4 py-12 text-center text-[10px] font-sans font-semibold uppercase tracking-widest text-slate-400">NO_RECORDS_FOUND / FILTER_MISMATCH</td>
                                             </tr>
                                         )}
                                     </tbody>
@@ -1473,11 +1473,11 @@ const FinanceView = ({
                                         entry.year === currentYear
                                     ))
                                     .map(rubric => (
-                                        <div key={rubric.id} className="bg-white border border-border-grid p-6 rounded-none shadow-none transition-all group hover:bg-slate-50 border-l-4 border-l-emerald-500">
-                                            <div className="text-[10px] font-mono font-bold uppercase tracking-widest mb-3 px-2 py-0.5 rounded-none w-fit bg-emerald-50 text-emerald-600 border border-emerald-100">{rubric.category} // TAG</div>
-                                            <h5 className="text-sm font-mono font-bold text-on-surface leading-tight uppercase tracking-tight">{rubric.description}</h5>
-                                            <div className="mt-4 text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
-                                                <span className="w-1.5 h-1.5 rounded-none bg-emerald-500 animate-pulse" />
+                                        <div key={rubric.id} className="bg-white border border-[#e5e7eb] dark:border-white/10 p-6 rounded-lg shadow-none transition-all group hover:bg-slate-50 border-l-4 border-l-emerald-500">
+                                            <div className="text-[10px] font-sans font-semibold uppercase tracking-widest mb-3 px-2 py-0.5 rounded-lg w-fit bg-emerald-50 text-emerald-600 border border-emerald-100">{rubric.category} // TAG</div>
+                                            <h5 className="text-sm font-sans font-semibold text-on-surface leading-tight uppercase tracking-tight">{rubric.description}</h5>
+                                            <div className="mt-4 text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
+                                                <span className="w-1.5 h-1.5 rounded-lg bg-emerald-500 animate-pulse" />
                                                 WAITING_REVENUE_LOG
                                             </div>
                                             <button
@@ -1492,7 +1492,7 @@ const FinanceView = ({
                                                     });
                                                     setIsAddingIncome(true);
                                                 }}
-                                                className="w-full bg-on-surface text-surface py-3 rounded-soft-touch text-[10px] font-mono font-bold uppercase tracking-widest hover:bg-emerald-600 transition-all flex items-center justify-center gap-2"
+                                                className="w-full bg-on-surface text-surface py-3 rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest hover:bg-emerald-600 transition-all flex items-center justify-center gap-2"
                                             >
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
                                                 INITIALIZE_LOG
@@ -1515,21 +1515,21 @@ const FinanceView = ({
                                         const diff = prevEntry ? entry.amount - prevEntry.amount : 0;
 
                                         return (
-                                            <div key={entry.id} className="bg-white p-5 rounded-none border border-border-grid shadow-none flex items-center justify-between group hover:bg-slate-50 transition-all">
+                                            <div key={entry.id} className="bg-white p-5 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none flex items-center justify-between group hover:bg-slate-50 transition-all">
                                                 <div className="flex items-center gap-6">
-                                                    <div className="w-10 h-10 rounded-none bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 font-mono font-bold text-xs">
+                                                    <div className="w-10 h-10 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 font-sans font-semibold text-xs">
                                                         ACK
                                                     </div>
                                                     <div>
-                                                        <div className="text-[8px] font-mono font-bold text-emerald-600/50 uppercase tracking-widest mb-1">{entry.category || 'INCOME'} // NODE</div>
-                                                        <div className="text-sm font-mono font-bold text-on-surface leading-none uppercase tracking-tight">{entry.description}</div>
-                                                        <div className="text-[9px] text-slate-400 font-mono font-bold mt-2 flex items-center gap-3">
+                                                        <div className="text-[8px] font-sans font-semibold text-emerald-600/50 uppercase tracking-widest mb-1">{entry.category || 'INCOME'} // NODE</div>
+                                                        <div className="text-sm font-sans font-semibold text-on-surface leading-none uppercase tracking-tight">{entry.description}</div>
+                                                        <div className="text-[9px] text-slate-400 font-sans font-semibold mt-2 flex items-center gap-3">
                                                             ETA: DAY_{entry.day}
-                                                            <span className={`px-2 py-0.5 rounded-none text-[8px] font-mono font-bold uppercase tracking-widest border ${entry.isReceived ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>
+                                                            <span className={`px-2 py-0.5 rounded-lg text-[8px] font-sans font-semibold uppercase tracking-widest border ${entry.isReceived ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>
                                                                 {entry.isReceived ? 'CONFIRMED' : 'IN_TRANSIT'}
                                                             </span>
                                                             {diff !== 0 && (
-                                                                <span className={`text-[8px] font-mono font-bold ${diff > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                                                <span className={`text-[8px] font-sans font-semibold ${diff > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                                                                     {diff > 0 ? '▲' : '▼'} BRL {Math.abs(diff).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                                 </span>
                                                             )}
@@ -1541,10 +1541,10 @@ const FinanceView = ({
                                                         type="checkbox"
                                                         checked={entry.isReceived}
                                                         onChange={() => onUpdateIncomeEntry({ ...entry, isReceived: !entry.isReceived })}
-                                                        className="w-4 h-4 rounded-none border-border-grid text-emerald-600 focus:ring-0 bg-transparent"
+                                                        className="w-4 h-4 rounded-lg border-[#e5e7eb] dark:border-white/10 text-emerald-600 focus:ring-0 bg-transparent"
                                                         title={entry.isReceived ? 'Marcar como nao recebido' : 'Marcar como recebido'}
                                                     />
-                                                    <div className="text-xl font-mono font-bold text-emerald-600 tracking-tighter">BRL {entry.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                                                    <div className="text-xl font-sans font-semibold text-emerald-600 tracking-tighter">BRL {entry.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
                                                     <button onClick={() => handleTwoStepDelete(`income_entry_${entry.id}`, () => onDeleteIncomeEntry(entry.id))} className={`p-2 rounded-soft-touch transition-all opacity-0 group-hover:opacity-100 border ${pendingDeleteKey === `income_entry_${entry.id}` ? 'bg-rose-500 text-white opacity-100 border-rose-600' : 'text-slate-200 border-transparent hover:text-rose-400 hover:border-rose-900/30'}`}>
                                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                     </button>
@@ -1563,20 +1563,20 @@ const FinanceView = ({
                     <FinanceSection title="Obrigações e Despesas">
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-10">
                             <div>
-                                <h5 className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.3em]">// OBLIGATION_MANAGEMENT_STREAM</h5>
-                                <p className="text-slate-300 text-[8px] font-mono font-bold uppercase tracking-widest mt-1">LIABILITY_SETTLEMENT_HUB</p>
+                                <h5 className="text-[10px] font-sans font-semibold text-slate-400 uppercase tracking-[0.3em]">// OBLIGATION_MANAGEMENT_STREAM</h5>
+                                <p className="text-slate-300 text-[8px] font-sans font-semibold uppercase tracking-widest mt-1">LIABILITY_SETTLEMENT_HUB</p>
                             </div>
                             <div className="flex gap-3 w-full md:w-auto">
                                 <button
                                     onClick={() => setIsManagingRubrics(!isManagingRubrics)}
-                                    className={`flex-1 md:flex-none px-6 py-3 rounded-soft-touch text-[10px] font-mono font-bold uppercase tracking-widest transition-all border ${isManagingRubrics ? 'bg-on-surface text-white border-on-surface shadow-none' : 'bg-white text-slate-600 border-border-grid hover:bg-slate-50 shadow-none'}`}
+                                    className={`flex-1 md:flex-none px-6 py-3 rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest transition-all border ${isManagingRubrics ? 'bg-on-surface text-white border-on-surface shadow-none' : 'bg-white text-slate-600 border-[#e5e7eb] dark:border-white/10 hover:bg-slate-50 shadow-none'}`}
                                 >
                                     {isManagingRubrics ? 'CLOSE_TAXONOMY' : 'MANAGE_RUBRICS'}
                                 </button>
                                 <button onClick={() => {
                                     setNewBill({ category: settings.billCategories?.[0] || 'Conta Fixa' });
                                     setIsAddingBill(true);
-                                }} className="flex-1 md:flex-none bg-primary-tactile text-white px-6 py-3 rounded-soft-touch text-[10px] font-mono font-bold uppercase tracking-widest transition-all hover:bg-blue-700 shadow-none">
+                                }} className="flex-1 md:flex-none bg-primary-tactile text-white px-6 py-3 rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest transition-all hover:bg-blue-700 shadow-none">
                                     + ADD_OBLIGATION
                                 </button>
                             </div>
@@ -1584,21 +1584,21 @@ const FinanceView = ({
 
                         {/* Gestão de Rubricas Industrial */}
                         {isManagingRubrics && (
-                            <div className="bg-on-surface text-surface p-8 rounded-none shadow-none animate-in fade-in slide-in-from-top-4 border-b-4 border-primary-tactile mb-10">
+                            <div className="bg-on-surface text-surface p-8 rounded-lg shadow-none animate-in fade-in slide-in-from-top-4 border-b-4 border-primary-tactile mb-10">
                                 <div className="flex justify-between items-center mb-10">
                                     <div>
-                                        <h5 className="text-[10px] font-mono font-bold uppercase tracking-[0.4em] text-primary-tactile">// RECURRING_OBLIGATION_TAXONOMY</h5>
-                                        <p className="text-white/30 text-[8px] font-mono font-bold uppercase tracking-widest mt-1">MONTHLY_LIABILITY_BASELINE</p>
+                                        <h5 className="text-[10px] font-sans font-semibold uppercase tracking-[0.4em] text-primary-tactile">// RECURRING_OBLIGATION_TAXONOMY</h5>
+                                        <p className="text-white/30 text-[8px] font-sans font-semibold uppercase tracking-widest mt-1">MONTHLY_LIABILITY_BASELINE</p>
                                     </div>
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
                                     {billRubrics.map(rubric => (
-                                        <div key={rubric.id} className="bg-white/5 border border-white/10 p-5 rounded-none flex justify-between items-center group hover:bg-white/10 transition-all">
+                                        <div key={rubric.id} className="bg-white/5 border border-white/10 p-5 rounded-lg flex justify-between items-center group hover:bg-white/10 transition-all">
                                             <div>
-                                                <div className="text-[8px] font-mono font-bold text-primary-tactile uppercase tracking-widest mb-1">{rubric.category} // TAG</div>
-                                                <div className="text-sm font-mono font-bold uppercase tracking-tight">{rubric.description}</div>
-                                                <div className="text-[9px] text-white/30 font-mono font-bold uppercase tracking-widest mt-2 flex items-center gap-2">
+                                                <div className="text-[8px] font-sans font-semibold text-primary-tactile uppercase tracking-widest mb-1">{rubric.category} // TAG</div>
+                                                <div className="text-sm font-sans font-semibold uppercase tracking-tight">{rubric.description}</div>
+                                                <div className="text-[9px] text-white/30 font-sans font-semibold uppercase tracking-widest mt-2 flex items-center gap-2">
                                                     DUE: DAY_{rubric.dueDay}
                                                     {rubric.defaultAmount ? ` // BRL ${rubric.defaultAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ' // VARIABLE_VAL'}
                                                     {rubric.pixCode && ' // PIX_LINKED'}
@@ -1622,8 +1622,8 @@ const FinanceView = ({
                                     ))}
                                 </div>
 
-                                <div className="bg-white/5 p-8 rounded-none border border-white/10">
-                                    <h6 className="text-[10px] font-mono font-bold text-white/30 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
+                                <div className="bg-white/5 p-8 rounded-lg border border-white/10">
+                                    <h6 className="text-[10px] font-sans font-semibold text-white/30 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
                                         <span className="w-2 h-2 bg-primary-tactile"></span>
                                         {editingRubric ? 'UPDATE_RUBRIC_NODE' : 'REGISTER_NEW_OBLIGATION'}
                                     </h6>
@@ -1631,26 +1631,26 @@ const FinanceView = ({
                                         <input
                                             type="text"
                                             placeholder="OBLIGATION_NAME"
-                                            className="bg-white/5 border border-white/10 rounded-none px-4 py-3 text-xs font-mono font-bold focus:ring-1 focus:ring-primary-tactile outline-none text-white placeholder:text-white/10"
+                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-primary-tactile outline-none text-white placeholder:text-white/10"
                                             value={newRubric.description || ''}
                                             onChange={e => setNewRubric({ ...newRubric, description: e.target.value })}
                                         />
                                         <input
                                             type="number"
                                             placeholder="DUE_DAY"
-                                            className="bg-white/5 border border-white/10 rounded-none px-4 py-3 text-xs font-mono font-bold focus:ring-1 focus:ring-primary-tactile outline-none text-white placeholder:text-white/10"
+                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-primary-tactile outline-none text-white placeholder:text-white/10"
                                             value={newRubric.dueDay || ''}
                                             onChange={e => setNewRubric({ ...newRubric, dueDay: Number(e.target.value) })}
                                         />
                                         <input
                                             type="number"
                                             placeholder="FIXED_VAL_OPT"
-                                            className="bg-white/5 border border-white/10 rounded-none px-4 py-3 text-xs font-mono font-bold focus:ring-1 focus:ring-primary-tactile outline-none text-white placeholder:text-white/10"
+                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-primary-tactile outline-none text-white placeholder:text-white/10"
                                             value={newRubric.defaultAmount || ''}
                                             onChange={e => setNewRubric({ ...newRubric, defaultAmount: e.target.value ? Number(e.target.value) : undefined })}
                                         />
                                         <select
-                                            className="bg-white/5 border border-white/10 rounded-none px-4 py-3 text-xs font-mono font-bold focus:ring-1 focus:ring-primary-tactile outline-none text-white [color-scheme:dark]"
+                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-primary-tactile outline-none text-white [color-scheme:dark]"
                                             value={newRubric.category}
                                             onChange={e => setNewRubric({ ...newRubric, category: e.target.value })}
                                         >
@@ -1661,7 +1661,7 @@ const FinanceView = ({
                                         <input
                                             type="text"
                                             placeholder="PIX_KEY_OPT"
-                                            className="bg-white/5 border border-white/10 rounded-none px-4 py-3 text-xs font-mono font-bold focus:ring-1 focus:ring-primary-tactile outline-none text-white placeholder:text-white/10 lg:col-span-1"
+                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-primary-tactile outline-none text-white placeholder:text-white/10 lg:col-span-1"
                                             value={newRubric.pixCode || ''}
                                             onChange={e => setNewRubric({ ...newRubric, pixCode: e.target.value })}
                                         />
@@ -1678,7 +1678,7 @@ const FinanceView = ({
                                                         setEditingRubric(null);
                                                     }
                                                 }}
-                                                className="flex-1 bg-white text-on-surface hover:bg-primary-tactile hover:text-white rounded-soft-touch px-4 py-3 text-[10px] font-mono font-bold uppercase tracking-widest transition-all"
+                                                className="flex-1 bg-white text-on-surface hover:bg-primary-tactile hover:text-white rounded-soft-touch px-4 py-3 text-[10px] font-sans font-semibold uppercase tracking-widest transition-all"
                                             >
                                                 {editingRubric ? 'COMMIT_UP' : 'INITIALIZE'}
                                             </button>
@@ -1688,7 +1688,7 @@ const FinanceView = ({
                                                         setEditingRubric(null);
                                                         setNewRubric({ category: 'Conta Fixa' });
                                                     }}
-                                                    className="bg-white/10 hover:bg-white/20 text-white rounded-soft-touch px-4 py-3 text-xs font-mono font-bold uppercase tracking-widest transition-all"
+                                                    className="bg-white/10 hover:bg-white/20 text-white rounded-soft-touch px-4 py-3 text-xs font-sans font-semibold uppercase tracking-widest transition-all"
                                                 >
                                                     ✕
                                                 </button>
@@ -1700,28 +1700,28 @@ const FinanceView = ({
                         )}
 
                         {isAddingBill && (
-                            <div className="mb-6 bg-surface p-6 rounded-none border-2 border-primary-tactile shadow-none animate-in fade-in slide-in-from-top-2">
+                            <div className="mb-6 bg-surface p-6 rounded-lg border-2 border-primary-tactile shadow-none animate-in fade-in slide-in-from-top-2">
                                 <div className="mb-4">
-                                    <h4 className="text-[10px] font-mono font-bold text-primary-tactile uppercase tracking-widest">// NEW_ENTRY_OBLIGATION</h4>
+                                    <h4 className="text-[10px] font-sans font-semibold text-primary-tactile uppercase tracking-widest">// NEW_ENTRY_OBLIGATION</h4>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-                                    <input type="text" placeholder="DESCRIPTION" className="px-4 py-2 rounded-soft-touch border border-border-grid bg-white text-on-surface font-mono font-bold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.description || ''} onChange={(e) => setNewBill({ ...newBill, description: e.target.value })} />
-                                    <input type="number" placeholder="AMOUNT_BRL" className="px-4 py-2 rounded-soft-touch border border-border-grid bg-white text-on-surface font-mono font-bold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.amount || ''} onChange={(e) => setNewBill({ ...newBill, amount: Number(e.target.value) })} />
-                                    <select className="px-4 py-2 rounded-soft-touch border border-border-grid bg-white text-on-surface font-mono font-bold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.category || ''} onChange={(e) => setNewBill({ ...newBill, category: e.target.value })}>
+                                    <input type="text" placeholder="DESCRIPTION" className="px-4 py-2 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.description || ''} onChange={(e) => setNewBill({ ...newBill, description: e.target.value })} />
+                                    <input type="number" placeholder="AMOUNT_BRL" className="px-4 py-2 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.amount || ''} onChange={(e) => setNewBill({ ...newBill, amount: Number(e.target.value) })} />
+                                    <select className="px-4 py-2 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.category || ''} onChange={(e) => setNewBill({ ...newBill, category: e.target.value })}>
                                         <option value="">SELECT_CATEGORY</option>
                                         {(settings.billCategories || ['Conta Fixa', 'Poupanca', 'Investimento']).map(cat => (
                                             <option key={cat} value={cat}>{cat}</option>
                                         ))}
                                     </select>
-                                    <input type="number" placeholder="DUE_DAY" max={31} min={1} className="px-4 py-2 rounded-soft-touch border border-border-grid bg-white text-on-surface font-mono font-bold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.dueDay || ''} onChange={(e) => setNewBill({ ...newBill, dueDay: Number(e.target.value) })} />
+                                    <input type="number" placeholder="DUE_DAY" max={31} min={1} className="px-4 py-2 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.dueDay || ''} onChange={(e) => setNewBill({ ...newBill, dueDay: Number(e.target.value) })} />
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                                    <input type="text" placeholder="BARCODE_LINE" className="px-4 py-2 rounded-soft-touch border border-border-grid bg-white text-on-surface font-mono font-bold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.barcode || ''} onChange={(e) => setNewBill({ ...newBill, barcode: e.target.value })} />
-                                    <input type="text" placeholder="PIX_COPY_PASTE" className="px-4 py-2 rounded-soft-touch border border-border-grid bg-white text-on-surface font-mono font-bold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.pixCode || ''} onChange={(e) => setNewBill({ ...newBill, pixCode: e.target.value })} />
+                                    <input type="text" placeholder="BARCODE_LINE" className="px-4 py-2 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.barcode || ''} onChange={(e) => setNewBill({ ...newBill, barcode: e.target.value })} />
+                                    <input type="text" placeholder="PIX_COPY_PASTE" className="px-4 py-2 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.pixCode || ''} onChange={(e) => setNewBill({ ...newBill, pixCode: e.target.value })} />
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className={`border border-dashed rounded-none p-4 flex flex-col items-center justify-center cursor-pointer transition-all ${newBill.attachmentUrl ? 'border-primary-tactile bg-blue-50' : 'border-border-grid bg-slate-50 hover:bg-slate-100'}`} onClick={() => {
+                                    <div className={`border border-dashed rounded-lg p-4 flex flex-col items-center justify-center cursor-pointer transition-all ${newBill.attachmentUrl ? 'border-primary-tactile bg-blue-50' : 'border-[#e5e7eb] dark:border-white/10 bg-slate-50 hover:bg-slate-100'}`} onClick={() => {
                                         const input = document.createElement('input');
                                         input.type = 'file';
                                         input.accept = 'image/*,.pdf';
@@ -1735,18 +1735,18 @@ const FinanceView = ({
                                         input.click();
                                     }}>
                                         {newBill.attachmentUrl ? (
-                                            <div className="flex items-center gap-2 text-primary-tactile font-mono font-bold text-[10px] uppercase tracking-tighter">
+                                            <div className="flex items-center gap-2 text-primary-tactile font-sans font-semibold text-[10px] uppercase tracking-tighter">
                                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
                                                 ATTACHMENT_LOADED
                                             </div>
                                         ) : (
                                             <div className="text-center text-slate-400">
-                                                <p className="text-[10px] font-mono font-bold uppercase tracking-widest">UPLOAD_BOLETO_PDF</p>
+                                                <p className="text-[10px] font-sans font-semibold uppercase tracking-widest">UPLOAD_BOLETO_PDF</p>
                                             </div>
                                         )}
                                     </div>
 
-                                    <div className={`border border-dashed rounded-none p-4 flex flex-col items-center justify-center cursor-pointer transition-all ${newBill.pixQrCodeUrl ? 'border-emerald-200 bg-emerald-50' : 'border-border-grid bg-slate-50 hover:bg-slate-100'}`} onClick={() => {
+                                    <div className={`border border-dashed rounded-lg p-4 flex flex-col items-center justify-center cursor-pointer transition-all ${newBill.pixQrCodeUrl ? 'border-emerald-200 bg-emerald-50' : 'border-[#e5e7eb] dark:border-white/10 bg-slate-50 hover:bg-slate-100'}`} onClick={() => {
                                         const input = document.createElement('input');
                                         input.type = 'file';
                                         input.accept = 'image/*';
@@ -1760,21 +1760,21 @@ const FinanceView = ({
                                         input.click();
                                     }}>
                                         {newBill.pixQrCodeUrl ? (
-                                            <div className="flex items-center gap-2 text-emerald-600 font-mono font-bold text-[10px] uppercase tracking-tighter">
+                                            <div className="flex items-center gap-2 text-emerald-600 font-sans font-semibold text-[10px] uppercase tracking-tighter">
                                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
                                                 PIX_QR_LOADED
                                             </div>
                                         ) : (
                                             <div className="text-center text-slate-400">
-                                                <p className="text-[10px] font-mono font-bold uppercase tracking-widest">UPLOAD_PIX_QR_IMG</p>
+                                                <p className="text-[10px] font-sans font-semibold uppercase tracking-widest">UPLOAD_PIX_QR_IMG</p>
                                             </div>
                                         )}
                                     </div>
                                 </div>
 
-                                <div className="flex justify-end gap-3 pt-6 border-t border-border-grid mt-6">
-                                    <button onClick={() => setIsAddingBill(false)} className="px-6 py-2 rounded-soft-touch text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400 hover:text-on-surface transition-colors">CANCEL</button>
-                                    <button onClick={handleSaveBill} disabled={uploading === true || !newBill.description || newBill.amount === undefined} className={`px-8 py-2 rounded-soft-touch text-[10px] font-mono font-bold uppercase tracking-widest transition-all ${uploading || !newBill.description || newBill.amount === undefined ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-primary-tactile text-white'}`}>
+                                <div className="flex justify-end gap-3 pt-6 border-t border-[#e5e7eb] dark:border-white/10 mt-6">
+                                    <button onClick={() => setIsAddingBill(false)} className="px-6 py-2 rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest text-slate-400 hover:text-on-surface transition-colors">CANCEL</button>
+                                    <button onClick={handleSaveBill} disabled={uploading === true || !newBill.description || newBill.amount === undefined} className={`px-8 py-2 rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest transition-all ${uploading || !newBill.description || newBill.amount === undefined ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-primary-tactile text-white'}`}>
                                         {uploading ? 'PROCESSING...' : 'SAVE_RECORD'}
                                     </button>
                                 </div>
@@ -1782,10 +1782,10 @@ const FinanceView = ({
                         )}
 
                         {pendingBillRubrics.length > 0 && (
-                            <div className="mb-6 rounded-none border border-border-grid bg-on-surface p-6 text-surface shadow-none">
+                            <div className="mb-6 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-on-surface p-6 text-surface shadow-none">
                                 <div className="mb-4">
-                                    <h5 className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] opacity-60">// PENDING_RUBRICS / NO_ENTRY_DETECTED</h5>
-                                    <p className="text-[8px] font-mono font-bold uppercase tracking-widest text-white/40 mt-1 italic">ACTION_REQUIRED: INITIALIZE_PERIOD_ENTRIES</p>
+                                    <h5 className="text-[10px] font-sans font-semibold uppercase tracking-[0.2em] opacity-60">// PENDING_RUBRICS / NO_ENTRY_DETECTED</h5>
+                                    <p className="text-[8px] font-sans font-semibold uppercase tracking-widest text-white/40 mt-1 italic">ACTION_REQUIRED: INITIALIZE_PERIOD_ENTRIES</p>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
                                     {pendingBillRubrics.map(rubric => (
@@ -1802,7 +1802,7 @@ const FinanceView = ({
                                                 });
                                                 setIsAddingBill(true);
                                             }}
-                                            className="rounded-soft-touch border border-white/20 bg-white/5 px-4 py-2 text-[10px] font-mono font-bold uppercase tracking-widest transition-all hover:bg-white/10 hover:border-white/40"
+                                            className="rounded-soft-touch border border-white/20 bg-white/5 px-4 py-2 text-[10px] font-sans font-semibold uppercase tracking-widest transition-all hover:bg-white/10 hover:border-white/40"
                                         >
                                             {rubric.description}
                                         </button>
@@ -1812,46 +1812,46 @@ const FinanceView = ({
                         )}
 
                         <div className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-3">
-                            <div className="rounded-none border border-border-grid bg-emerald-50/50 p-6 shadow-none">
-                                <div className="text-[9px] font-mono font-bold uppercase tracking-[0.2em] text-emerald-600 mb-2">// TOTAL_SETTLED</div>
-                                <div className="text-3xl font-mono font-bold tracking-tighter text-emerald-700">{formatCurrency(billsPaidTotal)}</div>
-                                <div className="mt-3 text-[9px] font-mono font-bold uppercase tracking-widest text-emerald-600/60">{currentMonthBills.filter(bill => bill.isPaid).length} OBLIGATIONS_CLEARED</div>
+                            <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-emerald-50/50 p-6 shadow-none">
+                                <div className="text-[9px] font-sans font-semibold uppercase tracking-[0.2em] text-emerald-600 mb-2">// TOTAL_SETTLED</div>
+                                <div className="text-3xl font-sans font-semibold tracking-tighter text-emerald-700">{formatCurrency(billsPaidTotal)}</div>
+                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-widest text-emerald-600/60">{currentMonthBills.filter(bill => bill.isPaid).length} OBLIGATIONS_CLEARED</div>
                             </div>
-                            <div className="rounded-none border border-border-grid bg-rose-50/50 p-6 shadow-none">
-                                <div className="text-[9px] font-mono font-bold uppercase tracking-[0.2em] text-rose-600 mb-2">// TOTAL_OUTSTANDING</div>
-                                <div className="text-3xl font-mono font-bold tracking-tighter text-rose-700">{formatCurrency(billsPendingTotal)}</div>
-                                <div className="mt-3 text-[9px] font-mono font-bold uppercase tracking-widest text-rose-600/60">{currentMonthBills.filter(bill => !bill.isPaid).length} OBLIGATIONS_PENDING</div>
+                            <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-rose-50/50 p-6 shadow-none">
+                                <div className="text-[9px] font-sans font-semibold uppercase tracking-[0.2em] text-rose-600 mb-2">// TOTAL_OUTSTANDING</div>
+                                <div className="text-3xl font-sans font-semibold tracking-tighter text-rose-700">{formatCurrency(billsPendingTotal)}</div>
+                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-widest text-rose-600/60">{currentMonthBills.filter(bill => !bill.isPaid).length} OBLIGATIONS_PENDING</div>
                             </div>
-                            <div className="rounded-none border border-border-grid bg-slate-50 p-6 shadow-none">
-                                <div className="text-[9px] font-mono font-bold uppercase tracking-[0.2em] text-slate-500 mb-2">// LIABILITY_TOTAL</div>
-                                <div className="text-3xl font-mono font-bold tracking-tighter text-on-surface">{formatCurrency(billsOverallTotal)}</div>
-                                <div className="mt-3 text-[9px] font-mono font-bold uppercase tracking-widest text-slate-400">{currentMonthBills.length} TOTAL_OBLIGATIONS_PERIOD</div>
+                            <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-slate-50 p-6 shadow-none">
+                                <div className="text-[9px] font-sans font-semibold uppercase tracking-[0.2em] text-slate-500 mb-2">// LIABILITY_TOTAL</div>
+                                <div className="text-3xl font-sans font-semibold tracking-tighter text-on-surface">{formatCurrency(billsOverallTotal)}</div>
+                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-widest text-slate-400">{currentMonthBills.length} TOTAL_OBLIGATIONS_PERIOD</div>
                             </div>
                         </div>
-                        <div className="mb-6 overflow-hidden rounded-none border border-border-grid bg-surface shadow-none">
-                            <div className="border-b border-border-grid bg-slate-50 p-6">
+                        <div className="mb-6 overflow-hidden rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-surface shadow-none">
+                            <div className="border-b border-[#e5e7eb] dark:border-white/10 bg-slate-50 p-6">
                                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
                                     <div className="space-y-1">
-                                        <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest">QUERY_FILTER</label>
+                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">QUERY_FILTER</label>
                                         <input
                                             type="text"
                                             placeholder="ID_BARCODE_PIX"
                                             value={billSearch}
                                             onChange={(e) => setBillSearch(e.target.value)}
-                                            className="w-full rounded-none border border-border-grid bg-white px-4 py-2.5 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
+                                            className="w-full rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2.5 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
                                         />
                                     </div>
                                     <div className="space-y-1">
-                                        <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest">STATUS_FILTER</label>
-                                        <select value={billStatusFilter} onChange={(e) => setBillStatusFilter(e.target.value as 'all' | 'paid' | 'unpaid')} className="w-full rounded-none border border-border-grid bg-white px-4 py-2.5 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile">
+                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">STATUS_FILTER</label>
+                                        <select value={billStatusFilter} onChange={(e) => setBillStatusFilter(e.target.value as 'all' | 'paid' | 'unpaid')} className="w-full rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2.5 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile">
                                             <option value="all">ALL_STATUS</option>
                                             <option value="paid">PAID</option>
                                             <option value="unpaid">UNPAID</option>
                                         </select>
                                     </div>
                                     <div className="space-y-1">
-                                        <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest">TAG_FILTER</label>
-                                        <select value={billCategoryFilter} onChange={(e) => setBillCategoryFilter(e.target.value)} className="w-full rounded-none border border-border-grid bg-white px-4 py-2.5 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile">
+                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">TAG_FILTER</label>
+                                        <select value={billCategoryFilter} onChange={(e) => setBillCategoryFilter(e.target.value)} className="w-full rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2.5 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile">
                                             <option value="all">ALL_CATEGORIES</option>
                                             {(settings.billCategories || []).map(cat => (
                                                 <option key={cat} value={cat}>{cat}</option>
@@ -1859,12 +1859,12 @@ const FinanceView = ({
                                         </select>
                                     </div>
                                     <div className="flex items-end">
-                                        <div className="w-full rounded-soft-touch border border-border-grid bg-white px-4 py-2.5 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 flex items-center justify-center">
+                                        <div className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-widest text-slate-500 flex items-center justify-center">
                                             P: {visibleBills.filter(bill => bill.isPaid).length} / U: {visibleBills.filter(bill => !bill.isPaid).length}
                                         </div>
                                     </div>
                                     <div className="flex items-end">
-                                        <div className="w-full flex items-center justify-center rounded-soft-touch bg-on-surface text-white px-4 py-2.5 text-[10px] font-mono font-bold uppercase tracking-[0.2em]">
+                                        <div className="w-full flex items-center justify-center rounded-soft-touch bg-on-surface text-white px-4 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-[0.2em]">
                                             COUNT: {visibleBills.length}
                                         </div>
                                     </div>
@@ -1872,7 +1872,7 @@ const FinanceView = ({
                             </div>
                             <div className="overflow-x-auto">
                                 <table className="min-w-full text-sm">
-                                    <thead className="bg-slate-100 text-[10px] font-mono uppercase tracking-widest text-slate-500 border-b border-border-grid">
+                                    <thead className="bg-slate-100 text-[10px] font-sans uppercase tracking-widest text-slate-500 border-b border-[#e5e7eb] dark:border-white/10">
                                         <tr>
                                             <th className="px-4 py-3 text-left font-bold">ACK</th>
                                             <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleBillSort('description')} className="flex items-center gap-2">DESCRIPTION <span>{getSortIndicator(billSort.key === 'description', billSort.direction)}</span></button></th>
@@ -1885,7 +1885,7 @@ const FinanceView = ({
                                             <th className="px-4 py-3 text-right font-bold">ACT</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-border-grid bg-white">
+                                    <tbody className="divide-y divide-[#e5e7eb] dark:divide-white/10 bg-white">
                                         {visibleBills.map(bill => {
                                             const prevBill = fixedBills.find(b =>
                                                 b.description === bill.description &&
@@ -1898,14 +1898,14 @@ const FinanceView = ({
 
                                             return (
                                                 <React.Fragment key={bill.id}>
-                                                    <tr className={`cursor-pointer transition-colors font-mono ${isExpanded ? 'bg-slate-50' : 'hover:bg-slate-50'}`} onClick={() => setExpandedBillId(isExpanded ? null : bill.id)}>
+                                                    <tr className={`cursor-pointer transition-colors font-sans ${isExpanded ? 'bg-slate-50' : 'hover:bg-slate-50'}`} onClick={() => setExpandedBillId(isExpanded ? null : bill.id)}>
                                                         <td className="px-4 py-4">
                                                             <input
                                                                 type="checkbox"
                                                                 checked={bill.isPaid}
                                                                 onClick={(e) => e.stopPropagation()}
                                                                 onChange={() => onUpdateBill({ ...bill, isPaid: !bill.isPaid })}
-                                                                className="h-4 w-4 rounded-none border-border-grid text-emerald-600 focus:ring-0 bg-transparent"
+                                                                className="h-4 w-4 rounded-lg border-[#e5e7eb] dark:border-white/10 text-emerald-600 focus:ring-0 bg-transparent"
                                                             />
                                                         </td>
                                                         <td className="px-4 py-4">
@@ -1919,17 +1919,17 @@ const FinanceView = ({
                                                             {diff !== 0 && <div className={`text-[9px] font-bold ${diff < 0 ? 'text-emerald-600' : 'text-accent-tactile'}`}>{diff < 0 ? '-' : '+'} {formatCurrency(Math.abs(diff))}</div>}
                                                         </td>
                                                         <td className="px-4 py-4">
-                                                            <span className={`inline-flex border border-border-grid px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest ${bill.barcode ? 'bg-on-surface text-surface' : 'bg-slate-50 text-slate-300'}`}>
+                                                            <span className={`inline-flex border border-[#e5e7eb] dark:border-white/10 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest ${bill.barcode ? 'bg-on-surface text-surface' : 'bg-slate-50 text-slate-300'}`}>
                                                                 {bill.barcode ? 'AVAIL' : 'NONE'}
                                                             </span>
                                                         </td>
                                                         <td className="px-4 py-4">
-                                                            <span className={`inline-flex border border-border-grid px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest ${bill.pixCode ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-300'}`}>
+                                                            <span className={`inline-flex border border-[#e5e7eb] dark:border-white/10 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest ${bill.pixCode ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-300'}`}>
                                                                 {bill.pixCode ? 'AVAIL' : 'NONE'}
                                                             </span>
                                                         </td>
                                                         <td className="px-4 py-4">
-                                                            <span className={`inline-flex border border-border-grid px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest ${bill.isPaid ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                                                            <span className={`inline-flex border border-[#e5e7eb] dark:border-white/10 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest ${bill.isPaid ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
                                                                 {bill.isPaid ? 'PAID' : 'PENDING'}
                                                             </span>
                                                         </td>
@@ -1946,24 +1946,24 @@ const FinanceView = ({
                                                     </tr>
                                                     {isExpanded && (
                                                         <tr className="bg-slate-50">
-                                                            <td colSpan={9} className="px-4 py-6 border-b border-border-grid">
+                                                            <td colSpan={9} className="px-4 py-6 border-b border-[#e5e7eb] dark:border-white/10">
                                                                 <div className="space-y-6">
                                                                     <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
                                                                         <div>
-                                                                            <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-1">DESCRIPTION_ID</label>
-                                                                            <input type="text" defaultValue={bill.description} onBlur={(e) => onUpdateBill({ ...bill, description: e.target.value })} className="w-full rounded-soft-touch border border-border-grid bg-white px-4 py-2 text-xs font-mono font-bold text-on-surface" />
+                                                                            <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest block mb-1">DESCRIPTION_ID</label>
+                                                                            <input type="text" defaultValue={bill.description} onBlur={(e) => onUpdateBill({ ...bill, description: e.target.value })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2 text-xs font-sans font-semibold text-on-surface" />
                                                                         </div>
                                                                         <div>
-                                                                            <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-1">AMOUNT_VAL</label>
-                                                                            <input type="number" defaultValue={bill.amount} onBlur={(e) => onUpdateBill({ ...bill, amount: Number(e.target.value) })} className="w-full rounded-soft-touch border border-border-grid bg-white px-4 py-2 text-xs font-mono font-bold text-on-surface" />
+                                                                            <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest block mb-1">AMOUNT_VAL</label>
+                                                                            <input type="number" defaultValue={bill.amount} onBlur={(e) => onUpdateBill({ ...bill, amount: Number(e.target.value) })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2 text-xs font-sans font-semibold text-on-surface" />
                                                                         </div>
                                                                         <div>
-                                                                            <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-1">DUE_CYCLE</label>
-                                                                            <input type="number" min={1} max={31} defaultValue={bill.dueDay} onBlur={(e) => onUpdateBill({ ...bill, dueDay: Number(e.target.value) })} className="w-full rounded-soft-touch border border-border-grid bg-white px-4 py-2 text-xs font-mono font-bold text-on-surface" />
+                                                                            <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest block mb-1">DUE_CYCLE</label>
+                                                                            <input type="number" min={1} max={31} defaultValue={bill.dueDay} onBlur={(e) => onUpdateBill({ ...bill, dueDay: Number(e.target.value) })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2 text-xs font-sans font-semibold text-on-surface" />
                                                                         </div>
                                                                         <div>
-                                                                            <label className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-1">CATEGORY_TAG</label>
-                                                                            <select defaultValue={bill.category} onBlur={(e) => onUpdateBill({ ...bill, category: e.target.value })} className="w-full rounded-soft-touch border border-border-grid bg-white px-4 py-2 text-xs font-mono font-bold text-on-surface">
+                                                                            <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest block mb-1">CATEGORY_TAG</label>
+                                                                            <select defaultValue={bill.category} onBlur={(e) => onUpdateBill({ ...bill, category: e.target.value })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2 text-xs font-sans font-semibold text-on-surface">
                                                                                 {(settings.billCategories || ['Conta Fixa', 'Poupanca', 'Investimento']).map(cat => (
                                                                                     <option key={cat} value={cat}>{cat}</option>
                                                                                 ))}
@@ -1971,16 +1971,16 @@ const FinanceView = ({
                                                                         </div>
                                                                     </div>
 
-                                                                    <div className="flex border-b border-border-grid">
+                                                                    <div className="flex border-b border-[#e5e7eb] dark:border-white/10">
                                                                         <button
                                                                             onClick={(e) => { e.stopPropagation(); setActiveBillTabs(prev => ({ ...prev, [bill.id]: 'codigo' })); }}
-                                                                            className={`px-6 py-2 text-[10px] font-mono font-bold uppercase tracking-widest transition-colors border-b-2 ${activeBillTab === 'codigo' ? 'border-primary-tactile text-on-surface' : 'border-transparent text-slate-400 hover:text-on-surface'}`}
+                                                                            className={`px-6 py-2 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors border-b-2 ${activeBillTab === 'codigo' ? 'border-primary-tactile text-on-surface' : 'border-transparent text-slate-400 hover:text-on-surface'}`}
                                                                         >
                                                                             CODES_DATA
                                                                         </button>
                                                                         <button
                                                                             onClick={(e) => { e.stopPropagation(); setActiveBillTabs(prev => ({ ...prev, [bill.id]: 'arquivo' })); }}
-                                                                            className={`px-6 py-2 text-[10px] font-mono font-bold uppercase tracking-widest transition-colors border-b-2 ${activeBillTab === 'arquivo' ? 'border-primary-tactile text-on-surface' : 'border-transparent text-slate-400 hover:text-on-surface'}`}
+                                                                            className={`px-6 py-2 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors border-b-2 ${activeBillTab === 'arquivo' ? 'border-primary-tactile text-on-surface' : 'border-transparent text-slate-400 hover:text-on-surface'}`}
                                                                         >
                                                                             FILE_ATTACHMENTS
                                                                         </button>
@@ -1988,23 +1988,23 @@ const FinanceView = ({
 
                                                                     {activeBillTab === 'codigo' ? (
                                                                         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                                                                            <div className="rounded-none border border-border-grid bg-white p-4">
-                                                                                <label className="mb-2 block text-[8px] font-mono font-bold uppercase tracking-widest text-slate-400">BARCODE_RAW</label>
+                                                                            <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white p-4">
+                                                                                <label className="mb-2 block text-[8px] font-sans font-semibold uppercase tracking-widest text-slate-400">BARCODE_RAW</label>
                                                                                 <div className="flex gap-2">
-                                                                                    <input type="text" defaultValue={bill.barcode || ''} onBlur={(e) => onUpdateBill({ ...bill, barcode: e.target.value })} className="w-full rounded-soft-touch border border-border-grid bg-slate-50 px-4 py-2 font-mono text-[10px] font-bold text-on-surface" />
+                                                                                    <input type="text" defaultValue={bill.barcode || ''} onBlur={(e) => onUpdateBill({ ...bill, barcode: e.target.value })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-slate-50 px-4 py-2 font-sans text-[10px] font-bold text-on-surface" />
                                                                                     {bill.barcode && (
-                                                                                        <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(bill.barcode || ''); }} className="rounded-soft-touch bg-on-surface text-surface px-4 py-2 text-[8px] font-mono font-bold uppercase tracking-widest">
+                                                                                        <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(bill.barcode || ''); }} className="rounded-soft-touch bg-on-surface text-surface px-4 py-2 text-[8px] font-sans font-semibold uppercase tracking-widest">
                                                                                             COPY
                                                                                         </button>
                                                                                     )}
                                                                                 </div>
                                                                             </div>
-                                                                            <div className="rounded-none border border-border-grid bg-white p-4">
-                                                                                <label className="mb-2 block text-[8px] font-mono font-bold uppercase tracking-widest text-slate-400">PIX_TOKEN</label>
+                                                                            <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white p-4">
+                                                                                <label className="mb-2 block text-[8px] font-sans font-semibold uppercase tracking-widest text-slate-400">PIX_TOKEN</label>
                                                                                 <div className="flex gap-2">
-                                                                                    <input type="text" defaultValue={bill.pixCode || ''} onBlur={(e) => onUpdateBill({ ...bill, pixCode: e.target.value })} className="w-full rounded-soft-touch border border-border-grid bg-slate-50 px-4 py-2 font-mono text-[10px] font-bold text-on-surface" />
+                                                                                    <input type="text" defaultValue={bill.pixCode || ''} onBlur={(e) => onUpdateBill({ ...bill, pixCode: e.target.value })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-slate-50 px-4 py-2 font-sans text-[10px] font-bold text-on-surface" />
                                                                                     {bill.pixCode && (
-                                                                                        <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(bill.pixCode || ''); }} className="rounded-soft-touch bg-on-surface text-surface px-4 py-2 text-[8px] font-mono font-bold uppercase tracking-widest">
+                                                                                        <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(bill.pixCode || ''); }} className="rounded-soft-touch bg-on-surface text-surface px-4 py-2 text-[8px] font-sans font-semibold uppercase tracking-widest">
                                                                                             COPY
                                                                                         </button>
                                                                                     )}
@@ -2027,12 +2027,12 @@ const FinanceView = ({
                                                                                     };
                                                                                     input.click();
                                                                                 }}
-                                                                                className={`cursor-pointer rounded-none border border-dashed p-4 transition-colors ${bill.attachmentUrl ? 'border-primary-tactile bg-blue-50' : 'border-border-grid bg-white hover:bg-slate-50'}`}
+                                                                                className={`cursor-pointer rounded-lg border border-dashed p-4 transition-colors ${bill.attachmentUrl ? 'border-primary-tactile bg-blue-50' : 'border-[#e5e7eb] dark:border-white/10 bg-white hover:bg-slate-50'}`}
                                                                             >
-                                                                                <div className="mb-2 text-[8px] font-mono font-bold uppercase tracking-widest text-slate-400">DOC_BOLETO_PDF</div>
-                                                                                <div className="text-[10px] font-mono font-bold text-on-surface uppercase">{bill.attachmentUrl ? 'FILE_STATUS: LOADED' : 'ACTION: CLICK_TO_ATTACH'}</div>
+                                                                                <div className="mb-2 text-[8px] font-sans font-semibold uppercase tracking-widest text-slate-400">DOC_BOLETO_PDF</div>
+                                                                                <div className="text-[10px] font-sans font-semibold text-on-surface uppercase">{bill.attachmentUrl ? 'FILE_STATUS: LOADED' : 'ACTION: CLICK_TO_ATTACH'}</div>
                                                                                 {bill.attachmentUrl && (
-                                                                                    <a href={bill.attachmentUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="mt-3 inline-flex border border-border-grid bg-white px-4 py-1 text-[8px] font-mono font-bold uppercase tracking-widest text-on-surface shadow-none hover:bg-slate-50">
+                                                                                    <a href={bill.attachmentUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="mt-3 inline-flex border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-1 text-[8px] font-sans font-semibold uppercase tracking-widest text-on-surface shadow-none hover:bg-slate-50">
                                                                                         VIEW_DOCUMENT
                                                                                     </a>
                                                                                 )}
@@ -2051,12 +2051,12 @@ const FinanceView = ({
                                                                                     };
                                                                                     input.click();
                                                                                 }}
-                                                                                className={`cursor-pointer rounded-none border border-dashed p-4 transition-colors ${bill.pixQrCodeUrl ? 'border-emerald-200 bg-emerald-50' : 'border-border-grid bg-white hover:bg-slate-50'}`}
+                                                                                className={`cursor-pointer rounded-lg border border-dashed p-4 transition-colors ${bill.pixQrCodeUrl ? 'border-emerald-200 bg-emerald-50' : 'border-[#e5e7eb] dark:border-white/10 bg-white hover:bg-slate-50'}`}
                                                                             >
-                                                                                <div className="mb-2 text-[8px] font-mono font-bold uppercase tracking-widest text-slate-400">IMG_PIX_QR</div>
-                                                                                <div className="text-[10px] font-mono font-bold text-on-surface uppercase">{bill.pixQrCodeUrl ? 'FILE_STATUS: LOADED' : 'ACTION: CLICK_TO_ATTACH'}</div>
+                                                                                <div className="mb-2 text-[8px] font-sans font-semibold uppercase tracking-widest text-slate-400">IMG_PIX_QR</div>
+                                                                                <div className="text-[10px] font-sans font-semibold text-on-surface uppercase">{bill.pixQrCodeUrl ? 'FILE_STATUS: LOADED' : 'ACTION: CLICK_TO_ATTACH'}</div>
                                                                                 {bill.pixQrCodeUrl && (
-                                                                                    <a href={bill.pixQrCodeUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="mt-3 inline-flex border border-border-grid bg-white px-4 py-1 text-[8px] font-mono font-bold uppercase tracking-widest text-on-surface shadow-none hover:bg-slate-50">
+                                                                                    <a href={bill.pixQrCodeUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="mt-3 inline-flex border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-1 text-[8px] font-sans font-semibold uppercase tracking-widest text-on-surface shadow-none hover:bg-slate-50">
                                                                                         VIEW_DOCUMENT
                                                                                     </a>
                                                                                 )}
@@ -2072,7 +2072,7 @@ const FinanceView = ({
                                         })}
                                         {visibleBills.length === 0 && (
                                             <tr>
-                                                <td colSpan={9} className="px-4 py-12 text-center text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400">NO_RECORDS_FOUND / FILTER_MISMATCH</td>
+                                                <td colSpan={9} className="px-4 py-12 text-center text-[10px] font-sans font-semibold uppercase tracking-widest text-slate-400">NO_RECORDS_FOUND / FILTER_MISMATCH</td>
                                             </tr>
                                         )}
                                     </tbody>

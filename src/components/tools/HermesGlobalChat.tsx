@@ -173,6 +173,7 @@ interface HermesGlobalChatProps {
   userId: string;
   autoStartMic?: boolean;
   copilotMode?: CopilotMode;
+  layout?: 'overlay' | 'inline';
   onOpenTask?: (taskId: string) => void;
   onOpenTool?: (tool: string, id: string) => void;
   initialPrompt?: string | null;
@@ -230,6 +231,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   userId,
   autoStartMic = false,
   copilotMode = 'default',
+  layout = 'overlay',
   onOpenTask,
   onOpenTool,
   initialPrompt,
@@ -271,13 +273,13 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   const isBlocked = isLoading || uploadPhase !== 'idle' || isProcessingMic || isTranscribing;
   const modeLabel = copilotMode === 'finance' ? 'Financeiro' : copilotMode === 'saude' ? 'Saúde' : copilotMode === 'estrategia' ? 'Estratégia' : 'Global';
 
-  const shellClass = isDark ? 'bg-[#191c1c] text-slate-100' : 'bg-surface text-slate-900';
-  const sidebarClass = isDark ? 'bg-[#151919] border-white/10' : 'bg-white border-border-grid';
-  const panelClass = isDark ? 'bg-[#191c1c] border-white/10' : 'bg-white border-border-grid';
-  const raisedClass = isDark ? 'bg-slate-900 border-white/10' : 'bg-white border-border-grid shadow-soft-touch';
+  const shellClass = isDark ? 'bg-[#151c27] text-[#ebf1ff]' : 'bg-[#ffffff] text-[#151c27]';
+  const sidebarClass = isDark ? 'bg-[#111827] border-white/10' : 'bg-[#ffffff] border-[#e5e7eb]';
+  const panelClass = isDark ? 'bg-[#151c27] border-white/10' : 'bg-[#ffffff] border-[#e5e7eb]';
+  const raisedClass = isDark ? 'bg-slate-900 border-white/10 rounded-xl' : 'bg-white border-[#e5e7eb] rounded-xl shadow-sm';
   const mutedClass = isDark ? 'text-slate-500' : 'text-slate-400';
   const textSoftClass = isDark ? 'text-slate-300' : 'text-slate-600';
-  const hoverClass = isDark ? 'hover:bg-white/5' : 'hover:bg-slate-100';
+  const hoverClass = isDark ? 'hover:bg-white/5 rounded-lg' : 'hover:bg-slate-50 rounded-lg';
 
   const touchSession = async (sessionId: string, updates: Partial<Session> = {}) => {
     const sessionRef = doc(db, 'sessoes_copiloto', sessionId);
@@ -844,9 +846,11 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
 
   if (!isOpen) return null;
 
+  const isInline = layout === 'inline';
+
   return (
     <div
-      className="fixed inset-0 z-[700] flex justify-end"
+      className={isInline ? 'relative flex h-full min-h-0 w-full justify-end' : 'fixed inset-0 z-[700] flex justify-end'}
       onDragEnter={(event) => {
         if (!Array.from(event.dataTransfer.types).includes('Files') || isBlocked) return;
         event.preventDefault();
@@ -865,8 +869,8 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
       }}
       onDrop={handleDrop}
     >
-      <div className="absolute inset-0 bg-slate-950/50" onClick={onClose} aria-hidden="true" />
-      <div className={`relative flex h-full w-full ${showHistory ? 'max-w-[920px]' : 'max-w-[640px]'} shadow-2xl duration-300 animate-in slide-in-from-right ${shellClass}`}>
+      {!isInline && <div className="absolute inset-0 bg-slate-950/50" onClick={onClose} aria-hidden="true" />}
+      <div className={`relative flex h-full w-full ${isInline ? 'max-w-none rounded-2xl border shadow-sm' : `${showHistory ? 'max-w-[920px]' : 'max-w-[640px]'} shadow-2xl animate-in slide-in-from-right`} duration-300 ${shellClass}`}>
       {isDragActive && (
         <div className={`pointer-events-none absolute inset-0 z-[900] flex items-center justify-center border-4 ${isDark ? 'border-blue-400 bg-blue-500/10' : 'border-blue-500 bg-blue-50/80'}`}>
           <div className={`border px-8 py-6 text-center ${raisedClass}`}>
@@ -877,14 +881,14 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
       )}
 
       <aside className={`${showMobileHistory ? 'fixed inset-0 z-[820] flex' : showHistory ? 'hidden md:flex' : 'hidden'} md:relative md:z-auto md:w-[300px] lg:w-[340px] shrink-0 flex-col border-r ${sidebarClass}`}>
-        <div className={`flex h-16 shrink-0 items-center justify-between border-b px-4 ${isDark ? 'border-white/10' : 'border-border-grid'}`}>
+        <div className={`flex h-16 shrink-0 items-center justify-between border-b px-4 ${isDark ? 'border-white/10' : 'border-[#e5e7eb]'}`}>
           <div className="flex min-w-0 items-center gap-3">
-            <div className={`flex h-9 w-9 items-center justify-center border p-1.5 ${isDark ? 'border-white/10 bg-white' : 'border-border-grid bg-surface'}`}>
+            <div className={`flex h-9 w-9 items-center justify-center border p-1.5 rounded-lg ${isDark ? 'border-white/10 bg-white' : 'border-[#e5e7eb] bg-surface'}`}>
               <img src="/logo.png" alt="Hermes" className="h-full w-full object-contain" />
             </div>
             <div className="min-w-0">
-              <p className={`truncate font-mono text-[10px] font-black uppercase tracking-[0.22em] ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Hermes</p>
-              <p className={`truncate font-mono text-[8px] font-black uppercase tracking-[0.18em] ${mutedClass}`}>Histórico global</p>
+              <p className={`truncate font-sans text-xs font-bold uppercase tracking-wider ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Hermes</p>
+              <p className={`truncate font-sans text-[9px] font-semibold uppercase tracking-wider ${mutedClass}`}>Histórico global</p>
             </div>
           </div>
           <button type="button" onClick={() => setShowMobileHistory(false)} className={`p-2 md:hidden ${hoverClass}`} aria-label="Fechar histórico">
@@ -896,7 +900,11 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
           <button
             type="button"
             onClick={startNewConversation}
-            className={`flex w-full items-center justify-center gap-2 border px-4 py-3 font-mono text-[10px] font-black uppercase tracking-[0.18em] transition-all ${isDark ? 'border-white/10 bg-white text-slate-950 hover:bg-slate-200' : 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800'}`}
+            className={`flex w-full items-center justify-center gap-2 px-4 py-3 font-sans text-[10px] font-bold uppercase tracking-wider transition-all rounded-lg ${
+              isDark
+                ? 'border border-white/10 bg-white text-slate-950 hover:bg-slate-200'
+                : 'bg-[#7800ce] hover:bg-[#9333ea] text-white border-none'
+            }`}
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
             Nova conversa
@@ -907,14 +915,14 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
               placeholder="Buscar conversas"
-              className={`min-w-0 flex-1 bg-transparent px-2 py-1 font-mono text-[11px] font-bold outline-none ${isDark ? 'placeholder:text-slate-600' : 'placeholder:text-slate-400'}`}
+              className={`min-w-0 flex-1 bg-transparent px-2 py-1 font-sans text-[11px] font-medium outline-none ${isDark ? 'placeholder:text-slate-600' : 'placeholder:text-slate-400'}`}
             />
           </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
           {filteredSessions.length === 0 ? (
-            <div className={`border p-4 text-center font-mono text-[10px] font-bold uppercase tracking-widest ${raisedClass} ${mutedClass}`}>
+            <div className={`border p-4 text-center font-sans text-[10px] font-bold uppercase tracking-wider ${raisedClass} ${mutedClass}`}>
               Sem conversas
             </div>
           ) : (
@@ -930,18 +938,26 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                         setCurrentSessionId(session.id);
                         setShowMobileHistory(false);
                       }}
-                      className={`min-w-0 flex-1 border px-3 py-3 text-left transition-all ${isActive ? (isDark ? 'border-blue-500/40 bg-blue-500/10' : 'border-slate-900 bg-slate-100') : `${isDark ? 'border-transparent hover:border-white/10' : 'border-transparent hover:border-border-grid'} ${hoverClass}`}`}
+                      className={`min-w-0 flex-1 border px-3 py-3 text-left transition-all rounded-lg ${
+                        isActive
+                          ? (isDark ? 'border-transparent bg-[#ddb8ff]/10 text-white font-semibold' : 'border-transparent bg-[#f3e8ff] text-[#7800ce] font-semibold')
+                          : `border-transparent hover:border-[#e5e7eb] dark:hover:border-white/10 ${hoverClass}`
+                      }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <p className={`truncate text-xs font-black ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{session.title || 'Nova conversa'}</p>
-                        <span className={`shrink-0 font-mono text-[8px] font-black uppercase ${mutedClass}`}>{formatSessionTime(session.lastMessageAt)}</span>
+                        <p className={`truncate text-xs font-semibold ${isActive ? 'text-[#7800ce]' : 'text-slate-800 dark:text-slate-200'}`}>{session.title || 'Nova conversa'}</p>
+                        <span className={`shrink-0 font-sans text-[8px] font-bold uppercase ${mutedClass}`}>{formatSessionTime(session.lastMessageAt)}</span>
                       </div>
-                      <p className={`mt-1 font-mono text-[8px] font-black uppercase tracking-[0.16em] ${mutedClass}`}>{session.copilotMode === 'finance' ? 'Financeiro' : session.copilotMode === 'saude' ? 'Saúde' : session.copilotMode === 'estrategia' ? 'Estratégia' : 'Global'}</p>
+                      <p className={`mt-1 font-sans text-[8px] font-bold uppercase tracking-wider ${mutedClass}`}>{session.copilotMode === 'finance' ? 'Financeiro' : session.copilotMode === 'saude' ? 'Saúde' : session.copilotMode === 'estrategia' ? 'Estratégia' : 'Global'}</p>
                     </button>
                     <button
                       type="button"
                       onClick={() => handleDeleteSession(session.id)}
-                      className={`w-9 shrink-0 border text-[10px] opacity-0 transition-all group-hover:opacity-100 ${sessionPendingDeleteId === session.id ? 'border-rose-500 bg-rose-600 text-white opacity-100' : `${isDark ? 'border-white/10 text-slate-500 hover:text-rose-300' : 'border-border-grid text-slate-300 hover:text-rose-600'}`}`}
+                      className={`w-9 shrink-0 border text-[10px] opacity-0 transition-all group-hover:opacity-100 rounded-lg ${
+                        sessionPendingDeleteId === session.id
+                          ? 'border-rose-500 bg-rose-600 text-white opacity-100'
+                          : `border-[#e5e7eb] dark:border-white/10 text-slate-350 hover:text-rose-600 dark:hover:text-rose-300 ${hoverClass}`
+                      }`}
                       title={sessionPendingDeleteId === session.id ? 'Confirmar exclusão' : 'Excluir conversa'}
                     >
                       <svg className="mx-auto h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" /></svg>
@@ -955,7 +971,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
       </aside>
 
       <main className={`flex min-w-0 flex-1 flex-col border-l-0 ${panelClass}`}>
-        <header className={`flex h-16 shrink-0 items-center justify-between border-b px-4 md:px-6 ${isDark ? 'border-white/10' : 'border-border-grid'}`}>
+        <header className={`flex h-16 shrink-0 items-center justify-between border-b px-4 md:px-6 ${isDark ? 'border-white/10' : 'border-[#e5e7eb]'}`}>
           <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
@@ -966,25 +982,41 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                 }
                 setShowHistory(prev => !prev);
               }}
-              className={`border px-3 py-2 font-mono text-[9px] font-black uppercase tracking-widest transition-all ${showHistory ? (isDark ? 'border-blue-400/40 bg-blue-500/10 text-blue-200' : 'border-slate-900 bg-slate-100 text-slate-900') : `${isDark ? 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-white' : 'border-border-grid text-slate-500 hover:bg-white hover:text-slate-900'}`}`}
+              className={`border px-3 py-2 font-sans text-[10px] font-semibold uppercase tracking-wider transition-all rounded-lg ${
+                showHistory
+                  ? (isDark ? 'border-blue-400/40 bg-blue-500/10 text-blue-200' : 'border-[#7800ce] bg-[#f5f3ff] text-[#7800ce]')
+                  : (isDark ? 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-white' : 'border-[#e5e7eb] text-slate-500 hover:bg-slate-50 hover:text-slate-900')
+              }`}
               aria-label="Abrir histórico"
               aria-pressed={showHistory}
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
             </button>
-            <div className={`hidden h-9 w-9 items-center justify-center border p-1.5 md:flex ${isDark ? 'border-white/10 bg-white' : 'border-border-grid bg-white'}`}>
+            <div className={`hidden h-9 w-9 items-center justify-center border p-1.5 md:flex rounded-lg ${isDark ? 'border-white/10 bg-white' : 'border-[#e5e7eb] bg-white'}`}>
               <img src="/logo.png" alt="Hermes" className="h-full w-full object-contain" />
             </div>
             <div className="min-w-0">
-              <h2 className={`truncate font-mono text-sm font-black uppercase tracking-[0.2em] ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Copiloto Hermes</h2>
-              <p className={`truncate font-mono text-[9px] font-black uppercase tracking-[0.18em] ${mutedClass}`}>Chat {modeLabel} · {currentSessionId ? 'conversa ativa' : 'nova conversa'}</p>
+              <h2 className={`truncate font-sans text-sm font-bold uppercase tracking-wider ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Copiloto Hermes</h2>
+              <p className={`truncate font-sans text-[9px] font-semibold uppercase tracking-wider ${mutedClass}`}>Chat {modeLabel} · {currentSessionId ? 'conversa ativa' : 'nova conversa'}</p>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <button type="button" onClick={startNewConversation} className={`hidden border px-3 py-2 font-mono text-[9px] font-black uppercase tracking-widest transition-all sm:inline-flex ${isDark ? 'border-white/10 text-slate-300 hover:bg-white/5 hover:text-white' : 'border-border-grid text-slate-600 hover:bg-white hover:text-slate-900'}`}>
+            <button
+              type="button"
+              onClick={startNewConversation}
+              className={`hidden border px-3 py-2 font-sans text-[10px] font-semibold uppercase tracking-wider transition-all rounded-lg sm:inline-flex ${
+                isDark ? 'border-white/10 text-slate-300 hover:bg-white/5 hover:text-white' : 'border-[#e5e7eb] text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+              }`}
+            >
               Nova conversa
             </button>
-            <button type="button" onClick={onClose} className={`border px-3 py-2 font-mono text-[9px] font-black uppercase tracking-widest transition-all ${isDark ? 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-white' : 'border-border-grid text-slate-500 hover:bg-white hover:text-slate-900'}`}>
+            <button
+              type="button"
+              onClick={onClose}
+              className={`border px-3 py-2 font-sans text-[10px] font-semibold uppercase tracking-wider transition-all rounded-lg ${
+                isDark ? 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-white' : 'border-[#e5e7eb] text-slate-500 hover:bg-slate-50 hover:text-[#ba1a1a]'
+              }`}
+            >
               Fechar
             </button>
           </div>
@@ -995,15 +1027,15 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
             {messages.length === 0 && !isLoading ? (
               <div className="flex flex-1 flex-col justify-center py-10">
                 <div className="mb-8 flex items-center gap-4">
-                  <div className={`flex h-14 w-14 items-center justify-center border p-2.5 ${isDark ? 'bg-white border-white/10' : 'bg-white border-border-grid shadow-soft-touch'}`}>
+                  <div className={`flex h-14 w-14 items-center justify-center border p-2.5 rounded-xl ${isDark ? 'bg-white border-white/10' : 'bg-white border-[#e5e7eb] shadow-sm'}`}>
                     <img src="/logo.png" alt="Hermes" className="h-full w-full object-contain" />
                   </div>
                   <div>
-                    <p className={`font-mono text-[10px] font-black uppercase tracking-[0.25em] ${mutedClass}`}>{copilotMode === 'estrategia' ? 'Copiloto de estratégia' : 'Copiloto global'}</p>
-                    <h3 className={`mt-1 text-2xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Como posso ajudar?</h3>
+                    <p className={`font-sans text-[10px] font-bold uppercase tracking-wider ${mutedClass}`}>{copilotMode === 'estrategia' ? 'Copiloto de estratégia' : 'Copiloto global'}</p>
+                    <h3 className={`mt-1 text-2xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Como posso ajudar?</h3>
                   </div>
                 </div>
-                <p className={`max-w-xl text-sm font-semibold leading-7 ${textSoftClass}`}>{copilotMode === 'estrategia' ? 'Foco nos seus objetivos, pilares, diretrizes, indicadores e marcos. Posso analisar coerência de longo prazo e criar, alterar ou excluir itens da sua estratégia.' : 'Pronto para conversar.'}</p>
+                <p className={`max-w-xl text-sm font-medium leading-relaxed ${textSoftClass}`}>{copilotMode === 'estrategia' ? 'Foco nos seus objetivos, pilares, diretrizes, indicadores e marcos. Posso analisar coerência de longo prazo e criar, alterar ou excluir itens da sua estratégia.' : 'Pronto para conversar.'}</p>
               </div>
             ) : (
               <div className="space-y-8">
@@ -1013,12 +1045,22 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                   return (
                     <div key={messageKey} className={`group flex gap-4 ${isUser ? 'justify-end' : 'justify-start'}`}>
                       {!isUser && (
-                        <div className={`mt-1 hidden h-8 w-8 shrink-0 items-center justify-center border p-1.5 md:flex ${isDark ? 'bg-white border-white/10' : 'bg-white border-border-grid shadow-soft-touch'}`}>
+                        <div className={`mt-1 hidden h-8 w-8 shrink-0 items-center justify-center border p-1.5 md:flex rounded-lg ${isDark ? 'bg-white border-white/10' : 'bg-white border-[#e5e7eb] shadow-sm'}`}>
                           <img src="/logo.png" alt="" className="h-full w-full object-contain" />
                         </div>
                       )}
-                      <article className={`min-w-0 max-w-[min(100%,48rem)] ${isUser ? 'border px-4 py-3 font-mono text-sm font-medium leading-6' : 'text-sm leading-7'} ${isUser ? (isDark ? 'border-blue-400/30 bg-blue-500/15 text-blue-50' : 'border-slate-900 bg-slate-900 text-white') : ''}`}>
-                        <div className={`mb-2 flex items-center gap-2 font-mono text-[8px] font-black uppercase tracking-[0.18em] ${isUser ? 'text-current opacity-60' : mutedClass}`}>
+                      <article className={`min-w-0 max-w-[min(100%,48rem)] ${
+                        isUser
+                          ? 'rounded-2xl px-4 py-3 font-sans text-sm font-medium leading-relaxed'
+                          : 'text-sm leading-relaxed font-sans'
+                      } ${
+                        isUser
+                          ? (isDark
+                              ? 'border border-[#ddb8ff]/20 bg-[#ddb8ff]/10 text-white'
+                              : 'bg-[#7800ce] text-white border-none')
+                          : ''
+                      }`}>
+                        <div className={`mb-2 flex items-center gap-2 font-sans text-[8px] font-bold uppercase tracking-wider ${isUser ? 'text-current opacity-60' : mutedClass}`}>
                           <span>{isUser ? 'Você' : 'Hermes'}</span>
                           <span>{formatMessageTime(msg.timestamp)}</span>
                           <button
@@ -1148,20 +1190,20 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
           </div>
         </div>
 
-        <footer className={`shrink-0 border-t px-4 py-4 md:px-8 ${isDark ? 'border-white/10 bg-[#171b1b]' : 'border-border-grid bg-surface'}`}>
+        <footer className={`shrink-0 border-t px-4 py-4 md:px-8 ${isDark ? 'border-white/10 bg-[#151c27]' : 'border-[#e5e7eb] bg-white'}`}>
           <div className="mx-auto w-full max-w-4xl">
             {footerError && (
-              <div className="mb-3 flex items-start gap-2 border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
+              <div className="mb-3 flex items-start gap-2 border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 rounded-lg">
                 <span className="flex-1">{footerError}</span>
-                <button type="button" onClick={() => setFooterError(null)} className="font-mono text-[9px] font-black uppercase">Fechar</button>
+                <button type="button" onClick={() => setFooterError(null)} className="font-sans text-[9px] font-bold uppercase">Fechar</button>
               </div>
             )}
             {(attachedFile || pastedContext || isTranscribing || isProcessingMic) && (
-              <div className={`mb-3 flex items-center gap-2 border px-3 py-2 font-mono text-[10px] font-bold ${raisedClass}`}>
+              <div className={`mb-3 flex items-center gap-2 border px-3 py-2 font-sans text-[10px] font-bold ${raisedClass}`}>
                 <span className={mutedClass}>{isTranscribing || isProcessingMic ? 'Transcrevendo áudio' : 'Contexto anexado'}</span>
                 <span className="min-w-0 flex-1 truncate">{attachedFile?.name || pastedContext?.name || 'Microfone'}</span>
                 {(attachedFile || pastedContext) && (
-                  <button type="button" onClick={() => { setAttachedFile(null); setPastedContext(null); }} className="font-black uppercase tracking-widest text-rose-500">Remover</button>
+                  <button type="button" onClick={() => { setAttachedFile(null); setPastedContext(null); }} className="font-bold uppercase tracking-wider text-rose-500">Remover</button>
                 )}
               </div>
             )}
@@ -1176,13 +1218,13 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                 </button>
                 {showTools && (
                   <div className={`absolute bottom-full left-0 z-[850] mb-3 max-h-[360px] w-[min(22rem,calc(100vw-2rem))] overflow-y-auto border shadow-2xl ${raisedClass}`}>
-                    <div className={`sticky top-0 border-b px-3 py-2 font-mono text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-white/10 bg-slate-900 text-slate-500' : 'border-border-grid bg-white text-slate-400'}`}>Ferramentas</div>
+                    <div className={`sticky top-0 border-b px-3 py-2 font-sans text-[10px] font-bold uppercase tracking-wider ${isDark ? 'border-white/10 bg-slate-900 text-slate-500' : 'border-[#e5e7eb] bg-white text-slate-400'}`}>Ferramentas</div>
                     <div className="p-2">
                       {toolsRegistry.map((tool) => (
                         <button key={tool.id} type="button" onClick={() => insertToolShortcut(tool.ui_metadata.tag)} className={`w-full px-3 py-2 text-left transition-all ${hoverClass}`}>
                           <div className="flex items-center justify-between gap-3">
-                            <span className={`text-xs font-black ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{tool.ui_metadata.title}</span>
-                            <span className="font-mono text-[9px] font-black text-blue-500">{tool.ui_metadata.tag}</span>
+                            <span className={`text-xs font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{tool.ui_metadata.title}</span>
+                            <span className="font-mono text-[9px] font-bold text-[#2563eb]">{tool.ui_metadata.tag}</span>
                           </div>
                           <p className={`mt-1 text-[10px] leading-relaxed ${mutedClass}`}>{tool.ui_metadata.description}</p>
                         </button>
@@ -1207,11 +1249,11 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                 placeholder={isRecording ? 'Gravando... clique no microfone para parar' : isProcessingMic || isTranscribing ? 'Transcrevendo áudio...' : attachedFile || pastedContext ? 'Pergunte sobre o contexto anexado...' : copilotMode === 'estrategia' ? 'Converse sobre seus objetivos e diretrizes...' : 'Mensagem para o Hermes'}
                 className={`min-h-10 flex-1 resize-none overflow-y-hidden bg-transparent px-2 py-2.5 text-sm font-medium leading-5 outline-none disabled:opacity-40 ${isDark ? 'text-slate-100 placeholder:text-slate-600' : 'text-slate-900 placeholder:text-slate-400'}`}
               />
-              <button type="button" disabled={isBlocked && !isRecording} onClick={() => isRecording ? stopRecording() : startRecording()} title={isRecording ? 'Parar gravação' : 'Gravar áudio'} className={`flex h-10 w-10 shrink-0 items-center justify-center transition-all disabled:opacity-30 ${isRecording ? 'bg-rose-600 text-white animate-pulse' : hoverClass}`}>
+              <button type="button" disabled={isBlocked && !isRecording} onClick={() => isRecording ? stopRecording() : startRecording()} title={isRecording ? 'Parar gravação' : 'Gravar áudio'} className={`flex h-10 w-10 shrink-0 items-center justify-center transition-all disabled:opacity-30 ${isRecording ? 'bg-rose-600 text-white animate-pulse rounded-lg' : hoverClass}`}>
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" /></svg>
               </button>
               {(input.trim() || attachedFile || pastedContext) && !isRecording && (
-                <button type="button" disabled={isBlocked} onClick={() => sendMessage(input)} title="Enviar" className="flex h-10 w-10 shrink-0 items-center justify-center bg-blue-600 text-white transition-all hover:bg-blue-700 disabled:opacity-30">
+                <button type="button" disabled={isBlocked} onClick={() => sendMessage(input)} title="Enviar" className="flex h-10 w-10 shrink-0 items-center justify-center bg-[#7800ce] text-white transition-all hover:bg-[#9333ea] rounded-lg disabled:opacity-30">
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
                 </button>
               )}

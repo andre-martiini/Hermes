@@ -68,7 +68,8 @@
       "PowerShell(Get-Content \"C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\src\\\\components\\\\tools\\\\HermesGlobalChat.tsx\" | Select-Object -Skip 851 -First 60 | ForEach-Object -Begin {$i=852} -Process { \"{0}: {1}\" -f $i, $_; $i++ })",
       "Skill(claude-mem:smart-explore)",
       "Skill(claude-mem:smart-explore:*)",
-      "Bash(find C:\\\\\\\\Users\\\\\\\\T-GAMER\\\\\\\\Documents\\\\\\\\gestao-Hermes\\\\\\\\src\\\\\\\\views -type f -name \"*.tsx\")"
+      "Bash(find C:\\\\\\\\Users\\\\\\\\T-GAMER\\\\\\\\Documents\\\\\\\\gestao-Hermes\\\\\\\\src\\\\\\\\views -type f -name \"*.tsx\")",
+      "Bash(npx vite *)"
     ]
   }
 }

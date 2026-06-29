@@ -1,22 +1,62 @@
-@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-@font-face {
-  font-family: 'DSEG7Classic';
-  src: url('https://cdn.jsdelivr.net/npm/dseg@0.46.0/fonts/DSEG7-Classic/DSEG7Classic-Bold.woff2') format('woff2');
-  font-weight: bold;
-  font-style: normal;
+:root {
+  --hermes-surface: #ffffff;
+  --hermes-surface-dim: #d3daea;
+  --hermes-surface-bright: #f9f9ff;
+  --hermes-surface-container-lowest: #ffffff;
+  --hermes-surface-container-low: #f0f3ff;
+  --hermes-surface-container: #e7eefe;
+  --hermes-surface-container-high: #e2e8f8;
+  --hermes-surface-container-highest: #dce2f3;
+  --hermes-on-surface: #151c27;
+  --hermes-on-surface-variant: #4d4354;
+  --hermes-inverse-surface: #2a313d;
+  --hermes-inverse-on-surface: #ebf1ff;
+  --hermes-outline: #7e7386;
+  --hermes-outline-variant: #cfc2d7;
+  --hermes-primary: #7800ce;
+  --hermes-primary-container: #9333ea;
+  --hermes-secondary: #0058be;
+  --hermes-secondary-container: #2170e4;
+  --hermes-tertiary: #784700;
+  --hermes-tertiary-container: #9a5c00;
+  --hermes-error: #ba1a1a;
+  --hermes-background: #f9fafb;
+  --hermes-border-subtle: #f3f4f6;
+  --hermes-border-standard: #e5e7eb;
+  --hermes-success: #10b981;
+  --hermes-ai-accent: #dbeafe;
+  --hermes-ai-text: #2563eb;
+  --hermes-shadow-card: 0 6px 18px rgba(21, 28, 39, 0.05), 0 2px 6px rgba(21, 28, 39, 0.03);
+  --hermes-radius-panel: 1rem;
+  --hermes-radius-control: 0.5rem;
+  --hermes-radius-small: 0.25rem;
 }
 
 /* Basic styles */
 body {
   margin: 0;
   padding: 0;
-  background-color: #f9f9f9;
-  color: #333333;
+  background-color: var(--hermes-background);
+  color: var(--hermes-on-surface);
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  text-rendering: geometricPrecision;
+}
+
+* {
+  letter-spacing: 0;
+}
+
+::selection {
+  background: #f0dbff;
+  color: #2c0051;
 }
 
 /* Utility: Truncate text to 3 lines with ellipsis */
@@ -449,4 +489,431 @@ body {
 .actions-view-dark .shadow-xl,
 .actions-view-dark .shadow-2xl {
   --tw-shadow-color: rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Hermes Productivity Suite design system */
+.font-mono,
+.font-serif,
+.font-lcd {
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif !important;
+}
+
+.tracking-tight,
+.tracking-tighter {
+  letter-spacing: 0 !important;
+}
+
+.tracking-wider,
+.tracking-widest,
+.tracking-\[0\.2em\],
+.tracking-\[0\.25em\],
+.tracking-\[0\.3em\] {
+  letter-spacing: 0.05em !important;
+}
+
+.bg-surface,
+.bg-white {
+  background-color: var(--hermes-surface) !important;
+}
+
+.bg-surface-container-low,
+.bg-slate-50,
+.bg-slate-50\/30,
+.bg-slate-50\/50,
+.bg-slate-50\/70,
+.bg-slate-50\/80 {
+  background-color: var(--hermes-background) !important;
+}
+
+.bg-surface-container,
+.bg-slate-100,
+.bg-slate-100\/50,
+.bg-slate-200,
+.bg-slate-200\/50 {
+  background-color: var(--hermes-surface-container) !important;
+}
+
+.bg-on-surface,
+.bg-slate-900,
+.bg-slate-950 {
+  background-color: var(--hermes-inverse-surface) !important;
+}
+
+.text-on-surface,
+.text-text-main,
+.text-main,
+.text-slate-950,
+.text-slate-900,
+.text-slate-800 {
+  color: var(--hermes-on-surface) !important;
+}
+
+.text-slate-700,
+.text-slate-600,
+.text-slate-500 {
+  color: var(--hermes-on-surface-variant) !important;
+}
+
+.text-slate-400,
+.text-slate-300 {
+  color: var(--hermes-outline) !important;
+}
+
+.text-primary-tactile,
+.text-purple-600,
+.text-violet-600,
+.text-indigo-600 {
+  color: var(--hermes-primary) !important;
+}
+
+.text-accent-tactile,
+.text-blue-600,
+.text-sky-600 {
+  color: var(--hermes-secondary) !important;
+}
+
+.bg-primary-tactile,
+.bg-primary,
+.bg-purple-600,
+.bg-violet-600,
+.bg-indigo-600 {
+  background-color: var(--hermes-primary-container) !important;
+  color: #ffffff !important;
+}
+
+.bg-accent-tactile,
+.bg-secondary,
+.bg-blue-600 {
+  background-color: var(--hermes-primary-container) !important;
+  color: #ffffff !important;
+}
+
+button.bg-slate-900,
+button.bg-slate-950,
+button.bg-blue-600,
+a.bg-slate-900,
+a.bg-slate-950,
+a.bg-blue-600,
+[role="button"].bg-slate-900,
+[role="button"].bg-slate-950,
+[role="button"].bg-blue-600 {
+  background-color: var(--hermes-primary-container) !important;
+  border-color: var(--hermes-primary-container) !important;
+  color: #ffffff !important;
+}
+
+button.hover\:bg-blue-700:hover,
+a.hover\:bg-blue-700:hover,
+[role="button"].hover\:bg-blue-700:hover,
+button.hover\:bg-slate-800:hover,
+a.hover\:bg-slate-800:hover,
+[role="button"].hover\:bg-slate-800:hover {
+  background-color: var(--hermes-primary) !important;
+  border-color: var(--hermes-primary) !important;
+}
+
+.border-border-grid,
+.border-slate-50,
+.border-slate-100,
+.border-slate-200,
+.border-gray-100,
+.border-gray-200,
+.border-\[\#e5e7eb\],
+.divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+.divide-\[\#e5e7eb\] > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--hermes-border-subtle) !important;
+}
+
+.border-primary-tactile,
+.border-purple-500,
+.border-violet-500,
+.border-indigo-500,
+.focus\:border-primary-tactile:focus {
+  border-color: var(--hermes-primary-container) !important;
+}
+
+.shadow-soft-touch,
+.shadow-card,
+.shadow-sm,
+.shadow-md,
+.shadow-lg,
+.shadow-xl,
+.shadow-2xl {
+  box-shadow: var(--hermes-shadow-card) !important;
+}
+
+.shadow-none {
+  box-shadow: none !important;
+}
+
+.rounded-none,
+.rounded-none-none,
+.rounded-soft-touch,
+.rounded-lg,
+.rounded-xl {
+  border-radius: var(--hermes-radius-control) !important;
+}
+
+.rounded-2xl,
+.rounded-3xl,
+.rounded-\[2rem\],
+.rounded-none-3xl {
+  border-radius: var(--hermes-radius-panel) !important;
+}
+
+.rounded-full {
+  border-radius: 9999px !important;
+}
+
+button,
+a,
+[role="button"],
+input,
+textarea,
+select {
+  transition-duration: 180ms;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+button:not(:disabled),
+[role="button"]:not(:disabled) {
+  cursor: pointer;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 1px var(--hermes-primary-container), 0 0 0 4px rgba(147, 51, 234, 0.12) !important;
+}
+
+input:not([type="checkbox"]):not([type="radio"]),
+textarea,
+select {
+  background-color: var(--hermes-background) !important;
+  border-color: var(--hermes-border-standard) !important;
+  border-radius: var(--hermes-radius-control) !important;
+  color: var(--hermes-on-surface) !important;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--hermes-outline) !important;
+}
+
+input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  border-radius: var(--hermes-radius-small) !important;
+  border-color: var(--hermes-outline-variant) !important;
+  accent-color: var(--hermes-primary-container);
+}
+
+label,
+.text-\[9px\],
+.text-\[10px\] {
+  letter-spacing: 0.05em;
+}
+
+.bg-purple-50,
+.bg-violet-50,
+.bg-indigo-50,
+.bg-purple-100,
+.bg-violet-100,
+.bg-indigo-100 {
+  background-color: #f5f3ff !important;
+}
+
+.bg-blue-50,
+.bg-sky-50,
+.bg-blue-100,
+.bg-sky-100 {
+  background-color: var(--hermes-ai-accent) !important;
+}
+
+.text-blue-700,
+.text-sky-700,
+.text-blue-500,
+.text-sky-500 {
+  color: var(--hermes-ai-text) !important;
+}
+
+.bg-emerald-500,
+.bg-emerald-600,
+.bg-green-500,
+.bg-green-600 {
+  background-color: var(--hermes-success) !important;
+  color: #ffffff !important;
+}
+
+.text-emerald-500,
+.text-emerald-600,
+.text-green-500,
+.text-green-600 {
+  color: var(--hermes-success) !important;
+}
+
+.bg-rose-500,
+.bg-rose-600,
+.bg-red-500,
+.bg-red-600 {
+  background-color: var(--hermes-error) !important;
+  color: #ffffff !important;
+}
+
+.text-rose-500,
+.text-rose-600,
+.text-red-500,
+.text-red-600 {
+  color: var(--hermes-error) !important;
+}
+
+.bg-amber-500,
+.bg-orange-500 {
+  background-color: var(--hermes-tertiary-container) !important;
+  color: #ffffff !important;
+}
+
+.text-amber-500,
+.text-orange-500,
+.text-amber-600,
+.text-orange-600 {
+  color: var(--hermes-tertiary) !important;
+}
+
+.border-b-2,
+.border-l-2,
+.border-r-2,
+.border-t-2,
+.border-2 {
+  border-width: 1px !important;
+}
+
+.h-2.rounded-none,
+.h-2.rounded-none-none,
+.h-1\.5,
+.h-1 {
+  border-radius: 9999px !important;
+}
+
+.animate-in {
+  animation: hermes-enter 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-in.slide-in-from-right {
+  animation: hermes-slide-in-right 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-pulse {
+  animation: hermes-pulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--hermes-surface-dim);
+  border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--hermes-outline-variant);
+}
+
+@keyframes hermes-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes hermes-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.68;
+  }
+}
+
+/* ===== Hermes micro-interactions (premium feel) ===== */
+
+/* Cap heading weight at 700 per design.md headline spec.
+   Inter loads up to 800; brutalist `font-black` (900) is downgraded so the
+   un-migrated screens match the 32 already-migrated files (which use font-bold). */
+.font-black {
+  font-weight: 700 !important;
+}
+
+/* Card hover lift — grounds panels and gives a responsive, premium feel. */
+.hermes-lift {
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+}
+.hermes-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 16px 32px rgba(21, 28, 39, 0.1), 0 6px 12px rgba(21, 28, 39, 0.05) !important;
+}
+.hermes-lift:active {
+  transform: translateY(-1px);
+}
+
+/* Staggered entrance for list/grid children. */
+.hermes-stagger > * {
+  animation: hermes-enter 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.hermes-stagger > *:nth-child(1) { animation-delay: 0.02s; }
+.hermes-stagger > *:nth-child(2) { animation-delay: 0.06s; }
+.hermes-stagger > *:nth-child(3) { animation-delay: 0.1s; }
+.hermes-stagger > *:nth-child(4) { animation-delay: 0.14s; }
+.hermes-stagger > *:nth-child(5) { animation-delay: 0.18s; }
+.hermes-stagger > *:nth-child(6) { animation-delay: 0.22s; }
+.hermes-stagger > *:nth-child(7) { animation-delay: 0.26s; }
+.hermes-stagger > *:nth-child(8) { animation-delay: 0.3s; }
+.hermes-stagger > *:nth-child(n + 9) { animation-delay: 0.34s; }
+
+/* Subtle press feedback for tactile controls. */
+.hermes-press {
+  transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.hermes-press:active {
+  transform: scale(0.97);
+}
+
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .hermes-lift,
+  .hermes-lift:hover,
+  .hermes-lift:active,
+  .hermes-stagger > *,
+  .hermes-press,
+  .hermes-press:active,
+  .animate-in,
+  .animate-pulse {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}
+
+@keyframes hermes-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }

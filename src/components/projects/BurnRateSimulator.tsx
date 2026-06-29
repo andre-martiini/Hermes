@@ -108,33 +108,33 @@ export const BurnRateSimulator: React.FC<BurnRateSimulatorProps> = ({
     return (
         <div className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-200">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Saldo em Caixa</p>
-                    <p className="text-2xl font-black text-slate-800">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(availableBalance)}</p>
+                <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200 hermes-lift">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Saldo em Caixa</p>
+                    <p className="text-2xl font-bold text-slate-800">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(availableBalance)}</p>
                 </div>
-                <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-200">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Comprometido (Futuro)</p>
-                    <p className="text-2xl font-black text-amber-600">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(futureCommitment)}</p>
+                <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200 hermes-lift">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Comprometido (Futuro)</p>
+                    <p className="text-2xl font-bold text-amber-600">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(futureCommitment)}</p>
                 </div>
-                <div className={`p-6 rounded-[2rem] border ${realFreeBalance >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'}`}>
-                    <p className={`text-[10px] font-black uppercase tracking-widest ${realFreeBalance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>Saldo Real Livre</p>
-                    <p className={`text-2xl font-black ${realFreeBalance >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(realFreeBalance)}</p>
+                <div className={`p-6 rounded-2xl border hermes-lift ${realFreeBalance >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'}`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-wider ${realFreeBalance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>Saldo Real Livre</p>
+                    <p className={`text-2xl font-bold ${realFreeBalance >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(realFreeBalance)}</p>
                 </div>
             </div>
 
-            <div className="bg-white border border-slate-200 rounded-[2rem] p-8 shadow-xl">
-                <h4 className="text-lg font-black text-slate-900 mb-6">Simulador de Contratação</h4>
+            <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-card">
+                <h4 className="text-lg font-bold text-slate-900 mb-6">Simulador de Contratação</h4>
 
                 <div className="flex gap-6 mb-6 border-b border-slate-100 pb-6">
                     <button
                         onClick={() => setScenarioMode('A')}
-                        className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${scenarioMode === 'A' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
+                        className={`flex-1 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${scenarioMode === 'A' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
                     >
                         Cenário A: Por Modalidade
                     </button>
                     <button
                         onClick={() => setScenarioMode('B')}
-                        className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${scenarioMode === 'B' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
+                        className={`flex-1 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${scenarioMode === 'B' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
                     >
                         Cenário B: Por Orçamento
                     </button>
@@ -144,7 +144,7 @@ export const BurnRateSimulator: React.FC<BurnRateSimulatorProps> = ({
                     <div>
                         {scenarioMode === 'A' ? (
                             <div className="space-y-4">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Selecionar Modalidade</label>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Selecionar Modalidade</label>
                                 <select
                                     value={selectedTypeId}
                                     onChange={(e) => setSelectedTypeId(e.target.value)}
@@ -158,7 +158,7 @@ export const BurnRateSimulator: React.FC<BurnRateSimulatorProps> = ({
                             </div>
                         ) : (
                             <div className="space-y-4">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Duração Desejada (Meses)</label>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Duração Desejada (Meses)</label>
                                 <input
                                     type="number"
                                     value={targetMonths}
@@ -169,11 +169,11 @@ export const BurnRateSimulator: React.FC<BurnRateSimulatorProps> = ({
                         )}
                     </div>
 
-                    <div className="text-center p-6 bg-slate-50 rounded-[2rem] border border-slate-100">
+                    <div className="text-center p-6 bg-slate-50 rounded-2xl border border-slate-100">
                         {simulationResult ? (
                             <>
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{simulationResult.label}</p>
-                                <p className={`text-4xl font-black my-2 ${simulationResult.isPositive ? 'text-indigo-600' : 'text-rose-500'}`}>{simulationResult.value}</p>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{simulationResult.label}</p>
+                                <p className={`text-4xl font-bold my-2 ${simulationResult.isPositive ? 'text-indigo-600' : 'text-rose-500'}`}>{simulationResult.value}</p>
                                 <p className="text-xs font-bold text-slate-500">{simulationResult.detail}</p>
                             </>
                         ) : (
@@ -184,8 +184,8 @@ export const BurnRateSimulator: React.FC<BurnRateSimulatorProps> = ({
             </div>
 
             {/* Burn Down Chart Visualization */}
-            <div className="bg-white border border-slate-200 rounded-[2rem] p-8 shadow-sm">
-                <h4 className="text-lg font-black text-slate-900 mb-6">Projeção de Saldo (Burn-down)</h4>
+            <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-sm">
+                <h4 className="text-lg font-bold text-slate-900 mb-6">Projeção de Saldo (Burn-down)</h4>
                 <div className="h-64 flex items-end gap-2">
                     {chartData.map((data, i) => {
                         const heightPercent = Math.max(0, Math.min(100, (data.balance / availableBalance) * 100));
@@ -198,7 +198,7 @@ export const BurnRateSimulator: React.FC<BurnRateSimulatorProps> = ({
                                     className={`w-full rounded-t-lg transition-all duration-500 ${data.balance >= 0 ? 'bg-indigo-200 group-hover:bg-indigo-400' : 'bg-rose-300'}`}
                                     style={{ height: `${heightPercent}%` }}
                                 ></div>
-                                <span className="text-[8px] font-black text-slate-400">{i}</span>
+                                <span className="text-[8px] font-bold text-slate-400">{i}</span>
                             </div>
                         );
                     })}

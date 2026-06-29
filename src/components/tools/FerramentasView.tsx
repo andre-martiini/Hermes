@@ -300,22 +300,22 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
       }
     ];
 
-    const toolCardClass = `group relative p-6 md:p-8 rounded-none border transition-all text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 overflow-hidden ${isDark ? 'bg-slate-900 border-slate-800 hover:border-blue-500/60 shadow-lg hover:bg-slate-800/50' : 'bg-white border-slate-200 hover:border-blue-400'}`;
+    const toolCardClass = `group relative p-6 md:p-8 rounded-lg border transition-all text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 overflow-hidden ${isDark ? 'bg-slate-950 border-slate-800 hover:border-blue-500/60 shadow-lg hover:bg-slate-800/50' : 'bg-white border-slate-200 hover:border-blue-400'}`;
 
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-in fade-in zoom-in-95 duration-500">
         {toolsList.map(t => (
           <button key={t.code} onClick={() => setActiveTool(t.id)} className={toolCardClass}>
             <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-30 transition-opacity">
-              <span className={`text-[10px] font-mono font-bold tracking-widest uppercase ${isDark ? 'text-slate-400' : ''}`}>{t.code}</span>
+              <span className={`text-[10px] font-sans font-semibold tracking-widest uppercase ${isDark ? 'text-slate-400' : ''}`}>{t.code}</span>
             </div>
-            <div className={`w-12 h-12 md:w-14 md:h-14 rounded-none border flex items-center justify-center group-hover:text-white transition-all flex-shrink-0 ${t.iconClasses} ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+            <div className={`w-12 h-12 md:w-14 md:h-14 rounded-lg border flex items-center justify-center group-hover:text-white transition-all flex-shrink-0 ${t.iconClasses} ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
               {t.icon}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
-                <div className={`w-1.5 h-1.5 ${t.dotColor} rounded-none`}></div>
-                <h3 className={`text-sm md:text-base font-mono font-black uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{t.title}</h3>
+                <div className={`w-1.5 h-1.5 ${t.dotColor} rounded-lg`}></div>
+                <h3 className={`text-sm md:text-base font-sans font-bold uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{t.title}</h3>
               </div>
               <p className={`font-medium leading-snug text-[11px] md:text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{t.desc}</p>
             </div>
@@ -333,25 +333,25 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
           <div className="flex items-center gap-4">
             <button
               onClick={() => setActiveTool(null)}
-              className={`p-3 border rounded-none transition-colors ${isDark ? 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-100' : 'bg-white border-slate-200 text-slate-400 hover:text-slate-900'}`}
+              className={`p-3 border rounded-lg transition-colors ${isDark ? 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-100' : 'bg-white border-slate-200 text-slate-400 hover:text-slate-900'}`}
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
             </button>
             <div>
-              <p className="text-[10px] font-mono font-black text-blue-500 uppercase tracking-widest mb-1">MODULE: BRAINSTORMING</p>
-              <h3 className={`text-xl font-mono font-black uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Ferramentas / Notas Rápidas</h3>
+              <p className="text-[10px] font-sans font-bold text-blue-500 uppercase tracking-widest mb-1">MODULE: BRAINSTORMING</p>
+              <h3 className={`text-xl font-sans font-bold uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Ferramentas / Notas Rápidas</h3>
             </div>
           </div>
         </div>
 
         <div className="space-y-4 max-w-4xl mx-auto w-full">
           <div className="flex flex-col md:flex-row gap-4 w-full px-0">
-            <div className={`flex-1 border rounded-none px-4 py-2 flex items-center gap-3 transition-all ${isDark ? 'bg-slate-900 border-slate-800 focus-within:border-blue-500' : 'bg-white border-slate-200 focus-within:border-blue-400'}`}>
+            <div className={`flex-1 border rounded-lg px-4 py-2 flex items-center gap-3 transition-all ${isDark ? 'bg-slate-950 border-slate-800 focus-within:border-blue-500' : 'bg-white border-slate-200 focus-within:border-blue-400'}`}>
               <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
               <input
                 type="text"
                 placeholder="Pesquisar nas notas..."
-                className={`flex-1 bg-transparent outline-none text-xs font-mono font-bold ${isDark ? 'text-slate-200 placeholder:text-slate-500' : 'text-slate-700 placeholder:text-slate-400'}`}
+                className={`flex-1 bg-transparent outline-none text-xs font-sans font-semibold ${isDark ? 'text-slate-200 placeholder:text-slate-500' : 'text-slate-700 placeholder:text-slate-400'}`}
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
               />
@@ -359,11 +359,11 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
           </div>
 
           <div className="w-full animate-in slide-in-from-top-2 duration-500">
-            <div className={`p-1 rounded-none border flex items-center gap-2 transition-all ${isDark ? 'bg-slate-900 border-slate-800 focus-within:border-blue-500' : 'bg-white border-slate-200 focus-within:border-blue-500'}`}>
+            <div className={`p-1 rounded-lg border flex items-center gap-2 transition-all ${isDark ? 'bg-slate-950 border-slate-800 focus-within:border-blue-500' : 'bg-white border-slate-200 focus-within:border-blue-500'}`}>
               <button
                 onClick={isRecording ? stopRecording : startRecording}
                 disabled={isProcessing}
-                className={`p-3 rounded-none transition-all flex-shrink-0 ${isRecording
+                className={`p-3 rounded-lg transition-all flex-shrink-0 ${isRecording
                   ? 'bg-rose-600 text-white animate-pulse shadow-lg'
                   : isProcessing
                     ? 'bg-blue-100 text-blue-600 cursor-wait'
@@ -388,14 +388,14 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
                 type="text"
                 disabled={isRecording || isProcessing}
                 placeholder={isRecording ? "Gravando... Fale agora." : isProcessing ? "Hermes AI está processando áudio..." : "Digite ou grave uma nova nota..."}
-                className={`flex-1 bg-transparent border-none outline-none px-2 py-3 text-[13px] font-mono font-bold ${isDark ? 'text-slate-100 placeholder:text-slate-500' : 'text-slate-800 placeholder:text-slate-300'} ${(isRecording || isProcessing) ? 'opacity-50' : ''}`}
+                className={`flex-1 bg-transparent border-none outline-none px-2 py-3 text-[13px] font-sans font-semibold ${isDark ? 'text-slate-100 placeholder:text-slate-500' : 'text-slate-800 placeholder:text-slate-300'} ${(isRecording || isProcessing) ? 'opacity-50' : ''}`}
                 value={textInput}
                 onChange={e => setTextInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && textInput.trim()) { onAddTextIdea(textInput); setTextInput(''); } }}
               />
               <button
                 onClick={() => { if (textInput.trim()) { onAddTextIdea(textInput); setTextInput(''); } }}
-                className="bg-blue-600 text-white h-10 px-4 flex items-center justify-center rounded-none hover:bg-blue-700 transition-all active:scale-95 shrink-0 font-mono text-[10px] font-black uppercase tracking-widest"
+                className="bg-blue-600 text-white h-10 px-4 flex items-center justify-center rounded-lg hover:bg-blue-700 transition-all active:scale-95 shrink-0 font-sans text-[10px] font-bold uppercase tracking-wider"
               >
                 Salvar
               </button>
@@ -404,33 +404,33 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
 
           <div className={`flex flex-col md:grid md:grid-cols-2 lg:grid-cols-3 gap-0 mb-32 md:mb-0 border-l border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
             {activeIdeas.map(idea => (
-              <div key={idea.id} className={`p-5 md:p-6 rounded-none border-r border-b transition-all group flex flex-col relative overflow-hidden -ml-px -mt-px md:m-0 ${isDark ? 'bg-slate-900 border-slate-800 hover:bg-slate-800/50' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
+              <div key={idea.id} className={`p-5 md:p-6 rounded-lg border-r border-b transition-all group flex flex-col relative overflow-hidden -ml-px -mt-px md:m-0 ${isDark ? 'bg-slate-950 border-slate-800 hover:bg-slate-800/50' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
                 <div className="flex items-center justify-between mb-4">
-                  <span className="text-[9px] font-mono font-black text-slate-400 uppercase tracking-widest">{formatDate(idea.timestamp.split('T')[0])}</span>
+                  <span className="text-[9px] font-sans font-bold text-slate-400 uppercase tracking-widest">{formatDate(idea.timestamp.split('T')[0])}</span>
                   <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-all">
                     {editingId === idea.id ? (
-                      <button onClick={() => { if (editText.trim()) { onUpdateIdea(idea.id, editText); setEditingId(null); } }} className="text-blue-600 hover:bg-blue-50 p-1.5 rounded-none transition-colors">
+                      <button onClick={() => { if (editText.trim()) { onUpdateIdea(idea.id, editText); setEditingId(null); } }} className="text-blue-600 hover:bg-blue-50 p-1.5 rounded-lg transition-colors">
                         <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                       </button>
                     ) : (
                       <>
-                        <button onClick={() => { setEditingId(idea.id); setEditText(idea.text); }} className="text-slate-300 hover:text-blue-600 p-1.5 rounded-none transition-colors" title="Editar"><svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg></button>
-                        <button onClick={() => onConvertToTask(idea)} className="text-slate-300 hover:text-sky-600 p-1.5 rounded-none transition-colors" title="Converter em Ação"><svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 002 2h2a2 2 0 012-2h2a2 2 0 012 2" /></svg></button>
-                        <button onClick={() => { navigator.clipboard.writeText(idea.text).then(() => { setCopiedId(idea.id); setTimeout(() => setCopiedId(null), 2000); }); }} className={`p-1.5 rounded-none transition-colors ${copiedId === idea.id ? 'text-emerald-500 bg-emerald-50' : 'text-slate-300 hover:text-blue-600'}`}>{copiedId === idea.id ? <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg> : <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>}</button>
+                        <button onClick={() => { setEditingId(idea.id); setEditText(idea.text); }} className="text-slate-300 hover:text-blue-600 p-1.5 rounded-lg transition-colors" title="Editar"><svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg></button>
+                        <button onClick={() => onConvertToTask(idea)} className="text-slate-300 hover:text-sky-600 p-1.5 rounded-lg transition-colors" title="Converter em Ação"><svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 002 2h2a2 2 0 012-2h2a2 2 0 012 2" /></svg></button>
+                        <button onClick={() => { navigator.clipboard.writeText(idea.text).then(() => { setCopiedId(idea.id); setTimeout(() => setCopiedId(null), 2000); }); }} className={`p-1.5 rounded-lg transition-colors ${copiedId === idea.id ? 'text-emerald-500 bg-emerald-50' : 'text-slate-300 hover:text-blue-600'}`}>{copiedId === idea.id ? <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg> : <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>}</button>
                       </>
                     )}
-                    <button onClick={() => onArchiveIdea(idea.id)} className="text-emerald-500 hover:bg-emerald-50 p-1.5 rounded-none transition-colors"><svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg></button>
-                    <button onClick={() => { if (confirmDeleteId === idea.id) { onDeleteIdea(idea.id); setConfirmDeleteId(null); } else { setConfirmDeleteId(idea.id); setTimeout(() => setConfirmDeleteId(null), 3000); } }} className={`p-1.5 rounded-none transition-colors ${confirmDeleteId === idea.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-200 hover:text-rose-500'}`}>{confirmDeleteId === idea.id ? <svg className="w-3.5 h-3.5 md:w-4 md:h-4 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}</button>
+                    <button onClick={() => onArchiveIdea(idea.id)} className="text-emerald-500 hover:bg-emerald-50 p-1.5 rounded-lg transition-colors"><svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg></button>
+                    <button onClick={() => { if (confirmDeleteId === idea.id) { onDeleteIdea(idea.id); setConfirmDeleteId(null); } else { setConfirmDeleteId(idea.id); setTimeout(() => setConfirmDeleteId(null), 3000); } }} className={`p-1.5 rounded-lg transition-colors ${confirmDeleteId === idea.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-200 hover:text-rose-500'}`}>{confirmDeleteId === idea.id ? <svg className="w-3.5 h-3.5 md:w-4 md:h-4 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}</button>
                   </div>
                 </div>
 
                 {editingId === idea.id ? (
-                  <AutoExpandingTextarea autoFocus className={`w-full border rounded-none p-4 text-[13px] font-mono font-bold outline-none focus:ring-1 focus:ring-blue-500 min-h-[100px] ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-800'}`} value={editText} onChange={e => setEditText(e.target.value)} />
+                  <AutoExpandingTextarea autoFocus className={`w-full border rounded-lg p-4 text-[13px] font-sans font-semibold outline-none focus:ring-1 focus:ring-blue-500 min-h-[100px] ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-800'}`} value={editText} onChange={e => setEditText(e.target.value)} />
                 ) : (
                   <div className="flex-1">
-                    <p className={`font-mono font-bold leading-relaxed mb-4 text-[13px] ${isDark ? 'text-slate-200' : 'text-slate-800'} ${!expandedCards.has(idea.id) && idea.text.length > 150 ? 'line-clamp-3' : ''}`}>{idea.text}</p>
+                    <p className={`font-sans font-semibold leading-relaxed mb-4 text-[13px] ${isDark ? 'text-slate-200' : 'text-slate-800'} ${!expandedCards.has(idea.id) && idea.text.length > 150 ? 'line-clamp-3' : ''}`}>{idea.text}</p>
                     {idea.text.length > 150 && (
-                      <button onClick={() => toggleCardExpansion(idea.id)} className="text-blue-600 hover:text-blue-700 text-[10px] font-mono font-black uppercase tracking-widest transition-colors flex items-center gap-1">
+                      <button onClick={() => toggleCardExpansion(idea.id)} className="text-blue-600 hover:text-blue-700 text-[10px] font-sans font-bold uppercase tracking-widest transition-colors flex items-center gap-1">
                         {expandedCards.has(idea.id) ? (
                           <>
                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 15l7-7 7 7" /></svg>
@@ -454,9 +454,9 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
               </div>
             ))}
             {activeIdeas.length === 0 && !isProcessing && (
-              <div className={`col-span-full py-16 text-center border border-dashed rounded-none ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                <p className="text-slate-300 font-mono font-black text-xs uppercase tracking-[0.2em]">SISTEMA: VAZIO</p>
-                <p className="text-slate-400 text-[11px] font-medium mt-1 font-mono">Nenhuma entrada detectada no banco de dados.</p>
+              <div className={`col-span-full py-16 text-center border border-dashed rounded-lg ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <p className="text-slate-300 font-sans font-bold text-xs uppercase tracking-[0.2em]">SISTEMA: VAZIO</p>
+                <p className="text-slate-400 text-[11px] font-medium mt-1 font-sans">Nenhuma entrada detectada no banco de dados.</p>
               </div>
             )}
           </div>
@@ -466,7 +466,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
           <button onClick={() => setIsArchivedIdeasOpen(!isArchivedIdeasOpen)} className="w-full flex items-center gap-4 group cursor-pointer">
             <div className={`h-px flex-1 transition-colors ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}></div>
             <div className="flex items-center gap-2 text-slate-400 group-hover:text-slate-600 transition-colors">
-              <h3 className="text-[10px] font-mono font-black uppercase tracking-[0.3em]">Arquivadas</h3>
+              <h3 className="text-[10px] font-sans font-bold uppercase tracking-[0.3em]">Arquivadas</h3>
               <svg className={`w-3 h-3 transition-transform duration-300 ${isArchivedIdeasOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
             </div>
             <div className={`h-px flex-1 transition-colors ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}></div>
@@ -475,22 +475,22 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
           {isArchivedIdeasOpen && (
             <div className={`flex flex-col md:grid md:grid-cols-2 lg:grid-cols-3 gap-0 opacity-60 hover:opacity-100 transition-opacity animate-in slide-in-from-top-4 duration-300 border-l border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               {archivedIdeas.map(idea => (
-                <div key={idea.id} className={`p-5 md:p-6 rounded-none border-r border-b transition-all group flex flex-col relative overflow-hidden -ml-px -mt-px md:m-0 ${isDark ? 'bg-slate-900/50 border-slate-800' : 'bg-slate-50/50 border-slate-200'}`}>
+                <div key={idea.id} className={`p-5 md:p-6 rounded-lg border-r border-b transition-all group flex flex-col relative overflow-hidden -ml-px -mt-px md:m-0 ${isDark ? 'bg-slate-950/50 border-slate-800' : 'bg-slate-50/50 border-slate-200'}`}>
                   <div className="flex items-center justify-between mb-4">
-                    <span className="text-[9px] font-mono font-black text-slate-400 uppercase tracking-widest">{formatDate(idea.timestamp.split('T')[0])}</span>
+                    <span className="text-[9px] font-sans font-bold text-slate-400 uppercase tracking-widest">{formatDate(idea.timestamp.split('T')[0])}</span>
                     <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-all">
-                      <button onClick={() => onArchiveIdea(idea.id)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded-none transition-colors" title="Restaurar"><svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg></button>
-                      <button onClick={() => { if (confirmDeleteId === idea.id) { onDeleteIdea(idea.id); setConfirmDeleteId(null); } else { setConfirmDeleteId(idea.id); setTimeout(() => setConfirmDeleteId(null), 3000); } }} className={`p-1.5 rounded-none transition-colors ${confirmDeleteId === idea.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-300 hover:text-rose-500'}`}>{confirmDeleteId === idea.id ? <svg className="w-3.5 h-3.5 md:w-4 md:h-4 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}</button>
+                      <button onClick={() => onArchiveIdea(idea.id)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded-lg transition-colors" title="Restaurar"><svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg></button>
+                      <button onClick={() => { if (confirmDeleteId === idea.id) { onDeleteIdea(idea.id); setConfirmDeleteId(null); } else { setConfirmDeleteId(idea.id); setTimeout(() => setConfirmDeleteId(null), 3000); } }} className={`p-1.5 rounded-lg transition-colors ${confirmDeleteId === idea.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-300 hover:text-rose-500'}`}>{confirmDeleteId === idea.id ? <svg className="w-3.5 h-3.5 md:w-4 md:h-4 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}</button>
                     </div>
                   </div>
                   <div className="flex-1">
-                    <p className={`font-mono italic leading-relaxed mb-4 text-[13px] line-clamp-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>"{idea.text}"</p>
+                    <p className={`font-sans italic leading-relaxed mb-4 text-[13px] line-clamp-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>"{idea.text}"</p>
                   </div>
                 </div>
               ))}
               {archivedIdeas.length === 0 && (
                 <div className={`col-span-full py-12 text-center border-r border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                  <p className="text-slate-300 font-mono font-black text-[10px] uppercase tracking-widest italic">Vazio</p>
+                  <p className="text-slate-300 font-sans font-bold text-[10px] uppercase tracking-widest italic">Vazio</p>
                 </div>
               )}
             </div>
@@ -499,12 +499,12 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
       </div>
 
       {isAddingText && (
-        <div className={`fixed bottom-24 left-4 right-4 md:left-1/2 md:-translate-x-1/2 w-auto md:w-full md:max-w-2xl z-[110] flex items-center gap-2 animate-in zoom-in-95 slide-in-from-bottom-10 p-3 rounded-none shadow-2xl border ${isDark ? 'bg-slate-900 border-slate-800 shadow-black/60' : 'bg-white border-slate-200'}`}>
-          <button onClick={isRecording ? stopRecording : startRecording} className={`p-4 rounded-none transition-all shadow-xl flex-shrink-0 border ${isRecording ? 'bg-rose-600 text-white animate-pulse shadow-rose-200' : isDark ? 'bg-slate-800 border-slate-700 text-slate-400 hover:text-blue-400' : 'bg-slate-50 border-slate-200 text-slate-400 hover:text-blue-600'}`}>
+        <div className={`fixed bottom-24 left-4 right-4 md:left-1/2 md:-translate-x-1/2 w-auto md:w-full md:max-w-2xl z-[110] flex items-center gap-2 animate-in zoom-in-95 slide-in-from-bottom-10 p-3 rounded-lg shadow-lg border ${isDark ? 'bg-slate-950 border-slate-800 shadow-black/60' : 'bg-white border-slate-200'}`}>
+          <button onClick={isRecording ? stopRecording : startRecording} className={`p-4 rounded-lg transition-all shadow-xl flex-shrink-0 border ${isRecording ? 'bg-rose-600 text-white animate-pulse shadow-rose-200' : isDark ? 'bg-slate-800 border-slate-700 text-slate-400 hover:text-blue-400' : 'bg-slate-50 border-slate-200 text-slate-400 hover:text-blue-600'}`}>
             {isRecording ? <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg> : <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>}
           </button>
-          <input type="text" disabled={isRecording} autoFocus placeholder={isRecording ? "Gravando... Fale agora." : "Digite ou grave sua nota..."} className={`flex-1 border rounded-none px-6 py-4 text-sm font-mono font-bold outline-none transition-all ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-blue-500 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-blue-400'} ${isRecording ? 'opacity-50' : ''}`} value={textInput} onChange={e => setTextInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && textInput.trim()) { onAddTextIdea(textInput); setTextInput(''); setEditingId(null); } }} />
-          <button onClick={() => { if (textInput.trim()) { onAddTextIdea(textInput); setTextInput(''); setIsAddingText(false); } else { setIsAddingText(false); } }} className="bg-blue-600 text-white px-6 h-14 rounded-none hover:bg-blue-700 transition-all flex-shrink-0 font-mono text-[10px] font-black uppercase tracking-widest">
+          <input type="text" disabled={isRecording} autoFocus placeholder={isRecording ? "Gravando... Fale agora." : "Digite ou grave sua nota..."} className={`flex-1 border rounded-lg px-6 py-4 text-sm font-sans font-semibold outline-none transition-all ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-blue-500 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-blue-400'} ${isRecording ? 'opacity-50' : ''}`} value={textInput} onChange={e => setTextInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && textInput.trim()) { onAddTextIdea(textInput); setTextInput(''); setEditingId(null); } }} />
+          <button onClick={() => { if (textInput.trim()) { onAddTextIdea(textInput); setTextInput(''); setIsAddingText(false); } else { setIsAddingText(false); } }} className="bg-blue-600 text-white px-6 h-14 rounded-lg hover:bg-blue-700 transition-all flex-shrink-0 font-sans text-[10px] font-bold uppercase tracking-wider">
             Confirmar
           </button>
         </div>

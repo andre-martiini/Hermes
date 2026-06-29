@@ -247,21 +247,21 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
     return base?.cor ?? null;
   };
 
-  const getHighlightClass = (name?: string) => {
-    if (!name || name === 'NÃO CLASSIFICADA') return '';
-    const baseColor = getBaseColor(name);
-    // If we have a dynamic color, we'll use inline style instead
-    if (baseColor) return '__dynamic__';
-    // Fallback legacy
+  const getAreaAccentColor = (name?: string): string | null => {
+    if (!name) return null;
     const n = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-    if (n.includes('CLC')) return 'bg-blue-100/70 px-1 -mx-1 rounded-sm decoration-clone';
-    if (n.includes('SAUDE')) return 'bg-rose-100/70 px-1 -mx-1 rounded-sm decoration-clone';
-    if (n.includes('FINANCEIRO') || n.includes('FINANCEIRA') || n.includes('FINANCAS')) return 'bg-emerald-100/70 px-1 -mx-1 rounded-sm decoration-clone';
-    if (n.includes('CARREIRA')) return 'bg-blue-100/70 px-1 -mx-1 rounded-sm decoration-clone';
-    if (n.includes('INTELECTUAL')) return 'bg-amber-100/70 px-1 -mx-1 rounded-sm decoration-clone';
-    if (n.includes('ESTILO DE VIDA')) return 'bg-cyan-100/70 px-1 -mx-1 rounded-sm decoration-clone';
-    if (n.includes('ASSISTENCIA') || n.includes('ESTUDANTIL')) return 'bg-purple-100/70 px-1 -mx-1 rounded-sm decoration-clone';
-    return '';
+    if (n === 'NAO CLASSIFICADA') return null;
+    const baseColor = getBaseColor(name);
+    if (baseColor) return baseColor;
+    if (n.includes('CLC')) return '#e11d48';
+    if (n.includes('SAUDE')) return '#e11d48';
+    if (n.includes('FINANCEIRO') || n.includes('FINANCEIRA') || n.includes('FINANCAS')) return '#10b981';
+    if (n.includes('CARREIRA')) return '#2563eb';
+    if (n.includes('INTELECTUAL')) return '#d97706';
+    if (n.includes('ESTILO DE VIDA')) return '#0891b2';
+    if (n.includes('ASSISTENCIA') || n.includes('ESTUDANTIL')) return '#9333ea';
+    if (n.includes('SISTEMA')) return '#2563eb';
+    return null;
   };
 
   const getTagStyle = (name: string): { className: string; style?: React.CSSProperties } => {
@@ -288,7 +288,14 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
     return { className: 'bg-slate-50 text-slate-500 border-slate-100' };
   };
 
-  const highlightClass = getHighlightClass(task.area_tematica);
+  const areaAccentColor = !isCompleted ? getAreaAccentColor(task.area_tematica) : null;
+  const rowAccentStyle: React.CSSProperties | undefined = areaAccentColor
+    ? {
+        background: isDark
+          ? `linear-gradient(90deg, ${areaAccentColor}2e 0%, ${areaAccentColor}14 34%, rgba(15, 23, 42, 0) 78%)`
+          : `linear-gradient(90deg, ${areaAccentColor}18 0%, ${areaAccentColor}0c 36%, rgba(255, 255, 255, 0) 82%)`,
+      }
+    : undefined;
 
   const dateDisplay = formatDateShort(task.data_limite);
   const canSynthesizeDescription = isBlankTaskDescription(task.descricao) && hasDescriptionSynthesisContext(task);
@@ -334,8 +341,16 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
         e.dataTransfer.setData('task-id', task.id);
         e.dataTransfer.effectAllowed = 'move';
       }}
-      className={`group w-full border-b transition-all flex flex-col animate-in relative ${isEditingDateTime ? 'z-[1000]' : 'z-auto'} ${isDark ? 'border-white/10' : 'border-border-grid'} ${isCompleted ? 'opacity-60 grayscale-[0.35]' : ''} ${highlighted ? (isDark ? 'bg-white/10 border-l-2 border-l-accent-tactile' : 'bg-surface-container border-l-2 border-l-primary-tactile') : 'bg-transparent'}`}
+      style={rowAccentStyle}
+      className={`group w-full border-b transition-all flex flex-col animate-in relative overflow-hidden ${isEditingDateTime ? 'z-[1000]' : 'z-auto'} ${isDark ? 'border-white/10' : 'border-[#e5e7eb]'} ${isCompleted ? 'opacity-60 grayscale-[0.35]' : ''} ${highlighted && !areaAccentColor ? (isDark ? 'bg-white/10 border-l-2 border-l-[#a855f7]' : 'bg-slate-50 border-l-2 border-l-[#7800ce]') : 'bg-transparent'}`}
     >
+      {areaAccentColor && (
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-0 left-0 w-1"
+          style={{ backgroundColor: areaAccentColor }}
+        />
+      )}
       <div
         onClick={() => setIsExpanded(!isExpanded)}
         onMouseLeave={() => setIsConfirmingDelete(false)}
@@ -352,9 +367,9 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
                 setIsConfirmingDelete(true);
               }
             }}
-            className={`p-1.5 transition-all flex items-center gap-1.5 rounded-none font-mono text-[9px] font-black uppercase ${
+            className={`p-1.5 transition-all flex items-center gap-1.5 rounded-lg font-sans text-[9px] font-bold uppercase ${
               isConfirmingDelete
-                ? 'bg-rose-600 text-white px-2.5 shadow-soft-touch opacity-100'
+                ? 'bg-rose-600 text-white px-2.5 shadow-sm opacity-100'
                 : `${isDark ? 'text-slate-500 hover:text-rose-400 hover:bg-white/5' : 'text-slate-400 hover:text-rose-600 hover:bg-slate-100'}`
             }`}
             title={isConfirmingDelete ? "Confirmar exclusão" : "Excluir ação"}
@@ -387,7 +402,7 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
             e.stopPropagation();
             onToggle(task.id, task.status);
           }}
-          className={`w-5 h-5 rounded-none border flex items-center justify-center transition-all flex-shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white shadow-soft-touch' : 'border-border-grid hover:border-primary-tactile'} text-transparent`}
+          className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all flex-shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white shadow-sm' : 'border-slate-300 dark:border-white/10 hover:border-primary-tactile'} text-transparent`}
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" /></svg>
         </button>
@@ -395,8 +410,8 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
         <div className="flex flex-col gap-1 flex-1 min-w-0">
           {highlighted && !isCompleted && (
             <div className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-none bg-primary-tactile"></span>
-              <span className={`text-[9px] font-black uppercase tracking-widest font-mono ${isDark ? 'text-accent-tactile' : 'text-primary-tactile'}`}>Próxima Ação</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-primary-tactile"></span>
+              <span className={`text-[9px] font-bold uppercase tracking-wider font-sans ${isDark ? 'text-accent-tactile' : 'text-primary-tactile'}`}>Próxima Ação</span>
             </div>
           )}
           <div
@@ -404,22 +419,9 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
               e.stopPropagation();
               onClick?.();
             }}
-            className={`cursor-pointer hover:underline decoration-1 ${highlighted ? `text-[15px] md:text-lg font-black` : `text-[13px] md:text-[15px] font-medium`} leading-snug transition-colors whitespace-normal break-words font-mono ${isCompleted ? 'line-through text-slate-400' : ''}`}
+            className={`cursor-pointer hover:underline decoration-1 ${highlighted ? `text-[15px] md:text-lg font-bold` : `text-[13px] md:text-[15px] font-medium`} leading-snug transition-colors whitespace-normal break-words font-sans ${isCompleted ? 'line-through text-slate-400' : ''}`}
           >
-            {highlightClass === '__dynamic__' ? (
-              <span style={{
-                backgroundColor: `${getBaseColor(task.area_tematica)}${isDark ? '35' : '18'}`,
-                ...(isDark ? { color: getBaseColor(task.area_tematica) ?? undefined } : {}),
-                padding: '0 3px',
-                margin: '0 -3px'
-              }}>
-                {task.titulo}
-              </span>
-            ) : highlightClass ? (
-              <span className={isDark ? '' : highlightClass}>
-                {task.titulo}
-              </span>
-            ) : task.titulo}
+            {task.titulo}
           </div>
         </div>
       </div>
@@ -429,11 +431,11 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
         <div className="flex items-center gap-2 flex-wrap">
           {task.area_tematica && task.area_tematica !== 'NÃO CLASSIFICADA' && (() => {
             const tagStyle = isDark
-              ? { className: 'bg-white/10 text-white border-white/10', style: undefined }
+              ? { className: 'bg-white/10 text-white border-white/10 rounded-full', style: undefined }
               : getTagStyle(task.area_tematica);
             return (
               <span
-                className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-none border font-mono uppercase ${tagStyle.className}`}
+                className={`text-[8px] md:text-[9px] font-bold px-2 py-0.5 rounded-full border font-sans uppercase ${tagStyle.className}`}
                 style={tagStyle.style}
               >
                 {task.area_tematica.replace('SISTEMA:', '').trim()}
@@ -449,7 +451,7 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
               e.stopPropagation();
               setIsEditingDateTime(!isEditingDateTime);
             }}
-            className={`flex items-center gap-1.5 font-black uppercase text-[9px] md:text-[10px] tracking-widest min-w-[65px] font-mono transition-all px-2 py-1 -mx-2 -my-1 border border-transparent hover:border-primary-tactile/30 hover:bg-primary-tactile/5 hover:text-primary-tactile ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+            className={`flex items-center gap-1.5 font-bold uppercase text-[9px] md:text-[10px] tracking-wider min-w-[65px] font-sans transition-all px-2.5 py-1.5 -mx-2.5 -my-1.5 border border-transparent rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
           >
             <svg className="w-3 h-3 md:w-3.5 md:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
             <span>{dateDisplay} {task.horario_inicio ? `• ${task.horario_inicio}` : ''}</span>
@@ -485,25 +487,25 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
                 {/* Inputs Section */}
                 <div className="flex flex-col gap-4 py-2">
                   <div className="space-y-1.5">
-                    <label className={`text-xs font-black uppercase tracking-widest font-mono block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Reagendar Prazo (Data Limite)</label>
+                    <label className={`text-[10px] font-bold uppercase tracking-wider font-sans block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Reagendar Prazo (Data Limite)</label>
                     <input 
                       type="date"
                       min={getTodayIso()}
                       value={localDate}
                       onChange={(e) => setLocalDate(e.target.value)}
                       style={{ colorScheme: isDark ? 'dark' : 'light' }}
-                      className={`w-full border px-3 py-2.5 text-xs font-black font-mono focus:ring-1 focus:ring-primary-tactile outline-none transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-50 border-border-grid text-slate-900'}`}
+                      className={`w-full border rounded-lg px-3 py-2 text-xs font-medium font-sans focus:ring-1 focus:ring-[#7800ce] outline-none transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-50 border-[#e5e7eb] text-slate-900'}`}
                     />
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className={`text-xs font-black uppercase tracking-widest font-mono block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Horário Previsto</label>
+                    <label className={`text-[10px] font-bold uppercase tracking-wider font-sans block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Horário Previsto</label>
                     <input 
                       type="time"
                       value={localTime}
                       onChange={(e) => setLocalTime(e.target.value)}
                       style={{ colorScheme: isDark ? 'dark' : 'light' }}
-                      className={`w-full border px-3 py-2.5 text-xs font-black font-mono focus:ring-1 focus:ring-primary-tactile outline-none transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-50 border-border-grid text-slate-900'}`}
+                      className={`w-full border rounded-lg px-3 py-2 text-xs font-medium font-sans focus:ring-1 focus:ring-[#7800ce] outline-none transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-50 border-[#e5e7eb] text-slate-900'}`}
                     />
                   </div>
                 </div>
@@ -513,13 +515,13 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
                   <div className="grid grid-cols-2 gap-3">
                     <button 
                       onClick={(e) => { e.stopPropagation(); handleQuickDate('today'); }}
-                      className={`py-3 text-xs font-black uppercase tracking-widest transition-colors border ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 border-slate-200 hover:bg-slate-200 text-slate-800'}`}
+                      className={`py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors border ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 border-slate-200 hover:bg-slate-200 text-slate-800'}`}
                     >
                       Hoje
                     </button>
                     <button 
                       onClick={(e) => { e.stopPropagation(); handleQuickDate('tomorrow'); }}
-                      className={`py-3 text-xs font-black uppercase tracking-widest transition-colors border ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 border-slate-200 hover:bg-slate-200 text-slate-800'}`}
+                      className={`py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors border ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 border-slate-200 hover:bg-slate-200 text-slate-800'}`}
                     >
                       Amanhã
                     </button>
@@ -527,7 +529,7 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
 
                   <button 
                     onClick={(e) => { e.stopPropagation(); handleConfirmReschedule(); }}
-                    className={`w-full py-3.5 text-xs font-black uppercase tracking-widest transition-colors shadow-soft-touch ${isDark ? 'bg-primary-tactile hover:bg-primary-tactile/80 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}
+                    className={`w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors shadow-sm ${isDark ? 'bg-[#7800ce] hover:bg-[#9333ea] text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}
                   >
                     Concluir Reagendamento
                   </button>

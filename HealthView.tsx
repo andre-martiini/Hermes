@@ -93,23 +93,23 @@ const DEFAULT_HEALTH_REMINDERS: HealthTelegramReminder[] = [
 // --- COMPONENTS ---
 
 const IndustrialHUDCard = ({ label, value, unit, trend, colorClass, icon }: { label: string, value: string | number, unit?: string, trend?: string, colorClass: string, icon?: React.ReactNode }) => (
-    <div className="bg-surface border-r border-border-grid p-6 flex flex-col justify-center relative overflow-hidden group">
+    <div className="bg-surface border-r border-[#e5e7eb] dark:border-white/10 p-6 flex flex-col justify-center relative overflow-hidden group">
         <div className={`absolute top-0 left-0 w-full h-0.5 ${colorClass} opacity-20 group-hover:opacity-100 transition-opacity`}></div>
         <div className="absolute -right-2 -top-2 opacity-[0.03] group-hover:opacity-[0.07] transition-opacity">
             {icon || <svg className="w-24 h-24" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L1 21h22L12 2z"/></svg>}
         </div>
         
-        <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.3em] mb-2">// {label}</span>
+        <span className="text-[10px] font-sans font-semibold text-slate-400 uppercase tracking-[0.3em] mb-2">// {label}</span>
         <div className="flex items-baseline gap-2 relative z-10">
-            <span className="text-4xl font-mono font-bold text-on-surface tracking-tighter animate-in slide-in-from-left-4">
+            <span className="text-4xl font-sans font-semibold text-on-surface tracking-tighter animate-in slide-in-from-left-4">
                 {value}
             </span>
-            {unit && <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">{unit}</span>}
+            {unit && <span className="text-[10px] font-sans font-semibold text-slate-400 uppercase tracking-widest">{unit}</span>}
         </div>
         {trend && (
             <div className="mt-2 flex items-center gap-1.5">
                 <div className={`w-1.5 h-1.5 rounded-full ${trend.startsWith('+') ? 'bg-rose-500' : 'bg-emerald-500'} animate-pulse`}></div>
-                <span className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest">{trend}</span>
+                <span className="text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-widest">{trend}</span>
             </div>
         )}
     </div>
@@ -119,15 +119,15 @@ const HealthSection = ({ title, children, iconColor, defaultExpanded = true, tec
     const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
     return (
-        <div className="bg-surface p-6 md:p-10 rounded-none border border-border-grid shadow-none relative overflow-hidden">
+        <div className="bg-surface p-6 md:p-10 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none relative overflow-hidden">
             <div className={`absolute top-0 left-0 w-1 h-full ${iconColor} opacity-50`}></div>
             
             <button onClick={() => setIsExpanded(!isExpanded)} className="w-full flex items-center justify-between group/btn">
                 <div className="flex flex-col items-start gap-1">
-                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.3em]">// {techNode}</span>
-                    <h3 className="text-2xl font-mono font-bold text-on-surface tracking-tight text-left">{title}</h3>
+                    <span className="text-[10px] font-sans font-semibold text-slate-400 uppercase tracking-[0.3em]">// {techNode}</span>
+                    <h3 className="text-2xl font-sans font-semibold text-on-surface tracking-tight text-left">{title}</h3>
                 </div>
-                <div className={`w-8 h-8 rounded-soft-touch border border-border-grid flex items-center justify-center transition-all ${isExpanded ? 'bg-on-surface text-surface' : 'bg-surface text-slate-300 hover:text-on-surface'}`}>
+                <div className={`w-8 h-8 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 flex items-center justify-center transition-all ${isExpanded ? 'bg-on-surface text-surface' : 'bg-surface text-slate-300 hover:text-on-surface'}`}>
                     <svg className={`w-4 h-4 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
                     </svg>
@@ -158,14 +158,14 @@ const NumberEntryCard = ({
     colorClass: string;
     onCommit: (value: number) => void;
 }) => (
-    <div className="bg-slate-50 p-6 border border-border-grid flex flex-col gap-4">
+    <div className="bg-slate-50 p-6 border border-[#e5e7eb] dark:border-white/10 flex flex-col gap-4">
         <div>
-            <span className={`text-[9px] font-mono font-bold uppercase tracking-widest ${colorClass}`}>// {label}</span>
-            <div className="text-3xl font-mono font-bold mt-1">{value}<span className="text-xs text-slate-400 ml-2">{unit}</span></div>
+            <span className={`text-[9px] font-sans font-semibold uppercase tracking-widest ${colorClass}`}>// {label}</span>
+            <div className="text-3xl font-sans font-semibold mt-1">{value}<span className="text-xs text-slate-400 ml-2">{unit}</span></div>
         </div>
         <input
             type="number"
-            className="bg-white border border-border-grid px-4 py-2 text-xs font-mono font-bold w-full outline-none focus:ring-1 focus:ring-sky-500"
+            className="bg-white border border-[#e5e7eb] dark:border-white/10 px-4 py-2 text-xs font-sans font-semibold w-full outline-none focus:ring-1 focus:ring-sky-500"
             placeholder={placeholder}
             onKeyDown={e => {
                 if (e.key === 'Enter') {
@@ -223,7 +223,7 @@ const HealthView: React.FC<HealthViewProps> = ({
         <div className={`health-view min-h-screen bg-surface ${isDark ? 'health-view-dark' : ''} pb-20`}>
             
             {/* 1. HUD: REAL-TIME TELEMETRY READOUT */}
-            <div className="grid grid-cols-1 md:grid-cols-4 border-b border-border-grid">
+            <div className="grid grid-cols-1 md:grid-cols-4 border-b border-[#e5e7eb] dark:border-white/10">
                 <IndustrialHUDCard 
                     label="CURRENT_MASS" 
                     value={currentWeight ? currentWeight.toFixed(1) : '--.-'} 
@@ -259,13 +259,13 @@ const HealthView: React.FC<HealthViewProps> = ({
             </div>
 
             {/* 2. NAVIGATION STRIP */}
-            <div className="bg-slate-50 border-b border-border-grid px-6 py-3 flex items-center justify-between">
+            <div className="bg-slate-50 border-b border-[#e5e7eb] dark:border-white/10 px-6 py-3 flex items-center justify-between">
                 <div className="flex gap-4">
                     {['telemetry', 'archive'].map(tab => (
                         <button 
                             key={tab}
                             onClick={() => setActiveTab(tab as any)}
-                            className={`text-[10px] font-mono font-bold uppercase tracking-[0.2em] px-4 py-2 transition-all ${activeTab === tab ? 'bg-on-surface text-surface' : 'text-slate-400 hover:text-on-surface'}`}
+                            className={`text-[10px] font-sans font-semibold uppercase tracking-[0.2em] px-4 py-2 transition-all ${activeTab === tab ? 'bg-on-surface text-surface' : 'text-slate-400 hover:text-on-surface'}`}
                         >
                             {tab}_NODE
                         </button>
@@ -276,7 +276,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                         type="date" 
                         value={selectedDate} 
                         onChange={e => setSelectedDate(e.target.value)}
-                        className="bg-transparent border border-border-grid px-3 py-1.5 text-[10px] font-mono font-bold text-on-surface outline-none"
+                        className="bg-transparent border border-[#e5e7eb] dark:border-white/10 px-3 py-1.5 text-[10px] font-sans font-semibold text-on-surface outline-none"
                     />
                 </div>
             </div>
@@ -311,11 +311,11 @@ const HealthView: React.FC<HealthViewProps> = ({
                                         <button
                                             key={habit.key}
                                             onClick={() => onUpdateHabits(selectedDate, { [habit.key]: !currentHabits[habit.key as keyof DailyHabits] })}
-                                            className={`p-4 border transition-all flex items-center justify-between group ${currentHabits[habit.key as keyof DailyHabits] ? 'bg-accent-tactile border-accent-tactile text-white' : 'bg-surface border-border-grid text-on-surface hover:border-accent-tactile'}`}
+                                            className={`p-4 border transition-all flex items-center justify-between group ${currentHabits[habit.key as keyof DailyHabits] ? 'bg-accent-tactile border-accent-tactile text-white' : 'bg-surface border-[#e5e7eb] dark:border-white/10 text-on-surface hover:border-accent-tactile'}`}
                                         >
                                             <div className="flex items-center gap-4">
                                                 <span className="text-xl">{habit.icon}</span>
-                                                <span className="text-[10px] font-mono font-bold uppercase tracking-[0.2em]">{habit.label}</span>
+                                                <span className="text-[10px] font-sans font-semibold uppercase tracking-[0.2em]">{habit.label}</span>
                                             </div>
                                             <div className={`w-4 h-4 border-2 flex items-center justify-center ${currentHabits[habit.key as keyof DailyHabits] ? 'bg-white border-white' : 'border-slate-200'}`}>
                                                 {currentHabits[habit.key as keyof DailyHabits] && <svg className="w-3 h-3 text-accent-tactile" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>}
@@ -329,7 +329,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                 <div className="grid grid-cols-7 gap-1">
                                     {/* Simplified Heatmap Logic */}
                                     {Array.from({ length: 31 }).map((_, i) => (
-                                        <div key={i} className="aspect-square bg-slate-50 border border-border-grid flex items-center justify-center text-[8px] font-mono font-bold text-slate-300">
+                                        <div key={i} className="aspect-square bg-slate-50 border border-[#e5e7eb] dark:border-white/10 flex items-center justify-center text-[8px] font-sans font-semibold text-slate-300">
                                             {String(i + 1).padStart(2, '0')}
                                         </div>
                                     ))}
@@ -339,15 +339,15 @@ const HealthView: React.FC<HealthViewProps> = ({
                             <HealthSection title="Spine_Routine" techNode="LOMBAR_GUIDE" iconColor="bg-violet-500" defaultExpanded={false}>
                                 <div className="space-y-3">
                                     {SPINE_ROUTINE.map(item => (
-                                        <div key={item.name} className="border border-border-grid bg-slate-50 p-4">
+                                        <div key={item.name} className="border border-[#e5e7eb] dark:border-white/10 bg-slate-50 p-4">
                                             <div className="flex items-center justify-between gap-3">
-                                                <span className="text-xs font-mono font-bold text-on-surface uppercase">{item.name}</span>
-                                                <span className="text-[9px] font-mono font-bold text-violet-600 uppercase tracking-widest">{item.timing}</span>
+                                                <span className="text-xs font-sans font-semibold text-on-surface uppercase">{item.name}</span>
+                                                <span className="text-[9px] font-sans font-semibold text-violet-600 uppercase tracking-widest">{item.timing}</span>
                                             </div>
                                             <p className="mt-2 text-xs leading-relaxed text-slate-500">{item.detail}</p>
                                         </div>
                                     ))}
-                                    <p className="text-[10px] leading-relaxed text-slate-400 font-mono">
+                                    <p className="text-[10px] leading-relaxed text-slate-400 font-sans">
                                         Guia informativo: faça sem dor aguda, sem prender a respiração e interrompa se houver irradiação, choque ou piora clara.
                                     </p>
                                 </div>
@@ -356,7 +356,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                             <HealthSection title="Telegram_Reminders" techNode="HEALTH_PROMPTS" iconColor="bg-emerald-500" defaultExpanded={false}>
                                 <div className="space-y-3">
                                     {activeReminders.map(reminder => (
-                                        <div key={reminder.id} className="border border-border-grid bg-slate-50 p-4 flex items-start gap-3">
+                                        <div key={reminder.id} className="border border-[#e5e7eb] dark:border-white/10 bg-slate-50 p-4 flex items-start gap-3">
                                             <input
                                                 type="checkbox"
                                                 checked={reminder.enabled}
@@ -368,24 +368,24 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                     <input
                                                         value={reminder.title}
                                                         onChange={e => onSaveTelegramReminder({ ...reminder, title: e.target.value })}
-                                                        className="bg-transparent text-xs font-mono font-bold uppercase text-on-surface outline-none w-full"
+                                                        className="bg-transparent text-xs font-sans font-semibold uppercase text-on-surface outline-none w-full"
                                                     />
                                                     <input
                                                         type="time"
                                                         value={reminder.time}
                                                         onChange={e => onSaveTelegramReminder({ ...reminder, time: e.target.value })}
-                                                        className="bg-white border border-border-grid px-2 py-1 text-[10px] font-mono font-bold"
+                                                        className="bg-white border border-[#e5e7eb] dark:border-white/10 px-2 py-1 text-[10px] font-sans font-semibold"
                                                     />
                                                 </div>
                                                 <textarea
                                                     value={reminder.message}
                                                     onChange={e => onSaveTelegramReminder({ ...reminder, message: e.target.value })}
-                                                    className="mt-2 w-full bg-white border border-border-grid p-2 text-xs text-slate-600 outline-none min-h-[58px]"
+                                                    className="mt-2 w-full bg-white border border-[#e5e7eb] dark:border-white/10 p-2 text-xs text-slate-600 outline-none min-h-[58px]"
                                                 />
                                                 <div className="mt-2 flex items-center justify-between">
-                                                    <span className="text-[9px] font-mono font-bold uppercase text-slate-400">Telegram only</span>
+                                                    <span className="text-[9px] font-sans font-semibold uppercase text-slate-400">Telegram only</span>
                                                     {!DEFAULT_HEALTH_REMINDERS.some(item => item.id === reminder.id) && (
-                                                        <button onClick={() => onDeleteTelegramReminder(reminder.id)} className="text-[9px] font-mono font-bold uppercase text-rose-500">remover</button>
+                                                        <button onClick={() => onDeleteTelegramReminder(reminder.id)} className="text-[9px] font-sans font-semibold uppercase text-rose-500">remover</button>
                                                     )}
                                                 </div>
                                             </div>
@@ -402,7 +402,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                             category: 'custom',
                                             telegramOnly: true,
                                         })}
-                                        className="w-full border border-dashed border-border-grid p-3 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 hover:text-on-surface hover:border-on-surface transition-colors"
+                                        className="w-full border border-dashed border-[#e5e7eb] dark:border-white/10 p-3 text-[10px] font-sans font-semibold uppercase tracking-widest text-slate-500 hover:text-on-surface hover:border-on-surface transition-colors"
                                     >
                                         Adicionar lembrete Telegram
                                     </button>
@@ -414,31 +414,31 @@ const HealthView: React.FC<HealthViewProps> = ({
                         <div className="lg:col-span-2 space-y-10">
                             <HealthSection title="Walking_Core" techNode="PRIMARY_METRIC" iconColor="bg-sky-500">
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div className="md:col-span-2 bg-slate-50 border border-border-grid p-6">
+                                    <div className="md:col-span-2 bg-slate-50 border border-[#e5e7eb] dark:border-white/10 p-6">
                                         <div className="flex items-end justify-between gap-4 mb-4">
                                             <div>
-                                                <span className="text-[9px] font-mono font-bold text-sky-600 uppercase tracking-widest">// WALKING_MINUTES</span>
-                                                <div className="text-5xl font-mono font-bold mt-1">{walkingMinutes}<span className="text-xs text-slate-400 ml-2">/ {walkingIdeal} MIN</span></div>
+                                                <span className="text-[9px] font-sans font-semibold text-sky-600 uppercase tracking-widest">// WALKING_MINUTES</span>
+                                                <div className="text-5xl font-sans font-semibold mt-1">{walkingMinutes}<span className="text-xs text-slate-400 ml-2">/ {walkingIdeal} MIN</span></div>
                                             </div>
-                                            <span className="text-[10px] font-mono font-bold uppercase text-slate-400">{todayLog.walk?.steps?.toLocaleString() || 0} passos</span>
+                                            <span className="text-[10px] font-sans font-semibold uppercase text-slate-400">{todayLog.walk?.steps?.toLocaleString() || 0} passos</span>
                                         </div>
-                                        <div className="h-3 bg-white border border-border-grid overflow-hidden">
+                                        <div className="h-3 bg-white border border-[#e5e7eb] dark:border-white/10 overflow-hidden">
                                             <div className="h-full bg-sky-500 transition-all" style={{ width: `${walkingProgress}%` }} />
                                         </div>
-                                        <div className="mt-3 flex items-center justify-between text-[10px] font-mono font-bold uppercase text-slate-400">
+                                        <div className="mt-3 flex items-center justify-between text-[10px] font-sans font-semibold uppercase text-slate-400">
                                             <span>Mínimo: {walkingMinimum} min</span>
                                             <span>Ideal: {walkingIdeal} min</span>
                                             <span>{todayLog.walk?.distance?.toFixed(1) || '0.0'} km</span>
                                         </div>
                                     </div>
-                                    <div className="bg-slate-50 border border-border-grid p-6 space-y-3">
+                                    <div className="bg-slate-50 border border-[#e5e7eb] dark:border-white/10 p-6 space-y-3">
                                         <label className="block">
-                                            <span className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest">mínimo</span>
-                                            <input type="number" value={walkingMinimum} onChange={e => onUpdateSettings({ ...settings, walkingMinimumMinutes: parseInt(e.target.value) || 0 })} className="mt-1 w-full bg-white border border-border-grid px-3 py-2 text-xs font-mono font-bold" />
+                                            <span className="text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-widest">mínimo</span>
+                                            <input type="number" value={walkingMinimum} onChange={e => onUpdateSettings({ ...settings, walkingMinimumMinutes: parseInt(e.target.value) || 0 })} className="mt-1 w-full bg-white border border-[#e5e7eb] dark:border-white/10 px-3 py-2 text-xs font-sans font-semibold" />
                                         </label>
                                         <label className="block">
-                                            <span className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest">ideal</span>
-                                            <input type="number" value={walkingIdeal} onChange={e => onUpdateSettings({ ...settings, walkingIdealMinutes: parseInt(e.target.value) || 0 })} className="mt-1 w-full bg-white border border-border-grid px-3 py-2 text-xs font-mono font-bold" />
+                                            <span className="text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-widest">ideal</span>
+                                            <input type="number" value={walkingIdeal} onChange={e => onUpdateSettings({ ...settings, walkingIdealMinutes: parseInt(e.target.value) || 0 })} className="mt-1 w-full bg-white border border-[#e5e7eb] dark:border-white/10 px-3 py-2 text-xs font-sans font-semibold" />
                                         </label>
                                     </div>
                                 </div>
@@ -446,28 +446,28 @@ const HealthView: React.FC<HealthViewProps> = ({
 
                             <HealthSection title="Pain_Checkin" techNode="LOMBAR_SIGNAL" iconColor="bg-orange-500">
                                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                    <label className="bg-slate-50 border border-border-grid p-4">
-                                        <span className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest">manhã</span>
-                                        <input type="number" min="0" max="10" value={todayLog.pain?.morning ?? ''} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, morning: parseInt(e.target.value) || 0 } })} className="mt-2 w-full bg-white border border-border-grid px-3 py-2 text-xs font-mono font-bold" />
+                                    <label className="bg-slate-50 border border-[#e5e7eb] dark:border-white/10 p-4">
+                                        <span className="text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-widest">manhã</span>
+                                        <input type="number" min="0" max="10" value={todayLog.pain?.morning ?? ''} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, morning: parseInt(e.target.value) || 0 } })} className="mt-2 w-full bg-white border border-[#e5e7eb] dark:border-white/10 px-3 py-2 text-xs font-sans font-semibold" />
                                     </label>
-                                    <label className="bg-slate-50 border border-border-grid p-4">
-                                        <span className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest">noite</span>
-                                        <input type="number" min="0" max="10" value={todayLog.pain?.evening ?? ''} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, evening: parseInt(e.target.value) || 0 } })} className="mt-2 w-full bg-white border border-border-grid px-3 py-2 text-xs font-mono font-bold" />
+                                    <label className="bg-slate-50 border border-[#e5e7eb] dark:border-white/10 p-4">
+                                        <span className="text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-widest">noite</span>
+                                        <input type="number" min="0" max="10" value={todayLog.pain?.evening ?? ''} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, evening: parseInt(e.target.value) || 0 } })} className="mt-2 w-full bg-white border border-[#e5e7eb] dark:border-white/10 px-3 py-2 text-xs font-sans font-semibold" />
                                     </label>
-                                    <button onClick={() => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, sciatica: !todayLog.pain?.sciatica } })} className={`border border-border-grid p-4 text-left ${todayLog.pain?.sciatica ? 'bg-orange-500 text-white' : 'bg-slate-50 text-on-surface'}`}>
-                                        <span className="text-[9px] font-mono font-bold uppercase tracking-widest">ciática</span>
-                                        <div className="text-xs font-mono font-bold mt-2">{todayLog.pain?.sciatica ? 'SIM' : 'NÃO'}</div>
+                                    <button onClick={() => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, sciatica: !todayLog.pain?.sciatica } })} className={`border border-[#e5e7eb] dark:border-white/10 p-4 text-left ${todayLog.pain?.sciatica ? 'bg-orange-500 text-white' : 'bg-slate-50 text-on-surface'}`}>
+                                        <span className="text-[9px] font-sans font-semibold uppercase tracking-widest">ciática</span>
+                                        <div className="text-xs font-sans font-semibold mt-2">{todayLog.pain?.sciatica ? 'SIM' : 'NÃO'}</div>
                                     </button>
-                                    <button onClick={() => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, crisis: !todayLog.pain?.crisis } })} className={`border border-border-grid p-4 text-left ${todayLog.pain?.crisis ? 'bg-rose-500 text-white' : 'bg-slate-50 text-on-surface'}`}>
-                                        <span className="text-[9px] font-mono font-bold uppercase tracking-widest">crise</span>
-                                        <div className="text-xs font-mono font-bold mt-2">{todayLog.pain?.crisis ? 'SIM' : 'NÃO'}</div>
+                                    <button onClick={() => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, crisis: !todayLog.pain?.crisis } })} className={`border border-[#e5e7eb] dark:border-white/10 p-4 text-left ${todayLog.pain?.crisis ? 'bg-rose-500 text-white' : 'bg-slate-50 text-on-surface'}`}>
+                                        <span className="text-[9px] font-sans font-semibold uppercase tracking-widest">crise</span>
+                                        <div className="text-xs font-sans font-semibold mt-2">{todayLog.pain?.crisis ? 'SIM' : 'NÃO'}</div>
                                     </button>
                                 </div>
                                 <textarea
                                     value={todayLog.pain?.notes || ''}
                                     onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, notes: e.target.value } })}
                                     placeholder="NOTA_CURTA_OPCIONAL"
-                                    className="mt-4 w-full bg-slate-50 border border-border-grid p-3 text-xs text-slate-600 outline-none min-h-[72px]"
+                                    className="mt-4 w-full bg-slate-50 border border-[#e5e7eb] dark:border-white/10 p-3 text-xs text-slate-600 outline-none min-h-[72px]"
                                 />
                             </HealthSection>
                             
@@ -475,17 +475,17 @@ const HealthView: React.FC<HealthViewProps> = ({
                             <HealthSection title="Training_Grounds" techNode="PHYSICAL_OUTPUT" iconColor="bg-rose-500">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     {/* Pushups Control */}
-                                    <div className="bg-slate-50 p-6 border border-border-grid flex flex-col gap-4">
+                                    <div className="bg-slate-50 p-6 border border-[#e5e7eb] dark:border-white/10 flex flex-col gap-4">
                                         <div className="flex justify-between items-start">
                                             <div>
-                                                <span className="text-[9px] font-mono font-bold text-emerald-600 uppercase tracking-widest">// PUSHUPS</span>
-                                                <div className="text-3xl font-mono font-bold mt-1">{todayLog.pushups?.done || 0}<span className="text-xs text-slate-400 ml-2">/ {exerciseSettings.pushups?.activeGoal || '--'}</span></div>
+                                                <span className="text-[9px] font-sans font-semibold text-emerald-600 uppercase tracking-widest">// PUSHUPS</span>
+                                                <div className="text-3xl font-sans font-semibold mt-1">{todayLog.pushups?.done || 0}<span className="text-xs text-slate-400 ml-2">/ {exerciseSettings.pushups?.activeGoal || '--'}</span></div>
                                             </div>
                                         </div>
                                         <div className="flex gap-2">
                                             <input 
                                                 type="number" 
-                                                className="bg-white border border-border-grid px-4 py-2 text-xs font-mono font-bold w-full outline-none focus:ring-1 focus:ring-emerald-500" 
+                                                className="bg-white border border-[#e5e7eb] dark:border-white/10 px-4 py-2 text-xs font-sans font-semibold w-full outline-none focus:ring-1 focus:ring-emerald-500" 
                                                 placeholder="SET_COUNT"
                                                 onKeyDown={e => {
                                                     if (e.key === 'Enter') {
@@ -499,17 +499,17 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     </div>
 
                                     {/* Pullups Control */}
-                                    <div className="bg-slate-50 p-6 border border-border-grid flex flex-col gap-4">
+                                    <div className="bg-slate-50 p-6 border border-[#e5e7eb] dark:border-white/10 flex flex-col gap-4">
                                         <div className="flex justify-between items-start">
                                             <div>
-                                                <span className="text-[9px] font-mono font-bold text-violet-600 uppercase tracking-widest">// PULLUPS</span>
-                                                <div className="text-3xl font-mono font-bold mt-1">{todayLog.pullups?.done || 0}<span className="text-xs text-slate-400 ml-2">/ {exerciseSettings.pullups?.activeGoal || '--'}</span></div>
+                                                <span className="text-[9px] font-sans font-semibold text-violet-600 uppercase tracking-widest">// PULLUPS</span>
+                                                <div className="text-3xl font-sans font-semibold mt-1">{todayLog.pullups?.done || 0}<span className="text-xs text-slate-400 ml-2">/ {exerciseSettings.pullups?.activeGoal || '--'}</span></div>
                                             </div>
                                         </div>
                                         <div className="flex gap-2">
                                             <input 
                                                 type="number" 
-                                                className="bg-white border border-border-grid px-4 py-2 text-xs font-mono font-bold w-full outline-none focus:ring-1 focus:ring-violet-500" 
+                                                className="bg-white border border-[#e5e7eb] dark:border-white/10 px-4 py-2 text-xs font-sans font-semibold w-full outline-none focus:ring-1 focus:ring-violet-500" 
                                                 placeholder="SET_COUNT"
                                                 onKeyDown={e => {
                                                     if (e.key === 'Enter') {
@@ -559,7 +559,7 @@ const HealthView: React.FC<HealthViewProps> = ({
 
                             {/* MASS TELEMETRY CHART */}
                             <HealthSection title="Biometric_Telemetries" techNode="WEIGHT_TREND_ANALYSIS" iconColor="bg-sky-500">
-                                <div className="h-[300px] w-full bg-slate-50 border border-border-grid border-dashed relative overflow-hidden flex items-center justify-center">
+                                <div className="h-[300px] w-full bg-slate-50 border border-[#e5e7eb] dark:border-white/10 border-dashed relative overflow-hidden flex items-center justify-center">
                                     <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
                                     
                                     {weights.length > 1 ? (
@@ -569,7 +569,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                 const h = Math.min(100, Math.max(10, ((w.weight - 60) / 40) * 100));
                                                 return (
                                                     <div key={i} className="flex-1 bg-primary-tactile opacity-60 hover:opacity-100 transition-opacity relative group" style={{ height: `${h}%` }}>
-                                                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-on-surface text-surface text-[8px] font-mono font-bold px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-on-surface text-surface text-[8px] font-sans font-semibold px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                                                             {w.weight.toFixed(1)}
                                                         </div>
                                                     </div>
@@ -577,7 +577,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                             })}
                                         </div>
                                     ) : (
-                                        <span className="text-[10px] font-mono font-bold text-slate-300 uppercase tracking-widest italic">INSUFFICIENT_TELEMETRY_DATA</span>
+                                        <span className="text-[10px] font-sans font-semibold text-slate-300 uppercase tracking-widest italic">INSUFFICIENT_TELEMETRY_DATA</span>
                                     )}
                                 </div>
                             </HealthSection>
@@ -589,18 +589,18 @@ const HealthView: React.FC<HealthViewProps> = ({
                         <HealthSection title="Medical_Archive" techNode="RECORDS_VAULT" iconColor="bg-slate-400">
                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {exams.map(exam => (
-                                    <div key={exam.id} className="bg-surface border border-border-grid p-6 hover:border-primary-tactile transition-all group">
+                                    <div key={exam.id} className="bg-surface border border-[#e5e7eb] dark:border-white/10 p-6 hover:border-primary-tactile transition-all group">
                                         <div className="flex justify-between items-start mb-4">
-                                            <span className="text-[8px] font-mono font-bold uppercase px-2 py-0.5 border border-border-grid">{exam.tipo}</span>
-                                            <span className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest">{formatDate(exam.data)}</span>
+                                            <span className="text-[8px] font-sans font-semibold uppercase px-2 py-0.5 border border-[#e5e7eb] dark:border-white/10">{exam.tipo}</span>
+                                            <span className="text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-widest">{formatDate(exam.data)}</span>
                                         </div>
-                                        <h4 className="text-lg font-mono font-bold text-on-surface mb-2">{exam.titulo}</h4>
-                                        <p className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest mb-4">LOC: {exam.doutor_local || 'N/A'}</p>
+                                        <h4 className="text-lg font-sans font-semibold text-on-surface mb-2">{exam.titulo}</h4>
+                                        <p className="text-[10px] font-sans font-semibold text-slate-400 uppercase tracking-widest mb-4">LOC: {exam.doutor_local || 'N/A'}</p>
                                         
                                         {exam.pool_dados && exam.pool_dados.length > 0 && (
                                             <div className="flex gap-2">
                                                 {exam.pool_dados.map(file => (
-                                                    <a key={file.id} href={file.valor} target="_blank" rel="noreferrer" className="p-2 border border-border-grid hover:bg-on-surface hover:text-white transition-all">
+                                                    <a key={file.id} href={file.valor} target="_blank" rel="noreferrer" className="p-2 border border-[#e5e7eb] dark:border-white/10 hover:bg-on-surface hover:text-white transition-all">
                                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
                                                     </a>
                                                 ))}

@@ -143,40 +143,40 @@ export const PgdAuditRow = ({
         const tarefaId = e.dataTransfer.getData('tarefaId');
         if (tarefaId) onDrop(tarefaId);
       }}
-      className="group border-b border-border-grid hover:bg-slate-50/50 transition-all p-4 md:p-8 flex flex-col gap-3 md:gap-4"
+      className="group border-b border-[#e5e7eb] dark:border-white/10 hover:bg-slate-50/50 transition-all p-4 md:p-8 flex flex-col gap-3 md:gap-4"
     >
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-3 mb-1">
-          <span className="text-[10px] font-black text-primary-tactile uppercase tracking-widest font-mono">{item.unidade}</span>
+          <span className="text-[10px] font-black text-primary-tactile uppercase tracking-widest font-sans">{item.unidade}</span>
           {entregaEntity?.processo_sei && (
-            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest font-mono border border-border-grid px-1.5 rounded-none">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest font-sans border border-[#e5e7eb] dark:border-white/10 px-1.5 rounded-lg">
               SEI: {entregaEntity.processo_sei}
             </span>
           )}
         </div>
-        <h4 className="text-xl font-black text-slate-900 tracking-tight leading-snug font-mono uppercase">
+        <h4 className="text-xl font-black text-slate-900 tracking-tight leading-snug font-sans uppercase">
           {item.entrega}
         </h4>
-        <p className="text-[11px] font-medium text-slate-500 leading-relaxed mt-1 font-mono">
+        <p className="text-[11px] font-medium text-slate-500 leading-relaxed mt-1 font-sans">
           {item.descricao}
         </p>
       </div>
 
       <div className="flex items-center justify-between mt-2">
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase font-mono">
-            <div className="w-1.5 h-1.5 bg-primary-tactile rounded-none"></div>
+          <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase font-sans">
+            <div className="w-1.5 h-1.5 bg-primary-tactile rounded-lg"></div>
             {linkedActionsCount} ações vinculadas
           </div>
-          <div className="flex items-center gap-2 text-[10px] font-black text-slate-300 uppercase font-mono">
-            <div className="w-1.5 h-1.5 bg-emerald-400 rounded-none"></div>
+          <div className="flex items-center gap-2 text-[10px] font-black text-slate-300 uppercase font-sans">
+            <div className="w-1.5 h-1.5 bg-emerald-400 rounded-lg"></div>
             {executionRecordsCount} registros PGD
           </div>
         </div>
 
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="px-4 py-2 bg-white border border-border-grid text-slate-600 rounded-none text-[9px] font-black uppercase tracking-wider hover:bg-slate-50 transition-colors flex items-center gap-2 shadow-sm font-mono"
+          className="px-4 py-2 bg-white border border-[#e5e7eb] dark:border-white/10 text-slate-600 rounded-lg text-[9px] font-bold uppercase tracking-wider hover:bg-slate-50 transition-colors flex items-center gap-2 shadow-sm font-sans"
         >
           {isExpanded ? 'Ocultar Detalhes' : 'Ver Detalhes'}
           <svg className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -187,16 +187,16 @@ export const PgdAuditRow = ({
 
       {isExpanded && (
         <div className="mt-4 space-y-4 animate-in slide-in-from-top-2 duration-300">
-          <div className="rounded-none border-2 border-border-grid bg-slate-50/60 p-3 md:p-4">
+          <div className="rounded-lg border-2 border-[#e5e7eb] dark:border-white/10 bg-slate-50/60 p-3 md:p-4">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
               <div>
-                <p className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em] font-mono">Registros de execução PGD</p>
-                <p className="text-[10px] text-slate-400 font-mono">Geração via IA, edição manual e processamento de logs.</p>
+                <p className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em] font-sans">Registros de execução PGD</p>
+                <p className="text-[10px] text-slate-400 font-sans">Geração via IA, edição manual e processamento de logs.</p>
               </div>
               <button
                 onClick={onGenerateWithAI}
                 disabled={!entregaId || isGeneratingAI || tarefasRelacionadas.length === 0}
-                className="px-4 py-2 rounded-none bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest disabled:opacity-40 font-mono hover:bg-primary-tactile transition-colors"
+                className="px-4 py-2 rounded-lg bg-slate-900 text-white text-[9px] font-bold uppercase tracking-wider disabled:opacity-40 font-sans hover:bg-primary-tactile transition-colors"
               >
                 {isGeneratingAI ? 'Gerando...' : 'Gerar com IA'}
               </button>
@@ -207,19 +207,19 @@ export const PgdAuditRow = ({
                 value={newRegistro.descricao_atividade}
                 onChange={(e) => setNewRegistro(prev => ({ ...prev, descricao_atividade: e.target.value }))}
                 placeholder="Adicionar registro manual..."
-                className="md:col-span-7 p-3 rounded-none border border-border-grid bg-white text-[11px] font-bold text-slate-700 outline-none min-h-[44px] font-mono"
+                className="md:col-span-7 p-3 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white text-[11px] font-bold text-slate-700 outline-none min-h-[44px] font-sans"
               />
               <input
                 type="date"
                 value={newRegistro.data_inicio}
                 onChange={(e) => setNewRegistro(prev => ({ ...prev, data_inicio: e.target.value, data_fim: prev.data_fim || e.target.value }))}
-                className="md:col-span-2 h-11 px-2 rounded-none border border-border-grid bg-white text-[11px] font-bold text-slate-700 outline-none font-mono"
+                className="md:col-span-2 h-11 px-2 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white text-[11px] font-bold text-slate-700 outline-none font-sans"
               />
               <input
                 type="date"
                 value={newRegistro.data_fim}
                 onChange={(e) => setNewRegistro(prev => ({ ...prev, data_fim: e.target.value }))}
-                className="md:col-span-2 h-11 px-2 rounded-none border border-border-grid bg-white text-[11px] font-bold text-slate-700 outline-none font-mono"
+                className="md:col-span-2 h-11 px-2 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white text-[11px] font-bold text-slate-700 outline-none font-sans"
               />
               <div className="md:col-span-1 flex items-start justify-end">
                 <button
@@ -239,7 +239,7 @@ export const PgdAuditRow = ({
                     });
                   }}
                   disabled={!newRegistro.descricao_atividade.trim()}
-                  className="h-11 w-11 self-start rounded-none bg-emerald-600 text-white text-[14px] font-black uppercase tracking-widest disabled:opacity-40 hover:bg-emerald-700"
+                  className="h-11 w-11 self-start rounded-lg bg-emerald-600 text-white text-[14px] font-bold uppercase tracking-wider disabled:opacity-40 hover:bg-emerald-700"
                   title="Adicionar registro"
                 >
                   +
@@ -247,13 +247,13 @@ export const PgdAuditRow = ({
               </div>
             </div>
 
-            <div className="mt-3 border-2 border-border-grid bg-white rounded-none p-4 space-y-3">
+            <div className="mt-3 border-2 border-[#e5e7eb] dark:border-white/10 bg-white rounded-lg p-4 space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest font-mono">Processar texto bruto com datas</p>
+                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest font-sans">Processar texto bruto com datas</p>
                 <button
                   onClick={() => onProcessRawText(rawTextInput)}
                   disabled={!rawTextInput.trim() || isProcessingRawText}
-                  className="px-4 py-2 rounded-none bg-blue-600 text-white text-[9px] font-black uppercase tracking-widest disabled:opacity-40 font-mono hover:bg-blue-700"
+                  className="px-4 py-2 rounded-lg bg-blue-600 text-white text-[9px] font-bold uppercase tracking-wider disabled:opacity-40 font-sans hover:bg-blue-700"
                 >
                   {isProcessingRawText ? 'Processando...' : 'Processar texto'}
                 </button>
@@ -262,7 +262,7 @@ export const PgdAuditRow = ({
                 value={rawTextInput}
                 onChange={(e) => setRawTextInput(e.target.value)}
                 placeholder="Cole aqui o texto bruto com datas (ex.: 02/02/2026 ...)"
-                className="w-full p-3 rounded-none border border-border-grid bg-slate-50 text-[10px] font-mono text-slate-700 outline-none min-h-[80px] scrollbar-hide"
+                className="w-full p-3 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-slate-50 text-[10px] font-sans text-slate-700 outline-none min-h-[80px] scrollbar-hide"
               />
             </div>
 
@@ -281,20 +281,20 @@ export const PgdAuditRow = ({
 
                 if (!isEditing) {
                   return (
-                    <div key={at.id} className="p-3 rounded-none border border-border-grid bg-white group/reg">
+                    <div key={at.id} className="p-3 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white group/reg">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
-                          <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-none border ${at.origem === 'ia' ? 'border-blue-200 text-blue-700' : 'border-emerald-200 text-emerald-700'} font-mono`}>
+                          <span className={`text-[8px] font-bold uppercase tracking-wider px-2 py-1 rounded-lg border ${at.origem === 'ia' ? 'border-blue-200 text-blue-700' : 'border-emerald-200 text-emerald-700'} font-sans`}>
                             {at.origem === 'ia' ? 'IA CORE' : 'MANUAL'}
                           </span>
-                          <span className="text-[8px] font-black uppercase tracking-widest text-emerald-700 border border-emerald-100 px-2 py-1 rounded-none font-mono">
+                          <span className="text-[8px] font-bold uppercase tracking-wider text-emerald-700 border border-emerald-100 px-2 py-1 rounded-lg font-sans">
                             SYNCED
                           </span>
                         </div>
                         <div className="flex items-center gap-1 opacity-0 group-hover/reg:opacity-100 transition-opacity">
                           <button
                             onClick={() => setEditingById((prev) => ({ ...prev, [at.id]: true }))}
-                            className="p-1.5 rounded-none border border-border-grid text-slate-400 hover:text-primary-tactile hover:border-primary-tactile/50"
+                            className="p-1.5 rounded-lg border border-[#e5e7eb] dark:border-white/10 text-slate-400 hover:text-primary-tactile hover:border-primary-tactile/50"
                             title="Editar registro"
                           >
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -303,7 +303,7 @@ export const PgdAuditRow = ({
                           </button>
                           <button
                             onClick={() => onDeleteActivity(at.id)}
-                            className="p-1.5 rounded-none border border-rose-100 text-rose-400 hover:text-rose-600 hover:bg-rose-50"
+                            className="p-1.5 rounded-lg border border-rose-100 text-rose-400 hover:text-rose-600 hover:bg-rose-50"
                             title="Excluir registro"
                           >
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -313,18 +313,18 @@ export const PgdAuditRow = ({
                         </div>
                       </div>
 
-                      <p className="mt-2 text-[11px] font-mono leading-snug text-slate-700">
+                      <p className="mt-2 text-[11px] font-sans leading-snug text-slate-700">
                         {draft.descricao_atividade}
                       </p>
 
-                      <div className="mt-2 flex items-center gap-1.5 text-[9px] font-black text-slate-400 font-mono">
-                        <span className="px-2 py-0.5 rounded-none border border-border-grid bg-slate-50">
+                      <div className="mt-2 flex items-center gap-1.5 text-[9px] font-black text-slate-400 font-sans">
+                        <span className="px-2 py-0.5 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-slate-50">
                           {startDate}
                         </span>
                         <svg className="w-3 h-3 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 12h14m-4-4l4 4-4 4" />
                         </svg>
-                        <span className="px-2 py-0.5 rounded-none border border-border-grid bg-slate-50">
+                        <span className="px-2 py-0.5 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-slate-50">
                           {endDate}
                         </span>
                       </div>
@@ -333,14 +333,14 @@ export const PgdAuditRow = ({
                 }
 
                 return (
-                  <div key={at.id} className="p-4 rounded-none border-2 border-primary-tactile/50 bg-white">
+                  <div key={at.id} className="p-4 rounded-lg border-2 border-primary-tactile/50 bg-white">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
-                        <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-none border ${at.origem === 'ia' ? 'border-blue-200 text-blue-700' : 'border-emerald-200 text-emerald-700'} font-mono`}>
+                        <span className={`text-[8px] font-bold uppercase tracking-wider px-2 py-1 rounded-lg border ${at.origem === 'ia' ? 'border-blue-200 text-blue-700' : 'border-emerald-200 text-emerald-700'} font-sans`}>
                           {at.origem === 'ia' ? 'IA CORE' : 'MANUAL'}
                         </span>
                         {dirty && (
-                          <span className="text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-none border border-amber-200 text-amber-700 bg-amber-50 font-mono">
+                          <span className="text-[8px] font-bold uppercase tracking-wider px-2 py-1 rounded-lg border border-amber-200 text-amber-700 bg-amber-50 font-sans">
                             DIVERGENTE
                           </span>
                         )}
@@ -357,7 +357,7 @@ export const PgdAuditRow = ({
                             setEditingById((prev) => ({ ...prev, [at.id]: false }));
                           }}
                           disabled={!draft.descricao_atividade.trim()}
-                          className="px-3 py-1.5 rounded-none bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest disabled:opacity-40 font-mono"
+                          className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-[9px] font-bold uppercase tracking-wider disabled:opacity-40 font-sans"
                         >
                           Salvar
                         </button>
@@ -366,7 +366,7 @@ export const PgdAuditRow = ({
                             resetDraftFromSource(at);
                             setEditingById((prev) => ({ ...prev, [at.id]: false }));
                           }}
-                          className="px-3 py-1.5 rounded-none border border-border-grid text-slate-500 text-[9px] font-black uppercase tracking-widest font-mono"
+                          className="px-3 py-1.5 rounded-lg border border-[#e5e7eb] dark:border-white/10 text-slate-500 text-[9px] font-bold uppercase tracking-wider font-sans"
                         >
                           Cancelar
                         </button>
@@ -375,28 +375,28 @@ export const PgdAuditRow = ({
                     <textarea
                       value={draft.descricao_atividade}
                       onChange={(e) => updateDraft(at.id, 'descricao_atividade', e.target.value)}
-                      className="w-full p-3 rounded-none border border-border-grid bg-slate-50 text-[11px] font-mono text-slate-700 outline-none min-h-[64px]"
+                      className="w-full p-3 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-slate-50 text-[11px] font-sans text-slate-700 outline-none min-h-[64px]"
                     />
                     <div className="mt-2 grid grid-cols-2 gap-2">
                       <input
                         type="date"
                         value={draft.data_inicio}
                         onChange={(e) => updateDraft(at.id, 'data_inicio', e.target.value)}
-                        className="p-2 rounded-none border border-border-grid bg-white text-[10px] font-black text-slate-700 outline-none font-mono"
+                        className="p-2 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white text-[10px] font-black text-slate-700 outline-none font-sans"
                       />
                       <input
                         type="date"
                         value={draft.data_fim}
                         onChange={(e) => updateDraft(at.id, 'data_fim', e.target.value)}
-                        className="p-2 rounded-none border border-border-grid bg-white text-[10px] font-black text-slate-700 outline-none font-mono"
+                        className="p-2 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white text-[10px] font-black text-slate-700 outline-none font-sans"
                       />
                     </div>
                   </div>
                 );
               })}
               {sortedAtividades.length === 0 && (
-                <div className="py-8 text-center bg-white rounded-none border-2 border-dashed border-border-grid">
-                  <p className="text-slate-300 text-[10px] font-black uppercase tracking-[0.2em] font-mono italic">Sem registros de execução</p>
+                <div className="py-8 text-center bg-white rounded-lg border-2 border-dashed border-[#e5e7eb] dark:border-white/10">
+                  <p className="text-slate-300 text-[10px] font-black uppercase tracking-[0.2em] font-sans italic">Sem registros de execução</p>
                 </div>
               )}
             </div>
@@ -407,14 +407,14 @@ export const PgdAuditRow = ({
               <div
                 key={t.id}
                 onClick={() => onSelectTask(t)}
-                className="p-4 rounded-none bg-slate-50 border-2 border-border-grid hover:border-primary-tactile transition-all cursor-pointer group/task relative pr-10"
+                className="p-4 rounded-lg bg-slate-50 border-2 border-[#e5e7eb] dark:border-white/10 hover:border-primary-tactile transition-all cursor-pointer group/task relative pr-10"
               >
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     if (entregaId) onUnlinkTarefa(t.id, entregaId);
                   }}
-                  className="absolute top-3 right-3 p-1.5 text-slate-300 hover:text-rose-500 hover:bg-white rounded-none opacity-0 group-hover/task:opacity-100 transition-all border border-transparent hover:border-border-grid"
+                  className="absolute top-3 right-3 p-1.5 text-slate-300 hover:text-rose-500 hover:bg-white rounded-lg opacity-0 group-hover/task:opacity-100 transition-all border border-transparent hover:border-[#e5e7eb] dark:border-white/10"
                   title="Desvincular"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -422,15 +422,15 @@ export const PgdAuditRow = ({
                   </svg>
                 </button>
                 <div className="flex items-center justify-between mb-1.5">
-                  <p className="text-[8px] font-black text-primary-tactile uppercase tracking-widest font-mono">Core-Task</p>
-                  <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest font-mono">{formatDate(t.data_limite)}</p>
+                  <p className="text-[8px] font-black text-primary-tactile uppercase tracking-widest font-sans">Core-Task</p>
+                  <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest font-sans">{formatDate(t.data_limite)}</p>
                 </div>
-                <p className="text-[11px] font-bold text-slate-800 leading-snug group-hover/task:text-primary-tactile transition-colors font-mono uppercase">{t.titulo}</p>
+                <p className="text-[11px] font-bold text-slate-800 leading-snug group-hover/task:text-primary-tactile transition-colors font-sans uppercase">{t.titulo}</p>
               </div>
             ))}
             {tarefasRelacionadas.length === 0 && (
-              <div className="col-span-full py-10 text-center bg-slate-50/30 rounded-none border-2 border-dashed border-border-grid">
-                <p className="text-slate-300 text-[10px] font-black uppercase tracking-[0.2em] font-mono italic">Nenhuma ação vinculada</p>
+              <div className="col-span-full py-10 text-center bg-slate-50/30 rounded-lg border-2 border-dashed border-[#e5e7eb] dark:border-white/10">
+                <p className="text-slate-300 text-[10px] font-black uppercase tracking-[0.2em] font-sans italic">Nenhuma ação vinculada</p>
               </div>
             )}
           </div>

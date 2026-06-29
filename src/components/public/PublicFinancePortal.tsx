@@ -106,7 +106,7 @@ const PublicFinancePortal = () => {
           <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           </div>
-          <h2 className="text-xl font-black text-slate-900 mb-2">Acesso Negado</h2>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">Acesso Negado</h2>
           <p className="text-slate-500">Token invalido ou expirado. Solicite um novo link de acesso.</p>
         </div>
       </div>
@@ -122,18 +122,18 @@ const PublicFinancePortal = () => {
     <div className="min-h-screen bg-slate-50 font-sans">
       <header className="bg-slate-900 text-white p-6 shadow-lg">
         <div className="max-w-md mx-auto">
-          <h1 className="text-lg font-black uppercase tracking-widest text-center">Controle de Gastos</h1>
+          <h1 className="text-lg font-bold uppercase tracking-wider text-center">Controle de Gastos</h1>
         </div>
       </header>
 
       <main className="max-w-md mx-auto p-4 space-y-6 -mt-4">
-        <div className="bg-white rounded-[2rem] p-6 shadow-xl border border-slate-100 relative overflow-hidden">
+        <div className="bg-white rounded-2xl p-6 shadow-card border border-slate-100 relative overflow-hidden">
           <div className="relative z-10 text-center">
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Saldo Restante</p>
-            <div className={`text-4xl font-black tracking-tighter ${isOverLimit ? 'text-rose-500' : 'text-emerald-500'}`}>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Saldo Restante</p>
+            <div className={`text-4xl font-bold tracking-tight ${isOverLimit ? 'text-rose-500' : 'text-emerald-500'}`}>
               R$ {remaining.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
             </div>
-            <div className="mt-4 flex justify-between text-xs font-bold text-slate-400 uppercase tracking-widest px-4">
+            <div className="mt-4 flex justify-between text-xs font-bold text-slate-400 uppercase tracking-wider px-4">
               <span>Gasto: R$ {spentAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
               <span>Limite: R$ {limit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
             </div>
@@ -147,12 +147,12 @@ const PublicFinancePortal = () => {
           </div>
         </div>
 
-        <div className="bg-white rounded-[2rem] p-6 shadow-lg border border-slate-100">
-          <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-6 border-l-4 border-blue-500 pl-3">Novo Lancamento</h2>
+        <div className="bg-white rounded-2xl p-6 shadow-card border border-slate-100">
+          <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-6 border-l-4 border-blue-500 pl-3">Novo Lancamento</h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Descricao</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Descricao</label>
               <input
                 type="text"
                 value={description}
@@ -164,7 +164,7 @@ const PublicFinancePortal = () => {
             </div>
 
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Valor (R$)</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Valor (R$)</label>
               <input
                 type="number"
                 step="0.01"
@@ -172,7 +172,7 @@ const PublicFinancePortal = () => {
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0,00"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-lg font-black text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-lg font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                 required
               />
             </div>
@@ -180,7 +180,7 @@ const PublicFinancePortal = () => {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full bg-slate-900 text-white py-4 rounded-xl text-xs font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-4 active:scale-95"
+              className="w-full bg-slate-900 text-white py-4 rounded-xl text-xs font-bold uppercase tracking-wider shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-4 active:scale-95"
             >
               {submitting ? 'Enviando...' : 'Registrar Gasto'}
             </button>
@@ -189,21 +189,21 @@ const PublicFinancePortal = () => {
           {successMessage && <p className="mt-4 text-center text-sm font-bold text-emerald-600">{successMessage}</p>}
         </div>
 
-        <div className="bg-white rounded-[2rem] p-6 shadow-lg border border-slate-100">
-          <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-4 border-l-4 border-emerald-500 pl-3">Lancamentos Externos</h2>
-          <div className="space-y-3">
+        <div className="bg-white rounded-2xl p-6 shadow-card border border-slate-100">
+          <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-4 border-l-4 border-emerald-500 pl-3">Lancamentos Externos</h2>
+          <div className="space-y-3 hermes-stagger">
             {externalTransactions.length === 0 ? (
               <p className="text-sm text-slate-400 font-medium">Nenhum gasto externo registrado ainda.</p>
             ) : (
               externalTransactions.map((transaction) => (
                 <div key={transaction.id} className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3 border border-slate-100">
                   <div>
-                    <p className="text-sm font-black text-slate-900">{transaction.description}</p>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    <p className="text-sm font-bold text-slate-900">{transaction.description}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       {new Date(transaction.date).toLocaleString('pt-BR')}
                     </p>
                   </div>
-                  <div className="text-sm font-black text-rose-500">
+                  <div className="text-sm font-bold text-rose-500">
                     R$ {Number(transaction.amount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </div>
                 </div>

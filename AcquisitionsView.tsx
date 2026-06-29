@@ -187,49 +187,49 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
         <div className="p-6 space-y-12 animate-in fade-in duration-500 bg-surface min-h-screen">
             {/* Título de Seção Industrial */}
             <div className="border-b-2 border-primary-tactile pb-4">
-                <h2 className="text-3xl font-mono font-bold text-on-surface">Acquisitions_Inventory</h2>
+                <h2 className="text-3xl font-sans font-semibold text-on-surface">Acquisitions_Inventory</h2>
                 <div className="flex items-center gap-2 mt-2">
-                    <span className="text-[10px] font-mono font-bold text-primary-tactile uppercase tracking-widest">// PROJECT_ID: {projetoId}</span>
+                    <span className="text-[10px] font-sans font-semibold text-primary-tactile uppercase tracking-widest">// PROJECT_ID: {projetoId}</span>
                     <span className="w-1 h-1 rounded-full bg-primary-tactile"></span>
-                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">STATUS: SYSTEM_READY</span>
+                    <span className="text-[10px] font-sans font-semibold text-slate-400 uppercase tracking-widest">STATUS: SYSTEM_READY</span>
                 </div>
             </div>
 
             {/* Tabs Industriais */}
-            <div className="flex gap-1 bg-slate-100 p-1 rounded-none border border-border-grid">
+            <div className="flex gap-1 bg-slate-100 p-1 rounded-lg border border-[#e5e7eb] dark:border-white/10">
                     <button
                         onClick={() => setActiveTab('needs')}
-                        className={`flex-1 py-3 px-4 text-[10px] font-mono font-bold uppercase tracking-[0.2em] transition-all ${activeTab === 'needs' ? 'bg-white text-on-surface border border-border-grid' : 'text-slate-400 hover:text-on-surface hover:bg-white/50'}`}
+                        className={`flex-1 py-3 px-4 text-[10px] font-sans font-semibold uppercase tracking-[0.2em] transition-all ${activeTab === 'needs' ? 'bg-white text-on-surface border border-[#e5e7eb] dark:border-white/10' : 'text-slate-400 hover:text-on-surface hover:bg-white/50'}`}
                     >
                     NEEDS_INVENTORY
                 </button>
                     <button
                         onClick={() => setActiveTab('process')}
-                        className={`flex-1 py-3 px-4 text-[10px] font-mono font-bold uppercase tracking-[0.2em] transition-all ${activeTab === 'process' ? 'bg-white text-on-surface border border-border-grid' : 'text-slate-400 hover:text-on-surface hover:bg-white/50'}`}
+                        className={`flex-1 py-3 px-4 text-[10px] font-sans font-semibold uppercase tracking-[0.2em] transition-all ${activeTab === 'process' ? 'bg-white text-on-surface border border-[#e5e7eb] dark:border-white/10' : 'text-slate-400 hover:text-on-surface hover:bg-white/50'}`}
                     >
                     OCR_AI_PROCESSOR
                 </button>
             </div>
 
             {activeTab === 'needs' && (
-                <div className="bg-surface rounded-none border border-border-grid p-0 shadow-none">
-                    <div className="p-6 border-b border-border-grid bg-slate-50/50">
-                        <h3 className="text-lg font-mono font-bold text-on-surface">Pending_Procurement</h3>
-                        <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest mt-1">LOG: PENDING_ACQUISITIONS_DETECTED_IN_ORCAMENTO</p>
+                <div className="bg-surface rounded-lg border border-[#e5e7eb] dark:border-white/10 p-0 shadow-none">
+                    <div className="p-6 border-b border-[#e5e7eb] dark:border-white/10 bg-slate-50/50">
+                        <h3 className="text-lg font-sans font-semibold text-on-surface">Pending_Procurement</h3>
+                        <p className="text-slate-500 font-sans text-[10px] uppercase tracking-widest mt-1">LOG: PENDING_ACQUISITIONS_DETECTED_IN_ORCAMENTO</p>
                     </div>
 
                     <div className="overflow-x-auto">
                         <table className="w-full text-left border-collapse">
-                            <thead className="bg-slate-100 text-[10px] font-mono uppercase tracking-widest text-slate-500 border-b border-border-grid">
+                            <thead className="bg-slate-100 text-[10px] font-sans uppercase tracking-widest text-slate-500 border-b border-[#e5e7eb] dark:border-white/10">
                                 <tr>
-                                    <th className="p-4 font-bold border-r border-border-grid">RESOURCE_ID</th>
-                                    <th className="p-4 font-bold border-r border-border-grid">BUDGET_EST</th>
-                                    <th className="p-4 font-bold border-r border-border-grid">EXECUTED_VAL</th>
-                                    <th className="p-4 font-bold border-r border-border-grid">BALANCE_REM</th>
+                                    <th className="p-4 font-bold border-r border-[#e5e7eb] dark:border-white/10">RESOURCE_ID</th>
+                                    <th className="p-4 font-bold border-r border-[#e5e7eb] dark:border-white/10">BUDGET_EST</th>
+                                    <th className="p-4 font-bold border-r border-[#e5e7eb] dark:border-white/10">EXECUTED_VAL</th>
+                                    <th className="p-4 font-bold border-r border-[#e5e7eb] dark:border-white/10">BALANCE_REM</th>
                                     <th className="p-4 font-bold">ACTION_ACK</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-border-grid bg-white">
+                            <tbody className="divide-y divide-[#e5e7eb] dark:divide-white/10 bg-white">
                                 {pendingItems.map(item => {
                                     const totalEst = item.quantidade * item.valor_unitario_estimado;
                                     const totalReal = transactions
@@ -238,25 +238,25 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
                                     const balance = totalEst - totalReal;
 
                                     return (
-                                        <tr key={item.id} className="hover:bg-slate-50 transition-colors font-mono">
-                                            <td className="p-4 border-r border-border-grid">
+                                        <tr key={item.id} className="hover:bg-slate-50 transition-colors font-sans">
+                                            <td className="p-4 border-r border-[#e5e7eb] dark:border-white/10">
                                                 <p className="font-bold text-on-surface text-xs">{item.nome}</p>
-                                                <span className="text-[8px] font-bold border border-border-grid bg-slate-100 text-slate-500 px-2 py-0.5 mt-1 inline-block uppercase tracking-widest">{item.rubrica}</span>
+                                                <span className="text-[8px] font-bold border border-[#e5e7eb] dark:border-white/10 bg-slate-100 text-slate-500 px-2 py-0.5 mt-1 inline-block uppercase tracking-widest">{item.rubrica}</span>
                                             </td>
-                                            <td className="p-4 text-xs font-bold text-slate-500 border-r border-border-grid">
+                                            <td className="p-4 text-xs font-bold text-slate-500 border-r border-[#e5e7eb] dark:border-white/10">
                                                 {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalEst)}
                                             </td>
-                                            <td className="p-4 text-xs font-bold text-primary-tactile border-r border-border-grid">
+                                            <td className="p-4 text-xs font-bold text-primary-tactile border-r border-[#e5e7eb] dark:border-white/10">
                                                 {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalReal)}
                                             </td>
-                                            <td className="p-4 text-xs font-bold text-emerald-600 border-r border-border-grid">
+                                            <td className="p-4 text-xs font-bold text-emerald-600 border-r border-[#e5e7eb] dark:border-white/10">
                                                 {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(balance)}
                                             </td>
                                             <td className="p-4">
                                                 <button
                                                     onClick={() => handleGetQuotes(item)}
                                                     disabled={quotingItemId === item.id}
-                                                    className="w-full bg-white border border-border-grid text-on-surface px-4 py-2 rounded-soft-touch text-[9px] font-bold uppercase tracking-widest hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
+                                                    className="w-full bg-white border border-[#e5e7eb] dark:border-white/10 text-on-surface px-4 py-2 rounded-soft-touch text-[9px] font-bold uppercase tracking-widest hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
                                                 >
                                                     {quotingItemId === item.id ? (
                                                         <div className="w-3 h-3 border-2 border-primary-tactile border-t-transparent rounded-full animate-spin"></div>
@@ -271,7 +271,7 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
                                 })}
                                 {pendingItems.length === 0 && (
                                     <tr>
-                                        <td colSpan={5} className="p-12 text-center text-slate-400 font-mono font-bold text-[10px] uppercase tracking-widest italic border-b border-border-grid">ZERO_PENDENCIES_DETECTED // SYSTEM_COMPLETE</td>
+                                        <td colSpan={5} className="p-12 text-center text-slate-400 font-sans font-semibold text-[10px] uppercase tracking-widest italic border-b border-[#e5e7eb] dark:border-white/10">ZERO_PENDENCIES_DETECTED // SYSTEM_COMPLETE</td>
                                     </tr>
                                 )}
                             </tbody>
@@ -281,23 +281,23 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
             )}
 
             {activeTab === 'process' && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 border border-border-grid bg-white">
-                    <div className="border-r border-border-grid">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 border border-[#e5e7eb] dark:border-white/10 bg-white">
+                    <div className="border-r border-[#e5e7eb] dark:border-white/10">
                         <div className="bg-white p-8">
-                            <h3 className="text-xl font-mono font-bold text-on-surface mb-6">Source_Capture</h3>
+                            <h3 className="text-xl font-sans font-semibold text-on-surface mb-6">Source_Capture</h3>
 
-                            <label className={`flex flex-col items-center justify-center w-full h-80 border-2 border-dashed rounded-none cursor-pointer transition-all ${isUploading ? 'bg-slate-50 border-primary-tactile' : 'bg-slate-50 border-border-grid hover:bg-white hover:border-primary-tactile'}`}>
+                            <label className={`flex flex-col items-center justify-center w-full h-80 border-2 border-dashed rounded-lg cursor-pointer transition-all ${isUploading ? 'bg-slate-50 border-primary-tactile' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10 hover:bg-white hover:border-primary-tactile'}`}>
                                 <div className="flex flex-col items-center justify-center pt-5 pb-6">
                                     {isUploading ? (
                                         <>
                                             <div className="w-8 h-8 border-4 border-primary-tactile border-t-transparent rounded-full animate-spin mb-4"></div>
-                                            <p className="text-[10px] font-mono font-bold text-primary-tactile uppercase tracking-widest animate-pulse">PROCESSING_IA_NEURAL_CAPTURE...</p>
+                                            <p className="text-[10px] font-sans font-semibold text-primary-tactile uppercase tracking-widest animate-pulse">PROCESSING_IA_NEURAL_CAPTURE...</p>
                                         </>
                                     ) : (
                                         <>
                                             <svg className="w-10 h-10 mb-3 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
-                                            <p className="mb-2 text-[10px] font-mono font-bold text-slate-500 uppercase tracking-widest"><span className="text-primary-tactile underline">UPLOAD_INITIALIZE</span> NF-E_CAPTURE</p>
-                                            <p className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-[0.2em]">FILE_TYPES: PDF_PNG_JPG (AI_VISION_V1)</p>
+                                            <p className="mb-2 text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-widest"><span className="text-primary-tactile underline">UPLOAD_INITIALIZE</span> NF-E_CAPTURE</p>
+                                            <p className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-[0.2em]">FILE_TYPES: PDF_PNG_JPG (AI_VISION_V1)</p>
                                         </>
                                     )}
                                 </div>
@@ -313,13 +313,13 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
                             </label>
 
                             {invoiceUrl && (
-                                <div className="mt-6 p-4 bg-emerald-50 border border-emerald-100 rounded-none flex items-center gap-4">
-                                    <div className="w-8 h-8 rounded-none border border-emerald-200 bg-white text-emerald-600 flex items-center justify-center">
+                                <div className="mt-6 p-4 bg-emerald-50 border border-emerald-100 rounded-lg flex items-center gap-4">
+                                    <div className="w-8 h-8 rounded-lg border border-emerald-200 bg-white text-emerald-600 flex items-center justify-center">
                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
                                     </div>
                                     <div className="flex-1">
-                                        <p className="text-[10px] font-mono font-bold text-emerald-800 uppercase tracking-widest">SIGNAL_CAPTURED: FILE_LOADED</p>
-                                        <a href={invoiceUrl} target="_blank" rel="noreferrer" className="text-[9px] font-mono font-bold text-emerald-600 uppercase tracking-widest hover:underline mt-1 inline-block">OPEN_SOURCE_FILE_IN_NEW_TAB</a>
+                                        <p className="text-[10px] font-sans font-semibold text-emerald-800 uppercase tracking-widest">SIGNAL_CAPTURED: FILE_LOADED</p>
+                                        <a href={invoiceUrl} target="_blank" rel="noreferrer" className="text-[9px] font-sans font-semibold text-emerald-600 uppercase tracking-widest hover:underline mt-1 inline-block">OPEN_SOURCE_FILE_IN_NEW_TAB</a>
                                     </div>
                                 </div>
                             )}
@@ -327,8 +327,8 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
 
                         {ocrResult && (
                             <div className="bg-on-surface text-surface p-8">
-                                <h4 className="text-[10px] font-mono font-bold uppercase tracking-[0.3em] mb-6 text-white/50">// EXTRACTED_METADATA_STREAM</h4>
-                                <div className="space-y-4 font-mono text-[10px] font-bold uppercase tracking-widest">
+                                <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.3em] mb-6 text-white/50">// EXTRACTED_METADATA_STREAM</h4>
+                                <div className="space-y-4 font-sans text-[10px] font-bold uppercase tracking-widest">
                                     <div className="flex justify-between border-b border-white/10 pb-2">
                                         <span className="text-white/40">VENDOR_ID:</span>
                                         <span className="text-white">{ocrResult.fornecedor || 'NULL'}</span>
@@ -351,15 +351,15 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
                     </div>
 
                     <div className="bg-surface p-8">
-                        <h3 className="text-xl font-mono font-bold text-on-surface mb-6">Finalize_Record</h3>
+                        <h3 className="text-xl font-sans font-semibold text-on-surface mb-6">Finalize_Record</h3>
 
                         <div className="space-y-6">
                             <div>
-                                <label className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-2">LINK_PLAN_RESOURCE</label>
+                                <label className="text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-widest block mb-2">LINK_PLAN_RESOURCE</label>
                                 <select
                                     value={selectedItemId}
                                     onChange={e => setSelectedItemId(e.target.value)}
-                                    className="w-full p-3 rounded-soft-touch border border-border-grid focus:ring-1 focus:ring-primary-tactile outline-none font-mono font-bold text-xs text-on-surface bg-white appearance-none"
+                                    className="w-full p-3 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 focus:ring-1 focus:ring-primary-tactile outline-none font-sans font-semibold text-xs text-on-surface bg-white appearance-none"
                                 >
                                     <option value="">SELECT_BUDGET_ITEM...</option>
                                     {items.filter(i => i.status !== 'executado').map(i => (
@@ -369,54 +369,54 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
                             </div>
 
                             <div>
-                                <label className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-2">ENTRY_DESCRIPTION</label>
+                                <label className="text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-widest block mb-2">ENTRY_DESCRIPTION</label>
                                 <input
                                     value={formDescription}
                                     onChange={e => setFormDescription(e.target.value)}
-                                    className="w-full p-3 rounded-soft-touch border border-border-grid focus:ring-1 focus:ring-primary-tactile outline-none font-mono font-bold text-xs text-on-surface"
+                                    className="w-full p-3 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 focus:ring-1 focus:ring-primary-tactile outline-none font-sans font-semibold text-xs text-on-surface"
                                     placeholder="TRANSACTION_LOG_NAME"
                                 />
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-2">TOTAL_VAL_BRL</label>
+                                    <label className="text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-widest block mb-2">TOTAL_VAL_BRL</label>
                                     <input
                                         type="number"
                                         value={formAmount}
                                         onChange={e => setFormAmount(Number(e.target.value))}
-                                        className="w-full p-3 rounded-soft-touch border border-border-grid focus:ring-1 focus:ring-primary-tactile outline-none font-mono font-bold text-xs text-on-surface"
+                                        className="w-full p-3 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 focus:ring-1 focus:ring-primary-tactile outline-none font-sans font-semibold text-xs text-on-surface"
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-2">EMISSION_DATE</label>
+                                    <label className="text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-widest block mb-2">EMISSION_DATE</label>
                                     <input
                                         type="date"
                                         value={formDate}
                                         onChange={e => setFormDate(e.target.value)}
-                                        className="w-full p-3 rounded-soft-touch border border-border-grid focus:ring-1 focus:ring-primary-tactile outline-none font-mono font-bold text-xs text-on-surface"
+                                        className="w-full p-3 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 focus:ring-1 focus:ring-primary-tactile outline-none font-sans font-semibold text-xs text-on-surface"
                                     />
                                 </div>
                             </div>
 
                             {formAmount > 1000 && (
-                                <div className={`p-4 rounded-none border-2 border-dashed ${formQuotes.length >= 3 ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+                                <div className={`p-4 rounded-lg border-2 border-dashed ${formQuotes.length >= 3 ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
                                     <div className="flex items-start gap-4">
-                                        <div className={`mt-0.5 w-6 h-6 rounded-none flex items-center justify-center text-white font-mono font-bold ${formQuotes.length >= 3 ? 'bg-emerald-500 shadow-sm' : 'bg-amber-500 animate-pulse shadow-sm'}`}>
+                                        <div className={`mt-0.5 w-6 h-6 rounded-lg flex items-center justify-center text-white font-sans font-semibold ${formQuotes.length >= 3 ? 'bg-emerald-500 shadow-sm' : 'bg-amber-500 animate-pulse shadow-sm'}`}>
                                             {formQuotes.length >= 3 ? '✓' : '!'}
                                         </div>
                                         <div>
-                                            <p className={`text-[10px] font-mono font-bold uppercase tracking-widest ${formQuotes.length >= 3 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                            <p className={`text-[10px] font-sans font-semibold uppercase tracking-widest ${formQuotes.length >= 3 ? 'text-emerald-700' : 'text-amber-700'}`}>
                                                 COMPLIANCE_CHECK: QUOTES_LOG ({formQuotes.length}/3)
                                             </p>
-                                            <p className="text-[8px] font-mono font-bold text-slate-500 uppercase tracking-widest mt-1 opacity-70">VAL &gt; 1.000_BRL REQUIRE_MIN_3_QUOTES_IN_DATASET.</p>
+                                            <p className="text-[8px] font-sans font-semibold text-slate-500 uppercase tracking-widest mt-1 opacity-70">VAL &gt; 1.000_BRL REQUIRE_MIN_3_QUOTES_IN_DATASET.</p>
                                         </div>
                                     </div>
                                 </div>
                             )}
                             <button
                                 onClick={handleSaveTransaction}
-                                className="w-full py-4 bg-primary-tactile text-white rounded-soft-touch text-[10px] font-mono font-bold uppercase tracking-[0.25em] border border-primary-tactile hover:bg-blue-700 transition-all mt-4"
+                                className="w-full py-4 bg-primary-tactile text-white rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-[0.25em] border border-primary-tactile hover:bg-blue-700 transition-all mt-4"
                             >
                                 FINALIZE_SAVE_RECORD
                             </button>

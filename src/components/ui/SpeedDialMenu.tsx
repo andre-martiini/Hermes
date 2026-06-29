@@ -166,12 +166,12 @@ export const SpeedDialMenu = ({
 
   const hasUrgentBadge = notifications.some(n => !n.isRead) || isSyncing;
   const modalSurfaceClass = isDark
-    ? 'bg-slate-950/90 border-slate-800'
-    : 'bg-surface/95 border-border-grid';
-  const actionButtonBaseClass = 'relative flex items-center justify-center w-16 h-16 sm:w-[72px] sm:h-[72px] border rounded-none shadow-soft-touch transition-all duration-200 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-tactile focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950';
+    ? 'bg-slate-950/95 border-slate-800 rounded-2xl shadow-2xl'
+    : 'bg-white/95 border-[#e5e7eb] rounded-2xl shadow-2xl';
+  const actionButtonBaseClass = 'relative flex items-center justify-center w-16 h-16 sm:w-[72px] sm:h-[72px] border rounded-2xl shadow-sm transition-all duration-200 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-tactile focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950';
   const actionButtonThemeClass = isDark
     ? 'bg-slate-900 border-slate-800 hover:bg-slate-800 hover:border-slate-700'
-    : 'bg-white border-border-grid hover:bg-slate-50 hover:border-slate-300';
+    : 'bg-white border-[#e5e7eb] hover:bg-slate-50 hover:border-slate-300';
   const actionLabelClass = isDark
     ? 'text-slate-400 group-hover:text-white'
     : 'text-slate-500 group-hover:text-slate-900';
@@ -218,7 +218,7 @@ export const SpeedDialMenu = ({
                     {action.badge}
                   </button>
 
-                  <span className={`min-h-[2.25rem] max-w-[7rem] text-center font-mono text-[9px] font-black uppercase leading-tight tracking-[0.16em] transition-colors duration-200 select-none ${actionLabelClass}`}>
+                  <span className={`min-h-[2.25rem] max-w-[7rem] text-center font-sans text-[10px] font-semibold uppercase leading-tight tracking-wider transition-colors duration-200 select-none ${actionLabelClass}`}>
                     {action.label}
                   </span>
                 </div>
@@ -235,29 +235,27 @@ export const SpeedDialMenu = ({
         onClick={() => setOpen(prev => !prev)}
         aria-label={triggerLabel || "Ações Rápidas"}
         aria-expanded={open}
-        className={`relative transition-all duration-200 active:scale-95 flex items-center justify-center gap-2 ${open ? 'bg-slate-900 border border-slate-900 text-white shadow-lg' : isDark ? 'bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white' : 'bg-white border border-border-grid text-slate-700 hover:bg-slate-50 hover:border-slate-300'} ${triggerClassName || ''}`}
+        className={`relative transition-all duration-200 active:scale-95 flex items-center justify-center gap-2 rounded-lg p-2.5 ${
+          open 
+            ? 'bg-slate-900 border border-slate-900 text-white shadow-md' 
+            : isDark 
+              ? 'bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white' 
+              : 'bg-white border border-[#e5e7eb] text-slate-700 hover:bg-slate-50 hover:border-slate-350 shadow-sm'
+        } ${triggerClassName || ''}`}
       >
-        <svg className={triggerIconClassName || 'w-5 h-5'} viewBox="0 0 24 24" fill="currentColor">
-          <circle cx="5" cy="5" r="1.8" />
-          <circle cx="12" cy="5" r="1.8" />
-          <circle cx="19" cy="5" r="1.8" />
-          <circle cx="5" cy="12" r="1.8" />
-          <circle cx="12" cy="12" r="1.8" />
-          <circle cx="19" cy="12" r="1.8" />
-          <circle cx="5" cy="19" r="1.8" />
-          <circle cx="12" cy="19" r="1.8" />
-          <circle cx="19" cy="19" r="1.8" />
+        <svg className={triggerIconClassName || 'w-5 h-5'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M13 10V3L4 14h7v7l9-11h-7z" />
         </svg>
         
         {triggerLabel && (
-          <span className="font-mono font-black uppercase tracking-[0.16em] text-[8px] whitespace-nowrap">
+          <span className="font-sans font-bold uppercase tracking-wider text-[9px] whitespace-nowrap">
             {triggerLabel}
           </span>
         )}
 
         {/* Urgent badge on trigger */}
         {hasUrgentBadge && !open && (
-          <span className={`absolute ${triggerLabel ? '-top-1 -right-1' : 'right-1.5 top-1.5'} h-2 w-2 border border-white bg-rose-500 rounded-none`} />
+          <span className={`absolute ${triggerLabel ? '-top-1 -right-1' : 'right-1.5 top-1.5'} h-2 w-2 border border-white bg-rose-500 rounded-full`} />
         )}
       </button>
 

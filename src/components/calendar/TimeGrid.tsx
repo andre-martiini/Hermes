@@ -317,7 +317,7 @@ export const TimeGrid = ({
             {Array.from({ length: CALENDAR_END_HOUR - CALENDAR_START_HOUR + 1 }).map((_, i) => {
               const hour = i + CALENDAR_START_HOUR;
               return (
-                <div key={hour} className={`absolute right-2 text-[10px] font-black font-mono tracking-tighter ${isDark ? 'text-slate-600' : 'text-slate-400'}`} style={{ top: i * hourHeight - 6 }}>
+                <div key={hour} className={`absolute right-2 text-[10px] font-bold font-mono tracking-tight ${isDark ? 'text-slate-600' : 'text-slate-400'}`} style={{ top: i * hourHeight - 6 }}>
                   {hour.toString().padStart(2, '0')}:00
                 </div>
               );
@@ -367,12 +367,12 @@ export const TimeGrid = ({
                     return (
                       <div
                         key={event.id}
-                        className={`absolute rounded-none border-l-4 p-1 shadow-sm overflow-hidden font-mono uppercase tracking-tighter ${isDark ? 'bg-amber-900/20 border-amber-500 text-amber-200' : 'bg-amber-50/90 border-amber-500 text-slate-800'}`}
+                        className={`absolute rounded-md border-l-4 p-1 shadow-sm overflow-hidden font-mono uppercase tracking-tight ${isDark ? 'bg-amber-900/20 border-amber-500 text-amber-200' : 'bg-amber-50/90 border-amber-500 text-slate-800'}`}
                         style={{ top, height: Math.max(20, height), left: `${left}%`, width: `${columnWidth}%`, zIndex: 5 }}
                         onMouseDown={e => e.stopPropagation()}
                         onTouchStart={e => e.stopPropagation()}
                       >
-                        <div className="text-[9px] font-black leading-tight line-clamp-1">{event.title}</div>
+                        <div className="text-[9px] font-bold leading-tight line-clamp-1">{event.title}</div>
                       </div>
                     );
                   }
@@ -459,7 +459,7 @@ export const TimeGrid = ({
                         </div>
                         <div className="absolute bottom-1 left-1 flex items-center gap-1.5 overflow-hidden">
                           {taskItem.area_tematica && (
-                            <span className={`text-[7px] font-black uppercase px-1.5 py-0.5 rounded-none ${isDark ? 'bg-white/10 text-slate-300' : 'bg-black/5 text-slate-600'}`}>
+                            <span className={`text-[7px] font-bold uppercase px-1.5 py-0.5 rounded-md ${isDark ? 'bg-white/10 text-slate-300' : 'bg-black/5 text-slate-600'}`}>
                               {taskItem.area_tematica}
                             </span>
                           )}

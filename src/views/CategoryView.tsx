@@ -42,14 +42,14 @@ export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onA
     <div className={`actions-category-view animate-in grid grid-cols-1 lg:grid-cols-12 gap-10 ${isDark ? 'actions-view-dark' : ''}`}>
       {/* Lado Esquerdo: Ações Pendentes */}
       <div className="lg:col-span-8 flex flex-col gap-6">
-        <div className={`bg-white border-l-8 border-${color}-600 p-8 rounded-none md:rounded-[2rem] shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6`}>
+        <div className={`bg-white border-l-8 border-${color}-600 p-8 rounded-lg md:rounded-[2rem] shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6`}>
           <h3 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-4">
             Ações em Aberto - {title}
             <span className={`bg-${color}-100 text-${color}-600 text-[10px] font-black px-4 py-1.5 rounded-full`}>{pendentes.length}</span>
           </h3>
           <button
             onClick={() => onAnalysePatterns?.(areaTematica)}
-            className={`bg-slate-900 hover:bg-${color}-600 text-white px-6 py-3 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 shadow-lg active:scale-95`}
+            className={`bg-slate-950 hover:bg-${color}-600 text-white px-6 py-3 rounded-lg md:rounded-2xl text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-3 shadow-lg active:scale-95`}
             title="Pedir para o HERMES aprender com seus processos recentes"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -59,7 +59,7 @@ export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onA
           </button>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl">
+        <div className="bg-white border border-slate-200 rounded-lg md:rounded-[2rem] overflow-hidden shadow-lg">
           {/* Desktop Table View */}
           <table className="w-full text-left hidden md:table">
             <thead className="bg-slate-50 border-b border-slate-200">
@@ -81,7 +81,7 @@ export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onA
                     <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={(e) => { e.stopPropagation(); onSelectTask(t); }}
-                        className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg md:rounded-xl text-[9px] font-black uppercase tracking-wider hover:bg-slate-200 transition-colors"
+                        className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg md:rounded-xl text-[9px] font-bold uppercase tracking-wider hover:bg-slate-200 transition-colors"
                       >
                         Editar
                       </button>
@@ -109,13 +109,13 @@ export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onA
                 <div className="flex justify-end gap-2">
                   <button
                     onClick={(e) => { e.stopPropagation(); onSelectTask(t); }}
-                    className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 rounded-lg md:rounded-xl text-[9px] font-black uppercase tracking-wider text-center"
+                    className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 rounded-lg md:rounded-xl text-[9px] font-bold uppercase tracking-wider text-center"
                   >
                     Editar
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); onExecuteTask(t); }}
-                    className="flex-1 px-4 py-3 bg-slate-900 text-white rounded-lg md:rounded-xl text-[9px] font-black uppercase tracking-wider text-center"
+                    className="flex-1 px-4 py-3 bg-slate-900 text-white rounded-lg md:rounded-xl text-[9px] font-bold uppercase tracking-wider text-center"
                   >
                     Executar
                   </button>
@@ -125,7 +125,7 @@ export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onA
           </div>
 
           {pendentes.length === 0 && (
-            <div className="py-20 text-center text-slate-300 font-black uppercase tracking-widest italic border-t border-slate-100">
+            <div className="py-20 text-center text-slate-300 font-bold uppercase tracking-wider italic border-t border-slate-100">
               Nenhuma ação em aberto
             </div>
           )}
@@ -134,7 +134,7 @@ export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onA
 
       {/* Lado Direito: Linha do Tempo (Concluídas + Iniciadas) */}
       <div className="lg:col-span-4 flex flex-col gap-6">
-        <div className="bg-slate-900 text-white p-8 rounded-none md:rounded-[2rem] shadow-xl">
+        <div className="bg-slate-900 text-white p-8 rounded-lg md:rounded-[2rem] shadow-xl">
           <h3 className="text-xl font-black tracking-tight uppercase tracking-widest">Histórico Realizado</h3>
           <p className="text-slate-400 text-[10px] font-black uppercase mt-1">Audit de Atividades</p>
         </div>
@@ -148,7 +148,7 @@ export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onA
             return (
               <div key={t.id} className="relative group">
                 <div className={`absolute -left-8 mt-1.5 w-6 h-6 rounded-full border-4 border-white ${isConcluido ? `bg-${color}-500` : 'bg-slate-400'} shadow-sm z-10 transition-transform group-hover:scale-125`}></div>
-                <div className="bg-white p-5 rounded-none md:rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer" onClick={() => onSelectTask(t)}>
+                <div className="bg-white p-5 rounded-lg md:rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer" onClick={() => onSelectTask(t)}>
                   <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{formatDate(displayDate || '')}</p>
                   <h4 className="text-xs font-bold text-slate-900 leading-tight line-clamp-2">{t.titulo}</h4>
                   <div className="mt-3 flex items-center gap-2">
@@ -160,7 +160,7 @@ export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onA
             );
           })}
           {historyTasks.length === 0 && (
-            <div className="py-10 text-center bg-slate-50 rounded-none md:rounded-2xl border-2 border-dashed border-slate-200">
+            <div className="py-10 text-center bg-slate-50 rounded-lg md:rounded-2xl border-2 border-dashed border-slate-200">
               <p className="text-slate-300 font-black text-[10px] uppercase">Sem histórico</p>
             </div>
           )}

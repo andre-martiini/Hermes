@@ -171,8 +171,8 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
             </svg>
           </button>
           <div>
-            <p className="text-[10px] font-mono font-black text-emerald-500 uppercase tracking-widest leading-none mb-1">MONITORAMENTO WEB</p>
-            <h3 className="text-lg font-mono font-black uppercase tracking-tight">Monitor de Páginas</h3>
+            <p className="text-[10px] font-mono font-bold text-emerald-500 uppercase tracking-wider leading-none mb-1">MONITORAMENTO WEB</p>
+            <h3 className="text-lg font-mono font-bold uppercase tracking-tight">Monitor de Páginas</h3>
           </div>
         </div>
       </div>
@@ -180,7 +180,7 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* Form */}
         <div className={`p-6 rounded-none border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-          <h4 className="text-xs font-mono font-black uppercase tracking-widest text-slate-400 mb-4">Adicionar Página</h4>
+          <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-400 mb-4">Adicionar Página</h4>
           <div className="space-y-3">
             <input
               type="url"
@@ -218,7 +218,7 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
             <button
               onClick={handleAdd}
               disabled={salvando}
-              className="h-[46px] w-full sm:w-auto px-6 rounded-none font-mono text-xs font-black uppercase tracking-widest transition-all inline-flex items-center justify-center gap-2 text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
+              className="h-[46px] w-full sm:w-auto px-6 rounded-none font-mono text-xs font-bold uppercase tracking-wider transition-all inline-flex items-center justify-center gap-2 text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
             >
               {salvando ? 'Salvando...' : 'Monitorar'}
             </button>
@@ -228,7 +228,7 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
         {/* List */}
         {paginas.length === 0 ? (
           <div className={`py-20 text-center border-2 border-dashed rounded-none ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-            <p className="text-slate-400 font-mono text-[10px] font-black uppercase tracking-[0.2em]">Nenhuma Página Monitorada</p>
+            <p className="text-slate-400 font-mono text-[10px] font-bold uppercase tracking-wider">Nenhuma Página Monitorada</p>
             <p className="text-slate-500 text-xs mt-1">Adicione uma URL e um objetivo. A sincronização avisará você no Telegram quando o objetivo avançar.</p>
           </div>
         ) : (
@@ -237,7 +237,7 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
               <div key={p.id} className={`p-4 rounded-none border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'} ${!p.ativo ? 'opacity-50' : ''}`}>
                 {editId === p.id ? (
                   <div className="space-y-3">
-                    <p className="text-[10px] font-mono font-black uppercase tracking-widest text-emerald-500">Editando página</p>
+                    <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-500">Editando página</p>
                     <input
                       type="url"
                       value={editUrl}
@@ -279,13 +279,13 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
                     <div className="flex gap-2">
                       <button
                         onClick={() => salvarEdicao(p)}
-                        className="px-4 py-2 font-mono text-[9px] font-black uppercase tracking-wider text-white bg-emerald-600 hover:bg-emerald-700 transition-all"
+                        className="px-4 py-2 font-mono text-[9px] font-bold uppercase tracking-wider text-white bg-emerald-600 hover:bg-emerald-700 transition-all"
                       >
                         Salvar
                       </button>
                       <button
                         onClick={cancelarEdicao}
-                        className="px-4 py-2 font-mono text-[9px] font-black uppercase tracking-wider border border-slate-400/40 text-slate-400 hover:bg-slate-400/10 transition-all"
+                        className="px-4 py-2 font-mono text-[9px] font-bold uppercase tracking-wider border border-slate-400/40 text-slate-400 hover:bg-slate-400/10 transition-all"
                       >
                         Cancelar
                       </button>
@@ -296,18 +296,18 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className={`w-2 h-2 rounded-none ${p.ativo ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-                        <span className="font-mono text-sm font-black tracking-tight truncate">{p.apelido}</span>
+                        <span className="font-mono text-sm font-bold tracking-tight truncate">{p.apelido}</span>
                       </div>
                       <a href={p.url} target="_blank" rel="noreferrer" className="block text-[11px] text-emerald-500 hover:underline font-mono truncate mt-1">
                         {p.url}
                       </a>
                       <p className="text-xs text-slate-400 mt-2 line-clamp-2">
-                        <span className="font-black uppercase tracking-wider text-[9px] text-slate-500">Objetivo: </span>
+                        <span className="font-bold uppercase tracking-wider text-[9px] text-slate-500">Objetivo: </span>
                         {p.objetivo}
                       </p>
                       {p.ultima_analise && (
                         <p className={`text-xs mt-2 p-2 rounded-none ${isDark ? 'bg-slate-800/60' : 'bg-slate-100'}`}>
-                          <span className="font-black uppercase tracking-wider text-[9px] text-emerald-500">Última análise: </span>
+                          <span className="font-bold uppercase tracking-wider text-[9px] text-emerald-500">Última análise: </span>
                           {p.ultima_analise}
                         </p>
                       )}
@@ -319,13 +319,13 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
                     <div className="flex flex-col gap-2 shrink-0">
                       <button
                         onClick={() => iniciarEdicao(p)}
-                        className="px-3 py-1.5 font-mono text-[9px] font-black uppercase tracking-wider border border-slate-400/40 text-slate-400 hover:bg-slate-400/10 transition-all"
+                        className="px-3 py-1.5 font-mono text-[9px] font-bold uppercase tracking-wider border border-slate-400/40 text-slate-400 hover:bg-slate-400/10 transition-all"
                       >
                         Editar
                       </button>
                       <button
                         onClick={() => toggleAtivo(p)}
-                        className={`px-3 py-1.5 font-mono text-[9px] font-black uppercase tracking-wider border transition-all ${
+                        className={`px-3 py-1.5 font-mono text-[9px] font-bold uppercase tracking-wider border transition-all ${
                           p.ativo
                             ? 'border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10'
                             : 'border-slate-400/40 text-slate-400 hover:bg-slate-400/10'
@@ -335,7 +335,7 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
                       </button>
                       <button
                         onClick={() => remover(p)}
-                        className="px-3 py-1.5 font-mono text-[9px] font-black uppercase tracking-wider border border-rose-500/40 text-rose-500 hover:bg-rose-500/10 transition-all"
+                        className="px-3 py-1.5 font-mono text-[9px] font-bold uppercase tracking-wider border border-rose-500/40 text-rose-500 hover:bg-rose-500/10 transition-all"
                       >
                         Remover
                       </button>

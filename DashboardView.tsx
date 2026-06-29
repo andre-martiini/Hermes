@@ -21,133 +21,92 @@ interface DashboardViewProps {
     onNavigate: (view: 'gallery' | 'finance' | 'saude') => void;
 }
 
-// --- SUBCOMPONENTES MOVIDOS PARA FORA ---
+// --- CARD COMPONENT (Hermes Corporate Modern Design) ---
+interface DashboardCardProps {
+    title: string;
+    onRedirect?: () => void;
+    children: React.ReactNode;
+    isDark?: boolean;
+    headerAction?: React.ReactNode;
+    className?: string;
+    style?: React.CSSProperties;
+}
 
-const DashboardCard = ({ title, iconColor, onRedirect, children, isDark = false, headerAction, className = "" }: { title: string, iconColor: string, onRedirect: () => void, children: React.ReactNode, isDark?: boolean, headerAction?: React.ReactNode, className?: string }) => {
-    const colorMap: Record<string, string> = {
-        'bg-accent-tactile': '#FF9D4D',
-        'bg-safety-red': '#EF4444',
-        'bg-emerald-500': '#10B981',
-        'bg-primary-tactile': '#73A9E6',
-        'bg-red-500': '#EF4444'
+const DashboardCard: React.FC<DashboardCardProps> = ({
+    title,
+    onRedirect,
+    children,
+    isDark = false,
+    headerAction,
+    className = "",
+    style = {}
+}) => {
+    const isClickable = !!onRedirect;
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (!onRedirect) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onRedirect();
+        }
     };
-    const hexColor = colorMap[iconColor] || '#E5E7EB';
 
     return (
         <div
             onClick={onRedirect}
-            style={{ borderLeftColor: hexColor }}
-            className={`group p-3 md:p-4 rounded-none border-y border-r border-border-grid border-l-4 h-full transition-all flex flex-col cursor-pointer min-h-0 ${isDark ? 'bg-[#1b1c1c] border-white/10' : 'bg-white shadow-sm hover:shadow-md'} ${className}`}
-            role="button"
-            tabIndex={0}
+            onKeyDown={isClickable ? handleKeyDown : undefined}
+            style={{
+                boxShadow: isDark
+                    ? '0 6px 12px rgba(0, 0, 0, 0.4), 0 4px 4px rgba(0, 0, 0, 0.2)'
+                    : '0 6px 12px rgba(21, 28, 39, 0.05), 0 4px 4px rgba(21, 28, 39, 0.03)',
+                fontFamily: 'Inter, sans-serif',
+                ...style
+            }}
+            className={`group p-5 rounded-2xl border transition-all duration-300 flex flex-col min-h-0 ${
+                isClickable ? 'cursor-pointer hover:border-[#861fdd]/40 hover:bg-slate-50/50 dark:hover:bg-slate-900/10' : ''
+            } ${
+                isDark
+                    ? 'bg-[#151c27] border-[#2a313d] text-white'
+                    : 'bg-[#ffffff] border-[#f3f4f6] text-[#151c27]'
+            } ${className}`}
+            role={isClickable ? "button" : undefined}
+            tabIndex={isClickable ? 0 : undefined}
         >
             <div className="flex items-center justify-between mb-4 shrink-0">
-                <div className="flex items-center gap-2">
-                    <h3 className={`text-xs md:text-base font-bold uppercase tracking-widest font-mono ${isDark ? 'text-[#f0f1f0]' : 'text-on-surface'}`}>{title}</h3>
-                </div>
-                <div className="flex items-center gap-1">
+                <h3 className={`text-xs font-bold uppercase tracking-[0.05em] font-sans ${
+                    isDark ? 'text-[#ebf1ff]' : 'text-[#151c27]'
+                }`}>
+                    {title}
+                </h3>
+                <div className="flex items-center gap-1.5" onClick={(e) => isClickable && e.stopPropagation()}>
                     {headerAction}
-                    <div className={`p-2 rounded-soft-touch transition-all ${isDark ? 'text-slate-500 group-hover:text-slate-100' : 'text-slate-400 group-hover:bg-slate-50 group-hover:text-slate-900'}`}>
-                        <svg className="w-5 h-5 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                        </svg>
-                    </div>
+                    {isClickable && (
+                        <div className={`p-1.5 rounded-lg transition-all ${
+                            isDark
+                                ? 'text-slate-500 group-hover:bg-white/5 group-hover:text-[#ddb8ff]'
+                                : 'text-slate-400 group-hover:bg-[#f5f3ff] group-hover:text-[#7800ce]'
+                        }`}>
+                            <svg className="w-4 h-4 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                            </svg>
+                        </div>
+                    )}
                 </div>
             </div>
-            <div className="flex-1 flex flex-col justify-center min-h-0">
+            <div className="flex-1 flex flex-col justify-start min-h-0">
                 {children}
             </div>
         </div>
     );
 };
 
-const PieChart = ({ data, isDark = false }: { data: [string, number][], isDark?: boolean }) => {
-    const total = data.reduce((acc, curr) => acc + curr[1], 0);
-    if (total === 0) return <div className={`h-24 md:h-40 flex items-center justify-center text-[10px] font-black uppercase font-mono ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>Sem dados</div>;
-
-    const colors = isDark
-        ? ['#64b5f6', '#34d399', '#ffb74d', '#fb7185', '#a78bfa', '#f472b6']
-        : ['#23619a', '#835500', '#0060ac', '#ef4444', '#8b5cf6', '#ec4899'];
-
-    return (
-        <div className="space-y-2 md:space-y-2.5">
-            <div className={`h-2 rounded-none overflow-hidden flex ${isDark ? 'bg-slate-800' : 'bg-slate-100 border border-border-grid'}`}>
-                {data.slice(0, 5).map((item, i) => (
-                    <div
-                        key={i}
-                        className="h-full transition-all"
-                        style={{ width: `${(item[1] / total) * 100}%`, backgroundColor: colors[i % colors.length] }}
-                        title={`${item[0]}: ${item[1]}`}
-                    />
-                ))}
-            </div>
-            <div className="space-y-1.5 flex-1 min-w-0">
-                {data.slice(0, 5).map((item, i) => (
-                    <div key={i} className="flex items-center justify-between gap-3 group">
-                        <div className="flex items-center gap-2 truncate flex-1">
-                            <div className="w-2 h-2 md:w-2.5 md:h-2.5 rounded-none shrink-0" style={{ backgroundColor: colors[i % colors.length] }}></div>
-                            <span className={`text-[9px] md:text-[11px] font-black uppercase truncate transition-colors font-mono ${isDark ? 'text-slate-300 group-hover:text-slate-100' : 'text-slate-600 group-hover:text-on-surface'}`}>{item[0]}</span>
-                        </div>
-                        <span className={`text-[10px] md:text-xs font-black font-lcd ${isDark ? 'text-white' : 'text-on-surface'}`}>{item[1]}</span>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-};
-
-const BarChart = ({ data, color, isDark = false, maxHeight = 65 }: { data: number[], color: string, isDark?: boolean, maxHeight?: number }) => {
-    const max = Math.max(...data, 1);
-    const chartHeightClass = "h-[40px] md:h-[65px]";
-    return (
-        <div className={`flex items-end gap-0.5 md:gap-1 ${chartHeightClass} w-full rounded-none px-1 md:px-2 pb-1 md:pb-2 border border-border-grid ${isDark ? 'bg-[#1b1c1c]/80' : 'bg-lcd-bg shadow-lcd-panel'}`}>
-            {data.map((v, i) => (
-                <div key={i} className="flex-1 flex flex-col justify-end items-center gap-0.5 group">
-                    <div
-                        className="w-full rounded-none transition-all group-hover:opacity-80 cursor-pointer"
-                        style={{
-                            height: `${(v / max) * (typeof window !== 'undefined' && window.innerWidth >= 768 ? 50 : 35)}px`,
-                            backgroundColor: color,
-                            minWidth: '2px'
-                        }}
-                        title={`Dia ${i + 1}: R$ ${v.toFixed(2)}`}
-                    />
-                    <span className={`text-[6px] md:text-[8px] font-black font-lcd opacity-60 group-hover:opacity-100 ${isDark ? 'text-slate-500' : 'text-slate-600'}`}>{i + 1}</span>
-                </div>
-            ))}
-        </div>
-    );
-};
-
+// --- MASKED DATA PLACEHOLDER ---
 const HiddenMoney = ({ className = "", compact = false }: { className?: string, compact?: boolean }) => (
-    <span className={`inline-block font-black tracking-normal select-none font-lcd ${className}`} aria-label="valor oculto">
-        <span className="font-mono">R$</span> {compact ? '••••' : '••••••'}
+    <span className={`inline-block font-bold tracking-normal select-none ${className}`} aria-label="valor oculto">
+        <span className="opacity-70">R$</span> {compact ? '••••' : '••••••'}
     </span>
 );
 
-const HiddenPercent = ({ className = "" }: { className?: string }) => (
-    <span className={`inline-flex items-center gap-1 font-black font-lcd select-none ${className}`} aria-label="percentual oculto">
-        ••%
-    </span>
-);
-
-const HiddenBarChart = ({ isDark = false }: { isDark?: boolean }) => (
-    <div className={`relative flex items-end gap-0.5 md:gap-1 h-[40px] md:h-[65px] w-full rounded-none px-1 md:px-2 pb-1 md:pb-2 overflow-hidden border border-black/10 ${isDark ? 'bg-slate-900/80' : 'bg-black/5'}`}>
-        {Array.from({ length: 12 }).map((_, i) => (
-            <div
-                key={i}
-                className={`flex-1 rounded-none ${isDark ? 'bg-slate-800' : 'bg-black/10'}`}
-                style={{ height: `${18 + ((i * 7) % 32)}px`, opacity: 0.55 }}
-            />
-        ))}
-        <div className={`absolute inset-0 flex items-center justify-center text-[9px] md:text-[10px] font-bold uppercase tracking-[0.2em] font-mono ${isDark ? 'text-slate-500 bg-slate-950/40' : 'text-on-surface/40 bg-white/20'}`}>
-            // DATA_OMITTED_SECURE_NODE
-        </div>
-    </div>
-);
-
-// --- COMPONENTE PRINCIPAL ---
-
+// --- MAIN COMPONENT ---
 const DashboardView: React.FC<DashboardViewProps> = ({
     tarefas = [],
     isDark = false,
@@ -159,48 +118,14 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     healthDailyHabits = [],
     healthSettings = {} as HealthSettings,
     exerciseLogs = [] as ExerciseLog[],
-    unidades = [],
     currentMonth = new Date().getMonth(),
     currentYear = new Date().getFullYear(),
     onNavigate
 }) => {
     const [isFinanceVisible, setIsFinanceVisible] = useState(false);
 
-    const { todayStr, tomorrowStr } = useMemo(() => {
-        const now = new Date();
-        const formatDate = (d: Date) => {
-            const y = d.getFullYear();
-            const m = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            return `${y}-${m}-${day}`;
-        };
-        const tom = new Date(now);
-        tom.setDate(tom.getDate() + 1);
-        return {
-            todayStr: formatDate(now),
-            tomorrowStr: formatDate(tom)
-        };
-    }, []);
-
     // --- ACTIONS LOGIC ---
     const inProgressActions = useMemo(() => tarefas.filter(t => t.status !== 'concluído' && t.status !== 'excluído' as any), [tarefas]);
-
-    const nextTwoDaysActions = useMemo(() => inProgressActions.filter(t =>
-        t.data_limite && t.data_limite !== '-' && t.data_limite >= todayStr && t.data_limite <= tomorrowStr
-    ), [inProgressActions, todayStr, tomorrowStr]);
-
-    const actionsByArea = useMemo(() => {
-        const counts: Record<string, number> = {};
-        inProgressActions.forEach(t => {
-            const area = t.area_tematica || 'GERAL';
-            counts[area] = (counts[area] || 0) + 1;
-        });
-        return Object.entries(counts).sort((a, b) => b[1] - a[1]);
-    }, [inProgressActions]);
-
-    const overdueCount = useMemo(() => inProgressActions.filter(t =>
-        t.data_limite && t.data_limite !== '-' && t.data_limite < todayStr
-    ).length, [inProgressActions, todayStr]);
 
     const actionsByDay = useMemo(() => {
         const result = [];
@@ -212,7 +137,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             d.setDate(today.getDate() + i);
             const dStr = d.toISOString().split('T')[0];
             const count = inProgressActions.filter(t => t.data_limite === dStr).length;
-            
+
             result.push({
                 dateStr: dStr,
                 dayNum: d.getDate(),
@@ -222,20 +147,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             });
         }
         return result;
-    }, [inProgressActions, todayStr]);
-
-    const distantFutureCount = useMemo(() => {
-        if (actionsByDay.length === 0) return 0;
-        const lastDate = actionsByDay[actionsByDay.length - 1].dateStr;
-        return inProgressActions.filter(t => t.data_limite && t.data_limite > lastDate).length;
-    }, [inProgressActions, actionsByDay]);
-
-    const nextMilestones = useMemo(() => {
-        return inProgressActions
-            .filter(t => t.data_limite && t.data_limite !== '-' && t.data_limite >= todayStr)
-            .sort((a, b) => a.data_limite.localeCompare(b.data_limite))
-            .slice(0, 3);
-    }, [inProgressActions, todayStr]);
+    }, [inProgressActions]);
 
     // --- FINANCE LOGIC ---
     const periodKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
@@ -253,16 +165,15 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
         const monthName = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'][currentMonth];
         const result = [];
-        
+
         for (let d = 1; d <= daysInMonth; d++) {
             const amount = currentMonthTransactions
                 .filter(t => {
                     const transDate = new Date(t.date);
-                    // Use UTC or local comparison carefully. Here we assume t.date is ISO or local.
                     return transDate.getDate() === d;
                 })
                 .reduce((acc, curr) => acc + curr.amount, 0);
-            
+
             if (amount > 0) {
                 result.push({
                     day: d,
@@ -272,16 +183,6 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             }
         }
         return result;
-    }, [currentMonthTransactions, currentMonth, currentYear]);
-
-    const dailySpending = useMemo(() => {
-        const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-        const days = Array(daysInMonth).fill(0);
-        currentMonthTransactions.forEach(t => {
-            const day = new Date(t.date).getDate();
-            if (day <= daysInMonth) days[day - 1] += t.amount;
-        });
-        return days;
     }, [currentMonthTransactions, currentMonth, currentYear]);
 
     const currentMonthIncome = useMemo(() => incomeEntries
@@ -331,172 +232,306 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         const key = new Date().toISOString().slice(0, 10);
         return exerciseLogs.find(l => l.id === key) || null;
     }, [exerciseLogs]);
-
-
+    // --- PROGRESS BAR RENDER HELPER ---
+    const renderProgressBar = (value: number, max: number) => {
+        const percent = max > 0 ? Math.min((value / max) * 100, 100) : 0;
+        return (
+            <div className={`h-[6px] w-full rounded-full overflow-hidden ${isDark ? 'bg-[#2a313d]' : 'bg-[#f3f4f6]'}`}>
+                <div style={{ width: `${percent}%` }} className="h-full bg-[#9333ea] rounded-full transition-all duration-500" />
+            </div>
+        );
+    };
 
     return (
-        <div className="animate-in fade-in duration-700 flex flex-col h-full lg:h-[calc(100vh-5rem)] p-1 md:p-2 lg:p-1 w-full max-w-[1600px] mx-auto overflow-hidden">
-            <div className="grid grid-cols-1 lg:grid-cols-2 lg:grid-rows-2 gap-2 md:gap-3 lg:gap-2 flex-1 min-h-0">
+        <div
+            style={{ fontFamily: 'Inter, sans-serif' }}
+            className={`animate-in fade-in duration-700 flex flex-col gap-5 w-full max-w-[1600px] mx-auto p-4 md:p-6 overflow-hidden ${
+                isDark ? 'text-white' : 'text-[#151c27]'
+            }`}
+        >
 
-                {/* CARD: AÇÕES */}
-                <DashboardCard title="Ações" iconColor="bg-accent-tactile" onRedirect={() => onNavigate('gallery')} isDark={isDark} className="lg:col-span-2">
-                    <div className={`h-full flex flex-col gap-4 p-2 md:p-4 rounded-none bg-transparent`}>
-                        <div className="flex items-center justify-between shrink-0">
-                            <p className={`text-[10px] font-bold uppercase tracking-[0.2em] font-mono ${isDark ? 'text-slate-400' : 'text-on-surface/50'}`}>// CARGA SEMANAL (D+6)</p>
-                            <div className="flex items-center gap-2 md:gap-3">
-                                <div className="flex items-center gap-1.5">
-                                    <span className={`text-[10px] font-bold uppercase font-mono ${isDark ? 'text-[#f0f1f0]' : 'text-on-surface'}`}>{inProgressActions.length} TOTAL</span>
-                                </div>
-                                {overdueCount > 0 && (
-                                    <div className="px-2 py-0.5 bg-red-50 border border-red-100 flex items-center gap-1.5">
-                                        <span className="text-[10px] font-bold uppercase font-mono text-red-600">{overdueCount} ATRASO</span>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
+            <div className="flex flex-col xl:flex-row gap-6 w-full items-stretch min-h-0 xl:h-[calc(100vh-7rem)]">
 
-                        <div className="flex-1 flex items-end gap-1 md:gap-2 min-h-0 px-2 pb-2 relative">
-                            {actionsByDay.map((day, i) => {
-                                const maxCount = Math.max(...actionsByDay.map(d => d.count), 5);
-                                const heightPercent = (day.count / maxCount) * 100;
-                                
-                                return (
-                                    <div key={i} className="flex-1 flex flex-col items-center justify-end h-full group">
-                                        <span className={`text-[11px] md:text-sm font-bold font-mono mb-1 ${day.count > 0 ? (isDark ? 'text-[#f0f1f0]' : 'text-on-surface') : (isDark ? 'text-slate-600' : 'text-on-surface/10')}`}>
-                                            {String(day.count).padStart(2, '0')}
-                                        </span>
-                                        <div 
-                                            style={{ height: `${Math.max(heightPercent, day.count > 0 ? 8 : 2)}%` }}
-                                            className={`w-full transition-all duration-500 rounded-none ${day.isToday 
-                                                ? 'bg-accent-tactile' 
-                                                : day.count > 0 
-                                                    ? 'bg-accent-tactile/20 hover:bg-accent-tactile/40'
-                                                    : isDark ? 'bg-white/5' : 'bg-slate-100'}`}
-                                        ></div>
-                                        <div className={`mt-3 flex flex-col items-center gap-0.5 ${day.isToday ? 'opacity-100' : 'opacity-40'}`}>
-                                            <span className={`text-[9px] md:text-[10px] font-bold font-mono leading-none whitespace-nowrap ${isDark ? 'text-[#f0f1f0]' : 'text-on-surface'}`}>
-                                                {String(day.dayNum).padStart(2, '0')} {day.monthName}
-                                            </span>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                </DashboardCard>
+                {/* 1. COLUNA ESQUERDA: Área de Trabalho (Flexível) */}
+                <div className="flex-1 flex flex-col gap-6 xl:overflow-y-auto custom-scrollbar xl:max-h-[calc(100vh-7rem)] pr-1">
 
-                {/* CARD: FINANCEIRO */}
-                <DashboardCard
-                    title="Financeiro"
-                    iconColor="bg-emerald-500"
-                    onRedirect={() => onNavigate('finance')}
-                    isDark={isDark}
-                    headerAction={
-                        <button
-                            onClick={(e) => { e.stopPropagation(); setIsFinanceVisible(!isFinanceVisible); }}
-                            className={`p-2 rounded-none transition-all ${isDark ? 'text-slate-500 hover:text-slate-100' : 'text-slate-400 hover:text-emerald-600'}`}
-                        >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                {isFinanceVisible ? <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /> : <path d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />}
-                            </svg>
-                        </button>
-                    }
-                >
-                    <div className={`h-full flex flex-col gap-4 p-2 md:p-4 rounded-none bg-transparent`}>
-                        <div className="flex items-center justify-between shrink-0">
-                            <div>
-                                <p className={`text-[10px] font-bold uppercase tracking-[0.2em] font-mono ${isDark ? 'text-slate-400' : 'text-on-surface/50'}`}>// CONSUMO MENSAL ATIVO</p>
-                                <div className="text-xl md:text-2xl font-bold font-mono text-emerald-600 mt-1">
-                                    {isFinanceVisible ? <><span className="text-xs opacity-60">R$</span> {currentMonthTotalSpent.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}</> : <HiddenMoney compact />}
-                                </div>
-                            </div>
-                            <div className="text-right">
-                                <p className={`text-[9px] font-bold uppercase tracking-[0.2em] font-mono ${isDark ? 'text-slate-400' : 'text-on-surface/40'}`}>DISPONÍVEL</p>
-                                <div className={`text-sm md:text-base font-bold font-lcd ${availableBalance < 0 ? 'text-red-600' : 'text-emerald-600/80'}`}>
-                                    {isFinanceVisible ? <>{availableBalance.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}</> : '••••'}
-                                </div>
-                            </div>
-                        </div>
+                    {/* CARD: Carga de Trabalho Semanal */}
+                    <DashboardCard title="Carga Semanal de Trabalho" isDark={isDark} onRedirect={() => onNavigate('gallery')}>
+                        <div className="flex flex-col gap-4">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.2em] font-mono text-slate-400">
+                                // CARGA OPERACIONAL D+6
+                            </p>
 
-                        <div className="flex-1 flex items-end gap-1 md:gap-1.5 min-h-0 px-2 pb-2 relative overflow-x-auto scrollbar-hide">
-                            {isFinanceVisible ? (
-                                financeChartData.length > 0 ? (
-                                    financeChartData.map((item, i) => {
-                                        const maxAmount = Math.max(...financeChartData.map(d => d.amount), 1);
-                                        const heightPercent = (item.amount / maxAmount) * 100;
-                                        
-                                        return (
-                                            <div key={i} className="flex-1 min-w-[14px] flex flex-col items-center justify-end h-full group">
-                                                <div 
-                                                    style={{ height: `${Math.max(heightPercent, 5)}%` }}
-                                                    className="w-full bg-emerald-500/20 group-hover:bg-emerald-500/40 transition-all duration-300 rounded-none"
-                                                    title={`Dia ${item.day}: R$ ${item.amount.toFixed(2)}`}
-                                                ></div>
-                                                <div className="mt-2">
-                                                    <span className={`text-[8px] font-bold font-mono group-hover:text-emerald-600 ${isDark ? 'text-slate-400' : 'text-on-surface/30'}`}>
-                                                        {String(item.day).padStart(2, '0')}
-                                                    </span>
+                            <div className="grid grid-cols-7 gap-2 md:gap-3 border-b border-[#f3f4f6] pb-2 dark:border-white/5">
+                                {actionsByDay.map((day, i) => {
+                                    const maxCount = Math.max(...actionsByDay.map(d => d.count), 1);
+                                    const heightPercent = (day.count / maxCount) * 100;
+
+                                    return (
+                                        <div key={i} className="flex min-w-0 flex-col items-center group">
+                                            <div className="flex h-40 w-full flex-col justify-end">
+                                                <div className="flex h-32 w-full items-end">
+                                                    <div
+                                                        className="flex w-full flex-col items-center"
+                                                        style={{ height: day.count > 0 ? `${Math.max(heightPercent, 8)}%` : '2px' }}
+                                                    >
+                                                        <span className={`mb-1 block text-center text-[11px] font-bold font-mono leading-none transition-colors ${
+                                                            day.count > 0
+                                                                ? (day.isToday ? 'text-[#7800ce] dark:text-[#ddb8ff]' : 'text-slate-600 dark:text-slate-300')
+                                                                : 'text-slate-300 dark:text-slate-700'
+                                                        }`}>
+                                                            {String(day.count).padStart(2, '0')}
+                                                        </span>
+                                                        <div
+                                                            className={`min-h-0 w-full flex-1 transition-all duration-300 rounded-lg ${
+                                                                day.isToday
+                                                                    ? 'bg-[#7800ce] shadow-[0_0_12px_rgba(120,0,206,0.3)]'
+                                                                    : day.count > 0
+                                                                        ? 'bg-[#9333ea]/20 hover:bg-[#9333ea]/40'
+                                                                        : isDark ? 'bg-white/5' : 'bg-slate-100'
+                                                            }`}
+                                                        />
+                                                    </div>
                                                 </div>
                                             </div>
-                                        );
-                                    })
-                                ) : (
-                                    <div className="flex-1 h-full flex items-center justify-center border border-dashed border-border-grid">
-                                        <span className={`text-[10px] font-bold uppercase font-mono italic ${isDark ? 'text-slate-500' : 'text-on-surface/20'}`}>SEM REGISTROS</span>
+                                            <div className="mt-3 flex flex-col items-center gap-0.5">
+                                                <span className={`text-[10px] font-bold font-mono ${
+                                                    day.isToday ? 'text-[#7800ce] dark:text-[#ddb8ff]' : 'text-slate-400 dark:text-slate-500'
+                                                }`}>
+                                                    {String(day.dayNum).padStart(2, '0')}
+                                                </span>
+                                                <span className="text-[8px] font-semibold text-slate-400 uppercase tracking-widest font-mono">
+                                                    {day.monthName}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </DashboardCard>
+                    {/* CARD: Painel Financeiro */}
+                    <DashboardCard
+                        title="Resumo Financeiro"
+                        isDark={isDark}
+                        onRedirect={() => onNavigate('finance')}
+                        headerAction={
+                            <button
+                                onClick={(e) => { e.stopPropagation(); setIsFinanceVisible(!isFinanceVisible); }}
+                                className={`p-1.5 rounded-lg border transition-all ${
+                                    isDark
+                                        ? 'border-white/10 text-slate-400 hover:text-white hover:bg-white/5'
+                                        : 'border-[#e5e7eb] text-slate-500 hover:text-[#9333ea] hover:bg-[#f5f3ff]'
+                                }`}
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    {isFinanceVisible ? (
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                    ) : (
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />
+                                    )}
+                                </svg>
+                            </button>
+                        }
+                    >
+                        <div className="flex flex-col gap-5">
+                            <div className="flex items-center justify-between">
+                                <div className="flex flex-col gap-1">
+                                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] font-mono text-slate-400">
+                                        Consumo Mensal
+                                    </span>
+                                    <div className="text-2xl font-bold font-mono text-[#10b981]">
+                                        {isFinanceVisible ? (
+                                            <>
+                                                <span className="text-xs opacity-75 font-sans mr-0.5">R$</span>
+                                                {currentMonthTotalSpent.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                            </>
+                                        ) : (
+                                            <HiddenMoney compact />
+                                        )}
                                     </div>
-                                )
-                            ) : (
-                                <div className="flex-1 h-full flex items-center justify-center border border-dashed border-border-grid">
-                                    <span className={`text-[10px] font-bold uppercase font-mono italic ${isDark ? 'text-slate-500' : 'text-on-surface/20'}`}>DADOS OMITIDOS</span>
                                 </div>
-                            )}
-                        </div>
-                    </div>
-                </DashboardCard>
+                                <div className="text-right flex flex-col gap-1">
+                                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] font-mono text-slate-400">
+                                        Saldo Disponível
+                                    </span>
+                                    <div className={`text-base font-bold font-mono ${
+                                        availableBalance < 0 ? 'text-[#ba1a1a]' : 'text-slate-600 dark:text-slate-300'
+                                    }`}>
+                                        {isFinanceVisible ? (
+                                            <>
+                                                <span className="text-xs opacity-75 mr-0.5">R$</span>
+                                                {availableBalance.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                            </>
+                                        ) : (
+                                            '••••'
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
 
-                {/* CARD: SAÚDE */}
-                <DashboardCard title="Saúde" iconColor="bg-safety-red" onRedirect={() => onNavigate('saude')} isDark={isDark}>
-                    <div className={`h-full flex flex-col gap-3 p-2 md:p-4 rounded-none bg-transparent`}>
-                        <div className="flex items-center justify-between shrink-0">
-                            <p className={`text-[10px] font-bold uppercase tracking-[0.2em] font-mono ${isDark ? 'text-slate-400' : 'text-on-surface/50'}`}>// MONITORAMENTO ATIVO</p>
-                            <span className={`text-[10px] font-bold uppercase font-mono ${isDark ? 'text-[#f0f1f0]' : 'text-on-surface'}`}>{habitStreak} DIAS CONSEC.</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-3 flex-1">
-                            <div className="flex flex-col justify-center border-l-2 border-red-500/10 pl-3">
-                                <p className={`text-[9px] font-bold uppercase tracking-[0.1em] font-mono mb-1 ${isDark ? 'text-slate-400' : 'text-on-surface/40'}`}>Massa Corporal</p>
-                                <div className={`text-xl md:text-2xl font-bold font-mono leading-none ${isDark ? 'text-[#f0f1f0]' : 'text-on-surface'}`}>
-                                    {currentWeight > 0 ? currentWeight.toFixed(1) : '—'}
-                                    <span className="text-[10px] opacity-40 ml-1">KG</span>
+                            {/* Progresso de Orçamento */}
+                            <div className="flex flex-col gap-1.5">
+                                <div className="flex justify-between text-[11px] text-slate-500">
+                                    <span>Limite Planejado</span>
+                                    <span className="font-mono">
+                                        {isFinanceVisible ? `R$ ${currentBudget.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}` : '••••'}
+                                    </span>
                                 </div>
-                                <div className={`text-[10px] font-bold font-mono mt-1 ${isDark ? 'text-slate-400' : 'text-on-surface/20'}`}>Δ {currentWeight > 0 ? `${weightDeltaPrefix}${weightDeltaAbs.toFixed(1)}` : '—'}</div>
+                                {renderProgressBar(currentMonthTotalSpent, currentBudget)}
                             </div>
-                            <div className="flex flex-col justify-center border-l-2 border-red-500/10 pl-3">
-                                <p className={`text-[9px] font-bold uppercase tracking-[0.1em] font-mono mb-1 ${isDark ? 'text-slate-400' : 'text-on-surface/40'}`}>Locomoção</p>
-                                <div className={`text-xl md:text-2xl font-bold font-mono leading-none ${isDark ? 'text-[#f0f1f0]' : 'text-on-surface'}`}>
-                                    {todayTelemetry?.walk?.steps ? todayTelemetry.walk.steps.toLocaleString('pt-BR') : '—'}
-                                </div>
-                                <div className={`text-[10px] font-bold font-mono mt-1 ${isDark ? 'text-slate-400' : 'text-on-surface/20'}`}>{todayTelemetry?.walk?.distance ? `${todayTelemetry.walk.distance.toFixed(1)} KM` : '—'}</div>
-                            </div>
-                            <div className="flex flex-col justify-center border-l-2 border-red-500/10 pl-3">
-                                <p className={`text-[9px] font-bold uppercase tracking-[0.1em] font-mono mb-1 ${isDark ? 'text-slate-400' : 'text-on-surface/40'}`}>Gasto Calórico</p>
-                                <div className={`text-xl md:text-2xl font-bold font-mono leading-none ${isDark ? 'text-[#f0f1f0]' : 'text-on-surface'}`}>
-                                    {todayTelemetry?.calories ? Math.round(todayTelemetry.calories).toLocaleString('pt-BR') : '—'}
-                                    <span className="text-[10px] opacity-40 ml-1">KCAL</span>
-                                </div>
-                                <div className={`text-[10px] font-bold font-mono mt-1 ${isDark ? 'text-slate-400' : 'text-on-surface/20'}`}>{todayTelemetry?.activeMinutes ? `${todayTelemetry.activeMinutes} MIN ATIVOS` : '—'}</div>
-                            </div>
-                            <div className="flex flex-col justify-center border-l-2 border-red-500/10 pl-3">
-                                <p className={`text-[9px] font-bold uppercase tracking-[0.1em] font-mono mb-1 ${isDark ? 'text-slate-400' : 'text-on-surface/40'}`}>Repouso</p>
-                                <div className={`text-xl md:text-2xl font-bold font-mono leading-none ${isDark ? 'text-[#f0f1f0]' : 'text-on-surface'}`}>
-                                    {todayTelemetry?.sleep?.totalMinutes ? `${Math.floor(todayTelemetry.sleep.totalMinutes / 60)}H ${todayTelemetry.sleep.totalMinutes % 60}M` : '—'}
-                                </div>
-                                <div className={`text-[10px] font-bold font-mono mt-1 ${isDark ? 'text-slate-400' : 'text-on-surface/20'}`}>STATUS NOMINAL</div>
-                            </div>
-                        </div>
-                    </div>
-                </DashboardCard>
 
+                            <hr className={isDark ? 'border-white/10' : 'border-[#e5e7eb]'} />
 
+                            {/* Gráfico Financeiro */}
+                            <div className="flex flex-col gap-2">
+                                <span className="text-[10px] font-bold uppercase tracking-[0.2em] font-mono text-slate-400">
+                                    // CONSUMO DIÁRIO DO PERÍODO
+                                </span>
+                                <div className="h-20 flex items-end gap-1 px-1 relative">
+                                    {isFinanceVisible ? (
+                                        financeChartData.length > 0 ? (
+                                            financeChartData.map((item, i) => {
+                                                const maxAmount = Math.max(...financeChartData.map(d => d.amount), 1);
+                                                const heightPercent = (item.amount / maxAmount) * 100;
+                                                return (
+                                                    <div key={i} className="flex-1 min-w-[8px] flex flex-col justify-end h-full group">
+                                                        <div
+                                                            style={{ height: `${Math.max(heightPercent, 6)}%` }}
+                                                            className="w-full bg-[#10b981]/30 group-hover:bg-[#10b981] transition-all duration-300 rounded-sm"
+                                                            title={`Dia ${item.day}: R$ ${item.amount.toFixed(2)}`}
+                                                        />
+                                                    </div>
+                                                );
+                                            })
+                                        ) : (
+                                            <div className="flex-1 h-full flex items-center justify-center border border-dashed border-[#e5e7eb] dark:border-white/10 rounded-xl">
+                                                <span className="text-[10px] uppercase font-mono italic text-slate-400">Sem registros neste mês</span>
+                                            </div>
+                                        )
+                                    ) : (
+                                        <div className="flex-1 h-full flex items-center justify-center border border-dashed border-[#e5e7eb] dark:border-white/10 rounded-xl bg-slate-500/5 backdrop-blur-[1px]">
+                                            <span className="text-[10px] uppercase tracking-wider font-mono font-bold text-slate-400">DADOS OMITIDOS DE FORMA SEGURA</span>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Resumo Caixa de Entradas/Saídas */}
+                            <div className="grid grid-cols-2 gap-4 text-xs font-medium">
+                                <div className={`p-3 rounded-xl border ${isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'}`}>
+                                    <span className="text-[9px] uppercase tracking-wider text-slate-400 font-mono">Receitas do Mês</span>
+                                    <p className="text-sm font-bold text-[#10b981] mt-1 font-mono">
+                                        {isFinanceVisible ? `R$ ${currentMonthIncome.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}` : '••••'}
+                                    </p>
+                                </div>
+                                <div className={`p-3 rounded-xl border ${isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'}`}>
+                                    <span className="text-[9px] uppercase tracking-wider text-slate-400 font-mono">Contas Fixas</span>
+                                    <p className="text-sm font-bold text-slate-600 dark:text-slate-300 mt-1 font-mono">
+                                        {isFinanceVisible ? `R$ ${currentTotalBills.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}` : '••••'}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </DashboardCard>
+
+                </div>
+
+                {/* 2. COLUNA DIREITA: Saúde & Telemetria (320px Fixo) */}
+                <div className="w-full xl:w-[320px] shrink-0 flex flex-col gap-6 xl:overflow-y-auto custom-scrollbar xl:max-h-[calc(100vh-7rem)] pr-1">
+                    {/* CARD: Saúde & Telemetria */}
+                    <DashboardCard title="Saúde & Telemetria" isDark={isDark} onRedirect={() => onNavigate('saude')}>
+                        <div className="flex flex-col gap-4">
+                            <div className="flex items-center justify-between shrink-0">
+                                <span className="text-[9px] uppercase tracking-wider text-slate-400 font-mono">// MONITORAMENTO HÁBITOS</span>
+                                <span className="rounded-full bg-[#10b981] text-white text-[9px] font-bold px-2 py-0.5 font-sans uppercase">
+                                    {habitStreak} Dias Seguidos
+                                </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className={`p-3 rounded-xl border flex flex-col justify-center ${
+                                    isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
+                                }`}>
+                                    <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Massa</span>
+                                    <div className="text-base font-bold font-mono mt-0.5">
+                                        {currentWeight > 0 ? `${currentWeight.toFixed(1)}` : '-'}
+                                        {currentWeight > 0 && <span className="text-[10px] text-slate-400 font-sans ml-0.5">KG</span>}
+                                    </div>
+                                    <div className="text-[9px] font-bold font-mono text-slate-400 mt-0.5">
+                                        Delta {currentWeight > 0 ? `${weightDeltaPrefix}${weightDeltaAbs.toFixed(1)}` : '-'}
+                                    </div>
+                                </div>
+
+                                <div className={`p-3 rounded-xl border flex flex-col justify-center ${
+                                    isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
+                                }`}>
+                                    <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Passos</span>
+                                    <div className="text-base font-bold font-mono mt-0.5">
+                                        {todayTelemetry?.walk?.steps ? todayTelemetry.walk.steps.toLocaleString('pt-BR') : '-'}
+                                    </div>
+                                    <div className="text-[9px] font-bold font-mono text-slate-400 mt-0.5">
+                                        {todayTelemetry?.walk?.distance ? `${todayTelemetry.walk.distance.toFixed(1)} KM` : '-'}
+                                    </div>
+                                </div>
+
+                                <div className={`p-3 rounded-xl border flex flex-col justify-center ${
+                                    isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
+                                }`}>
+                                    <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Calorias</span>
+                                    <div className="text-base font-bold font-mono mt-0.5">
+                                        {todayTelemetry?.calories ? Math.round(todayTelemetry.calories).toLocaleString('pt-BR') : '-'}
+                                        {todayTelemetry?.calories && <span className="text-[9px] text-slate-400 font-sans ml-0.5">KCAL</span>}
+                                    </div>
+                                    <div className="text-[9px] font-bold font-mono text-slate-400 mt-0.5">
+                                        {todayTelemetry?.activeMinutes ? `${todayTelemetry.activeMinutes} MIN ATIVOS` : '-'}
+                                    </div>
+                                </div>
+
+                                <div className={`p-3 rounded-xl border flex flex-col justify-center ${
+                                    isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
+                                }`}>
+                                    <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Repouso</span>
+                                    <div className="text-base font-bold font-mono mt-0.5">
+                                        {todayTelemetry?.sleep?.totalMinutes ? `${Math.floor(todayTelemetry.sleep.totalMinutes / 60)}h ${todayTelemetry.sleep.totalMinutes % 60}m` : '-'}
+                                    </div>
+                                    <div className="text-[9px] font-bold font-mono text-slate-400 mt-0.5">
+                                        STATUS NOMINAL
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Habit Completion Last 7 Days */}
+                            <div className="flex flex-col gap-2 mt-2">
+                                <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 font-mono">// ÚLTIMOS 7 DIAS</span>
+                                <div className="flex justify-between items-center gap-1.5 bg-[#f9fafb] dark:bg-white/[0.01] border border-[#f3f4f6] dark:border-white/5 p-3 rounded-xl">
+                                    {last7Habits.map((h, i) => {
+                                        const donePercent = h.total > 0 ? (h.done / h.total) * 100 : 0;
+                                        return (
+                                            <div key={i} className="flex-1 flex flex-col items-center gap-1.5">
+                                                <div className="h-10 w-2.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden flex flex-col justify-end">
+                                                    <div
+                                                        style={{ height: `${donePercent}%` }}
+                                                        className={`w-full rounded-full transition-all duration-300 ${
+                                                            h.done >= 4 ? 'bg-[#10b981]' : h.done > 0 ? 'bg-[#9333ea]/60' : 'bg-transparent'
+                                                        }`}
+                                                    />
+                                                </div>
+                                                <span className={`text-[8px] font-bold font-mono ${
+                                                    h.isToday ? 'text-[#7800ce] dark:text-[#ddb8ff]' : 'text-slate-400'
+                                                }`}>
+                                                    {h.label}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                        </div>
+                    </DashboardCard>
+
+                </div>
 
             </div>
         </div>

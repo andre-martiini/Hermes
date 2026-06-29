@@ -52,15 +52,15 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
     // Theme Class helper
     const themeClass = {
         bg: isDark ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800',
-        card: isDark ? 'bg-slate-900 border-slate-800 text-white hover:bg-slate-850' : 'bg-white border-slate-100 text-slate-800 hover:shadow-md',
+        card: isDark ? 'bg-slate-950 border-slate-800 text-white hover:bg-slate-850' : 'bg-white border-slate-100 text-slate-800 hover:shadow-md',
         input: isDark ? 'bg-slate-800 border-slate-700 text-white focus:ring-indigo-500' : 'bg-slate-100 border-transparent text-slate-700 focus:ring-indigo-500',
         label: isDark ? 'text-slate-400' : 'text-slate-400',
         border: isDark ? 'border-slate-800' : 'border-slate-100',
         timelineLine: isDark ? 'bg-slate-800' : 'bg-slate-200',
         timelineDot: isDark ? 'bg-indigo-500 border-slate-900' : 'bg-indigo-600 border-white',
         textMuted: isDark ? 'text-slate-400' : 'text-slate-500',
-        headerBg: isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100',
-        modalBg: isDark ? 'bg-slate-900 border-slate-850' : 'bg-white border-slate-200'
+        headerBg: isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-100',
+        modalBg: isDark ? 'bg-slate-950 border-slate-850' : 'bg-white border-slate-200'
     };
 
     // Real-time listener for perfil_pessoas
@@ -302,15 +302,15 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h3 className={`text-xl font-black ${isDark ? 'text-white' : 'text-slate-800'}`}>Contatos e Histórico Inteligente</h3>
-                    <p className={`text-xs font-medium mt-1 font-mono ${isDark ? 'text-slate-400' : 'text-slate-550'}`}>
+                    <p className={`text-xs font-medium mt-1 font-sans ${isDark ? 'text-slate-400' : 'text-slate-550'}`}>
                         Catalogador inteligente de nomes mencionadas em ações de trabalho integrado ao Google Contacts.
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2 w-full md:w-auto">
                     <button
                         onClick={handleGoogleSync}
-                        className={`px-4 py-2 border rounded-none text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 font-mono ${
-                            isDark ? 'bg-slate-850 border-border-grid text-indigo-400 hover:bg-slate-800' : 'bg-indigo-50 border-indigo-100 text-indigo-600 hover:bg-indigo-100'
+                        className={`px-4 py-2 border rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-2 font-sans ${
+                            isDark ? 'bg-slate-850 border-[#e5e7eb] dark:border-white/10 text-indigo-400 hover:bg-slate-800' : 'bg-indigo-50 border-indigo-100 text-indigo-600 hover:bg-indigo-100'
                         }`}
                     >
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18" /></svg>
@@ -318,7 +318,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                     </button>
                     <button
                         onClick={openAddModal}
-                        className={`px-4 py-2 border rounded-none text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 font-mono ${
+                        className={`px-4 py-2 border rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-2 font-sans ${
                             isDark ? 'bg-white text-slate-900 border-white hover:bg-slate-100' : 'bg-slate-900 text-white border-slate-900 hover:bg-slate-800'
                         }`}
                     >
@@ -340,10 +340,10 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                         <button
                             key={tab.id}
                             onClick={() => setFilterTag(tab.id)}
-                            className={`px-4 py-1.5 border rounded-none text-[10px] font-black uppercase tracking-widest transition-all font-mono ${
+                            className={`px-4 py-1.5 border rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all font-sans ${
                                 filterTag === tab.id
                                     ? isDark ? 'bg-white text-slate-900 border-white' : 'bg-slate-900 text-white border-slate-900'
-                                    : isDark ? 'bg-slate-800/80 border-border-grid text-slate-400 hover:bg-slate-700/80 hover:text-white' : 'bg-slate-100 border-transparent text-slate-500 hover:bg-slate-200/60'
+                                    : isDark ? 'bg-slate-800/80 border-[#e5e7eb] dark:border-white/10 text-slate-400 hover:bg-slate-700/80 hover:text-white' : 'bg-slate-100 border-transparent text-slate-500 hover:bg-slate-200/60'
                             }`}
                         >
                             {tab.label}
@@ -357,8 +357,8 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                         placeholder="Pesquisar por nome ou e-mail..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className={`pl-10 pr-4 py-2 border rounded-none text-xs font-bold font-mono outline-none focus:ring-1 focus:ring-primary-tactile w-full md:w-64 transition-all ${
-                            isDark ? 'bg-slate-800/80 border-border-grid text-white placeholder:text-slate-500' : 'bg-slate-100 border-transparent text-slate-750 placeholder:text-slate-400'
+                        className={`pl-10 pr-4 py-2 border rounded-lg text-xs font-bold font-sans outline-none focus:ring-1 focus:ring-primary-tactile w-full md:w-64 transition-all ${
+                            isDark ? 'bg-slate-800/80 border-[#e5e7eb] dark:border-white/10 text-white placeholder:text-slate-500' : 'bg-slate-100 border-transparent text-slate-750 placeholder:text-slate-400'
                         }`}
                     />
                 </div>
@@ -369,7 +369,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                 {/* Left: Contact List */}
                 <div className="lg:col-span-3 space-y-3 max-h-[65vh] overflow-y-auto pr-1">
                     {filteredContacts.length === 0 ? (
-                        <div className={`p-12 text-center border border-dashed rounded-none font-mono ${isDark ? 'border-border-grid bg-slate-900/40 text-slate-550' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>
+                        <div className={`p-12 text-center border border-dashed rounded-lg font-sans ${isDark ? 'border-[#e5e7eb] dark:border-white/10 bg-slate-950/40 text-slate-550' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>
                             <p className="text-sm font-bold">Nenhum contato encontrado.</p>
                         </div>
                     ) : (
@@ -380,10 +380,10 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                 <div
                                     key={contact.id}
                                     onClick={() => setSelectedContact(contact)}
-                                    className={`border rounded-none p-4 transition-all duration-200 cursor-pointer flex items-center justify-between font-mono ${
+                                    className={`border rounded-lg p-4 transition-all duration-200 cursor-pointer flex items-center justify-between font-sans ${
                                         isSelected 
-                                            ? isDark ? 'bg-slate-800 border-white text-white shadow-lg' : 'bg-slate-900 border-slate-900 text-white shadow-lg' 
-                                            : isDark ? 'bg-slate-900/40 border-border-grid text-slate-200 hover:bg-slate-800/60 hover:border-slate-700' : 'bg-white border-slate-100 text-slate-800 hover:shadow-md'
+                                            ? isDark ? 'bg-slate-800 border-white text-white shadow-lg' : 'bg-slate-950 border-slate-900 text-white shadow-lg' 
+                                            : isDark ? 'bg-slate-950/40 border-[#e5e7eb] dark:border-white/10 text-slate-200 hover:bg-slate-800/60 hover:border-slate-700' : 'bg-white border-slate-100 text-slate-800 hover:shadow-md'
                                     }`}
                                 >
                                     <div className="flex items-center gap-3.5 min-w-0">
@@ -398,11 +398,11 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                                     setSelectedIds(prev => [...prev, contact.id]);
                                                 }
                                             }}
-                                            className={`h-4.5 w-4.5 cursor-pointer accent-indigo-600 rounded-none border transition-all ${
+                                            className={`h-4.5 w-4.5 cursor-pointer accent-indigo-600 rounded-lg border transition-all ${
                                                 isDark ? 'border-slate-750 bg-slate-850' : 'border-slate-300 bg-white'
                                             }`}
                                         />
-                                        <div className={`w-10 h-10 rounded-none flex items-center justify-center font-black text-xs text-white ${contact.avatar_color || 'bg-indigo-500'}`}>
+                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-black text-xs text-white ${contact.avatar_color || 'bg-indigo-500'}`}>
                                             {contact.avatar_initials || contact.nome.charAt(0).toUpperCase()}
                                         </div>
                                         <div className="min-w-0">
@@ -428,7 +428,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                             {(contact.tags || []).slice(0, 2).map((t, idx) => (
                                                 <span 
                                                     key={idx} 
-                                                    className={`px-2 py-0.5 rounded-none text-[8px] font-black uppercase tracking-widest ${
+                                                    className={`px-2 py-0.5 rounded-lg text-[8px] font-bold uppercase tracking-wider ${
                                                         isSelected
                                                             ? 'bg-white/20 text-white'
                                                             : t === 'Contatos do Google' ? isDark ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-900/50' : 'bg-emerald-50 text-emerald-700' :
@@ -440,7 +440,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                                 </span>
                                             ))}
                                             {(contact.tags || []).length > 2 && (
-                                                <span className={`px-2 py-0.5 rounded-none text-[8px] font-black ${isSelected ? 'bg-white/20 text-white' : isDark ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-400'}`}>
+                                                <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black ${isSelected ? 'bg-white/20 text-white' : isDark ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-400'}`}>
                                                     +{(contact.tags || []).length - 2}
                                                 </span>
                                             )}
@@ -455,8 +455,8 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                 {/* Right: Timeline & Contact Details Panel */}
                 <div className="lg:col-span-2">
                     {!selectedContact ? (
-                        <div className={`border rounded-none p-12 text-center h-full flex flex-col justify-center items-center font-mono ${
-                            isDark ? 'bg-slate-900/40 border-border-grid' : 'bg-slate-50 border-slate-100'
+                        <div className={`border rounded-lg p-12 text-center h-full flex flex-col justify-center items-center font-sans ${
+                            isDark ? 'bg-slate-950/40 border-[#e5e7eb] dark:border-white/10' : 'bg-slate-50 border-slate-100'
                         }`}>
                             <svg className={`w-10 h-10 mb-4 ${isDark ? 'text-slate-750' : 'text-slate-300'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
                             <h4 className={`text-sm font-black ${isDark ? 'text-slate-300' : 'text-slate-800'}`}>Nenhum contato selecionado</h4>
@@ -465,13 +465,13 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                             </p>
                         </div>
                     ) : (
-                        <div className={`border rounded-none p-6 font-mono space-y-6 ${
-                            isDark ? 'bg-slate-900/40 border-border-grid' : 'bg-white border-slate-100 shadow-sm'
+                        <div className={`border rounded-lg p-6 font-sans space-y-6 ${
+                            isDark ? 'bg-slate-950/40 border-[#e5e7eb] dark:border-white/10' : 'bg-white border-slate-100 shadow-sm'
                         }`}>
                             {/* Panel Header */}
                             <div className="flex items-start justify-between">
                                 <div className="flex items-center gap-4">
-                                    <div className={`w-12 h-12 rounded-none flex items-center justify-center font-black text-sm text-white ${selectedContact.avatar_color || 'bg-indigo-500'}`}>
+                                    <div className={`w-12 h-12 rounded-lg flex items-center justify-center font-black text-sm text-white ${selectedContact.avatar_color || 'bg-indigo-500'}`}>
                                         {selectedContact.avatar_initials || selectedContact.nome.charAt(0).toUpperCase()}
                                     </div>
                                     <div>
@@ -484,14 +484,14 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                 <div className="flex gap-1">
                                     <button 
                                         onClick={() => openEditModal(selectedContact)}
-                                        className={`p-1.5 rounded-none border transition-all ${isDark ? 'text-slate-400 hover:text-indigo-405 border-transparent hover:border-slate-800 hover:bg-slate-850' : 'text-slate-400 hover:text-indigo-600 border-transparent hover:border-slate-200 hover:bg-slate-50'}`}
+                                        className={`p-1.5 rounded-lg border transition-all ${isDark ? 'text-slate-400 hover:text-indigo-405 border-transparent hover:border-slate-800 hover:bg-slate-850' : 'text-slate-400 hover:text-indigo-600 border-transparent hover:border-slate-200 hover:bg-slate-50'}`}
                                         title="Editar Contato"
                                     >
                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                     </button>
                                     <button 
                                         onClick={() => handleDeleteContact(selectedContact)}
-                                        className={`p-1.5 rounded-none border transition-all ${isDark ? 'text-slate-400 hover:text-rose-450 border-transparent hover:border-slate-800 hover:bg-slate-850' : 'text-slate-400 hover:text-rose-600 border-transparent hover:border-slate-200 hover:bg-slate-50'}`}
+                                        className={`p-1.5 rounded-lg border transition-all ${isDark ? 'text-slate-400 hover:text-rose-450 border-transparent hover:border-slate-800 hover:bg-slate-850' : 'text-slate-400 hover:text-rose-600 border-transparent hover:border-slate-200 hover:bg-slate-50'}`}
                                         title="Excluir Contato"
                                     >
                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
@@ -500,7 +500,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                             </div>
 
                             {/* Contact Details Fields */}
-                            <div className={`grid grid-cols-1 gap-3 p-4 rounded-none text-xs border ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-100'}`}>
+                            <div className={`grid grid-cols-1 gap-3 p-4 rounded-lg text-xs border ${isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50 border-slate-100'}`}>
                                 {selectedContact.email && (
                                     <div className="flex justify-between">
                                         <span className={`font-bold uppercase tracking-widest text-[9px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>E-mail</span>
@@ -522,8 +522,8 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                 {selectedContact.observacoes && (
                                     <div className={`pt-2 border-t flex flex-col gap-1 ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
                                         <span className={`font-bold uppercase tracking-widest text-[9px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Observações / Notas</span>
-                                        <p className={`text-[11px] font-bold leading-relaxed p-2.5 rounded-none border ${
-                                            isDark ? 'bg-slate-900 border-slate-800 text-slate-350' : 'bg-white border-slate-100 text-slate-600'
+                                        <p className={`text-[11px] font-bold leading-relaxed p-2.5 rounded-lg border ${
+                                            isDark ? 'bg-slate-950 border-slate-800 text-slate-350' : 'bg-white border-slate-100 text-slate-600'
                                         }`}>{selectedContact.observacoes}</p>
                                     </div>
                                 )}
@@ -540,7 +540,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                         {selectedContact.resumo_ia && (
                                             <button
                                                 onClick={() => handleGenerateSummary(selectedContact.id)}
-                                                className={`text-[9px] font-black uppercase tracking-wider underline hover:no-underline ${
+                                                className={`text-[9px] font-bold uppercase tracking-wider underline hover:no-underline ${
                                                     isDark ? 'text-indigo-400 hover:text-indigo-300' : 'text-indigo-650 hover:text-indigo-850'
                                                 }`}
                                                 disabled={isGeneratingSummary}
@@ -550,8 +550,8 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                         )}
                                     </div>
                                     {selectedContact.resumo_ia ? (
-                                        <p className={`text-[11px] font-bold italic leading-relaxed p-2.5 rounded-none border border-dashed ${
-                                            isDark ? 'bg-slate-900 border-slate-800 text-slate-350' : 'bg-white border-slate-150 text-slate-650'
+                                        <p className={`text-[11px] font-bold italic leading-relaxed p-2.5 rounded-lg border border-dashed ${
+                                            isDark ? 'bg-slate-950 border-slate-800 text-slate-350' : 'bg-white border-slate-150 text-slate-650'
                                         }`}>
                                             "{selectedContact.resumo_ia}"
                                         </p>
@@ -559,7 +559,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                         <div className="pt-1">
                                             <button
                                                 onClick={() => handleGenerateSummary(selectedContact.id)}
-                                                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-750 disabled:bg-indigo-850 text-white font-black text-[9px] uppercase tracking-wider rounded-none border border-indigo-500 flex items-center gap-1 transition-all"
+                                                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-750 disabled:bg-indigo-850 text-white font-black text-[9px] uppercase tracking-wider rounded-lg border border-indigo-500 flex items-center gap-1 transition-all"
                                                 disabled={isGeneratingSummary}
                                             >
                                                 {isGeneratingSummary ? (
@@ -585,7 +585,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
 
                                 <div className={`pt-2 border-t flex flex-wrap gap-1 ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
                                     {(selectedContact.tags || []).map((t, idx) => (
-                                        <span key={idx} className={`px-2.5 py-0.5 rounded-none text-[9px] font-black uppercase tracking-widest border ${
+                                        <span key={idx} className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border ${
                                             isDark ? 'bg-slate-800 border-slate-700 text-slate-400' : 'bg-slate-200 text-slate-650 border-slate-300/45'
                                         }`}>
                                             {t}
@@ -601,7 +601,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                 </h4>
                                 
                                 {timeline.length === 0 ? (
-                                    <div className={`p-8 text-center text-xs font-bold rounded-none border ${isDark ? 'bg-slate-900/20 border-slate-800 text-slate-500' : 'bg-slate-50 border-slate-100 text-slate-400'}`}>
+                                    <div className={`p-8 text-center text-xs font-bold rounded-lg border ${isDark ? 'bg-slate-950/20 border-slate-800 text-slate-500' : 'bg-slate-50 border-slate-100 text-slate-400'}`}>
                                         Nenhuma interação registrada ainda.
                                     </div>
                                 ) : (
@@ -612,13 +612,13 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                             });
                                             return (
                                                 <div key={item.id || idx} className="relative">
-                                                    <div className={`absolute -left-[23px] top-[3px] w-3 h-3 rounded-none border-[3px] ${item.tipo === 'mencao_copiloto' ? 'bg-blue-400 border-slate-900' : isDark ? 'bg-indigo-400 border-slate-900' : 'bg-indigo-600 border-white'}`} />
+                                                    <div className={`absolute -left-[23px] top-[3px] w-3 h-3 rounded-lg border-[3px] ${item.tipo === 'mencao_copiloto' ? 'bg-blue-400 border-slate-900' : isDark ? 'bg-indigo-400 border-slate-900' : 'bg-indigo-600 border-white'}`} />
                                                     <div>
                                                         <div className="flex items-center justify-between gap-2">
                                                             <div className="flex items-center gap-2">
-                                                                <span className={`text-[9px] font-mono font-black uppercase tracking-wider ${isDark ? 'text-indigo-450' : 'text-indigo-600'}`}>{formattedDate}</span>
+                                                                <span className={`text-[9px] font-sans font-bold uppercase tracking-wider ${isDark ? 'text-indigo-450' : 'text-indigo-600'}`}>{formattedDate}</span>
                                                                 {item.tipo === 'mencao_copiloto' && (
-                                                                    <span className="text-[8px] bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded-none font-black uppercase tracking-widest">IA</span>
+                                                                    <span className="text-[8px] bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded-lg font-bold uppercase tracking-wider">IA</span>
                                                                 )}
                                                             </div>
                                                             <div className="flex items-center gap-2">
@@ -627,7 +627,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                                                         onClick={() => {
                                                                             navigateWithinApp(`/copiloto?sessionId=${item.sessao_copiloto_id}`);
                                                                         }}
-                                                                        className={`text-[9px] font-black uppercase tracking-widest flex items-center gap-1 ${
+                                                                        className={`text-[9px] font-bold uppercase tracking-wider flex items-center gap-1 ${
                                                                             isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-800 hover:underline'
                                                                         }`}
                                                                     >
@@ -641,7 +641,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                                                             e.preventDefault();
                                                                             navigateWithinApp(`/tarefas?task=${item.tarefa_id}`);
                                                                         }}
-                                                                        className={`text-[9px] font-black uppercase tracking-widest flex items-center gap-1 ${
+                                                                        className={`text-[9px] font-bold uppercase tracking-wider flex items-center gap-1 ${
                                                                             isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-800 hover:underline'
                                                                         }`}
                                                                     >
@@ -669,13 +669,13 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
             {showSyncModal && (
                 <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={() => !isSyncing && setShowSyncModal(false)}></div>
-                    <div className={`w-full max-w-sm rounded-none border shadow-2xl p-8 relative z-10 text-center space-y-4 font-mono ${
-                        isDark ? 'bg-slate-900 border-border-grid text-white' : 'bg-white border-slate-200 text-slate-800'
+                    <div className={`w-full max-w-sm rounded-2xl border shadow-lg p-8 relative z-10 text-center space-y-4 font-sans ${
+                        isDark ? 'bg-slate-950 border-[#e5e7eb] dark:border-white/10 text-white' : 'bg-white border-slate-200 text-slate-800'
                     }`}>
                         {isSyncing ? (
                             <>
                                 <div className="flex justify-center py-6">
-                                    <div className="w-12 h-12 border-4 border-indigo-650 border-t-transparent rounded-none animate-spin"></div>
+                                    <div className="w-12 h-12 border-4 border-indigo-650 border-t-transparent rounded-lg animate-spin"></div>
                                 </div>
                                 <h4 className="text-sm font-black">Sincronizando com Google Contacts...</h4>
                                 <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -689,7 +689,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                 </div>
                                 <h4 className="text-base font-black">Sincronização Concluída!</h4>
                                 {syncStats && (
-                                    <div className={`grid grid-cols-2 gap-3 p-4 rounded-none text-xs font-bold mt-3 text-left border ${
+                                    <div className={`grid grid-cols-2 gap-3 p-4 rounded-lg text-xs font-bold mt-3 text-left border ${
                                         isDark ? 'bg-slate-950 border-slate-850 text-slate-450' : 'bg-slate-50 border-slate-100 text-slate-600'
                                     }`}>
                                         <div className="flex flex-col">
@@ -704,7 +704,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                 )}
                                 <button
                                     onClick={() => setShowSyncModal(false)}
-                                    className={`w-full mt-6 py-3 rounded-none text-[10px] font-black uppercase tracking-widest transition-all border ${
+                                    className={`w-full mt-6 py-3 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border ${
                                         isDark ? 'bg-white text-slate-900 border-white hover:bg-slate-100' : 'bg-slate-900 text-white border-slate-900 hover:bg-slate-800'
                                     }`}
                                 >
@@ -720,20 +720,20 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
             {isModalOpen && (
                 <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={() => setIsModalOpen(false)}></div>
-                    <div className={`w-full max-w-md rounded-none border shadow-2xl p-8 relative z-10 font-mono ${
-                        isDark ? 'bg-slate-900 border-border-grid text-white' : 'bg-white border-slate-200 text-slate-800'
+                    <div className={`w-full max-w-md rounded-2xl border shadow-lg p-8 relative z-10 font-sans ${
+                        isDark ? 'bg-slate-950 border-[#e5e7eb] dark:border-white/10 text-white' : 'bg-white border-slate-200 text-slate-800'
                     }`}>
-                        <h3 className="text-lg font-black mb-6 border-b pb-2 border-border-grid">
+                        <h3 className="text-lg font-black mb-6 border-b pb-2 border-[#e5e7eb] dark:border-white/10">
                             {editingContact ? 'Editar Contato' : 'Adicionar Contato'}
                         </h3>
                         <div className="space-y-4">
                             <div>
-                                <label className={`text-[10px] font-black uppercase tracking-widest ml-1 ${isDark ? 'text-slate-550' : 'text-slate-400'}`}>Nome Completo</label>
+                                <label className={`text-[10px] font-bold uppercase tracking-wider ml-1 ${isDark ? 'text-slate-550' : 'text-slate-400'}`}>Nome Completo</label>
                                 <input
                                     type="text"
                                     value={formState.nome}
                                     onChange={e => setFormState({...formState, nome: e.target.value})}
-                                    className={`w-full mt-1 p-3 rounded-none border outline-none font-bold text-xs ${
+                                    className={`w-full mt-1 p-3 rounded-lg border outline-none font-bold text-xs ${
                                         isDark ? 'bg-slate-950 border-slate-800 text-white focus:border-white' : 'bg-white border-slate-200 text-slate-700 focus:border-slate-900'
                                     }`}
                                     placeholder="Ex: João da Silva"
@@ -741,24 +741,24 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className={`text-[10px] font-black uppercase tracking-widest ml-1 ${isDark ? 'text-slate-555' : 'text-slate-400'}`}>E-mail</label>
+                                    <label className={`text-[10px] font-bold uppercase tracking-wider ml-1 ${isDark ? 'text-slate-555' : 'text-slate-400'}`}>E-mail</label>
                                     <input
                                         type="email"
                                         value={formState.email}
                                         onChange={e => setFormState({...formState, email: e.target.value})}
-                                        className={`w-full mt-1 p-3 rounded-none border outline-none font-bold text-xs ${
+                                        className={`w-full mt-1 p-3 rounded-lg border outline-none font-bold text-xs ${
                                             isDark ? 'bg-slate-950 border-slate-800 text-white focus:border-white' : 'bg-white border-slate-200 text-slate-700 focus:border-slate-900'
                                         }`}
                                         placeholder="email@example.com"
                                     />
                                 </div>
                                 <div>
-                                    <label className={`text-[10px] font-black uppercase tracking-widest ml-1 ${isDark ? 'text-slate-555' : 'text-slate-400'}`}>Telefone</label>
+                                    <label className={`text-[10px] font-bold uppercase tracking-wider ml-1 ${isDark ? 'text-slate-555' : 'text-slate-400'}`}>Telefone</label>
                                     <input
                                         type="text"
                                         value={formState.telefone}
                                         onChange={e => setFormState({...formState, telefone: e.target.value})}
-                                        className={`w-full mt-1 p-3 rounded-none border outline-none font-bold text-xs ${
+                                        className={`w-full mt-1 p-3 rounded-lg border outline-none font-bold text-xs ${
                                             isDark ? 'bg-slate-950 border-slate-800 text-white focus:border-white' : 'bg-white border-slate-200 text-slate-700 focus:border-slate-900'
                                         }`}
                                         placeholder="(27) 99999-9999"
@@ -766,12 +766,12 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                 </div>
                             </div>
                             <div>
-                                <label className={`text-[10px] font-black uppercase tracking-widest ml-1 ${isDark ? 'text-slate-555' : 'text-slate-400'}`}>Observações</label>
+                                <label className={`text-[10px] font-bold uppercase tracking-wider ml-1 ${isDark ? 'text-slate-555' : 'text-slate-400'}`}>Observações</label>
                                 <textarea
                                     value={formState.observacoes}
                                     onChange={e => setFormState({...formState, observacoes: e.target.value})}
                                     rows={3}
-                                    className={`w-full mt-1 p-3 rounded-none border outline-none font-bold text-xs resize-none ${
+                                    className={`w-full mt-1 p-3 rounded-lg border outline-none font-bold text-xs resize-none ${
                                         isDark ? 'bg-slate-950 border-slate-800 text-white focus:border-white' : 'bg-white border-slate-200 text-slate-700 focus:border-slate-900'
                                     }`}
                                     placeholder="Notas adicionais sobre a pessoa..."
@@ -780,15 +780,15 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                             <div className="flex gap-2 justify-end pt-4">
                                 <button
                                     onClick={() => setIsModalOpen(false)}
-                                    className={`px-5 py-2.5 rounded-none text-[10px] font-black uppercase tracking-widest transition-all border ${
-                                        isDark ? 'bg-slate-800 text-slate-350 border-border-grid hover:bg-slate-750' : 'bg-slate-100 text-slate-600 border-transparent hover:bg-slate-200'
+                                    className={`px-5 py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border ${
+                                        isDark ? 'bg-slate-800 text-slate-350 border-[#e5e7eb] dark:border-white/10 hover:bg-slate-750' : 'bg-slate-100 text-slate-600 border-transparent hover:bg-slate-200'
                                     }`}
                                 >
                                     Cancelar
                                 </button>
                                 <button
                                     onClick={handleSaveContact}
-                                    className={`px-5 py-2.5 rounded-none text-[10px] font-black uppercase tracking-widest transition-all border ${
+                                    className={`px-5 py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border ${
                                         isDark ? 'bg-white text-slate-900 border-white hover:bg-slate-100' : 'bg-slate-900 text-white border-slate-900 hover:bg-slate-800'
                                     }`}
                                 >
@@ -802,17 +802,17 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
 
             {/* Merge Floating Action Bar */}
             {selectedIds.length >= 2 && (
-                <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-6 px-6 py-4 border rounded-none shadow-2xl font-mono ${
-                    isDark ? 'bg-slate-900 border-white text-white' : 'bg-slate-900 border-slate-950 text-white'
+                <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-6 px-6 py-4 border rounded-lg shadow-lg font-sans ${
+                    isDark ? 'bg-slate-950 border-white text-white' : 'bg-slate-950 border-slate-950 text-white'
                 }`}>
                     <div className="flex flex-col">
-                        <span className="text-xs font-black uppercase tracking-wider">{selectedIds.length} Contatos Selecionados</span>
+                        <span className="text-xs font-bold uppercase tracking-wider">{selectedIds.length} Contatos Selecionados</span>
                         <span className="text-[10px] text-slate-400 font-bold">Unifique registros duplicados mesclando-os</span>
                     </div>
                     <div className="flex gap-2">
                         <button
                             onClick={() => setSelectedIds([])}
-                            className="px-3 py-1.5 transition-all font-black text-xs uppercase tracking-wider rounded-none text-slate-400 hover:text-white"
+                            className="px-3 py-1.5 transition-all font-bold text-xs uppercase tracking-wider rounded-lg text-slate-400 hover:text-white"
                         >
                             Limpar
                         </button>
@@ -822,7 +822,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                 setPrimaryMergeId(selectedIds[0]);
                                 setShowMergeModal(true);
                             }}
-                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-750 transition-all font-black text-xs uppercase tracking-wider rounded-none text-white border border-indigo-500"
+                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-750 transition-all font-bold text-xs uppercase tracking-wider rounded-lg text-white border border-indigo-500"
                         >
                             Mesclar
                         </button>
@@ -833,7 +833,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
             {/* Merge Contacts Modal */}
             {showMergeModal && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className={`w-full max-w-md p-6 border rounded-none font-mono ${themeClass.modalBg}`}>
+                    <div className={`w-full max-w-md p-6 border rounded-2xl font-sans ${themeClass.modalBg}`}>
                         <div className="flex justify-between items-start mb-4">
                             <h3 className={`text-sm font-black uppercase tracking-[0.2em] ${isDark ? 'text-white' : 'text-slate-950'}`}>
                                 Mesclar Contatos
@@ -857,7 +857,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                     className={`flex items-center gap-3 p-3 border cursor-pointer transition-all ${
                                         primaryMergeId === contact.id 
                                             ? isDark ? 'bg-slate-800 border-white text-white' : 'bg-slate-100 border-slate-900 text-slate-950'
-                                            : isDark ? 'bg-slate-950 border-slate-850 text-slate-400 hover:bg-slate-900/60' : 'bg-slate-50 border-slate-150 text-slate-650 hover:bg-slate-100/60'
+                                            : isDark ? 'bg-slate-950 border-slate-850 text-slate-400 hover:bg-slate-950/60' : 'bg-slate-50 border-slate-150 text-slate-650 hover:bg-slate-100/60'
                                     }`}
                                 >
                                     <input 
@@ -877,10 +877,10 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                             ))}
                         </div>
                         
-                        <div className="flex justify-end gap-3 pt-3 border-t border-border-grid">
+                        <div className="flex justify-end gap-3 pt-3 border-t border-[#e5e7eb] dark:border-white/10">
                             <button
                                 onClick={() => setShowMergeModal(false)}
-                                className={`px-4 py-2 border rounded-none font-black text-xs uppercase tracking-wider transition-all ${
+                                className={`px-4 py-2 border rounded-lg font-bold text-xs uppercase tracking-wider transition-all ${
                                     isDark ? 'border-slate-800 text-slate-400 hover:bg-slate-850 hover:text-white' : 'border-slate-200 text-slate-650 hover:bg-slate-50'
                                 }`}
                                 disabled={isMerging}
@@ -889,7 +889,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                             </button>
                             <button
                                 onClick={handleConfirmMerge}
-                                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-750 disabled:bg-indigo-800 text-white font-black text-xs uppercase tracking-wider rounded-none border border-indigo-500 flex items-center gap-2"
+                                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-750 disabled:bg-indigo-800 text-white font-bold text-xs uppercase tracking-wider rounded-lg border border-indigo-500 flex items-center gap-2"
                                 disabled={isMerging || !primaryMergeId}
                             >
                                 {isMerging ? 'Mesclando...' : 'Confirmar Mesclagem'}

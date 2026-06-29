@@ -9,28 +9,70 @@ export default {
   theme: {
     extend: {
       colors: {
-        'surface': '#F9F8F6',         // Technical Paper
-        'on-surface': '#212121',      // Deep Ink
-        'primary-tactile': '#73A9E6', // Atmospheric Blue (Operational)
-        'accent-tactile': '#FF9D4D',  // Alert Orange
-        'safety-red': '#EF4444',      // Emergency/Health Red
-        'highlighter': '#FDE68A',     // Highlighter Yellow
-        'border-grid': '#E5E7EB',     // Fine Grid Lines
-        'text-main': '#212121',
+        surface: "#ffffff",
+        "surface-dim": "#d3daea",
+        "surface-bright": "#f9f9ff",
+        "surface-container-lowest": "#ffffff",
+        "surface-container-low": "#f0f3ff",
+        "surface-container": "#e7eefe",
+        "surface-container-high": "#e2e8f8",
+        "surface-container-highest": "#dce2f3",
+        "surface-variant": "#dce2f3",
+        "on-surface": "#151c27",
+        "on-surface-variant": "#4d4354",
+        "inverse-surface": "#2a313d",
+        "inverse-on-surface": "#ebf1ff",
+        outline: "#7e7386",
+        "outline-variant": "#cfc2d7",
+        "surface-tint": "#861fdd",
+        primary: "#7800ce",
+        "on-primary": "#ffffff",
+        "primary-container": "#9333ea",
+        "on-primary-container": "#f6e6ff",
+        "inverse-primary": "#ddb8ff",
+        secondary: "#0058be",
+        "on-secondary": "#ffffff",
+        "secondary-container": "#2170e4",
+        "on-secondary-container": "#fefcff",
+        tertiary: "#784700",
+        "on-tertiary": "#ffffff",
+        "tertiary-container": "#9a5c00",
+        "on-tertiary-container": "#ffe8d4",
+        error: "#ba1a1a",
+        "on-error": "#ffffff",
+        "error-container": "#ffdad6",
+        "on-error-container": "#93000a",
+        background: "#f9fafb",
+        "on-background": "#151c27",
+        "border-subtle": "#f3f4f6",
+        "border-standard": "#e5e7eb",
+        "status-progress": "#9333ea",
+        "status-active": "#10b981",
+        "ai-accent": "#dbeafe",
+        "ai-text": "#2563eb",
+
+        /* Legacy aliases kept so existing screens inherit the new Hermes palette. */
+        "primary-tactile": "#9333ea",
+        "accent-tactile": "#0058be",
+        "safety-red": "#ba1a1a",
+        highlighter: "#ffdcbc",
+        "border-grid": "#f3f4f6",
+        "text-main": "#151c27",
       },
       fontFamily: {
-        serif: ['Newsreader', 'serif'],
-        mono: ['JetBrains Mono', 'monospace'],
-        lcd: ['DSEG7Classic', 'Space Mono', 'monospace'],
+        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        serif: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        mono: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        lcd: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       boxShadow: {
-        'soft-touch': 'inset 2px 2px 4px rgba(0,0,0,0.05), inset -2px -2px 4px rgba(255,255,255,0.8)',
-        'lcd-panel': 'inset 0 1px 3px rgba(0,0,0,0.2), 0 1px 0 rgba(255,255,255,0.5)',
+        card: "0 6px 18px rgba(21, 28, 39, 0.05), 0 2px 6px rgba(21, 28, 39, 0.03)",
+        "soft-touch": "0 6px 18px rgba(21, 28, 39, 0.05), 0 2px 6px rgba(21, 28, 39, 0.03)",
+        "lcd-panel": "0 1px 2px rgba(21, 28, 39, 0.04)",
       },
       borderRadius: {
-        'soft-touch': '4px', // For interactive elements
-        'lcd': '2px',         // For display panels
-        'none': '0px',        // For structural elements
+        "soft-touch": "0.5rem",
+        lcd: "0.25rem",
       },
     },
   },

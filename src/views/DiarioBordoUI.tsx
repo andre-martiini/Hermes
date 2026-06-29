@@ -233,13 +233,13 @@ export const DiarioBordoUI = ({
       const nome = richEntry.name || richEntry.value;
       return (
         <a href={url} target="_blank" rel="noreferrer"
-          className={`group flex items-center gap-2 p-2 rounded-none border transition-all ${isDark ? 'bg-white/5 border-border-grid hover:bg-white/10' : 'bg-blue-50/50 border-border-grid hover:bg-blue-50'}`}>
-          <div className={`w-8 h-8 rounded-none flex items-center justify-center shrink-0 ${isDark ? 'bg-white/10 text-white' : 'bg-blue-200 text-blue-600'}`}>
+          className={`group flex items-center gap-2 p-2 rounded-lg border transition-all ${isDark ? 'bg-white/5 border-[#e5e7eb] dark:border-white/10 hover:bg-white/10' : 'bg-blue-50/50 border-[#e5e7eb] dark:border-white/10 hover:bg-blue-50'}`}>
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isDark ? 'bg-white/10 text-white' : 'bg-blue-200 text-blue-600'}`}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
           </div>
           <div className="flex-1 min-w-0">
-            <p className={`text-[11px] font-bold break-all leading-snug font-mono ${isDark ? 'text-white' : 'text-blue-900'}`}>{nome || url}</p>
-            <p className={`text-[8px] uppercase font-black tracking-widest mt-0.5 opacity-50 font-mono ${isDark ? 'text-white/40' : 'text-blue-400'}`}>Link</p>
+            <p className={`text-[11px] font-bold break-all leading-snug font-sans ${isDark ? 'text-white' : 'text-blue-900'}`}>{nome || url}</p>
+            <p className={`text-[8px] uppercase font-black tracking-widest mt-0.5 opacity-50 font-sans ${isDark ? 'text-white/40' : 'text-blue-400'}`}>Link</p>
           </div>
         </a>
       );
@@ -252,16 +252,16 @@ export const DiarioBordoUI = ({
       const waNumber = num.startsWith('55') ? num : `55${num}`;
       const waLink = num.length >= 10 ? `https://wa.me/${waNumber}` : null;
       return (
-        <div className={`group flex items-center gap-2 p-2 rounded-none border transition-all ${isDark ? 'bg-white/5 border-border-grid' : 'bg-emerald-50/50 border-border-grid'}`}>
-          <div className={`w-8 h-8 rounded-none flex items-center justify-center shrink-0 ${isDark ? 'bg-white/10 text-white' : 'bg-emerald-200 text-emerald-600'}`}>
+        <div className={`group flex items-center gap-2 p-2 rounded-lg border transition-all ${isDark ? 'bg-white/5 border-[#e5e7eb] dark:border-white/10' : 'bg-emerald-50/50 border-[#e5e7eb] dark:border-white/10'}`}>
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isDark ? 'bg-white/10 text-white' : 'bg-emerald-200 text-emerald-600'}`}>
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.022-.014-.503-.245-.583-.273-.08-.027-.138-.04-.197.048-.058.088-.227.288-.278.346-.05.058-.1.066-.188.022-.088-.044-.372-.137-.708-.437-.26-.231-.437-.515-.487-.603-.05-.088-.005-.135.039-.179.04-.04.088-.103.131-.154.044-.051.059-.088.088-.146.03-.058.015-.11-.008-.154-.022-.044-.197-.474-.27-.65-.072-.172-.143-.149-.197-.151l-.168-.002c-.058 0-.154.022-.234.11-.08.088-.307.3-.307.732 0 .432.315.849.359.907.044.058.62 1.04 1.502 1.42.21.09.372.143.5.184.21.067.4.057.55.035.168-.024.503-.205.574-.403.072-.198.072-.367.051-.403-.021-.037-.08-.058-.168-.102z" /><path d="M12 2C6.477 2 2 6.477 2 12c0 1.891.524 3.66 1.434 5.168L2 22l4.958-1.412A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 01-4.07-1.112l-.292-.174-3.024.863.878-2.946-.19-.302A7.957 7.957 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z" /></svg>
           </div>
           <div className="flex-1 min-w-0">
-            <p className={`text-[11px] font-bold break-all leading-snug font-mono ${isDark ? 'text-white' : 'text-emerald-900'}`}>{nome || contact}</p>
-            <p className={`text-[8px] uppercase font-black tracking-widest mt-0.5 opacity-50 font-mono ${isDark ? 'text-white/40' : 'text-emerald-500'}`}>Contato</p>
+            <p className={`text-[11px] font-bold break-all leading-snug font-sans ${isDark ? 'text-white' : 'text-emerald-900'}`}>{nome || contact}</p>
+            <p className={`text-[8px] uppercase font-black tracking-widest mt-0.5 opacity-50 font-sans ${isDark ? 'text-white/40' : 'text-emerald-500'}`}>Contato</p>
           </div>
           {waLink && (
-            <a href={waLink} target="_blank" rel="noreferrer" className={`p-1 rounded-none transition-colors ${isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-emerald-200 text-emerald-600'}`} title="WhatsApp">
+            <a href={waLink} target="_blank" rel="noreferrer" className={`p-1 rounded-lg transition-colors ${isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-emerald-200 text-emerald-600'}`} title="WhatsApp">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
             </a>
           )}
@@ -286,19 +286,19 @@ export const DiarioBordoUI = ({
 
       return (
         <a href={url} target="_blank" rel="noreferrer"
-          className={`group flex flex-col p-2 rounded-none border transition-all ${isDark ? 'bg-white/5 border-border-grid hover:bg-white/10' : 'bg-amber-50/50 border-border-grid hover:bg-amber-50'} overflow-hidden max-w-sm`}>
+          className={`group flex flex-col p-2 rounded-lg border transition-all ${isDark ? 'bg-white/5 border-[#e5e7eb] dark:border-white/10 hover:bg-white/10' : 'bg-amber-50/50 border-[#e5e7eb] dark:border-white/10 hover:bg-amber-50'} overflow-hidden max-w-sm`}>
           {isImage && (
-            <div className="w-full h-32 md:h-48 mb-2 bg-slate-900 rounded-none overflow-hidden flex items-center justify-center">
+            <div className="w-full h-32 md:h-48 mb-2 bg-slate-950 rounded-lg overflow-hidden flex items-center justify-center">
               <img src={embedUrl} alt={nome} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
             </div>
           )}
           <div className="flex items-center gap-2">
-            <div className={`w-8 h-8 rounded-none flex items-center justify-center shrink-0 ${isDark ? 'bg-white/10 text-white' : 'bg-amber-200 text-amber-600'}`}>
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isDark ? 'bg-white/10 text-white' : 'bg-amber-200 text-amber-600'}`}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
             </div>
             <div className="flex-1 min-w-0">
-              <p className={`text-[11px] font-bold break-all leading-snug font-mono ${isDark ? 'text-white' : 'text-amber-900'}`}>{nome}</p>
-              <p className={`text-[8px] uppercase font-black tracking-widest mt-0.5 opacity-50 font-mono ${isDark ? 'text-white/40' : 'text-amber-600'}`}>Anexo{isImage ? ' Visual' : ''}</p>
+              <p className={`text-[11px] font-bold break-all leading-snug font-sans ${isDark ? 'text-white' : 'text-amber-900'}`}>{nome}</p>
+              <p className={`text-[8px] uppercase font-black tracking-widest mt-0.5 opacity-50 font-sans ${isDark ? 'text-white/40' : 'text-amber-600'}`}>Anexo{isImage ? ' Visual' : ''}</p>
             </div>
           </div>
         </a>
@@ -307,7 +307,7 @@ export const DiarioBordoUI = ({
 
     return (
       <CollapsibleContainer maxLines={6}>
-        <div className={`text-xs md:text-sm leading-relaxed break-words [overflow-wrap:anywhere] font-mono ${isDark ? 'text-white/90' : 'text-slate-700'}`}>{formatWhatsAppText(text, isDark)}</div>
+        <div className={`text-xs md:text-sm leading-relaxed break-words [overflow-wrap:anywhere] font-sans ${isDark ? 'text-white/90' : 'text-slate-700'}`}>{formatWhatsAppText(text, isDark)}</div>
       </CollapsibleContainer>
     );
   };
@@ -318,16 +318,16 @@ export const DiarioBordoUI = ({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`flex flex-col flex-1 min-h-0 relative rounded-none ${isDark ? 'bg-[#0f1724]' : 'bg-white'}`}
+      className={`flex flex-col flex-1 min-h-0 relative rounded-lg ${isDark ? 'bg-[#0f1724]' : 'bg-white'}`}
     >
       {isDragActive && (
-        <div className={`pointer-events-none absolute inset-3 z-30 rounded-none border-2 border-dashed flex items-center justify-center backdrop-blur-sm ${isDark
+        <div className={`pointer-events-none absolute inset-3 z-30 rounded-lg border-2 border-dashed flex items-center justify-center backdrop-blur-sm ${isDark
           ? 'border-blue-400 bg-blue-500/10'
           : 'border-blue-400 bg-blue-50/90'
           }`}>
-          <div className={`px-4 py-3 rounded-none text-center shadow-lg ${isDark ? 'bg-slate-950/80 text-blue-200' : 'bg-white text-blue-700'
+          <div className={`px-4 py-3 rounded-lg text-center shadow-lg ${isDark ? 'bg-slate-950/80 text-blue-200' : 'bg-white text-blue-700'
             }`}>
-            <p className="text-sm font-black uppercase tracking-widest">Solte para anexar</p>
+            <p className="text-sm font-bold uppercase tracking-wider">Solte para anexar</p>
             <p className="text-[11px] mt-1 opacity-80">O diário vai usar o mesmo fluxo do botão de upload.</p>
           </div>
         </div>
@@ -351,7 +351,7 @@ export const DiarioBordoUI = ({
         {/* Wrapper interno com padding para afastar os elementos das bordas, sem tirar a barra de rolagem do limite */}
         <div className="px-3 md:px-6 pt-2 pb-2">
           <div className="flex justify-center mb-6">
-            <div className={`border rounded-none px-4 py-2 text-[10px] uppercase tracking-widest font-black ${isDark ? 'bg-white/5 border-border-grid text-white/40' : 'bg-slate-100 border-border-grid text-slate-400'}`}>
+            <div className={`border rounded-lg px-4 py-2 text-[10px] uppercase tracking-widest font-black ${isDark ? 'bg-white/5 border-[#e5e7eb] dark:border-white/10 text-white/40' : 'bg-slate-100 border-[#e5e7eb] dark:border-white/10 text-slate-400'}`}>
               Início da Sessão • {new Date(task.data_criacao || Date.now()).toLocaleDateString()}
             </div>
           </div>
@@ -381,16 +381,16 @@ export const DiarioBordoUI = ({
                   <React.Fragment key={idx}>
                     {showHeader && (
                       <div className="flex justify-center py-3">
-                        <span className={`text-[9px] font-black uppercase tracking-[0.2em] px-3 py-1 rounded-none border ${isDark ? 'bg-white/5 border-border-grid text-white/30' : 'bg-slate-100 border-border-grid text-slate-400'}`}>
+                        <span className={`text-[9px] font-black uppercase tracking-[0.2em] px-3 py-1 rounded-lg border ${isDark ? 'bg-white/5 border-[#e5e7eb] dark:border-white/10 text-white/30' : 'bg-slate-100 border-[#e5e7eb] dark:border-white/10 text-slate-400'}`}>
                           {formatLabel(entry.data)}
                         </span>
                       </div>
                     )}
                     <div className="flex flex-col gap-1 items-start animate-in fade-in slide-in-from-bottom-2 duration-300 w-full mb-3">
-                      <div className={`p-4 rounded-none border max-w-full md:max-w-[90%] shadow-lg relative group ${isDark ? 'bg-[#1A1A1A] border-border-grid' : 'bg-white border-border-grid shadow-slate-200'}`}>
+                      <div className={`p-4 rounded-lg border max-w-full md:max-w-[90%] shadow-lg relative group ${isDark ? 'bg-[#1A1A1A] border-[#e5e7eb] dark:border-white/10' : 'bg-white border-[#e5e7eb] dark:border-white/10 shadow-slate-200'}`}>
                         {renderDiaryContent(entry.nota)}
                         <div className="flex items-center justify-between mt-2 gap-4">
-                          <span className={`text-[9px] font-black uppercase tracking-wider font-mono ${isDark ? 'text-white/30' : 'text-slate-300'}`}>
+                          <span className={`text-[9px] font-bold uppercase tracking-wider font-sans ${isDark ? 'text-white/30' : 'text-slate-300'}`}>
                             {entryDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                           </span>
                           <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -414,10 +414,10 @@ export const DiarioBordoUI = ({
 
             {isUploading && (
               <div className="flex flex-col gap-1 items-start animate-in fade-in duration-300 w-full opacity-60">
-                <div className={`p-4 rounded-none border max-w-[90%] shadow-lg ${isDark ? 'bg-[#1A1A1A] border-border-grid' : 'bg-white border-border-grid shadow-slate-200'}`}>
+                <div className={`p-4 rounded-lg border max-w-[90%] shadow-lg ${isDark ? 'bg-[#1A1A1A] border-[#e5e7eb] dark:border-white/10' : 'bg-white border-[#e5e7eb] dark:border-white/10 shadow-slate-200'}`}>
                   <div className="flex items-center gap-3">
-                    <div className="w-4 h-4 rounded-none border-2 border-slate-300 border-t-blue-500 animate-spin"></div>
-                    <p className={`text-xs font-bold font-mono ${isDark ? 'text-white/60' : 'text-slate-500'}`}>Enviando arquivos...</p>
+                    <div className="w-4 h-4 rounded-lg border-2 border-slate-300 border-t-blue-500 animate-spin"></div>
+                    <p className={`text-xs font-bold font-sans ${isDark ? 'text-white/60' : 'text-slate-500'}`}>Enviando arquivos...</p>
                   </div>
                 </div>
               </div>
@@ -436,7 +436,7 @@ export const DiarioBordoUI = ({
 
       {/* ── Área de Input Compacta ── */}
       <div className="shrink-0 pt-1 px-2 md:px-6 pb-2 md:pb-6">
-        <div className={`relative flex items-end gap-1 rounded-none border px-2 py-2 shadow-sm transition-all ${isDark ? 'bg-[#1A1A1A] border-border-grid focus-within:border-blue-500' : 'bg-white border-border-grid focus-within:border-blue-500'}`}>
+        <div className={`relative flex items-end gap-1 rounded-lg border px-2 py-2 shadow-sm transition-all ${isDark ? 'bg-[#1A1A1A] border-[#e5e7eb] dark:border-white/10 focus-within:border-blue-500' : 'bg-white border-[#e5e7eb] dark:border-white/10 focus-within:border-blue-500'}`}>
           <div className="relative shrink-0">
             <button
               onClick={() => {
@@ -444,13 +444,13 @@ export const DiarioBordoUI = ({
                 setShowFormattingMenu(false);
                 setShowEmojiPicker(false);
               }}
-              className={`flex h-9 w-9 items-center justify-center rounded-none transition-colors ${isDark ? 'text-white/55 hover:bg-white/10 hover:text-white/85' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'}`}
+              className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${isDark ? 'text-white/55 hover:bg-white/10 hover:text-white/85' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'}`}
               title="Anexar"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 5v14m-7-7h14" /></svg>
             </button>
             {showAttachMenu && (
-              <div className={`absolute bottom-11 left-0 w-48 rounded-none border shadow-xl overflow-hidden animate-in zoom-in-95 origin-bottom-left z-[100] ${isDark ? 'bg-[#1A1A1A] border-border-grid' : 'bg-white border-border-grid'}`}>
+              <div className={`absolute bottom-11 left-0 w-48 rounded-lg border shadow-xl overflow-hidden animate-in zoom-in-95 origin-bottom-left z-[100] ${isDark ? 'bg-[#1A1A1A] border-[#e5e7eb] dark:border-white/10' : 'bg-white border-[#e5e7eb] dark:border-white/10'}`}>
                 <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleFileUploadInput} />
                 <button onClick={() => fileInputRef.current?.click()} className={`w-full text-left px-4 py-3 text-xs font-bold flex items-center gap-2 ${isDark ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}>
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
@@ -475,7 +475,7 @@ export const DiarioBordoUI = ({
                 setShowAttachMenu(false);
                 setShowEmojiPicker(false);
               }}
-              className={`flex h-9 w-9 items-center justify-center rounded-none transition-colors ${isDark ? 'text-white/55 hover:bg-white/10 hover:text-white/85' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'}`}
+              className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${isDark ? 'text-white/55 hover:bg-white/10 hover:text-white/85' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'}`}
               title="Formatação e emoji"
               aria-expanded={showFormattingMenu}
             >
@@ -484,19 +484,19 @@ export const DiarioBordoUI = ({
               </svg>
             </button>
             {showFormattingMenu && (
-              <div className={`absolute bottom-11 left-0 z-[100] w-44 rounded-none border p-1.5 shadow-2xl ${isDark ? 'bg-[#1A1A1A] border-border-grid' : 'bg-white border-border-grid'}`}>
+              <div className={`absolute bottom-11 left-0 z-[100] w-44 rounded-lg border p-1.5 shadow-lg ${isDark ? 'bg-[#1A1A1A] border-[#e5e7eb] dark:border-white/10' : 'bg-white border-[#e5e7eb] dark:border-white/10'}`}>
                 {[
                   { label: 'Negrito', mark: '*', icon: 'B', className: 'font-black' },
                   { label: 'Itálico', mark: '_', icon: 'I', className: 'italic' },
                   { label: 'Riscado', mark: '~', icon: 'S', className: 'line-through' },
-                  { label: 'Código', mark: '`', icon: '</>', className: 'font-mono text-[10px]' },
+                  { label: 'Código', mark: '`', icon: '</>', className: 'font-sans text-[10px]' },
                 ].map(item => (
                   <button
                     key={item.mark}
                     onClick={() => applyDiaryFormatting(item.mark)}
-                    className={`w-full flex items-center gap-3 rounded-none px-3 py-2 text-left text-xs font-bold transition-colors ${isDark ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}
+                    className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-left text-xs font-bold transition-colors ${isDark ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}
                   >
-                    <span className={`flex h-6 w-6 items-center justify-center rounded-none ${isDark ? 'bg-white/10 text-white/70' : 'bg-slate-100 text-slate-500'} ${item.className}`}>{item.icon}</span>
+                    <span className={`flex h-6 w-6 items-center justify-center rounded-lg ${isDark ? 'bg-white/10 text-white/70' : 'bg-slate-100 text-slate-500'} ${item.className}`}>{item.icon}</span>
                     {item.label}
                   </button>
                 ))}
@@ -506,9 +506,9 @@ export const DiarioBordoUI = ({
                     setShowEmojiPicker(true);
                     setShowFormattingMenu(false);
                   }}
-                  className={`w-full flex items-center gap-3 rounded-none px-3 py-2 text-left text-xs font-bold transition-colors ${isDark ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}
+                  className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-left text-xs font-bold transition-colors ${isDark ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}
                 >
-                  <span className={`flex h-6 w-6 items-center justify-center rounded-none ${isDark ? 'bg-white/10 text-white/70' : 'bg-slate-100 text-slate-500'}`}>
+                  <span className={`flex h-6 w-6 items-center justify-center rounded-lg ${isDark ? 'bg-white/10 text-white/70' : 'bg-slate-100 text-slate-500'}`}>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                   </span>
                   Emoji
@@ -516,7 +516,7 @@ export const DiarioBordoUI = ({
               </div>
             )}
             {showEmojiPicker && (
-              <div className="absolute bottom-11 left-0 z-[100] shadow-2xl rounded-none">
+              <div className="absolute bottom-11 left-0 z-[100] shadow-lg rounded-lg">
                 <EmojiPicker
                   onEmojiClick={(emojiData) => {
                     insertIntoDiaryInput(emojiData.emoji);
@@ -583,16 +583,16 @@ export const DiarioBordoUI = ({
               }}
               placeholder="Escreva Aqui"
               rows={1}
-              className={`w-full px-2 pt-2.5 pb-1.5 outline-none text-sm leading-5 font-mono font-medium transition-all min-h-9 max-h-[120px] overflow-y-auto resize-none border-0 ${isDark
+              className={`w-full px-2 pt-2.5 pb-1.5 outline-none text-sm leading-5 font-sans font-medium transition-all min-h-9 max-h-[120px] overflow-y-auto resize-none border-0 ${isDark
                 ? 'bg-transparent text-white placeholder:text-white/20'
                 : 'bg-transparent text-slate-800 placeholder:text-slate-400'
                 }`}
             />
             {showMentionSuggestions && filteredSuggestions.length > 0 && (
-              <div className={`absolute bottom-full left-0 mb-2 w-64 rounded-none border shadow-2xl overflow-hidden z-[200] ${
-                isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-800'
+              <div className={`absolute bottom-full left-0 mb-2 w-64 rounded-2xl border shadow-lg overflow-hidden z-[200] ${
+                isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-800'
               }`}>
-                <div className={`p-2 text-[9px] font-black uppercase tracking-widest border-b ${
+                <div className={`p-2 text-[9px] font-bold uppercase tracking-wider border-b ${
                   isDark ? 'border-slate-800 text-slate-500' : 'border-slate-100 text-slate-400'
                 }`}>
                   Mencionar Pessoa
@@ -606,7 +606,7 @@ export const DiarioBordoUI = ({
                         type="button"
                         onClick={() => insertMention(suggestion.nome)}
                         onMouseEnter={() => setSelectedSuggestionIdx(idx)}
-                        className={`w-full text-left px-4 py-2 text-xs font-bold font-mono transition-colors flex items-center gap-2 ${
+                        className={`w-full text-left px-4 py-2 text-xs font-bold font-sans transition-colors flex items-center gap-2 ${
                           isSelected 
                             ? isDark ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-700' 
                             : isDark ? 'hover:bg-slate-800 text-white/80' : 'hover:bg-slate-50 text-slate-700'
@@ -628,7 +628,7 @@ export const DiarioBordoUI = ({
             <button
               onClick={isRecording ? stopRecording : startRecording}
               disabled={isProcessingTranscription}
-              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-none transition-all active:scale-95 ${isRecording
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-all active:scale-95 ${isRecording
                 ? 'bg-rose-500 text-white animate-pulse shadow-rose-500/30'
                 : isDark
                   ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white'
@@ -637,7 +637,7 @@ export const DiarioBordoUI = ({
               title={isRecording ? 'Parar Gravação' : 'Gravar Áudio'}
             >
               {isProcessingTranscription ? (
-                <div className="w-4 h-4 border-2 border-slate-300 border-t-blue-500 rounded-none animate-spin"></div>
+                <div className="w-4 h-4 border-2 border-slate-300 border-t-blue-500 rounded-lg animate-spin"></div>
               ) : (
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" /></svg>
               )}
@@ -647,7 +647,7 @@ export const DiarioBordoUI = ({
             {newFollowUp.trim() && !isRecording && (
               <button
                 onClick={handleAddFollowUp}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-none bg-blue-600 text-white shadow-md shadow-blue-600/30 transition-all hover:bg-blue-500 active:scale-95"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white shadow-md shadow-blue-600/30 transition-all hover:bg-blue-500 active:scale-95"
                 title="Enviar (Enter)"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
@@ -658,10 +658,10 @@ export const DiarioBordoUI = ({
         </div>
 
         {/* Helper text */}
-        <p className={`hidden md:block text-[11px] mt-1.5 px-2 font-mono ${isDark ? 'text-white/20' : 'text-slate-400'}`}>
+        <p className={`hidden md:block text-[11px] mt-1.5 px-2 font-sans ${isDark ? 'text-white/20' : 'text-slate-400'}`}>
           Enter para enviar · Shift+Enter para nova linha
         </p>
-        <p className={`md:hidden text-[11px] mt-1.5 px-2 font-mono ${isDark ? 'text-white/20' : 'text-slate-400'}`}>
+        <p className={`md:hidden text-[11px] mt-1.5 px-2 font-sans ${isDark ? 'text-white/20' : 'text-slate-400'}`}>
           Enter para nova linha · Botão para enviar
         </p>
       </div>

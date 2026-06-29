@@ -504,11 +504,11 @@ export const ShoppingListTool = ({
         <div className="bg-amber-50 border border-amber-200 rounded-none-none shadow-none p-5 space-y-4">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">Validacao do Copiloto</p>
-              <h3 className="text-lg font-black text-slate-900">{assistantPreview.title}</h3>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Validacao do Copiloto</p>
+              <h3 className="text-lg font-bold text-slate-900">{assistantPreview.title}</h3>
               <p className="text-sm text-slate-600 font-medium mt-1">{assistantPreview.description}</p>
             </div>
-            <div className={`px-3 py-1 rounded-none-none text-[10px] font-black uppercase tracking-widest ${
+            <div className={`px-3 py-1 rounded-none-none text-[10px] font-bold uppercase tracking-wider ${
               assistantStatus === 'applied'
                 ? 'bg-emerald-100 text-emerald-700'
                 : assistantStatus === 'cancelled'
@@ -540,13 +540,13 @@ export const ShoppingListTool = ({
               <button
                 onClick={applyAssistantAction}
                 disabled={!canConfirmAssistantAction}
-                className="flex-1 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="flex-1 py-3 rounded-none-none text-[10px] font-bold uppercase tracking-wider text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 Confirmar alteracao
               </button>
               <button
                 onClick={() => setAssistantStatus('cancelled')}
-                className="flex-1 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 transition-all"
+                className="flex-1 py-3 rounded-none-none text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 transition-all"
               >
                 Cancelar
               </button>
@@ -563,13 +563,13 @@ export const ShoppingListTool = ({
           </button>
         )}
         <div className="flex-1">
-          <h2 className="text-2xl md:text-3xl font-mono font-black uppercase tracking-tight text-slate-900">Lista de Compras</h2>
+          <h2 className="text-2xl md:text-3xl font-mono font-bold uppercase tracking-tight text-slate-900">Lista de Compras</h2>
           <p className="text-slate-500 font-mono text-xs uppercase font-bold">{items.length} itens cadastrados · {plannedItems.length} planejados</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
           <button
             onClick={() => setIsPortalConfigOpen(prev => !prev)}
-            className={`h-11 px-3 md:px-4 rounded-none-none border text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${isPortalConfigOpen ? 'bg-slate-900 text-white border-slate-900 shadow-none' : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800 hover:border-slate-300'}`}
+            className={`h-11 px-3 md:px-4 rounded-none-none border text-[9px] md:text-[10px] font-bold uppercase tracking-wider transition-all ${isPortalConfigOpen ? 'bg-slate-900 text-white border-slate-900 shadow-none' : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800 hover:border-slate-300'}`}
           >
             Portal Externo
           </button>
@@ -579,13 +579,13 @@ export const ShoppingListTool = ({
               const labels: Record<string, string> = { catalog: 'Cadastro', planning: 'Planejar', shopping: 'Comprar' };
               return (
                 <button key={tab} onClick={() => setView(tab)}
-                  className={`flex-1 px-2 md:px-4 py-2.5 rounded-none-none text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all relative ${view === tab ? 'bg-white text-slate-900 shadow-none' : 'text-slate-400 hover:text-slate-600'}`}>
+                  className={`flex-1 px-2 md:px-4 py-2.5 rounded-none-none text-[9px] md:text-[10px] font-bold uppercase tracking-wider transition-all relative ${view === tab ? 'bg-white text-slate-900 shadow-none' : 'text-slate-400 hover:text-slate-600'}`}>
                   {labels[tab]}
                   {tab === 'planning' && plannedItems.length > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-[8px] font-black w-4 h-4 rounded-none-none flex items-center justify-center">{plannedItems.length}</span>
+                    <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-[8px] font-bold w-4 h-4 rounded-none-none flex items-center justify-center">{plannedItems.length}</span>
                   )}
                   {tab === 'shopping' && purchasedCount > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[8px] font-black w-4 h-4 rounded-none-none flex items-center justify-center">{purchasedCount}</span>
+                    <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[8px] font-bold w-4 h-4 rounded-none-none flex items-center justify-center">{purchasedCount}</span>
                   )}
                 </button>
               );
@@ -596,7 +596,7 @@ export const ShoppingListTool = ({
 
       {isPortalConfigOpen && (
         <div className="bg-white rounded-none-none border border-slate-200 shadow-xl p-6 animate-in fade-in slide-in-from-top-2 duration-300">
-          <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Portal Externo da Lista</h3>
+          <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-4">Portal Externo da Lista</h3>
           <div className="flex flex-col md:flex-row gap-3">
             <input
               type="text"
@@ -605,7 +605,7 @@ export const ShoppingListTool = ({
               placeholder="Nenhum token gerado"
               className="flex-1 bg-slate-50 border border-slate-200 rounded-none-none px-4 py-3 text-xs font-mono text-slate-700 outline-none"
             />
-            <button onClick={generateExternalToken} className="bg-blue-600 text-white px-4 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all">
+            <button onClick={generateExternalToken} className="bg-blue-600 text-white px-4 py-3 rounded-none-none text-[10px] font-bold uppercase tracking-wider hover:bg-blue-700 transition-all">
               Gerar Token
             </button>
           </div>
@@ -617,7 +617,7 @@ export const ShoppingListTool = ({
               placeholder="Link externo aparecerá aqui"
               className="flex-1 bg-slate-50 border border-slate-200 rounded-none-none px-4 py-3 text-xs font-mono text-slate-700 outline-none"
             />
-            <button onClick={copyExternalLink} className="bg-emerald-600 text-white px-4 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all">
+            <button onClick={copyExternalLink} className="bg-emerald-600 text-white px-4 py-3 rounded-none-none text-[10px] font-bold uppercase tracking-wider hover:bg-emerald-700 transition-all">
               Copiar Link
             </button>
           </div>
@@ -632,7 +632,7 @@ export const ShoppingListTool = ({
         <div className="space-y-6 animate-in fade-in duration-300">
           {/* Add form */}
           <div className="bg-white rounded-none-none border border-slate-200 shadow-xl p-6 space-y-4">
-            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Novo Item</h3>
+            <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Novo Item</h3>
             <form onSubmit={handleAddItem} className="flex flex-col md:flex-row md:items-center gap-3">
               <input
                 type="text"
@@ -674,14 +674,14 @@ export const ShoppingListTool = ({
           {Object.keys(groupedCatalog).length === 0 ? (
             <div className="py-24 text-center text-slate-300">
               <svg className="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" /></svg>
-              <p className="font-black uppercase tracking-widest text-sm">Nenhum item cadastrado</p>
+              <p className="font-bold uppercase tracking-wider text-sm">Nenhum item cadastrado</p>
               <p className="text-xs font-medium mt-2 opacity-60">Adicione itens acima para começar</p>
             </div>
           ) : (
             <div className="space-y-4">
               {Object.entries(groupedCatalog).map(([cat, catItems]) => (
                 <div key={cat}>
-                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pl-2 mb-2">{cat}</h4>
+                  <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-2 mb-2">{cat}</h4>
                   <div className="bg-white rounded-none-none border border-slate-200 shadow-none divide-y divide-slate-200 overflow-hidden">
                     {catItems.map(item => (
                       <div key={item.id} className="flex items-center gap-4 px-5 py-4 hover:bg-slate-50 transition-all group">
@@ -698,7 +698,7 @@ export const ShoppingListTool = ({
                               onBlur={commitEdit} onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') { setEditingItemId(null); setEditingField(null); } }}
                               className="mt-0.5 w-32 bg-blue-50 border border-blue-200 rounded-none px-2 py-0.5 text-[10px] font-bold outline-none" />
                           ) : (
-                            <p onClick={() => startEdit(item.id, 'categoria', item.categoria)} className="text-[10px] font-black text-slate-400 uppercase tracking-widest cursor-pointer hover:text-blue-500 transition-colors mt-0.5">{item.categoria}</p>
+                            <p onClick={() => startEdit(item.id, 'categoria', item.categoria)} className="text-[10px] font-bold text-slate-400 uppercase tracking-wider cursor-pointer hover:text-blue-500 transition-colors mt-0.5">{item.categoria}</p>
                           )}
                         </div>
                         <button onClick={() => handleDeleteItem(item.id)} className={`opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 rounded-none-none transition-all ${pendingDeleteItemId === item.id ? 'bg-rose-500 text-white shadow-none' : 'text-slate-300 hover:text-rose-500 hover:bg-rose-50'}`}>
@@ -728,20 +728,20 @@ export const ShoppingListTool = ({
             </div>
             <button onClick={handleClearPlanningClick} title="Limpar planejamento" className={`group h-12 px-3 border rounded-none-none shadow-none flex items-center gap-2 transition-all ${isClearPlanningPending ? 'bg-rose-500 border-rose-600 text-white' : 'bg-white border-slate-200 text-slate-400 hover:text-rose-500 hover:border-rose-200 hover:bg-rose-50'}`}>
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-              <span className="text-[8px] font-black uppercase tracking-widest">{isClearPlanningPending ? 'Confirma limpeza' : 'Limpar Planejamento'}</span>
+              <span className="text-[8px] font-bold uppercase tracking-wider">{isClearPlanningPending ? 'Confirma limpeza' : 'Limpar Planejamento'}</span>
             </button>
           </div>
 
           {items.length === 0 ? (
             <div className="py-24 text-center text-slate-300">
-              <p className="font-black uppercase tracking-widest text-sm">Nenhum item no catálogo</p>
-              <button onClick={() => setView('catalog')} className="mt-4 text-blue-500 text-[10px] font-black uppercase tracking-widest hover:text-blue-600 transition-colors">Ir para o Cadastro →</button>
+              <p className="font-bold uppercase tracking-wider text-sm">Nenhum item no catálogo</p>
+              <button onClick={() => setView('catalog')} className="mt-4 text-blue-500 text-[10px] font-bold uppercase tracking-wider hover:text-blue-600 transition-colors">Ir para o Cadastro →</button>
             </div>
           ) : (
             <div className="space-y-4">
               {Object.entries(groupedCatalog).map(([cat, catItems]) => (
                 <div key={cat}>
-                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pl-2 mb-2">{cat}</h4>
+                  <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-2 mb-2">{cat}</h4>
                   <div className="bg-white rounded-none-none border border-slate-200 shadow-none divide-y divide-slate-200 overflow-hidden">
                     {catItems.map(item => (
                       <div key={item.id} className={`flex items-center gap-4 px-5 py-4 transition-all ${item.isPlanned ? 'bg-blue-50/40' : 'hover:bg-slate-50'}`}>
@@ -755,19 +755,19 @@ export const ShoppingListTool = ({
                         {item.isPlanned && (
                           <div className="flex items-center gap-2 bg-white border border-blue-100 rounded-none-none px-3 py-1.5 shadow-none">
                             <button onClick={() => updateQuantidade(item.id, String(Math.max(0.5, parseFloat(item.quantidade || '1') - (parseFloat(item.quantidade || '1') % 1 === 0 ? 1 : 0.5))))}
-                              className="w-6 h-6 rounded-none-none bg-slate-100 text-slate-600 font-black flex items-center justify-center hover:bg-blue-100 transition-all text-sm leading-none">−</button>
+                              className="w-6 h-6 rounded-none-none bg-slate-100 text-slate-600 font-bold flex items-center justify-center hover:bg-blue-100 transition-all text-sm leading-none">−</button>
                             {editingItemId === item.id && editingField === 'quantidade' ? (
                               <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
                                 onBlur={commitEdit} onKeyDown={e => { if (e.key === 'Enter') commitEdit(); }}
-                                className="w-12 text-center bg-transparent text-slate-800 font-black text-sm outline-none" />
+                                className="w-12 text-center bg-transparent text-slate-800 font-bold text-sm outline-none" />
                             ) : (
                               <span onClick={() => startEdit(item.id, 'quantidade', item.quantidade)}
-                                className="w-10 text-center text-slate-800 font-black text-sm cursor-pointer hover:text-blue-600 transition-colors">
+                                className="w-10 text-center text-slate-800 font-bold text-sm cursor-pointer hover:text-blue-600 transition-colors">
                                 {item.quantidade} <span className="text-slate-400 font-medium text-[10px]">{item.unit}</span>
                               </span>
                             )}
                             <button onClick={() => updateQuantidade(item.id, String(parseFloat(item.quantidade || '1') + (parseFloat(item.quantidade || '1') % 1 === 0 ? 1 : 0.5)))}
-                              className="w-6 h-6 rounded-none-none bg-slate-100 text-slate-600 font-black flex items-center justify-center hover:bg-blue-100 transition-all text-sm leading-none">+</button>
+                              className="w-6 h-6 rounded-none-none bg-slate-100 text-slate-600 font-bold flex items-center justify-center hover:bg-blue-100 transition-all text-sm leading-none">+</button>
                           </div>
                         )}
                       </div>
@@ -781,7 +781,7 @@ export const ShoppingListTool = ({
           {plannedItems.length > 0 && (
             <div className="sticky bottom-6">
               <button onClick={() => setView('shopping')}
-                className="w-full bg-blue-600 text-white py-4 rounded-none-none font-black uppercase tracking-widest text-sm shadow-none shadow-none hover:bg-blue-700 transition-all active:scale-[0.98] flex items-center justify-center gap-3">
+                className="w-full bg-blue-600 text-white py-4 rounded-none-none font-bold uppercase tracking-wider text-sm shadow-none shadow-none hover:bg-blue-700 transition-all active:scale-[0.98] flex items-center justify-center gap-3">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
                 Ir às Compras · {plannedItems.length} itens
               </button>
@@ -797,10 +797,10 @@ export const ShoppingListTool = ({
           <div className="bg-white rounded-none-none border border-slate-200 shadow-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-xl font-black text-slate-900">Comprando</h3>
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-0.5">{purchasedCount} de {plannedItems.length} comprados</p>
+                <h3 className="text-xl font-bold text-slate-900">Comprando</h3>
+                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mt-0.5">{purchasedCount} de {plannedItems.length} comprados</p>
               </div>
-              <button onClick={() => setIsFinalizingConfirmOpen(true)} className="bg-emerald-500 text-white px-6 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-none shadow-none">Finalizar</button>
+              <button onClick={() => setIsFinalizingConfirmOpen(true)} className="bg-emerald-500 text-white px-6 py-3 rounded-none-none text-[10px] font-bold uppercase tracking-wider hover:bg-emerald-600 transition-all shadow-none shadow-none">Finalizar</button>
             </div>
             <div className="w-full bg-slate-100 rounded-none-none h-2 overflow-hidden">
               <div className="bg-emerald-500 h-2 rounded-none-none transition-all duration-500"
@@ -810,8 +810,8 @@ export const ShoppingListTool = ({
 
           {plannedItems.length === 0 ? (
             <div className="py-24 text-center text-slate-300">
-              <p className="font-black uppercase tracking-widest text-sm">Lista vazia</p>
-              <button onClick={() => setView('planning')} className="mt-4 text-blue-500 text-[10px] font-black uppercase tracking-widest hover:text-blue-600 transition-colors">Ir para o Planejamento →</button>
+              <p className="font-bold uppercase tracking-wider text-sm">Lista vazia</p>
+              <button onClick={() => setView('planning')} className="mt-4 text-blue-500 text-[10px] font-bold uppercase tracking-wider hover:text-blue-600 transition-colors">Ir para o Planejamento →</button>
             </div>
           ) : (
             <div className="space-y-4">
@@ -827,8 +827,8 @@ export const ShoppingListTool = ({
                         <div className="w-3 h-3 border-2 border-current rounded-none-none" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-lg font-mono font-black uppercase tracking-tight text-slate-900">{item.nome}</p>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.categoria}</p>
+                        <p className="text-lg font-mono font-bold uppercase tracking-tight text-slate-900">{item.nome}</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{item.categoria}</p>
                       </div>
                       <div className="text-right flex-shrink-0">
                         <span className="text-lg font-mono font-bold text-blue-600">{item.quantidade}</span>
@@ -838,7 +838,7 @@ export const ShoppingListTool = ({
                   ))}
                   {pendingShoppingItems.length === 0 && (
                     <div className="px-6 py-8 text-center text-slate-400">
-                      <p className="text-sm font-black uppercase tracking-widest">Tudo comprado</p>
+                      <p className="text-sm font-bold uppercase tracking-wider">Tudo comprado</p>
                     </div>
                   )}
                 </div>
@@ -851,8 +851,8 @@ export const ShoppingListTool = ({
                   className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors"
                 >
                   <div className="text-left">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Comprados</p>
-                    <p className="text-sm font-black text-slate-900">{purchasedShoppingItems.length} itens</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Comprados</p>
+                    <p className="text-sm font-bold text-slate-900">{purchasedShoppingItems.length} itens</p>
                   </div>
                   <svg className={`w-5 h-5 text-slate-400 transition-transform ${isPurchasedSectionOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
@@ -872,7 +872,7 @@ export const ShoppingListTool = ({
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-base font-mono font-bold uppercase tracking-tight line-through text-slate-400">{item.nome}</p>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.categoria}</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{item.categoria}</p>
                         </div>
                         <div className="text-right flex-shrink-0">
                           <span className="text-lg font-mono font-bold text-slate-300">{item.quantidade}</span>
@@ -882,7 +882,7 @@ export const ShoppingListTool = ({
                     ))}
                     {purchasedShoppingItems.length === 0 && (
                       <div className="px-6 py-8 text-center text-slate-400">
-                        <p className="text-sm font-black uppercase tracking-widest">Nenhum item comprado ainda</p>
+                        <p className="text-sm font-bold uppercase tracking-wider">Nenhum item comprado ainda</p>
                       </div>
                     )}
                   </div>
@@ -899,8 +899,8 @@ export const ShoppingListTool = ({
           <div className="bg-white w-full max-w-lg rounded-none-none shadow-none overflow-hidden animate-in zoom-in-95 duration-300">
             <div className="p-8 border-b border-slate-200 flex items-center justify-between">
               <div>
-                <h3 className="text-2xl font-black text-slate-900 tracking-tight">Importação em Lote</h3>
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Um item por linha · Nome|Categoria (opcional)</p>
+                <h3 className="text-2xl font-bold text-slate-900 tracking-tight">Importação em Lote</h3>
+                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mt-1">Um item por linha · Nome|Categoria (opcional)</p>
               </div>
               <button onClick={() => setIsImportModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-none-none transition-colors">
                 <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -914,8 +914,8 @@ export const ShoppingListTool = ({
                 onChange={e => setImportText(e.target.value)}
               />
               <div className="flex gap-4">
-                <button onClick={() => setIsImportModalOpen(false)} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none-none transition-all">Cancelar</button>
-                <button onClick={handleBatchImport} className="flex-[2] py-4 bg-blue-600 text-white rounded-none-none text-[10px] font-black uppercase tracking-widest shadow-none shadow-none hover:bg-blue-700 transition-all">
+                <button onClick={() => setIsImportModalOpen(false)} className="flex-1 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:bg-slate-50 rounded-none-none transition-all">Cancelar</button>
+                <button onClick={handleBatchImport} className="flex-[2] py-4 bg-blue-600 text-white rounded-none-none text-[10px] font-bold uppercase tracking-wider shadow-none shadow-none hover:bg-blue-700 transition-all">
                   Importar {importText.split('\n').filter(l => l.trim()).length} Itens
                 </button>
               </div>
@@ -927,11 +927,11 @@ export const ShoppingListTool = ({
       {isFinalizingConfirmOpen && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
           <div className="bg-white w-full max-w-md rounded-none-none p-6 space-y-4 shadow-none">
-            <h3 className="text-lg font-black text-slate-900">Finalizar Compras</h3>
+            <h3 className="text-lg font-bold text-slate-900">Finalizar Compras</h3>
             <p className="text-sm text-slate-500 font-medium">Isto limpará os itens planejados/comprados desta rodada. Continuar?</p>
             <div className="flex gap-3">
-              <button onClick={() => setIsFinalizingConfirmOpen(false)} className="flex-1 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest text-slate-500 bg-slate-100 hover:bg-slate-200 transition-all">Cancelar</button>
-              <button onClick={async () => { await finalizeShopping(); setIsFinalizingConfirmOpen(false); }} className="flex-1 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest text-white bg-emerald-600 hover:bg-emerald-700 transition-all">Confirmar</button>
+              <button onClick={() => setIsFinalizingConfirmOpen(false)} className="flex-1 py-3 rounded-none-none text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 hover:bg-slate-200 transition-all">Cancelar</button>
+              <button onClick={async () => { await finalizeShopping(); setIsFinalizingConfirmOpen(false); }} className="flex-1 py-3 rounded-none-none text-[10px] font-bold uppercase tracking-wider text-white bg-emerald-600 hover:bg-emerald-700 transition-all">Confirmar</button>
             </div>
           </div>
         </div>

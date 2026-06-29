@@ -147,7 +147,7 @@ const PublicShoppingPortal = () => {
           <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           </div>
-          <h2 className="text-xl font-black text-slate-900 mb-2">Acesso Negado</h2>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">Acesso Negado</h2>
           <p className="text-slate-500">Token invalido ou expirado. Solicite um novo link de acesso.</p>
         </div>
       </div>
@@ -158,15 +158,15 @@ const PublicShoppingPortal = () => {
     <div className="min-h-screen bg-slate-50 font-sans">
       <header className="bg-slate-900 text-white p-6 shadow-lg">
         <div className="max-w-4xl mx-auto">
-          <h1 className="text-lg font-black uppercase tracking-widest text-center">Lista de Compras</h1>
-          <p className="text-center text-[10px] font-bold uppercase tracking-widest text-slate-300 mt-2">
+          <h1 className="text-lg font-bold uppercase tracking-wider text-center">Lista de Compras</h1>
+          <p className="text-center text-[10px] font-bold uppercase tracking-wider text-slate-300 mt-2">
             Sincronizacao em tempo real por atualizacao periodica
           </p>
         </div>
       </header>
 
       <main className="max-w-4xl mx-auto p-4 space-y-6 -mt-4">
-        <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl p-4 md:p-6">
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-card p-4 md:p-6">
           <div className="flex flex-wrap gap-2">
             {(['planning', 'shopping'] as const).map((tab) => {
               const label = tab === 'planning' ? 'Planejar' : 'Comprar';
@@ -174,14 +174,14 @@ const PublicShoppingPortal = () => {
                 <button
                   key={tab}
                   onClick={() => setView(tab)}
-                  className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all relative ${view === tab ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:text-slate-700'}`}
+                  className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all relative ${view === tab ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:text-slate-700'}`}
                 >
                   {label}
                   {tab === 'planning' && plannedItems.length > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">{plannedItems.length}</span>
+                    <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-[8px] font-bold w-4 h-4 rounded-full flex items-center justify-center">{plannedItems.length}</span>
                   )}
                   {tab === 'shopping' && purchasedCount > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">{purchasedCount}</span>
+                    <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[8px] font-bold w-4 h-4 rounded-full flex items-center justify-center">{purchasedCount}</span>
                   )}
                 </button>
               );
@@ -204,21 +204,21 @@ const PublicShoppingPortal = () => {
               </div>
               <button onClick={handleClearPlanningClick} className={`h-12 px-3 border rounded-2xl shadow-sm flex items-center gap-2 transition-all ${isClearPlanningPending ? 'bg-rose-500 border-rose-600 text-white' : 'bg-white border-slate-100 text-slate-400 hover:text-rose-500 hover:border-rose-200 hover:bg-rose-50'}`}>
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-                <span className="text-[8px] font-black uppercase tracking-widest">{isClearPlanningPending ? 'Confirma limpeza' : 'Limpar Planejamento'}</span>
+                <span className="text-[8px] font-bold uppercase tracking-wider">{isClearPlanningPending ? 'Confirma limpeza' : 'Limpar Planejamento'}</span>
               </button>
             </div>
 
             {items.length === 0 ? (
               <div className="py-24 text-center text-slate-300">
-                <p className="font-black uppercase tracking-widest text-sm">Nenhum item disponivel</p>
+                <p className="font-bold uppercase tracking-wider text-sm">Nenhum item disponivel</p>
                 <p className="text-xs font-medium mt-2 opacity-60">Adicione itens no Hermes para comecar</p>
               </div>
             ) : (
               <div className="space-y-4">
                 {Object.entries(groupedCatalog).map(([category, categoryItems]) => (
                   <div key={category}>
-                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pl-2 mb-2">{category}</h4>
-                    <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm divide-y divide-slate-50 overflow-hidden">
+                    <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-2 mb-2">{category}</h4>
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-50 overflow-hidden">
                       {categoryItems.map((item) => (
                         <div key={item.id} className={`flex items-center gap-4 px-5 py-4 transition-all ${item.isPlanned ? 'bg-blue-50/40' : 'hover:bg-slate-50'}`}>
                           <button
@@ -228,13 +228,13 @@ const PublicShoppingPortal = () => {
                             {item.isPlanned ? '✓' : '+'}
                           </button>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-black text-slate-800">{item.nome}</p>
-                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{item.categoria}</p>
+                            <p className="text-sm font-bold text-slate-800">{item.nome}</p>
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{item.categoria}</p>
                           </div>
                           <input
                             value={item.quantidade || ''}
                             onChange={(e) => void updateQuantidade(item.id, e.target.value)}
-                            className="w-16 text-center bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-black text-slate-700"
+                            className="w-16 text-center bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold text-slate-700"
                           />
                         </div>
                       ))}
@@ -248,31 +248,31 @@ const PublicShoppingPortal = () => {
 
         {view === 'shopping' && (
           <div className="space-y-6 animate-in fade-in duration-300">
-            <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl p-5 flex items-center justify-between">
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-card p-5 flex items-center justify-between">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Em aberto</p>
-                <p className="text-2xl font-black text-slate-900">{pendingShoppingItems.length}</p>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Em aberto</p>
+                <p className="text-2xl font-bold text-slate-900">{pendingShoppingItems.length}</p>
               </div>
               <button
                 onClick={() => void finalizeShopping()}
-                className="bg-emerald-600 text-white px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all"
+                className="bg-emerald-600 text-white px-4 py-3 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-emerald-700 transition-all"
               >
                 Finalizar Compra
               </button>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-3 hermes-stagger">
               {pendingShoppingItems.map((item) => (
                 <div key={item.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-4 flex items-center gap-4">
                   <button
                     onClick={() => void togglePurchased(item.id)}
-                    className="w-10 h-10 rounded-2xl bg-slate-100 text-slate-500 font-black"
+                    className="w-10 h-10 rounded-2xl bg-slate-100 text-slate-500 font-bold"
                   >
                     {exitingPurchasedIds.includes(item.id) ? '...' : 'OK'}
                   </button>
                   <div className="flex-1">
-                    <p className="text-sm font-black text-slate-900">{item.nome}</p>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    <p className="text-sm font-bold text-slate-900">{item.nome}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       {item.quantidade || '1'} {item.unit || 'un'} • {item.categoria}
                     </p>
                   </div>
@@ -280,12 +280,12 @@ const PublicShoppingPortal = () => {
               ))}
             </div>
 
-            <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-4">
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
               <button
                 onClick={() => setIsPurchasedSectionOpen((prev) => !prev)}
                 className="w-full flex items-center justify-between text-left"
               >
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                   Comprados ({purchasedShoppingItems.length})
                 </span>
                 <span className="text-slate-400">{isPurchasedSectionOpen ? '-' : '+'}</span>
@@ -297,13 +297,13 @@ const PublicShoppingPortal = () => {
                     <div key={item.id} className="bg-slate-50 rounded-2xl border border-slate-100 px-5 py-4 flex items-center gap-4">
                       <button
                         onClick={() => void togglePurchased(item.id)}
-                        className="w-10 h-10 rounded-2xl bg-emerald-500 text-white font-black"
+                        className="w-10 h-10 rounded-2xl bg-emerald-500 text-white font-bold"
                       >
                         ✓
                       </button>
                       <div className="flex-1">
-                        <p className="text-sm font-black text-slate-900">{item.nome}</p>
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                        <p className="text-sm font-bold text-slate-900">{item.nome}</p>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                           {item.quantidade || '1'} {item.unit || 'un'} • {item.categoria}
                         </p>
                       </div>

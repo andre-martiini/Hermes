@@ -356,7 +356,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
         <div className="p-8 space-y-6">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <h3 className="text-xl font-black text-slate-800">Equipe de Bolsistas</h3>
+                    <h3 className="text-xl font-bold text-slate-800">Equipe de Bolsistas</h3>
                     <p className="text-slate-400 text-xs font-medium mt-1">{Object.keys(groupedLinks).length} bolsistas no total</p>
                 </div>
                 <div className="flex flex-wrap gap-2 w-full md:w-auto">
@@ -379,7 +379,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                     />
                     <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all flex items-center gap-2"
+                        className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-emerald-100 transition-all flex items-center gap-2"
                     >
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
                         Importar CSV
@@ -408,13 +408,13 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                                 alert("Nao foi possivel gerar o link do portal.");
                             }
                         }}
-                        className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all"
+                        className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-slate-200 transition-all"
                     >
                         Link do Portal
                     </button>
                     <button
                         onClick={() => setIsScholarshipTypeModalOpen(true)}
-                        className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-100 transition-all flex items-center gap-2"
+                        className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-indigo-100 transition-all flex items-center gap-2"
                     >
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                         Modalidades
@@ -422,7 +422,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-3">
+            <div className="grid grid-cols-1 gap-3 hermes-stagger">
                 {filteredGroupedLinks.map(([personId, personLinks]) => {
                     const person = people[personId];
                     if (!person) return null;
@@ -432,19 +432,19 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                     const type = scholarshipTypes.find(t => t.id === activeLink.tipo_bolsa_id);
 
                     return (
-                        <div key={personId} className={`bg-white border ${isExpiring ? 'border-amber-300 ring-1 ring-amber-100' : 'border-slate-100'} rounded-2xl p-4 hover:shadow-md transition-all group overflow-hidden relative`}>
+                        <div key={personId} className={`bg-white border ${isExpiring ? 'border-amber-300 ring-1 ring-amber-100' : 'border-slate-100'} rounded-2xl p-4 hermes-lift group overflow-hidden relative`}>
                             <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
                                 <div 
                                     className="flex items-center gap-4 flex-1 cursor-pointer group/card min-w-0"
                                     onClick={() => setSelectedPersonIdForView(personId)}
                                 >
-                                    <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 font-black text-xs border border-slate-100 group-hover/card:bg-indigo-600 group-hover/card:text-white transition-all">
+                                    <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 font-bold text-xs border border-slate-100 group-hover/card:bg-indigo-600 group-hover/card:text-white transition-all">
                                         {person.nome.charAt(0)}
                                     </div>
                                     <div className="min-w-0 flex-1">
                                         <div className="flex items-center gap-2">
-                                            <h4 className="text-sm font-black text-slate-800 truncate group-hover/card:text-indigo-600 transition-colors">{person.nome}</h4>
-                                            <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${
+                                            <h4 className="text-sm font-bold text-slate-800 truncate group-hover/card:text-indigo-600 transition-colors">{person.nome}</h4>
+                                            <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wider ${
                                                 activeLink.status === 'Ativo(a)' ? 'bg-emerald-100 text-emerald-700' :
                                                 activeLink.status === 'Em regularização' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'
                                             }`}>
@@ -456,7 +456,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                                             <span className="text-[10px] text-slate-300">•</span>
                                             <span className="text-[10px] text-slate-400 font-bold">{type?.nome_modalidade || 'Bolsa'}</span>
                                             <span className="text-[10px] text-slate-300">•</span>
-                                            <span className="text-[10px] text-indigo-600 font-black">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(activeLink.valor_bolsa_mensal_atual)}</span>
+                                            <span className="text-[10px] text-indigo-600 font-bold">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(activeLink.valor_bolsa_mensal_atual)}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -476,7 +476,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                                             setLinkForm({ status: 'Ativo(a)', percentual_recebimento: 100, projeto_id: projetoId, pessoa_id: personId });
                                             setIsLinkModalOpen(true);
                                         }}
-                                        className="px-3 py-1.5 text-slate-500 hover:text-slate-800 text-[9px] font-black uppercase tracking-widest border border-slate-100 rounded-lg hover:bg-slate-50 transition-all"
+                                        className="px-3 py-1.5 text-slate-500 hover:text-slate-800 text-[9px] font-bold uppercase tracking-wider border border-slate-100 rounded-lg hover:bg-slate-50 transition-all"
                                     >
                                         Aditivo
                                     </button>
@@ -486,7 +486,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                                             setLinkForm(activeLink);
                                             setIsLinkModalOpen(true);
                                         }}
-                                        className="px-3 py-1.5 bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest rounded-lg hover:bg-slate-800 transition-all shadow-sm"
+                                        className="px-3 py-1.5 bg-slate-900 text-white text-[9px] font-bold uppercase tracking-wider rounded-lg hover:bg-slate-800 transition-all shadow-sm"
                                     >
                                         Editar
                                     </button>
@@ -501,12 +501,12 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
             {isLinkModalOpen && (
                 <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsLinkModalOpen(false)}></div>
-                    <div className="bg-white w-full max-w-lg rounded-[2rem] shadow-2xl p-8 relative z-10">
-                        <h3 className="text-xl font-black text-slate-900 mb-6">{editingLink ? 'Editar Vínculo' : 'Novo Vínculo/Aditivo'}</h3>
+                    <div className="bg-white w-full max-w-lg rounded-2xl shadow-card p-8 relative z-10">
+                        <h3 className="text-xl font-bold text-slate-900 mb-6">{editingLink ? 'Editar Vínculo' : 'Novo Vínculo/Aditivo'}</h3>
                         <div className="space-y-4">
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Tipo de Bolsa</label>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Tipo de Bolsa</label>
                                     <select
                                         value={linkForm.tipo_bolsa_id}
                                         onChange={e => setLinkForm({...linkForm, tipo_bolsa_id: e.target.value})}
@@ -519,7 +519,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">% Recebimento</label>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">% Recebimento</label>
                                     <input
                                         type="number"
                                         value={linkForm.percentual_recebimento}
@@ -530,7 +530,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Data Início</label>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Data Início</label>
                                     <input
                                         type="date"
                                         value={linkForm.data_inicio}
@@ -539,7 +539,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Previsão Fim</label>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Previsão Fim</label>
                                     <input
                                         type="date"
                                         value={linkForm.data_fim_prevista}
@@ -549,7 +549,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                                 </div>
                             </div>
                             <div>
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Status</label>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Status</label>
                                 <select
                                     value={linkForm.status}
                                     onChange={e => setLinkForm({...linkForm, status: e.target.value as any})}
@@ -562,7 +562,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                                 </select>
                             </div>
                             <div>
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Função/Atividades</label>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Função/Atividades</label>
                                 <input
                                     value={linkForm.funcao || ''}
                                     onChange={e => setLinkForm({...linkForm, funcao: e.target.value})}
@@ -574,13 +574,13 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                         <div className="flex gap-4 pt-6">
                             <button
                                 onClick={() => setIsLinkModalOpen(false)}
-                                className="flex-1 py-3 text-xs font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-xl transition-all"
+                                className="flex-1 py-3 text-xs font-bold uppercase tracking-wider text-slate-400 hover:bg-slate-50 rounded-xl transition-all"
                             >
                                 Cancelar
                             </button>
                             <button
                                 onClick={handleSaveLink}
-                                className="flex-1 bg-indigo-600 text-white py-3 rounded-xl text-xs font-black uppercase tracking-widest shadow-lg hover:bg-indigo-700 transition-all"
+                                className="flex-1 bg-indigo-600 text-white py-3 rounded-xl text-xs font-bold uppercase tracking-wider shadow-lg hover:bg-indigo-700 transition-all"
                             >
                                 Salvar
                             </button>
@@ -593,9 +593,9 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
             {isScholarshipTypeModalOpen && (
                 <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsScholarshipTypeModalOpen(false)}></div>
-                    <div className="bg-white w-full max-w-2xl rounded-[2rem] shadow-2xl p-8 relative z-10">
+                    <div className="bg-white w-full max-w-2xl rounded-2xl shadow-card p-8 relative z-10">
                         <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-xl font-black text-slate-900">Configurar Modalidades de Bolsa</h3>
+                            <h3 className="text-xl font-bold text-slate-900">Configurar Modalidades de Bolsa</h3>
                             <button onClick={() => setIsScholarshipTypeModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
                             </button>
@@ -605,7 +605,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                             {/* Add New Type Form */}
                             <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 flex flex-col md:flex-row gap-4 items-end">
                                 <div className="flex-1 space-y-2">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Nome da Modalidade</label>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Nome da Modalidade</label>
                                     <input 
                                         type="text"
                                         placeholder="Ex: BPIG-II"
@@ -615,7 +615,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                                     />
                                 </div>
                                 <div className="w-full md:w-48 space-y-2">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Valor Integral (100%)</label>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Valor Integral (100%)</label>
                                     <input 
                                         type="number"
                                         placeholder="Ex: 1500"
@@ -630,7 +630,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                                         await addDoc(collection(db, 'tipos_bolsa'), newTypeForm);
                                         setNewTypeForm({});
                                     }}
-                                    className="bg-indigo-600 text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+                                    className="bg-indigo-600 text-white px-6 py-3 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
                                 >
                                     Adicionar
                                 </button>
@@ -641,7 +641,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                                 {scholarshipTypes.map(t => (
                                     <div key={t.id} className="flex items-center justify-between p-4 bg-white border border-slate-100 rounded-xl hover:border-indigo-100 transition-all group">
                                         <div>
-                                            <p className="font-black text-slate-800">{t.nome_modalidade}</p>
+                                            <p className="font-bold text-slate-800">{t.nome_modalidade}</p>
                                             <p className="text-xs text-slate-400 font-bold">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(t.valor_integral)} <span className="text-slate-300 font-normal">/ mês integral</span></p>
                                         </div>
                                         <button 
@@ -667,32 +667,32 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
             {selectedPersonIdForView && (
                 <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-md" onClick={() => setSelectedPersonIdForView(null)}></div>
-                    <div className="bg-slate-50 w-full max-w-4xl max-h-[90vh] rounded-[2.5rem] shadow-2xl flex flex-col md:flex-row overflow-hidden relative z-10">
+                    <div className="bg-slate-50 w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-card flex flex-col md:flex-row overflow-hidden relative z-10">
                         {/* Sidebar: Profile Summary */}
                         <div className="w-full md:w-80 bg-white border-r border-slate-200 p-8 flex flex-col">
                             <div className="flex flex-col items-center text-center space-y-4 mb-8">
-                                <div className="w-24 h-24 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 font-black text-3xl border-4 border-slate-50 shadow-inner">
+                                <div className="w-24 h-24 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 font-bold text-3xl border-4 border-slate-50 shadow-inner">
                                     {people[selectedPersonIdForView]?.nome.charAt(0)}
                                 </div>
                                 <div>
-                                    <h3 className="text-xl font-black text-slate-900 leading-tight">{people[selectedPersonIdForView]?.nome}</h3>
-                                    <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest mt-1">Bolsista</p>
+                                    <h3 className="text-xl font-bold text-slate-900 leading-tight">{people[selectedPersonIdForView]?.nome}</h3>
+                                    <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider mt-1">Bolsista</p>
                                 </div>
                             </div>
 
                             <div className="space-y-4 flex-1">
                                 <div className="bg-slate-50 p-4 rounded-2xl">
-                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Documentação</p>
+                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Documentação</p>
                                     <p className="text-xs font-bold text-slate-700">CPF: <span className="font-medium">{people[selectedPersonIdForView]?.cpf}</span></p>
                                     <p className="text-xs font-bold text-slate-700">RG: <span className="font-medium">{people[selectedPersonIdForView]?.rg}</span></p>
                                 </div>
                                 <div className="bg-slate-50 p-4 rounded-2xl">
-                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Contato</p>
+                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Contato</p>
                                     <p className="text-xs font-bold text-slate-700 truncate">{people[selectedPersonIdForView]?.email}</p>
                                     <p className="text-xs font-bold text-slate-700 mt-1">{people[selectedPersonIdForView]?.telefone}</p>
                                 </div>
                                 <div className="bg-slate-50 p-4 rounded-2xl">
-                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Acadêmico</p>
+                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Acadêmico</p>
                                     <p className="text-xs font-bold text-slate-700">{people[selectedPersonIdForView]?.campus || 'Campus não inf.'}</p>
                                     <p className="text-xs text-slate-500 font-medium line-clamp-1">{people[selectedPersonIdForView]?.curso || 'Curso não inf.'}</p>
                                 </div>
@@ -700,7 +700,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
 
                             <button
                                 onClick={() => setSelectedPersonIdForView(null)}
-                                className="w-full mt-6 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg"
+                                className="w-full mt-6 py-3 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-slate-800 transition-all shadow-lg"
                             >
                                 Fechar
                             </button>
@@ -709,13 +709,13 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                         {/* Main Content: Info & Timeline */}
                         <div className="flex-1 overflow-y-auto p-10 space-y-8">
                             <div>
-                                <h4 className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2">
+                                <h4 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
                                    <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
                                    Dados Bancários e Endereço
                                 </h4>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm">
-                                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Conta para Recebimento</p>
+                                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-2">Conta para Recebimento</p>
                                         <div className="space-y-1">
                                             <p className="text-xs font-bold text-slate-800">Banco: <span className="font-medium">{people[selectedPersonIdForView]?.dados_bancarios?.banco}</span></p>
                                             <p className="text-xs font-bold text-slate-800">Agência: <span className="font-medium">{people[selectedPersonIdForView]?.dados_bancarios?.agencia}</span></p>
@@ -723,14 +723,14 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                                         </div>
                                     </div>
                                     <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm">
-                                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Endereço Residencial</p>
+                                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-2">Endereço Residencial</p>
                                         <p className="text-xs font-medium text-slate-600 leading-relaxed">{people[selectedPersonIdForView]?.endereco || 'Endereço não cadastrado.'}</p>
                                     </div>
                                 </div>
                             </div>
 
                             <div>
-                                <h4 className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2">
+                                <h4 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
                                    <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                                    Histórico de Vínculos no Projeto
                                 </h4>
@@ -745,7 +745,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                                                         link.status === 'Em regularização' ? 'bg-amber-500' : 'bg-slate-300'
                                                     }`}></div>
                                                     <div>
-                                                        <p className="text-sm font-black text-slate-800">
+                                                        <p className="text-sm font-bold text-slate-800">
                                                             {type?.nome_modalidade || 'Bolsa'} 
                                                             <span className="text-slate-400 font-bold ml-2">({link.percentual_recebimento}%)</span>
                                                         </p>
@@ -755,10 +755,10 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
-                                                    <p className="text-sm font-black text-indigo-600">
+                                                    <p className="text-sm font-bold text-indigo-600">
                                                         {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(link.valor_bolsa_mensal_atual)}
                                                     </p>
-                                                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mt-1">{link.status}</p>
+                                                    <p className="text-[8px] font-bold uppercase tracking-wider text-slate-400 mt-1">{link.status}</p>
                                                 </div>
                                             </div>
                                         );
@@ -772,7 +772,7 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                                         href={people[selectedPersonIdForView]?.lattes} 
                                         target="_blank" 
                                         rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-2 text-xs font-black text-indigo-600 hover:text-indigo-700 uppercase tracking-widest bg-indigo-50 px-4 py-2 rounded-xl transition-all"
+                                        className="inline-flex items-center gap-2 text-xs font-bold text-indigo-600 hover:text-indigo-700 uppercase tracking-wider bg-indigo-50 px-4 py-2 rounded-xl transition-all"
                                     >
                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                                         Acessar Currículo Lattes

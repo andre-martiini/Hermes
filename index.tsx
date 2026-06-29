@@ -6,7 +6,7 @@ import {
   BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings,
   FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight,
   DailyHabits, HealthSettings, ExerciseLog, ExerciseSettings, PullupPhase, HermesNotification, AppSettings,
-  formatDate, formatDateLocalISO, 
+  formatDate, formatDateLocalISO,
   GoogleCalendarEvent,
   PoolItem, CustomNotification, HealthExam, ConhecimentoItem, UndoAction, HermesModalProps,
   ShoppingItem, Projeto, BaseConhecimento, TipoAcao, Servico, Toast,
@@ -1303,7 +1303,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!user || !isKnowledgeBasesLoaded || hasSeededRef.current) return;
     hasSeededRef.current = true;
-    
+
     const defaultBases = [
       { nome: 'Serviços', emoji: '💼', cor: '#3b82f6', descricao: 'Base integrada com todos os serviços e portfólio' },
       { nome: 'Saúde', emoji: '❤️', cor: '#ef4444', descricao: 'Base integrada com exames, peso e dados de saúde' },
@@ -2200,7 +2200,7 @@ const App: React.FC = () => {
       };
 
       addTerminalLog("Iniciando sincronização biométrica...");
-      
+
       const telemetry = await GoogleHealthService.getDailyTelemetry(today);
       const weightData = await GoogleHealthService.getWeight(today);
 
@@ -2225,7 +2225,7 @@ const App: React.FC = () => {
       } else {
         addTerminalLog("Nenhum registro de peso encontrado para hoje.");
       }
-      
+
       showToast("Saúde sincronizada com sucesso!", "success");
     } catch (healthError: any) {
       console.warn("Health sync skipped or failed:", healthError);
@@ -4080,7 +4080,7 @@ const App: React.FC = () => {
       const isLinkedToCurrent = linkedIds.some(id => currentDeliveryIds.includes(id));
       // Se JÃ estiver vinculado a uma entrega deste mês, não precisa aparecer na lista de "Aguardando"
       // POIS ela já aparecerá dentro do card da entrega correspondente.
-      // Se estiver vinculado a entrega de OUTRO mês, deve aparecer aqui? 
+      // Se estiver vinculado a entrega de OUTRO mês, deve aparecer aqui?
       // O usuário disse: "todas as tarefas que tem a tag CLC ou a tag assistência estudantil devam constar nessa aba Audit PGC"
       // E "Se ela estiver vinculada a uma das atividades já cadastradas, ótimo, senão o sistema deve proporcionar uma forma inteligente de fazer essa vinculação."
       return !isLinkedToCurrent;
@@ -4206,7 +4206,7 @@ const App: React.FC = () => {
     };
   }, [planosTrabalho, currentYear, currentMonth, pgcEntregas, pgcTasks, atividadesPGC, afastamentos]);
   const isDarkTheme = themeMode === 'dark' || (themeMode === 'system' && prefersDark);
-  const appBgClass = isDarkTheme ? 'bg-[#191c1c] text-[#f0f1f0]' : 'bg-surface-container-low text-on-surface';
+  const appBgClass = isDarkTheme ? 'bg-[#0f172a] text-[#f8fafc]' : 'bg-[#f9fafb] text-on-surface';
   const loginPanelClass = isDarkTheme
     ? 'bg-slate-900 border-white/10 shadow-[0_30px_60px_rgba(0,0,0,0.55)]'
     : 'bg-white border-border-grid shadow-soft-touch';
@@ -4283,16 +4283,46 @@ const App: React.FC = () => {
     );
   }
   const sidebarClass = isDarkTheme
-    ? 'bg-[#191c1c] text-[#f0f1f0] border-r border-white/10'
-    : 'bg-surface-container-low text-on-surface border-r border-border-grid';
+    ? 'bg-[#111827] text-[#f8fafc] border-r border-white/10'
+    : 'bg-white/95 text-on-surface border-r border-border-grid shadow-[1px_0_0_rgba(21,28,39,0.03)]';
   const headerClass = isDarkTheme
-    ? 'bg-[#191c1c]/95 border-white/10'
-    : 'bg-surface-container-low border-b border-border-grid';
+    ? 'bg-[#111827]/90 border-white/10'
+    : 'bg-white/85 border-b border-border-grid shadow-[0_1px_0_rgba(21,28,39,0.03)]';
   const mutedTextClass = isDarkTheme ? 'text-slate-500' : 'text-slate-400';
   const subtleBorderClass = isDarkTheme ? 'border-white/10' : 'border-border-grid';
   const inputSurfaceClass = isDarkTheme
     ? 'bg-slate-900 border-white/10 text-white placeholder:text-slate-600'
     : 'bg-white border-border-grid text-on-surface placeholder:text-slate-400';
+  const isStrategySplitCopilot = viewMode === 'strategy' && isCopilotoOpen && copilotoMode === 'estrategia';
+  const closeCopiloto = () => {
+    setIsCopilotoOpen(false);
+    setCopilotoAutoStartMic(false);
+    setCopilotoMode('default');
+    setCopilotoInitialPrompt(null);
+  };
+  const handleCopilotoOpenTask = async (id: string) => {
+    const task = tarefas.find(t => t.id === id);
+    if (task) {
+      setSelectedTask(task);
+      setTaskModalMode('execute');
+    } else {
+      const snap = await getDoc(doc(db, 'tarefas', id));
+      if (snap.exists()) {
+        setSelectedTask({ id: snap.id, ...snap.data() } as any);
+        setTaskModalMode('execute');
+      }
+    }
+  };
+  const handleCopilotoOpenTool = (tool: string, id: string) => {
+    setIsCopilotoOpen(false);
+    setCopilotoMode('default');
+    setActiveModule('acoes');
+    setViewMode('ferramentas');
+    if (tool === 'diagnostico') {
+      setActiveFerramenta('diagnostico');
+      setInitialDiagnosisId(id);
+    }
+  };
   return (
     <>
       <div className={`min-h-screen flex flex-col md:flex-row relative transition-colors ${appBgClass}`}>
@@ -4337,7 +4367,7 @@ const App: React.FC = () => {
           </div>
         )}
         {/* Sidebar Desktop */}
-        <aside className={`hidden md:flex ${isSidebarRetracted ? 'w-20' : 'w-64'} ${sidebarClass} flex-col h-screen sticky top-0 overflow-y-auto shrink-0 z-50 transition-all duration-300`}>
+        <aside className={`hidden md:flex ${isSidebarRetracted ? 'w-20' : 'w-80'} ${sidebarClass} flex-col h-screen sticky top-0 overflow-y-auto shrink-0 z-50 transition-all duration-300`}>
           <div className={`px-4 py-6 flex flex-col h-full ${isSidebarRetracted ? 'gap-6 items-center pt-8' : 'gap-8'}`}>
             <div
               className={`flex items-center gap-4 cursor-pointer hover:opacity-80 transition-opacity ${isSidebarRetracted ? 'flex-col' : ''}`}
@@ -4477,7 +4507,7 @@ const App: React.FC = () => {
                       isNotificationCenterOpen={isNotificationCenterOpen}
                       onOpenCopiloto={() => setIsCopilotoOpen(true)}
                       onOpenNotes={() => setIsQuickNoteModalOpen(true)}
-                      
+
                       onOpenShopping={() => { setIsShoppingAIModalOpen(true); setIsMobileMenuOpen(false); }}
                       onOpenTranscription={() => { setIsTranscriptionAIModalOpen(true); setIsMobileMenuOpen(false); }}
                       onOpenWhatsAppTranscription={() => {
@@ -4736,9 +4766,9 @@ const App: React.FC = () => {
                   {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && (
                     <div className="ml-auto flex items-center justify-end gap-3">
                       {activeModule !== 'dashboard' && (
-                        <div className={`hidden lg:flex h-12 items-center border rounded-none px-4 w-72 xl:w-80 group focus-within:ring-1 focus-within:ring-primary-tactile transition-all ${inputSurfaceClass} border-border-grid`}>
+                        <div className={`hidden lg:flex h-10 items-center border rounded-lg px-4 w-72 xl:w-80 group focus-within:ring-1 focus-within:ring-primary-tactile transition-all ${inputSurfaceClass} border-[#e5e7eb] dark:border-slate-800`}>
                           <svg className={`w-4 h-4 mr-3 ${mutedTextClass}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                          <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold w-full font-mono flex-1" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                          <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-medium w-full font-sans flex-1" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                           {searchTerm && (
                             <button
                               onClick={() => setSearchTerm('')}
@@ -4754,16 +4784,16 @@ const App: React.FC = () => {
                       )}
                       <button
                         onClick={() => setIsCreateModalOpen(true)}
-                        className="h-12 bg-slate-900 text-white px-5 rounded-none text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-slate-800 transition-all active:scale-95 font-mono"
+                        className="h-10 bg-slate-900 text-white px-5 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 hover:bg-slate-800 transition-all active:scale-95 font-sans shadow-sm"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
                         Criar Ação
                       </button>
                       {searchTerm !== 'filter:unclassified' && (
-                        <div className={`h-12 p-1 rounded-none inline-flex border ${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-surface-container border-border-grid'} gap-0.5`}>
+                        <div className={`h-10 p-0.5 rounded-lg inline-flex border ${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-[#e5e7eb]'} gap-0.5`}>
                           <button
                             onClick={() => setDashboardViewMode('list')}
-                            className={`px-3 md:px-4 py-1.5 rounded-none text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center font-mono ${dashboardViewMode === 'list' ? (isDarkTheme ? 'bg-slate-600 text-white' : 'bg-slate-900 text-white') : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
+                            className={`px-3 md:px-4 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center font-sans ${dashboardViewMode === 'list' ? (isDarkTheme ? 'bg-slate-600 text-white' : 'bg-white text-slate-900 shadow-sm') : (isDarkTheme ? 'text-slate-550 hover:text-slate-800' : 'text-slate-400 hover:text-slate-650')}`}
                             title="Visualização em Lista"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
@@ -4771,7 +4801,7 @@ const App: React.FC = () => {
                           {dashboardViewMode === 'list' && (
                             <button
                               onClick={() => setGroupByDate(prev => !prev)}
-                              className={`px-3 md:px-4 py-1.5 rounded-none text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center font-mono border-l ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'} ${!groupByDate ? 'text-amber-500 font-black' : (isDarkTheme ? 'text-slate-400 hover:text-slate-300' : 'text-slate-500 hover:text-slate-700')}`}
+                              className={`px-3 md:px-4 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center font-sans border-x ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'} ${!groupByDate ? 'text-amber-500 font-bold' : (isDarkTheme ? 'text-slate-400 hover:text-slate-350' : 'text-slate-550 hover:text-slate-850')}`}
                               title={groupByDate ? "Desativar Agrupamento por Datas (Ver Lista Corrida)" : "Ativar Agrupamento por Datas"}
                             >
                               <svg className="w-3.5 h-3.5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4782,7 +4812,7 @@ const App: React.FC = () => {
                           )}
                           <button
                             onClick={() => setDashboardViewMode('calendar')}
-                            className={`px-3 md:px-4 py-1.5 rounded-none text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center font-mono ${dashboardViewMode === 'calendar' ? (isDarkTheme ? 'bg-slate-600 text-white' : 'bg-slate-900 text-white') : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
+                            className={`px-3 md:px-4 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center font-sans ${dashboardViewMode === 'calendar' ? (isDarkTheme ? 'bg-slate-600 text-white' : 'bg-white text-slate-900 shadow-sm') : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
                             title="Visualização em Calendário"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2-2v12a2 2 0 002 2z" /></svg>
@@ -4798,7 +4828,7 @@ const App: React.FC = () => {
                     isNotificationCenterOpen={isNotificationCenterOpen}
                     onOpenCopiloto={() => setIsCopilotoOpen(true)}
                     onOpenNotes={() => setIsQuickNoteModalOpen(true)}
-                    
+
                     onOpenShopping={() => setIsShoppingAIModalOpen(true)}
                     onOpenTranscription={() => setIsTranscriptionAIModalOpen(true)}
                     onOpenWhatsAppTranscription={() => {
@@ -4922,13 +4952,34 @@ const App: React.FC = () => {
                     </div>
                   </>
                 ) : viewMode === 'strategy' ? (
-                  <StrategyDashboardView
-                    userId={user?.uid || ''}
-                    isDark={isDarkTheme}
-                    showToast={showToast}
-                    tarefas={tarefas}
-                    onCreateIndicadorAction={handleCreateIndicadorAction}
-                  />
+                  <div className={isStrategySplitCopilot ? 'flex h-[calc(100vh-7.5rem)] min-h-[640px] gap-4 overflow-hidden' : ''}>
+                    <div className={isStrategySplitCopilot ? 'min-w-0 flex-1 overflow-y-auto pr-1' : ''}>
+                      <StrategyDashboardView
+                        userId={user?.uid || ''}
+                        isDark={isDarkTheme}
+                        showToast={showToast}
+                        tarefas={tarefas}
+                        onCreateIndicadorAction={handleCreateIndicadorAction}
+                      />
+                    </div>
+                    {isStrategySplitCopilot && (
+                      <aside className="w-[420px] shrink-0">
+                        <HermesGlobalChat
+                          isOpen={isCopilotoOpen}
+                          onClose={closeCopiloto}
+                          autoStartMic={copilotoAutoStartMic}
+                          copilotMode={copilotoMode}
+                          layout="inline"
+                          initialPrompt={copilotoInitialPrompt}
+                          onInitialPromptConsumed={() => setCopilotoInitialPrompt(null)}
+                          isDark={isDarkTheme}
+                          userId={user?.uid || ''}
+                          onOpenTask={handleCopilotoOpenTask}
+                          onOpenTool={handleCopilotoOpenTool}
+                        />
+                      </aside>
+                    )}
+                  </div>
                 ) : viewMode === 'gallery' ? (
                   <>
                     {/* Mobile Search Bar */}
@@ -4961,7 +5012,7 @@ const App: React.FC = () => {
                               <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
                               Lista
                             </button>
-                            
+
                             {dashboardViewMode === 'list' && (
                               <button
                                 onClick={() => setGroupByDate(prev => !prev)}
@@ -5623,7 +5674,7 @@ const App: React.FC = () => {
                   const servicosBase = knowledgeBases.find(b => b.nome.toLowerCase() === 'serviços');
                   const saudeBase = knowledgeBases.find(b => b.nome.toLowerCase() === 'saúde');
                   const financeiraBase = knowledgeBases.find(b => b.nome.toLowerCase() === 'financeira');
-                  
+
                   const virtualItems: ConhecimentoItem[] = [];
 
                   if (servicosBase) {
@@ -6360,7 +6411,7 @@ const App: React.FC = () => {
                 isSyncing={isSyncing}
                 isNotificationCenterOpen={isNotificationCenterOpen}
                 onOpenNotes={() => setIsQuickNoteModalOpen(true)}
-                
+
                 onOpenShopping={() => setIsShoppingAIModalOpen(true)}
                 onOpenCopiloto={() => setIsCopilotoOpen(true)}
                 onOpenTranscription={() => setIsTranscriptionAIModalOpen(true)}
@@ -6417,7 +6468,7 @@ const App: React.FC = () => {
           )
         }
         {/* â”€â”€ Sistema Execution View (full-screen overlay) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        
+
         {
           isTerminalOpen && (
             <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/90 animate-in fade-in duration-300">
@@ -6727,42 +6778,29 @@ const App: React.FC = () => {
             }}
             className="fixed bottom-6 right-6 z-[600] flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 transition-all hover:-translate-y-0.5 hover:bg-indigo-500 active:scale-95 sm:h-16 sm:w-16"
           >
-            <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+            <img
+              src="/logo.png"
+              alt=""
+              aria-hidden="true"
+              className="h-8 w-8 object-contain sm:h-9 sm:w-9"
+              style={{ filter: 'brightness(0) invert(1)' }}
+            />
           </button>
         )}
+        {!isStrategySplitCopilot && (
         <HermesGlobalChat
           isOpen={isCopilotoOpen}
-          onClose={() => { setIsCopilotoOpen(false); setCopilotoAutoStartMic(false); setCopilotoMode('default'); setCopilotoInitialPrompt(null); }}
+          onClose={closeCopiloto}
           autoStartMic={copilotoAutoStartMic}
           copilotMode={copilotoMode}
           initialPrompt={copilotoInitialPrompt}
           onInitialPromptConsumed={() => setCopilotoInitialPrompt(null)}
           isDark={isDarkTheme}
           userId={user?.uid || ''}
-          onOpenTask={async (id) => {
-            const task = tarefas.find(t => t.id === id);
-            if (task) {
-              setSelectedTask(task);
-              setTaskModalMode('execute');
-            } else {
-              const snap = await getDoc(doc(db, 'tarefas', id));
-              if (snap.exists()) {
-                setSelectedTask({ id: snap.id, ...snap.data() } as any);
-                setTaskModalMode('execute');
-              }
-            }
-          }}
-          onOpenTool={(tool, id) => {
-            setIsCopilotoOpen(false);
-            setCopilotoMode('default');
-            setActiveModule('acoes');
-            setViewMode('ferramentas');
-            if (tool === 'diagnostico') {
-              setActiveFerramenta('diagnostico');
-              setInitialDiagnosisId(id);
-            }
-          }}
+          onOpenTask={handleCopilotoOpenTask}
+          onOpenTool={handleCopilotoOpenTool}
         />
+        )}
       </div>
     </>
   );

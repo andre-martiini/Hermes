@@ -65,7 +65,7 @@ const FileIcon: React.FC<{ tipo: string; isDark?: boolean }> = ({ tipo, isDark }
         ? (colorsDark[t] || 'bg-slate-800 text-slate-400 border-slate-700')
         : (colorsLight[t] || 'bg-slate-50 text-slate-600 border-slate-200');
     return (
-        <div className={`w-10 h-10 border flex items-center justify-center flex-shrink-0 font-mono font-black text-[9px] uppercase tracking-tighter ${cls}`}>
+        <div className={`w-10 h-10 border flex items-center justify-center flex-shrink-0 font-sans font-bold text-[9px] uppercase tracking-tighter ${cls}`}>
             {t === 'link' ? (
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
             ) : t.substring(0, 3)}
@@ -79,7 +79,7 @@ const VectorBadge: React.FC<{ hasEmbedding: boolean; isDark?: boolean }> = ({ ha
         : (isDark ? 'bg-slate-800 text-slate-500 border-slate-700' : 'bg-slate-50 text-slate-400 border-slate-200');
     const dotCls = hasEmbedding ? 'bg-emerald-500' : (isDark ? 'bg-slate-600' : 'bg-slate-300');
     return (
-        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 border font-mono text-[9px] font-black uppercase tracking-widest ${cls}`}>
+        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 border font-sans text-[9px] font-bold uppercase tracking-wider ${cls}`}>
             <div className={`w-1.5 h-1.5 ${dotCls}`} />
             {hasEmbedding ? 'Vetorizado' : 'Offline'}
         </span>
@@ -187,7 +187,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
     return (
         <div className={`flex flex-col md:flex-row h-[100dvh] overflow-hidden ${isDark ? 'bg-slate-950 text-slate-100' : 'bg-[#f9f9f9] text-slate-900'}`}>
             {/* Sidebar */}
-            <aside className={`w-full md:w-72 flex-shrink-0 border-r flex flex-col h-full ${mobileView === 'content' ? 'hidden md:flex' : 'flex'} ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+            <aside className={`w-full md:w-72 flex-shrink-0 border-r flex flex-col h-full ${mobileView === 'content' ? 'hidden md:flex' : 'flex'} ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
                 <div className={`p-6 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                     <div className="flex items-center gap-4 mb-4 md:hidden">
                         <button
@@ -198,13 +198,13 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                             </svg>
                         </button>
-                        <p className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest">SAIR DO MÓDULO</p>
+                        <p className="text-[10px] font-sans font-bold text-slate-400 uppercase tracking-widest">SAIR DO MÓDULO</p>
                     </div>
                     <div className="flex items-center gap-2 mb-1">
                         <div className="w-2 h-2 bg-slate-400"></div>
-                        <p className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest">SYSTEM: ÁREAS TEMÁTICAS</p>
+                        <p className="text-[10px] font-sans font-bold text-slate-400 uppercase tracking-widest">SYSTEM: ÁREAS TEMÁTICAS</p>
                     </div>
-                    <h2 className={`text-sm font-mono font-black uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Conhecimento das Áreas</h2>
+                    <h2 className={`text-sm font-sans font-bold uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Conhecimento das Áreas</h2>
                 </div>
 
                 <nav className="flex-1 overflow-y-auto">
@@ -222,13 +222,13 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                             )}
                             <div className="flex flex-col flex-1 min-w-0">
                                 <div className="flex items-center justify-between mb-1">
-                                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">ÁREA-{String(idx + 1).padStart(3, '0')}</span>
-                                    <span className={`text-[10px] font-mono font-black ${selectedBaseId === base.id ? 'text-slate-600' : 'text-slate-400'}`}>
+                                    <span className="text-[10px] font-sans font-semibold text-slate-400 uppercase tracking-widest">ÁREA-{String(idx + 1).padStart(3, '0')}</span>
+                                    <span className={`text-[10px] font-sans font-bold ${selectedBaseId === base.id ? 'text-slate-600' : 'text-slate-400'}`}>
                                         ITEMS: {items.filter(i => i.base_id === base.id).length}
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <span className={`text-sm font-mono font-black truncate uppercase tracking-tight ${selectedBaseId === base.id ? (isDark ? 'text-slate-100' : 'text-slate-900') : (isDark ? 'text-slate-400' : 'text-slate-600')}`}>
+                                    <span className={`text-sm font-sans font-bold truncate uppercase tracking-tight ${selectedBaseId === base.id ? (isDark ? 'text-slate-100' : 'text-slate-900') : (isDark ? 'text-slate-400' : 'text-slate-600')}`}>
                                         {base.nome}
                                     </span>
                                 </div>
@@ -237,7 +237,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                     ))}
                 </nav>
 
-                <div className={`p-4 border-t ${isDark ? 'border-slate-800 bg-slate-900/80' : 'border-slate-200 bg-slate-50'}`}>
+                <div className={`p-4 border-t ${isDark ? 'border-slate-800 bg-slate-950/80' : 'border-slate-200 bg-slate-50'}`}>
                     {isCreatingBase ? (
                         <div className="flex flex-col gap-2">
                             <input
@@ -246,17 +246,17 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                                 onChange={e => setNewBaseName(e.target.value)}
                                 onKeyDown={e => { if (e.key === 'Enter') handleCreateBase(); if (e.key === 'Escape') setIsCreatingBase(false); }}
                                 placeholder="NOME DA ÁREA..."
-                                className={`w-full px-3 py-2 text-xs font-mono font-bold border rounded-none outline-none transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
+                                className={`w-full px-3 py-2 text-xs font-sans font-semibold border rounded-lg outline-none transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
                             />
                             <div className="flex gap-2">
-                                <button onClick={handleCreateBase} className={`flex-1 py-2 text-white rounded-none text-[10px] font-mono font-black uppercase tracking-widest transition-colors ${isDark ? 'bg-slate-600 hover:bg-slate-700' : 'bg-slate-900 hover:bg-black'}`}>Criar</button>
-                                <button onClick={() => setIsCreatingBase(false)} className={`flex-1 py-2 border rounded-none text-[10px] font-mono font-black uppercase tracking-widest transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>Cancelar</button>
+                                <button onClick={handleCreateBase} className={`flex-1 py-2 text-white rounded-lg text-[10px] font-sans font-bold uppercase tracking-widest transition-colors ${isDark ? 'bg-slate-600 hover:bg-slate-700' : 'bg-slate-950 hover:bg-black'}`}>Criar</button>
+                                <button onClick={() => setIsCreatingBase(false)} className={`flex-1 py-2 border rounded-lg text-[10px] font-sans font-bold uppercase tracking-widest transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>Cancelar</button>
                             </div>
                         </div>
                     ) : (
                         <button
                             onClick={() => setIsCreatingBase(true)}
-                            className={`w-full flex items-center justify-center gap-2 px-3 py-3 border border-dashed transition-all text-[10px] font-mono font-black uppercase tracking-widest ${isDark ? 'border-slate-700 text-slate-400 hover:border-slate-400 hover:text-slate-300 bg-slate-800/40 hover:bg-slate-800' : 'border-slate-300 text-slate-400 hover:border-slate-500 hover:text-slate-600'}`}
+                            className={`w-full flex items-center justify-center gap-2 px-3 py-3 border border-dashed transition-all text-[10px] font-sans font-bold uppercase tracking-widest ${isDark ? 'border-slate-700 text-slate-400 hover:border-slate-400 hover:text-slate-300 bg-slate-800/40 hover:bg-slate-800' : 'border-slate-300 text-slate-400 hover:border-slate-500 hover:text-slate-600'}`}
                         >
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" />
@@ -281,7 +281,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                 ) : (
                     <>
                         {/* Header */}
-                        <div className={`border-b px-4 md:px-8 py-4 md:py-6 flex flex-col md:flex-row md:items-center gap-4 md:gap-6 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                        <div className={`border-b px-4 md:px-8 py-4 md:py-6 flex flex-col md:flex-row md:items-center gap-4 md:gap-6 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
                             <div className="flex items-center justify-between md:justify-start gap-4">
                                 <button
                                     onClick={() => setMobileView('bases')}
@@ -295,17 +295,17 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                                 <div className="flex items-center gap-3">
                                     <span className="text-2xl">{selectedBase.emoji || '📁'}</span>
                                     <div className="min-w-0">
-                                        <p className="text-[10px] font-mono font-black text-violet-500 uppercase tracking-[0.2em]">ÁREA TEMÁTICA</p>
-                                        <h1 className={`text-xl font-mono font-black uppercase tracking-tight truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{selectedBase.nome}</h1>
+                                        <p className="text-[10px] font-sans font-bold text-violet-500 uppercase tracking-[0.2em]">ÁREA TEMÁTICA</p>
+                                        <h1 className={`text-xl font-sans font-bold uppercase tracking-tight truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{selectedBase.nome}</h1>
                                     </div>
                                 </div>
                             </div>
                             {selectedBase.descricao && (
-                                <p className="text-[11px] font-mono text-slate-400 font-bold ml-0 md:ml-10 truncate hidden md:block">{selectedBase.descricao}</p>
+                                <p className="text-[11px] font-sans text-slate-400 font-bold ml-0 md:ml-10 truncate hidden md:block">{selectedBase.descricao}</p>
                             )}
                             <div className="flex items-center gap-2 md:gap-3 overflow-x-auto pb-2 md:pb-0 scrollbar-hide">
                                 {/* Search */}
-                                <div className={`flex items-center border rounded-none px-3 md:px-4 py-2 md:py-2.5 gap-2 md:gap-3 min-w-[140px] md:w-64 focus-within:border-violet-400 transition-all ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                                <div className={`flex items-center border rounded-lg px-3 md:px-4 py-2 md:py-2.5 gap-2 md:gap-3 min-w-[140px] md:w-64 focus-within:border-violet-400 transition-all ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
                                     <svg className="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                                     </svg>
@@ -313,12 +313,12 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                                         value={searchTerm}
                                         onChange={e => setSearchTerm(e.target.value)}
                                         placeholder="BUSCAR DOCUMENTOS..."
-                                        className={`bg-transparent text-[11px] font-mono font-black outline-none w-full uppercase tracking-widest ${isDark ? 'text-slate-100 placeholder:text-slate-500' : 'text-slate-700 placeholder:text-slate-300'}`}
+                                        className={`bg-transparent text-[11px] font-sans font-bold outline-none w-full uppercase tracking-widest ${isDark ? 'text-slate-100 placeholder:text-slate-500' : 'text-slate-700 placeholder:text-slate-300'}`}
                                     />
                                 </div>
                                 <button
                                     onClick={() => setIsAddLinkOpen(true)}
-                                    className={`flex items-center gap-2 px-4 py-2.5 border rounded-none text-[10px] font-mono font-black uppercase tracking-widest transition-all ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-slate-100' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                                    className={`flex items-center gap-2 px-4 py-2.5 border rounded-lg text-[10px] font-sans font-bold uppercase tracking-widest transition-all ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-slate-100' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                                 >
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
@@ -328,7 +328,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                                 <button
                                     onClick={() => fileInputRef.current?.click()}
                                     disabled={isUploading}
-                                    className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-none text-[10px] font-mono font-black uppercase tracking-widest hover:bg-violet-700 transition-all disabled:opacity-60 shadow-lg shadow-violet-100"
+                                    className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-lg text-[10px] font-sans font-bold uppercase tracking-widest hover:bg-violet-700 transition-all disabled:opacity-60 shadow-lg shadow-violet-100"
                                 >
                                     {isUploading ? (
                                         <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -344,7 +344,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                                 </button>
                                 <button
                                     onClick={() => setEditingBase(selectedBase)}
-                                    className={`w-10 h-10 flex-shrink-0 flex items-center justify-center border rounded-none transition-all ${isDark ? 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-slate-200' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+                                    className={`w-10 h-10 flex-shrink-0 flex items-center justify-center border rounded-lg transition-all ${isDark ? 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-slate-200' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
                                 >
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -362,7 +362,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                         >
                             {isDragging && (
                                 <div className="fixed inset-0 z-40 flex items-center justify-center pointer-events-none">
-                                    <div className="bg-violet-600 text-white px-8 py-4 rounded-2xl shadow-2xl font-black text-lg">
+                                    <div className="bg-violet-600 text-white px-8 py-4 rounded-2xl shadow-lg font-black text-lg">
                                         Solte para adicionar à base
                                     </div>
                                 </div>
@@ -375,26 +375,26 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                                         </svg>
                                     </div>
-                                    <p className="text-[10px] font-mono font-black text-slate-300 uppercase tracking-[0.3em] mb-2">SYSTEM: NO DATA DETECTED</p>
-                                    <p className="text-slate-400 text-[11px] font-mono">Arraste arquivos aqui ou use o comando UPLOAD.</p>
+                                    <p className="text-[10px] font-sans font-bold text-slate-300 uppercase tracking-[0.3em] mb-2">SYSTEM: NO DATA DETECTED</p>
+                                    <p className="text-slate-400 text-[11px] font-sans">Arraste arquivos aqui ou use o comando UPLOAD.</p>
                                 </div>
                             ) : (
                                 <div className={`flex flex-col border-l border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                                     {baseItems.map(item => (
                                         <div
                                             key={item.id}
-                                            className={`border-r border-b px-6 py-4 flex items-center gap-4 transition-all group relative -ml-px -mt-px ${isDark ? 'bg-slate-900 border-slate-800 hover:bg-slate-800/60' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
+                                            className={`border-r border-b px-6 py-4 flex items-center gap-4 transition-all group relative -ml-px -mt-px ${isDark ? 'bg-slate-950 border-slate-800 hover:bg-slate-800/60' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
                                         >
                                             <FileIcon tipo={item.tipo_arquivo} isDark={isDark} />
                                             <div className="flex-1 min-w-0 py-1">
-                                                <p className={`text-[13px] font-mono font-black uppercase tracking-tight truncate ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{item.titulo}</p>
+                                                <p className={`text-[13px] font-sans font-bold uppercase tracking-tight truncate ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{item.titulo}</p>
                                                 <div className="flex flex-wrap items-center gap-2 md:gap-3 mt-1">
-                                                    <span className="text-[9px] font-mono font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">
+                                                    <span className="text-[9px] font-sans font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">
                                                         {new Date(item.data_criacao).toLocaleDateString('pt-BR')}
                                                     </span>
                                                     <VectorBadge hasEmbedding={!!(item as any).embedding} isDark={isDark} />
                                                     {item.tags && item.tags.length > 0 && item.tags.slice(0, 2).map(tag => (
-                                                        <span key={tag} className={`text-[9px] font-mono font-black px-2 py-0.5 uppercase tracking-widest ${isDark ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>{tag}</span>
+                                                        <span key={tag} className={`text-[9px] font-sans font-bold px-2 py-0.5 uppercase tracking-widest ${isDark ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>{tag}</span>
                                                     ))}
                                                 </div>
                                             </div>
@@ -475,33 +475,33 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
             {/* Add Link Modal */}
             {isAddLinkOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                    <div className={`rounded-none shadow-2xl w-full max-w-md p-8 border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}>
-                        <h2 className={`text-sm font-mono font-black uppercase tracking-[0.2em] mb-6 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>ADICIONAR RECURSO EXTERNO</h2>
+                    <div className={`rounded-lg shadow-lg w-full max-w-md p-8 border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}>
+                        <h2 className={`text-sm font-sans font-bold uppercase tracking-[0.2em] mb-6 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>ADICIONAR RECURSO EXTERNO</h2>
                         <div className="flex flex-col gap-5">
                             <div>
-                                <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-1.5 block">URL DE ORIGEM</label>
+                                <label className="text-[10px] font-sans font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">URL DE ORIGEM</label>
                                 <input
                                     autoFocus
                                     value={linkUrl}
                                     onChange={e => setLinkUrl(e.target.value)}
                                     placeholder="https://..."
-                                    className={`w-full px-4 py-3 text-xs font-mono font-bold border rounded-none outline-none transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
+                                    className={`w-full px-4 py-3 text-xs font-sans font-semibold border rounded-lg outline-none transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
                                 />
                             </div>
                             <div>
-                                <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-1.5 block">TÍTULO IDENTIFICADOR (OPCIONAL)</label>
+                                <label className="text-[10px] font-sans font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">TÍTULO IDENTIFICADOR (OPCIONAL)</label>
                                 <input
                                     value={linkTitle}
                                     onChange={e => setLinkTitle(e.target.value)}
                                     onKeyDown={e => { if (e.key === 'Enter') handleAddLink(); }}
                                     placeholder="NOME DO LINK..."
-                                    className={`w-full px-4 py-3 text-xs font-mono font-bold border rounded-none outline-none transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
+                                    className={`w-full px-4 py-3 text-xs font-sans font-semibold border rounded-lg outline-none transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
                                 />
                             </div>
                         </div>
                         <div className="flex gap-3 mt-8">
-                            <button onClick={handleAddLink} className="flex-1 py-3 bg-violet-600 text-white rounded-none text-[10px] font-mono font-black uppercase tracking-widest hover:bg-violet-700 transition-all">Sincronizar</button>
-                            <button onClick={() => { setIsAddLinkOpen(false); setLinkUrl(''); setLinkTitle(''); }} className={`flex-1 py-3 border rounded-none text-[10px] font-mono font-black uppercase tracking-widest transition-all ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>Cancelar</button>
+                            <button onClick={handleAddLink} className="flex-1 py-3 bg-violet-600 text-white rounded-lg text-[10px] font-sans font-bold uppercase tracking-widest hover:bg-violet-700 transition-all">Sincronizar</button>
+                            <button onClick={() => { setIsAddLinkOpen(false); setLinkUrl(''); setLinkTitle(''); }} className={`flex-1 py-3 border rounded-lg text-[10px] font-sans font-bold uppercase tracking-widest transition-all ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>Cancelar</button>
                         </div>
                     </div>
                 </div>
@@ -555,11 +555,11 @@ const EditBaseModal: React.FC<EditBaseModalProps> = ({ base, onSave, onDelete, o
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className={`rounded-none shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}>
-                <div className={`p-8 border-b flex items-center justify-between ${isDark ? 'border-slate-800 bg-slate-900/80' : 'border-slate-200 bg-slate-50'}`}>
+            <div className={`rounded-lg shadow-lg w-full max-w-lg max-h-[90vh] overflow-y-auto border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}>
+                <div className={`p-8 border-b flex items-center justify-between ${isDark ? 'border-slate-800 bg-slate-950/80' : 'border-slate-200 bg-slate-50'}`}>
                     <div>
-                        <p className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-1">SYSTEM CONFIGURATION</p>
-                        <h2 className={`text-sm font-mono font-black uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Configurar Área Temática</h2>
+                        <p className="text-[10px] font-sans font-bold text-slate-400 uppercase tracking-widest mb-1">SYSTEM CONFIGURATION</p>
+                        <h2 className={`text-sm font-sans font-bold uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Configurar Área Temática</h2>
                     </div>
                     <button onClick={onClose} className={`w-10 h-10 flex items-center justify-center border transition-colors ${isDark ? 'border-slate-700 bg-slate-800 text-slate-300 hover:text-slate-100 hover:bg-slate-700' : 'border-slate-200 bg-white text-slate-400 hover:text-slate-600'}`}>
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -572,10 +572,10 @@ const EditBaseModal: React.FC<EditBaseModalProps> = ({ base, onSave, onDelete, o
                     {/* Color Palette */}
                     <div>
                         <div className="flex items-center justify-between mb-3">
-                            <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest">Cor da Área Temática</label>
+                            <label className="text-[10px] font-sans font-bold text-slate-400 uppercase tracking-widest">Cor da Área Temática</label>
                             <div className="flex items-center gap-2">
                                 <div className="w-5 h-5 border-2 border-white shadow" style={{ backgroundColor: cor }} />
-                                <span className="text-[10px] font-mono font-black uppercase tracking-widest" style={{ color: cor }}>
+                                <span className="text-[10px] font-sans font-bold uppercase tracking-widest" style={{ color: cor }}>
                                     {COLOR_OPTIONS.find(c => c.value === cor)?.label || cor}
                                 </span>
                             </div>
@@ -594,27 +594,27 @@ const EditBaseModal: React.FC<EditBaseModalProps> = ({ base, onSave, onDelete, o
                     </div>
 
                     <div>
-                        <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-2 block">Nome da Área Temática</label>
+                        <label className="text-[10px] font-sans font-bold text-slate-400 uppercase tracking-widest mb-2 block">Nome da Área Temática</label>
                         <input
                             value={nome}
                             onChange={e => setNome(e.target.value)}
-                            className={`w-full px-4 py-3 text-xs font-mono font-bold border rounded-none outline-none transition-colors uppercase tracking-widest ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
+                            className={`w-full px-4 py-3 text-xs font-sans font-semibold border rounded-lg outline-none transition-colors uppercase tracking-widest ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
                         />
                     </div>
 
                     <div>
-                        <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-2 block">Descrição</label>
+                        <label className="text-[10px] font-sans font-bold text-slate-400 uppercase tracking-widest mb-2 block">Descrição</label>
                         <input
                             value={descricao}
                             onChange={e => setDescricao(e.target.value)}
                             placeholder="FINALIDADE DESTA ÁREA NO SISTEMA..."
-                            className={`w-full px-4 py-3 text-xs font-mono font-bold border rounded-none outline-none transition-colors uppercase tracking-widest ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
+                            className={`w-full px-4 py-3 text-xs font-sans font-semibold border rounded-lg outline-none transition-colors uppercase tracking-widest ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
                         />
                     </div>
 
                     {/* RAG Config */}
                     <div className={`border-t ${isDark ? 'border-slate-800' : 'border-slate-200'} pt-6`}>
-                        <p className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-[0.2em] mb-4">MÓDULOS DE INTEGRAÇÃO RAG</p>
+                        <p className="text-[10px] font-sans font-bold text-slate-400 uppercase tracking-[0.2em] mb-4">MÓDULOS DE INTEGRAÇÃO RAG</p>
                         <div className="flex flex-col gap-4">
                             <label className="flex items-center gap-4 cursor-pointer group">
                                 <div
@@ -623,7 +623,7 @@ const EditBaseModal: React.FC<EditBaseModalProps> = ({ base, onSave, onDelete, o
                                 >
                                     <div className={`w-4 h-4 bg-white shadow-sm absolute top-0.5 transition-all ${incluirDiarios ? 'left-7' : 'left-0.5'}`} />
                                 </div>
-                                <span className={`text-[11px] font-mono font-black uppercase tracking-tight ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Incluir Diários de Bordo</span>
+                                <span className={`text-[11px] font-sans font-bold uppercase tracking-tight ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Incluir Diários de Bordo</span>
                             </label>
                             <label className="flex items-center gap-4 cursor-pointer group">
                                 <div
@@ -632,26 +632,26 @@ const EditBaseModal: React.FC<EditBaseModalProps> = ({ base, onSave, onDelete, o
                                 >
                                     <div className={`w-4 h-4 bg-white shadow-sm absolute top-0.5 transition-all ${incluirManual ? 'left-7' : 'left-0.5'}`} />
                                 </div>
-                                <span className={`text-[11px] font-mono font-black uppercase tracking-tight ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Incluir Manual Operacional</span>
+                                <span className={`text-[11px] font-sans font-bold uppercase tracking-tight ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Incluir Manual Operacional</span>
                             </label>
                             <div>
-                                <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Tags RAG</label>
+                                <label className="text-[10px] font-sans font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Tags RAG</label>
                                 <input
                                     value={tagsInput}
                                     onChange={e => setTagsInput(e.target.value)}
                                     placeholder="PROCEDIMENTO, PROTOCOLO, REUNIÃO..."
-                                    className={`w-full px-4 py-2.5 text-[10px] font-mono font-bold border rounded-none outline-none transition-colors uppercase ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-slate-400 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-slate-400 placeholder:text-slate-400'}`}
+                                    className={`w-full px-4 py-2.5 text-[10px] font-sans font-semibold border rounded-lg outline-none transition-colors uppercase ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-slate-400 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-slate-400 placeholder:text-slate-400'}`}
                                 />
-                                <p className={`text-[9px] font-mono mt-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Separe as tags por vírgula</p>
+                                <p className={`text-[9px] font-sans mt-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Separe as tags por vírgula</p>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div className={`p-8 border-t flex gap-3 ${isDark ? 'border-slate-800 bg-slate-900/80' : 'border-slate-200 bg-slate-50'}`}>
-                    <button onClick={handleSave} className={`flex-1 py-4 text-white rounded-none text-[10px] font-mono font-black uppercase tracking-widest transition-all ${isDark ? 'bg-slate-600 hover:bg-slate-700' : 'bg-slate-900 hover:bg-black'}`}>Atualizar Sistema</button>
-                    <button onClick={onClose} className={`flex-1 py-4 border rounded-none text-[10px] font-mono font-black uppercase tracking-widest transition-all ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>Cancelar</button>
-                    <button onClick={onDelete} className={`w-14 flex items-center justify-center border rounded-none transition-all ${isDark ? 'bg-rose-950/40 text-rose-400 border-rose-800/60 hover:bg-rose-900/60' : 'bg-rose-50 text-rose-600 border-rose-100 hover:bg-rose-100'}`}>
+                <div className={`p-8 border-t flex gap-3 ${isDark ? 'border-slate-800 bg-slate-950/80' : 'border-slate-200 bg-slate-50'}`}>
+                    <button onClick={handleSave} className={`flex-1 py-4 text-white rounded-lg text-[10px] font-sans font-bold uppercase tracking-widest transition-all ${isDark ? 'bg-slate-600 hover:bg-slate-700' : 'bg-slate-950 hover:bg-black'}`}>Atualizar Sistema</button>
+                    <button onClick={onClose} className={`flex-1 py-4 border rounded-lg text-[10px] font-sans font-bold uppercase tracking-widest transition-all ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>Cancelar</button>
+                    <button onClick={onDelete} className={`w-14 flex items-center justify-center border rounded-lg transition-all ${isDark ? 'bg-rose-950/40 text-rose-400 border-rose-800/60 hover:bg-rose-900/60' : 'bg-rose-50 text-rose-600 border-rose-100 hover:bg-rose-100'}`}>
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                         </svg>

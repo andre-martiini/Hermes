@@ -292,10 +292,10 @@ export function HealthSummaryCard(props: HealthSummaryCardProps) {
     );
 
     return (
-        <div className={`p-4 rounded-none border-4 flex flex-col gap-4 ${styles.container}`}>
+        <div className={`p-4 rounded-lg border-4 flex flex-col gap-4 ${styles.container}`}>
             <div className="flex items-start justify-between gap-3 shrink-0">
                 <div className="min-w-0">
-                    <p className={`text-[10px] font-black uppercase tracking-[0.2em] font-mono ${styles.eyebrow}`}>
+                    <p className={`text-[10px] font-black uppercase tracking-[0.2em] font-sans ${styles.eyebrow}`}>
                         Saúde Geral
                     </p>
                     <h3 className={`mt-1 text-base font-black leading-tight ${styles.title}`}>
@@ -307,7 +307,7 @@ export function HealthSummaryCard(props: HealthSummaryCardProps) {
                         <button
                             type="button"
                             onClick={props.onOpenHealthCopilot}
-                            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 border text-[9px] font-black uppercase tracking-[0.14em] font-mono transition-all ${
+                            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 border text-[9px] font-black uppercase tracking-[0.14em] font-sans transition-all ${
                                 visibleAnalysis.status === 'critical' ? 'border-rose-300 bg-white/60 text-rose-800 hover:bg-white'
                                 : visibleAnalysis.status === 'attention' ? 'border-amber-300 bg-white/60 text-amber-800 hover:bg-white'
                                 : visibleAnalysis.status === 'stable' ? 'border-sky-300 bg-white/60 text-sky-800 hover:bg-white'
@@ -322,11 +322,11 @@ export function HealthSummaryCard(props: HealthSummaryCardProps) {
                         </button>
                     )}
                     {typeof visibleAnalysis.score === 'number' && (
-                        <span className={`text-[10px] font-black uppercase tracking-widest font-mono ${styles.muted}`}>
+                        <span className={`text-[10px] font-bold uppercase tracking-wider font-sans ${styles.muted}`}>
                             {visibleAnalysis.score}/100
                         </span>
                     )}
-                    <span className={`px-2 py-1 text-[9px] font-black uppercase tracking-[0.16em] font-mono ${styles.badge}`}>
+                    <span className={`px-2 py-1 text-[9px] font-black uppercase tracking-[0.16em] font-sans ${styles.badge}`}>
                         {loading ? 'Analisando' : styles.label}
                     </span>
                 </div>
@@ -341,7 +341,7 @@ export function HealthSummaryCard(props: HealthSummaryCardProps) {
                     {hasStructuredDetails && (
                         <div className={`grid gap-3 sm:grid-cols-2 border-t pt-3 ${styles.divider}`}>
                             <div>
-                                <p className={`text-[9px] font-black uppercase tracking-[0.18em] font-mono ${styles.eyebrow}`}>
+                                <p className={`text-[9px] font-black uppercase tracking-[0.18em] font-sans ${styles.eyebrow}`}>
                                     Ponto de atenção
                                 </p>
                                 <p className={`mt-1 text-xs font-bold leading-relaxed ${styles.text}`}>
@@ -349,7 +349,7 @@ export function HealthSummaryCard(props: HealthSummaryCardProps) {
                                 </p>
                             </div>
                             <div>
-                                <p className={`text-[9px] font-black uppercase tracking-[0.18em] font-mono ${styles.eyebrow}`}>
+                                <p className={`text-[9px] font-black uppercase tracking-[0.18em] font-sans ${styles.eyebrow}`}>
                                     Ponto positivo
                                 </p>
                                 <p className={`mt-1 text-xs font-bold leading-relaxed ${styles.text}`}>
@@ -361,7 +361,7 @@ export function HealthSummaryCard(props: HealthSummaryCardProps) {
 
                     {hasStructuredDetails && (
                         <div className={`border-t pt-3 ${styles.divider}`}>
-                            <p className={`text-[9px] font-black uppercase tracking-[0.18em] font-mono ${styles.eyebrow}`}>
+                            <p className={`text-[9px] font-black uppercase tracking-[0.18em] font-sans ${styles.eyebrow}`}>
                                 Proposta para esta semana
                             </p>
                             <p className={`mt-1 text-sm font-black leading-relaxed ${styles.title}`}>
@@ -372,8 +372,8 @@ export function HealthSummaryCard(props: HealthSummaryCardProps) {
                 </>
             ) : loading ? (
                 <div className="space-y-3">
-                    <div className="h-3 w-2/3 rounded-none animate-pulse bg-black/10" />
-                    <div className="h-16 rounded-none animate-pulse bg-black/10" />
+                    <div className="h-3 w-2/3 rounded-lg animate-pulse bg-black/10" />
+                    <div className="h-16 rounded-lg animate-pulse bg-black/10" />
                 </div>
             ) : (
                 <p className={`text-sm font-bold italic ${styles.muted}`}>Aguardando análise...</p>
@@ -382,7 +382,7 @@ export function HealthSummaryCard(props: HealthSummaryCardProps) {
                 <button
                     type="button"
                     onClick={props.onOpenHealthCopilot}
-                    className={`sm:hidden flex items-center justify-center gap-2 border px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] font-mono transition-all ${
+                    className={`sm:hidden flex items-center justify-center gap-2 border px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] font-sans transition-all ${
                         visibleAnalysis.status === 'critical' ? 'border-rose-300 bg-white/60 text-rose-800'
                         : visibleAnalysis.status === 'attention' ? 'border-amber-300 bg-white/60 text-amber-800'
                         : visibleAnalysis.status === 'stable' ? 'border-sky-300 bg-white/60 text-sky-800'

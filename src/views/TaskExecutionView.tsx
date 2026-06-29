@@ -39,19 +39,19 @@ const DocumentViewer = ({ file, onClose, isDark }: {
   }
 
   return (
-    <div className={`flex flex-col flex-1 h-full overflow-hidden rounded-none border ${isDark ? 'bg-[#050505] border-white/10' : 'bg-white border-border-grid'}`}>
-      <div className={`shrink-0 px-6 py-4 flex items-center justify-between border-b ${isDark ? 'border-white/10' : 'border-border-grid'}`}>
+    <div className={`flex flex-col flex-1 h-full overflow-hidden rounded-lg border ${isDark ? 'bg-[#050505] border-white/10' : 'bg-white border-[#e5e7eb] dark:border-white/10'}`}>
+      <div className={`shrink-0 px-6 py-4 flex items-center justify-between border-b ${isDark ? 'border-white/10' : 'border-[#e5e7eb] dark:border-white/10'}`}>
         <div className="flex items-center gap-3">
-          <button onClick={onClose} className={`p-2 rounded-none transition-all ${isDark ? 'hover:bg-white/10 text-white/50' : 'hover:bg-slate-100 text-slate-400'}`}>
+          <button onClick={onClose} className={`p-2 rounded-lg transition-all ${isDark ? 'hover:bg-white/10 text-white/50' : 'hover:bg-slate-100 text-slate-400'}`}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
           </button>
           <div>
-            <h3 className={`text-sm font-black tracking-tight font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>{file.nome}</h3>
-            <p className={`text-[10px] font-bold uppercase tracking-widest font-mono ${isDark ? 'text-white/40' : 'text-slate-400'}`}>Modo de Foco</p>
+            <h3 className={`text-sm font-black tracking-tight font-sans ${isDark ? 'text-white' : 'text-slate-900'}`}>{file.nome}</h3>
+            <p className={`text-[10px] font-bold uppercase tracking-widest font-sans ${isDark ? 'text-white/40' : 'text-slate-400'}`}>Modo de Foco</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <a href={file.url} target="_blank" rel="noreferrer" className={`px-4 py-2 rounded-none text-[10px] font-black uppercase tracking-widest transition-all font-mono ${isDark ? 'bg-white/5 text-white/70 hover:bg-white/10' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+          <a href={file.url} target="_blank" rel="noreferrer" className={`px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all font-sans ${isDark ? 'bg-white/5 text-white/70 hover:bg-white/10' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
             Abrir Original
           </a>
         </div>
@@ -59,22 +59,22 @@ const DocumentViewer = ({ file, onClose, isDark }: {
       <div className="flex-1 bg-black/5 relative">
         {file.tipo === 'image' ? (
           <div className="w-full h-full flex items-center justify-center p-8">
-            <img src={imageUrl} alt={file.nome} className="max-w-full max-h-full object-contain rounded-none shadow-2xl transition-all hover:scale-[1.01]" />
+            <img src={imageUrl} alt={file.nome} className="max-w-full max-h-full object-contain rounded-lg shadow-lg transition-all hover:scale-[1.01]" />
           </div>
         ) : canEmbed ? (
           <iframe src={finalUrl} className="w-full h-full border-none" title={file.nome} />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center gap-5 p-8 text-center">
-            <div className={`w-16 h-16 rounded-none flex items-center justify-center ${isDark ? 'bg-white/5' : 'bg-slate-100'}`}>
+            <div className={`w-16 h-16 rounded-lg flex items-center justify-center ${isDark ? 'bg-white/5' : 'bg-slate-100'}`}>
               <svg className={`w-8 h-8 ${isDark ? 'text-white/30' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
             </div>
             <div>
-              <p className={`text-sm font-bold font-mono ${isDark ? 'text-white/70' : 'text-slate-700'}`}>Pré-visualização não disponível</p>
-              <p className={`text-xs mt-1 font-mono ${isDark ? 'text-white/40' : 'text-slate-400'}`}>O arquivo não pode ser incorporado aqui</p>
+              <p className={`text-sm font-bold font-sans ${isDark ? 'text-white/70' : 'text-slate-700'}`}>Pré-visualização não disponível</p>
+              <p className={`text-xs mt-1 font-sans ${isDark ? 'text-white/40' : 'text-slate-400'}`}>O arquivo não pode ser incorporado aqui</p>
             </div>
-            <a href={file.url} target="_blank" rel="noreferrer" className={`px-5 py-2.5 rounded-none text-xs font-black uppercase tracking-widest transition-all font-mono ${isDark ? 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}>
+            <a href={file.url} target="_blank" rel="noreferrer" className={`px-5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all font-sans ${isDark ? 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}>
               Abrir no Google Drive
             </a>
           </div>
@@ -1537,16 +1537,16 @@ export const TaskExecutionView = ({
   };
 
   // ─── Theme classes ────────────────────────────────────────────
-  const bg = isDark ? 'bg-[#050505] text-white' : 'bg-surface-container-low text-slate-900';
-  const cardBg = isDark ? 'bg-white/5 border-white/10' : 'bg-white border-border-grid';
+  const bg = isDark ? 'bg-[#050505] text-white' : 'bg-slate-50 dark:bg-slate-950/40-low text-slate-900';
+  const cardBg = isDark ? 'bg-white/5 border-white/10' : 'bg-white border-[#e5e7eb] dark:border-white/10';
   const mutedText = isDark ? 'text-white/40' : 'text-slate-400';
-  const labelCls = `text-[9px] font-black uppercase tracking-widest font-mono ${mutedText}`;
+  const labelCls = `text-[9px] font-bold uppercase tracking-wider font-sans ${mutedText}`;
 
   // ─── Status color ─────────────────────────────────────────────
   const statusColor = (s: string) => {
-    if (s === 'em andamento') return 'bg-blue-500/15 text-blue-400 border-blue-500/30 font-mono';
-    if (s === 'stand-by') return 'bg-amber-500/15 text-amber-400 border-amber-500/30 font-mono';
-    return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 font-mono';
+    if (s === 'em andamento') return 'bg-blue-500/15 text-blue-400 border-blue-500/30 font-sans';
+    if (s === 'stand-by') return 'bg-amber-500/15 text-amber-400 border-amber-500/30 font-sans';
+    return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 font-sans';
   };
 
   // ─── Columns visibility (mobile tabs) ────────────────────────
@@ -1575,10 +1575,10 @@ export const TaskExecutionView = ({
     subtitle: string,
     onExpand: () => void
   ) => (
-    <div className={`hidden lg:flex h-full shrink-0 flex-col items-center justify-between rounded-none px-2 py-4 ${isDark ? 'bg-[#0f1724]' : 'bg-white'} ${panel === 'plan' ? 'border-r' : 'border-l'} ${isDark ? 'border-white/10' : 'border-border-grid'}`}>
+    <div className={`hidden lg:flex h-full shrink-0 flex-col items-center justify-between rounded-lg px-2 py-4 ${isDark ? 'bg-[#0f1724]' : 'bg-white'} ${panel === 'plan' ? 'border-r' : 'border-l'} ${isDark ? 'border-white/10' : 'border-[#e5e7eb] dark:border-white/10'}`}>
       <button
         onClick={onExpand}
-        className={`flex h-8 w-8 items-center justify-center rounded-none border transition-all font-mono ${isDark ? 'border-white/10 text-white/70 hover:bg-white/10 hover:text-white' : 'border-border-grid text-slate-500 hover:bg-slate-100 hover:text-slate-900'}`}
+        className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-all font-sans ${isDark ? 'border-white/10 text-white/70 hover:bg-white/10 hover:text-white' : 'border-[#e5e7eb] dark:border-white/10 text-slate-500 hover:bg-slate-100 hover:text-slate-900'}`}
         title={`Expandir ${title}`}
       >
         <svg className={`h-4 w-4 ${panel === 'plan' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1587,9 +1587,9 @@ export const TaskExecutionView = ({
       </button>
       <div className="flex flex-1 flex-col items-center justify-center gap-3">
         <span className={`text-[8px] font-black uppercase tracking-[0.35em] [writing-mode:vertical-rl] rotate-180 ${mutedText}`}>{subtitle}</span>
-        <span className={`text-[9px] font-black uppercase tracking-widest [writing-mode:vertical-rl] rotate-180 ${isDark ? 'text-white/80' : 'text-slate-700'}`}>{title}</span>
+        <span className={`text-[9px] font-bold uppercase tracking-wider [writing-mode:vertical-rl] rotate-180 ${isDark ? 'text-white/80' : 'text-slate-700'}`}>{title}</span>
       </div>
-      <div className={`h-8 w-1 rounded-none ${isDark ? 'bg-white/10' : 'bg-slate-200'}`} />
+      <div className={`h-8 w-1 rounded-lg ${isDark ? 'bg-white/10' : 'bg-slate-200'}`} />
     </div>
   );
 
@@ -1613,7 +1613,7 @@ export const TaskExecutionView = ({
       <header
         ref={mobileHeaderRef}
         style={{ marginTop: isCompactMobileViewport && isMobileHeaderHidden ? -mobileHeaderHeight : 0 }}
-        className={`shrink-0 px-4 py-2 sm:py-3 border-b flex flex-col gap-2 transition-[transform,margin,opacity] duration-300 ease-out max-sm:will-change-transform ${isCompactMobileViewport && isMobileHeaderHidden ? 'max-sm:-translate-y-full max-sm:opacity-0 max-sm:pointer-events-none' : 'max-sm:translate-y-0 max-sm:opacity-100'} ${isDark ? 'border-white/10 bg-[#050505]' : 'border-border-grid bg-white'}`}
+        className={`shrink-0 px-4 py-2 sm:py-3 border-b flex flex-col gap-2 transition-[transform,margin,opacity] duration-300 ease-out max-sm:will-change-transform ${isCompactMobileViewport && isMobileHeaderHidden ? 'max-sm:-translate-y-full max-sm:opacity-0 max-sm:pointer-events-none' : 'max-sm:translate-y-0 max-sm:opacity-100'} ${isDark ? 'border-white/10 bg-[#050505]' : 'border-[#e5e7eb] dark:border-white/10 bg-white'}`}
       >
         <div className="sm:hidden flex flex-col gap-3 py-0.5">
           {/* Linha 1: Título livre */}
@@ -1631,13 +1631,13 @@ export const TaskExecutionView = ({
                     setIsEditingTitle(false);
                   }
                 }}
-                className={`w-full bg-transparent border-b border-blue-500/50 outline-none text-xl font-black leading-tight tracking-tight break-words font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}
+                className={`w-full bg-transparent border-b border-blue-500/50 outline-none text-xl font-black leading-tight tracking-tight break-words font-sans ${isDark ? 'text-white' : 'text-slate-900'}`}
                 autoFocus
               />
             ) : (
               <h1
                 onClick={() => setIsEditingTitle(true)}
-                className={`text-xl font-black leading-tight tracking-tight break-words cursor-pointer hover:text-blue-600 transition-colors font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}
+                className={`text-xl font-black leading-tight tracking-tight break-words cursor-pointer hover:text-blue-600 transition-colors font-sans ${isDark ? 'text-white' : 'text-slate-900'}`}
                 title="Clique para alterar o título"
               >
                 {currentTaskData.titulo}
@@ -1647,7 +1647,7 @@ export const TaskExecutionView = ({
 
           {/* Linha 2: Voltar + Atalhos */}
           <div className="flex items-center justify-between">
-            <button onClick={onClose} className={`shrink-0 flex h-8 w-8 items-center justify-center rounded-none transition-all ${isDark ? 'text-white/30 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}>
+            <button onClick={onClose} className={`shrink-0 flex h-8 w-8 items-center justify-center rounded-lg transition-all ${isDark ? 'text-white/30 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
             </button>
             <div className="shrink-0">
@@ -1676,7 +1676,7 @@ export const TaskExecutionView = ({
                 isDark={isDark}
                 direction="down"
                 triggerLabel="Atalhos"
-                triggerClassName={`flex px-2.5 py-1 items-center justify-center rounded-none border shadow-[0_4px_12px_rgba(15,23,42,0.15)] ${isDark ? 'bg-slate-900 text-slate-300 border-slate-800' : 'bg-white text-slate-700 border-border-grid'}`}
+                triggerClassName={`flex px-2.5 py-1 items-center justify-center rounded-lg border shadow-[0_4px_12px_rgba(15,23,42,0.15)] ${isDark ? 'bg-slate-950 text-slate-300 border-slate-800' : 'bg-white text-slate-700 border-[#e5e7eb] dark:border-white/10'}`}
                 triggerIconClassName="h-3 w-3"
               />
             </div>
@@ -1685,7 +1685,7 @@ export const TaskExecutionView = ({
         </div>
 
         <div className="hidden sm:flex items-center gap-4">
-          <button onClick={onClose} className={`shrink-0 flex h-8 w-8 items-center justify-center rounded-none transition-all ${isDark ? 'text-white/40 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}>
+          <button onClick={onClose} className={`shrink-0 flex h-8 w-8 items-center justify-center rounded-lg transition-all ${isDark ? 'text-white/40 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}>
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
           </button>
 
@@ -1703,13 +1703,13 @@ export const TaskExecutionView = ({
                     setIsEditingTitle(false);
                   }
                 }}
-                className={`w-full bg-transparent border-b border-blue-500/50 outline-none text-xl md:text-3xl font-black tracking-tight leading-tight break-words font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}
+                className={`w-full bg-transparent border-b border-blue-500/50 outline-none text-xl md:text-3xl font-black tracking-tight leading-tight break-words font-sans ${isDark ? 'text-white' : 'text-slate-900'}`}
                 autoFocus
               />
             ) : (
               <h1
                 onClick={() => setIsEditingTitle(true)}
-                className={`text-xl md:text-3xl font-black tracking-tight leading-tight break-words whitespace-normal cursor-pointer hover:text-blue-600 transition-colors font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}
+                className={`text-xl md:text-3xl font-black tracking-tight leading-tight break-words whitespace-normal cursor-pointer hover:text-blue-600 transition-colors font-sans ${isDark ? 'text-white' : 'text-slate-900'}`}
                 title="Clique para alterar o título"
               >
                 {currentTaskData.titulo}
@@ -1743,7 +1743,7 @@ export const TaskExecutionView = ({
               isDark={isDark}
               direction="down"
               triggerLabel="Atalhos"
-              triggerClassName={`px-3 py-1.5 rounded-none border shadow-[0_4px_12px_rgba(15,23,42,0.15)] ${isDark ? 'bg-slate-900 text-slate-300 border-slate-800' : 'bg-white text-slate-700 border-border-grid'}`}
+              triggerClassName={`px-3 py-1.5 rounded-lg border shadow-[0_4px_12px_rgba(15,23,42,0.15)] ${isDark ? 'bg-slate-950 text-slate-300 border-slate-800' : 'bg-white text-slate-700 border-[#e5e7eb] dark:border-white/10'}`}
               triggerIconClassName="h-3.5 w-3.5"
             />
           </div>
@@ -1753,7 +1753,7 @@ export const TaskExecutionView = ({
       {/* ══════════════════════════════════════════════════════════
           MOBILE TAB BAR
       ══════════════════════════════════════════════════════════ */}
-      <nav className={`lg:hidden shrink-0 flex border-b ${isDark ? 'border-white/10 bg-[#050505]' : 'border-border-grid bg-white'}`}>
+      <nav className={`lg:hidden shrink-0 flex border-b ${isDark ? 'border-white/10 bg-[#050505]' : 'border-[#e5e7eb] dark:border-white/10 bg-white'}`}>
         {(['mapa', 'diario', 'copiloto'] as MobileTab[]).map(tab => {
           const labels: Record<MobileTab, string> = { mapa: 'Mapa', diario: 'Diário', copiloto: 'Copiloto' };
           const icons: Record<MobileTab, React.ReactNode> = {
@@ -1797,7 +1797,7 @@ export const TaskExecutionView = ({
             </div>
             {/* Copiloto em Modo de Foco lateral */}
             <div 
-              className="w-full lg:w-[440px] shrink-0 border-l border-border-grid flex flex-col min-h-0 overflow-hidden bg-[#050505]"
+              className="w-full lg:w-[440px] shrink-0 border-l border-[#e5e7eb] dark:border-white/10 flex flex-col min-h-0 overflow-hidden bg-[#050505]"
               style={{ width: isDesktopViewport ? copilotPanelWidth : '100%' }}
             >
               <HermesCopilotoDrawer
@@ -1840,7 +1840,7 @@ export const TaskExecutionView = ({
                     </div>
                     <button
                       onClick={() => setIsPlanCollapsed(true)}
-                      className={`flex h-7 w-7 items-center justify-center rounded-none border transition-all ${isDark ? 'border-white/10 text-white/50 hover:bg-white/10 hover:text-white' : 'border-border-grid text-slate-500 hover:bg-slate-100 hover:text-slate-900'}`}
+                      className={`flex h-7 w-7 items-center justify-center rounded-lg border transition-all ${isDark ? 'border-white/10 text-white/50 hover:bg-white/10 hover:text-white' : 'border-[#e5e7eb] dark:border-white/10 text-slate-500 hover:bg-slate-100 hover:text-slate-900'}`}
                       title="Retrair plano de ação"
                     >
                       <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1851,7 +1851,7 @@ export const TaskExecutionView = ({
 
                   <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                     {/* 1. PLANO DE AÇÃO */}
-                    <div className={`rounded-none border ${cardBg}`}>
+                    <div className={`rounded-lg border ${cardBg}`}>
                       <div className="px-4 pt-4 pb-2 flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <svg className={`w-3.5 h-3.5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1860,13 +1860,13 @@ export const TaskExecutionView = ({
                           <p className={labelCls}>STATUS DA AÇÃO</p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className={`text-[9px] font-black font-mono ${progressPercent === 100 ? 'text-emerald-500' : mutedText}`}>
+                          <span className={`text-[9px] font-black font-sans ${progressPercent === 100 ? 'text-emerald-500' : mutedText}`}>
                             {(currentTaskData.plano_acao || []).filter(i => i.completed).length}/{(currentTaskData.plano_acao || []).length}
                           </span>
                           <button
                             onClick={openPlanModal}
                             title="Editar plano de ação"
-                            className={`p-1 rounded-none transition-all ${isDark ? 'text-white/30 hover:text-white/70 hover:bg-white/10' : 'text-slate-300 hover:text-slate-600 hover:bg-slate-100'}`}
+                            className={`p-1 rounded-lg transition-all ${isDark ? 'text-white/30 hover:text-white/70 hover:bg-white/10' : 'text-slate-300 hover:text-slate-600 hover:bg-slate-100'}`}
                           >
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                           </button>
@@ -1878,7 +1878,7 @@ export const TaskExecutionView = ({
                         <select
                           value={currentTaskData.status}
                           onChange={e => handleStatusChange(e.target.value)}
-                          className={`w-full text-center text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-none border appearance-none cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono ${statusColor(currentTaskData.status)} ${isDark ? 'bg-transparent' : 'bg-white'}`}
+                          className={`w-full text-center text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg border appearance-none cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 transition-all font-sans ${statusColor(currentTaskData.status)} ${isDark ? 'bg-transparent' : 'bg-white'}`}
                         >
                           <option value="em andamento">Em Andamento</option>
                           <option value="stand-by">Stand-by</option>
@@ -1889,13 +1889,13 @@ export const TaskExecutionView = ({
                       {/* Barra de progresso interna */}
                       {(currentTaskData.plano_acao || []).length > 0 && (
                         <div className="px-4 mb-3 flex items-center gap-3">
-                          <div className={`flex-1 h-1.5 rounded-none overflow-hidden ${isDark ? 'bg-white/10' : 'bg-slate-100'}`}>
+                          <div className={`flex-1 h-1.5 rounded-lg overflow-hidden ${isDark ? 'bg-white/10' : 'bg-slate-100'}`}>
                             <div
-                              className={`h-full rounded-none transition-all duration-500 ${progressPercent === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                              className={`h-full rounded-lg transition-all duration-500 ${progressPercent === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`}
                               style={{ width: `${progressPercent}%` }}
                             />
                           </div>
-                          <span className={`text-[9px] font-black uppercase tracking-widest shrink-0 font-mono ${progressPercent === 100 ? (isDark ? 'text-emerald-400' : 'text-emerald-600') : mutedText}`}>
+                          <span className={`text-[9px] font-bold uppercase tracking-wider shrink-0 font-sans ${progressPercent === 100 ? (isDark ? 'text-emerald-400' : 'text-emerald-600') : mutedText}`}>
                             {progressPercent}%
                           </span>
                         </div>
@@ -1909,9 +1909,9 @@ export const TaskExecutionView = ({
                             <button
                               key={item.id}
                               onClick={() => handleToggleChecklistItem(item.id)}
-                              className={`w-full flex items-start gap-3 p-2.5 rounded-none text-left transition-all group ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
+                              className={`w-full flex items-start gap-3 p-2.5 rounded-lg text-left transition-all group ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
                             >
-                              <div className={`w-4 h-4 mt-0.5 rounded-none border-2 flex items-center justify-center shrink-0 transition-all ${item.completed
+                              <div className={`w-4 h-4 mt-0.5 rounded-lg border-2 flex items-center justify-center shrink-0 transition-all ${item.completed
                                 ? 'bg-emerald-500 border-emerald-500'
                                 : isDark ? 'border-white/30 group-hover:border-emerald-400' : 'border-slate-300 group-hover:border-emerald-500'
                                 }`}>
@@ -1921,7 +1921,7 @@ export const TaskExecutionView = ({
                                   </svg>
                                 )}
                               </div>
-                              <span className={`text-xs font-medium leading-snug transition-all font-mono ${item.completed
+                              <span className={`text-xs font-medium leading-snug transition-all font-sans ${item.completed
                                 ? isDark ? 'text-white/30 line-through' : 'text-slate-300 line-through'
                                 : isDark ? 'text-white/80' : 'text-slate-700'
                                 }`}>
@@ -1946,9 +1946,9 @@ export const TaskExecutionView = ({
                           {showPlanHistory && (
                             <div className="mt-2 space-y-2">
                               {[...(currentTaskData.plano_acao_historico || [])].reverse().map((version, vIdx) => (
-                                <div key={vIdx} className={`p-2 rounded-none border ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-border-grid'}`}>
+                                <div key={vIdx} className={`p-2 rounded-lg border ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10'}`}>
                                   <div className="flex items-center justify-between mb-1.5">
-                                    <p className={`text-[8px] font-black uppercase tracking-widest ${mutedText}`}>
+                                    <p className={`text-[8px] font-bold uppercase tracking-wider ${mutedText}`}>
                                       Versão {(currentTaskData.plano_acao_historico || []).length - vIdx}
                                       {version.data && ` — ${formatDate(version.data)}`}
                                     </p>
@@ -1979,7 +1979,7 @@ export const TaskExecutionView = ({
                     </div>
 
                     {/* 2. AGENDAMENTO */}
-                    <div className={`rounded-none border p-4 ${cardBg}`}>
+                    <div className={`rounded-lg border p-4 ${cardBg}`}>
                       <div className="flex items-center gap-2 mb-3">
                         <svg className={`w-3.5 h-3.5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -1991,48 +1991,48 @@ export const TaskExecutionView = ({
                           <p className={`${labelCls} mb-1 opacity-60`}>Data de Execução</p>
                           <input type="date" min={getTodayIso()} value={localDataLimite} onChange={e => { setLocalDataLimite(e.target.value); setLocalHorarioInicio(''); setLocalHorarioFim(''); }} onBlur={handleBlurDataLimite}
                             style={{ colorScheme: isDark ? 'dark' : 'light' }}
-                            className={`w-full px-3 py-2 rounded-none text-xs font-bold outline-none focus:ring-1 focus:ring-primary-tactile border transition-all font-mono mb-3 ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-border-grid text-slate-900'}`} />
+                            className={`w-full px-3 py-2 rounded-lg text-xs font-bold outline-none focus:ring-1 focus:ring-primary-tactile border transition-all font-sans mb-3 ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10 text-slate-900'}`} />
                             
                           <p className={`${labelCls} mb-1 opacity-60`}>Prazo Final (Opcional)</p>
                           <input type="date" min={getTodayIso()} value={localPrazoFinal} onChange={e => setLocalPrazoFinal(e.target.value)} onBlur={handleBlurPrazoFinal}
                             style={{ colorScheme: isDark ? 'dark' : 'light' }}
-                            className={`w-full px-3 py-2 rounded-none text-xs font-bold outline-none focus:ring-1 focus:ring-primary-tactile border transition-all font-mono ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-border-grid text-slate-900'}`} />
+                            className={`w-full px-3 py-2 rounded-lg text-xs font-bold outline-none focus:ring-1 focus:ring-primary-tactile border transition-all font-sans ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10 text-slate-900'}`} />
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <div>
                             <p className={`${labelCls} mb-1 opacity-60`}>Início</p>
                             <input type="time" value={localHorarioInicio} onChange={e => setLocalHorarioInicio(e.target.value)} onBlur={() => onSave(task.id, { horario_inicio: localHorarioInicio })}
                               style={{ colorScheme: isDark ? 'dark' : 'light' }}
-                              className={`w-full px-3 py-2 rounded-none text-xs font-bold outline-none focus:ring-1 focus:ring-primary-tactile border transition-all font-mono ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-border-grid text-slate-900'}`} />
+                              className={`w-full px-3 py-2 rounded-lg text-xs font-bold outline-none focus:ring-1 focus:ring-primary-tactile border transition-all font-sans ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10 text-slate-900'}`} />
                           </div>
                           <div>
                             <p className={`${labelCls} mb-1 opacity-60`}>Fim</p>
                             <input type="time" value={localHorarioFim} onChange={e => setLocalHorarioFim(e.target.value)} onBlur={() => onSave(task.id, { horario_fim: localHorarioFim })}
                               style={{ colorScheme: isDark ? 'dark' : 'light' }}
-                              className={`w-full px-3 py-2 rounded-none text-xs font-bold outline-none focus:ring-1 focus:ring-primary-tactile border transition-all font-mono ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-border-grid text-slate-900'}`} />
+                              className={`w-full px-3 py-2 rounded-lg text-xs font-bold outline-none focus:ring-1 focus:ring-primary-tactile border transition-all font-sans ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10 text-slate-900'}`} />
                           </div>
                         </div>
                         {taskReminders.length > 0 && (
-                          <div className={`rounded-none border px-3 py-2 ${isDark ? 'border-white/10 bg-white/5' : 'border-border-grid bg-slate-50'}`}>
+                          <div className={`rounded-lg border px-3 py-2 ${isDark ? 'border-white/10 bg-white/5' : 'border-[#e5e7eb] dark:border-white/10 bg-slate-50'}`}>
                             <button
                               onClick={() => setShowReminderHistory(prev => !prev)}
                               className="w-full flex items-center gap-2 text-left"
                             >
-                              <div className={`w-7 h-7 rounded-none flex items-center justify-center shrink-0 ${pendingReminderCount > 0
+                              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${pendingReminderCount > 0
                                 ? isDark ? 'bg-amber-500/15 text-amber-300' : 'bg-amber-100 text-amber-700'
                                 : isDark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
                                 }`}>
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
                               </div>
                               <div className="min-w-0 flex-1">
-                                <p className={`text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-white/75' : 'text-slate-700'}`}>Lembretes</p>
+                                <p className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-white/75' : 'text-slate-700'}`}>Lembretes</p>
                                 <p className={`text-[10px] truncate ${mutedText}`}>
                                   {nextPendingReminder
                                     ? `Próximo: ${new Date(nextPendingReminder.reminder_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`
                                     : 'Todos os lembretes já foram enviados'}
                                 </p>
                               </div>
-                              <span className={`px-2 py-0.5 rounded-none text-[9px] font-black ${pendingReminderCount > 0
+                              <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black ${pendingReminderCount > 0
                                 ? isDark ? 'bg-amber-500/15 text-amber-300' : 'bg-amber-100 text-amber-700'
                                 : isDark ? 'bg-white/10 text-white/45' : 'bg-slate-200 text-slate-500'
                                 }`}>
@@ -2045,12 +2045,12 @@ export const TaskExecutionView = ({
                                 {taskReminders.map(reminder => (
                                   <div
                                     key={reminder.id}
-                                    className={`flex items-center gap-2 rounded-none border px-2.5 py-2 ${reminder.reminder_sent
-                                      ? isDark ? 'border-white/10 bg-white/5 text-white/45' : 'border-border-grid bg-white text-slate-400'
+                                    className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${reminder.reminder_sent
+                                      ? isDark ? 'border-white/10 bg-white/5 text-white/45' : 'border-[#e5e7eb] dark:border-white/10 bg-white text-slate-400'
                                       : isDark ? 'border-amber-500/20 bg-amber-500/10 text-white' : 'border-amber-200 bg-amber-50 text-slate-700'
                                       }`}
                                   >
-                                    <div className={`w-2 h-2 rounded-none shrink-0 ${reminder.reminder_sent ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                                    <div className={`w-2 h-2 rounded-lg shrink-0 ${reminder.reminder_sent ? 'bg-emerald-400' : 'bg-amber-400'}`} />
                                     <div className="min-w-0 flex-1">
                                       <p className="text-[11px] font-bold">
                                         {new Date(reminder.reminder_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
@@ -2066,7 +2066,7 @@ export const TaskExecutionView = ({
                                     </div>
                                     <button
                                       onClick={() => handleDeleteReminder(reminder.id)}
-                                      className={`w-7 h-7 rounded-none flex items-center justify-center transition-all ${isDark ? 'hover:bg-white/10 text-white/40 hover:text-rose-300' : 'hover:bg-white text-slate-400 hover:text-rose-600'}`}
+                                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${isDark ? 'hover:bg-white/10 text-white/40 hover:text-rose-300' : 'hover:bg-white text-slate-400 hover:text-rose-600'}`}
                                       aria-label="Excluir lembrete"
                                     >
                                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -2079,9 +2079,9 @@ export const TaskExecutionView = ({
                         )}
                         <button
                           onClick={() => openReminderModal()}
-                          className={`w-full flex items-center justify-center gap-2 py-2 rounded-none border text-[10px] font-black uppercase tracking-widest transition-all ${pendingReminderCount > 0
+                          className={`w-full flex items-center justify-center gap-2 py-2 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-all ${pendingReminderCount > 0
                             ? isDark ? 'border-amber-500/20 text-amber-300 hover:bg-amber-500/10' : 'border-amber-200 text-amber-700 hover:bg-amber-50'
-                            : isDark ? 'border-white/10 text-white/40 hover:bg-white/5 hover:text-white/70' : 'border-border-grid text-slate-400 hover:bg-slate-50 hover:text-slate-700'
+                            : isDark ? 'border-white/10 text-white/40 hover:bg-white/5 hover:text-white/70' : 'border-[#e5e7eb] dark:border-white/10 text-slate-400 hover:bg-slate-50 hover:text-slate-700'
                             }`}>
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
                           {taskReminders.length > 0 ? 'Novo Lembrete' : 'Agendar Lembrete'}
@@ -2090,8 +2090,8 @@ export const TaskExecutionView = ({
                     </div>
 
                     {/* 3. CONTEXTO (Agrupado) */}
-                    <div className={`rounded-none border ${cardBg}`}>
-                      <div className="px-4 py-3 border-b border-border-grid flex items-center gap-2">
+                    <div className={`rounded-lg border ${cardBg}`}>
+                      <div className="px-4 py-3 border-b border-[#e5e7eb] dark:border-white/10 flex items-center gap-2">
                         <svg className={`w-3.5 h-3.5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
@@ -2103,7 +2103,7 @@ export const TaskExecutionView = ({
                         {currentTaskData.descricao && (
                           <div className="space-y-2">
                             <p className={`${labelCls} opacity-60`}>Síntese da Demanda</p>
-                            <p className={`text-xs leading-relaxed font-mono ${isDark ? 'text-white/70' : 'text-slate-600'}`}>
+                            <p className={`text-xs leading-relaxed font-sans ${isDark ? 'text-white/70' : 'text-slate-600'}`}>
                               {currentTaskData.descricao}
                             </p>
                           </div>
@@ -2121,18 +2121,18 @@ export const TaskExecutionView = ({
                               onSave(task.id, { area_tematica: newArea, base_conhecimento: baseId });
                             }}
                             style={{ colorScheme: isDark ? 'dark' : 'light' }}
-                            className={`w-full border-none p-0 text-xs font-black uppercase tracking-widest focus:ring-0 cursor-pointer font-mono ${isDark ? 'bg-slate-900 text-white' : 'bg-transparent text-slate-900'}`}
+                            className={`w-full border-none p-0 text-xs font-bold uppercase tracking-wider focus:ring-0 cursor-pointer font-sans ${isDark ? 'bg-slate-900 text-white' : 'bg-transparent text-slate-900'}`}
                           >
-                            <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} value="GERAL">Geral</option>
-                            <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} value="NÃO CLASSIFICADA">Não Classificada</option>
+                            <option className={isDark ? 'bg-slate-900 text-white font-sans' : 'bg-white text-slate-900 font-sans'} value="GERAL">Geral</option>
+                            <option className={isDark ? 'bg-slate-900 text-white font-sans' : 'bg-white text-slate-900 font-sans'} value="NÃO CLASSIFICADA">Não Classificada</option>
                             <optgroup label="Estratégicas">
                               {STRATEGIC_AREA_OPTIONS.map(option => (
-                                <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} key={option.value} value={option.value}>{option.label}</option>
+                                <option className={isDark ? 'bg-slate-900 text-white font-sans' : 'bg-white text-slate-900 font-sans'} key={option.value} value={option.value}>{option.label}</option>
                               ))}
                             </optgroup>
                             <optgroup label="Operacionais">
                               {(unidades || []).filter(u => isOperationalArea(u.nome)).map(u => (
-                                <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                                <option className={isDark ? 'bg-slate-900 text-white font-sans' : 'bg-white text-slate-900 font-sans'} key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
                               ))}
                             </optgroup>
                           </select>
@@ -2145,14 +2145,14 @@ export const TaskExecutionView = ({
                             <button
                               onClick={handleAutoClassifyTags}
                               disabled={isGeneratingTags}
-                              className="flex items-center gap-1.5 px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-none transition-colors text-[9px] font-black uppercase tracking-widest border border-indigo-100 disabled:opacity-50"
+                              className="flex items-center gap-1.5 px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors text-[9px] font-bold uppercase tracking-wider border border-indigo-100 disabled:opacity-50"
                             >
                               {isGeneratingTags ? '...' : '✨ Auto'}
                             </button>
                           </div>
-                          <div className="flex flex-wrap gap-2 mb-3 font-mono">
+                          <div className="flex flex-wrap gap-2 mb-3 font-sans">
                             {(currentTaskData.tags || []).map(tag => (
-                              <span key={tag} className="flex items-center gap-1 bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-none text-[10px] font-bold border border-indigo-100 font-mono">
+                              <span key={tag} className="flex items-center gap-1 bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-[10px] font-bold border border-indigo-100 font-sans">
                                 #{tag}
                                 <button onClick={(e) => {
                                   e.preventDefault();
@@ -2162,7 +2162,7 @@ export const TaskExecutionView = ({
                               </span>
                             ))}
                             {(currentTaskData.tags || []).length === 0 && (
-                              <span className="text-[10px] text-slate-400 font-medium italic font-mono">Nenhuma tag...</span>
+                              <span className="text-[10px] text-slate-400 font-medium italic font-sans">Nenhuma tag...</span>
                             )}
                           </div>
                           <div>
@@ -2180,7 +2180,7 @@ export const TaskExecutionView = ({
                                     }
                                   }
                                 }}
-                                className={`flex-1 border rounded-none px-3 py-1.5 text-[11px] font-medium focus:ring-1 focus:ring-indigo-500 outline-none font-mono ${isDark ? 'bg-black/50 border-white/10 text-white' : 'bg-slate-50 border-border-grid text-slate-700'}`}
+                                className={`flex-1 border rounded-lg px-3 py-1.5 text-[11px] font-medium focus:ring-1 focus:ring-indigo-500 outline-none font-sans ${isDark ? 'bg-black/50 border-white/10 text-white' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10 text-slate-700'}`}
                                 placeholder="Adicionar nova tag (Enter)..."
                               />
                               <button
@@ -2191,7 +2191,7 @@ export const TaskExecutionView = ({
                                     setTagInput('');
                                   }
                                 }}
-                                className={`px-3 py-1.5 rounded-none transition-all text-[10px] font-bold border ${isDark ? 'bg-white/10 text-white/70 border-white/20 hover:bg-white/20' : 'bg-slate-100 text-slate-600 border-border-grid hover:bg-slate-200'}`}
+                                className={`px-3 py-1.5 rounded-lg transition-all text-[10px] font-bold border ${isDark ? 'bg-white/10 text-white/70 border-white/20 hover:bg-white/20' : 'bg-slate-100 text-slate-600 border-[#e5e7eb] dark:border-white/10 hover:bg-slate-200'}`}
                               >
                                 Add
                               </button>
@@ -2226,14 +2226,14 @@ export const TaskExecutionView = ({
                             <p className={`${labelCls} flex-1 text-left opacity-60`}>Conhecimento</p>
                             <span className={`text-[9px] font-bold ${mutedText}`}>{(currentTaskData.pool_dados || []).length}</span>
                             {(derivedKnowledgeBase || currentTaskData.extra_context_id || (currentTaskData.pool_dados || []).length > 0) && (
-                              <span className="w-1.5 h-1.5 rounded-none bg-emerald-500 shrink-0" />
+                              <span className="w-1.5 h-1.5 rounded-lg bg-emerald-500 shrink-0" />
                             )}
                             <svg className={`w-3 h-3 transition-transform ${mutedText} ${showKnowledgePanel ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2.5" /></svg>
                           </button>
                           {showKnowledgePanel && (
                             <div className="space-y-3 animate-in fade-in duration-300">
                               {derivedKnowledgeBase ? (
-                                <div className={`flex items-center gap-2 px-3 py-2 rounded-none border text-xs font-bold ${isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                                <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-bold ${isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
                                   <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
                                   <span className="truncate">{derivedKnowledgeBase.emoji || '📚'} {derivedKnowledgeBase.nome}</span>
                                 </div>
@@ -2251,7 +2251,7 @@ export const TaskExecutionView = ({
                                     <button key={item.id} onClick={() => {
                                       window.open(item.valor, '_blank');
                                     }}
-                                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-none border text-[10px] font-bold transition-all ${isDark ? 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-700 hover:bg-blue-50 hover:border-blue-200'}`}>
+                                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-[10px] font-bold transition-all ${isDark ? 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-700 hover:bg-blue-50 hover:border-blue-200'}`}>
                                       <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                       <span className="min-w-0 flex-1 truncate text-left">{item.nome || item.valor}</span>
                                       <span className={`shrink-0 text-[8px] uppercase ${mutedText}`}>{item.tipo}</span>
@@ -2263,7 +2263,7 @@ export const TaskExecutionView = ({
                               {sessionExtraFiles.length > 0 && (
                                 <div className="space-y-1">
                                   {sessionExtraFiles.map(f => (
-                                    <div key={f.id} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-none text-[10px] font-medium border ${f.status === 'ready'
+                                    <div key={f.id} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[10px] font-medium border ${f.status === 'ready'
                                       ? isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
                                       : f.status === 'uploading'
                                         ? isDark ? 'bg-blue-500/10 border-blue-500/20 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-600'
@@ -2301,7 +2301,7 @@ export const TaskExecutionView = ({
                                   className="w-full flex flex-col items-center justify-center gap-2 disabled:opacity-40"
                                 >
                                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
-                                  <span className="font-mono text-[10px] font-black uppercase tracking-widest">
+                                  <span className="font-sans text-[10px] font-bold uppercase tracking-wider">
                                     {isUploading || isUploadingExtra ? 'Processando conhecimento...' : 'Adicionar ou arrastar arquivos'}
                                   </span>
                                   <span className={`text-[8px] font-bold ${mutedText}`}>Qualquer arquivo aceito</span>
@@ -2317,7 +2317,7 @@ export const TaskExecutionView = ({
                           <button onClick={() => setShowKnowledgePanel(!showKnowledgePanel)} className="w-full flex items-center gap-2">
                             <p className={`${labelCls} flex-1 text-left opacity-60`}>Fontes de Conhecimento</p>
                             {(currentTaskData.base_conhecimento || currentTaskData.extra_context_id) && (
-                              <span className="w-1.5 h-1.5 rounded-none bg-emerald-500 shrink-0" />
+                              <span className="w-1.5 h-1.5 rounded-lg bg-emerald-500 shrink-0" />
                             )}
                             <svg className={`w-3 h-3 transition-transform ${mutedText} ${showKnowledgePanel ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2.5" /></svg>
                           </button>
@@ -2327,7 +2327,7 @@ export const TaskExecutionView = ({
                               <div>
                                 <p className={`${labelCls} mb-1.5 opacity-40`}>Base de Conhecimento (RAG)</p>
                                 {derivedKnowledgeBase ? (
-                                  <div className={`flex items-center gap-2 px-3 py-2 rounded-none border text-xs font-bold ${isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                                  <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-bold ${isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
                                     <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
                                     <span className="truncate">{derivedKnowledgeBase.emoji || '📚'} {derivedKnowledgeBase.nome}</span>
                                   </div>
@@ -2345,7 +2345,7 @@ export const TaskExecutionView = ({
                                 {sessionExtraFiles.length > 0 && (
                                   <div className="space-y-1 mb-2">
                                     {sessionExtraFiles.map(f => (
-                                      <div key={f.id} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-none text-[10px] font-medium border ${f.status === 'ready'
+                                      <div key={f.id} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[10px] font-medium border ${f.status === 'ready'
                                         ? isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
                                         : f.status === 'uploading'
                                           ? isDark ? 'bg-blue-500/10 border-blue-500/20 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-600'
@@ -2369,7 +2369,7 @@ export const TaskExecutionView = ({
                                 <button
                                   onClick={() => extraFileInputRef.current?.click()}
                                   disabled={isUploadingExtra}
-                                  className={`w-full flex items-center justify-center gap-2 py-2 rounded-none border border-dashed text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40 ${isDark ? 'border-white/20 text-white/40 hover:border-blue-400/40 hover:text-blue-300 hover:bg-blue-500/5' : 'border-slate-300 text-slate-400 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50'}`}
+                                  className={`w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed text-[10px] font-bold uppercase tracking-wider transition-all disabled:opacity-40 ${isDark ? 'border-white/20 text-white/40 hover:border-blue-400/40 hover:text-blue-300 hover:bg-blue-500/5' : 'border-slate-300 text-slate-400 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50'}`}
                                 >
                                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
                                   {isUploadingExtra ? 'Processando…' : 'Adicionar arquivo'}
@@ -2392,7 +2392,7 @@ export const TaskExecutionView = ({
             {!isPlanPanelCollapsed && renderResizeHandle('plan')}
 
             <div className={`flex min-w-0 flex-1 flex-col overflow-hidden ${!showDiario ? 'hidden lg:flex' : 'flex'} min-h-0`}>
-              <div className={`flex-1 flex flex-col rounded-none lg:rounded-none overflow-hidden ${isDark ? 'bg-[#0f1724]' : 'bg-white'}`}>
+              <div className={`flex-1 flex flex-col rounded-lg lg:rounded-lg overflow-hidden ${isDark ? 'bg-[#0f1724]' : 'bg-white'}`}>
                 {/* Diary header */}
                 <div className={`shrink-0 px-4 py-2 flex items-center justify-between border-b ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
                   <div className="flex items-center gap-2">
@@ -2410,7 +2410,7 @@ export const TaskExecutionView = ({
                           insightState ? (insightState.nivel === 1 ? 'Insight Crítico detectado!' : insightState.nivel === 3 ? 'Ideia Criativa disponível!' : 'Sugestão de Otimização personalizada.') :
                             'O Hermes está observando em busca de insights...'
                       }
-                      className={`flex items-center justify-center w-7 h-7 rounded-none transition-all relative ${isAnalyzingInsight
+                      className={`flex items-center justify-center w-7 h-7 rounded-lg transition-all relative ${isAnalyzingInsight
                         ? `animate-pulse ${isDark ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-50 text-indigo-500'}`
                         : insightState
                           ? insightState.nivel === 1
@@ -2426,11 +2426,11 @@ export const TaskExecutionView = ({
                       </svg>
                       {/* Analysis ring (discreet) */}
                       {isAnalyzingInsight && (
-                        <div className="absolute inset-0 rounded-none border-2 border-indigo-400/30 border-t-transparent animate-spin" />
+                        <div className="absolute inset-0 rounded-lg border-2 border-indigo-400/30 border-t-transparent animate-spin" />
                       )}
                     </button>
                     <button onClick={handleSummarizeWithAI}
-                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200'}`}>
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-all ${isDark ? 'bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200'}`}>
                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
                       Resumir
                     </button>
@@ -2512,15 +2512,15 @@ export const TaskExecutionView = ({
       ══════════════════════════════════════════════════════════ */}
       {showPlanModal && (
         <div className="fixed inset-0 z-[350] bg-slate-950/90 flex items-center justify-center p-4">
-          <div className={`w-full max-w-lg rounded-none shadow-2xl flex flex-col max-h-[85vh] ${isDark ? 'bg-[#0f0f1a] border border-white/10 text-white' : 'bg-white text-slate-900'}`}>
+          <div className={`w-full max-w-lg rounded-lg shadow-lg flex flex-col max-h-[85vh] ${isDark ? 'bg-[#0f0f1a] border border-white/10 text-white' : 'bg-white text-slate-900'}`}>
 
             {/* Header */}
-            <div className={`shrink-0 px-6 py-5 border-b flex items-center justify-between ${isDark ? 'border-white/10' : 'border-border-grid'}`}>
+            <div className={`shrink-0 px-6 py-5 border-b flex items-center justify-between ${isDark ? 'border-white/10' : 'border-[#e5e7eb] dark:border-white/10'}`}>
               <div>
-                <h3 className="text-base font-black tracking-tight font-mono">Editar Plano de Ação</h3>
-                <p className={`text-[10px] mt-0.5 font-mono ${mutedText}`}>{planDraft.length} {planDraft.length === 1 ? 'passo' : 'passos'} · clique no texto para editar</p>
+                <h3 className="text-base font-black tracking-tight font-sans">Editar Plano de Ação</h3>
+                <p className={`text-[10px] mt-0.5 font-sans ${mutedText}`}>{planDraft.length} {planDraft.length === 1 ? 'passo' : 'passos'} · clique no texto para editar</p>
               </div>
-              <button onClick={() => setShowPlanModal(false)} className={`p-2 rounded-none transition-all ${isDark ? 'hover:bg-white/10 text-white/40' : 'hover:bg-slate-100 text-slate-400'}`}>
+              <button onClick={() => setShowPlanModal(false)} className={`p-2 rounded-lg transition-all ${isDark ? 'hover:bg-white/10 text-white/40' : 'hover:bg-slate-100 text-slate-400'}`}>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
@@ -2537,10 +2537,10 @@ export const TaskExecutionView = ({
                   onDragStart={(e) => handleDragStart(e, idx)}
                   onDragOver={(e) => handleDragOver(e, idx)}
                   onDragEnd={handleDragEnd}
-                  className={`flex items-start gap-3 px-3 py-2.5 rounded-none border group transition-all 
+                  className={`flex items-start gap-3 px-3 py-2.5 rounded-lg border group transition-all 
                     ${dragSourceIdx === idx ? 'opacity-40 bg-blue-500/10' : ''} 
                     ${dragOverIdx === idx ? 'border-blue-500 border-dashed' : ''}
-                    ${isDark ? 'bg-white/5 border-white/10 hover:border-white/20' : 'bg-slate-50 border-slate-100 hover:border-border-grid'}
+                    ${isDark ? 'bg-white/5 border-white/10 hover:border-white/20' : 'bg-slate-50 border-slate-100 hover:border-[#e5e7eb] dark:border-white/10'}
                   `}
                 >
                   {/* Drag Handle */}
@@ -2570,7 +2570,7 @@ export const TaskExecutionView = ({
                       setPlanDraft(sorted);
                     }}
                     title={item.completed ? "Marcar como não concluído" : "Marcar como concluído"}
-                    className={`mt-1 shrink-0 w-5 h-5 rounded-none flex items-center justify-center text-[9px] font-black transition-all ${item.completed ? 'bg-emerald-500 text-white' : isDark ? 'bg-white/10 text-white/40 hover:bg-white/20' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'}`}
+                    className={`mt-1 shrink-0 w-5 h-5 rounded-lg flex items-center justify-center text-[9px] font-black transition-all ${item.completed ? 'bg-emerald-500 text-white' : isDark ? 'bg-white/10 text-white/40 hover:bg-white/20' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'}`}
                   >
                     {item.completed ? <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : idx + 1}
                   </button>
@@ -2588,7 +2588,7 @@ export const TaskExecutionView = ({
                   {/* Delete */}
                   <button
                     onClick={() => setPlanDraft(prev => prev.filter(i => i.id !== item.id))}
-                    className={`mt-1 shrink-0 p-1 rounded-none opacity-0 group-hover:opacity-100 transition-all ${isDark ? 'text-rose-400 hover:bg-rose-500/20' : 'text-rose-400 hover:bg-rose-50'}`}
+                    className={`mt-1 shrink-0 p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-all ${isDark ? 'text-rose-400 hover:bg-rose-500/20' : 'text-rose-400 hover:bg-rose-50'}`}
                   >
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                   </button>
@@ -2598,7 +2598,7 @@ export const TaskExecutionView = ({
 
             {/* Add new item */}
             <div className={`shrink-0 px-4 py-3 border-t ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
-              <div className={`flex items-center gap-2 px-3 py-2.5 rounded-none border ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-border-grid'}`}>
+              <div className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10'}`}>
                 <svg className={`w-3.5 h-3.5 shrink-0 ${mutedText}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
                 <input
                   ref={newPlanItemRef}
@@ -2609,7 +2609,7 @@ export const TaskExecutionView = ({
                   className={`flex-1 text-xs font-medium bg-transparent outline-none ${isDark ? 'text-white placeholder:text-white/25' : 'text-slate-700 placeholder:text-slate-400'}`}
                 />
                 {newPlanItemText.trim() && (
-                  <button onClick={addPlanDraftItem} className="shrink-0 px-2.5 py-1 rounded-none bg-blue-600 text-white text-[9px] font-black uppercase tracking-widest">
+                  <button onClick={addPlanDraftItem} className="shrink-0 px-2.5 py-1 rounded-lg bg-blue-600 text-white text-[9px] font-bold uppercase tracking-wider">
                     Add
                   </button>
                 )}
@@ -2620,10 +2620,10 @@ export const TaskExecutionView = ({
             <div className={`shrink-0 px-6 py-4 border-t flex items-center justify-between gap-3 ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
               <p className={`text-[9px] ${mutedText}`}>Itens já concluídos são preservados</p>
               <div className="flex gap-3">
-                <button onClick={() => setShowPlanModal(false)} className={`px-4 py-2 text-sm font-bold rounded-none transition-all ${isDark ? 'text-white/40 hover:text-white/70' : 'text-slate-400 hover:text-slate-600'}`}>
+                <button onClick={() => setShowPlanModal(false)} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${isDark ? 'text-white/40 hover:text-white/70' : 'text-slate-400 hover:text-slate-600'}`}>
                   Cancelar
                 </button>
-                <button onClick={savePlanDraft} className="px-6 py-2 rounded-none bg-blue-600 hover:bg-blue-700 text-white text-sm font-black shadow-lg transition-all">
+                <button onClick={savePlanDraft} className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-black shadow-lg transition-all">
                   Salvar plano
                 </button>
               </div>
@@ -2641,11 +2641,11 @@ export const TaskExecutionView = ({
       {showInsightModal && insightState && (
         <div className="fixed inset-0 z-[400] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleInsightDiscard} />
-          <div className={`relative w-full max-w-md max-h-[90vh] overflow-y-auto custom-scrollbar rounded-none border shadow-2xl p-6 ${isDark ? 'bg-[#0f1724] border-white/10' : 'bg-white border-border-grid'}`}>
+          <div className={`relative w-full max-w-md max-h-[90vh] overflow-y-auto custom-scrollbar rounded-2xl border shadow-lg p-6 ${isDark ? 'bg-[#0f1724] border-white/10' : 'bg-white border-[#e5e7eb] dark:border-white/10'}`}>
 
             {/* Header */}
             <div className="flex items-center gap-3 mb-5">
-              <div className={`w-10 h-10 rounded-none flex items-center justify-center shrink-0 ${insightState.nivel === 1
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${insightState.nivel === 1
                 ? 'bg-amber-500/20 text-amber-400'
                 : insightState.nivel === 3
                   ? 'bg-emerald-500/20 text-emerald-400'
@@ -2656,7 +2656,7 @@ export const TaskExecutionView = ({
                 </svg>
               </div>
               <div>
-                <p className={`text-[9px] font-black uppercase tracking-widest ${insightState.nivel === 1 ? 'text-amber-400' : insightState.nivel === 3 ? 'text-emerald-400' : isDark ? 'text-blue-400' : 'text-blue-600'}`}>
+                <p className={`text-[9px] font-bold uppercase tracking-wider ${insightState.nivel === 1 ? 'text-amber-400' : insightState.nivel === 3 ? 'text-emerald-400' : isDark ? 'text-blue-400' : 'text-blue-600'}`}>
                   {insightState.nivel === 1 ? 'Insight Crítico' : insightState.nivel === 3 ? 'Laboratório de Ideias' : 'Sugestão de Otimização'}
                 </p>
                 <p className={`text-[10px] font-bold ${isDark ? 'text-white/50' : 'text-slate-500'}`}>
@@ -2665,14 +2665,14 @@ export const TaskExecutionView = ({
               </div>
               <button
                 onClick={handleInsightDiscard}
-                className={`ml-auto p-1.5 rounded-none transition-all ${isDark ? 'text-white/30 hover:text-white/60 hover:bg-white/10' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
+                className={`ml-auto p-1.5 rounded-lg transition-all ${isDark ? 'text-white/30 hover:text-white/60 hover:bg-white/10' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
 
             {/* Insight text */}
-            <div className={`rounded-none p-4 mb-4 ${isDark ? 'bg-white/5 border border-white/10' : 'bg-slate-50 border border-border-grid'}`}>
+            <div className={`rounded-lg p-4 mb-4 ${isDark ? 'bg-white/5 border border-white/10' : 'bg-slate-50 border border-[#e5e7eb] dark:border-white/10'}`}>
               <p className={`text-sm leading-relaxed ${isDark ? 'text-white/80' : 'text-slate-700'}`}>
                 {insightState.texto}
               </p>
@@ -2680,8 +2680,8 @@ export const TaskExecutionView = ({
 
             {/* Proposed plan preview (when alvo = plano) */}
             {insightState.alvo === 'plano' && insightState.planoProposto && insightState.planoProposto.length > 0 && (
-              <div className={`rounded-none p-3 mb-4 ${isDark ? 'bg-blue-500/5 border border-blue-500/10' : 'bg-blue-50 border border-blue-100'}`}>
-                <p className={`text-[9px] font-black uppercase tracking-widest mb-2 ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
+              <div className={`rounded-lg p-3 mb-4 ${isDark ? 'bg-blue-500/5 border border-blue-500/10' : 'bg-blue-50 border border-blue-100'}`}>
+                <p className={`text-[9px] font-bold uppercase tracking-wider mb-2 ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
                   Plano Proposto
                 </p>
                 <div className="space-y-1.5">
@@ -2698,17 +2698,17 @@ export const TaskExecutionView = ({
             {/* Proposed actions (when alvo = acoes) */}
             {insightState.alvo === 'acoes' && insightState.acoesPropostas && insightState.acoesPropostas.length > 0 && (
               <div className="space-y-3 mb-5">
-                <p className={`text-[9px] font-black uppercase tracking-widest ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                <p className={`text-[9px] font-bold uppercase tracking-wider ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
                   Ideias de Novas Ações
                 </p>
                 {insightState.acoesPropostas.map((idea, idx) => (
-                  <div key={idx} className={`rounded-none border p-3 flex items-start justify-between gap-3 ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-border-grid'}`}>
+                  <div key={idx} className={`rounded-lg border p-3 flex items-start justify-between gap-3 ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10'}`}>
                     <div className="flex-1">
                       <p className={`text-[11px] font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{idea.titulo}</p>
                       <p className={`text-[10px] leading-relaxed mt-1 ${isDark ? 'text-white/40' : 'text-slate-500'}`}>{idea.descricao}</p>
                       <div className="flex flex-wrap gap-1 mt-2">
                         {idea.tags?.map(tag => (
-                          <span key={tag} className={`text-[8px] px-1.5 py-0.5 rounded-none font-bold uppercase ${isDark ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
+                          <span key={tag} className={`text-[8px] px-1.5 py-0.5 rounded-lg font-bold uppercase ${isDark ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
                             #{tag}
                           </span>
                         ))}
@@ -2716,7 +2716,7 @@ export const TaskExecutionView = ({
                     </div>
                     <button
                       onClick={() => handleCreateProposedAction(idea)}
-                      className={`shrink-0 p-2 rounded-none transition-all ${isDark ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}
+                      className={`shrink-0 p-2 rounded-lg transition-all ${isDark ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}
                       title="Criar esta ação agora"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2733,7 +2733,7 @@ export const TaskExecutionView = ({
               {insightState.alvo !== 'acoes' && (
                 <button
                   onClick={handleInsightApply}
-                  className="flex-1 py-2.5 rounded-none bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black uppercase tracking-widest transition-all shadow-lg"
+                  className="flex-1 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold uppercase tracking-wider transition-all shadow-lg"
                 >
                   Aplicar
                 </button>
@@ -2741,14 +2741,14 @@ export const TaskExecutionView = ({
               {insightState.alvo === 'acoes' && (
                 <button
                   onClick={handleInsightDiscard}
-                  className="flex-1 py-2.5 rounded-none bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black uppercase tracking-widest transition-all shadow-lg"
+                  className="flex-1 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold uppercase tracking-wider transition-all shadow-lg"
                 >
                   Entendido
                 </button>
               )}
               <button
                 onClick={handleInsightDiscard}
-                className={`flex-1 py-2.5 rounded-none text-[11px] font-black uppercase tracking-widest transition-all border ${isDark ? 'border-white/10 text-white/50 hover:bg-white/10' : 'border-border-grid text-slate-500 hover:bg-slate-50'}`}
+                className={`flex-1 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all border ${isDark ? 'border-white/10 text-white/50 hover:bg-white/10' : 'border-[#e5e7eb] dark:border-white/10 text-slate-500 hover:bg-slate-50'}`}
               >
                 {insightState.alvo === 'acoes' ? 'Fechar' : 'Descartar'}
               </button>
@@ -2762,7 +2762,7 @@ export const TaskExecutionView = ({
       ══════════════════════════════════════════════════════════ */}
       {modalConfig.isOpen && (
         <div className="fixed inset-0 z-[300] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className={`w-full ${modalConfig.type === 'edit_diary' ? 'max-w-4xl max-h-[90vh]' : 'max-w-md'} p-8 rounded-none shadow-2xl overflow-hidden border-2 ${isDark ? 'bg-[#0a0a0a] text-white border-white/20' : 'bg-white text-slate-900 border-slate-900'}`}>
+          <div className={`w-full ${modalConfig.type === 'edit_diary' ? 'max-w-4xl max-h-[90vh]' : 'max-w-md'} p-8 rounded-lg shadow-lg overflow-hidden border-2 ${isDark ? 'bg-[#0a0a0a] text-white border-white/20' : 'bg-white text-slate-900 border-slate-900'}`}>
             <h3 className="text-base font-black mb-4 tracking-tighter">
               {modalConfig.type === 'confirm_delete' ? 'Excluir Registro'
                 : modalConfig.type === 'reminder' ? 'Agendar Lembrete'
@@ -2776,32 +2776,32 @@ export const TaskExecutionView = ({
               <textarea
                 value={modalInputValue}
                 onChange={e => setModalInputValue(e.target.value)}
-                className={`w-full p-4 rounded-none border outline-none min-h-[45vh] max-h-[65vh] overflow-y-auto resize-y ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-border-grid text-slate-900'}`}
+                className={`w-full p-4 rounded-lg border outline-none min-h-[45vh] max-h-[65vh] overflow-y-auto resize-y ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10 text-slate-900'}`}
               />
             )}
             {(modalConfig.type === 'link') && (
               <div className="flex flex-col gap-3">
-                <input placeholder="Nome" value={modalInputName} onChange={e => setModalInputName(e.target.value)} className={`w-full p-3 rounded-none border outline-none ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-border-grid'}`} />
-                <input placeholder="URL" value={modalInputValue} onChange={e => setModalInputValue(e.target.value)} className={`w-full p-3 rounded-none border outline-none ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-border-grid'}`} />
+                <input placeholder="Nome" value={modalInputName} onChange={e => setModalInputName(e.target.value)} className={`w-full p-3 rounded-lg border outline-none ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-[#e5e7eb] dark:border-white/10'}`} />
+                <input placeholder="URL" value={modalInputValue} onChange={e => setModalInputValue(e.target.value)} className={`w-full p-3 rounded-lg border outline-none ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-[#e5e7eb] dark:border-white/10'}`} />
               </div>
             )}
             {(modalConfig.type === 'contact') && (
               <div className="flex flex-col gap-3">
-                <input placeholder="Nome do Contato" value={modalInputName} onChange={e => setModalInputName(e.target.value)} className={`w-full p-3 rounded-none border outline-none ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-border-grid'}`} />
-                <input placeholder="Telefone / Info" value={modalInputValue} onChange={e => setModalInputValue(e.target.value)} className={`w-full p-3 rounded-none border outline-none ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-border-grid'}`} />
+                <input placeholder="Nome do Contato" value={modalInputName} onChange={e => setModalInputName(e.target.value)} className={`w-full p-3 rounded-lg border outline-none ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-[#e5e7eb] dark:border-white/10'}`} />
+                <input placeholder="Telefone / Info" value={modalInputValue} onChange={e => setModalInputValue(e.target.value)} className={`w-full p-3 rounded-lg border outline-none ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-[#e5e7eb] dark:border-white/10'}`} />
               </div>
             )}
             {modalConfig.type === 'reminder' && (
               <div className="flex flex-col gap-3">
-                <input type="date" value={reminderDate} onChange={e => setReminderDate(e.target.value)} className={`w-full p-3 rounded-none border outline-none ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-border-grid'}`} />
-                <input type="time" value={reminderTime} onChange={e => setReminderTime(e.target.value)} className={`w-full p-3 rounded-none border outline-none ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-border-grid'}`} />
+                <input type="date" value={reminderDate} onChange={e => setReminderDate(e.target.value)} className={`w-full p-3 rounded-lg border outline-none ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10'}`} />
+                <input type="time" value={reminderTime} onChange={e => setReminderTime(e.target.value)} className={`w-full p-3 rounded-lg border outline-none ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10'}`} />
                 <textarea
                   value={reminderMessage}
                   onChange={e => setReminderMessage(e.target.value)}
                   rows={3}
                   maxLength={500}
                   placeholder="Texto personalizado do lembrete (opcional)"
-                  className={`w-full p-3 rounded-none border outline-none resize-none text-sm ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-border-grid text-slate-900 placeholder:text-slate-400'}`}
+                  className={`w-full p-3 rounded-lg border outline-none resize-none text-sm ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10 text-slate-900 placeholder:text-slate-400'}`}
                 />
               </div>
             )}
@@ -2813,9 +2813,9 @@ export const TaskExecutionView = ({
                 {pendingFiles.map((pendingFile, i) => {
                   return (
                     <div key={pendingFile.id}>
-                      <p className={`text-[9px] font-black uppercase tracking-widest mb-1 ${mutedText}`}>Arquivo {i + 1}</p>
+                      <p className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${mutedText}`}>Arquivo {i + 1}</p>
                       <input value={pendingFile.customName} onChange={e => setPendingFiles(prev => prev.map(item => item.id === pendingFile.id ? { ...item, customName: e.target.value } : item))}
-                        className={`w-full p-3 rounded-none border outline-none ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-border-grid'}`} />
+                        className={`w-full p-3 rounded-lg border outline-none ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-[#e5e7eb] dark:border-white/10'}`} />
                       <p className={`text-[10px] mt-0.5 ${mutedText}`}>Original: {pendingFile.file.name}</p>
                     </div>
                   );
@@ -2827,7 +2827,7 @@ export const TaskExecutionView = ({
               <button onClick={() => { setModalConfig({ ...modalConfig, isOpen: false }); setModalInputValue(''); setModalInputName(''); setReminderMessage(''); setPendingFiles([]); }}
                 className={`px-4 py-2 font-bold ${isDark ? 'text-white/40' : 'text-slate-400'}`}>Cancelar</button>
               <button onClick={handleModalConfirm}
-                className={`px-6 py-2 rounded-none font-black text-white shadow-lg transition-all ${modalConfig.type === 'confirm_delete' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                className={`px-6 py-2 rounded-lg font-black text-white shadow-lg transition-all ${modalConfig.type === 'confirm_delete' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
                 Confirmar
               </button>
             </div>
