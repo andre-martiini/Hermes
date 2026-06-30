@@ -387,6 +387,7 @@ export const TaskExecutionView = ({
           prazoFinal: currentTaskData.prazo_final || null,
           planoAcao: (currentTaskData.plano_acao || []).map(i => ({ id: i.id, text: i.text, completed: i.completed })),
           acompanhamentoRecente: (currentTaskData.acompanhamento || []).slice(-10).map(e => ({ data: e.data, nota: e.nota })),
+          insightsIgnorados: currentTaskData.insights_ignorados || [],
         });
         const d = res.data as any;
         if (d.nivel != null && d.texto) {
@@ -1442,6 +1443,23 @@ export const TaskExecutionView = ({
   const handleInsightDiscard = () => {
     setInsightState(null);
     setShowInsightModal(false);
+  };
+
+  // Ignorar permanentemente: registra o texto da opinião em insights_ignorados
+  // para que o backend não volte a reiterar essa mesma manifestação.
+  const handleInsightIgnore = () => {
+    if (!insightState) return;
+    const texto = insightState.texto.trim();
+    if (texto) {
+      const atuais = currentTaskData.insights_ignorados || [];
+      if (!atuais.includes(texto)) {
+        // Mantém só as últimas 30 para o array não crescer indefinidamente.
+        const proximos = [...atuais, texto].slice(-30);
+        onSave(task.id, { insights_ignorados: proximos });
+      }
+      showToast('Opinião ignorada. O Hermes não vai mais sugerir isto.', 'success');
+    }
+    handleInsightDiscard();
   };
 
   // ─── Extra Context File Upload ────────────────────────────────
@@ -2751,6 +2769,18 @@ export const TaskExecutionView = ({
                 className={`flex-1 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all border ${isDark ? 'border-white/10 text-white/50 hover:bg-white/10' : 'border-[#e5e7eb] dark:border-white/10 text-slate-500 hover:bg-slate-50'}`}
               >
                 {insightState.alvo === 'acoes' ? 'Fechar' : 'Descartar'}
+              </button>
+            </div>
+
+            {/* Ignorar permanentemente — discreto */}
+            <div className="mt-3 text-center">
+              <button
+                onClick={handleInsightIgnore}
+                title="O Hermes não voltará a sugerir esta opinião específica nesta ação"
+                className={`text-[10px] font-medium transition-all inline-flex items-center gap-1 ${isDark ? 'text-white/30 hover:text-white/60' : 'text-slate-400 hover:text-slate-600'}`}
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+                Não sugerir isto novamente
               </button>
             </div>
           </div>

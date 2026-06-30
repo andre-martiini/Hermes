@@ -93,6 +93,7 @@ export interface Tarefa {
     tipo_acao?: TipoAcao;
     plano_acao?: ActionPlanItem[];
     plano_acao_historico?: ActionPlanHistory[];
+    insights_ignorados?: string[]; // opiniões proativas que o usuário pediu para não reiterar
     origem?: 'manual' | 'audio' | 'whatsapp';
     base_conhecimento?: string;
     reuniao_vinculada_id?: string;
