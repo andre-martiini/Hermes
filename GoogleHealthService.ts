@@ -4,16 +4,23 @@ const CLIENT_ID = "1003307358410-o3tbms16qbisurm47vb667plt3c27n1g.apps.googleuse
 const TOKEN_STORAGE_KEY = 'hermes_google_health_token';
 const GOOGLE_FIT_ESTIMATED_STEPS_SOURCE = 'derived:com.google.step_count.delta:com.google.android.gms:estimated_steps';
 const PREFERRED_STEP_SOURCE_LABEL = 'health_platform';
+const GOOGLE_HEALTH_SLEEP_SCOPE = "https://www.googleapis.com/auth/googlehealth.sleep.readonly";
 
-// Health Connect: sleep. Google Fit: steps, distance, calories, active minutes, weight, sleep fallback.
+// Google Fit: steps, distance, calories, active minutes, weight and sleep fallback.
+// Health Connect sleep is intentionally not requested by default: accounts without API access
+// receive 403 even after consent, which adds friction to every sync.
 const SCOPES = [
-    "https://www.googleapis.com/auth/googlehealth.sleep.readonly",
     "https://www.googleapis.com/auth/fitness.activity.read",
     "https://www.googleapis.com/auth/fitness.body.read",
     "https://www.googleapis.com/auth/fitness.location.read",
     "https://www.googleapis.com/auth/fitness.sleep.read",
 ].join(" ");
-const REQUIRED_SCOPES = new Set(SCOPES.split(/\s+/));
+const REQUIRED_FIT_SCOPES = new Set([
+    "https://www.googleapis.com/auth/fitness.activity.read",
+    "https://www.googleapis.com/auth/fitness.body.read",
+    "https://www.googleapis.com/auth/fitness.location.read",
+    "https://www.googleapis.com/auth/fitness.sleep.read",
+]);
 
 type SavedGoogleHealthToken = {
     token?: string;
@@ -31,17 +38,27 @@ type StepSourceTotal = {
 export class GoogleHealthService {
     private static accessToken: string | null = null;
     private static tokenExpiry: number = 0;
+    private static grantedScopes: Set<string> = new Set();
     private static pendingAuth: Promise<string> | null = null;
 
-    private static hasRequiredScopes(scope?: string) {
+    private static parseScopes(scope?: string) {
+        return new Set((scope || '').split(/\s+/).filter(Boolean));
+    }
+
+    private static hasRequiredFitScopes(scope?: string) {
         if (!scope) return false;
-        const grantedScopes = new Set(scope.split(/\s+/).filter(Boolean));
-        return [...REQUIRED_SCOPES].every(requiredScope => grantedScopes.has(requiredScope));
+        const grantedScopes = this.parseScopes(scope);
+        return [...REQUIRED_FIT_SCOPES].every(requiredScope => grantedScopes.has(requiredScope));
+    }
+
+    private static hasScope(scope: string) {
+        return this.grantedScopes.has(scope);
     }
 
     private static clearSavedToken() {
         this.accessToken = null;
         this.tokenExpiry = 0;
+        this.grantedScopes = new Set();
         localStorage.removeItem(TOKEN_STORAGE_KEY);
     }
 
@@ -51,9 +68,10 @@ export class GoogleHealthService {
 
         try {
             const { token, expiry, scope } = JSON.parse(rawSaved) as SavedGoogleHealthToken;
-            if (typeof token === 'string' && typeof expiry === 'number' && Date.now() < expiry && this.hasRequiredScopes(scope)) {
+            if (typeof token === 'string' && typeof expiry === 'number' && Date.now() < expiry && this.hasRequiredFitScopes(scope)) {
                 this.accessToken = token;
                 this.tokenExpiry = expiry;
+                this.grantedScopes = this.parseScopes(scope);
                 return true;
             }
         } catch (error) {
@@ -67,6 +85,7 @@ export class GoogleHealthService {
     private static saveToken(token: string, scope: string) {
         this.accessToken = token;
         this.tokenExpiry = Date.now() + (55 * 60 * 1000);
+        this.grantedScopes = this.parseScopes(scope);
         localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify({
             token,
             expiry: this.tokenExpiry,
@@ -93,9 +112,9 @@ export class GoogleHealthService {
                 callback: (response: any) => {
                     if (response.error) {
                         reject(new Error(typeof response.error === 'string' ? response.error : 'Google authorization failed.'));
-                    } else if (!response.access_token || !this.hasRequiredScopes(response.scope)) {
+                    } else if (!response.access_token || !this.hasRequiredFitScopes(response.scope)) {
                         this.clearSavedToken();
-                        reject(new Error(`Google did not grant all required health scopes. Granted: ${response.scope || 'none'}`));
+                        reject(new Error(`Google did not grant all required Google Fit scopes. Granted: ${response.scope || 'none'}`));
                     } else {
                         this.saveToken(response.access_token, response.scope);
                         resolve(response.access_token);
@@ -103,7 +122,7 @@ export class GoogleHealthService {
                 },
             });
 
-            client.requestAccessToken({ prompt: 'consent' });
+            client.requestAccessToken({ prompt: '' });
         });
 
         try {
@@ -120,6 +139,10 @@ export class GoogleHealthService {
 
     private static async fetchHealthV4(dataType: string, startTime: Date, endTime: Date) {
         if (!this.accessToken) await this.authorize();
+        if (!this.hasScope(GOOGLE_HEALTH_SLEEP_SCOPE)) {
+            console.warn(`[HealthConnect] Skipping ${dataType}: optional Google Health scope was not granted.`);
+            return null;
+        }
 
         const filter = `${dataType}.interval.civil_start_time >= "${this.formatCivilTime(startTime)}" AND ${dataType}.interval.civil_start_time <= "${this.formatCivilTime(endTime)}"`;
         const url = `https://health.googleapis.com/v4/users/me/dataTypes/${dataType}/dataPoints?filter=${encodeURIComponent(filter)}`;
@@ -138,6 +161,15 @@ export class GoogleHealthService {
         const data = await response.json();
         console.log(`[HealthConnect] Received ${dataType}:`, data);
         return data;
+    }
+
+    private static async settle<T>(label: string, promise: Promise<T>): Promise<T | null> {
+        try {
+            return await promise;
+        } catch (error) {
+            console.warn(`[GoogleHealth] ${label} skipped:`, error);
+            return null;
+        }
     }
 
     private static async fetchFitAggregate(dataTypeNames: string[], startMs: number, endMs: number) {
@@ -213,6 +245,29 @@ export class GoogleHealthService {
         return data?.dataSource ?? [];
     }
 
+    private static async fetchFitDataset(dataSourceId: string, startMs: number, endMs: number) {
+        if (!this.accessToken) await this.authorize();
+
+        const startNs = BigInt(Math.trunc(startMs)) * BigInt(1_000_000);
+        const endNs = BigInt(Math.trunc(endMs)) * BigInt(1_000_000);
+        const datasetId = `${startNs}-${endNs}`;
+        const url = `https://fitness.googleapis.com/fitness/v1/users/me/dataSources/${encodeURIComponent(dataSourceId)}/datasets/${datasetId}`;
+        const response = await fetch(url, {
+            headers: {
+                Authorization: `Bearer ${this.accessToken}`,
+                Accept: 'application/json',
+            },
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            console.error('[GoogleFit] Dataset error:', response.status, err);
+            return null;
+        }
+
+        return response.json();
+    }
+
     private static getDataSourceLabel(source: any) {
         const app = source.application?.name || source.application?.packageName;
         const device = [source.device?.manufacturer, source.device?.model].filter(Boolean).join(' ');
@@ -249,11 +304,11 @@ export class GoogleHealthService {
         return relevantTotals;
     }
 
-    private static chooseStepCount(sourceTotals: StepSourceTotal[], estimatedSteps: number) {
+    private static chooseStepCount(sourceTotals: StepSourceTotal[], estimatedSteps: number, aggregateSteps: number) {
         const preferredSource = sourceTotals.find(total =>
             !total.isEstimatedSteps &&
             total.steps > 0 &&
-            total.label.toLowerCase() === PREFERRED_STEP_SOURCE_LABEL
+            total.label.toLowerCase().includes(PREFERRED_STEP_SOURCE_LABEL)
         );
         if (preferredSource) {
             return {
@@ -265,8 +320,8 @@ export class GoogleHealthService {
         const individualSources = sourceTotals.filter(total => !total.isEstimatedSteps && total.steps > 0);
         if (!individualSources.length) {
             return {
-                steps: estimatedSteps,
-                sourceLabel: 'Google Fit estimated_steps',
+                steps: estimatedSteps || aggregateSteps,
+                sourceLabel: estimatedSteps ? 'Google Fit estimated_steps' : 'Google Fit step_count.delta',
             };
         }
 
@@ -288,8 +343,12 @@ export class GoogleHealthService {
         }
 
         return {
-            steps: estimatedSteps || largestIndividual.steps,
-            sourceLabel: estimatedSteps ? 'Google Fit estimated_steps' : largestIndividual.label,
+            steps: estimatedSteps || aggregateSteps || largestIndividual.steps,
+            sourceLabel: estimatedSteps
+                ? 'Google Fit estimated_steps'
+                : aggregateSteps
+                    ? 'Google Fit step_count.delta'
+                    : largestIndividual.label,
         };
     }
 
@@ -380,26 +439,27 @@ export class GoogleHealthService {
         end.setHours(23, 59, 59, 999);
 
         const [fitData, estimatedStepsData, stepSourceTotals, healthSleepData, fitSleepData, fitSleepSessionData] = await Promise.all([
-            this.fetchFitAggregate(
-                ['com.google.distance.delta', 'com.google.calories.expended', 'com.google.active_minutes'],
+            this.settle('activity aggregate', this.fetchFitAggregate(
+                ['com.google.step_count.delta', 'com.google.distance.delta', 'com.google.calories.expended', 'com.google.active_minutes'],
                 start.getTime(),
                 end.getTime()
-            ),
-            this.fetchFitEstimatedSteps(start.getTime(), end.getTime()),
-            this.fetchStepSourceTotals(start.getTime(), end.getTime()),
-            this.fetchHealthV4('sleep', start, end),
-            this.fetchFitAggregate(
+            )),
+            this.settle('estimated steps', this.fetchFitEstimatedSteps(start.getTime(), end.getTime())),
+            this.settle('step sources', this.fetchStepSourceTotals(start.getTime(), end.getTime())),
+            this.settle('Health Connect sleep', this.fetchHealthV4('sleep', start, end)),
+            this.settle('Fit sleep aggregate', this.fetchFitAggregate(
                 ['com.google.sleep.segment'],
                 start.getTime(),
                 end.getTime()
-            ),
-            this.fetchFitSleepSessions(start, end),
+            )),
+            this.settle('Fit sleep sessions', this.fetchFitSleepSessions(start, end)),
         ]);
 
         const summary: Partial<ExerciseLog> = {};
 
         const estimatedSteps = this.getAggregateValue(estimatedStepsData, 'step_count', 'intVal');
-        const selectedSteps = this.chooseStepCount(stepSourceTotals, estimatedSteps);
+        const aggregateSteps = this.getAggregateValue(fitData, 'step_count', 'intVal');
+        const selectedSteps = this.chooseStepCount(stepSourceTotals ?? [], estimatedSteps, aggregateSteps);
         const steps = selectedSteps.steps;
         const distanceM = this.getAggregateValue(fitData, 'distance', 'fpVal');
         const calories = this.getAggregateValue(fitData, 'calories', 'fpVal');
@@ -427,9 +487,11 @@ export class GoogleHealthService {
         if (healthSleepData?.dataPoints && healthSleepData.dataPoints.length > 0) {
             let totalSleepSec = 0;
             for (const point of healthSleepData.dataPoints) {
-                const interval = point.sleep?.interval ?? point.exercise?.interval;
-                const s = interval?.startTime ? new Date(interval.startTime).getTime() : NaN;
-                const e = interval?.endTime ? new Date(interval.endTime).getTime() : NaN;
+                const interval = point.sleep?.interval ?? point.exercise?.interval ?? point.interval;
+                const startTime = interval?.startTime ?? point.startTime ?? point.start_time;
+                const endTime = interval?.endTime ?? point.endTime ?? point.end_time;
+                const s = startTime ? new Date(startTime).getTime() : NaN;
+                const e = endTime ? new Date(endTime).getTime() : NaN;
                 if (!isNaN(s) && !isNaN(e)) totalSleepSec += (e - s) / 1000;
             }
             if (totalSleepSec > 0) {
@@ -449,20 +511,50 @@ export class GoogleHealthService {
         start.setDate(start.getDate() - 30);
         start.setHours(0, 0, 0, 0);
 
-        const data = await this.fetchFitAggregate(
-            ['com.google.weight'],
-            start.getTime(),
-            end.getTime()
-        );
+        const [aggregateData, weightSources] = await Promise.all([
+            this.settle('weight aggregate', this.fetchFitAggregate(
+                ['com.google.weight'],
+                start.getTime(),
+                end.getTime()
+            )),
+            this.settle('weight sources', this.fetchFitDataSources('com.google.weight')),
+        ]);
 
-        const allPoints: any[] = (data?.bucket ?? [])
+        const sourceDatasets = await Promise.all((weightSources ?? []).slice(0, 10).map(async (source: any) => ({
+            source,
+            data: await this.settle(`weight dataset ${this.getDataSourceLabel(source)}`, this.fetchFitDataset(source.dataStreamId, start.getTime(), end.getTime())),
+        })));
+
+        const rawPoints = sourceDatasets
+            .flatMap(({ source, data }) => (data?.point ?? []).map((point: any) => ({
+                point,
+                sourceLabel: this.getDataSourceLabel(source),
+            })))
+            .filter(({ point }) => typeof point.value?.[0]?.fpVal === 'number');
+
+        if (rawPoints.length > 0) {
+            const latest = rawPoints.reduce((best, current) =>
+                BigInt(current.point.endTimeNanos ?? 0) > BigInt(best.point.endTimeNanos ?? 0) ? current : best
+            );
+            console.log('[GoogleFit] Latest weight parsed:', {
+                weight: latest.point.value?.[0]?.fpVal,
+                source: latest.sourceLabel,
+            });
+            return { weight: latest.point.value?.[0]?.fpVal };
+        }
+
+        const aggregatePoints: any[] = (aggregateData?.bucket ?? [])
             .flatMap((b: any) => (b.dataset ?? []).flatMap((ds: any) => ds.point ?? []));
 
-        if (allPoints.length > 0) {
-            const latest = allPoints.reduce((a, b) =>
+        if (aggregatePoints.length > 0) {
+            const latest = aggregatePoints.reduce((a, b) =>
                 BigInt(b.endTimeNanos ?? 0) > BigInt(a.endTimeNanos ?? 0) ? b : a
             );
-            return { weight: latest.value?.[0]?.fpVal };
+            const aggregateWeight = latest.value?.[0]?.fpVal;
+            if (typeof aggregateWeight === 'number') {
+                console.log('[GoogleFit] Aggregate weight parsed:', aggregateWeight);
+                return { weight: aggregateWeight };
+            }
         }
         return null;
     }

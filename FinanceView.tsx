@@ -40,8 +40,8 @@ interface FinanceViewProps {
     onAddTransaction: (transaction: Omit<FinanceTransaction, 'id'>) => Promise<void>;
     onUpdateTransaction: (transaction: FinanceTransaction) => Promise<void>;
     onDeleteTransaction: (id: string) => Promise<void>;
-    activeTab: 'dashboard' | 'fixed';
-    setActiveTab: (tab: 'dashboard' | 'fixed') => void;
+    activeTab: 'dashboard' | 'income' | 'expense';
+    setActiveTab: (tab: 'dashboard' | 'income' | 'expense') => void;
     isSettingsOpen: boolean;
     setIsSettingsOpen: (isOpen: boolean) => void;
     onOpenFinancialCopilot?: () => void;
@@ -444,12 +444,12 @@ const FinanceView = ({
             {/* Header & Tabs removidos - agora no Header global */}
 
             {isSettingsOpen && (
-                <div className="bg-on-surface text-surface p-8 rounded-lg shadow-none animate-in slide-in-from-top-4 space-y-10 border-b-4 border-primary-tactile">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                <div className="bg-surface dark:bg-slate-900 text-on-surface p-6 md:p-8 rounded-2xl border border-slate-200 dark:border-white/10 shadow-card animate-in slide-in-from-top-4 space-y-8">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div>
-                            <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.3em] mb-4 text-primary-tactile flex items-center gap-2">
-                                <span className="w-2 h-2 bg-primary-tactile"></span>
-                                BUDGET_PERIOD // {new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}
+                            <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider mb-2 text-primary-tactile flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 bg-primary-tactile rounded-full"></span>
+                                Orçamento do Período — {new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}
                             </h4>
                             <div className="flex gap-4">
                                 <input
@@ -462,63 +462,63 @@ const FinanceView = ({
                                             [periodKey]: Number(e.target.value)
                                         }
                                     })}
-                                    className="bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white font-sans font-semibold outline-none focus:ring-1 focus:ring-primary-tactile w-full text-lg"
+                                    className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-3 text-on-surface font-sans font-semibold outline-none focus:ring-1 focus:ring-primary-tactile w-full text-base"
                                 />
                             </div>
-                            <p className="text-[8px] text-white/30 uppercase mt-2 font-sans font-semibold italic tracking-widest">LOCAL_OVERRIDE_ACTIVE</p>
+                            <p className="text-[9px] text-slate-400 dark:text-slate-500 uppercase mt-2 font-sans font-semibold tracking-wider">Limite personalizado para o mês ativo</p>
                         </div>
                         <div>
-                            <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.3em] mb-4 text-slate-400 flex items-center gap-2">
-                                <span className="w-2 h-2 bg-slate-600"></span>
-                                DEFAULT_BUDGET_FALLBACK
+                            <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider mb-2 text-slate-500 flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 bg-slate-400 rounded-full"></span>
+                                Orçamento Padrão
                             </h4>
                             <div className="flex gap-4">
                                 <input
                                     type="number"
                                     defaultValue={settings.monthlyBudget}
                                     onBlur={(e) => onUpdateSettings({ ...settings, monthlyBudget: Number(e.target.value) })}
-                                    className="bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white font-sans font-semibold outline-none focus:ring-1 focus:ring-primary-tactile w-full text-lg"
+                                    className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-3 text-on-surface font-sans font-semibold outline-none focus:ring-1 focus:ring-primary-tactile w-full text-base"
                                 />
                             </div>
-                            <p className="text-[8px] text-white/30 uppercase mt-2 font-sans font-semibold italic tracking-widest">GLOBAL_SYSTEM_BASELINE</p>
+                            <p className="text-[9px] text-slate-400 dark:text-slate-500 uppercase mt-2 font-sans font-semibold tracking-wider">Base geral de referência do sistema</p>
                         </div>
                     </div>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">
                         <div>
-                            <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.3em] mb-4 text-emerald-500 flex items-center gap-2">
-                                <span className="w-2 h-2 bg-emerald-500"></span>
-                                EMERGENCY_RESERVE_TARGET
+                            <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider mb-2 text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
+                                Meta da Reserva de Emergência
                             </h4>
                             <input
                                 type="number"
                                 value={localEmergencyTarget}
                                 onChange={(e) => setLocalEmergencyTarget(Number(e.target.value))}
                                 onBlur={(e) => onUpdateSettings({ ...settings, emergencyReserveTarget: Number(e.target.value) })}
-                                className="bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white font-sans font-semibold outline-none focus:ring-1 focus:ring-primary-tactile w-full"
+                                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-3 text-on-surface font-sans font-semibold outline-none focus:ring-1 focus:ring-primary-tactile w-full"
                             />
                         </div>
                         <div>
-                            <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.3em] mb-4 text-emerald-500 flex items-center gap-2">
-                                <span className="w-2 h-2 bg-emerald-500"></span>
-                                CURRENT_RESERVE_SYNC
+                            <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider mb-2 text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
+                                Saldo Atual da Reserva
                             </h4>
                             <input
                                 type="number"
                                 value={localEmergencyCurrent}
                                 onChange={(e) => setLocalEmergencyCurrent(Number(e.target.value))}
                                 onBlur={(e) => onUpdateSettings({ ...settings, emergencyReserveCurrent: Number(e.target.value) })}
-                                className="bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white font-sans font-semibold outline-none focus:ring-1 focus:ring-primary-tactile w-full"
+                                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-3 text-on-surface font-sans font-semibold outline-none focus:ring-1 focus:ring-primary-tactile w-full"
                             />
                         </div>
                     </div>
 
-                    {/* Configuração de Gastos Externos Industrial */}
-                    <div className="pt-8 border-t border-white/10">
-                        <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.4em] mb-6 text-purple-400">// EXTERNAL_SPENDING_PORTAL</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                    {/* Configuração de Gastos Externos */}
+                    <div className="pt-6 border-t border-slate-200 dark:border-white/10">
+                        <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider mb-4 text-purple-650 dark:text-purple-400">// Portal de Acesso Externo</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                             <div>
-                                <label className="text-[9px] font-sans font-semibold text-white/40 uppercase tracking-widest block mb-2">EXTERNAL_LIMIT_ALLOCATION</label>
+                                <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block mb-2">Limite de Gastos para Visualização Externa (R$)</label>
                                 <input
                                     type="number"
                                     defaultValue={settings.externalSpendingLimit || 0}
@@ -531,18 +531,18 @@ const FinanceView = ({
                                             token: settings.externalToken
                                         }, { merge: true });
                                     }}
-                                    className="bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white font-sans font-semibold outline-none focus:ring-1 focus:ring-primary-tactile w-full"
+                                    className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-3 text-on-surface font-sans font-semibold outline-none focus:ring-1 focus:ring-primary-tactile w-full"
                                 />
                             </div>
                             <div>
-                                <label className="text-[9px] font-sans font-semibold text-white/40 uppercase tracking-widest block mb-2">AUTH_TOKEN_GENERATOR</label>
+                                <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block mb-2">Token de Autenticação Externa</label>
                                 <div className="flex gap-2">
                                     <input
                                         type="text"
                                         value={settings.externalToken || ''}
                                         readOnly
-                                        placeholder="NULL_TOKEN"
-                                        className="bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white font-sans text-xs outline-none w-full"
+                                        placeholder="Nenhum token gerado"
+                                        className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-3 text-on-surface font-sans text-xs outline-none w-full"
                                     />
                                     <button
                                         onClick={async () => {
@@ -554,42 +554,42 @@ const FinanceView = ({
                                                 token: newToken
                                             }, { merge: true });
                                         }}
-                                        className="bg-white text-on-surface hover:bg-primary-tactile hover:text-white px-6 py-3 rounded-lg text-[10px] font-sans font-semibold uppercase tracking-widest transition-all"
+                                        className="bg-slate-100 dark:bg-slate-800 text-on-surface hover:bg-primary-tactile hover:text-white px-5 py-2.5 rounded-lg text-[10px] font-sans font-bold uppercase tracking-wider transition-all border border-slate-200 dark:border-white/10 shrink-0"
                                     >
-                                        GENERATE
+                                        Gerar Token
                                     </button>
                                 </div>
                             </div>
                         </div>
                         {settings.externalToken && (
-                            <div className="mt-6 bg-white/5 border border-white/10 p-4 rounded-lg flex flex-col md:flex-row items-center justify-between gap-4">
-                                <div className="text-[10px] font-sans text-purple-300 break-all opacity-80 italic">
+                            <div className="mt-4 bg-slate-50 dark:bg-slate-950 border border-slate-250 dark:border-white/10 p-4 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4">
+                                <div className="text-[10px] font-sans text-purple-700 dark:text-purple-400 break-all opacity-90 italic">
                                     {window.location.origin}/gastos-externos?token={settings.externalToken}
                                 </div>
                                 <button
                                     onClick={() => navigator.clipboard.writeText(`${window.location.origin}/gastos-externos?token=${settings.externalToken}`)}
-                                    className="bg-purple-600/20 text-purple-300 border border-purple-500/30 px-5 py-2 rounded-soft-touch text-[9px] font-sans font-semibold uppercase tracking-widest hover:bg-purple-600/40 transition-all flex items-center gap-2"
+                                    className="bg-primary-tactile/10 text-primary-tactile border border-primary-tactile/20 hover:bg-primary-tactile/20 px-4 py-2 rounded-lg text-[9px] font-sans font-bold uppercase tracking-wider transition-all flex items-center gap-2"
                                 >
-                                    COPY_LINK_STREAM
+                                    Copiar Link do Portal
                                 </button>
                             </div>
                         )}
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10 pt-8 border-t border-white/10">
-                        {/* Gestão de Categorias de Obrigações Industrial */}
-                        <div className="space-y-6">
-                            <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.3em] text-blue-400">// BILL_TAXONOMY</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-6 border-t border-slate-200 dark:border-white/10">
+                        {/* Gestão de Categorias de Obrigações */}
+                        <div className="space-y-4">
+                            <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">// Categorias de Saídas (Obrigações)</h4>
                             <div className="flex flex-wrap gap-2">
                                 {(settings.billCategories || ['Conta Fixa', 'Poupança', 'Investimento']).map(cat => (
-                                    <div key={cat} className="flex items-center gap-3 bg-white/5 border border-white/10 px-3 py-1 rounded-lg group">
-                                        <span className="text-[10px] font-sans font-semibold uppercase tracking-widest">{cat}</span>
+                                    <div key={cat} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 px-3 py-1.5 rounded-lg group">
+                                        <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-on-surface">{cat}</span>
                                         <button
                                             onClick={() => onUpdateSettings({
                                                 ...settings,
                                                 billCategories: (settings.billCategories || []).filter(c => c !== cat)
                                             })}
-                                            className="text-white/20 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-all font-sans font-semibold text-[10px]"
+                                            className="text-slate-400 dark:text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all font-sans font-semibold text-[10px]"
                                         >
                                             ✕
                                         </button>
@@ -599,8 +599,8 @@ const FinanceView = ({
                             <div className="flex gap-2">
                                 <input
                                     type="text"
-                                    placeholder="APPEND_NEW_TAG"
-                                    className="bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-[10px] font-sans font-semibold uppercase tracking-widest outline-none focus:ring-1 focus:ring-blue-500 w-full"
+                                    placeholder="Nova Categoria..."
+                                    className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-wider outline-none focus:ring-1 focus:ring-blue-500 w-full"
                                     value={newBillCategoryInput}
                                     onChange={e => setNewBillCategoryInput(e.target.value)}
                                 />
@@ -614,26 +614,26 @@ const FinanceView = ({
                                             setNewBillCategoryInput('');
                                         }
                                     }}
-                                    className="bg-blue-600 text-white px-4 py-2 rounded-soft-touch text-[10px] font-sans font-semibold"
+                                    className="bg-blue-600 text-white px-4 py-2.5 rounded-lg text-xs font-bold hover:bg-blue-700 transition-colors"
                                 >
                                     +
                                 </button>
                             </div>
                         </div>
 
-                        {/* Gestão de Categorias de Renda Industrial */}
-                        <div className="space-y-6">
-                            <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.3em] text-emerald-400">// INCOME_SOURCES</h4>
+                        {/* Gestão de Categorias de Renda */}
+                        <div className="space-y-4">
+                            <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">// Categorias de Entrada (Fontes de Renda)</h4>
                             <div className="flex flex-wrap gap-2">
                                 {(settings.incomeCategories || ['Renda Principal', 'Renda Extra', 'Dividendos', 'Outros']).map(cat => (
-                                    <div key={cat} className="flex items-center gap-3 bg-white/5 border border-white/10 px-3 py-1 rounded-lg group">
-                                        <span className="text-[10px] font-sans font-semibold uppercase tracking-widest">{cat}</span>
+                                    <div key={cat} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 px-3 py-1.5 rounded-lg group">
+                                        <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-on-surface">{cat}</span>
                                         <button
                                             onClick={() => onUpdateSettings({
                                                 ...settings,
                                                 incomeCategories: (settings.incomeCategories || []).filter(c => c !== cat)
                                             })}
-                                            className="text-white/20 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-all font-sans font-semibold text-[10px]"
+                                            className="text-slate-400 dark:text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all font-sans font-semibold text-[10px]"
                                         >
                                             ✕
                                         </button>
@@ -643,8 +643,8 @@ const FinanceView = ({
                             <div className="flex gap-2">
                                 <input
                                     type="text"
-                                    placeholder="APPEND_NEW_SOURCE"
-                                    className="bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-[10px] font-sans font-semibold uppercase tracking-widest outline-none focus:ring-1 focus:ring-emerald-500 w-full"
+                                    placeholder="Nova Fonte..."
+                                    className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-wider outline-none focus:ring-1 focus:ring-emerald-500 w-full"
                                     value={newIncomeCategoryInput}
                                     onChange={e => setNewIncomeCategoryInput(e.target.value)}
                                 />
@@ -658,7 +658,7 @@ const FinanceView = ({
                                             setNewIncomeCategoryInput('');
                                         }
                                     }}
-                                    className="bg-emerald-600 text-white px-4 py-2 rounded-soft-touch text-[10px] font-sans font-semibold"
+                                    className="bg-emerald-600 text-white px-4 py-2.5 rounded-lg text-xs font-bold hover:bg-emerald-700 transition-colors"
                                 >
                                     +
                                 </button>
@@ -684,6 +684,65 @@ const FinanceView = ({
                         currentYear={currentYear}
                         onOpenFinancialCopilot={onOpenFinancialCopilot}
                     />
+
+                    {/* COMPARATIVE HUB */}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-2 bg-surface p-6 md:p-8 rounded-2xl border border-slate-200 dark:border-white/10 shadow-card flex flex-col justify-between relative overflow-hidden group">
+                            <div className="relative z-10">
+                                <div className="mb-6">
+                                    <h4 className="text-[10px] font-sans font-bold text-slate-400 uppercase tracking-wider">Comparativo de Fluxo Mensal</h4>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                    <div>
+                                        <div className="text-[10px] font-sans font-bold text-emerald-600 dark:text-emerald-400 uppercase mb-2 tracking-wider flex items-center gap-2">
+                                            Previsão de Entrada
+                                            {prevIncome > 0 && (
+                                                <span className={`text-[9px] px-1.5 py-0.5 rounded-full border border-slate-200 dark:border-white/10 ${incomeOverallTotal >= prevIncome ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20 dark:text-emerald-400' : 'bg-rose-50 text-rose-600 dark:bg-rose-950/20 dark:text-rose-400'}`}>
+                                                    {incomeOverallTotal >= prevIncome ? 'Alta' : 'Queda'} {Math.round(Math.abs((incomeOverallTotal - prevIncome) / prevIncome) * 100)}%
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="text-3xl font-sans font-bold text-on-surface tracking-tight">
+                                            R$ {incomeOverallTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="text-[10px] font-sans font-bold text-blue-600 dark:text-blue-400 uppercase mb-2 tracking-wider flex items-center gap-2">
+                                            Previsão de Saída (Fixas)
+                                            {prevBills > 0 && (
+                                                <span className={`text-[9px] px-1.5 py-0.5 rounded-full border border-slate-200 dark:border-white/10 ${currentTotalBills <= prevBills ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20 dark:text-emerald-400' : 'bg-rose-50 text-rose-600 dark:bg-rose-950/20 dark:text-rose-400'}`}>
+                                                    {currentTotalBills <= prevBills ? 'Queda' : 'Alta'} {Math.round(Math.abs((currentTotalBills - prevBills) / prevBills) * 100)}%
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="text-3xl font-sans font-bold text-on-surface tracking-tight">
+                                            R$ {currentTotalBills.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="mt-8">
+                                    <div className="flex justify-between text-[10px] font-sans font-bold uppercase tracking-wider mb-2">
+                                        <span className="text-slate-400">Comprometimento de Renda ({Math.round((currentTotalBills / (incomeOverallTotal || 1)) * 100)}%)</span>
+                                        <span className="text-slate-400 italic">Limite Ideal: 70%</span>
+                                    </div>
+                                    <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden border border-slate-200 dark:border-white/10">
+                                        <div
+                                            className={`h-full transition-all duration-1000 ${incomeOverallTotal > 0 && (currentTotalBills / incomeOverallTotal) > 0.7 ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                                            style={{ width: `${Math.min(incomeOverallTotal > 0 ? (currentTotalBills / incomeOverallTotal) * 100 : 0, 100)}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className={`p-6 md:p-8 rounded-2xl border border-slate-200 dark:border-white/10 shadow-card flex flex-col justify-center items-center text-center transition-all ${incomeOverallTotal - currentTotalBills >= 0 ? 'bg-slate-50 dark:bg-slate-900 text-on-surface' : 'bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-400'}`}>
+                            <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider mb-2 text-slate-400">Saldo Projetado</h4>
+                            <div className={`text-4xl font-sans font-bold tracking-tight mb-2 ${incomeOverallTotal - currentTotalBills >= 0 ? 'text-on-surface' : 'text-rose-600 dark:text-rose-400'}`}>
+                                R$ {(incomeOverallTotal - currentTotalBills).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </div>
+                            <p className="text-[9px] font-sans font-semibold uppercase text-slate-400 tracking-wider">Saldo Líquido Estimado</p>
+                        </div>
+                    </div>
                     {/* Budget Bar Section */}
                     <div className="bg-surface p-6 md:p-8 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none relative overflow-hidden">
                         <div className="flex justify-between items-end mb-6">
@@ -1024,120 +1083,59 @@ const FinanceView = ({
                 </div>
             )}
 
-            {/* RENDAS E OBRIGAÇÕES VIEW */}
-            {activeTab === 'fixed' && (
+            {/* RENDAS VIEW (ENTRADA) */}
+            {activeTab === 'income' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
 
                     {isNFSeGeneratorOpen && (
                         <NFSeGenerator onClose={() => setIsNFSeGeneratorOpen(false)} />
                     )}
 
-                    {/* HUB DE SAÚDE FINANCEIRA (COMPARATIVOS) */}
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-2 bg-surface p-8 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none flex flex-col justify-between relative overflow-hidden group">
-                            <div className="relative z-10">
-                                <div className="mb-6">
-                                    <h4 className="text-[10px] font-sans font-semibold text-slate-400 uppercase tracking-[0.2em]">COMPARATIVO_MENSAL / REPORT</h4>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                    <div>
-                                        <div className="text-[10px] font-sans font-semibold text-emerald-600 uppercase mb-2 tracking-widest flex items-center gap-2">
-                                            // TOTAL_PREVISTO
-                                            {prevIncome > 0 && (
-                                                <span className={`text-[9px] px-1.5 py-0.5 border border-[#e5e7eb] dark:border-white/10 ${incomeOverallTotal >= prevIncome ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                                                    {incomeOverallTotal >= prevIncome ? 'UP' : 'DOWN'} {Math.round(Math.abs((incomeOverallTotal - prevIncome) / prevIncome) * 100)}%
-                                                </span>
-                                            )}
-                                        </div>
-                                        <div className="text-4xl font-sans font-semibold text-on-surface tracking-tighter">
-                                            R$ {incomeOverallTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <div className="text-[10px] font-sans font-semibold text-accent-tactile uppercase mb-2 tracking-widest flex items-center gap-2">
-                                            // TOTAL_CONTAS
-                                            {prevBills > 0 && (
-                                                <span className={`text-[9px] px-1.5 py-0.5 border border-[#e5e7eb] dark:border-white/10 ${currentTotalBills <= prevBills ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                                                    {currentTotalBills <= prevBills ? 'DOWN' : 'UP'} {Math.round(Math.abs((currentTotalBills - prevBills) / prevBills) * 100)}%
-                                                </span>
-                                            )}
-                                        </div>
-                                        <div className="text-4xl font-sans font-semibold text-on-surface tracking-tighter">
-                                            R$ {currentTotalBills.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="mt-8">
-                                    <div className="flex justify-between text-[10px] font-sans font-semibold uppercase tracking-widest mb-2">
-                                        <span className="text-slate-400">COMPROMETIMENTO_RENDA ({Math.round((currentTotalBills / (incomeOverallTotal || 1)) * 100)}%)</span>
-                                        <span className="text-slate-300 italic">THRESHOLD: 70%</span>
-                                    </div>
-                                    <div className="h-2 bg-slate-100 rounded-lg overflow-hidden border border-[#e5e7eb] dark:border-white/10">
-                                        <div
-                                            className={`h-full transition-all duration-1000 ${incomeOverallTotal > 0 && (currentTotalBills / incomeOverallTotal) > 0.7 ? 'bg-accent-tactile' : 'bg-emerald-500'}`}
-                                            style={{ width: `${Math.min(incomeOverallTotal > 0 ? (currentTotalBills / incomeOverallTotal) * 100 : 0, 100)}%` }}
-                                        ></div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className={`p-8 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none flex flex-col justify-center items-center text-center transition-all ${incomeOverallTotal - currentTotalBills >= 0 ? 'bg-on-surface text-surface' : 'bg-accent-tactile text-white'}`}>
-                            <h4 className="text-[10px] font-sans font-semibold uppercase tracking-[0.2em] mb-2 opacity-60">SALDO_PROJETADO</h4>
-                            <div className="text-4xl md:text-5xl font-sans font-semibold tracking-tighter mb-2">
-                                R$ {(incomeOverallTotal - currentTotalBills).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                            </div>
-                            <p className="text-[10px] font-sans font-semibold uppercase opacity-40 tracking-widest">NET_REMAINING_BALANCE</p>
-                        </div>
-                    </div>
-
-                    <div className="h-px bg-slate-100 w-full opacity-50" />
-
                     {/* SEÇÃO DE RENDAS / GANHOS */}
                     <FinanceSection title="Rendas e Rendimentos">
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-                            <p className="text-slate-400 font-sans text-[10px] font-bold uppercase tracking-widest">REVENUE_STREAMS / ACTIVE_INCOME</p>
+                            <p className="text-slate-400 font-sans text-[10px] font-bold uppercase tracking-wider">Fontes de Renda Ativas</p>
                             <div className="flex gap-3 w-full md:w-auto">
                                 <button
                                     onClick={() => setIsNFSeGeneratorOpen(true)}
-                                    className="flex-1 md:flex-none border border-[#e5e7eb] dark:border-white/10 bg-surface hover:bg-slate-100 text-on-surface px-5 py-2 flex items-center justify-center gap-2 rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest transition-all"
+                                    className="flex-1 md:flex-none border border-slate-200 dark:border-white/10 bg-surface hover:bg-slate-50 text-on-surface px-4 py-2 flex items-center justify-center gap-2 rounded-lg text-[10px] font-sans font-bold uppercase tracking-wider transition-all shadow-sm"
                                 >
                                     <svg className="w-4 h-4 text-primary-tactile" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                                    NFS-e_GEN
+                                    Gerar NFS-e
                                 </button>
                                 <button
                                     onClick={() => setIsManagingIncomeRubrics(!isManagingIncomeRubrics)}
-                                    className={`flex-1 md:flex-none px-5 py-2 flex items-center justify-center rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest transition-all border ${isManagingIncomeRubrics ? 'bg-on-surface text-surface border-on-surface' : 'bg-surface text-on-surface border-[#e5e7eb] dark:border-white/10 hover:bg-slate-100'}`}
+                                    className={`flex-1 md:flex-none px-4 py-2 flex items-center justify-center rounded-lg text-[10px] font-sans font-bold uppercase tracking-wider transition-all border ${isManagingIncomeRubrics ? 'bg-slate-900 dark:bg-slate-800 text-white border-slate-900 dark:border-slate-850' : 'bg-surface text-slate-700 border-slate-200 dark:border-white/10 hover:bg-slate-50 shadow-sm'}`}
                                 >
-                                    {isManagingIncomeRubrics ? 'CLOSE_RESOURCES' : 'MANAGE_RESOURCES'}
+                                    {isManagingIncomeRubrics ? 'Fechar Fontes' : 'Gerenciar Fontes'}
                                 </button>
                                 <button onClick={() => {
                                     setNewIncome({ category: settings.incomeCategories?.[0] || 'Renda Principal' });
                                     setIsAddingIncome(true);
-                                }} className="flex-1 md:flex-none bg-primary-tactile text-white px-5 py-2 flex items-center justify-center rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest transition-all">
-                                    + ADD_ENTRY
+                                }} className="flex-1 md:flex-none bg-primary-tactile text-white px-4 py-2 flex items-center justify-center rounded-lg text-[10px] font-sans font-bold uppercase tracking-wider transition-all shadow-md hover:bg-primary">
+                                    + Nova Entrada
                                 </button>
                             </div>
                         </div>
                                      {/* Gestão de Rubricas de Renda Industrial */}
                         {isManagingIncomeRubrics && (
-                            <div className="bg-on-surface text-surface p-8 rounded-lg shadow-none animate-in fade-in slide-in-from-top-4 border-b-4 border-emerald-500">
-                                <div className="flex justify-between items-center mb-10">
+                            <div className="bg-slate-50 dark:bg-slate-900 text-on-surface p-6 md:p-8 rounded-2xl border border-slate-200 dark:border-white/10 shadow-card animate-in fade-in slide-in-from-top-4 space-y-6">
+                                <div className="flex justify-between items-center">
                                     <div>
-                                        <h5 className="text-[10px] font-sans font-semibold uppercase tracking-[0.4em] text-emerald-400">// INCOME_STREAMS_REGISTRY</h5>
-                                        <p className="text-emerald-300/30 text-[8px] font-sans font-semibold uppercase tracking-widest mt-1">RECURRING_REVENUE_CHANNELS</p>
+                                        <h5 className="text-[10px] font-sans font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">// Cadastro de Fontes de Receita</h5>
+                                        <p className="text-slate-400 text-[9px] font-semibold uppercase tracking-wider mt-1">Canais de Receita Recorrente</p>
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                     {incomeRubrics.map(rubric => (
-                                        <div key={rubric.id} className="bg-white/5 border border-white/10 p-5 rounded-lg flex justify-between items-center group hover:bg-white/10 transition-all">
+                                        <div key={rubric.id} className="bg-surface border border-slate-200 dark:border-white/10 p-4 rounded-xl flex justify-between items-center group hover:bg-slate-50 transition-all shadow-sm">
                                             <div>
-                                                <div className="text-[8px] font-sans font-semibold text-emerald-400 uppercase tracking-widest mb-1">{rubric.category} // TAG</div>
-                                                <div className="text-sm font-sans font-semibold uppercase tracking-tight">{rubric.description}</div>
-                                                <div className="text-[9px] text-white/30 font-sans font-semibold uppercase tracking-widest mt-2 flex items-center gap-2">
-                                                    ETA: DAY_{rubric.expectedDay}
-                                                    {rubric.defaultAmount ? ` // BRL ${rubric.defaultAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ' // VARIABLE_VAL'}
+                                                <div className="text-[8px] font-sans font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1">{rubric.category}</div>
+                                                <div className="text-xs font-sans font-bold text-on-surface uppercase tracking-tight">{rubric.description}</div>
+                                                <div className="text-[9px] text-slate-400 font-sans font-semibold uppercase tracking-wider mt-2 flex items-center gap-2">
+                                                    Previsto: Dia {rubric.expectedDay}
+                                                    {rubric.defaultAmount ? ` // R$ ${rubric.defaultAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ' // Valor Variável'}
                                                 </div>
                                             </div>
                                             <div className="flex gap-2">
@@ -1146,11 +1144,11 @@ const FinanceView = ({
                                                         setEditingIncomeRubric(rubric);
                                                         setNewIncomeRubric(rubric);
                                                     }}
-                                                    className="p-2 text-white/20 hover:text-emerald-400 transition-all opacity-0 group-hover:opacity-100 border border-transparent hover:border-white/10"
+                                                    className="p-1.5 text-slate-300 hover:text-emerald-500 hover:border-slate-100 transition-all opacity-0 group-hover:opacity-100 border border-transparent rounded-lg"
                                                 >
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                                 </button>
-                                                <button onClick={() => handleTwoStepDelete(`income_rubric_${rubric.id}`, () => onDeleteIncomeRubric(rubric.id))} className={`p-2 rounded-soft-touch transition-all opacity-0 group-hover:opacity-100 border ${pendingDeleteKey === `income_rubric_${rubric.id}` ? 'bg-rose-500 text-white opacity-100 border-rose-600' : 'text-white/20 border-transparent hover:text-rose-400 hover:border-rose-900/30'}`}>
+                                                <button onClick={() => handleTwoStepDelete(`income_rubric_${rubric.id}`, () => onDeleteIncomeRubric(rubric.id))} className={`p-1.5 rounded-lg transition-all opacity-0 group-hover:opacity-100 border ${pendingDeleteKey === `income_rubric_${rubric.id}` ? 'bg-rose-500 text-white opacity-100 border-rose-600' : 'text-slate-300 border-transparent hover:text-rose-500 hover:border-rose-100'}`}>
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                 </button>
                                             </div>
@@ -1158,40 +1156,40 @@ const FinanceView = ({
                                     ))}
                                 </div>
 
-                                <div className="bg-white/5 p-8 rounded-lg border border-white/10">
-                                    <h6 className="text-[10px] font-sans font-semibold text-white/30 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
-                                        <span className="w-2 h-2 bg-emerald-500"></span>
-                                        {editingIncomeRubric ? 'UPDATE_RESOURCE_NODE' : 'REGISTER_NEW_STREAM'}
+                                <div className="bg-surface p-6 rounded-xl border border-slate-200 dark:border-white/10 shadow-sm space-y-4">
+                                    <h6 className="text-[10px] font-sans font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
+                                        {editingIncomeRubric ? 'Atualizar Fonte' : 'Cadastrar Nova Fonte'}
                                     </h6>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                                         <input
                                             type="text"
-                                            placeholder="STREAM_IDENTIFIER"
-                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-emerald-500 outline-none text-white placeholder:text-white/10"
+                                            placeholder="Descrição da Renda"
+                                            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2.5 text-xs font-sans font-semibold focus:ring-1 focus:ring-emerald-500 outline-none text-on-surface"
                                             value={newIncomeRubric.description || ''}
                                             onChange={e => setNewIncomeRubric({ ...newIncomeRubric, description: e.target.value })}
                                         />
                                         <input
                                             type="number"
-                                            placeholder="EXPECTED_DAY"
-                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-emerald-500 outline-none text-white placeholder:text-white/10"
+                                            placeholder="Dia Previsto (1-31)"
+                                            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2.5 text-xs font-sans font-semibold focus:ring-1 focus:ring-emerald-500 outline-none text-on-surface"
                                             value={newIncomeRubric.expectedDay || ''}
                                             onChange={e => setNewIncomeRubric({ ...newIncomeRubric, expectedDay: Number(e.target.value) })}
                                         />
                                         <input
                                             type="number"
-                                            placeholder="BASELINE_VALUE"
-                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-emerald-500 outline-none text-white placeholder:text-white/10"
+                                            placeholder="Valor Base (Opcional)"
+                                            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2.5 text-xs font-sans font-semibold focus:ring-1 focus:ring-emerald-500 outline-none text-on-surface"
                                             value={newIncomeRubric.defaultAmount || ''}
                                             onChange={e => setNewIncomeRubric({ ...newIncomeRubric, defaultAmount: e.target.value ? Number(e.target.value) : undefined })}
                                         />
                                         <select
-                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-emerald-500 outline-none text-white [color-scheme:dark]"
+                                            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2.5 text-xs font-sans font-semibold focus:ring-1 focus:ring-emerald-500 outline-none text-on-surface"
                                             value={newIncomeRubric.category}
                                             onChange={e => setNewIncomeRubric({ ...newIncomeRubric, category: e.target.value })}
                                         >
                                             {(settings.incomeCategories || ['Renda Principal', 'Renda Extra', 'Dividendos', 'Outros']).map(cat => (
-                                                <option key={cat} value={cat} className="bg-on-surface text-white uppercase">{cat}</option>
+                                                <option key={cat} value={cat} className="text-on-surface">{cat}</option>
                                             ))}
                                         </select>
                                         <div className="flex gap-2">
@@ -1207,9 +1205,9 @@ const FinanceView = ({
                                                         setEditingIncomeRubric(null);
                                                     }
                                                 }}
-                                                className="flex-1 bg-white text-on-surface hover:bg-emerald-500 hover:text-white rounded-soft-touch px-4 py-3 text-[10px] font-sans font-semibold uppercase tracking-widest transition-all"
+                                                className="flex-1 bg-primary-tactile hover:bg-primary text-white rounded-lg px-4 py-2.5 text-[10px] font-sans font-bold uppercase tracking-wider transition-all shadow-sm"
                                             >
-                                                {editingIncomeRubric ? 'COMMIT_UP' : 'INITIALIZE'}
+                                                {editingIncomeRubric ? 'Salvar' : 'Adicionar'}
                                             </button>
                                             {editingIncomeRubric && (
                                                 <button
@@ -1217,7 +1215,7 @@ const FinanceView = ({
                                                         setEditingIncomeRubric(null);
                                                         setNewIncomeRubric({ category: 'Renda Principal' });
                                                     }}
-                                                    className="bg-white/10 hover:bg-white/20 text-white rounded-soft-touch px-4 py-3 text-xs font-sans font-semibold uppercase tracking-widest transition-all"
+                                                    className="bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg px-4 py-2.5 text-xs font-sans font-bold uppercase tracking-wider transition-all"
                                                 >
                                                     ✕
                                                 </button>
@@ -1312,75 +1310,75 @@ const FinanceView = ({
                             </div>
                         )}
 
-                        <div className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-3">
-                            <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-emerald-50/50 p-6 shadow-none">
-                                <div className="text-[9px] font-sans font-semibold uppercase tracking-[0.2em] text-emerald-600 mb-2">// TOTAL_RECEIVED</div>
-                                <div className="text-3xl font-sans font-semibold tracking-tighter text-emerald-700">{formatCurrency(incomeReceivedTotal)}</div>
-                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-widest text-emerald-600/60">{currentMonthIncomeEntries.filter(entry => entry.isReceived).length} NODES_ACKNOWLEDGED</div>
+                        <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-3">
+                            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-emerald-50/20 dark:bg-emerald-950/10 p-6 shadow-card">
+                                <div className="text-[9px] font-sans font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-450 mb-2">// Ganhos Confirmados</div>
+                                <div className="text-3xl font-sans font-bold tracking-tight text-emerald-700 dark:text-emerald-400">{formatCurrency(incomeReceivedTotal)}</div>
+                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-wider text-slate-400">{currentMonthIncomeEntries.filter(entry => entry.isReceived).length} entrada(s) confirmada(s)</div>
                             </div>
-                            <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-amber-50/50 p-6 shadow-none">
-                                <div className="text-[9px] font-sans font-semibold uppercase tracking-[0.2em] text-amber-600 mb-2">// TOTAL_PENDING</div>
-                                <div className="text-3xl font-sans font-semibold tracking-tighter text-amber-700">{formatCurrency(incomePendingTotal)}</div>
-                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-widest text-amber-600/60">{currentMonthIncomeEntries.filter(entry => !entry.isReceived).length} NODES_IN_TRANSIT</div>
+                            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-amber-50/20 dark:bg-amber-950/10 p-6 shadow-card">
+                                <div className="text-[9px] font-sans font-bold uppercase tracking-wider text-amber-600 dark:text-amber-450 mb-2">// Ganhos Pendentes</div>
+                                <div className="text-3xl font-sans font-bold tracking-tight text-amber-750 dark:text-amber-400">{formatCurrency(incomePendingTotal)}</div>
+                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-wider text-slate-400">{currentMonthIncomeEntries.filter(entry => !entry.isReceived).length} entrada(s) pendente(s)</div>
                             </div>
-                            <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-slate-50 p-6 shadow-none">
-                                <div className="text-[9px] font-sans font-semibold uppercase tracking-[0.2em] text-slate-500 mb-2">// OVERALL_TOTAL</div>
-                                <div className="text-3xl font-sans font-semibold tracking-tighter text-on-surface">{formatCurrency(incomeOverallTotal)}</div>
-                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-widest text-slate-400">{currentMonthIncomeEntries.length} TOTAL_ENTRIES_PERIOD</div>
+                            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-900 p-6 shadow-card">
+                                <div className="text-[9px] font-sans font-bold uppercase tracking-wider text-slate-550 dark:text-slate-400 mb-2">// Receita Total Projetada</div>
+                                <div className="text-3xl font-sans font-bold tracking-tight text-on-surface">{formatCurrency(incomeOverallTotal)}</div>
+                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-wider text-slate-400">{currentMonthIncomeEntries.length} lançamento(s) no mês</div>
                             </div>
                         </div>
 
-                        <div className="mb-6 overflow-hidden rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-surface shadow-none">
-                            <div className="border-b border-[#e5e7eb] dark:border-white/10 bg-slate-50 p-6">
+                        <div className="mb-6 overflow-hidden rounded-2xl border border-slate-200 dark:border-white/10 bg-surface shadow-card">
+                            <div className="border-b border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-900 p-6">
                                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
                                     <div className="space-y-1">
-                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">QUERY_FILTER</label>
+                                        <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider">Filtrar por Descrição</label>
                                         <input
                                             type="text"
-                                            placeholder="SEARCH_BY_DESCRIPTION"
+                                            placeholder="Buscar descrição..."
                                             value={incomeSearch}
                                             onChange={(e) => setIncomeSearch(e.target.value)}
-                                            className="w-full rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2.5 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500"
+                                            className="w-full rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
                                         />
                                     </div>
                                     <div className="space-y-1">
-                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">STATUS_FILTER</label>
-                                        <select value={incomeStatusFilter} onChange={(e) => setIncomeStatusFilter(e.target.value as 'all' | 'received' | 'pending')} className="w-full rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2.5 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500">
-                                            <option value="all">ALL_STATUS</option>
-                                            <option value="received">RECEIVED</option>
-                                            <option value="pending">PENDING</option>
+                                        <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider">Status</label>
+                                        <select value={incomeStatusFilter} onChange={(e) => setIncomeStatusFilter(e.target.value as 'all' | 'received' | 'pending')} className="w-full rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile">
+                                            <option value="all">Todos os Status</option>
+                                            <option value="received">Confirmados</option>
+                                            <option value="pending">Pendentes</option>
                                         </select>
                                     </div>
                                     <div className="space-y-1">
-                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">TAG_FILTER</label>
-                                        <select value={incomeCategoryFilter} onChange={(e) => setIncomeCategoryFilter(e.target.value)} className="w-full rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2.5 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500">
-                                            <option value="all">ALL_CATEGORIES</option>
+                                        <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider">Categoria</label>
+                                        <select value={incomeCategoryFilter} onChange={(e) => setIncomeCategoryFilter(e.target.value)} className="w-full rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile">
+                                            <option value="all">Todas as Fontes</option>
                                             {(settings.incomeCategories || []).map(cat => (
                                                 <option key={cat} value={cat}>{cat}</option>
                                             ))}
                                         </select>
                                     </div>
                                     <div className="flex items-end">
-                                        <div className="w-full flex items-center justify-center rounded-soft-touch bg-on-surface text-white px-4 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-[0.2em]">
-                                            COUNT: {visibleIncomeEntries.length}
+                                        <div className="w-full flex items-center justify-center rounded-lg bg-slate-900 text-white px-4 py-2 text-[10px] font-sans font-bold uppercase tracking-wider">
+                                            Filtrados: {visibleIncomeEntries.length}
                                         </div>
                                     </div>
                                 </div>
                             </div>
                             <div className="overflow-x-auto">
                                 <table className="min-w-full text-sm">
-                                    <thead className="bg-slate-100 text-[10px] font-sans uppercase tracking-widest text-slate-500 border-b border-[#e5e7eb] dark:border-white/10">
+                                    <thead className="bg-slate-100 dark:bg-slate-900 text-[10px] font-sans uppercase tracking-wider text-slate-500 border-b border-slate-200 dark:border-white/10">
                                         <tr>
-                                            <th className="px-4 py-3 text-left font-bold">ACK</th>
-                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleIncomeSort('description')} className="flex items-center gap-2">DESCRIPTION <span>{incomeSort.key === 'description' ? (incomeSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button></th>
-                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleIncomeSort('category')} className="flex items-center gap-2">CATEGORY <span>{incomeSort.key === 'category' ? (incomeSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button></th>
-                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleIncomeSort('day')} className="flex items-center gap-2">ETA <span>{incomeSort.key === 'day' ? (incomeSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button></th>
-                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleIncomeSort('amount')} className="flex items-center gap-2">AMOUNT <span>{incomeSort.key === 'amount' ? (incomeSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button></th>
-                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleIncomeSort('status')} className="flex items-center gap-2">STATUS <span>{incomeSort.key === 'status' ? (incomeSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button></th>
-                                            <th className="px-4 py-3 text-right font-bold">ACTIONS</th>
+                                            <th className="px-4 py-3 text-left font-bold">Conf.</th>
+                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleIncomeSort('description')} className="flex items-center gap-2">Descrição <span>{incomeSort.key === 'description' ? (incomeSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleIncomeSort('category')} className="flex items-center gap-2">Categoria <span>{incomeSort.key === 'category' ? (incomeSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleIncomeSort('day')} className="flex items-center gap-2">Dia Previsto <span>{incomeSort.key === 'day' ? (incomeSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleIncomeSort('amount')} className="flex items-center gap-2">Valor <span>{incomeSort.key === 'amount' ? (incomeSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleIncomeSort('status')} className="flex items-center gap-2">Status <span>{incomeSort.key === 'status' ? (incomeSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button></th>
+                                            <th className="px-4 py-3 text-right font-bold">Ações</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-[#e5e7eb] dark:divide-white/10 bg-white">
+                                    <tbody className="divide-y divide-slate-150 dark:divide-white/10 bg-white dark:bg-slate-900">
                                         {visibleIncomeEntries.map(entry => {
                                             const prevEntry = incomeEntries.find(e =>
                                                 e.description === entry.description &&
@@ -1392,55 +1390,55 @@ const FinanceView = ({
 
                                             return (
                                                 <React.Fragment key={entry.id}>
-                                                    <tr className={`cursor-pointer transition-colors font-sans ${isExpanded ? 'bg-slate-50 text-on-surface' : 'hover:bg-slate-50 text-on-surface'}`} onClick={() => setExpandedIncomeId(isExpanded ? null : entry.id)}>
+                                                    <tr className={`cursor-pointer transition-colors font-sans ${isExpanded ? 'bg-slate-50 dark:bg-slate-800 text-on-surface' : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-on-surface'}`} onClick={() => setExpandedIncomeId(isExpanded ? null : entry.id)}>
                                                         <td className="px-4 py-4">
-                                                            <input type="checkbox" checked={entry.isReceived} onClick={(e) => e.stopPropagation()} onChange={() => onUpdateIncomeEntry({ ...entry, isReceived: !entry.isReceived })} className="h-4 w-4 rounded-lg border-[#e5e7eb] dark:border-white/10 text-primary-tactile focus:ring-0 bg-transparent" />
+                                                            <input type="checkbox" checked={entry.isReceived} onClick={(e) => e.stopPropagation()} onChange={() => onUpdateIncomeEntry({ ...entry, isReceived: !entry.isReceived })} className="h-4 w-4 rounded-lg border-slate-200 dark:border-white/10 text-primary-tactile focus:ring-0 bg-transparent" />
                                                         </td>
                                                         <td className="px-4 py-4">
                                                             <div className="font-bold text-xs">{entry.description}</div>
-                                                            {entry.rubricId && <div className="text-[8px] font-bold uppercase tracking-widest text-slate-400">// LINKED_RESOURCE</div>}
+                                                            {entry.rubricId && <div className="text-[8px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">// Origem Vinculada</div>}
                                                         </td>
-                                                        <td className="px-4 py-4 font-bold text-[10px] text-slate-500 uppercase">{entry.category || 'INCOME'}</td>
-                                                        <td className="px-4 py-4 font-bold text-[10px] text-slate-500 uppercase">DAY_{entry.day}</td>
+                                                        <td className="px-4 py-4 font-bold text-[10px] text-slate-550 dark:text-slate-400 uppercase">{entry.category || 'Entrada'}</td>
+                                                        <td className="px-4 py-4 font-bold text-[10px] text-slate-550 dark:text-slate-400 uppercase">Dia {entry.day}</td>
                                                         <td className="px-4 py-4">
-                                                            <div className="font-bold text-xs text-emerald-600">{formatCurrency(entry.amount)}</div>
+                                                            <div className="font-bold text-xs text-emerald-600 dark:text-emerald-400">{formatCurrency(entry.amount)}</div>
                                                             {diff !== 0 && <div className={`text-[9px] font-bold ${diff > 0 ? 'text-emerald-600' : 'text-accent-tactile'}`}>{diff > 0 ? '+' : '-'} {formatCurrency(Math.abs(diff))}</div>}
                                                         </td>
                                                         <td className="px-4 py-4">
-                                                            <span className={`inline-flex border border-[#e5e7eb] dark:border-white/10 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest ${entry.isReceived ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
-                                                                {entry.isReceived ? 'OK' : 'PENDING'}
+                                                            <span className={`inline-flex border border-slate-200 dark:border-white/10 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wider ${entry.isReceived ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20 dark:text-emerald-405' : 'bg-amber-50 text-amber-600 dark:bg-amber-950/20 dark:text-amber-405'}`}>
+                                                                {entry.isReceived ? 'Confirmado' : 'Pendente'}
                                                             </span>
                                                         </td>
                                                         <td className="px-4 py-4">
                                                             <div className="flex items-center justify-end gap-2">
-                                                                <button onClick={(e) => { e.stopPropagation(); setExpandedIncomeId(isExpanded ? null : entry.id); }} className="rounded-soft-touch p-1 text-slate-300 hover:text-on-surface">
+                                                                <button onClick={(e) => { e.stopPropagation(); setExpandedIncomeId(isExpanded ? null : entry.id); }} className="rounded-lg p-1 text-slate-300 hover:text-on-surface">
                                                                     <svg className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
                                                                 </button>
-                                                                <button onClick={(e) => { e.stopPropagation(); handleTwoStepDelete(`income_entry_${entry.id}`, () => onDeleteIncomeEntry(entry.id)); }} className={`rounded-soft-touch p-1 transition-colors ${pendingDeleteKey === `income_entry_${entry.id}` ? 'bg-accent-tactile text-white' : 'text-slate-200 hover:text-accent-tactile'}`}>
+                                                                <button onClick={(e) => { e.stopPropagation(); handleTwoStepDelete(`income_entry_${entry.id}`, () => onDeleteIncomeEntry(entry.id)); }} className={`rounded-lg p-1 transition-colors ${pendingDeleteKey === `income_entry_${entry.id}` ? 'bg-accent-tactile text-white' : 'text-slate-350 hover:text-accent-tactile'}`}>
                                                                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                                 </button>
                                                             </div>
                                                         </td>
                                                     </tr>
                                                     {isExpanded && (
-                                                        <tr className="bg-slate-50">
-                                                            <td colSpan={7} className="px-4 py-6 border-b border-[#e5e7eb] dark:border-white/10">
+                                                        <tr className="bg-slate-50 dark:bg-slate-800">
+                                                            <td colSpan={7} className="px-4 py-6 border-b border-slate-200 dark:border-white/10">
                                                                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
                                                                     <div className="space-y-1">
-                                                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest block">DESCRIPTION_ID</label>
-                                                                        <input type="text" defaultValue={entry.description} onBlur={(e) => onUpdateIncomeEntry({ ...entry, description: e.target.value })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500" />
+                                                                        <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block">Descrição</label>
+                                                                        <input type="text" defaultValue={entry.description} onBlur={(e) => onUpdateIncomeEntry({ ...entry, description: e.target.value })} className="w-full rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500" />
                                                                     </div>
                                                                     <div className="space-y-1">
-                                                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest block">AMOUNT_VAL</label>
-                                                                        <input type="number" defaultValue={entry.amount} onBlur={(e) => onUpdateIncomeEntry({ ...entry, amount: Number(e.target.value) })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500" />
+                                                                        <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block">Valor (R$)</label>
+                                                                        <input type="number" defaultValue={entry.amount} onBlur={(e) => onUpdateIncomeEntry({ ...entry, amount: Number(e.target.value) })} className="w-full rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500" />
                                                                     </div>
                                                                     <div className="space-y-1">
-                                                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest block">ETA_DAY</label>
-                                                                        <input type="number" min={1} max={31} defaultValue={entry.day} onBlur={(e) => onUpdateIncomeEntry({ ...entry, day: Number(e.target.value) })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500" />
+                                                                        <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block">Dia Previsto</label>
+                                                                        <input type="number" min={1} max={31} defaultValue={entry.day} onBlur={(e) => onUpdateIncomeEntry({ ...entry, day: Number(e.target.value) })} className="w-full rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500" />
                                                                     </div>
                                                                     <div className="space-y-1">
-                                                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest block">CATEGORY_TAG</label>
-                                                                        <select defaultValue={entry.category} onBlur={(e) => onUpdateIncomeEntry({ ...entry, category: e.target.value })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500">
+                                                                        <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block">Categoria</label>
+                                                                        <select defaultValue={entry.category} onBlur={(e) => onUpdateIncomeEntry({ ...entry, category: e.target.value })} className="w-full rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500">
                                                                             {(settings.incomeCategories || ['Renda Principal', 'Renda Extra', 'Dividendos', 'Outros']).map(cat => (
                                                                                 <option key={cat} value={cat}>{cat}</option>
                                                                             ))}
@@ -1455,7 +1453,7 @@ const FinanceView = ({
                                         })}
                                         {visibleIncomeEntries.length === 0 && (
                                             <tr>
-                                                <td colSpan={7} className="px-4 py-12 text-center text-[10px] font-sans font-semibold uppercase tracking-widest text-slate-400">NO_RECORDS_FOUND / FILTER_MISMATCH</td>
+                                                <td colSpan={7} className="px-4 py-12 text-center text-[10px] font-sans font-semibold uppercase tracking-wider text-slate-400">Nenhum lançamento de entrada encontrado</td>
                                             </tr>
                                         )}
                                     </tbody>
@@ -1556,52 +1554,55 @@ const FinanceView = ({
                             </div>
                         </div>
                     </FinanceSection>
+                </div>
+            )}
 
-                    <div className="h-px bg-slate-100 w-full opacity-50" />
-
+            {/* OBRIGAÇÕES VIEW (SAÍDA) */}
+            {activeTab === 'expense' && (
+                <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
                     {/* SEÇÃO DE CONTAS / OBRIGAÇÕES */}
                     <FinanceSection title="Obrigações e Despesas">
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-10">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                             <div>
-                                <h5 className="text-[10px] font-sans font-semibold text-slate-400 uppercase tracking-[0.3em]">// OBLIGATION_MANAGEMENT_STREAM</h5>
-                                <p className="text-slate-300 text-[8px] font-sans font-semibold uppercase tracking-widest mt-1">LIABILITY_SETTLEMENT_HUB</p>
+                                <h5 className="text-[10px] font-sans font-bold text-slate-550 dark:text-slate-400 uppercase tracking-wider">// Gestão de Obrigações Fixas</h5>
+                                <p className="text-slate-400 text-[9px] font-semibold uppercase tracking-wider mt-1">Central de Pagamento de Contas</p>
                             </div>
                             <div className="flex gap-3 w-full md:w-auto">
                                 <button
                                     onClick={() => setIsManagingRubrics(!isManagingRubrics)}
-                                    className={`flex-1 md:flex-none px-6 py-3 rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest transition-all border ${isManagingRubrics ? 'bg-on-surface text-white border-on-surface shadow-none' : 'bg-white text-slate-600 border-[#e5e7eb] dark:border-white/10 hover:bg-slate-50 shadow-none'}`}
+                                    className={`flex-1 md:flex-none px-4 py-2.5 rounded-lg text-[10px] font-sans font-bold uppercase tracking-wider transition-all border ${isManagingRubrics ? 'bg-slate-900 dark:bg-slate-800 text-white border-slate-900 dark:border-slate-850' : 'bg-surface text-slate-700 border-slate-200 dark:border-white/10 hover:bg-slate-50 shadow-sm'}`}
                                 >
-                                    {isManagingRubrics ? 'CLOSE_TAXONOMY' : 'MANAGE_RUBRICS'}
+                                    {isManagingRubrics ? 'Fechar Categorias' : 'Gerenciar Categorias'}
                                 </button>
                                 <button onClick={() => {
                                     setNewBill({ category: settings.billCategories?.[0] || 'Conta Fixa' });
                                     setIsAddingBill(true);
-                                }} className="flex-1 md:flex-none bg-primary-tactile text-white px-6 py-3 rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest transition-all hover:bg-blue-700 shadow-none">
-                                    + ADD_OBLIGATION
+                                }} className="flex-1 md:flex-none bg-primary-tactile hover:bg-primary text-white px-4 py-2.5 rounded-lg text-[10px] font-sans font-bold uppercase tracking-wider transition-all shadow-md">
+                                    + Nova Obrigação
                                 </button>
                             </div>
                         </div>
 
                         {/* Gestão de Rubricas Industrial */}
                         {isManagingRubrics && (
-                            <div className="bg-on-surface text-surface p-8 rounded-lg shadow-none animate-in fade-in slide-in-from-top-4 border-b-4 border-primary-tactile mb-10">
-                                <div className="flex justify-between items-center mb-10">
+                            <div className="bg-slate-50 dark:bg-slate-900 text-on-surface p-6 md:p-8 rounded-2xl border border-slate-200 dark:border-white/10 shadow-card animate-in fade-in slide-in-from-top-4 mb-10 space-y-6">
+                                <div className="flex justify-between items-center">
                                     <div>
-                                        <h5 className="text-[10px] font-sans font-semibold uppercase tracking-[0.4em] text-primary-tactile">// RECURRING_OBLIGATION_TAXONOMY</h5>
-                                        <p className="text-white/30 text-[8px] font-sans font-semibold uppercase tracking-widest mt-1">MONTHLY_LIABILITY_BASELINE</p>
+                                        <h5 className="text-[10px] font-sans font-bold uppercase tracking-wider text-primary-tactile">// Cadastro de Obrigações Recorrentes</h5>
+                                        <p className="text-slate-400 text-[9px] font-semibold uppercase tracking-wider mt-1">Base Mensal de Compromissos</p>
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                     {billRubrics.map(rubric => (
-                                        <div key={rubric.id} className="bg-white/5 border border-white/10 p-5 rounded-lg flex justify-between items-center group hover:bg-white/10 transition-all">
+                                        <div key={rubric.id} className="bg-surface border border-slate-200 dark:border-white/10 p-4 rounded-xl flex justify-between items-center group hover:bg-slate-50 transition-all shadow-sm">
                                             <div>
-                                                <div className="text-[8px] font-sans font-semibold text-primary-tactile uppercase tracking-widest mb-1">{rubric.category} // TAG</div>
-                                                <div className="text-sm font-sans font-semibold uppercase tracking-tight">{rubric.description}</div>
-                                                <div className="text-[9px] text-white/30 font-sans font-semibold uppercase tracking-widest mt-2 flex items-center gap-2">
-                                                    DUE: DAY_{rubric.dueDay}
-                                                    {rubric.defaultAmount ? ` // BRL ${rubric.defaultAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ' // VARIABLE_VAL'}
-                                                    {rubric.pixCode && ' // PIX_LINKED'}
+                                                <div className="text-[8px] font-sans font-bold text-primary-tactile uppercase tracking-wider mb-1">{rubric.category}</div>
+                                                <div className="text-xs font-sans font-bold text-on-surface uppercase tracking-tight">{rubric.description}</div>
+                                                <div className="text-[9px] text-slate-400 font-sans font-semibold uppercase tracking-wider mt-2 flex items-center gap-2">
+                                                    Vencimento: Dia {rubric.dueDay}
+                                                    {rubric.defaultAmount ? ` // R$ ${rubric.defaultAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ' // Valor Variável'}
+                                                    {rubric.pixCode && ' // Pix Salvo'}
                                                 </div>
                                             </div>
                                             <div className="flex gap-2">
@@ -1610,11 +1611,11 @@ const FinanceView = ({
                                                         setEditingRubric(rubric);
                                                         setNewRubric(rubric);
                                                     }}
-                                                    className="p-2 text-white/20 hover:text-primary-tactile transition-all opacity-0 group-hover:opacity-100 border border-transparent hover:border-white/10"
+                                                    className="p-1.5 text-slate-350 hover:text-primary-tactile transition-all opacity-0 group-hover:opacity-100 border border-transparent rounded-lg"
                                                 >
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                                 </button>
-                                                <button onClick={() => handleTwoStepDelete(`rubric_${rubric.id}`, () => onDeleteRubric(rubric.id))} className={`p-2 rounded-soft-touch transition-all opacity-0 group-hover:opacity-100 border ${pendingDeleteKey === `rubric_${rubric.id}` ? 'bg-rose-500 text-white opacity-100 border-rose-600' : 'text-white/20 border-transparent hover:text-rose-400 hover:border-rose-900/30'}`}>
+                                                <button onClick={() => handleTwoStepDelete(`rubric_${rubric.id}`, () => onDeleteRubric(rubric.id))} className={`p-1.5 rounded-lg transition-all opacity-0 group-hover:opacity-100 border ${pendingDeleteKey === `rubric_${rubric.id}` ? 'bg-rose-500 text-white opacity-100 border-rose-600' : 'text-slate-300 border-transparent hover:text-rose-500 hover:border-rose-100'}`}>
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                 </button>
                                             </div>
@@ -1622,46 +1623,46 @@ const FinanceView = ({
                                     ))}
                                 </div>
 
-                                <div className="bg-white/5 p-8 rounded-lg border border-white/10">
-                                    <h6 className="text-[10px] font-sans font-semibold text-white/30 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
-                                        <span className="w-2 h-2 bg-primary-tactile"></span>
-                                        {editingRubric ? 'UPDATE_RUBRIC_NODE' : 'REGISTER_NEW_OBLIGATION'}
+                                <div className="bg-surface p-6 rounded-xl border border-slate-200 dark:border-white/10 shadow-sm space-y-4">
+                                    <h6 className="text-[10px] font-sans font-bold text-slate-550 uppercase tracking-wider mb-2 flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 bg-primary-tactile rounded-full"></span>
+                                        {editingRubric ? 'Atualizar Categoria' : 'Cadastrar Nova Categoria'}
                                     </h6>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
                                         <input
                                             type="text"
-                                            placeholder="OBLIGATION_NAME"
-                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-primary-tactile outline-none text-white placeholder:text-white/10"
+                                            placeholder="Nome da Obrigação"
+                                            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2.5 text-xs font-sans font-semibold focus:ring-1 focus:ring-primary-tactile outline-none text-on-surface"
                                             value={newRubric.description || ''}
                                             onChange={e => setNewRubric({ ...newRubric, description: e.target.value })}
                                         />
                                         <input
                                             type="number"
-                                            placeholder="DUE_DAY"
-                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-primary-tactile outline-none text-white placeholder:text-white/10"
+                                            placeholder="Dia do Vencimento"
+                                            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2.5 text-xs font-sans font-semibold focus:ring-1 focus:ring-primary-tactile outline-none text-on-surface"
                                             value={newRubric.dueDay || ''}
                                             onChange={e => setNewRubric({ ...newRubric, dueDay: Number(e.target.value) })}
                                         />
                                         <input
                                             type="number"
-                                            placeholder="FIXED_VAL_OPT"
-                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-primary-tactile outline-none text-white placeholder:text-white/10"
+                                            placeholder="Valor Fixo (Opcional)"
+                                            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2.5 text-xs font-sans font-semibold focus:ring-1 focus:ring-primary-tactile outline-none text-on-surface"
                                             value={newRubric.defaultAmount || ''}
                                             onChange={e => setNewRubric({ ...newRubric, defaultAmount: e.target.value ? Number(e.target.value) : undefined })}
                                         />
                                         <select
-                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-primary-tactile outline-none text-white [color-scheme:dark]"
+                                            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2.5 text-xs font-sans font-semibold focus:ring-1 focus:ring-primary-tactile outline-none text-on-surface"
                                             value={newRubric.category}
                                             onChange={e => setNewRubric({ ...newRubric, category: e.target.value })}
                                         >
                                             {(settings.billCategories || ['Conta Fixa', 'Poupança', 'Investimento']).map(cat => (
-                                                <option key={cat} value={cat} className="bg-on-surface text-white uppercase">{cat}</option>
+                                                <option key={cat} value={cat} className="text-on-surface">{cat}</option>
                                             ))}
                                         </select>
                                         <input
                                             type="text"
-                                            placeholder="PIX_KEY_OPT"
-                                            className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs font-sans font-semibold focus:ring-1 focus:ring-primary-tactile outline-none text-white placeholder:text-white/10 lg:col-span-1"
+                                            placeholder="Chave Pix (Opcional)"
+                                            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2.5 text-xs font-sans font-semibold focus:ring-1 focus:ring-primary-tactile outline-none text-on-surface lg:col-span-1"
                                             value={newRubric.pixCode || ''}
                                             onChange={e => setNewRubric({ ...newRubric, pixCode: e.target.value })}
                                         />
@@ -1678,9 +1679,9 @@ const FinanceView = ({
                                                         setEditingRubric(null);
                                                     }
                                                 }}
-                                                className="flex-1 bg-white text-on-surface hover:bg-primary-tactile hover:text-white rounded-soft-touch px-4 py-3 text-[10px] font-sans font-semibold uppercase tracking-widest transition-all"
+                                                className="flex-1 bg-primary-tactile hover:bg-primary text-white rounded-lg px-4 py-2.5 text-[10px] font-sans font-bold uppercase tracking-wider transition-all shadow-sm"
                                             >
-                                                {editingRubric ? 'COMMIT_UP' : 'INITIALIZE'}
+                                                {editingRubric ? 'Salvar' : 'Adicionar'}
                                             </button>
                                             {editingRubric && (
                                                 <button
@@ -1688,7 +1689,7 @@ const FinanceView = ({
                                                         setEditingRubric(null);
                                                         setNewRubric({ category: 'Conta Fixa' });
                                                     }}
-                                                    className="bg-white/10 hover:bg-white/20 text-white rounded-soft-touch px-4 py-3 text-xs font-sans font-semibold uppercase tracking-widest transition-all"
+                                                    className="bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg px-4 py-2.5 text-xs font-sans font-bold uppercase tracking-wider transition-all"
                                                 >
                                                     ✕
                                                 </button>
@@ -1700,28 +1701,49 @@ const FinanceView = ({
                         )}
 
                         {isAddingBill && (
-                            <div className="mb-6 bg-surface p-6 rounded-lg border-2 border-primary-tactile shadow-none animate-in fade-in slide-in-from-top-2">
-                                <div className="mb-4">
-                                    <h4 className="text-[10px] font-sans font-semibold text-primary-tactile uppercase tracking-widest">// NEW_ENTRY_OBLIGATION</h4>
+                            <div className="mb-6 bg-surface p-6 md:p-8 rounded-2xl border border-slate-200 dark:border-white/10 shadow-card animate-in fade-in slide-in-from-top-2 space-y-6">
+                                <div>
+                                    <h4 className="text-[10px] font-sans font-bold text-primary-tactile uppercase tracking-wider flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 bg-primary-tactile rounded-full"></span>
+                                        Registrar Nova Obrigação Fixa
+                                    </h4>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-                                    <input type="text" placeholder="DESCRIPTION" className="px-4 py-2 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.description || ''} onChange={(e) => setNewBill({ ...newBill, description: e.target.value })} />
-                                    <input type="number" placeholder="AMOUNT_BRL" className="px-4 py-2 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.amount || ''} onChange={(e) => setNewBill({ ...newBill, amount: Number(e.target.value) })} />
-                                    <select className="px-4 py-2 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.category || ''} onChange={(e) => setNewBill({ ...newBill, category: e.target.value })}>
-                                        <option value="">SELECT_CATEGORY</option>
-                                        {(settings.billCategories || ['Conta Fixa', 'Poupanca', 'Investimento']).map(cat => (
-                                            <option key={cat} value={cat}>{cat}</option>
-                                        ))}
-                                    </select>
-                                    <input type="number" placeholder="DUE_DAY" max={31} min={1} className="px-4 py-2 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.dueDay || ''} onChange={(e) => setNewBill({ ...newBill, dueDay: Number(e.target.value) })} />
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block">Descrição</label>
+                                        <input type="text" placeholder="ex: Aluguel, Internet..." className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950 text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.description || ''} onChange={(e) => setNewBill({ ...newBill, description: e.target.value })} />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block">Valor (R$)</label>
+                                        <input type="number" placeholder="0.00" className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950 text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.amount || ''} onChange={(e) => setNewBill({ ...newBill, amount: Number(e.target.value) })} />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block">Categoria</label>
+                                        <select className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950 text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.category || ''} onChange={(e) => setNewBill({ ...newBill, category: e.target.value })}>
+                                            <option value="">Selecionar Categoria</option>
+                                            {(settings.billCategories || ['Conta Fixa', 'Poupança', 'Investimento']).map(cat => (
+                                                <option key={cat} value={cat}>{cat}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block">Dia do Vencimento</label>
+                                        <input type="number" placeholder="1-31" max={31} min={1} className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950 text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.dueDay || ''} onChange={(e) => setNewBill({ ...newBill, dueDay: Number(e.target.value) })} />
+                                    </div>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                                    <input type="text" placeholder="BARCODE_LINE" className="px-4 py-2 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.barcode || ''} onChange={(e) => setNewBill({ ...newBill, barcode: e.target.value })} />
-                                    <input type="text" placeholder="PIX_COPY_PASTE" className="px-4 py-2 rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.pixCode || ''} onChange={(e) => setNewBill({ ...newBill, pixCode: e.target.value })} />
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block">Código de Barras (Linha Digitável)</label>
+                                        <input type="text" placeholder="Cole a linha digitável do boleto..." className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950 text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.barcode || ''} onChange={(e) => setNewBill({ ...newBill, barcode: e.target.value })} />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block">Código Pix Copia e Cola</label>
+                                        <input type="text" placeholder="Cole o código Pix Copia e Cola..." className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950 text-on-surface font-sans font-semibold text-xs outline-none focus:ring-1 focus:ring-primary-tactile" value={newBill.pixCode || ''} onChange={(e) => setNewBill({ ...newBill, pixCode: e.target.value })} />
+                                    </div>
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className={`border border-dashed rounded-lg p-4 flex flex-col items-center justify-center cursor-pointer transition-all ${newBill.attachmentUrl ? 'border-primary-tactile bg-blue-50' : 'border-[#e5e7eb] dark:border-white/10 bg-slate-50 hover:bg-slate-100'}`} onClick={() => {
+                                    <div className={`border border-dashed rounded-lg p-4 flex flex-col items-center justify-center cursor-pointer transition-all ${newBill.attachmentUrl ? 'border-primary-tactile bg-blue-50/50' : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100'}`} onClick={() => {
                                         const input = document.createElement('input');
                                         input.type = 'file';
                                         input.accept = 'image/*,.pdf';
@@ -1735,18 +1757,18 @@ const FinanceView = ({
                                         input.click();
                                     }}>
                                         {newBill.attachmentUrl ? (
-                                            <div className="flex items-center gap-2 text-primary-tactile font-sans font-semibold text-[10px] uppercase tracking-tighter">
+                                            <div className="flex items-center gap-2 text-primary-tactile font-sans font-bold text-[10px] uppercase tracking-wider">
                                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
-                                                ATTACHMENT_LOADED
+                                                Boleto Anexado
                                             </div>
                                         ) : (
                                             <div className="text-center text-slate-400">
-                                                <p className="text-[10px] font-sans font-semibold uppercase tracking-widest">UPLOAD_BOLETO_PDF</p>
+                                                <p className="text-[10px] font-sans font-bold uppercase tracking-wider">Anexar PDF ou Imagem do Boleto</p>
                                             </div>
                                         )}
                                     </div>
 
-                                    <div className={`border border-dashed rounded-lg p-4 flex flex-col items-center justify-center cursor-pointer transition-all ${newBill.pixQrCodeUrl ? 'border-emerald-200 bg-emerald-50' : 'border-[#e5e7eb] dark:border-white/10 bg-slate-50 hover:bg-slate-100'}`} onClick={() => {
+                                    <div className={`border border-dashed rounded-lg p-4 flex flex-col items-center justify-center cursor-pointer transition-all ${newBill.pixQrCodeUrl ? 'border-emerald-250 bg-emerald-50/50' : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100'}`} onClick={() => {
                                         const input = document.createElement('input');
                                         input.type = 'file';
                                         input.accept = 'image/*';
@@ -1760,32 +1782,32 @@ const FinanceView = ({
                                         input.click();
                                     }}>
                                         {newBill.pixQrCodeUrl ? (
-                                            <div className="flex items-center gap-2 text-emerald-600 font-sans font-semibold text-[10px] uppercase tracking-tighter">
+                                            <div className="flex items-center gap-2 text-emerald-600 font-sans font-bold text-[10px] uppercase tracking-wider">
                                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
-                                                PIX_QR_LOADED
+                                                QR Code Pix Carregado
                                             </div>
                                         ) : (
                                             <div className="text-center text-slate-400">
-                                                <p className="text-[10px] font-sans font-semibold uppercase tracking-widest">UPLOAD_PIX_QR_IMG</p>
+                                                <p className="text-[10px] font-sans font-bold uppercase tracking-wider">Carregar Imagem do QR Code Pix</p>
                                             </div>
                                         )}
                                     </div>
                                 </div>
 
-                                <div className="flex justify-end gap-3 pt-6 border-t border-[#e5e7eb] dark:border-white/10 mt-6">
-                                    <button onClick={() => setIsAddingBill(false)} className="px-6 py-2 rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest text-slate-400 hover:text-on-surface transition-colors">CANCEL</button>
-                                    <button onClick={handleSaveBill} disabled={uploading === true || !newBill.description || newBill.amount === undefined} className={`px-8 py-2 rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest transition-all ${uploading || !newBill.description || newBill.amount === undefined ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-primary-tactile text-white'}`}>
-                                        {uploading ? 'PROCESSING...' : 'SAVE_RECORD'}
+                                <div className="flex justify-end gap-3 pt-4 border-t border-slate-100 dark:border-white/10">
+                                    <button onClick={() => setIsAddingBill(false)} className="px-5 py-2.5 border border-slate-200 dark:border-white/10 rounded-lg text-xs font-bold text-slate-500 hover:text-on-surface hover:bg-slate-50 dark:hover:bg-slate-850 transition-all">Cancelar</button>
+                                    <button onClick={handleSaveBill} disabled={uploading === true || !newBill.description || newBill.amount === undefined} className={`px-8 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${uploading || !newBill.description || newBill.amount === undefined ? 'bg-slate-150 text-slate-400 dark:bg-slate-800 cursor-not-allowed' : 'bg-primary-tactile hover:bg-primary text-white shadow-sm'}`}>
+                                        {uploading ? 'Processando...' : 'Salvar Obrigação'}
                                     </button>
                                 </div>
                             </div>
                         )}
 
                         {pendingBillRubrics.length > 0 && (
-                            <div className="mb-6 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-on-surface p-6 text-surface shadow-none">
+                            <div className="mb-6 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-900 p-6 shadow-card">
                                 <div className="mb-4">
-                                    <h5 className="text-[10px] font-sans font-semibold uppercase tracking-[0.2em] opacity-60">// PENDING_RUBRICS / NO_ENTRY_DETECTED</h5>
-                                    <p className="text-[8px] font-sans font-semibold uppercase tracking-widest text-white/40 mt-1 italic">ACTION_REQUIRED: INITIALIZE_PERIOD_ENTRIES</p>
+                                    <h5 className="text-[10px] font-sans font-bold uppercase tracking-wider text-slate-650 dark:text-slate-450">// Obrigações pendentes de lançamento no período</h5>
+                                    <p className="text-[9px] font-sans font-semibold uppercase tracking-wider text-slate-400 mt-1 italic">Clique em uma obrigação para pré-preencher um novo lançamento</p>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
                                     {pendingBillRubrics.map(rubric => (
@@ -1802,7 +1824,7 @@ const FinanceView = ({
                                                 });
                                                 setIsAddingBill(true);
                                             }}
-                                            className="rounded-soft-touch border border-white/20 bg-white/5 px-4 py-2 text-[10px] font-sans font-semibold uppercase tracking-widest transition-all hover:bg-white/10 hover:border-white/40"
+                                            className="rounded-lg border border-slate-200 dark:border-white/10 bg-surface text-slate-700 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-800 hover:border-slate-300 dark:hover:border-white/20 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all shadow-sm"
                                         >
                                             {rubric.description}
                                         </button>
@@ -1811,81 +1833,81 @@ const FinanceView = ({
                             </div>
                         )}
 
-                        <div className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-3">
-                            <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-emerald-50/50 p-6 shadow-none">
-                                <div className="text-[9px] font-sans font-semibold uppercase tracking-[0.2em] text-emerald-600 mb-2">// TOTAL_SETTLED</div>
-                                <div className="text-3xl font-sans font-semibold tracking-tighter text-emerald-700">{formatCurrency(billsPaidTotal)}</div>
-                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-widest text-emerald-600/60">{currentMonthBills.filter(bill => bill.isPaid).length} OBLIGATIONS_CLEARED</div>
+                        <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-3">
+                            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-emerald-50/20 dark:bg-emerald-950/10 p-6 shadow-card">
+                                <div className="text-[9px] font-sans font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-450 mb-2">// Total Pago</div>
+                                <div className="text-3xl font-sans font-bold tracking-tight text-emerald-700 dark:text-emerald-400">{formatCurrency(billsPaidTotal)}</div>
+                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-wider text-slate-400">{currentMonthBills.filter(bill => bill.isPaid).length} conta(s) paga(s)</div>
                             </div>
-                            <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-rose-50/50 p-6 shadow-none">
-                                <div className="text-[9px] font-sans font-semibold uppercase tracking-[0.2em] text-rose-600 mb-2">// TOTAL_OUTSTANDING</div>
-                                <div className="text-3xl font-sans font-semibold tracking-tighter text-rose-700">{formatCurrency(billsPendingTotal)}</div>
-                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-widest text-rose-600/60">{currentMonthBills.filter(bill => !bill.isPaid).length} OBLIGATIONS_PENDING</div>
+                            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-rose-50/20 dark:bg-rose-950/10 p-6 shadow-card">
+                                <div className="text-[9px] font-sans font-bold uppercase tracking-wider text-rose-600 dark:text-rose-450 mb-2">// Total Pendente</div>
+                                <div className="text-3xl font-sans font-bold tracking-tight text-rose-700 dark:text-rose-400">{formatCurrency(billsPendingTotal)}</div>
+                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-wider text-slate-400">{currentMonthBills.filter(bill => !bill.isPaid).length} conta(s) pendente(s)</div>
                             </div>
-                            <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-slate-50 p-6 shadow-none">
-                                <div className="text-[9px] font-sans font-semibold uppercase tracking-[0.2em] text-slate-500 mb-2">// LIABILITY_TOTAL</div>
-                                <div className="text-3xl font-sans font-semibold tracking-tighter text-on-surface">{formatCurrency(billsOverallTotal)}</div>
-                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-widest text-slate-400">{currentMonthBills.length} TOTAL_OBLIGATIONS_PERIOD</div>
+                            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-900 p-6 shadow-card">
+                                <div className="text-[9px] font-sans font-bold uppercase tracking-wider text-slate-550 dark:text-slate-400 mb-2">// Valor Total das Contas</div>
+                                <div className="text-3xl font-sans font-bold tracking-tight text-on-surface">{formatCurrency(billsOverallTotal)}</div>
+                                <div className="mt-3 text-[9px] font-sans font-semibold uppercase tracking-wider text-slate-400">{currentMonthBills.length} obrigação(ões) no período</div>
                             </div>
                         </div>
-                        <div className="mb-6 overflow-hidden rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-surface shadow-none">
-                            <div className="border-b border-[#e5e7eb] dark:border-white/10 bg-slate-50 p-6">
+                        <div className="mb-6 overflow-hidden rounded-2xl border border-slate-200 dark:border-white/10 bg-surface shadow-card">
+                            <div className="border-b border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-900 p-6">
                                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
                                     <div className="space-y-1">
-                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">QUERY_FILTER</label>
+                                        <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider">Filtrar por Descrição / Chave</label>
                                         <input
                                             type="text"
-                                            placeholder="ID_BARCODE_PIX"
+                                            placeholder="Buscar por descrição, Pix..."
                                             value={billSearch}
                                             onChange={(e) => setBillSearch(e.target.value)}
-                                            className="w-full rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2.5 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
+                                            className="w-full rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
                                         />
                                     </div>
                                     <div className="space-y-1">
-                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">STATUS_FILTER</label>
-                                        <select value={billStatusFilter} onChange={(e) => setBillStatusFilter(e.target.value as 'all' | 'paid' | 'unpaid')} className="w-full rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2.5 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile">
-                                            <option value="all">ALL_STATUS</option>
-                                            <option value="paid">PAID</option>
-                                            <option value="unpaid">UNPAID</option>
+                                        <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider">Status</label>
+                                        <select value={billStatusFilter} onChange={(e) => setBillStatusFilter(e.target.value as 'all' | 'paid' | 'unpaid')} className="w-full rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile">
+                                            <option value="all">Todos os Status</option>
+                                            <option value="paid">Pagas</option>
+                                            <option value="unpaid">Pendentes</option>
                                         </select>
                                     </div>
                                     <div className="space-y-1">
-                                        <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">TAG_FILTER</label>
-                                        <select value={billCategoryFilter} onChange={(e) => setBillCategoryFilter(e.target.value)} className="w-full rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2.5 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile">
-                                            <option value="all">ALL_CATEGORIES</option>
+                                        <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider">Categoria</label>
+                                        <select value={billCategoryFilter} onChange={(e) => setBillCategoryFilter(e.target.value)} className="w-full rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-2 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile">
+                                            <option value="all">Todas as Categorias</option>
                                             {(settings.billCategories || []).map(cat => (
                                                 <option key={cat} value={cat}>{cat}</option>
                                             ))}
                                         </select>
                                     </div>
                                     <div className="flex items-end">
-                                        <div className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-widest text-slate-500 flex items-center justify-center">
-                                            P: {visibleBills.filter(bill => bill.isPaid).length} / U: {visibleBills.filter(bill => !bill.isPaid).length}
+                                        <div className="w-full rounded-lg border border-slate-250 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center justify-center">
+                                            Pagas: {visibleBills.filter(bill => bill.isPaid).length} | Pendentes: {visibleBills.filter(bill => !bill.isPaid).length}
                                         </div>
                                     </div>
                                     <div className="flex items-end">
-                                        <div className="w-full flex items-center justify-center rounded-soft-touch bg-on-surface text-white px-4 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-[0.2em]">
-                                            COUNT: {visibleBills.length}
+                                        <div className="w-full flex items-center justify-center rounded-lg bg-slate-900 text-white px-4 py-2 text-[10px] font-bold uppercase tracking-wider">
+                                            Filtrados: {visibleBills.length}
                                         </div>
                                     </div>
                                 </div>
                             </div>
                             <div className="overflow-x-auto">
                                 <table className="min-w-full text-sm">
-                                    <thead className="bg-slate-100 text-[10px] font-sans uppercase tracking-widest text-slate-500 border-b border-[#e5e7eb] dark:border-white/10">
+                                    <thead className="bg-slate-100 dark:bg-slate-900 text-[10px] font-sans uppercase tracking-wider text-slate-500 border-b border-slate-200 dark:border-white/10">
                                         <tr>
-                                            <th className="px-4 py-3 text-left font-bold">ACK</th>
-                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleBillSort('description')} className="flex items-center gap-2">DESCRIPTION <span>{getSortIndicator(billSort.key === 'description', billSort.direction)}</span></button></th>
-                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleBillSort('category')} className="flex items-center gap-2">TAG <span>{getSortIndicator(billSort.key === 'category', billSort.direction)}</span></button></th>
-                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleBillSort('dueDay')} className="flex items-center gap-2">DUE <span>{getSortIndicator(billSort.key === 'dueDay', billSort.direction)}</span></button></th>
-                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleBillSort('amount')} className="flex items-center gap-2">VAL <span>{getSortIndicator(billSort.key === 'amount', billSort.direction)}</span></button></th>
-                                            <th className="px-4 py-3 text-left font-bold">DOCS</th>
-                                            <th className="px-4 py-3 text-left font-bold">PIX</th>
-                                            <th className="px-4 py-3 text-left font-bold">STATUS</th>
-                                            <th className="px-4 py-3 text-right font-bold">ACT</th>
+                                            <th className="px-4 py-3 text-left font-bold">Pago</th>
+                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleBillSort('description')} className="flex items-center gap-2">Descrição <span>{getSortIndicator(billSort.key === 'description', billSort.direction)}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleBillSort('category')} className="flex items-center gap-2">Categoria <span>{getSortIndicator(billSort.key === 'category', billSort.direction)}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleBillSort('dueDay')} className="flex items-center gap-2">Vencimento <span>{getSortIndicator(billSort.key === 'dueDay', billSort.direction)}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-bold"><button onClick={() => toggleBillSort('amount')} className="flex items-center gap-2">Valor <span>{getSortIndicator(billSort.key === 'amount', billSort.direction)}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-bold">Anexo</th>
+                                            <th className="px-4 py-3 text-left font-bold">Pix</th>
+                                            <th className="px-4 py-3 text-left font-bold">Status</th>
+                                            <th className="px-4 py-3 text-right font-bold">Ações</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-[#e5e7eb] dark:divide-white/10 bg-white">
+                                    <tbody className="divide-y divide-slate-150 dark:divide-white/10 bg-white dark:bg-slate-900">
                                         {visibleBills.map(bill => {
                                             const prevBill = fixedBills.find(b =>
                                                 b.description === bill.description &&
@@ -1898,114 +1920,114 @@ const FinanceView = ({
 
                                             return (
                                                 <React.Fragment key={bill.id}>
-                                                    <tr className={`cursor-pointer transition-colors font-sans ${isExpanded ? 'bg-slate-50' : 'hover:bg-slate-50'}`} onClick={() => setExpandedBillId(isExpanded ? null : bill.id)}>
+                                                    <tr className={`cursor-pointer transition-colors font-sans ${isExpanded ? 'bg-slate-50 dark:bg-slate-800' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`} onClick={() => setExpandedBillId(isExpanded ? null : bill.id)}>
                                                         <td className="px-4 py-4">
                                                             <input
                                                                 type="checkbox"
                                                                 checked={bill.isPaid}
                                                                 onClick={(e) => e.stopPropagation()}
                                                                 onChange={() => onUpdateBill({ ...bill, isPaid: !bill.isPaid })}
-                                                                className="h-4 w-4 rounded-lg border-[#e5e7eb] dark:border-white/10 text-emerald-600 focus:ring-0 bg-transparent"
+                                                                className="h-4 w-4 rounded-lg border-slate-200 dark:border-white/10 text-emerald-600 focus:ring-0 bg-transparent"
                                                             />
                                                         </td>
                                                         <td className="px-4 py-4">
-                                                            <div className={`font-bold text-xs ${bill.isPaid ? 'text-slate-300 line-through' : 'text-on-surface'}`}>{bill.description}</div>
-                                                            {bill.rubricId && <div className="text-[8px] font-bold uppercase tracking-widest text-slate-400">// LINKED_RESOURCE</div>}
+                                                            <div className={`font-bold text-xs ${bill.isPaid ? 'text-slate-350 dark:text-slate-500 line-through font-normal' : 'text-on-surface font-semibold'}`}>{bill.description}</div>
+                                                            {bill.rubricId && <div className="text-[8px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">// Origem Vinculada</div>}
                                                         </td>
-                                                        <td className="px-4 py-4 font-bold text-[10px] text-slate-500 uppercase">{bill.category || 'FIXED'}</td>
-                                                        <td className="px-4 py-4 font-bold text-[10px] text-slate-500 uppercase">DAY_{bill.dueDay}</td>
+                                                        <td className="px-4 py-4 font-bold text-[10px] text-slate-550 dark:text-slate-400 uppercase">{bill.category || 'Compromisso'}</td>
+                                                        <td className="px-4 py-4 font-bold text-[10px] text-slate-550 dark:text-slate-400 uppercase">Dia {bill.dueDay}</td>
                                                         <td className="px-4 py-4">
-                                                            <div className={`font-bold text-xs ${bill.isPaid ? 'text-slate-300' : 'text-on-surface'}`}>{formatCurrency(bill.amount)}</div>
+                                                            <div className={`font-bold text-xs ${bill.isPaid ? 'text-slate-350 dark:text-slate-500 line-through font-normal' : 'text-on-surface font-semibold'}`}>{formatCurrency(bill.amount)}</div>
                                                             {diff !== 0 && <div className={`text-[9px] font-bold ${diff < 0 ? 'text-emerald-600' : 'text-accent-tactile'}`}>{diff < 0 ? '-' : '+'} {formatCurrency(Math.abs(diff))}</div>}
                                                         </td>
                                                         <td className="px-4 py-4">
-                                                            <span className={`inline-flex border border-[#e5e7eb] dark:border-white/10 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest ${bill.barcode ? 'bg-on-surface text-surface' : 'bg-slate-50 text-slate-300'}`}>
-                                                                {bill.barcode ? 'AVAIL' : 'NONE'}
+                                                            <span className={`inline-flex border border-slate-200 dark:border-white/10 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wider ${bill.barcode ? 'bg-slate-900 text-white dark:bg-slate-800' : 'bg-slate-50 text-slate-300 dark:bg-slate-950 dark:text-slate-600'}`}>
+                                                                {bill.barcode ? 'Disponível' : 'Nenhum'}
                                                             </span>
                                                         </td>
                                                         <td className="px-4 py-4">
-                                                            <span className={`inline-flex border border-[#e5e7eb] dark:border-white/10 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest ${bill.pixCode ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-300'}`}>
-                                                                {bill.pixCode ? 'AVAIL' : 'NONE'}
+                                                            <span className={`inline-flex border border-slate-200 dark:border-white/10 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wider ${bill.pixCode ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20 dark:text-emerald-405' : 'bg-slate-50 text-slate-300 dark:bg-slate-950 dark:text-slate-600'}`}>
+                                                                {bill.pixCode ? 'Disponível' : 'Nenhum'}
                                                             </span>
                                                         </td>
                                                         <td className="px-4 py-4">
-                                                            <span className={`inline-flex border border-[#e5e7eb] dark:border-white/10 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest ${bill.isPaid ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
-                                                                {bill.isPaid ? 'PAID' : 'PENDING'}
+                                                            <span className={`inline-flex border border-slate-200 dark:border-white/10 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wider ${bill.isPaid ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20 dark:text-emerald-405' : 'bg-amber-50 text-amber-600 dark:bg-amber-950/20 dark:text-amber-405'}`}>
+                                                                {bill.isPaid ? 'Pago' : 'Pendente'}
                                                             </span>
                                                         </td>
                                                         <td className="px-4 py-4">
                                                             <div className="flex items-center justify-end gap-2">
-                                                                <button onClick={(e) => { e.stopPropagation(); setExpandedBillId(isExpanded ? null : bill.id); }} className="rounded-soft-touch p-1 text-slate-300 hover:text-on-surface">
+                                                                <button onClick={(e) => { e.stopPropagation(); setExpandedBillId(isExpanded ? null : bill.id); }} className="rounded-lg p-1 text-slate-300 hover:text-on-surface">
                                                                     <svg className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
                                                                 </button>
-                                                                <button onClick={(e) => { e.stopPropagation(); handleTwoStepDelete(`bill_${bill.id}`, () => onDeleteBill(bill.id)); }} className={`rounded-soft-touch p-1 transition-colors ${pendingDeleteKey === `bill_${bill.id}` ? 'bg-accent-tactile text-white' : 'text-slate-200 hover:text-accent-tactile'}`}>
+                                                                <button onClick={(e) => { e.stopPropagation(); handleTwoStepDelete(`bill_${bill.id}`, () => onDeleteBill(bill.id)); }} className={`rounded-lg p-1 transition-colors ${pendingDeleteKey === `bill_${bill.id}` ? 'bg-accent-tactile text-white' : 'text-slate-350 hover:text-accent-tactile'}`}>
                                                                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                                 </button>
                                                             </div>
                                                         </td>
                                                     </tr>
                                                     {isExpanded && (
-                                                        <tr className="bg-slate-50">
-                                                            <td colSpan={9} className="px-4 py-6 border-b border-[#e5e7eb] dark:border-white/10">
+                                                        <tr className="bg-slate-50 dark:bg-slate-800">
+                                                            <td colSpan={9} className="px-4 py-6 border-b border-slate-200 dark:border-white/10">
                                                                 <div className="space-y-6">
                                                                     <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
                                                                         <div>
-                                                                            <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest block mb-1">DESCRIPTION_ID</label>
-                                                                            <input type="text" defaultValue={bill.description} onBlur={(e) => onUpdateBill({ ...bill, description: e.target.value })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2 text-xs font-sans font-semibold text-on-surface" />
+                                                                            <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block mb-1">Descrição</label>
+                                                                            <input type="text" defaultValue={bill.description} onBlur={(e) => onUpdateBill({ ...bill, description: e.target.value })} className="w-full rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-2 text-xs font-sans font-semibold text-on-surface" />
                                                                         </div>
                                                                         <div>
-                                                                            <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest block mb-1">AMOUNT_VAL</label>
-                                                                            <input type="number" defaultValue={bill.amount} onBlur={(e) => onUpdateBill({ ...bill, amount: Number(e.target.value) })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2 text-xs font-sans font-semibold text-on-surface" />
+                                                                            <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block mb-1">Valor (R$)</label>
+                                                                            <input type="number" defaultValue={bill.amount} onBlur={(e) => onUpdateBill({ ...bill, amount: Number(e.target.value) })} className="w-full rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-2 text-xs font-sans font-semibold text-on-surface" />
                                                                         </div>
                                                                         <div>
-                                                                            <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest block mb-1">DUE_CYCLE</label>
-                                                                            <input type="number" min={1} max={31} defaultValue={bill.dueDay} onBlur={(e) => onUpdateBill({ ...bill, dueDay: Number(e.target.value) })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2 text-xs font-sans font-semibold text-on-surface" />
+                                                                            <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block mb-1">Dia do Vencimento</label>
+                                                                            <input type="number" min={1} max={31} defaultValue={bill.dueDay} onBlur={(e) => onUpdateBill({ ...bill, dueDay: Number(e.target.value) })} className="w-full rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-2 text-xs font-sans font-semibold text-on-surface" />
                                                                         </div>
                                                                         <div>
-                                                                            <label className="text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest block mb-1">CATEGORY_TAG</label>
-                                                                            <select defaultValue={bill.category} onBlur={(e) => onUpdateBill({ ...bill, category: e.target.value })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-2 text-xs font-sans font-semibold text-on-surface">
-                                                                                {(settings.billCategories || ['Conta Fixa', 'Poupanca', 'Investimento']).map(cat => (
+                                                                            <label className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider block mb-1">Categoria</label>
+                                                                            <select defaultValue={bill.category} onBlur={(e) => onUpdateBill({ ...bill, category: e.target.value })} className="w-full rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-2 text-xs font-sans font-semibold text-on-surface">
+                                                                                {(settings.billCategories || ['Conta Fixa', 'Poupança', 'Investimento']).map(cat => (
                                                                                     <option key={cat} value={cat}>{cat}</option>
                                                                                 ))}
                                                                             </select>
                                                                         </div>
                                                                     </div>
 
-                                                                    <div className="flex border-b border-[#e5e7eb] dark:border-white/10">
+                                                                    <div className="flex border-b border-slate-200 dark:border-white/10">
                                                                         <button
                                                                             onClick={(e) => { e.stopPropagation(); setActiveBillTabs(prev => ({ ...prev, [bill.id]: 'codigo' })); }}
-                                                                            className={`px-6 py-2 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors border-b-2 ${activeBillTab === 'codigo' ? 'border-primary-tactile text-on-surface' : 'border-transparent text-slate-400 hover:text-on-surface'}`}
+                                                                            className={`px-4 py-2 text-[10px] font-sans font-bold uppercase tracking-wider transition-colors border-b-2 ${activeBillTab === 'codigo' ? 'border-primary-tactile text-on-surface font-bold' : 'border-transparent text-slate-400 hover:text-on-surface'}`}
                                                                         >
-                                                                            CODES_DATA
+                                                                            Códigos de Pagamento
                                                                         </button>
                                                                         <button
                                                                             onClick={(e) => { e.stopPropagation(); setActiveBillTabs(prev => ({ ...prev, [bill.id]: 'arquivo' })); }}
-                                                                            className={`px-6 py-2 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors border-b-2 ${activeBillTab === 'arquivo' ? 'border-primary-tactile text-on-surface' : 'border-transparent text-slate-400 hover:text-on-surface'}`}
+                                                                            className={`px-4 py-2 text-[10px] font-sans font-bold uppercase tracking-wider transition-colors border-b-2 ${activeBillTab === 'arquivo' ? 'border-primary-tactile text-on-surface' : 'border-transparent text-slate-400 hover:text-on-surface'}`}
                                                                         >
-                                                                            FILE_ATTACHMENTS
+                                                                            Anexos e Arquivos
                                                                         </button>
                                                                     </div>
 
                                                                     {activeBillTab === 'codigo' ? (
                                                                         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                                                                            <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white p-4">
-                                                                                <label className="mb-2 block text-[8px] font-sans font-semibold uppercase tracking-widest text-slate-400">BARCODE_RAW</label>
+                                                                            <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 p-4 shadow-sm">
+                                                                                <label className="mb-2 block text-[9px] font-sans font-bold uppercase tracking-wider text-slate-500">Código de Barras</label>
                                                                                 <div className="flex gap-2">
-                                                                                    <input type="text" defaultValue={bill.barcode || ''} onBlur={(e) => onUpdateBill({ ...bill, barcode: e.target.value })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-slate-50 px-4 py-2 font-sans text-[10px] font-bold text-on-surface" />
+                                                                                    <input type="text" defaultValue={bill.barcode || ''} onBlur={(e) => onUpdateBill({ ...bill, barcode: e.target.value })} className="w-full rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-900 px-4 py-2 font-sans text-xs font-semibold text-on-surface" />
                                                                                     {bill.barcode && (
-                                                                                        <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(bill.barcode || ''); }} className="rounded-soft-touch bg-on-surface text-surface px-4 py-2 text-[8px] font-sans font-semibold uppercase tracking-widest">
-                                                                                            COPY
+                                                                                        <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(bill.barcode || ''); }} className="rounded-lg bg-slate-900 text-white px-4 py-2 text-[9px] font-sans font-bold uppercase tracking-wider hover:bg-slate-800 transition-all">
+                                                                                            Copiar
                                                                                         </button>
                                                                                     )}
                                                                                 </div>
                                                                             </div>
-                                                                            <div className="rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white p-4">
-                                                                                <label className="mb-2 block text-[8px] font-sans font-semibold uppercase tracking-widest text-slate-400">PIX_TOKEN</label>
+                                                                            <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 p-4 shadow-sm">
+                                                                                <label className="mb-2 block text-[9px] font-sans font-bold uppercase tracking-wider text-slate-500">Código Pix Copia e Cola</label>
                                                                                 <div className="flex gap-2">
-                                                                                    <input type="text" defaultValue={bill.pixCode || ''} onBlur={(e) => onUpdateBill({ ...bill, pixCode: e.target.value })} className="w-full rounded-soft-touch border border-[#e5e7eb] dark:border-white/10 bg-slate-50 px-4 py-2 font-sans text-[10px] font-bold text-on-surface" />
+                                                                                    <input type="text" defaultValue={bill.pixCode || ''} onBlur={(e) => onUpdateBill({ ...bill, pixCode: e.target.value })} className="w-full rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-900 px-4 py-2 font-sans text-xs font-semibold text-on-surface" />
                                                                                     {bill.pixCode && (
-                                                                                        <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(bill.pixCode || ''); }} className="rounded-soft-touch bg-on-surface text-surface px-4 py-2 text-[8px] font-sans font-semibold uppercase tracking-widest">
-                                                                                            COPY
+                                                                                        <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(bill.pixCode || ''); }} className="rounded-lg bg-slate-900 text-white px-4 py-2 text-[9px] font-sans font-bold uppercase tracking-wider hover:bg-slate-800 transition-all">
+                                                                                            Copiar
                                                                                         </button>
                                                                                     )}
                                                                                 </div>
@@ -2027,13 +2049,13 @@ const FinanceView = ({
                                                                                     };
                                                                                     input.click();
                                                                                 }}
-                                                                                className={`cursor-pointer rounded-lg border border-dashed p-4 transition-colors ${bill.attachmentUrl ? 'border-primary-tactile bg-blue-50' : 'border-[#e5e7eb] dark:border-white/10 bg-white hover:bg-slate-50'}`}
+                                                                                className={`cursor-pointer rounded-xl border border-dashed p-4 transition-colors ${bill.attachmentUrl ? 'border-primary-tactile bg-blue-50/50 dark:bg-blue-950/10' : 'border-slate-250 dark:border-white/10 bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-900'}`}
                                                                             >
-                                                                                <div className="mb-2 text-[8px] font-sans font-semibold uppercase tracking-widest text-slate-400">DOC_BOLETO_PDF</div>
-                                                                                <div className="text-[10px] font-sans font-semibold text-on-surface uppercase">{bill.attachmentUrl ? 'FILE_STATUS: LOADED' : 'ACTION: CLICK_TO_ATTACH'}</div>
+                                                                                <div className="mb-2 text-[9px] font-sans font-bold uppercase tracking-wider text-slate-500">Arquivo do Boleto (PDF/Imagem)</div>
+                                                                                <div className="text-[10px] font-sans font-semibold text-on-surface uppercase">{bill.attachmentUrl ? 'Arquivo Carregado' : 'Clique para anexar arquivo'}</div>
                                                                                 {bill.attachmentUrl && (
-                                                                                    <a href={bill.attachmentUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="mt-3 inline-flex border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-1 text-[8px] font-sans font-semibold uppercase tracking-widest text-on-surface shadow-none hover:bg-slate-50">
-                                                                                        VIEW_DOCUMENT
+                                                                                    <a href={bill.attachmentUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="mt-3 inline-flex border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-1 rounded-lg text-[9px] font-sans font-bold uppercase tracking-wider text-on-surface shadow-sm hover:bg-slate-50">
+                                                                                        Visualizar Documento
                                                                                     </a>
                                                                                 )}
                                                                             </div>
@@ -2051,13 +2073,13 @@ const FinanceView = ({
                                                                                     };
                                                                                     input.click();
                                                                                 }}
-                                                                                className={`cursor-pointer rounded-lg border border-dashed p-4 transition-colors ${bill.pixQrCodeUrl ? 'border-emerald-200 bg-emerald-50' : 'border-[#e5e7eb] dark:border-white/10 bg-white hover:bg-slate-50'}`}
+                                                                                className={`cursor-pointer rounded-xl border border-dashed p-4 transition-colors ${bill.pixQrCodeUrl ? 'border-emerald-250 bg-emerald-50/50 dark:bg-emerald-950/10' : 'border-slate-250 dark:border-white/10 bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-900'}`}
                                                                             >
-                                                                                <div className="mb-2 text-[8px] font-sans font-semibold uppercase tracking-widest text-slate-400">IMG_PIX_QR</div>
-                                                                                <div className="text-[10px] font-sans font-semibold text-on-surface uppercase">{bill.pixQrCodeUrl ? 'FILE_STATUS: LOADED' : 'ACTION: CLICK_TO_ATTACH'}</div>
+                                                                                <div className="mb-2 text-[9px] font-sans font-bold uppercase tracking-wider text-slate-550 dark:text-slate-400">QR Code Pix (Imagem)</div>
+                                                                                <div className="text-[10px] font-sans font-semibold text-on-surface uppercase">{bill.pixQrCodeUrl ? 'Arquivo Carregado' : 'Clique para anexar arquivo'}</div>
                                                                                 {bill.pixQrCodeUrl && (
-                                                                                    <a href={bill.pixQrCodeUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="mt-3 inline-flex border border-[#e5e7eb] dark:border-white/10 bg-white px-4 py-1 text-[8px] font-sans font-semibold uppercase tracking-widest text-on-surface shadow-none hover:bg-slate-50">
-                                                                                        VIEW_DOCUMENT
+                                                                                    <a href={bill.pixQrCodeUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="mt-3 inline-flex border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-4 py-1 rounded-lg text-[9px] font-sans font-bold uppercase tracking-wider text-on-surface shadow-sm hover:bg-slate-50">
+                                                                                        Visualizar Documento
                                                                                     </a>
                                                                                 )}
                                                                             </div>
@@ -2072,7 +2094,7 @@ const FinanceView = ({
                                         })}
                                         {visibleBills.length === 0 && (
                                             <tr>
-                                                <td colSpan={9} className="px-4 py-12 text-center text-[10px] font-sans font-semibold uppercase tracking-widest text-slate-400">NO_RECORDS_FOUND / FILTER_MISMATCH</td>
+                                                <td colSpan={9} className="px-4 py-12 text-center text-xs font-sans font-semibold text-slate-400">Nenhuma obrigação encontrada</td>
                                             </tr>
                                         )}
                                     </tbody>

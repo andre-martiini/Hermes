@@ -1706,7 +1706,7 @@ const App: React.FC = () => {
     return 'system';
   });
   const [prefersDark, setPrefersDark] = useState(false);
-  const [financeActiveTab, setFinanceActiveTab] = useState<'dashboard' | 'fixed'>('dashboard');
+  const [financeActiveTab, setFinanceActiveTab] = useState<'dashboard' | 'income' | 'expense'>('dashboard');
   const [isFinanceSettingsOpen, setIsFinanceSettingsOpen] = useState(false);
   // Modal Mode State
   const [taskModalMode, setTaskModalMode] = useState<'default' | 'edit' | 'execute'>('default');
@@ -4582,10 +4582,16 @@ const App: React.FC = () => {
                           Visão Geral
                         </button>
                         <button
-                          onClick={() => setFinanceActiveTab('fixed')}
-                          className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${financeActiveTab === 'fixed' ? (isDarkTheme ? 'bg-slate-800 text-white shadow-sm border border-slate-700' : 'bg-white text-slate-900 shadow-sm border border-slate-100') : 'text-slate-400 hover:text-slate-600'}`}
+                          onClick={() => setFinanceActiveTab('income')}
+                          className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${financeActiveTab === 'income' ? (isDarkTheme ? 'bg-slate-800 text-white shadow-sm border border-slate-700' : 'bg-white text-slate-900 shadow-sm border border-slate-100') : 'text-slate-400 hover:text-slate-600'}`}
                         >
-                          Obrigações
+                          Entrada
+                        </button>
+                        <button
+                          onClick={() => setFinanceActiveTab('expense')}
+                          className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${financeActiveTab === 'expense' ? (isDarkTheme ? 'bg-slate-800 text-white shadow-sm border border-slate-700' : 'bg-white text-slate-900 shadow-sm border border-slate-100') : 'text-slate-400 hover:text-slate-600'}`}
+                        >
+                          Saída
                         </button>
                       </div>
                       <button
@@ -4710,18 +4716,24 @@ const App: React.FC = () => {
                   {/* Finance Controls */}
                   {viewMode === 'finance' && (
                     <div className="ml-auto flex items-center gap-4">
-                      <div className={`flex gap-1`}>
+                      <div className={`flex p-1 rounded-xl border ${isDarkTheme ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-200'} gap-1`}>
                         <button
                           onClick={() => setFinanceActiveTab('dashboard')}
-                          className={`px-4 py-1.5 text-[10px] uppercase font-black rounded-none transition-all font-mono ${financeActiveTab === 'dashboard' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-emerald-600'}`}
+                          className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${financeActiveTab === 'dashboard' ? (isDarkTheme ? 'bg-slate-800 text-white shadow-sm border border-slate-700' : 'bg-white text-slate-900 shadow-sm border border-slate-100') : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
                         >
                           Visão Geral
                         </button>
                         <button
-                          onClick={() => setFinanceActiveTab('fixed')}
-                          className={`px-4 py-1.5 text-[10px] uppercase font-black rounded-none transition-all font-mono ${financeActiveTab === 'fixed' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-emerald-600'}`}
+                          onClick={() => setFinanceActiveTab('income')}
+                          className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${financeActiveTab === 'income' ? (isDarkTheme ? 'bg-slate-800 text-white shadow-sm border border-slate-700' : 'bg-white text-slate-900 shadow-sm border border-slate-100') : 'text-slate-500 hover:text-slate-750 dark:text-slate-400 dark:hover:text-slate-200'}`}
                         >
-                          Obrigações
+                          Entrada
+                        </button>
+                        <button
+                          onClick={() => setFinanceActiveTab('expense')}
+                          className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${financeActiveTab === 'expense' ? (isDarkTheme ? 'bg-slate-800 text-white shadow-sm border border-slate-700' : 'bg-white text-slate-900 shadow-sm border border-slate-100') : 'text-slate-500 hover:text-slate-750 dark:text-slate-400 dark:hover:text-slate-200'}`}
+                        >
+                          Saída
                         </button>
                       </div>
                       <div className={`flex items-center rounded-xl border shadow-sm overflow-hidden ${isDarkTheme ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
@@ -5524,11 +5536,6 @@ const App: React.FC = () => {
                       showToast("Registro atualizado.", "success");
                     }}
                     isDark={isDarkTheme}
-                    onOpenHealthCopilot={() => {
-                      setCopilotoMode('saude');
-                      setCopilotoAutoStartMic(false);
-                      setIsCopilotoOpen(true);
-                    }}
                   />
                 ) : viewMode === 'contacts' ? (
                   <ContactsView isDark={isDarkTheme} />
@@ -6771,12 +6778,26 @@ const App: React.FC = () => {
             type="button"
             aria-label="Copiloto Hermes"
             onClick={() => {
-              // No módulo de Estratégia o copiloto abre focado nos objetivos/diretrizes
-              // e com as ferramentas de criação/edição/exclusão habilitadas.
-              setCopilotoMode(viewMode === 'strategy' ? 'estrategia' : 'default');
+              if (viewMode === 'saude' || activeModule === 'saude') {
+                setCopilotoMode('saude');
+                setCopilotoAutoStartMic(false);
+              } else if (viewMode === 'finance' || activeModule === 'financeiro') {
+                setCopilotoMode('finance');
+                setCopilotoAutoStartMic(false);
+              } else {
+                // No módulo de Estratégia o copiloto abre focado nos objetivos/diretrizes
+                // e com as ferramentas de criação/edição/exclusão habilitadas.
+                setCopilotoMode(viewMode === 'strategy' ? 'estrategia' : 'default');
+              }
               setIsCopilotoOpen(true);
             }}
-            className="fixed bottom-6 right-6 z-[600] flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 transition-all hover:-translate-y-0.5 hover:bg-indigo-500 active:scale-95 sm:h-16 sm:w-16"
+            className={`fixed bottom-6 right-6 z-[600] flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg transition-all hover:-translate-y-0.5 active:scale-95 sm:h-16 sm:w-16 ${
+              (viewMode === 'saude' || activeModule === 'saude')
+                ? 'bg-red-600 shadow-red-600/30 hover:bg-red-500'
+                : (viewMode === 'finance' || activeModule === 'financeiro')
+                ? 'bg-emerald-600 shadow-emerald-600/30 hover:bg-emerald-500'
+                : 'bg-indigo-600 shadow-indigo-600/30 hover:bg-indigo-500'
+            }`}
           >
             <img
               src="/logo.png"

@@ -23,12 +23,16 @@ if CURRENT_DIR not in sys.path:
     sys.path.insert(0, CURRENT_DIR)
 
 from security_portals import (
+    generatePgdFromDiariesAI,
     generatePgdFromRawTextAI,
+    getPublicFinancePortal,
+    getPublicScholarshipProject,
     getPublicShoppingPortal,
     matchShoppingItemsAI,
-    mutateShoppingList,
     mutatePublicShoppingPortal,
+    mutateShoppingList,
     submitPublicFinanceTransaction,
+    submitPublicScholarshipRegistration,
 )
 from pdf_precision import extract_pdf_text_with_fallback, is_pdf_mime_type
 
@@ -2476,15 +2480,6 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
     # 2. Lembretes de saude enviados somente pelo Telegram.
     default_health_reminders = [
         {
-            "id": "spine_morning",
-            "title": "Rotina lombar",
-            "message": "André, hora da sua rotina lombar. Comece leve: mobilidade, respiração e sem pressa.",
-            "time": "05:00",
-            "enabled": True,
-            "daysOfWeek": [0, 1, 2, 3, 4, 5, 6],
-            "category": "spine",
-        },
-        {
             "id": "lunch_slow",
             "title": "Almoço com calma",
             "message": "André, lembre de comer devagar no almoço. Ritmo baixo também é estratégia.",
@@ -4063,21 +4058,21 @@ def start_file_indexing(item_id, item_data):
 
             prompt = f"""
 
-            Analise o texto abaixo, extraÃ­do de um arquivo Word DOCX, e retorne em JSON:
+            Analise o texto abaixo, extraido de um arquivo Word DOCX, e retorne em JSON:
 
-            1. texto_bruto: ConteÃºdo principal extraÃ­do.
+            1. texto_bruto: Conteudo principal extraido.
 
-            2. resumo_tldr: Resumo de atÃ© 3 linhas.
+            2. resumo_tldr: Resumo de ate 3 linhas.
 
             3. tags: Lista de 5-10 palavras-chave.
 
-            4. area_tematica: Uma Ãºnica palavra de classificaÃ§Ã£o.
+            4. area_tematica: Uma unica palavra de classificacao.
 
-            METADADOS DA EXTRAÃ‡ÃƒO:
+            METADADOS DA EXTRACAO:
 
             {json.dumps(docx_metadata, ensure_ascii=False)}
 
-            TEXTO EXTRAÃDO:
+            TEXTO EXTRAIDO:
 
             {extracted_docx_text[:100000]}
 
@@ -8219,7 +8214,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 return f"Erro ao consultar finanças: {e}"
 
         def consultar_saude(ultimos_dias: int = 7, data_especifica: str = None):
-            """Consulta dados de saúde e exercício do usuário: sono, passos, calorias, hábitos diários e peso.
+            """Consulta dados de saude do usuario: peso, caminhada/passos, calorias, sono e dor.
             Parâmetros:
             - ultimos_dias: número de dias a consultar (padrão: 7, máximo: 30)
             - data_especifica: data no formato YYYY-MM-DD para consulta de um dia específico (sobrepõe ultimos_dias)
@@ -8240,17 +8235,16 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 for d in db.collection('health_exercise_logs').stream():
                     if start_date <= d.id <= end_date:
                         entry = d.to_dict() or {}
-                        entry['data'] = d.id
-                        logs.append(entry)
+                        logs.append({
+                            "data": d.id,
+                            "walk": entry.get("walk"),
+                            "calories": entry.get("calories"),
+                            "activeMinutes": entry.get("activeMinutes"),
+                            "heartRate": entry.get("heartRate"),
+                            "sleep": entry.get("sleep"),
+                            "pain": entry.get("pain"),
+                        })
                 logs.sort(key=lambda x: x['data'], reverse=True)
-
-                habits = []
-                for d in db.collection('health_daily_habits').stream():
-                    if start_date <= d.id <= end_date:
-                        h = d.to_dict() or {}
-                        h['data'] = d.id
-                        habits.append(h)
-                habits.sort(key=lambda x: x['data'], reverse=True)
 
                 weight_start = (today - timedelta(days=30)).isoformat()
                 weights = []
@@ -8262,8 +8256,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
                 result = {
                     "periodo": {"inicio": start_date, "fim": end_date},
-                    "logs_exercicio": logs,
-                    "habitos_diarios": habits,
+                    "telemetria_diaria": logs,
                     "pesos_recentes": weights[:5],
                 }
                 return json.dumps(result, ensure_ascii=False, default=str)
@@ -9270,44 +9263,23 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         elif copilot_mode == "saude":
             mode_context = (
-                "## MODO COPILOTO DE SAÚDE ATIVO\n"
-                "Você está atuando como Copiloto de Saúde do Hermes. Priorize orientações sobre hábitos, exercícios, alimentação, controle de peso, sono e gestão da dor lombar.\n"
-                "Para qualquer métrica de saúde atual, use as ferramentas disponíveis antes de concluir. "
-                "Quando sugerir próximos passos, escreva como proposta para o usuário avaliar; não crie registros, metas ou logs sem confirmação explícita.\n\n"
-                "## PROTOCOLO CLÍNICO PESSOAL DO USUÁRIO\n"
-                "O usuário possui as seguintes condições diagnosticadas e protocolos prescritos:\n\n"
-                "### Diagnósticos\n"
-                "- **Síndrome de Bertolotti**: Megapófise no processo transverso de L5 (LSTV). Pseudoarticulação/fusão com o sacro. Bloqueio cinético L5-S1 > hipermobilidade compensatória em L4-L5. Dor lombar crônica; crises matinais por acúmulo inflamatório durante o sono.\n"
-                "- **DRGE + Esofagite Erosiva Grau A + Hiato diafragmático alargado**: Confirmado endoscopia 18/07/2024. Esfíncter esofágico comprometido por perda do suporte crural.\n\n"
-                "### Rotina matinal de descompressão (antes de qualquer carga axial)\n"
-                "1. Joelho ao peito unilateral: 30s por lado, deitado\n"
-                "2. Postura da criança (Balasana): 1-2 min respiração diafragmática\n"
-                "3. Gato-vaca: 10-15 ciclos lentos sincronizados com respiração\n\n"
+                "## MODO COPILOTO DE SAUDE ATIVO\n"
+                "Voce esta atuando como Copiloto de Saude do Hermes. Priorize leitura e interpretacao operacional de peso, caminhada/passos, calorias, sono e sinais de dor.\n"
+                "Para qualquer metrica de saude atual, use consultar_saude antes de concluir. Nao trate habitos diarios, treino de forca, rotina lombar, flexoes, barras, prancha, ponte, bird-dog ou agachamentos como parte ativa do sistema.\n"
+                "Quando sugerir proximos passos, escreva como proposta para o usuario avaliar; nao crie registros, metas ou logs sem confirmacao explicita.\n\n"
+                "## CONTEXTO CLINICO PESSOAL DO USUARIO\n"
+                "Use este contexto apenas para interpretar dor, sono, caminhada e alimentacao com prudencia, sem prescrever tratamento medico.\n\n"
+                "### Diagnosticos informados\n"
+                "- Sindrome de Bertolotti: variacao lombo-sacra com historico de dor lombar cronica e crises matinais.\n"
+                "- DRGE + esofagite erosiva grau A + hiato diafragmatico alargado, confirmado por endoscopia em 18/07/2024.\n\n"
                 "### Ergonomia ocupacional\n"
-                "- Não sentar/ficar de pé estático >40-45 min; micro-caminhadas de 2 min entre posturas\n\n"
-                "### Estabilização segmentar (diário)\n"
-                "1. Ativação TrA (drawing-in/bracing): 8-10s isometria x10, sem Valsalva\n"
-                "2. Ponte pélvica (bridging): pelve neutra, TrA + glúteo máximo\n"
-                "3. Bird-dog: quadrúpede, braço + perna opostos, pelve sem rotação\n\n"
-                "### Pilates - restrições rígidas\n"
-                "- PROIBIDOS: The Saw, Rolling Like a Ball, Jackknife, rotações extremas de tronco livre\n"
-                "- PERMITIDOS: rotação torácica pura com pelve fixada (T12 para cima), fortalecimento isométrico de core\n\n"
-                "### Protocolo de caminhada (6-6-6 / Fartlek)\n"
-                "- 5-6x/semana, >100 min totais/dia; SOMENTE superfícies planas\n"
-                "- Zona 1 (5-6 min): aquecimento leve\n"
-                "- Zona 2 (20-40 min): alternar vigoroso 3-5 min + lento 1,5-3 min\n"
-                "- Zona 3 (5-6 min): desaquecimento\n"
-                "- Locais Vitória-ES: Parque Pedra da Cebola, Orla Camburi (domingo Rua de Lazer 5h-13h), Parque Botânico Vale\n\n"
-                "### Dieta anti-refluxo e anti-inflamatória\n"
-                "- EVITAR: frituras, ultraprocessados, café forte, carbonatadas, pimenta, chocolate. Não comer nas 3h antes de deitar.\n"
-                "- FAVORECER: gengibre, aveia, frango grelhado, tofu, azeite extravirgem, abacate, nozes\n"
-                "- Suplemento: Bromelina + Rutosídeo\n\n"
-                "### Sequenciamento alimentar (GLP-1 endógeno)\n"
-                "Ordem: 1) Vegetais/fibras folhosas 2) Proteínas magras 3) Carboidratos complexos em porção limitada\n\n"
-                "### Hábitos rastreados\n"
-                "noSugar, noAlcohol, noSnacks, workout, eatUntil18, eatSlowly. Streak = dias consecutivos com >=4/6 hábitos.\n\n"
+                "- Evitar longos periodos estaticos; pausas breves de movimento podem ser propostas como cuidado geral, sem registrar rotina no sistema.\n\n"
+                "### Caminhada\n"
+                "- Priorizar superficies planas e progressao conservadora quando houver dor. Use passos, distancia e minutos ativos como metricas principais.\n\n"
+                "### Dieta anti-refluxo e anti-inflamatoria\n"
+                "- Evitar frituras, ultraprocessados, cafe forte, bebidas carbonatadas, pimenta e chocolate. Evitar comer nas 3h antes de deitar.\n"
+                "- Favorecer opcoes simples e bem toleradas, como aveia, proteinas magras, azeite extravirgem, abacate e nozes quando fizer sentido no contexto.\n\n"
             )
-
         elif copilot_mode == "estrategia":
             # Snapshot completo da estratégia pessoal do usuário, com IDs, para que o
             # copiloto possa conversar sobre os objetivos e operar as ferramentas CRUD.
@@ -12386,15 +12358,92 @@ def gerarResumoFinanceiro(req: https_fn.CallableRequest):
             message="snapshot é obrigatório."
         )
 
-    api_key = get_gemini_api_key()
-    if not api_key:
-        raise https_fn.HttpsError(
-            code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
-            message="Chave Gemini não configurada."
-        )
-
     import json
     import re
+
+    def _safe_num(value, default=0.0):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _money(v):
+        return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    def _finance_fallback_analysis(reason: str = ""):
+        fluxo = snapshot.get("fluxoCaixa") or {}
+        gastos = snapshot.get("gastos") or {}
+        reserva = snapshot.get("reserve") or {}
+        saidas = snapshot.get("obrigacoesSaida") or {}
+
+        renda = _safe_num(fluxo.get("receivedIncome"))
+        gasto = _safe_num(fluxo.get("spent"))
+        saldo = _safe_num(fluxo.get("balance"), renda - gasto)
+        orcamento = _safe_num(gastos.get("budget"))
+        contas_pendentes = _safe_num(saidas.get("pendingAmount"))
+        cobertura = _safe_num(reserva.get("coverageMonths"))
+        comprometimento = (gasto / renda) if renda > 0 else None
+
+        status = "stable"
+        score = 70
+        if saldo < 0 or contas_pendentes > 0 or (comprometimento is not None and comprometimento > 0.9):
+            status = "attention"
+            score = 55
+        if (renda > 0 and saldo < -0.15 * renda) or (orcamento > 0 and gasto > 1.15 * orcamento) or (0 < cobertura < 1):
+            status = "critical"
+            score = 38
+        if saldo > 0 and contas_pendentes <= 0 and cobertura >= 3 and (comprometimento is None or comprometimento < 0.7):
+            status = "strong"
+            score = 84
+
+        if saldo < 0:
+            main_risk = f"Fluxo do mês negativo em {_money(abs(saldo))} (renda {_money(renda)} x gastos {_money(gasto)})."
+        elif contas_pendentes > 0:
+            main_risk = f"Há {_money(contas_pendentes)} em obrigações ainda em aberto neste mês."
+        elif comprometimento is not None and comprometimento > 0.9:
+            main_risk = f"Os gastos consomem {comprometimento * 100:.0f}% da renda recebida."
+        else:
+            main_risk = "Sem risco dominante claro nos dados disponíveis."
+
+        if saldo > 0:
+            positive = f"O mês fecha com sobra de {_money(saldo)}."
+        elif cobertura >= 1:
+            positive = f"A reserva cobre cerca de {cobertura:.1f} mês(es) de orçamento."
+        else:
+            positive = "Os lançamentos já estão registrados para acompanhar o fluxo."
+
+        if status in ("attention", "critical"):
+            action = "Revise as obrigações em aberto e priorize equilibrar gastos e renda antes de assumir novos compromissos."
+        else:
+            action = "Mantenha o ritmo atual e direcione a sobra para a reserva ou para as metas ativas."
+
+        normalized = {
+            "status": status,
+            "score": score,
+            "title": "Análise financeira local",
+            "summary": f"Resumo calculado localmente: renda {_money(renda)}, gastos {_money(gasto)} e saldo {_money(saldo)} no mês.",
+            "mainRisk": main_risk,
+            "positivePoint": positive,
+            "actionProposal": action,
+        }
+        if reason:
+            print(f"Resumo financeiro usando fallback local: {reason}")
+        return {"analysis": normalized, "summary": normalized["summary"], "fallback": True}
+
+    def _extract_json_object(raw_text: str) -> str:
+        clean_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text or "", flags=re.IGNORECASE).strip()
+        if clean_text.startswith("{") and clean_text.endswith("}"):
+            return clean_text
+        start = clean_text.find("{")
+        end = clean_text.rfind("}")
+        if start >= 0 and end > start:
+            return clean_text[start:end + 1]
+        return clean_text
+
+    api_key = get_gemini_api_key()
+    if not api_key:
+        return _finance_fallback_analysis("Chave Gemini não configurada.")
+
     snapshot_text = json.dumps(snapshot, ensure_ascii=False, indent=2)
 
     prompt = f"""Você é um consultor financeiro pessoal. Analise o snapshot financeiro abaixo e gere um diagnóstico de saúde financeira em português.
@@ -12431,7 +12480,7 @@ SNAPSHOT:
         client = genai.Client(api_key=api_key)
         response = generate_content_logged(
             client,
-            model=GEMINI_FRONTIER_MODEL,
+            model=GEMINI_BALANCED_MODEL,
             contents=prompt,
             feature="resumo_financeiro",
             db=get_db(),
@@ -12442,7 +12491,7 @@ SNAPSHOT:
             )
         )
         raw_text = (response.text or "").strip()
-        clean_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=re.IGNORECASE).strip()
+        clean_text = _extract_json_object(raw_text)
         analysis = json.loads(clean_text)
 
         allowed_status = {"critical", "attention", "stable", "strong"}
@@ -12467,11 +12516,8 @@ SNAPSHOT:
         }
         return {"analysis": normalized, "summary": normalized["summary"]}
     except Exception as e:
-        print(f"Erro ao gerar resumo financeiro: {e}")
-        raise https_fn.HttpsError(
-            code=https_fn.FunctionsErrorCode.INTERNAL,
-            message="Erro ao gerar resumo financeiro."
-        )
+        print(f"Erro ao gerar resumo financeiro: {repr(e)}")
+        return _finance_fallback_analysis(str(e))
 
 
 @https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=60)
@@ -12492,49 +12538,121 @@ def gerarResumoSaude(req: https_fn.CallableRequest):
             message="snapshot é obrigatório."
         )
 
-    api_key = get_gemini_api_key()
-    if not api_key:
-        raise https_fn.HttpsError(
-            code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
-            message="Chave Gemini não configurada."
-        )
-
     import json
     import re
+
+    def _health_fallback_analysis(reason: str = ""):
+        biometria = snapshot.get("biometria") or {}
+        atividade = snapshot.get("atividade7d") or {}
+        sono = snapshot.get("sono7d") or {}
+        dor = snapshot.get("dor7d") or {}
+        avg_steps = atividade.get("mediaPassosDia")
+        avg_sleep = sono.get("mediaTotalMin")
+        trend_weight = biometria.get("tendencia30d")
+        pain_crisis = dor.get("crisesRecentes") or 0
+        ideal_days = atividade.get("diasMetaIdealAtingida") or 0
+
+        status = "stable"
+        score = 72
+        if pain_crisis > 0 or (isinstance(avg_sleep, (int, float)) and avg_sleep < 360) or (isinstance(trend_weight, (int, float)) and trend_weight > 1.5):
+            status = "attention"
+            score = 58
+        if pain_crisis >= 2 or (
+            isinstance(avg_sleep, (int, float)) and avg_sleep < 330
+            and isinstance(avg_steps, (int, float)) and avg_steps < 3500
+        ):
+            status = "critical"
+            score = 38
+        if (
+            isinstance(avg_sleep, (int, float)) and avg_sleep >= 420
+            and isinstance(avg_steps, (int, float)) and avg_steps >= 7000
+            and ideal_days >= 3
+            and pain_crisis == 0
+        ):
+            status = "strong"
+            score = 84
+
+        steps_text = f"{int(avg_steps):,}".replace(",", ".") + " passos/dia" if isinstance(avg_steps, (int, float)) else "passos ainda sem media"
+        sleep_text = f"{avg_sleep / 60:.1f}h de sono medio" if isinstance(avg_sleep, (int, float)) else "sono ainda sem media"
+        weight_text = (
+            f"tendencia de {'+' if trend_weight > 0 else ''}{trend_weight:.1f} kg em 30 dias"
+            if isinstance(trend_weight, (int, float))
+            else "peso sem tendencia recente"
+        )
+        main_risk = (
+            f"{pain_crisis} crise(s) de dor registradas nos ultimos 7 dias."
+            if pain_crisis
+            else "Sem risco dominante claro nos dados disponiveis."
+        )
+        positive = (
+            f"{ideal_days} dia(s) atingiram a meta ideal de caminhada."
+            if ideal_days > 0
+            else "Sono medio acima de 7h no periodo com dados."
+            if isinstance(avg_sleep, (int, float)) and avg_sleep >= 420
+            else "O painel ja possui dados suficientes para acompanhar tendencia."
+        )
+
+        normalized = {
+            "status": status,
+            "score": score,
+            "title": "Analise local de saude",
+            "summary": f"Resumo calculado localmente: {steps_text}, {sleep_text} e {weight_text}.",
+            "mainRisk": main_risk,
+            "positivePoint": positive,
+            "actionProposal": "Nesta semana, priorize sincronizar telemetria diariamente e manter a caminhada minima antes de aumentar intensidade.",
+        }
+        if reason:
+            print(f"Resumo de saude usando fallback local: {reason}")
+        return {"analysis": normalized, "summary": normalized["summary"], "fallback": True}
+
+    def _extract_json_object(raw_text: str) -> str:
+        clean_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text or "", flags=re.IGNORECASE).strip()
+        if clean_text.startswith("{") and clean_text.endswith("}"):
+            return clean_text
+        start = clean_text.find("{")
+        end = clean_text.rfind("}")
+        if start >= 0 and end > start:
+            return clean_text[start:end + 1]
+        return clean_text
+
+    api_key = get_gemini_api_key()
+    if not api_key:
+        return _health_fallback_analysis("Chave Gemini nao configurada.")
+
     snapshot_text = json.dumps(snapshot, ensure_ascii=False, indent=2)
 
-    prompt = f"""Você é um coach de saúde pessoal e analista de bem-estar. Analise o snapshot de saúde abaixo e gere um diagnóstico em português.
+    prompt = f"""Voce e um coach de saude pessoal e analista de bem-estar. Analise o snapshot de saude abaixo e gere um diagnostico em portugues.
 
-O snapshot contém dados reais do usuário: biometria (peso e meta), hábitos diários (taxa de adesão por hábito nos últimos 7 e 30 dias, streak), atividade física (média de passos, distância, calorias, dias com meta atingida), sono (média de horas, sono profundo, dias abaixo de 7h) e dor (escala 0-10 matinal/noturna, crises recentes).
+O snapshot contem dados reais do usuario: biometria (peso e meta), caminhada/atividade (media de passos, distancia, calorias e dias com meta atingida), sono (media de horas, sono profundo, dias abaixo de 7h) e dor (escala 0-10 matinal/noturna, crises recentes).
 
-Regras obrigatórias:
-- Responda somente JSON válido, sem markdown, sem títulos externos e sem emojis.
-- Não crie tarefas, registros ou qualquer ação dentro do sistema.
-- O campo "actionProposal" deve ser uma proposta textual concreta e específica para o usuário avaliar esta semana.
-- Seja específico com os números mais relevantes do snapshot.
-- Se algum dado estiver ausente (null), ignore essa dimensão na análise.
-- Priorize as dimensões com dados mais completos.
+Regras obrigatorias:
+- Responda somente JSON valido, sem markdown, sem titulos externos e sem emojis.
+- Nao crie tarefas, registros ou qualquer acao dentro do sistema.
+- O campo "actionProposal" deve ser uma proposta textual concreta e especifica para o usuario avaliar esta semana.
+- Seja especifico com os numeros mais relevantes do snapshot.
+- Se algum dado estiver ausente (null), ignore essa dimensao na analise.
+- Priorize as dimensoes com dados mais completos.
+- Nao avalie habitos diarios, rotina lombar, treino de forca, flexoes, barras, prancha, ponte, bird-dog ou agachamentos.
 
 Formato exato:
 {{
   "status": "critical" | "attention" | "stable" | "strong",
   "score": 0,
-  "title": "frase curta com o diagnóstico central",
-  "summary": "síntese em 1 ou 2 frases, com números reais do snapshot",
-  "mainRisk": "principal ponto de atenção com números específicos",
-  "positivePoint": "ponto positivo real do período, ou cautela se não houver",
-  "actionProposal": "proposta prática e específica para esta semana, sem executar nada"
+  "title": "frase curta com o diagnostico central",
+  "summary": "sintese em 1 ou 2 frases, com numeros reais do snapshot",
+  "mainRisk": "principal ponto de atencao com numeros especificos",
+  "positivePoint": "ponto positivo real do periodo, ou cautela se nao houver",
+  "actionProposal": "proposta pratica e especifica para esta semana, sem executar nada"
 }}
 
-Critérios de status:
-- "critical": peso muito acima da meta E hábitos ruins E sono deteriorado E dor elevada. Ou crise de dor recente com outros indicadores negativos.
-- "attention": desequilíbrio em 2+ dimensões (ex: baixa adesão a hábitos, sono abaixo de 6h na média, peso crescendo consistentemente).
-- "stable": maioria das dimensões controladas, sem deterioração clara, adesão razoável a hábitos.
-- "strong": boa adesão a hábitos (>70% em 30d), peso próximo ou abaixo da meta, sono adequado (>7h média), atividade física regular, dor baixa ou ausente.
+Criterios de status:
+- "critical": crise de dor recente com outros indicadores negativos, sono muito baixo, passos muito baixos ou peso muito acima da meta com tendencia de alta.
+- "attention": desequilibrio em 2+ dimensoes (ex: sono abaixo de 6h na media, passos baixos, peso crescendo consistentemente ou dor recorrente).
+- "stable": maioria das dimensoes controladas, sem deterioracao clara.
+- "strong": peso proximo ou abaixo da meta, sono adequado (>7h media), caminhada regular e dor baixa ou ausente.
 
 SNAPSHOT:
 {snapshot_text}"""
-
     try:
         client = genai.Client(api_key=api_key)
         response = generate_content_logged(
@@ -12550,7 +12668,7 @@ SNAPSHOT:
             )
         )
         raw_text = (response.text or "").strip()
-        clean_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=re.IGNORECASE).strip()
+        clean_text = _extract_json_object(raw_text)
         analysis = json.loads(clean_text)
 
         allowed_status = {"critical", "attention", "stable", "strong"}
@@ -12576,10 +12694,7 @@ SNAPSHOT:
         return {"analysis": normalized, "summary": normalized["summary"]}
     except Exception as e:
         print(f"Erro ao gerar resumo de saúde: {e}")
-        raise https_fn.HttpsError(
-            code=https_fn.FunctionsErrorCode.INTERNAL,
-            message="Erro ao gerar resumo de saúde."
-        )
+        return _health_fallback_analysis(str(e))
 
 
 def get_people_service():
@@ -13060,6 +13175,7 @@ _LONG_TRANSCRIPTION_VIDEO_EXTS = {
 
 
 @storage_fn.on_object_finalized(
+    bucket="gestao-hermes.firebasestorage.app",
     region="us-east1",
     timeout_sec=540,
     memory=options.MemoryOption.GB_4,

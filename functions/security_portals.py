@@ -242,7 +242,11 @@ def _shopping_item_ref(db, item_id: str):
     return ref, snap.to_dict() or {}
 
 
-@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=120)
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=120
+)
 def matchShoppingItemsAI(req: https_fn.CallableRequest):
     require_authenticated(req)
 
@@ -355,7 +359,11 @@ Responda SOMENTE com JSON valido, sem markdown, sem explicacoes:
         )
 
 
-@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=120)
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=120
+)
 def generatePgdFromDiariesAI(req: https_fn.CallableRequest):
     require_authenticated(req)
 
@@ -422,7 +430,11 @@ def generatePgdFromDiariesAI(req: https_fn.CallableRequest):
         )
 
 
-@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=120)
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=120
+)
 def generatePgdFromRawTextAI(req: https_fn.CallableRequest):
     require_authenticated(req)
 
@@ -487,7 +499,10 @@ def generatePgdFromRawTextAI(req: https_fn.CallableRequest):
 
 
 
-@https_fn.on_call(timeout_sec=60)
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
+    timeout_sec=60
+)
 def getPublicFinancePortal(req: https_fn.CallableRequest):
     data = req.data or {}
     token = data.get('token')
@@ -513,7 +528,10 @@ def getPublicFinancePortal(req: https_fn.CallableRequest):
     }
 
 
-@https_fn.on_call(timeout_sec=60)
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
+    timeout_sec=60
+)
 def submitPublicFinanceTransaction(req: https_fn.CallableRequest):
     data = req.data or {}
     token = data.get('token')
@@ -555,7 +573,10 @@ def submitPublicFinanceTransaction(req: https_fn.CallableRequest):
     return {'success': True, 'id': ref.id}
 
 
-@https_fn.on_call(timeout_sec=60)
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
+    timeout_sec=60
+)
 def getPublicShoppingPortal(req: https_fn.CallableRequest):
     data = req.data or {}
     token = data.get('token')
@@ -572,7 +593,10 @@ def getPublicShoppingPortal(req: https_fn.CallableRequest):
     return {'valid': True, 'items': items}
 
 
-@https_fn.on_call(timeout_sec=60)
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
+    timeout_sec=60
+)
 def mutatePublicShoppingPortal(req: https_fn.CallableRequest):
     data = req.data or {}
     token = data.get('token')
@@ -620,7 +644,10 @@ def mutatePublicShoppingPortal(req: https_fn.CallableRequest):
     return {'success': True}
 
 
-@https_fn.on_call(timeout_sec=60)
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
+    timeout_sec=60
+)
 def mutateShoppingList(req: https_fn.CallableRequest):
     require_authenticated(req)
 
@@ -802,7 +829,10 @@ def mutateShoppingList(req: https_fn.CallableRequest):
     return {'success': True, 'affected': affected}
 
 
-@https_fn.on_call(timeout_sec=60)
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
+    timeout_sec=60
+)
 def getPublicScholarshipProject(req: https_fn.CallableRequest):
     data = req.data or {}
     project_id = str(data.get('projectId') or '').strip()
@@ -836,7 +866,10 @@ def getPublicScholarshipProject(req: https_fn.CallableRequest):
     }
 
 
-@https_fn.on_call(timeout_sec=60)
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
+    timeout_sec=60
+)
 def submitPublicScholarshipRegistration(req: https_fn.CallableRequest):
     data = req.data or {}
     project_id = str(data.get('projectId') or '').strip()

@@ -38,51 +38,41 @@ const STATUS_STYLES: Record<FinancialHealthStatus, {
     label: string;
     container: string;
     eyebrow: string;
-    title: string;
-    text: string;
     muted: string;
     badge: string;
-    divider: string;
+    accent: string;
 }> = {
     critical: {
         label: 'Crítico',
-        container: 'bg-rose-50 border-rose-300 shadow-[inset_0_4px_12px_rgba(190,18,60,0.10)]',
-        eyebrow: 'text-rose-700/70',
-        title: 'text-rose-950',
-        text: 'text-rose-950/85',
-        muted: 'text-rose-800/65',
-        badge: 'bg-rose-600 text-white',
-        divider: 'border-rose-200',
+        container: 'border-rose-200 dark:border-rose-900/30',
+        eyebrow: 'text-rose-700',
+        muted: 'text-rose-700',
+        badge: 'bg-rose-100 text-rose-800 dark:bg-rose-950/20 dark:text-rose-400',
+        accent: 'bg-rose-600',
     },
     attention: {
         label: 'Atenção',
-        container: 'bg-amber-50 border-amber-300 shadow-[inset_0_4px_12px_rgba(180,83,9,0.10)]',
-        eyebrow: 'text-amber-700/75',
-        title: 'text-amber-950',
-        text: 'text-amber-950/85',
-        muted: 'text-amber-800/65',
-        badge: 'bg-amber-500 text-amber-950',
-        divider: 'border-amber-200',
+        container: 'border-amber-200 dark:border-amber-900/30',
+        eyebrow: 'text-amber-700',
+        muted: 'text-amber-700',
+        badge: 'bg-amber-100 text-amber-800 dark:bg-amber-950/20 dark:text-amber-400',
+        accent: 'bg-amber-500',
     },
     stable: {
         label: 'Estável',
-        container: 'bg-sky-50 border-sky-300 shadow-[inset_0_4px_12px_rgba(2,132,199,0.10)]',
-        eyebrow: 'text-sky-700/70',
-        title: 'text-sky-950',
-        text: 'text-sky-950/85',
-        muted: 'text-sky-800/65',
-        badge: 'bg-sky-600 text-white',
-        divider: 'border-sky-200',
+        container: 'border-sky-200 dark:border-sky-900/30',
+        eyebrow: 'text-sky-700',
+        muted: 'text-sky-700',
+        badge: 'bg-sky-100 text-sky-800 dark:bg-sky-950/20 dark:text-sky-400',
+        accent: 'bg-sky-600',
     },
     strong: {
         label: 'Forte',
-        container: 'bg-emerald-50 border-emerald-300 shadow-[inset_0_4px_12px_rgba(5,150,105,0.10)]',
-        eyebrow: 'text-emerald-700/70',
-        title: 'text-emerald-950',
-        text: 'text-emerald-950/85',
-        muted: 'text-emerald-800/65',
-        badge: 'bg-emerald-600 text-white',
-        divider: 'border-emerald-200',
+        container: 'border-emerald-200 dark:border-emerald-900/30',
+        eyebrow: 'text-emerald-700',
+        muted: 'text-emerald-700',
+        badge: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-400',
+        accent: 'bg-emerald-600',
     },
 };
 
@@ -295,113 +285,78 @@ export function FinancialHealthCard(props: FinancialHealthCardProps) {
     );
 
     return (
-        <div className={`p-4 rounded-lg border-4 flex flex-col gap-4 ${styles.container}`}>
-            <div className="flex items-start justify-between gap-3 shrink-0">
-                <div className="min-w-0">
-                    <p className={`text-[10px] font-black uppercase tracking-[0.2em] font-sans ${styles.eyebrow}`}>
-                        Saúde Financeira
-                    </p>
-                    <h3 className={`mt-1 text-base font-black leading-tight ${styles.title}`}>
-                        {visibleAnalysis.title}
-                    </h3>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                    {props.onOpenFinancialCopilot && (
-                        <button
-                            type="button"
-                            onClick={props.onOpenFinancialCopilot}
-                            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 border text-[9px] font-black uppercase tracking-[0.14em] font-sans transition-all ${visibleAnalysis.status === 'critical'
-                                ? 'border-rose-300 bg-white/60 text-rose-800 hover:bg-white'
-                                : visibleAnalysis.status === 'attention'
-                                ? 'border-amber-300 bg-white/60 text-amber-900 hover:bg-white'
-                                : visibleAnalysis.status === 'stable'
-                                ? 'border-sky-300 bg-white/60 text-sky-800 hover:bg-white'
-                                : 'border-emerald-300 bg-white/60 text-emerald-800 hover:bg-white'
-                            }`}
-                            title="Conversar com o copiloto financeiro"
-                        >
-                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 10v2m0-2c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            Copiloto
-                        </button>
-                    )}
-                    {typeof visibleAnalysis.score === 'number' && (
-                        <span className={`text-[10px] font-bold uppercase tracking-wider font-sans ${styles.muted}`}>
-                            {visibleAnalysis.score}/100
+        <div className={`relative overflow-hidden rounded-2xl border bg-white dark:bg-slate-900 p-5 shadow-card ${styles.container}`}>
+            <div className={`absolute left-0 top-0 h-full w-1 ${styles.accent}`} />
+            <div className="flex flex-col gap-4 pl-2">
+                <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                        <p className={`text-[10px] font-semibold uppercase tracking-[0.05em] font-sans ${styles.eyebrow}`}>
+                            Saúde Financeira
+                        </p>
+                        <h3 className="mt-1 text-base font-bold leading-tight text-on-surface">
+                            {visibleAnalysis.title}
+                        </h3>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                        {typeof visibleAnalysis.score === 'number' && (
+                            <span className={`text-[10px] font-semibold uppercase tracking-[0.05em] font-sans ${styles.muted}`}>
+                                {visibleAnalysis.score}/100
+                            </span>
+                        )}
+                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.05em] font-sans ${styles.badge}`}>
+                            {loading ? 'Analisando' : styles.label}
                         </span>
-                    )}
-                    <span className={`px-2 py-1 text-[9px] font-black uppercase tracking-[0.16em] font-sans ${styles.badge}`}>
-                        {loading ? 'Analisando' : styles.label}
-                    </span>
+                    </div>
                 </div>
+
+                {analysis ? (
+                    <>
+                        <p className="text-sm font-medium leading-relaxed text-on-surface-variant">
+                            {visibleAnalysis.summary}
+                        </p>
+
+                        {hasStructuredDetails && (
+                            <div className="grid gap-3 border-t border-border-subtle pt-3 sm:grid-cols-2">
+                                <div>
+                                    <p className={`text-[10px] font-semibold uppercase tracking-[0.05em] font-sans ${styles.eyebrow}`}>
+                                        Risco principal
+                                    </p>
+                                    <p className="mt-1 text-xs font-semibold leading-relaxed text-on-surface-variant">
+                                        {visibleAnalysis.mainRisk}
+                                    </p>
+                                </div>
+                                <div>
+                                    <p className={`text-[10px] font-semibold uppercase tracking-[0.05em] font-sans ${styles.eyebrow}`}>
+                                        Ponto positivo
+                                    </p>
+                                    <p className="mt-1 text-xs font-semibold leading-relaxed text-on-surface-variant">
+                                        {visibleAnalysis.positivePoint}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        {hasStructuredDetails && (
+                            <div className="border-t border-border-subtle pt-3">
+                                <p className={`text-[10px] font-semibold uppercase tracking-[0.05em] font-sans ${styles.eyebrow}`}>
+                                    Proposta de ação
+                                </p>
+                                <p className="mt-1 text-sm font-bold leading-relaxed text-on-surface">
+                                    {visibleAnalysis.actionProposal}
+                                </p>
+                            </div>
+                        )}
+                    </>
+                ) : loading ? (
+                    <div className="space-y-3">
+                        <div className="h-3 w-2/3 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
+                        <div className="h-16 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
+                    </div>
+                ) : (
+                    <p className={`text-sm font-semibold ${styles.muted}`}>Aguardando análise...</p>
+                )}
+
             </div>
-
-            {analysis ? (
-                <>
-                    <p className={`text-sm font-medium leading-relaxed ${styles.text}`}>
-                        {visibleAnalysis.summary}
-                    </p>
-
-                    {hasStructuredDetails && (
-                        <div className={`grid gap-3 sm:grid-cols-2 border-t pt-3 ${styles.divider}`}>
-                            <div>
-                                <p className={`text-[9px] font-black uppercase tracking-[0.18em] font-sans ${styles.eyebrow}`}>
-                                    Risco principal
-                                </p>
-                                <p className={`mt-1 text-xs font-bold leading-relaxed ${styles.text}`}>
-                                    {visibleAnalysis.mainRisk}
-                                </p>
-                            </div>
-                            <div>
-                                <p className={`text-[9px] font-black uppercase tracking-[0.18em] font-sans ${styles.eyebrow}`}>
-                                    Ponto positivo
-                                </p>
-                                <p className={`mt-1 text-xs font-bold leading-relaxed ${styles.text}`}>
-                                    {visibleAnalysis.positivePoint}
-                                </p>
-                            </div>
-                        </div>
-                    )}
-
-                    {hasStructuredDetails && (
-                        <div className={`border-t pt-3 ${styles.divider}`}>
-                            <p className={`text-[9px] font-black uppercase tracking-[0.18em] font-sans ${styles.eyebrow}`}>
-                                Proposta de ação
-                            </p>
-                            <p className={`mt-1 text-sm font-black leading-relaxed ${styles.title}`}>
-                                {visibleAnalysis.actionProposal}
-                            </p>
-                        </div>
-                    )}
-                </>
-            ) : loading ? (
-                <div className="space-y-3">
-                    <div className="h-3 w-2/3 rounded-lg animate-pulse bg-black/10" />
-                    <div className="h-16 rounded-lg animate-pulse bg-black/10" />
-                </div>
-            ) : (
-                <p className={`text-sm font-bold italic ${styles.muted}`}>Aguardando análise...</p>
-            )}
-            {props.onOpenFinancialCopilot && (
-                <button
-                    type="button"
-                    onClick={props.onOpenFinancialCopilot}
-                    className={`sm:hidden flex items-center justify-center gap-2 border px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] font-sans transition-all ${visibleAnalysis.status === 'critical'
-                        ? 'border-rose-300 bg-white/60 text-rose-800'
-                        : visibleAnalysis.status === 'attention'
-                        ? 'border-amber-300 bg-white/60 text-amber-900'
-                        : visibleAnalysis.status === 'stable'
-                        ? 'border-sky-300 bg-white/60 text-sky-800'
-                        : 'border-emerald-300 bg-white/60 text-emerald-800'
-                    }`}
-                >
-                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 10v2m0-2c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    Conversar com copiloto financeiro
-                </button>
-            )}
         </div>
     );
 }
