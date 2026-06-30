@@ -65,6 +65,7 @@ from knowledge_graph import (  # noqa: F401 — registra as Cloud Functions
     get_artefato_raw_text,
 )
 from hermes_core_logic import (  # noqa: F401 — registra as Cloud Functions
+    telegramWebhook,
     on_telegram_inbound,
     carregar_areas_tematicas_validas,
     normalizar_area_tematica,
