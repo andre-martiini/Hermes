@@ -12169,6 +12169,11 @@ def analisarInsightProativo(req: https_fn.CallableRequest):
     prazo_final = (data.get('prazoFinal') or '').strip()
     plano_acao = data.get('planoAcao') or []
     acompanhamento_recente = data.get('acompanhamentoRecente') or []
+    # Opiniões que o usuário marcou como "não sugerir novamente" — supressão permanente.
+    insights_ignorados = [
+        t.strip() for t in (data.get('insightsIgnorados') or [])
+        if isinstance(t, str) and t.strip()
+    ]
 
     if not task_id:
         raise https_fn.HttpsError(
@@ -12196,6 +12201,43 @@ def analisarInsightProativo(req: https_fn.CallableRequest):
             for entry in acompanhamento_recente[-10:]
         ]) or 'Nenhum registro.'
 
+        # Insights proativos já emitidos recentemente para esta ação. Sem isso, o
+        # modelo re-analisa o estado do zero a cada mudança no plano/diário e, se
+        # uma preocupação anterior não foi sanada, reformula a MESMA observação com
+        # outras palavras — gerando duplicatas. Carregamos os últimos para que o
+        # modelo evite repetir e para a rede de segurança por similaridade abaixo.
+        insights_anteriores = []
+        try:
+            sess_docs = db.collection('sessoes_copiloto')\
+                .where('taskId', '==', task_id)\
+                .limit(10).get()
+            for sdoc in sess_docs:
+                sdata = sdoc.to_dict()
+                if sdata.get('isTemporary'):
+                    continue
+                # Ordena só por timestamp (sem where composto) para não exigir
+                # índice composto; filtra subtype em memória.
+                msg_docs = sdoc.reference.collection('mensagens')\
+                    .order_by('timestamp', direction=firestore.Query.DESCENDING)\
+                    .limit(30).get()
+                for mdoc in msg_docs:
+                    m = mdoc.to_dict()
+                    if m.get('subtype') == 'proactive_insight':
+                        txt = (m.get('content') or '').strip()
+                        if txt:
+                            insights_anteriores.append(txt)
+        except Exception as _e:
+            print(f"[analisarInsightProativo] Falha ao carregar insights anteriores: {_e}")
+        insights_anteriores = insights_anteriores[:5]
+
+        insights_anteriores_txt = '\n'.join(
+            f"- {t}" for t in insights_anteriores
+        ) or 'Nenhum insight emitido ainda.'
+
+        insights_ignorados_txt = '\n'.join(
+            f"- {t}" for t in insights_ignorados[:30]
+        ) or 'Nenhuma.'
+
         prompt = f"""Você é um analista de produtividade. Analise o estado atual desta ação e determine se há um insight genuinamente útil.
 
 CONTEXTO:
@@ -12210,6 +12252,12 @@ PLANO DE AÇÃO:
 
 DIÁRIO (entradas recentes):
 {diario_txt}
+
+INSIGHTS QUE VOCÊ JÁ EMITIU RECENTEMENTE PARA ESTA AÇÃO:
+{insights_anteriores_txt}
+
+OPINIÕES QUE O USUÁRIO PEDIU EXPLICITAMENTE PARA IGNORAR (NÃO LEVANTE NENHUMA DESTAS, NEM REFORMULADA):
+{insights_ignorados_txt}
 
 CLASSIFICAÇÃO:
 - NIVEL_1 (Crítico): Erro lógico real (ex: planejar algo para o passado ou pós-conclusão), gargalo crítico esquecido.
@@ -12228,6 +12276,8 @@ ESTILO:
 
 REGRAS:
 - Só retorne insight se for genuinamente valioso. Evite insights genéricos ou óbvios.
+- ANTI-REPETIÇÃO (regra mais importante): se a sua observação for substancialmente a mesma (mesmo tema, mesmo ponto cego ou mesma sugestão) de algum item em "INSIGHTS QUE VOCÊ JÁ EMITIU RECENTEMENTE" — ainda que reformulada com outras palavras — e o plano/diário ainda NÃO tiver incorporado aquela sugestão, retorne SEM_INSIGHT. Não fique reiterando uma opinião que não foi sanada. Só volte a um tema já levantado se houver um fato genuinamente novo a acrescentar.
+- OPINIÕES IGNORADAS (regra absoluta): se a sua observação coincidir com qualquer item em "OPINIÕES QUE O USUÁRIO PEDIU EXPLICITAMENTE PARA IGNORAR" — mesmo que parcialmente ou reformulada — retorne SEM_INSIGHT obrigatoriamente. O usuário já decidiu não tratar disso.
 - Para alvo "plano", inclua plano_proposto com todos os itens revisados (array de objetos com "id", "text", "completed").
 - Para alvo "acoes", inclua acoes_propostas (array de objetos com "titulo", "descricao", "tags").
 - Use IDs de 8 chars para itens novos no plano. Preserve id e completed dos itens existentes quando mantidos.
@@ -12269,6 +12319,33 @@ Se SEM_INSIGHT: {{"nivel": null, "texto": null, "alvo": null, "plano_proposto": 
             nivel = None
         if alvo not in ('diario', 'plano', 'acoes', None):
             alvo = None
+
+        # Rede de segurança: mesmo com as regras acima, o modelo pode reformular um
+        # insight anterior ou uma opinião ignorada. Suprimimos quando há forte
+        # sobreposição de termos (Jaccard). Opiniões ignoradas usam limiar menor
+        # (mais agressivo), pois o usuário decidiu explicitamente não tratá-las.
+        if texto:
+            import re as _re
+
+            def _norm_tokens(s):
+                s = (s or '').lower()
+                s = _re.sub(r"[^0-9a-zà-ú\s]", ' ', s)
+                return {t for t in s.split() if len(t) > 3}
+
+            new_tokens = _norm_tokens(texto)
+            if new_tokens:
+                for prev, limiar, origem in (
+                    [(p, 0.4, 'ignorado') for p in insights_ignorados] +
+                    [(p, 0.5, 'recente') for p in insights_anteriores]
+                ):
+                    prev_tokens = _norm_tokens(prev)
+                    if not prev_tokens:
+                        continue
+                    union = len(new_tokens | prev_tokens)
+                    jaccard = len(new_tokens & prev_tokens) / union if union else 0
+                    if jaccard >= limiar:
+                        print(f"[analisarInsightProativo] Insight suprimido por similaridade ({origem}, jaccard={jaccard:.2f})")
+                        return {"nivel": None, "texto": None, "alvo": None, "planoProposto": None, "acoesPropostas": None}
 
         return {
             "nivel": nivel,
