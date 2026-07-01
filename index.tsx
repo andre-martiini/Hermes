@@ -125,6 +125,14 @@ const getBucketStartDate = (label: string): string => {
   }
   return '';
 };
+
+const hasValidActionDate = (task: Pick<Tarefa, 'data_limite'>): boolean => {
+  return Boolean(task.data_limite && task.data_limite !== '-' && task.data_limite !== '0000-00-00' && /^\d{4}-\d{2}-\d{2}$/.test(task.data_limite));
+};
+
+const shouldShowInStandbyBucket = (task: Tarefa): boolean => {
+  return isStandbyStatus(task.status) || !hasValidActionDate(task);
+};
 // -----------------------------------------------------------------------------
 
 const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean, onClose: () => void, showToast: (m: string, t: 'success' | 'error' | 'info') => void }) => {
@@ -3885,10 +3893,9 @@ const App: React.FC = () => {
         buckets.concluidas.push(t);
         return;
       }
-      const hasValidDate = Boolean(t.data_limite && t.data_limite !== "-" && t.data_limite !== "0000-00-00" && /^\d{4}-\d{2}-\d{2}$/.test(t.data_limite));
-      // A data valida deve prevalecer na organizacao visual: uma acao marcada
-      // para hoje nao pode ficar escondida no stand-by so por causa do status.
-      if (!hasValidDate) {
+      const hasValidDate = hasValidActionDate(t);
+      // Stand-by e acoes sem data saem do fluxo ativo e entram no backlog pausado.
+      if (shouldShowInStandbyBucket(t)) {
         buckets.standBy.push(t);
         return;
       }
@@ -3925,8 +3932,6 @@ const App: React.FC = () => {
     }
     // Build final object preserving desired order
     const finalGroups: Record<string, Tarefa[]> = {};
-    // Stand-by: visual top, but auto-expand ignores it
-    if (buckets.standBy.length > 0) finalGroups["Ações em Stand-by"] = buckets.standBy;
     if (buckets.hoje.length > 0) finalGroups["Hoje"] = buckets.hoje;
     if (buckets.amanha.length > 0) finalGroups["Amanhã"] = buckets.amanha;
     if (buckets.estaSemana.length > 0) finalGroups["Esta Semana"] = buckets.estaSemana;
@@ -3935,6 +3940,7 @@ const App: React.FC = () => {
     Object.keys(mesesFuturos).sort().forEach(key => {
       finalGroups[mesesFuturos[key].label] = mesesFuturos[key].tasks;
     });
+    if (buckets.standBy.length > 0) finalGroups["Ações em Stand-by"] = buckets.standBy;
     if (buckets.concluidas.length > 0) {
       buckets.concluidas.sort((a, b) => {
         const tA = a.data_conclusao ? new Date(a.data_conclusao).getTime() : 0;
@@ -3946,7 +3952,7 @@ const App: React.FC = () => {
     return finalGroups;
   }, [filteredAndSortedTarefas]);
   const activeTasks = useMemo(() => {
-    return filteredAndSortedTarefas.filter(t => normalizeStatus(t.status) !== 'concluido');
+    return filteredAndSortedTarefas.filter(t => normalizeStatus(t.status) !== 'concluido' && !shouldShowInStandbyBucket(t));
   }, [filteredAndSortedTarefas]);
 
   // Lookup UPPER(nome) -> peso_gravidade (1..5) das Áreas Temáticas (unidades)
@@ -3997,6 +4003,9 @@ const App: React.FC = () => {
       if (sectionsToExpand.length === 0) {
         const fallback = keys.find(k => k !== "Ações em Stand-by" && k !== "Concluídas");
         if (fallback) sectionsToExpand = [fallback];
+      }
+      if (sectionsToExpand.length === 0 && keys.includes("Ações em Stand-by")) {
+        sectionsToExpand = ["Ações em Stand-by"];
       }
       setExpandedSections(sectionsToExpand);
       setHasAutoExpanded(true);
@@ -5363,6 +5372,45 @@ const App: React.FC = () => {
                                     </div>
                                   )}
                                 </div>
+
+                                {/* Bloco de Ações em Stand-by */}
+                                {tarefasAgrupadas["Ações em Stand-by"] && tarefasAgrupadas["Ações em Stand-by"].length > 0 && (
+                                  <div className={`border rounded-none overflow-visible ${isDarkTheme ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-border-grid'}`}>
+                                    <button
+                                      onClick={() => toggleSection("Ações em Stand-by")}
+                                      className={`w-full px-4 py-3 bg-transparent flex items-center justify-between transition-colors group ${isDarkTheme ? 'hover:bg-white/[0.02]' : 'hover:bg-slate-50'}`}
+                                    >
+                                      <div className="flex items-center gap-3">
+                                        <span className={`text-xs font-black uppercase tracking-[0.22em] font-mono ${isDarkTheme ? 'text-amber-300' : 'text-amber-700'}`}>Ações em Stand-by</span>
+                                        <span className={`text-[10px] font-bold font-mono ${isDarkTheme ? 'text-slate-500' : 'text-slate-300'}`}>({tarefasAgrupadas["Ações em Stand-by"].length})</span>
+                                      </div>
+                                      <svg className={`w-4 h-4 transition-transform duration-300 ${effectiveExpandedSections.includes("Ações em Stand-by") ? 'rotate-180' : ''} ${isDarkTheme ? 'text-slate-500' : 'text-slate-300'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+                                      </svg>
+                                    </button>
+                                    {effectiveExpandedSections.includes("Ações em Stand-by") && (
+                                      <div className="animate-in origin-top border-t border-border-grid divide-y divide-border-grid">
+                                        {tarefasAgrupadas["Ações em Stand-by"].map(task => (
+                                          <div key={task.id} className="relative">
+                                            <RowCard
+                                              task={task}
+                                              isDark={isDarkTheme}
+                                              knowledgeBases={knowledgeBases}
+                                              onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
+                                              onToggle={handleToggleTarefaStatus}
+                                              onDelete={handleDeleteTarefa}
+                                              onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
+                                              onUpdateToToday={handleUpdateToToday}
+                                              onUpdateTask={handleUpdateTarefa}
+                                              onSynthesizeDescription={handleSynthesizeTaskDescription}
+                                              isSynthesizingDescription={descriptionSynthesisTaskId === task.id}
+                                            />
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
 
                                 {/* Bloco de Concluídas colapsável */}
                                 {tarefasAgrupadas["Concluídas"] && tarefasAgrupadas["Concluídas"].length > 0 && (
