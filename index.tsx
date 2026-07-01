@@ -5,7 +5,7 @@ import {
   Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento,
   BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings,
   FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight,
-  DailyHabits, HealthSettings, ExerciseLog, ExerciseSettings, PullupPhase, HermesNotification, AppSettings,
+  HealthSettings, ExerciseLog, ExerciseSettings, PullupPhase, HermesNotification, AppSettings,
   formatDate, formatDateLocalISO,
   GoogleCalendarEvent,
   PoolItem, CustomNotification, HealthExam, ConhecimentoItem, UndoAction, HermesModalProps,
@@ -44,7 +44,7 @@ import {
 } from './src/components/ui/UIComponents';
 import { PgdAuditRow } from './src/components/ui/PgdAuditRow';
 import {
-  HermesModal, SettingsModal, DailyHabitsModal,
+  HermesModal, SettingsModal,
   TaskCreateModal, TaskEditModal
 } from './src/components/modals/Modals';
 import { DayView } from './src/views/DayView';
@@ -997,7 +997,6 @@ const App: React.FC = () => {
   });
   // Health State
   const [healthWeights, setHealthWeights] = useState<HealthWeight[]>([]);
-  const [healthDailyHabits, setHealthDailyHabits] = useState<DailyHabits[]>([]);
   const [healthSettings, setHealthSettings] = useState<HealthSettings>({ targetWeight: 0 });
   const [exerciseLogs, setExerciseLogs] = useState<ExerciseLog[]>([]);
   const [exerciseSettings, setExerciseSettings] = useState<ExerciseSettings>({});
@@ -1249,9 +1248,6 @@ const App: React.FC = () => {
     const unsubHealthWeights = onSnapshot(collection(db, 'health_weights'), (snapshot) => {
       setHealthWeights(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HealthWeight)));
     }, handleSnapshotError('health_weights'));
-    const unsubHealthHabits = onSnapshot(collection(db, 'health_daily_habits'), (snapshot) => {
-      setHealthDailyHabits(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DailyHabits)));
-    }, handleSnapshotError('health_daily_habits'));
     const unsubHealthSettings = onSnapshot(doc(db, 'health_settings', 'config'), (doc) => {
       if (doc.exists()) setHealthSettings(doc.data() as HealthSettings);
     }, handleSnapshotError('health_settings/config'));
@@ -1288,7 +1284,6 @@ const App: React.FC = () => {
       unsubShopping();
       unsubProjects();
       unsubHealthWeights();
-      unsubHealthHabits();
       unsubHealthSettings();
       unsubExerciseLogs();
       unsubExerciseSettings();
@@ -1869,7 +1864,6 @@ const App: React.FC = () => {
     };
   }, [isPgdTerminalOpen]);
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
-  const [isHabitsReminderOpen, setIsHabitsReminderOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'notifications' | 'context'>('notifications');
   // --- HermesNotification System & App Settings ---
   const emitNotification = async (title: string, message: string, type: 'info' | 'warning' | 'success' | 'error' = 'info', link?: string, id?: string) => {
@@ -1991,21 +1985,13 @@ const App: React.FC = () => {
         break;
     }
   };
-  // HermesNotification System Triggers (Time-based: Habits, Weigh-in, Task Reminders)
+  // HermesNotification System Triggers (Time-based: Weigh-in, Task Reminders)
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
       const current_time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
       const todayStr = formatDateLocalISO(now);
-      // 1. Habits Reminder (More robust check: >= time and not shown today)
-      if (appSettings.notifications.habitsReminder.enabled) {
-        const lastOpen = localStorage.getItem('lastHabitsReminderDate');
-        if (lastOpen !== todayStr && current_time >= appSettings.notifications.habitsReminder.time) {
-          setIsHabitsReminderOpen(true);
-          localStorage.setItem('lastHabitsReminderDate', todayStr);
-        }
-      }
-      // 2. Weigh-in Reminder (Bell HermesNotification)
+      // 1. Weigh-in Reminder (Bell HermesNotification)
       if (appSettings.notifications.weighInReminder.enabled) {
         const lastWeighInRemind = localStorage.getItem('lastWeighInRemindDate');
         if (lastWeighInRemind !== todayStr && current_time >= appSettings.notifications.weighInReminder.time) {
@@ -2031,10 +2017,10 @@ const App: React.FC = () => {
           }
         }
       }
-      // 3. Task Reminders (Scheduled via TaskExecutionView)
+      // 2. Task Reminders (Scheduled via TaskExecutionView)
       // Delegated to backend Cloud Function to prevent duplicate triggering
       // and ensure execution when frontend is offline.
-      // 4. Daily Task Notifications (Legacy / Overdue)
+      // 3. Daily Task Notifications (Legacy / Overdue)
       const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
       tarefas.forEach(t => {
         if (t.status === 'concluído' || t.data_limite !== todayStr) return;
@@ -3648,9 +3634,6 @@ const App: React.FC = () => {
       showToast("Erro ao remover meta.", "error");
     }
   };
-  const handleUpdateHealthHabits = async (date: string, habits: Partial<DailyHabits>) => {
-    await setDoc(doc(db, 'health_daily_habits', date), habits, { merge: true });
-  };
   const handleSaveHealthTelegramReminder = async (reminder: HealthTelegramReminder) => {
     const nowIso = new Date().toISOString();
     const payload: HealthTelegramReminder = {
@@ -3669,11 +3652,6 @@ const App: React.FC = () => {
   const handleSaveExerciseLog = async (date: string, data: Partial<ExerciseLog>) => {
     // Save the log
     await setDoc(doc(db, 'health_exercise_logs', date), data, { merge: true });
-    const hasExerciseData = data.pushups !== undefined || data.pullups !== undefined || data.plank !== undefined || data.bridge !== undefined || data.birdDog !== undefined || data.squats !== undefined;
-    // Auto-mark workout habit only when explicit exercise (pushups/pullups) is logged
-    if (hasExerciseData) {
-      await setDoc(doc(db, 'health_daily_habits', date), { workout: true }, { merge: true });
-    }
     // Recalculate goals from last 5 sessions
     const allLogs = [...exerciseLogs.filter(l => l.id !== date), { id: date, ...data }]
       .sort((a, b) => b.id.localeCompare(a.id));
@@ -4957,7 +4935,6 @@ const App: React.FC = () => {
                         fixedBills={fixedBills}
                         incomeEntries={incomeEntries}
                         healthWeights={healthWeights}
-                        healthDailyHabits={healthDailyHabits}
                         healthSettings={healthSettings}
                         exerciseLogs={exerciseLogs}
                         unidades={unidades}
@@ -5481,12 +5458,10 @@ const App: React.FC = () => {
                 ) : viewMode === 'saude' ? (
                   <HealthView
                     weights={healthWeights}
-                    dailyHabits={healthDailyHabits}
                     settings={healthSettings}
                     onUpdateSettings={handleUpdateHealthSettings}
                     onAddWeight={handleAddHealthWeight}
                     onDeleteWeight={handleDeleteHealthWeight}
-                    onUpdateHabits={handleUpdateHealthHabits}
                     exerciseLogs={exerciseLogs}
                     exerciseSettings={exerciseSettings}
                     onSaveExerciseLog={handleSaveExerciseLog}
@@ -6568,23 +6543,6 @@ const App: React.FC = () => {
               onUpdateUnidade={handleUpdateUnidade}
               onEmitNotification={emitNotification}
               showConfirm={showConfirm}
-            />
-          )
-        }
-        {
-          isHabitsReminderOpen && (
-            <DailyHabitsModal
-              habits={healthDailyHabits.find(h => h.id === formatDateLocalISO(new Date())) || {
-                id: formatDateLocalISO(new Date()),
-                noSugar: false,
-                noAlcohol: false,
-                noSnacks: false,
-                workout: false,
-                eatUntil18: false,
-                eatSlowly: false
-              }}
-              onUpdateHabits={handleUpdateHealthHabits}
-              onClose={() => setIsHabitsReminderOpen(false)}
             />
           )
         }

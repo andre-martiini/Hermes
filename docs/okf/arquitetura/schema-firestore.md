@@ -103,13 +103,13 @@ Contratos/serviços (freelance, consultoria): `titulo`, `cliente`, `status`, `ti
 ## Saúde
 
 ### `health_exercise_logs`
-Log diário (`id` = `YYYY-MM-DD`): exercícios (`pushups`, `pullups`, `plank`, `squats`, `walk`...), `calories`, `heartRate`, `sleep`, `pain`.
+Log diário (`id` = `YYYY-MM-DD`): exercícios (`pushups`, `pullups`, `plank`, `squats`, `walk`...), `calories`, `heartRate`, `sleep`, `pain`. O campo `walk` (minutos, passos, km) vem apenas de sessões de caminhada/exercício registradas no Google Health/Fit — não é o total de passos do dia.
 
 ### `health_weights`
 Histórico de peso por dia: `date`, `weight`, `fatPercentage`, `muscleMass`.
 
-### `health_daily_habits`
-Checklist diário de hábitos (`noSugar`, `noAlcohol`, `workout`, `eatUntil18`...).
+### `health_daily_habits` (descontinuada)
+Checklist diário de hábitos, removido do sistema. A coleção permanece apenas como histórico e não é mais lida nem gravada pelo app.
 
 ### `health_telegram_reminders`
 Reminders de saúde enviados via Telegram: `title`, `time`, `daysOfWeek[]`, `category` (`spine`\|`walking`\|`nutrition`\|`pain`\|`custom`), `last_sent_date`.

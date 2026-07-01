@@ -4,7 +4,7 @@ import { functions, db } from '../../../firebase';
 import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import type { MeetingHistoryEntry } from '../tools/MeetingTranscriptionTool';
 import {
-  Tarefa, Status, Categoria, EntregaInstitucional, DailyHabits,
+  Tarefa, Status, Categoria, EntregaInstitucional,
   AppSettings, HermesModalProps, CustomNotification, TipoAcao, ActionPlanItem, ConhecimentoItem
 } from '../../../types';
 import { formatDate, formatDateLocalISO } from '../../../types';
@@ -182,39 +182,6 @@ export const SettingsModal = ({
                   <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
                   Geral / Saúde
                 </h4>
-
-                <div className={`flex items-center justify-between p-6 ${isDarkTheme ? 'bg-slate-800 border-slate-700 hover:border-blue-500/50' : 'bg-slate-50 border-slate-100 hover:border-blue-200'} rounded-lg border group transition-all`}>
-                  <div className="flex-1">
-                    <p className={`text-sm font-bold ${isDarkTheme ? 'text-white' : 'text-slate-900'} mb-1`}>Hábitos de Hoje</p>
-                    <p className={`text-[11px] ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'} font-medium`}>Abrir lembrete para marcar hábitos cumpridos</p>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <input
-                      type="time"
-                      value={localSettings.notifications.habitsReminder.time}
-                      onChange={(e) => setLocalSettings({
-                        ...localSettings,
-                        notifications: {
-                          ...localSettings.notifications,
-                          habitsReminder: { ...localSettings.notifications.habitsReminder, time: e.target.value }
-                        }
-                      })}
-                      className={`border rounded-lg px-3 py-1.5 text-xs font-bold focus:ring-2 focus:ring-blue-500 ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-900'}`}
-                    />
-                    <button
-                      onClick={() => setLocalSettings({
-                        ...localSettings,
-                        notifications: {
-                          ...localSettings.notifications,
-                          habitsReminder: { ...localSettings.notifications.habitsReminder, enabled: !localSettings.notifications.habitsReminder.enabled }
-                        }
-                      })}
-                      className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.habitsReminder.enabled ? 'bg-blue-600' : 'bg-slate-300'}`}
-                    >
-                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.habitsReminder.enabled ? 'left-7' : 'left-1'}`} />
-                    </button>
-                  </div>
-                </div>
 
                 <div className={`flex flex-col p-6 ${isDarkTheme ? 'bg-slate-800 border-slate-700 hover:border-rose-500/50' : 'bg-slate-50 border-slate-100 hover:border-rose-200'} rounded-lg border group transition-all gap-4`}>
                   <div className="flex items-center justify-between">
@@ -699,96 +666,6 @@ export const SettingsModal = ({
     </div >
   );
 };
-export const DailyHabitsModal = ({
-  habits,
-  onUpdateHabits,
-  onClose
-}: {
-  habits: DailyHabits,
-  onUpdateHabits: (date: string, updates: Partial<DailyHabits>) => void,
-  onClose: () => void
-}) => {
-  const todayStr = formatDateLocalISO(new Date());
-
-  const handleHabitToggle = (habitKey: keyof DailyHabits) => {
-    if (habitKey === 'id') return;
-    onUpdateHabits(todayStr, { [habitKey]: !habits[habitKey] });
-  };
-
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-0 md:p-4 bg-slate-950/90 animate-in fade-in duration-300">
-      <div className="bg-white w-full h-full md:h-auto md:max-w-md rounded-lg shadow-lg overflow-hidden animate-in zoom-in-95 duration-300 border-2 border-slate-900">
-        <div className="p-8 border-b border-[#e5e7eb] dark:border-white/10 bg-slate-50 flex items-center justify-between">
-          <div>
-            <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3 font-sans uppercase">
-              <span className="w-2 h-8 bg-amber-500 rounded-lg"></span>
-              Hábitos Diários
-            </h3>
-            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1 font-sans">Status Check :: Daily_Sync</p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-lg transition-colors border border-transparent hover:border-[#e5e7eb] dark:border-white/10">
-            <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-
-        <div className="p-8 space-y-3">
-          {[
-            { id: 'noSugar', label: 'Sem Açúcar', color: 'rose' },
-            { id: 'noAlcohol', label: 'Sem Álcool', color: 'purple' },
-            { id: 'noSnacks', label: 'Sem Lanches/Delivery', color: 'orange' },
-
-            { id: 'eatUntil18', label: 'Comer até as 18h', color: 'blue' },
-            { id: 'eatSlowly', label: 'Comer Devagar', color: 'indigo' }
-          ].map((habit) => {
-            const colorMap: Record<string, { bg: string, border: string, text: string, dot: string }> = {
-              rose: { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', dot: 'bg-rose-500' },
-              purple: { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', dot: 'bg-purple-500' },
-              orange: { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', dot: 'bg-orange-500' },
-              emerald: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-500' },
-              blue: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', dot: 'bg-blue-500' },
-              indigo: { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', dot: 'bg-indigo-500' }
-            };
-            const colors = colorMap[habit.color] || colorMap.rose;
-            const isActive = !!habits[habit.id as keyof DailyHabits];
-
-            return (
-              <button
-                key={habit.id}
-                onClick={() => handleHabitToggle(habit.id as keyof DailyHabits)}
-                className={`w-full flex items-center justify-between p-4 rounded-lg border-2 transition-all duration-300 font-sans ${isActive
-                  ? `${colors.bg} ${colors.border} shadow-sm`
-                  : 'bg-white border-slate-100 hover:border-slate-200'
-                  }`}
-              >
-                <span className={`text-[11px] font-bold uppercase tracking-wider ${isActive ? colors.text : 'text-slate-600'}`}>
-                  {habit.label}
-                </span>
-                <div className={`w-6 h-6 rounded-lg flex items-center justify-center transition-all ${isActive
-                  ? `${colors.dot} text-white scale-110`
-                  : 'border-2 border-slate-200'
-                  }`}>
-                  {isActive && (
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>
-                  )}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="p-8 bg-slate-50 border-t border-[#e5e7eb] dark:border-white/10">
-          <button
-            onClick={onClose}
-            className="w-full bg-slate-900 text-white px-8 py-5 rounded-lg text-[10px] font-black uppercase tracking-[0.2em] shadow-lg hover:bg-blue-600 transition-all font-sans"
-          >
-            Concluir Registro e Sincronizar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
 export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems = [], onSave, onClose, showAlert, initialData, existingTags = [] }: { unidades: { id: string, nome: string }[], knowledgeBases?: { id: string, nome: string, tipo?: string, sistema_id?: string }[], knowledgeItems?: ConhecimentoItem[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void, showAlert: (title: string, message: string) => void, initialData?: Partial<Tarefa>, existingTags?: string[] }) => {
