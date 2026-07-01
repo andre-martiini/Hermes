@@ -1429,12 +1429,17 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
 
 # ─── Acervo Global: Cron Job de ingestão ─────────────────────────────────────
 
-def executar_monitoramento_acervo_global() -> dict:
+def executar_monitoramento_acervo_global(resetar_falhas_permanentes: bool = False) -> dict:
     """
     Core function — monitora a Pasta de Deságue no Google Drive.
 
     Retorna um resumo {"novos": int, "reprocessados": int, "erro": str | None}
     para permitir uso tanto pelo cron quanto por um callable de sincronização manual.
+
+    `resetar_falhas_permanentes`: quando True (usado pela sincronização manual),
+    documentos em "falha_permanente" voltam a ser tentados do zero (tentativas
+    resetadas). O cron automático nunca usa isso, para não recriar o loop de
+    custo que o limite de tentativas existe para evitar.
     """
     import os as _os
     from googleapiclient.discovery import build
@@ -1521,9 +1526,22 @@ def executar_monitoramento_acervo_global() -> dict:
         # Se já existe no acervo_global
         if fid in acervo_map:
             info = acervo_map[fid]
-            # Se não está concluído nem ignorado propositalmente, tenta re-despachar
-            if info["status"] not in ("concluido", "ignorado_mime", "falha_permanente"):
-                proxima_tentativa = info["tentativas"] + 1
+            status_atual = info["status"]
+            tentativas_atual = info["tentativas"]
+
+            # Recuperação manual: dá uma nova cota de tentativas a documentos
+            # que esgotaram o limite, presumindo que o operador corrigiu a causa
+            # (ex.: permissão no Drive) antes de clicar em "Sincronizar agora".
+            if resetar_falhas_permanentes and status_atual == "falha_permanente":
+                status_atual = "pendente"
+                tentativas_atual = 0
+
+            # "concluido" e "falha_limite_tamanho" já foram indexados com sucesso
+            # (o segundo só guarda o texto truncado) — nenhum dos dois deve ser
+            # retentado. "ignorado_mime" e "falha_permanente" são estados
+            # terminais que exigem intervenção manual, não retry automático.
+            if status_atual not in ("concluido", "falha_limite_tamanho", "ignorado_mime", "falha_permanente"):
+                proxima_tentativa = tentativas_atual + 1
                 if proxima_tentativa > MAX_TENTATIVAS_ACERVO:
                     # Esgotou as tentativas: para de retentar automaticamente e sinaliza
                     # na UI para investigação manual (evita loop infinito de custo de API).
@@ -1590,9 +1608,13 @@ def sincronizar_acervo_manual(req: https_fn.CallableRequest):
     de 15 minutos, para o usuário forçar uma sincronização (ex.: depois de
     resolver um problema de acesso a um arquivo específico) sem esperar o cron.
 
+    Diferente do cron, também dá uma nova cota de tentativas a documentos em
+    "falha_permanente" — o clique manual presume que o operador já corrigiu
+    o problema que travou o arquivo.
+
     Output: { novos: int, reprocessados: int, erro: str | None }
     """
-    resultado = executar_monitoramento_acervo_global()
+    resultado = executar_monitoramento_acervo_global(resetar_falhas_permanentes=True)
     return resultado
 
 
