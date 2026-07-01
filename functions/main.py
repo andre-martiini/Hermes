@@ -2349,34 +2349,6 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
 
         
 
-        # --- Lembrete de Hábitos ---
-
-        habits = notifs_config.get('habitsReminder', {})
-
-        if habits.get('enabled') and habits.get('time') == current_time_str:
-
-            remind_id = f"habits_{today_str}"
-
-            # Verifica se já enviou hoje
-
-            if not db.collection('system_reminders').document(remind_id).get().exists:
-
-                emit_notification_backend(
-
-                    "Lembrete de Hábitos",
-
-                    "Hora de registrar seus hábitos de hoje para manter sua rotina nos trilhos!",
-
-                    'info',
-
-                    'saude'
-
-                )
-
-                db.collection('system_reminders').document(remind_id).set({'sent_at': now.isoformat()})
-
-
-
         # --- Lembrete de Pesagem ---
 
         weigh_in = notifs_config.get('weighInReminder', {})

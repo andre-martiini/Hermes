@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
-    HealthWeight, DailyHabits, HealthSettings, ExerciseLog,
+    HealthWeight, HealthSettings, ExerciseLog,
     ExerciseSettings, formatDate, formatDateLocalISO,
     HealthExam, HealthTelegramReminder
 } from './types';
@@ -8,12 +8,10 @@ import { HealthSummaryCard } from './src/components/HealthSummaryCard';
 
 interface HealthViewProps {
     weights: HealthWeight[];
-    dailyHabits: DailyHabits[];
     settings: HealthSettings;
     onUpdateSettings: (settings: HealthSettings) => void;
     onAddWeight: (weight: number, date: string) => void;
     onDeleteWeight: (id: string) => void;
-    onUpdateHabits: (date: string, habits: Partial<DailyHabits>) => void;
     exerciseLogs: ExerciseLog[];
     exerciseSettings: ExerciseSettings;
     onSaveExerciseLog: (date: string, data: Partial<ExerciseLog>) => Promise<void>;

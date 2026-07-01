@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
     Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry,
-    HealthWeight, DailyHabits, HealthSettings, ExerciseLog
+    HealthWeight, HealthSettings, ExerciseLog
 } from './types';
 
 interface DashboardViewProps {
@@ -12,7 +12,6 @@ interface DashboardViewProps {
     fixedBills: FixedBill[];
     incomeEntries: IncomeEntry[];
     healthWeights: HealthWeight[];
-    healthDailyHabits: DailyHabits[];
     healthSettings: HealthSettings;
     exerciseLogs: ExerciseLog[];
     unidades: { id: string, nome: string }[];
@@ -115,7 +114,6 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     fixedBills = [],
     incomeEntries = [],
     healthWeights = [],
-    healthDailyHabits = [],
     healthSettings = {} as HealthSettings,
     exerciseLogs = [] as ExerciseLog[],
     currentMonth = new Date().getMonth(),
@@ -200,33 +198,6 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     const weightDelta = initialWeight > 0 ? initialWeight - currentWeight : 0;
     const weightDeltaAbs = Math.abs(weightDelta);
     const weightDeltaPrefix = weightDelta < -0.05 ? '+' : weightDelta > 0.05 ? '-' : '';
-
-    const habitStreak = useMemo(() => {
-        let streak = 0;
-        const sortedHabits = [...healthDailyHabits].sort((a, b) => b.id.localeCompare(a.id));
-        let checkDate = new Date();
-        for (const habit of sortedHabits) {
-            const hDate = habit.id;
-            const expectedDate = checkDate.toISOString().split('T')[0];
-            if (hDate === expectedDate) {
-                const completedCount = [habit.noSugar, habit.noAlcohol, habit.noSnacks, habit.workout, habit.eatUntil18, habit.eatSlowly].filter(Boolean).length;
-                if (completedCount >= 4) { streak++; checkDate.setDate(checkDate.getDate() - 1); } else break;
-            } else if (hDate < expectedDate) break;
-        }
-        return streak;
-    }, [healthDailyHabits]);
-
-    const last7Habits = useMemo(() => {
-        const today = new Date();
-        return Array.from({ length: 7 }, (_, i) => {
-            const d = new Date(today);
-            d.setDate(today.getDate() - (6 - i));
-            const key = d.toISOString().slice(0, 10);
-            const record = healthDailyHabits.find(h => h.id === key);
-            const done = record ? [record.noSugar, record.noAlcohol, record.noSnacks, record.workout, record.eatUntil18, record.eatSlowly].filter(Boolean).length : 0;
-            return { label: String(d.getDate()).padStart(2, '0'), done, total: 6, isToday: i === 6 };
-        });
-    }, [healthDailyHabits]);
 
     const todayTelemetry = useMemo(() => {
         const key = new Date().toISOString().slice(0, 10);
@@ -443,10 +414,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                     <DashboardCard title="Saúde & Telemetria" isDark={isDark} onRedirect={() => onNavigate('saude')}>
                         <div className="flex flex-col gap-4">
                             <div className="flex items-center justify-between shrink-0">
-                                <span className="text-[9px] uppercase tracking-wider text-slate-400 font-mono">// MONITORAMENTO HÁBITOS</span>
-                                <span className="rounded-full bg-[#10b981] text-white text-[9px] font-bold px-2 py-0.5 font-sans uppercase">
-                                    {habitStreak} Dias Seguidos
-                                </span>
+                                <span className="text-[9px] uppercase tracking-wider text-slate-400 font-mono">// TELEMETRIA DIÁRIA</span>
                             </div>
 
                             <div className="grid grid-cols-2 gap-3">
@@ -498,33 +466,6 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                     <div className="text-[9px] font-bold font-mono text-slate-400 mt-0.5">
                                         STATUS NOMINAL
                                     </div>
-                                </div>
-                            </div>
-
-                            {/* Habit Completion Last 7 Days */}
-                            <div className="flex flex-col gap-2 mt-2">
-                                <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 font-mono">// ÚLTIMOS 7 DIAS</span>
-                                <div className="flex justify-between items-center gap-1.5 bg-[#f9fafb] dark:bg-white/[0.01] border border-[#f3f4f6] dark:border-white/5 p-3 rounded-xl">
-                                    {last7Habits.map((h, i) => {
-                                        const donePercent = h.total > 0 ? (h.done / h.total) * 100 : 0;
-                                        return (
-                                            <div key={i} className="flex-1 flex flex-col items-center gap-1.5">
-                                                <div className="h-10 w-2.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden flex flex-col justify-end">
-                                                    <div
-                                                        style={{ height: `${donePercent}%` }}
-                                                        className={`w-full rounded-full transition-all duration-300 ${
-                                                            h.done >= 4 ? 'bg-[#10b981]' : h.done > 0 ? 'bg-[#9333ea]/60' : 'bg-transparent'
-                                                        }`}
-                                                    />
-                                                </div>
-                                                <span className={`text-[8px] font-bold font-mono ${
-                                                    h.isToday ? 'text-[#7800ce] dark:text-[#ddb8ff]' : 'text-slate-400'
-                                                }`}>
-                                                    {h.label}
-                                                </span>
-                                            </div>
-                                        );
-                                    })}
                                 </div>
                             </div>
 

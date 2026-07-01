@@ -30,6 +30,18 @@ GODMODE_PERSONA = (
     "- Toda afirmação de risco, custo ou prazo deve estar ancorada em dado concreto obtido via "
     "ferramenta. Se não houver dado suficiente, diga isso explicitamente em vez de estimar sem base.\n"
     "- Aponte o custo de oportunidade: onde o tempo/orçamento analisado traria mais alavancagem.\n\n"
+    "Regras de interpretação dos dados (calibração — leia antes de tirar conclusões):\n"
+    "- Receitas: o campo isReceived distingue o que já entrou (true) do que ainda é previsto (false). "
+    "Nunca afirme que uma receita 'não foi recebida' sem conferir esse campo registro a registro.\n"
+    "- Contas fixas com valor 0 são contas de valor variável cuja fatura ainda não chegou (EDP, Cesan, "
+    "faturas de cartão etc.): o valor é lançado quando a fatura é recebida. É o fluxo normal do módulo, "
+    "não cadastro incompleto — trate como 'despesa a apurar', não como desconhecimento de custos.\n"
+    "- Valores de projetos institucionais (parcelas de fomento, SIGEX, MAGO, TJES etc., em geral tarefas "
+    "com campo 'projeto' preenchido) NÃO fazem parte da vida financeira pessoal do usuário. Só relacione "
+    "dinheiro de projeto ao caixa pessoal se houver receita correspondente registrada no módulo financeiro.\n"
+    "- Passos/caminhadas: o sistema absorve apenas passos de caminhadas e exercícios registrados no "
+    "Google Health (fonte confiável). Passos baixos significam ausência de treino registrado naquele dia, "
+    "não o total de movimento do usuário.\n\n"
     "Quando a pergunta pedir uma análise estratégica (não uma consulta factual simples), estruture "
     "a resposta em exatamente três seções, nesta ordem:\n"
     "1. **Diagnóstico de Falha** — inconsistências, riscos de execução e desalinhamentos identificados.\n"
@@ -144,10 +156,14 @@ def _build_tools(db, user_uid: str | None, gemini_key: str | None):
             data = d.to_dict() or {}
             if data.get("month") != mes or data.get("year") != ano:
                 continue
+            amount = float(data.get("amount") or 0)
             contas.append({
                 "id": d.id,
                 "description": data.get("description"),
                 "amount": data.get("amount"),
+                # Conta variável cuja fatura ainda não chegou: o valor 0 é por
+                # design e é preenchido quando a fatura é recebida.
+                "aguardando_fatura": amount == 0,
                 "isPaid": data.get("isPaid"),
                 "dueDay": data.get("dueDay"),
                 "category": data.get("category"),
@@ -156,7 +172,11 @@ def _build_tools(db, user_uid: str | None, gemini_key: str | None):
         total_despesas = sum(float(t.get("amount") or 0) for t in transacoes) + sum(
             float(c.get("amount") or 0) for c in contas
         )
-        total_receitas = sum(float(r.get("amount") or 0) for r in receitas)
+        total_receitas_previstas = sum(float(r.get("amount") or 0) for r in receitas)
+        total_receitas_recebidas = sum(
+            float(r.get("amount") or 0) for r in receitas if r.get("isReceived")
+        )
+        contas_aguardando_fatura = sum(1 for c in contas if c["aguardando_fatura"])
 
         return {
             "periodo": periodo,
@@ -164,8 +184,19 @@ def _build_tools(db, user_uid: str | None, gemini_key: str | None):
             "receitas": receitas,
             "contas_fixas": contas,
             "total_despesas": total_despesas,
-            "total_receitas": total_receitas,
-            "saldo": total_receitas - total_despesas,
+            "total_receitas_previstas": total_receitas_previstas,
+            "total_receitas_recebidas": total_receitas_recebidas,
+            "total_receitas_a_receber": total_receitas_previstas - total_receitas_recebidas,
+            "saldo_projetado": total_receitas_previstas - total_despesas,
+            "saldo_realizado": total_receitas_recebidas - total_despesas,
+            "contas_aguardando_fatura": contas_aguardando_fatura,
+            "notas_interpretacao": [
+                "Receitas com isReceived=true já entraram no caixa; isReceived=false é previsão pendente.",
+                "Contas fixas com aguardando_fatura=true têm valor variável e ainda sem fatura no mês — "
+                "é o fluxo normal do módulo, não cadastro incompleto; total_despesas ainda não inclui essas faturas.",
+                "Este módulo cobre apenas finanças PESSOAIS: valores de projetos institucionais "
+                "(parcelas SIGEX, fomentos etc.) não pertencem a este caixa.",
+            ],
         }
 
     def consultar_saude(dias: int = 14) -> dict:
@@ -178,11 +209,6 @@ def _build_tools(db, user_uid: str | None, gemini_key: str | None):
             if str(data.get("date", "")) >= cutoff:
                 pesos.append({"id": d.id, **data})
 
-        habitos = [
-            {"id": d.id, **(d.to_dict() or {})}
-            for d in db.collection("health_daily_habits").limit(200).stream()
-            if d.id >= cutoff
-        ]
         exercicios = [
             {"id": d.id, **(d.to_dict() or {})}
             for d in db.collection("health_exercise_logs").limit(200).stream()
@@ -192,8 +218,13 @@ def _build_tools(db, user_uid: str | None, gemini_key: str | None):
         return {
             "periodo_dias": dias,
             "pesos": sorted(pesos, key=lambda x: x.get("date", "")),
-            "habitos": habitos,
             "exercicios": exercicios,
+            "notas_interpretacao": [
+                "Passos e distância em 'walk' vêm apenas de caminhadas/exercícios registrados no "
+                "Google Health — não representam o total de passos do dia; passos baixos = sem treino "
+                "registrado, não sedentarismo total.",
+                "O rastreamento de hábitos diários foi descontinuado e não faz parte do sistema.",
+            ],
         }
 
     def consultar_metas_estrategicas(apenas_ativas: bool = True) -> dict:
@@ -236,7 +267,10 @@ def _build_tools(db, user_uid: str | None, gemini_key: str | None):
             "name": "consultar_tarefas",
             "description": (
                 "Lista tarefas/ações do usuário (título, status, área temática, prazos). "
-                "Por padrão oculta tarefas concluídas — use incluir_concluidas para trazê-las."
+                "Por padrão oculta tarefas concluídas — use incluir_concluidas para trazê-las. "
+                "Atenção: tarefas com campo 'projeto' tratam de projetos institucionais; valores "
+                "financeiros citados nelas (parcelas, fomentos) pertencem ao projeto, não às finanças "
+                "pessoais do usuário."
             ),
             "input_schema": {
                 "type": "object",
@@ -265,7 +299,9 @@ def _build_tools(db, user_uid: str | None, gemini_key: str | None):
             "name": "consultar_financeiro",
             "description": (
                 "Retorna transações, receitas e contas fixas de um mês/ano do módulo financeiro pessoal, "
-                "com totais de receita, despesa e saldo. Sem parâmetros, usa o mês/ano atual."
+                "com totais de receita (recebida x a receber, via isReceived), despesa e saldos projetado/"
+                "realizado. Contas fixas com aguardando_fatura=true são variáveis sem fatura lançada no mês "
+                "(comportamento por design). Sem parâmetros, usa o mês/ano atual."
             ),
             "input_schema": {
                 "type": "object",
@@ -278,7 +314,8 @@ def _build_tools(db, user_uid: str | None, gemini_key: str | None):
         {
             "name": "consultar_saude",
             "description": (
-                "Retorna histórico recente de peso, hábitos diários e registros de exercício do módulo de saúde."
+                "Retorna histórico recente de peso e registros de exercício/telemetria do módulo de saúde. "
+                "Passos refletem apenas caminhadas/exercícios registrados no Google Health, não o total do dia."
             ),
             "input_schema": {
                 "type": "object",

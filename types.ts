@@ -437,16 +437,6 @@ export interface HealthWeight {
     muscleMass?: number;
 }
 
-export interface DailyHabits {
-    id: string; // date string (YYYY-MM-DD)
-    noSugar: boolean;
-    noAlcohol: boolean;
-    noSnacks: boolean;
-    workout: boolean;
-    eatUntil18: boolean;
-    eatSlowly: boolean;
-}
-
 export interface HealthSettings {
     targetWeight: number;
     walkingMinimumMinutes?: number;
@@ -502,10 +492,6 @@ export interface CustomNotification {
 export interface AppSettings {
     googleDriveFolderId?: string;
     notifications: {
-        habitsReminder: {
-            enabled: boolean;
-            time: string; // format "HH:mm"
-        };
         weighInReminder: {
             enabled: boolean;
             frequency: 'weekly' | 'biweekly' | 'monthly';
