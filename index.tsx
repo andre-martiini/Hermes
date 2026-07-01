@@ -4880,6 +4880,7 @@ const App: React.FC = () => {
                       { label: 'Financeiro', active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
                       { label: 'Saúde', active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
                       { label: 'Estratégia', active: activeModule === 'estrategia' && viewMode === 'strategy', onClick: () => { setActiveModule('estrategia'); setViewMode('strategy'); } },
+                      { label: 'Godmode', active: viewMode === 'godmode', onClick: () => { setActiveModule('estrategia'); setViewMode('godmode'); } },
                       { label: 'Contatos', active: viewMode === 'contacts', onClick: () => { setActiveModule('acoes'); setViewMode('contacts'); } },
                       { label: 'Conhecimento', active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
                       { label: 'Áreas Temáticas', active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
@@ -4995,7 +4996,7 @@ const App: React.FC = () => {
                     )}
                   </div>
                 ) : viewMode === 'godmode' ? (
-                  <HermesGodmodeView isDark={isDarkTheme} showToast={showToast} />
+                  <HermesGodmodeView userId={user?.uid || ''} isDark={isDarkTheme} showToast={showToast} />
                 ) : viewMode === 'gallery' ? (
                   <>
                     {/* Mobile Search Bar */}
