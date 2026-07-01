@@ -17,6 +17,14 @@
       ]
     },
     {
+      "collectionGroup": "sessoes_godmode",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "slide_jobs",
       "queryScope": "COLLECTION",
       "fields": [

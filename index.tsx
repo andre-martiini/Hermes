@@ -4535,7 +4535,7 @@ const App: React.FC = () => {
                       onCreateAction={() => setIsCreateModalOpen(true)}
                       isDark={isDarkTheme}
                     />
-                    {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && (
+                    {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && (
                       <button
                         onClick={() => setIsCreateModalOpen(true)}
                         className="bg-slate-900 text-white p-1.5 rounded-lg md:rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
@@ -4648,6 +4648,7 @@ const App: React.FC = () => {
                             viewMode === 'rag-bases' ? 'Áreas Temáticas' :
                               viewMode === 'knowledge' ? 'Conhecimento' :
                                 viewMode === 'ferramentas' ? 'Ferramentas' :
+                                  viewMode === 'godmode' ? 'Godmode' :
                                   activeModule === 'dashboard' ? 'Dashboard' :
                                       activeModule === 'acoes' ? 'Ações' :
                                         activeModule === 'financeiro' ? 'Financeiro' :
@@ -4656,7 +4657,7 @@ const App: React.FC = () => {
                         </h1>
                       </div>
                     </div>
-                    {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'services' && viewMode !== 'strategy' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
+                    {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
                       <nav className={`flex flex-wrap items-center gap-1`}>
                         <button
                           onClick={() => {
@@ -4777,7 +4778,7 @@ const App: React.FC = () => {
                     </div>
                   )}
                   {/* Standard Action Buttons (Search, Sync, Create) */}
-                  {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && (
+                  {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && (
                     <div className="ml-auto flex items-center justify-end gap-3">
                       {activeModule !== 'dashboard' && (
                         <div className={`hidden lg:flex h-10 items-center border rounded-lg px-4 w-72 xl:w-80 group focus-within:ring-1 focus-within:ring-primary-tactile transition-all ${inputSurfaceClass} border-[#e5e7eb] dark:border-slate-800`}>
@@ -4880,6 +4881,7 @@ const App: React.FC = () => {
                       { label: 'Financeiro', active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
                       { label: 'Saúde', active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
                       { label: 'Estratégia', active: activeModule === 'estrategia' && viewMode === 'strategy', onClick: () => { setActiveModule('estrategia'); setViewMode('strategy'); } },
+                      { label: 'Godmode', active: viewMode === 'godmode', onClick: () => { setActiveModule('estrategia'); setViewMode('godmode'); } },
                       { label: 'Contatos', active: viewMode === 'contacts', onClick: () => { setActiveModule('acoes'); setViewMode('contacts'); } },
                       { label: 'Conhecimento', active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
                       { label: 'Áreas Temáticas', active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
@@ -4995,7 +4997,7 @@ const App: React.FC = () => {
                     )}
                   </div>
                 ) : viewMode === 'godmode' ? (
-                  <HermesGodmodeView isDark={isDarkTheme} showToast={showToast} />
+                  <HermesGodmodeView userId={user?.uid || ''} isDark={isDarkTheme} showToast={showToast} />
                 ) : viewMode === 'gallery' ? (
                   <>
                     {/* Mobile Search Bar */}
