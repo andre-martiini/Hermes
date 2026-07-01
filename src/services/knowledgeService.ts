@@ -95,3 +95,19 @@ export async function getArtefatoRawText(
     const res = await fn({ id, tipo });
     return res.data;
 }
+
+export interface SincronizarAcervoResponse {
+    novos: number;
+    reprocessados: number;
+    erro: string | null;
+}
+
+/** Dispara sob demanda a varredura da Pasta de Deságue (Drop Folder), sem esperar o cron de 15 min. */
+export async function sincronizarAcervoManual(): Promise<SincronizarAcervoResponse> {
+    const fn = httpsCallable<Record<string, never>, SincronizarAcervoResponse>(
+        functions,
+        'sincronizar_acervo_manual'
+    );
+    const res = await fn({});
+    return res.data;
+}

@@ -3,12 +3,14 @@ import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firesto
 import {
     smartSearchKG,
     getArtefatoRawText,
+    sincronizarAcervoManual,
     type KnowledgeResult,
     type KnowledgeFilters,
     type KnowledgeIntent,
     type FileSearchCitation,
 } from './src/services/knowledgeService';
 import { db } from './firebase';
+import type { AcervoGlobal } from './types';
 
 interface KnowledgeViewProps {
     onNavigateToOrigin?: (modulo: string, id: string) => void;
@@ -608,7 +610,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
         return () => window.removeEventListener('knowledge-view-open-node', handleOpenNode);
     }, []);
 
-    const [mode, setMode] = useState<'search' | 'audit'>('search');
+    const [mode, setMode] = useState<'search' | 'audit' | 'acervo'>('search');
     const [query, setQuery] = useState('');
     const [filtros, setFiltros] = useState<KnowledgeFilters>({ tipo: 'all' });
     const [tagInput, setTagInput] = useState('');
@@ -628,6 +630,9 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
     const [memoryDraft, setMemoryDraft] = useState('');
     const [soulDraft, setSoulDraft] = useState('');
     const [auditStatus, setAuditStatus] = useState<string | null>(null);
+    const [acervoItems, setAcervoItems] = useState<AcervoGlobal[]>([]);
+    const [syncing, setSyncing] = useState(false);
+    const [syncStatus, setSyncStatus] = useState<string | null>(null);
 
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -666,9 +671,17 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
             setSoulDraft((data?.content as string) || '');
         });
 
+        const unsubAcervo = onSnapshot(collection(db, 'acervo_global'), (snapshot) => {
+            const items = snapshot.docs
+                .map((snap) => ({ id: snap.id, ...(snap.data() as any) }))
+                .sort((a, b) => String(b.indexed_at || '').localeCompare(String(a.indexed_at || ''))) as AcervoGlobal[];
+            setAcervoItems(items);
+        });
+
         return () => {
             unsubNodes();
             unsubSoul();
+            unsubAcervo();
         };
     }, []);
 
@@ -788,6 +801,45 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
         setAuditStatus('Memória removida.');
     }, [selectedMemoryId]);
 
+    const acervoStatusMeta = (status: string): { label: string; className: string } => {
+        switch (status) {
+            case 'concluido':
+                return { label: '✅ Concluído', className: 'bg-emerald-50 text-emerald-700' };
+            case 'pendente':
+                return { label: '⏳ Pendente', className: 'bg-amber-50 text-amber-700' };
+            case 'falha_acesso':
+                return { label: '⚠️ Falha de acesso', className: 'bg-red-50 text-red-700' };
+            case 'falha_embedding':
+                return { label: '⚠️ Falha ao indexar', className: 'bg-red-50 text-red-700' };
+            case 'falha_limite_tamanho':
+                return { label: '⚠️ Truncado (arquivo grande)', className: 'bg-amber-50 text-amber-700' };
+            case 'falha_permanente':
+                return { label: '⛔ Falha permanente', className: 'bg-slate-800 text-white' };
+            case 'ignorado_mime':
+                return { label: '➖ Tipo não suportado', className: 'bg-slate-100 text-slate-500' };
+            default:
+                return { label: status, className: 'bg-slate-100 text-slate-500' };
+        }
+    };
+
+    const runSincronizarAcervo = useCallback(async () => {
+        if (syncing) return;
+        setSyncing(true);
+        setSyncStatus(null);
+        try {
+            const res = await sincronizarAcervoManual();
+            setSyncStatus(
+                res.erro
+                    ? `Falha na sincronização: ${res.erro}`
+                    : `Sincronizado — ${res.novos} novo(s), ${res.reprocessados} reprocessado(s).`
+            );
+        } catch (e: any) {
+            setSyncStatus(e?.message || 'Falha ao sincronizar.');
+        } finally {
+            setSyncing(false);
+        }
+    }, [syncing]);
+
     return (
         <div className="w-full h-full bg-surface overflow-y-auto relative">
             <div className="max-w-6xl mx-auto px-4 md:px-8 py-8 md:py-12 pb-32">
@@ -806,6 +858,9 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
                     </Chip>
                     <Chip active={mode === 'audit'} onClick={() => setMode('audit')}>
                         Auditoria de Memória
+                    </Chip>
+                    <Chip active={mode === 'acervo'} onClick={() => setMode('acervo')}>
+                        Ingestão (Drop Folder)
                     </Chip>
                 </div>
 
@@ -1025,7 +1080,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
                             </div>
                         )}
                     </>
-                ) : (
+                ) : mode === 'audit' ? (
                     <div className="grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] gap-6">
                         <section className="bg-white border-4 border-slate-900 rounded-lg p-4 shadow-[8px_8px_0px_rgba(15,23,42,1)] font-sans">
                             <div className="mb-4">
@@ -1153,6 +1208,73 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
                                 </div>
                             )}
                         </section>
+                    </div>
+                ) : (
+                    <div className="bg-white border-4 border-slate-900 rounded-lg p-4 shadow-[8px_8px_0px_rgba(15,23,42,1)] font-sans">
+                        <div className="flex items-center justify-between gap-3 mb-4">
+                            <div>
+                                <h2 className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">
+                                    Pasta de Deságue (Drop Folder)
+                                </h2>
+                                <p className="text-xs text-slate-400 mt-1">
+                                    Arquivos detectados no Drive e o status da indexação no módulo de Conhecimento.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={runSincronizarAcervo}
+                                disabled={syncing}
+                                className="shrink-0 rounded-md bg-slate-900 px-3 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-slate-700 disabled:opacity-50"
+                            >
+                                {syncing ? 'Sincronizando…' : 'Sincronizar agora'}
+                            </button>
+                        </div>
+
+                        {syncStatus && (
+                            <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs font-bold text-slate-600">
+                                {syncStatus}
+                            </div>
+                        )}
+
+                        {acervoItems.length === 0 ? (
+                            <p className="text-sm text-slate-500 font-medium py-6 text-center">
+                                Nenhum arquivo encontrado ainda na Pasta de Deságue.
+                            </p>
+                        ) : (
+                            <div className="space-y-2">
+                                {acervoItems.map((item) => {
+                                    const meta = acervoStatusMeta(item.status_indexacao);
+                                    return (
+                                        <div
+                                            key={item.id}
+                                            className="flex items-center justify-between gap-3 border border-slate-200 rounded-md p-3"
+                                        >
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-sm font-bold text-slate-900 truncate">{item.nome}</p>
+                                                <p className="text-xs text-slate-400">{item.tipo_mime}</p>
+                                            </div>
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <span
+                                                    className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[9px] font-bold uppercase tracking-wider ${meta.className}`}
+                                                >
+                                                    {meta.label}
+                                                </span>
+                                                {item.url && (
+                                                    <a
+                                                        href={item.url}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="text-xs font-bold text-emerald-700 hover:underline"
+                                                    >
+                                                        Abrir no Drive
+                                                    </a>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

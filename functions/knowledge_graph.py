@@ -72,6 +72,7 @@ ARTEFATO_TOKEN_CAP    = 15_000
 # ─── Módulo Acervo Global ─────────────────────────────────────────────────────
 KG_TOKEN_LIMIT     = 6_000   # budget máximo para Nós Conceituais no RAG híbrido
 ACERVO_TOKEN_LIMIT = 2_000   # budget máximo para Acervo Global no RAG híbrido
+MAX_TENTATIVAS_ACERVO = 5    # após N re-despachos sem sucesso, marca falha_permanente
 ARTEFATO_CHAR_CAP     = ARTEFATO_TOKEN_CAP * CHARS_PER_TOKEN  # ≈ 60 000 chars
 ARTEFATO_PUBSUB_TOPIC = "hermes-artefato-kg"
 SUPPORTED_MIMES = frozenset({
@@ -1376,6 +1377,13 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
     except Exception as exc:
         print(f"[KG Artefato] Falha ao gerar embedding ({nome}): {exc}")
 
+    if not emb:
+        # Sem embedding não há como gravar em indice_artefatos (a busca depende
+        # do campo vetorial). Não deixar o status cair em "concluido"/"falha_limite_tamanho"
+        # aqui, ou o documento fica invisível para sempre — o re-despacho do cron só
+        # tenta de novo itens fora de ("concluido", "ignorado_mime").
+        status_final = "falha_embedding"
+
     # ── Despacho final por origem ─────────────────────────────────────────────
     if origem == "tarefa":
         _update_artefato_status(db, task_id, idx, status_final, resumo)
@@ -1421,9 +1429,12 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
 
 # ─── Acervo Global: Cron Job de ingestão ─────────────────────────────────────
 
-def executar_monitoramento_acervo_global() -> None:
+def executar_monitoramento_acervo_global() -> dict:
     """
     Core function — monitora a Pasta de Deságue no Google Drive.
+
+    Retorna um resumo {"novos": int, "reprocessados": int, "erro": str | None}
+    para permitir uso tanto pelo cron quanto por um callable de sincronização manual.
     """
     import os as _os
     from googleapiclient.discovery import build
@@ -1433,20 +1444,23 @@ def executar_monitoramento_acervo_global() -> None:
     # ── Lê configuração ───────────────────────────────────────────────────────
     settings_doc = db.collection("system").document("settings").get()
     if not settings_doc.exists:
-        print("[Acervo] system/settings não encontrado — cron abortado")
-        return
+        erro = "system/settings não encontrado — cron abortado"
+        print(f"[Acervo] {erro}")
+        return {"novos": 0, "reprocessados": 0, "erro": erro}
     settings_data = settings_doc.to_dict() or {}
     folder_id = settings_data.get("drop_folder_id", "")
     if not folder_id:
-        print("[Acervo] drop_folder_id não configurado — cron abortado")
-        return
+        erro = "drop_folder_id não configurado — cron abortado"
+        print(f"[Acervo] {erro}")
+        return {"novos": 0, "reprocessados": 0, "erro": erro}
 
     # ── Credenciais Drive ─────────────────────────────────────────────────────
     try:
         creds = _get_google_creds_kg(db)
     except Exception as exc:
-        print(f"[Acervo] Erro ao obter credenciais Drive: {exc}")
-        return
+        erro = f"Erro ao obter credenciais Drive: {exc}"
+        print(f"[Acervo] {erro}")
+        return {"novos": 0, "reprocessados": 0, "erro": erro}
 
     service = build("drive", "v3", credentials=creds)
 
@@ -1464,8 +1478,9 @@ def executar_monitoramento_acervo_global() -> None:
         try:
             resp = service.files().list(**kwargs_api).execute()
         except Exception as exc:
-            print(f"[Acervo] Erro ao listar Drive: {exc}")
-            return
+            erro = f"Erro ao listar Drive: {exc}"
+            print(f"[Acervo] {erro}")
+            return {"novos": 0, "reprocessados": 0, "erro": erro}
         all_files.extend(resp.get("files", []))
         page_token = resp.get("nextPageToken")
         if not page_token:
@@ -1473,7 +1488,7 @@ def executar_monitoramento_acervo_global() -> None:
 
     if not all_files:
         print("[Acervo] Pasta de Deságue vazia — nada a processar")
-        return
+        return {"novos": 0, "reprocessados": 0, "erro": None}
 
     print(f"[Acervo] {len(all_files)} arquivo(s) encontrado(s) na pasta")
 
@@ -1485,7 +1500,8 @@ def executar_monitoramento_acervo_global() -> None:
         if fid:
             acervo_map[fid] = {
                 "id": doc.id,
-                "status": d.get("status_indexacao", "pendente")
+                "status": d.get("status_indexacao", "pendente"),
+                "tentativas": d.get("tentativas", 0),
             }
 
     # ── Filtra e despacha ─────────────────────────────────────────────────────
@@ -1506,14 +1522,25 @@ def executar_monitoramento_acervo_global() -> None:
         if fid in acervo_map:
             info = acervo_map[fid]
             # Se não está concluído nem ignorado propositalmente, tenta re-despachar
-            if info["status"] not in ("concluido", "ignorado_mime"):
+            if info["status"] not in ("concluido", "ignorado_mime", "falha_permanente"):
+                proxima_tentativa = info["tentativas"] + 1
+                if proxima_tentativa > MAX_TENTATIVAS_ACERVO:
+                    # Esgotou as tentativas: para de retentar automaticamente e sinaliza
+                    # na UI para investigação manual (evita loop infinito de custo de API).
+                    try:
+                        db.collection("acervo_global").document(info["id"]).update({
+                            "status_indexacao": "falha_permanente",
+                            "tentativas": proxima_tentativa,
+                        })
+                    except Exception as exc:
+                        print(f"[Acervo] Erro ao marcar falha_permanente {nome}: {exc}")
+                    continue
                 # Já existe mas está travado ou falhou? Re-despacha para o Worker Pub/Sub
                 try:
-                    # Reseta status para pendente se não estiver
-                    if info["status"] != "pendente":
-                        db.collection("acervo_global").document(info["id"]).update({
-                            "status_indexacao": "pendente"
-                        })
+                    db.collection("acervo_global").document(info["id"]).update({
+                        "status_indexacao": "pendente",
+                        "tentativas": proxima_tentativa,
+                    })
                     _dispatch_acervo_pubsub(project_id, info["id"], url, mime, fid, nome)
                     reprocessados += 1
                 except Exception as exc:
@@ -1531,6 +1558,7 @@ def executar_monitoramento_acervo_global() -> None:
                 "resumo_semantico": None,
                 "tags": [],
                 "status_indexacao": "pendente",
+                "tentativas": 0,
                 "indexed_at": firestore.SERVER_TIMESTAMP,
             })
             _dispatch_acervo_pubsub(project_id, acervo_id, url, mime, fid, nome)
@@ -1540,7 +1568,7 @@ def executar_monitoramento_acervo_global() -> None:
 
     print(f"[Acervo] Monitoramento concluído. Novos: {novos}, Re-despachados: {reprocessados}")
 
-    print(f"[Acervo] {novos} arquivo(s) novo(s) despachados para indexação")
+    return {"novos": novos, "reprocessados": reprocessados, "erro": None}
 
 
 @scheduler_fn.on_schedule(
@@ -1553,6 +1581,19 @@ def monitorar_acervo_global(*args, **kwargs) -> None:
     Cron Job — monitora a Pasta de Deságue no Google Drive a cada 15 minutos.
     """
     executar_monitoramento_acervo_global()
+
+
+@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=300)
+def sincronizar_acervo_manual(req: https_fn.CallableRequest):
+    """
+    Dispara sob demanda a mesma varredura da Pasta de Deságue feita pelo cron
+    de 15 minutos, para o usuário forçar uma sincronização (ex.: depois de
+    resolver um problema de acesso a um arquivo específico) sem esperar o cron.
+
+    Output: { novos: int, reprocessados: int, erro: str | None }
+    """
+    resultado = executar_monitoramento_acervo_global()
+    return resultado
 
 
 # ─── RAG: extração com time decay + circuit breaker ──────────────────────────
