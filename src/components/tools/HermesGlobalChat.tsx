@@ -23,11 +23,11 @@ import MermaidBlock from './MermaidBlock';
 import { getRoutingIndex, toolsRegistry } from './toolRegistry';
 import { isInternalAppHref, navigateWithinApp } from '../../utils/internalNavigation';
 
-const UPLOAD_ENDPOINT = 'https://us-central1-gestao-hermes.cloudfunctions.net/uploadFileForCopiloto';
+export const UPLOAD_ENDPOINT = 'https://us-central1-gestao-hermes.cloudfunctions.net/uploadFileForCopiloto';
 const COPILOTO_CALLABLE_TIMEOUT_MS = 240000;
 const LARGE_PASTE_THRESHOLD = 1500;
 const COMPOSER_MAX_LINES = 8;
-const COPILOTO_SUPPORTED_FILE_EXTENSIONS = [
+export const COPILOTO_SUPPORTED_FILE_EXTENSIONS = [
   '.pdf',
   '.doc',
   '.docx',
@@ -48,8 +48,8 @@ const COPILOTO_SUPPORTED_FILE_EXTENSIONS = [
   '.jpeg',
   '.webp',
 ] as const;
-const COPILOTO_FILE_ACCEPT = COPILOTO_SUPPORTED_FILE_EXTENSIONS.join(',');
-const COPILOTO_SUPPORTED_FORMATS_LABEL = 'PDF, DOC/DOCX, XLS/XLSX, CSV, TXT, JSON, XML, EML, Markdown, HTML, PPTX e imagens';
+export const COPILOTO_FILE_ACCEPT = COPILOTO_SUPPORTED_FILE_EXTENSIONS.join(',');
+export const COPILOTO_SUPPORTED_FORMATS_LABEL = 'PDF, DOC/DOCX, XLS/XLSX, CSV, TXT, JSON, XML, EML, Markdown, HTML, PPTX e imagens';
 
 const TOOL_LABELS: Record<string, string> = {
   consultar_historico_acoes: 'Histórico',
@@ -206,7 +206,7 @@ const getCopilotoErrorMessage = (err: any) => {
   return raw || 'Erro desconhecido ao consultar o copiloto.';
 };
 
-const isCopilotoFileSupported = (file: File) => {
+export const isCopilotoFileSupported = (file: File) => {
   const fileName = file.name.toLowerCase();
   const hasSupportedExtension = COPILOTO_SUPPORTED_FILE_EXTENSIONS.some((extension) => fileName.endsWith(extension));
   return hasSupportedExtension || ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'].includes(file.type);
