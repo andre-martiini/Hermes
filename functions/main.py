@@ -63,6 +63,7 @@ from knowledge_graph import (  # noqa: F401 — registra as Cloud Functions
     buscar_procedimento,
     crystallize_task_manual,
     extract_kg_rag_context,
+    processar_artefato_kg,
     monitorar_acervo_global,
     executar_monitoramento_acervo_global,
     sincronizar_acervo_manual,

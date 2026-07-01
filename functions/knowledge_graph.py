@@ -95,6 +95,8 @@ SUPPORTED_MIMES = frozenset({
 })
 
 DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+XLS_MIME_TYPE = "application/vnd.ms-excel"
+XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 FILE_SEARCH_STORE_MODEL = "models/gemini-embedding-2"
 FILE_SEARCH_QUERY_MODEL = GEMINI_BALANCED_MODEL
 FILE_SEARCH_WAIT_SECONDS = 90
@@ -104,11 +106,29 @@ def _is_docx(filename: str | None = None, mime_type: str | None = None) -> bool:
     return (mime_type or "").lower().strip() == DOCX_MIME_TYPE or (filename or "").lower().endswith(".docx")
 
 
+def _is_excel(filename: str | None = None, mime_type: str | None = None) -> bool:
+    mime = (mime_type or "").lower().strip()
+    name = (filename or "").lower().strip()
+    return mime in (XLS_MIME_TYPE, XLSX_MIME_TYPE) or name.endswith((".xls", ".xlsx"))
+
+
 def _extract_docx_text(file_bytes: bytes) -> str:
     import mammoth
 
     result = mammoth.extract_raw_text(io.BytesIO(file_bytes))
     return (result.value or "").strip()
+
+
+def _extract_excel_text(file_bytes: bytes) -> str:
+    import pandas as pd
+
+    sheets = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None)
+    chunks: list[str] = []
+    for sheet_name, df in sheets.items():
+        if df.empty:
+            continue
+        chunks.append(f"ABA: {sheet_name}\n{df.to_csv(index=False)}")
+    return "\n\n".join(chunks).strip()
 _DRIVE_ID_RE = re.compile(
     r"(?:drive\.google\.com/(?:file/d/|open\?id=)|docs\.google\.com/\w+/d/)([a-zA-Z0-9_-]{20,})"
 )
@@ -1312,11 +1332,13 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
         print(f"[KG Artefato] Falha no download ({nome}): {exc}")
         return
 
-    # ── Extração de texto via Gemini ─────────────────────────────────────────
+    # ── Extração de texto ────────────────────────────────────────────────────
     try:
         client = _gemini_client(api_key)
         if _is_docx(nome, tipo_mime):
             texto = _extract_docx_text(file_bytes)
+        elif _is_excel(nome, tipo_mime):
+            texto = _extract_excel_text(file_bytes)
         else:
             from google.genai import types
             extract_resp = generate_content_logged(
@@ -1380,8 +1402,8 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
     if not emb:
         # Sem embedding não há como gravar em indice_artefatos (a busca depende
         # do campo vetorial). Não deixar o status cair em "concluido"/"falha_limite_tamanho"
-        # aqui, ou o documento fica invisível para sempre — o re-despacho do cron só
-        # tenta de novo itens fora de ("concluido", "ignorado_mime").
+        # aqui, ou o documento fica invisível para sempre — o re-despacho do cron
+        # ignora estados terminais como "concluido" e "falha_limite_tamanho".
         status_final = "falha_embedding"
 
     # ── Despacho final por origem ─────────────────────────────────────────────
