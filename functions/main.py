@@ -35,6 +35,9 @@ from security_portals import (
     submitPublicScholarshipRegistration,
 )
 from pdf_precision import extract_pdf_text_with_fallback, is_pdf_mime_type
+from godmode import (  # noqa: F401 — registra as Cloud Functions
+    askHermesGodmode,
+)
 
 DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
