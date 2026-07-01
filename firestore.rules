@@ -1,0 +1,35 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function verifiedEmail() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
+    function internalUser() {
+      return verifiedEmail()
+        && request.auth.token.email == "andre.martiini@gmail.com";
+    }
+
+    match /system/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /public_configs/{document=**} {
+      allow read, write: if internalUser();
+    }
+
+    match /whatsapp_messages/{document=**} {
+      allow read, write: if internalUser();
+    }
+
+    match /{document=**} {
+      allow read, write: if internalUser();
+    }
+  }
+}
