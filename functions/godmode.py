@@ -2,11 +2,13 @@
 Hermes Godmode — modo estratégico do Copiloto, rodando sobre Claude
 (Anthropic) em vez de Gemini. Módulo aditivo: não altera nada do fluxo
 existente de askCopilotoHermes; expõe seu próprio callable e seu próprio
-registro de ferramentas, todas de leitura, sobre as mesmas coleções do
-Firestore já usadas pelo restante do app.
+registro de ferramentas, todas de leitura, sobre as coleções de tarefas,
+financeiro, saúde, metas estratégicas e conhecimento já usadas pelo
+restante do app.
 """
 
 import os
+from datetime import datetime, timedelta
 
 from firebase_admin import firestore
 from firebase_functions import https_fn, options
@@ -67,61 +69,132 @@ def _get_user_profile_text(db, uid: str | None) -> str:
 def _build_tools(db, user_uid: str | None, gemini_key: str | None):
     """Registro de ferramentas somente-leitura do Godmode."""
 
-    def consultar_projetos(nome_contendo: str = "") -> dict:
-        needle = (nome_contendo or "").strip().lower()
-        out = []
-        for d in db.collection("projetos").stream():
+    def consultar_tarefas(status: str = "", area_tematica: str = "", incluir_concluidas: bool = False, limite: int = 50) -> dict:
+        limite = max(1, min(int(limite or 50), 150))
+        query = db.collection("tarefas")
+        # Só um filtro no Firestore por vez (evita depender de índice composto);
+        # o restante do filtro é aplicado em memória.
+        if area_tematica:
+            query = query.where("area_tematica", "==", area_tematica)
+        elif status:
+            query = query.where("status", "==", status)
+
+        tarefas = []
+        for d in query.limit(limite * 3).stream():
             data = d.to_dict() or {}
-            nome = data.get("nome", "")
-            if needle and needle not in nome.lower():
+            if status and data.get("status") != status:
                 continue
-            out.append({"id": d.id, "nome": nome, "orcamento": data.get("orcamento") or {}})
-        return {"projetos": out[:100]}
+            if not status and not incluir_concluidas and data.get("status") == "concluído":
+                continue
+            if area_tematica and data.get("area_tematica") != area_tematica:
+                continue
+            tarefas.append({
+                "id": d.id,
+                "titulo": data.get("titulo"),
+                "status": data.get("status"),
+                "area_tematica": data.get("area_tematica"),
+                "projeto": data.get("projeto"),
+                "data_limite": data.get("data_limite"),
+                "prazo_final": data.get("prazo_final"),
+                "contabilizar_meta": data.get("contabilizar_meta"),
+                "tags": data.get("tags"),
+            })
+            if len(tarefas) >= limite:
+                break
+        return {"tarefas": tarefas}
 
-    def consultar_itens_orcamento(projeto_id: str) -> dict:
-        if not projeto_id:
-            return {"error": "projeto_id é obrigatório."}
-        itens = []
-        totais_rubrica: dict = {}
-        totais_status: dict = {}
-        docs = db.collection("projetos").document(projeto_id).collection("itens_orcamento").stream()
-        for d in docs:
+    def consultar_financeiro(mes: int = 0, ano: int = 0) -> dict:
+        now = datetime.utcnow()
+        mes = int(mes) or now.month
+        ano = int(ano) or now.year
+        periodo = f"{ano:04d}-{mes:02d}"
+
+        transacoes = []
+        for d in db.collection("finance_transactions").limit(500).stream():
             data = d.to_dict() or {}
-            valor = float(data.get("valor_unitario_estimado") or 0) * float(data.get("quantidade") or 0)
-            rubrica = data.get("rubrica", "indefinida")
-            status = data.get("status", "indefinido")
-            totais_rubrica[rubrica] = totais_rubrica.get(rubrica, 0) + valor
-            totais_status[status] = totais_status.get(status, 0) + valor
-            itens.append({**data, "id": d.id, "valor_total": valor})
-        return {"itens": itens[:200], "totais_por_rubrica": totais_rubrica, "totais_por_status": totais_status}
+            if data.get("status") == "deleted":
+                continue
+            if str(data.get("date", ""))[:7] != periodo:
+                continue
+            transacoes.append({
+                "id": d.id,
+                "description": data.get("description"),
+                "amount": data.get("amount"),
+                "date": data.get("date"),
+                "category": data.get("category"),
+            })
 
-    def consultar_vinculos_bolsistas(projeto_id: str = "") -> dict:
-        query = db.collection("vinculos_projeto")
-        if projeto_id:
-            query = query.where("projeto_id", "==", projeto_id)
-        vinculos = [dict(d.to_dict() or {}, id=d.id) for d in query.limit(150).stream()]
+        receitas = []
+        for d in db.collection("income_entries").limit(500).stream():
+            data = d.to_dict() or {}
+            if data.get("status") == "deleted":
+                continue
+            if data.get("month") != mes or data.get("year") != ano:
+                continue
+            receitas.append({
+                "id": d.id,
+                "description": data.get("description"),
+                "amount": data.get("amount"),
+                "isReceived": data.get("isReceived"),
+                "category": data.get("category"),
+            })
 
-        pessoa_ids = {v.get("pessoa_id") for v in vinculos if v.get("pessoa_id")}
-        tipo_ids = {v.get("tipo_bolsa_id") for v in vinculos if v.get("tipo_bolsa_id")}
+        contas = []
+        for d in db.collection("fixed_bills").limit(500).stream():
+            data = d.to_dict() or {}
+            if data.get("month") != mes or data.get("year") != ano:
+                continue
+            contas.append({
+                "id": d.id,
+                "description": data.get("description"),
+                "amount": data.get("amount"),
+                "isPaid": data.get("isPaid"),
+                "dueDay": data.get("dueDay"),
+                "category": data.get("category"),
+            })
 
-        pessoas = {}
-        for pid in pessoa_ids:
-            snap = db.collection("perfil_pessoas").document(pid).get()
-            if snap.exists:
-                pessoas[pid] = (snap.to_dict() or {}).get("nome")
+        total_despesas = sum(float(t.get("amount") or 0) for t in transacoes) + sum(
+            float(c.get("amount") or 0) for c in contas
+        )
+        total_receitas = sum(float(r.get("amount") or 0) for r in receitas)
 
-        tipos = {}
-        for tid in tipo_ids:
-            snap = db.collection("tipos_bolsa").document(tid).get()
-            if snap.exists:
-                data = snap.to_dict() or {}
-                tipos[tid] = {"nome": data.get("nome_modalidade"), "valor_integral": data.get("valor_integral")}
+        return {
+            "periodo": periodo,
+            "transacoes": transacoes,
+            "receitas": receitas,
+            "contas_fixas": contas,
+            "total_despesas": total_despesas,
+            "total_receitas": total_receitas,
+            "saldo": total_receitas - total_despesas,
+        }
 
-        for v in vinculos:
-            v["pessoa_nome"] = pessoas.get(v.get("pessoa_id"))
-            v["tipo_bolsa"] = tipos.get(v.get("tipo_bolsa_id"))
+    def consultar_saude(dias: int = 14) -> dict:
+        dias = max(1, min(int(dias or 14), 90))
+        cutoff = (datetime.utcnow() - timedelta(days=dias)).strftime("%Y-%m-%d")
 
-        return {"vinculos": vinculos}
+        pesos = []
+        for d in db.collection("health_weights").limit(200).stream():
+            data = d.to_dict() or {}
+            if str(data.get("date", "")) >= cutoff:
+                pesos.append({"id": d.id, **data})
+
+        habitos = [
+            {"id": d.id, **(d.to_dict() or {})}
+            for d in db.collection("health_daily_habits").limit(200).stream()
+            if d.id >= cutoff
+        ]
+        exercicios = [
+            {"id": d.id, **(d.to_dict() or {})}
+            for d in db.collection("health_exercise_logs").limit(200).stream()
+            if d.id >= cutoff
+        ]
+
+        return {
+            "periodo_dias": dias,
+            "pesos": sorted(pesos, key=lambda x: x.get("date", "")),
+            "habitos": habitos,
+            "exercicios": exercicios,
+        }
 
     def consultar_metas_estrategicas(apenas_ativas: bool = True) -> dict:
         if not user_uid:
@@ -151,56 +224,68 @@ def _build_tools(db, user_uid: str | None, gemini_key: str | None):
             return {"error": str(exc)}
 
     function_map = {
-        "consultar_projetos": consultar_projetos,
-        "consultar_itens_orcamento": consultar_itens_orcamento,
-        "consultar_vinculos_bolsistas": consultar_vinculos_bolsistas,
+        "consultar_tarefas": consultar_tarefas,
+        "consultar_financeiro": consultar_financeiro,
+        "consultar_saude": consultar_saude,
         "consultar_metas_estrategicas": consultar_metas_estrategicas,
         "buscar_conhecimento": buscar_conhecimento,
     }
 
     tools_schema = [
         {
-            "name": "consultar_projetos",
+            "name": "consultar_tarefas",
             "description": (
-                "Lista projetos cadastrados com seu orçamento (custeio/capital/bolsas). "
-                "Use um filtro de nome para restringir."
+                "Lista tarefas/ações do usuário (título, status, área temática, prazos). "
+                "Por padrão oculta tarefas concluídas — use incluir_concluidas para trazê-las."
             ),
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "nome_contendo": {
+                    "status": {
                         "type": "string",
-                        "description": "Filtro opcional por substring no nome do projeto.",
+                        "enum": ["em andamento", "stand-by", "concluído"],
+                        "description": "Filtra por status exato. Deixe vazio para todos.",
+                    },
+                    "area_tematica": {
+                        "type": "string",
+                        "description": "Filtra por área temática exata, se conhecida.",
+                    },
+                    "incluir_concluidas": {
+                        "type": "boolean",
+                        "description": "Se true, inclui tarefas com status 'concluído' quando nenhum status específico for informado.",
+                    },
+                    "limite": {
+                        "type": "integer",
+                        "description": "Número máximo de tarefas retornadas (padrão 50, máximo 150).",
                     },
                 },
             },
         },
         {
-            "name": "consultar_itens_orcamento",
+            "name": "consultar_financeiro",
             "description": (
-                "Lista os itens de orçamento planejados/aprovados/executados de um projeto "
-                "específico, com totais por rubrica e por status."
+                "Retorna transações, receitas e contas fixas de um mês/ano do módulo financeiro pessoal, "
+                "com totais de receita, despesa e saldo. Sem parâmetros, usa o mês/ano atual."
             ),
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "projeto_id": {"type": "string", "description": "ID do documento do projeto em 'projetos'."},
+                    "mes": {"type": "integer", "description": "Mês (1-12). Padrão: mês atual."},
+                    "ano": {"type": "integer", "description": "Ano (ex: 2026). Padrão: ano atual."},
                 },
-                "required": ["projeto_id"],
             },
         },
         {
-            "name": "consultar_vinculos_bolsistas",
+            "name": "consultar_saude",
             "description": (
-                "Lista vínculos de bolsistas/pessoas a projetos (datas, percentual de recebimento, "
-                "tipo de bolsa, status). Opcionalmente filtra por projeto."
+                "Retorna histórico recente de peso, hábitos diários e registros de exercício do módulo de saúde."
             ),
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "projeto_id": {
-                        "type": "string",
-                        "description": "ID do projeto para filtrar os vínculos. Deixe vazio para todos.",
+                    "dias": {
+                        "type": "integer",
+                        "description": "Janela de dias para trás a considerar (padrão 14, máximo 90).",
                     },
                 },
             },
