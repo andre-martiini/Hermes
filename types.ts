@@ -116,7 +116,7 @@ export interface ArtefatoKG {
     url: string;
     tipo_mime: string;
     resumo_semantico: string | null;
-    status_indexacao: 'pendente' | 'concluido' | 'falha_acesso' | 'falha_limite_tamanho' | 'ignorado_mime';
+    status_indexacao: 'pendente' | 'concluido' | 'falha_acesso' | 'falha_limite_tamanho' | 'ignorado_mime' | 'falha_embedding';
     drive_file_id?: string;
 }
 
@@ -129,7 +129,8 @@ export interface AcervoGlobal {
     drive_file_id: string;
     resumo_semantico: string | null;
     tags: string[];
-    status_indexacao: 'pendente' | 'concluido' | 'falha_acesso' | 'falha_limite_tamanho' | 'ignorado_mime';
+    status_indexacao: 'pendente' | 'concluido' | 'falha_acesso' | 'falha_limite_tamanho' | 'ignorado_mime' | 'falha_embedding' | 'falha_permanente';
+    tentativas?: number;
     indexed_at: string;
     file_search?: GeminiFileSearchIndex;
 }
