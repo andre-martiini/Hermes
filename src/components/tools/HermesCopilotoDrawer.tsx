@@ -2925,7 +2925,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         </div>
                                         {mention.filtered.map((item, idx) => (
                                             <button
-                                                key={item.id}
+                                                key={item.id || `mention-${idx}`}
                                                 onMouseDown={e => { e.preventDefault(); selectMention(item); }}
                                                 className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${idx === mention.selectedIndex ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
                                             >
