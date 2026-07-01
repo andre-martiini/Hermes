@@ -37,5 +37,5 @@ Desde o início/meados de 2025, o Google migrou para as séries Gemini 2.0 e 2.5
 
 ## Armazenamento de chaves
 
-- Arquivos `.env` locais usados em `Hermes-Bot/` e na raiz do projeto.
+- Arquivos `.env` locais usados na raiz do projeto e em subserviços (ex.: `hermes-voice-bridge/`).
 - `.gitignore` deve incluir explicitamente `.env` e `.env.local` para prevenir vazamentos.
