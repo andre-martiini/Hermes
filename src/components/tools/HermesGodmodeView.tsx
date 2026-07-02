@@ -47,7 +47,7 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
     const [isRecording, setIsRecording] = useState(false);
     const [isProcessingMic, setIsProcessingMic] = useState(false);
     const [isDragActive, setIsDragActive] = useState(false);
-    const bottomRef = useRef<HTMLDivElement>(null);
+    const messagesScrollRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
@@ -86,8 +86,11 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
     }, [userId]);
 
     useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
+        // Rola apenas a lista interna de mensagens — scrollIntoView rolaria a
+        // página inteira em mobile, escondendo o cabeçalho fixo do módulo.
+        const el = messagesScrollRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+    }, [messages, isSending]);
 
     useEffect(() => {
         return () => {
@@ -255,7 +258,7 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
 
     return (
         <div
-            className={`relative flex flex-col h-[calc(100vh-7.5rem)] min-h-[520px] rounded-2xl border overflow-hidden ${
+            className={`relative flex flex-col h-[calc(100dvh-7.5rem)] min-h-[520px] rounded-2xl border overflow-hidden ${
                 isDark
                     ? 'border-violet-400/20 bg-gradient-to-br from-[#0b0714] via-[#160c2e] to-[#1c0f3b]'
                     : 'border-violet-200 bg-gradient-to-br from-white via-[#faf7ff] to-[#f0e6ff]'
@@ -370,7 +373,7 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
                 </div>
             )}
 
-            <div className="relative flex-1 overflow-y-auto px-5 py-4 space-y-4">
+            <div ref={messagesScrollRef} className="relative flex-1 overflow-y-auto overscroll-contain px-5 py-4 space-y-4">
                 {messages.length === 0 && (
                     <div className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                         Faça uma pergunta estratégica — tarefas, financeiro, saúde, metas. O Godmode vai buscar os dados reais antes de responder.
@@ -400,7 +403,6 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
                         {uploadPhase === 'uploading' ? 'Enviando arquivo...' : uploadPhase === 'processing' ? 'Processando anexo...' : 'Godmode está analisando…'}
                     </div>
                 )}
-                <div ref={bottomRef} />
             </div>
 
             <div className={`relative px-5 py-4 border-t backdrop-blur-sm ${isDark ? 'border-violet-400/10' : 'border-violet-200/70'}`}>
