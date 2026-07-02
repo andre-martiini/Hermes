@@ -13,6 +13,16 @@ GODMODE_MAX_TOOL_WORKERS = 8
 GODMODE_TOOL_RESULT_CHAR_LIMIT = 8000
 
 
+def _is_model_unavailable_error(exc: Exception) -> bool:
+    """Detecta um modelo indisponível (ex: rollout parcial) sem depender do
+    pacote anthropic estar importado neste módulo — inspeciona status_code
+    (APIStatusError) e o corpo da mensagem como fallback."""
+    if getattr(exc, "status_code", None) == 404:
+        return True
+    message = str(exc).lower()
+    return "not_found_error" in message or ("model" in message and "not available" in message)
+
+
 def run_tool_loop(
     client,
     model: str,
@@ -23,6 +33,7 @@ def run_tool_loop(
     user_message: str,
     max_tokens: int = 4096,
     max_rounds: int = GODMODE_MAX_ROUNDS,
+    fallback_model: str | None = None,
 ) -> dict:
     """
     Executa um turno completo de conversa com tool-calling na Claude Messages API.
@@ -33,8 +44,11 @@ def run_tool_loop(
     history: mensagens Claude já acumuladas em turnos anteriores
              ([{"role": "user"|"assistant", "content": str}, ...])
     user_message: texto da nova mensagem do usuário
+    fallback_model: se o `model` primário responder "não disponível" (404),
+             a rodada é refeita automaticamente com este modelo, e todas as
+             rodadas seguintes do mesmo turno passam a usá-lo.
 
-    Retorna: {"text", "history", "tools_used", "usage"}
+    Retorna: {"text", "history", "tools_used", "usage", "model_used", "fallback_used"}
     """
     messages = list(history)
     messages.append({"role": "user", "content": user_message})
@@ -43,15 +57,28 @@ def run_tool_loop(
     usage_totals = {"input_tokens": 0, "output_tokens": 0}
     final_text = ""
     hit_round_limit = True
+    active_model = model
+    fallback_used = False
 
     for _round in range(max_rounds):
-        response = client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            system=system_instruction,
-            tools=tools,
-            messages=messages,
-        )
+        def _create(model_name: str):
+            return client.messages.create(
+                model=model_name,
+                max_tokens=max_tokens,
+                system=system_instruction,
+                tools=tools,
+                messages=messages,
+            )
+
+        try:
+            response = _create(active_model)
+        except Exception as exc:
+            if fallback_model and active_model != fallback_model and _is_model_unavailable_error(exc):
+                active_model = fallback_model
+                fallback_used = True
+                response = _create(active_model)
+            else:
+                raise
 
         usage = getattr(response, "usage", None)
         if usage is not None:
@@ -105,4 +132,6 @@ def run_tool_loop(
         "history": messages,
         "tools_used": tools_used,
         "usage": usage_totals,
+        "model_used": active_model,
+        "fallback_used": fallback_used,
     }

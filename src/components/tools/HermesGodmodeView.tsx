@@ -20,6 +20,7 @@ interface GodmodeMessage {
     role: 'user' | 'assistant';
     content: string;
     toolsUsed?: string[];
+    modelUsed?: string;
     timestamp?: { seconds: number };
 }
 
@@ -389,9 +390,10 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
                             <div className="prose prose-sm max-w-none dark:prose-invert">
                                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                             </div>
-                            {!!msg.toolsUsed?.length && (
+                            {(!!msg.toolsUsed?.length || msg.modelUsed) && (
                                 <div className={`mt-2 text-[10px] uppercase tracking-widest font-mono ${msg.role === 'user' ? 'text-white/70' : (isDark ? 'text-slate-500' : 'text-slate-400')}`}>
-                                    Ferramentas: {msg.toolsUsed.join(', ')}
+                                    {msg.modelUsed && <span>Modelo: {msg.modelUsed}</span>}
+                                    {!!msg.toolsUsed?.length && <span>{msg.modelUsed ? ' · ' : ''}Ferramentas: {msg.toolsUsed.join(', ')}</span>}
                                 </div>
                             )}
                         </div>

@@ -448,11 +448,12 @@ def askHermesGodmode(req: https_fn.CallableRequest):
             history=history,
             user_message=llm_user_message,
             max_tokens=GODMODE_MAX_TOKENS,
+            fallback_model=GODMODE_FALLBACK_MODEL,
         )
     except anthropic.APIStatusError as exc:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.UNAVAILABLE,
-            message=f"Erro na Claude API: {exc}",
+            message=f"Erro na Claude API (modelo principal e fallback indisponíveis): {exc}",
         )
 
     mensagens_ref.add(
@@ -460,6 +461,7 @@ def askHermesGodmode(req: https_fn.CallableRequest):
             "role": "assistant",
             "content": result["text"],
             "toolsUsed": result["tools_used"],
+            "modelUsed": result["model_used"],
             "timestamp": firestore.SERVER_TIMESTAMP,
         }
     )
@@ -470,4 +472,6 @@ def askHermesGodmode(req: https_fn.CallableRequest):
         "sessionId": session_id,
         "toolsUsed": result["tools_used"],
         "usage": result["usage"],
+        "modelUsed": result["model_used"],
+        "fallbackUsed": result["fallback_used"],
     }

@@ -123,6 +123,8 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
   const [finalDocument, setFinalDocument] = useState<string | null>(null);
   const [history, setHistory] = useState<BatchHistoryEntry[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isPasteTranscribing, setIsPasteTranscribing] = useState(false);
+  const [pasteProgress, setPasteProgress] = useState<number | null>(null);
 
   useEffect(() => {
     readQueuedShareItems().then((queued) => {
@@ -344,9 +346,10 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
             />
             <button
               onClick={() => fileInputRef.current?.click()}
+              disabled={isPasteTranscribing}
               className={`px-4 py-2.5 border rounded-none-none text-[10px] font-bold uppercase tracking-wider transition-all ${
                 isDark ? 'border-slate-600 bg-slate-800 text-slate-200 hover:border-blue-400' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-400 hover:text-blue-600'
-              }`}
+              } ${isPasteTranscribing ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               + Adicionar Áudio/Vídeo
             </button>
@@ -357,6 +360,7 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
               value={textDraft}
               onChange={(e) => setTextDraft(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') addTextItem(); }}
+              disabled={isPasteTranscribing}
               onPaste={async (e) => {
                 const pastedItems = e.clipboardData.items;
                 let audioFile: File | null = null;
@@ -371,30 +375,66 @@ export const BatchTranscriptionTool: React.FC<BatchTranscriptionToolProps> = ({ 
                 if (audioFile && window.innerWidth >= 768) {
                   e.preventDefault();
                   showToast('Áudio colado! Transcrevendo automaticamente...', 'info');
+                  setIsPasteTranscribing(true);
+                  setPasteProgress(0);
                   try {
-                    const result = await transcribeFile(audioFile, () => {});
+                    const result = await transcribeFile(audioFile, (pct) => {
+                      setPasteProgress(pct);
+                    });
                     setTextDraft((prev) => prev ? prev + '\n' + result.refined : result.refined);
                     showToast('Áudio transcrito com sucesso!', 'success');
                   } catch (error) {
                     console.error('[BatchTranscriptionTool] Erro na transcrição automática:', error);
                     showToast('Erro ao transcrever o áudio.', 'error');
+                  } finally {
+                    setIsPasteTranscribing(false);
+                    setPasteProgress(null);
                   }
                 }
               }}
               placeholder="Cole aqui uma mensagem de texto da conversa..."
               className={`flex-1 px-4 py-2.5 border rounded-none-none text-sm font-medium outline-none ${
                 isDark ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-900 placeholder:text-slate-400'
-              }`}
+              } ${isPasteTranscribing ? 'opacity-55 bg-slate-50 dark:bg-slate-900/50 cursor-not-allowed' : ''}`}
             />
             <button
               onClick={addTextItem}
+              disabled={isPasteTranscribing || !textDraft.trim()}
               className={`px-4 py-2.5 border rounded-none-none text-[10px] font-bold uppercase tracking-wider transition-all ${
                 isDark ? 'border-slate-600 bg-slate-800 text-slate-200 hover:border-blue-400' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-400 hover:text-blue-600'
-              }`}
+              } ${isPasteTranscribing || !textDraft.trim() ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               + Adicionar Texto
             </button>
           </div>
+          {isPasteTranscribing && (
+            <div className="mt-4 p-4 rounded-xl border border-blue-100 dark:border-blue-900/30 bg-blue-50/50 dark:bg-blue-950/20 animate-in fade-in zoom-in-95 duration-200">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-blue-500 border-t-transparent" />
+                  <span className={`text-[10px] font-mono font-bold uppercase tracking-widest ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
+                    {pasteProgress !== null ? 'Enviando Áudio...' : 'Processando Transcrição...'}
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono font-bold text-slate-400">
+                  {pasteProgress !== null ? `${pasteProgress}%` : 'Aguardando IA...'}
+                </span>
+              </div>
+              <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                <div
+                  style={{ width: `${pasteProgress !== null ? pasteProgress : 100}%` }}
+                  className={`h-full rounded-full transition-all duration-300 ${
+                    pasteProgress !== null ? 'bg-blue-500' : 'bg-blue-400 animate-pulse'
+                  }`}
+                />
+              </div>
+              <p className="text-[10px] text-slate-400 mt-2 italic font-sans leading-relaxed">
+                {pasteProgress !== null 
+                  ? 'Fazendo upload do áudio para o servidor seguro.' 
+                  : 'O áudio foi enviado e está sendo transcrito pela Inteligência Artificial. Por favor, aguarde...'}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Queue */}

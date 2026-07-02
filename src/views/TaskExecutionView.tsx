@@ -2265,8 +2265,8 @@ export const TaskExecutionView = ({
                                 {(currentTaskData.pool_dados || []).length === 0 ? (
                                   <p className={`text-xs ${mutedText} w-full text-center py-2 italic`}>Nenhum arquivo carregado.</p>
                                 ) : (
-                                  (currentTaskData.pool_dados || []).map(item => (
-                                    <button key={item.id} onClick={() => {
+                                  (currentTaskData.pool_dados || []).map((item, index) => (
+                                    <button key={item.id || `pool-${index}`} onClick={() => {
                                       window.open(item.valor, '_blank');
                                     }}
                                       className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-[10px] font-bold transition-all ${isDark ? 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-700 hover:bg-blue-50 hover:border-blue-200'}`}>

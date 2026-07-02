@@ -213,6 +213,7 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
 }) => {
   const statusValue = normalizeStatus(task.status);
   const isCompleted = statusValue === 'concluido';
+  const isStandby = statusValue === 'stand-by' || statusValue === 'standby' || statusValue === 'stand by' || statusValue === 'cgby';
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isEditingDateTime, setIsEditingDateTime] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -297,7 +298,7 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
       }
     : undefined;
 
-  const dateDisplay = formatDateShort(task.data_limite);
+  const dateDisplay = isStandby ? 'Stand-by' : formatDateShort(task.data_limite);
   const canSynthesizeDescription = isBlankTaskDescription(task.descricao) && hasDescriptionSynthesisContext(task);
 
   const handleQuickDate = (type: 'today' | 'tomorrow') => {
@@ -429,6 +430,11 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
 
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-2 flex-wrap">
+          {isStandby && (
+            <span className={`text-[8px] md:text-[9px] font-bold px-2 py-0.5 rounded-full border font-sans uppercase ${isDark ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+              Stand-by
+            </span>
+          )}
           {task.area_tematica && task.area_tematica !== 'NÃO CLASSIFICADA' && (() => {
             const tagStyle = isDark
               ? { className: 'bg-white/10 text-white border-white/10 rounded-full', style: undefined }
