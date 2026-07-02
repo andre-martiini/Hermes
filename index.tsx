@@ -4940,7 +4940,7 @@ const App: React.FC = () => {
             </header>
             <div className={`w-full ${viewMode === 'dashboard' ? 'px-0 py-0' : 'px-0 md:px-8 py-6'}`}>
               {/* Painel de Estatísticas e Filtros - APENAS NA VISÃO GERAL */}
-              <main className={viewMode === 'dashboard' ? '' : 'mb-20'}>
+              <main className={(viewMode === 'dashboard' || viewMode === 'godmode') ? '' : 'mb-20'}>
                 {viewMode === 'dashboard' ? (
                   <>
                     {/* Mobile: Atalhos Inteligentes */}
@@ -6825,7 +6825,7 @@ const App: React.FC = () => {
             />
           )
         }
-        {!isCopilotoOpen && !(selectedTask && (taskModalMode === 'execute' || (taskModalMode === 'default' && selectedTask.area_tematica === 'CLC'))) && (
+        {!isCopilotoOpen && viewMode !== 'godmode' && !(selectedTask && (taskModalMode === 'execute' || (taskModalMode === 'default' && selectedTask.area_tematica === 'CLC'))) && (
           <button
             type="button"
             aria-label="Copiloto Hermes"
