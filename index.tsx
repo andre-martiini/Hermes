@@ -5600,7 +5600,6 @@ const App: React.FC = () => {
                 ) : viewMode === 'services' ? (
                   <ServicesView
                     services={services}
-                    knowledgeBases={knowledgeBases}
                     onCreateService={handleCreateService}
                     onUpdateService={handleUpdateService}
                     onDeleteService={handleDeleteService}

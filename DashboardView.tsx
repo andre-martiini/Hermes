@@ -105,6 +105,28 @@ const HiddenMoney = ({ className = "", compact = false }: { className?: string, 
     </span>
 );
 
+const getFinanceDateParts = (dateValue?: string) => {
+    if (!dateValue) return null;
+
+    const isoDate = dateValue.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoDate) {
+        return {
+            year: Number(isoDate[1]),
+            month: Number(isoDate[2]) - 1,
+            day: Number(isoDate[3])
+        };
+    }
+
+    const fallbackDate = new Date(dateValue);
+    if (Number.isNaN(fallbackDate.getTime())) return null;
+
+    return {
+        year: fallbackDate.getFullYear(),
+        month: fallbackDate.getMonth(),
+        day: fallbackDate.getDate()
+    };
+};
+
 // --- MAIN COMPONENT ---
 const DashboardView: React.FC<DashboardViewProps> = ({
     tarefas = [],
@@ -152,8 +174,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     const currentBudget = financeSettings?.monthlyBudgets?.[periodKey] || financeSettings?.monthlyBudget || 0;
 
     const currentMonthTransactions = useMemo(() => financeTransactions.filter(t => {
-        const d = new Date(t.date);
-        return d.getMonth() === currentMonth && d.getFullYear() === currentYear && t.status !== 'deleted';
+        const dateParts = getFinanceDateParts(t.date);
+        return dateParts?.month === currentMonth && dateParts.year === currentYear && t.status !== 'deleted';
     }), [financeTransactions, currentMonth, currentYear]);
 
     const currentMonthTotalSpent = useMemo(() => currentMonthTransactions.reduce((acc, curr) => acc + curr.amount, 0), [currentMonthTransactions]);
@@ -162,26 +184,29 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     const financeChartData = useMemo(() => {
         const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
         const monthName = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'][currentMonth];
-        const result = [];
+        const amountByDay = new Map<number, number>();
 
-        for (let d = 1; d <= daysInMonth; d++) {
-            const amount = currentMonthTransactions
-                .filter(t => {
-                    const transDate = new Date(t.date);
-                    return transDate.getDate() === d;
-                })
-                .reduce((acc, curr) => acc + curr.amount, 0);
+        currentMonthTransactions.forEach(transaction => {
+            const dateParts = getFinanceDateParts(transaction.date);
+            if (!dateParts) return;
 
-            if (amount > 0) {
-                result.push({
-                    day: d,
-                    amount,
-                    monthName
-                });
-            }
-        }
-        return result;
+            amountByDay.set(dateParts.day, (amountByDay.get(dateParts.day) || 0) + transaction.amount);
+        });
+
+        return Array.from({ length: daysInMonth }, (_, index) => {
+            const day = index + 1;
+            return {
+                day,
+                amount: amountByDay.get(day) || 0,
+                monthName
+            };
+        });
     }, [currentMonthTransactions, currentMonth, currentYear]);
+
+    const maxFinanceChartAmount = useMemo(
+        () => Math.max(...financeChartData.map(d => d.amount), 1),
+        [financeChartData]
+    );
 
     const currentMonthIncome = useMemo(() => incomeEntries
         .filter(e => e.month === currentMonth && e.year === currentYear && e.isReceived && e.status !== 'deleted')
@@ -361,16 +386,20 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 </span>
                                 <div className="h-20 flex items-end gap-1 px-1 relative">
                                     {isFinanceVisible ? (
-                                        financeChartData.length > 0 ? (
+                                        financeChartData.some(item => item.amount > 0) ? (
                                             financeChartData.map((item, i) => {
-                                                const maxAmount = Math.max(...financeChartData.map(d => d.amount), 1);
-                                                const heightPercent = (item.amount / maxAmount) * 100;
+                                                const heightPercent = (item.amount / maxFinanceChartAmount) * 100;
+                                                const hasAmount = item.amount > 0;
                                                 return (
                                                     <div key={i} className="flex-1 min-w-[8px] flex flex-col justify-end h-full group">
                                                         <div
-                                                            style={{ height: `${Math.max(heightPercent, 6)}%` }}
-                                                            className="w-full bg-[#10b981]/30 group-hover:bg-[#10b981] transition-all duration-300 rounded-sm"
-                                                            title={`Dia ${item.day}: R$ ${item.amount.toFixed(2)}`}
+                                                            style={{ height: hasAmount ? `${Math.max(heightPercent, 6)}%` : '2px' }}
+                                                            className={`w-full transition-all duration-300 rounded-sm ${
+                                                                hasAmount
+                                                                    ? 'bg-[#10b981]/30 group-hover:bg-[#10b981]'
+                                                                    : isDark ? 'bg-white/10' : 'bg-slate-200'
+                                                            }`}
+                                                            title={`${String(item.day).padStart(2, '0')} ${item.monthName}: R$ ${item.amount.toFixed(2)}`}
                                                         />
                                                     </div>
                                                 );
