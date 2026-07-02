@@ -78,7 +78,88 @@ def _get_user_profile_text(db, uid: str | None) -> str:
     return "\n".join(lines) or "(perfil sem dados básicos)"
 
 
-def _build_tools(db, user_uid: str | None, gemini_key: str | None):
+_GAPPS_EXPORT_MIME = {
+    "application/vnd.google-apps.document": "text/plain",
+    "application/vnd.google-apps.spreadsheet": "text/csv",
+    "application/vnd.google-apps.presentation": "text/plain",
+}
+
+_PLAIN_TEXT_EXTENSIONS = (".txt", ".csv", ".md", ".markdown", ".json", ".xml", ".html", ".htm", ".eml")
+
+
+def _extract_attached_file_text(drive_file_id: str, gemini_key: str | None) -> tuple[str, str]:
+    """Baixa do Drive o arquivo anexado à mensagem e extrai seu texto. Retorna (nome_real, texto)."""
+    from main import get_drive_service  # import tardio: evita import circular com main.py
+
+    import io as _io
+
+    from googleapiclient.http import MediaIoBaseDownload
+
+    drive_service = get_drive_service()
+    meta = drive_service.files().get(fileId=drive_file_id, fields="name,mimeType").execute()
+    real_name = meta.get("name", "arquivo anexado")
+    mime = meta.get("mimeType", "application/octet-stream")
+
+    if mime in _GAPPS_EXPORT_MIME:
+        request = drive_service.files().export_media(fileId=drive_file_id, mimeType=_GAPPS_EXPORT_MIME[mime])
+    else:
+        request = drive_service.files().get_media(fileId=drive_file_id)
+
+    buffer = _io.BytesIO()
+    downloader = MediaIoBaseDownload(buffer, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    file_bytes = buffer.getvalue()
+
+    lower_name = real_name.lower()
+    if mime.startswith("image/"):
+        text = (
+            "(Este anexo é uma imagem — o Godmode ainda não realiza leitura visual/OCR. "
+            "Peça ao usuário para descrever em texto o conteúdo relevante da imagem.)"
+        )
+    elif mime in _GAPPS_EXPORT_MIME or lower_name.endswith(_PLAIN_TEXT_EXTENSIONS):
+        text = file_bytes.decode("utf-8", errors="replace")
+    elif lower_name.endswith(".docx") or mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        import mammoth
+
+        text = mammoth.extract_raw_text(_io.BytesIO(file_bytes)).value or ""
+    elif lower_name.endswith(".pptx") or mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+        from pptx import Presentation
+
+        prs = Presentation(_io.BytesIO(file_bytes))
+        parts = [
+            shape.text.strip()
+            for slide in prs.slides
+            for shape in slide.shapes
+            if hasattr(shape, "text") and shape.text.strip()
+        ]
+        text = "\n".join(parts)
+    elif lower_name.endswith(".xlsx") or mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        import pandas as pd
+
+        sheets = pd.read_excel(_io.BytesIO(file_bytes), sheet_name=None)
+        text = "\n\n".join(f"ABA: {name}\n{sheet.to_csv(index=False)}" for name, sheet in sheets.items())
+    elif lower_name.endswith(".pdf") or mime == "application/pdf":
+        from pdf_precision import extract_pdf_text_with_fallback
+
+        result = extract_pdf_text_with_fallback(
+            file_bytes, real_name, api_key=gemini_key, allow_gemini_fallback=bool(gemini_key)
+        )
+        text = result.get("text") or ""
+    else:
+        text = ""
+
+    return real_name, text.strip()
+
+
+def _build_tools(
+    db,
+    user_uid: str | None,
+    gemini_key: str | None,
+    attached_drive_file_id: str | None = None,
+    attached_file_name: str | None = None,
+):
     """Registro de ferramentas somente-leitura do Godmode."""
 
     def consultar_tarefas(status: str = "", area_tematica: str = "", incluir_concluidas: bool = False, limite: int = 50) -> dict:
@@ -254,6 +335,17 @@ def _build_tools(db, user_uid: str | None, gemini_key: str | None):
         except Exception as exc:
             return {"error": str(exc)}
 
+    def ler_arquivo_anexado(query_especifica: str = "") -> dict:
+        if not attached_drive_file_id:
+            return {"erro": "Nenhum arquivo foi anexado a esta mensagem."}
+        try:
+            real_name, text = _extract_attached_file_text(attached_drive_file_id, gemini_key)
+        except Exception as exc:
+            return {"erro": f"Falha ao ler o arquivo anexado ({attached_file_name or attached_drive_file_id}): {exc}"}
+        if not text:
+            return {"arquivo": real_name, "aviso": "Não foi possível extrair texto deste arquivo."}
+        return {"arquivo": real_name, "conteudo": text[:7000]}
+
     function_map = {
         "consultar_tarefas": consultar_tarefas,
         "consultar_financeiro": consultar_financeiro,
@@ -261,6 +353,8 @@ def _build_tools(db, user_uid: str | None, gemini_key: str | None):
         "consultar_metas_estrategicas": consultar_metas_estrategicas,
         "buscar_conhecimento": buscar_conhecimento,
     }
+    if attached_drive_file_id:
+        function_map["ler_arquivo_anexado"] = ler_arquivo_anexado
 
     tools_schema = [
         {
@@ -368,6 +462,25 @@ def _build_tools(db, user_uid: str | None, gemini_key: str | None):
         },
     ]
 
+    if attached_drive_file_id:
+        tools_schema.append({
+            "name": "ler_arquivo_anexado",
+            "description": (
+                f"Lê o conteúdo do arquivo '{attached_file_name or 'anexo'}' que o usuário anexou "
+                "a esta mensagem e retorna seu texto extraído. Use sempre que a pergunta se referir "
+                "ao conteúdo desse anexo antes de responder."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query_especifica": {
+                        "type": "string",
+                        "description": "O que exatamente você precisa encontrar no arquivo (opcional, ajuda a focar a leitura).",
+                    },
+                },
+            },
+        })
+
     return tools_schema, function_map
 
 
@@ -401,6 +514,8 @@ def askHermesGodmode(req: https_fn.CallableRequest):
     data = req.data or {}
     prompt = (data.get("prompt") or "").strip()
     session_id = (data.get("sessionId") or "").strip()
+    drive_file_id = (data.get("driveFileId") or "").strip() or None
+    drive_file_name = (data.get("driveFileName") or "").strip() or None
     user_uid = req.auth.uid if req.auth else None
 
     if not user_uid:
@@ -408,11 +523,13 @@ def askHermesGodmode(req: https_fn.CallableRequest):
             code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
             message="Autenticação obrigatória para usar o Hermes Godmode.",
         )
-    if not prompt:
+    if not prompt and not drive_file_id:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
             message="Prompt é obrigatório.",
         )
+    if not prompt:
+        prompt = f"Arquivo anexado: {drive_file_name or 'documento'}"
 
     try:
         import anthropic
@@ -460,7 +577,15 @@ def askHermesGodmode(req: https_fn.CallableRequest):
 
     client = anthropic.Anthropic(api_key=claude_key)
     system_instruction = _get_persona(db) + "\n\n## PERFIL DO USUÁRIO\n" + _get_user_profile_text(db, user_uid)
-    tools, function_map = _build_tools(db, user_uid, gemini_key)
+    tools, function_map = _build_tools(db, user_uid, gemini_key, drive_file_id, drive_file_name)
+
+    llm_user_message = prompt
+    if drive_file_id:
+        llm_user_message = (
+            f"[O usuário anexou o arquivo '{drive_file_name or 'documento'}' a esta mensagem. "
+            "Use a ferramenta ler_arquivo_anexado para consultar o conteúdo antes de responder.]\n\n"
+            f"{prompt}"
+        )
 
     try:
         result = claude_provider.run_tool_loop(
@@ -470,7 +595,7 @@ def askHermesGodmode(req: https_fn.CallableRequest):
             tools=tools,
             function_map=function_map,
             history=history,
-            user_message=prompt,
+            user_message=llm_user_message,
             max_tokens=GODMODE_MAX_TOKENS,
         )
     except anthropic.APIStatusError as exc:
