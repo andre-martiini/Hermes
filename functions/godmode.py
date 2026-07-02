@@ -3,12 +3,14 @@ Hermes Godmode — modo estratégico do Copiloto, rodando sobre Claude
 (Anthropic) em vez de Gemini. Módulo aditivo: não altera nada do fluxo
 existente de askCopilotoHermes; expõe seu próprio callable e seu próprio
 registro de ferramentas, todas de leitura, sobre as coleções de tarefas,
-financeiro, saúde, metas estratégicas e conhecimento já usadas pelo
-restante do app.
+metas estratégicas e conhecimento já usadas pelo restante do app.
+
+Os módulos financeiro e de saúde estão temporariamente desvinculados do
+Godmode (em ajuste separado) — não há ferramentas nem calibração de dados
+para eles aqui.
 """
 
 import os
-from datetime import datetime, timedelta
 
 from firebase_admin import firestore
 from firebase_functions import https_fn, options
@@ -25,27 +27,23 @@ GODMODE_PERSONA = (
     "Você é o Hermes Godmode: um conselheiro adversário, não um assistente condescendente. "
     "Sua função é auditar viabilidade e confrontar premissas do usuário com dados reais do "
     "sistema — nunca validar por educação.\n\n"
+    "Escopo atual: apenas tarefas/ações, metas estratégicas e base de conhecimento. Os módulos "
+    "financeiro e de saúde estão temporariamente fora do seu escopo — você não tem ferramentas "
+    "para consultá-los. Se a pergunta depender de dados financeiros ou de saúde, diga isso "
+    "explicitamente e não estime ou infira esses números a partir de outras fontes.\n\n"
     "Regras de conduta:\n"
     "- Nunca bajule. Discorde com fundamento quando os fatos não sustentarem o pedido.\n"
     "- Toda afirmação de risco, custo ou prazo deve estar ancorada em dado concreto obtido via "
     "ferramenta. Se não houver dado suficiente, diga isso explicitamente em vez de estimar sem base.\n"
-    "- Aponte o custo de oportunidade: onde o tempo/orçamento analisado traria mais alavancagem.\n\n"
-    "Regras de interpretação dos dados (calibração — leia antes de tirar conclusões):\n"
-    "- Receitas: o campo isReceived distingue o que já entrou (true) do que ainda é previsto (false). "
-    "Nunca afirme que uma receita 'não foi recebida' sem conferir esse campo registro a registro.\n"
-    "- Contas fixas com valor 0 são contas de valor variável cuja fatura ainda não chegou (EDP, Cesan, "
-    "faturas de cartão etc.): o valor é lançado quando a fatura é recebida. É o fluxo normal do módulo, "
-    "não cadastro incompleto — trate como 'despesa a apurar', não como desconhecimento de custos.\n"
-    "- Valores de projetos institucionais (parcelas de fomento, SIGEX, MAGO, TJES etc., em geral tarefas "
-    "com campo 'projeto' preenchido) NÃO fazem parte da vida financeira pessoal do usuário. Só relacione "
-    "dinheiro de projeto ao caixa pessoal se houver receita correspondente registrada no módulo financeiro.\n"
-    "- Passos/caminhadas: o sistema absorve apenas passos de caminhadas e exercícios registrados no "
-    "Google Health (fonte confiável). Passos baixos significam ausência de treino registrado naquele dia, "
-    "não o total de movimento do usuário.\n\n"
+    "- Aponte o custo de oportunidade: onde o tempo analisado traria mais alavancagem.\n\n"
+    "Regras de formatação (a leitura é majoritariamente em celular):\n"
+    "- Nunca use tabelas Markdown — são ilegíveis em tela estreita. Prefira listas de tópicos, "
+    "com o item em negrito seguido de uma explicação curta.\n"
+    "- Frases curtas e diretas. Evite parágrafos longos.\n\n"
     "Quando a pergunta pedir uma análise estratégica (não uma consulta factual simples), estruture "
-    "a resposta em exatamente três seções, nesta ordem:\n"
+    "a resposta em exatamente três seções, nesta ordem, cada uma em tópicos (nunca em tabela):\n"
     "1. **Diagnóstico de Falha** — inconsistências, riscos de execução e desalinhamentos identificados.\n"
-    "2. **Matriz de Trade-offs** — 2 ou 3 rotas de ação, com custo, risco e impacto de cada uma.\n"
+    "2. **Matriz de Trade-offs** — 2 ou 3 rotas de ação, cada uma em um tópico com custo, risco e impacto.\n"
     "3. **Plano de Contingência** — recomendação imediata de mitigação ou realocação de recursos.\n"
     "Para perguntas factuais diretas, responda direto, sem forçar essa estrutura."
 )
@@ -196,118 +194,6 @@ def _build_tools(
                 break
         return {"tarefas": tarefas}
 
-    def consultar_financeiro(mes: int = 0, ano: int = 0) -> dict:
-        now = datetime.utcnow()
-        mes = int(mes) or now.month
-        ano = int(ano) or now.year
-        periodo = f"{ano:04d}-{mes:02d}"
-
-        transacoes = []
-        for d in db.collection("finance_transactions").limit(500).stream():
-            data = d.to_dict() or {}
-            if data.get("status") == "deleted":
-                continue
-            if str(data.get("date", ""))[:7] != periodo:
-                continue
-            transacoes.append({
-                "id": d.id,
-                "description": data.get("description"),
-                "amount": data.get("amount"),
-                "date": data.get("date"),
-                "category": data.get("category"),
-            })
-
-        receitas = []
-        for d in db.collection("income_entries").limit(500).stream():
-            data = d.to_dict() or {}
-            if data.get("status") == "deleted":
-                continue
-            if data.get("month") != mes or data.get("year") != ano:
-                continue
-            receitas.append({
-                "id": d.id,
-                "description": data.get("description"),
-                "amount": data.get("amount"),
-                "isReceived": data.get("isReceived"),
-                "category": data.get("category"),
-            })
-
-        contas = []
-        for d in db.collection("fixed_bills").limit(500).stream():
-            data = d.to_dict() or {}
-            if data.get("month") != mes or data.get("year") != ano:
-                continue
-            amount = float(data.get("amount") or 0)
-            contas.append({
-                "id": d.id,
-                "description": data.get("description"),
-                "amount": data.get("amount"),
-                # Conta variável cuja fatura ainda não chegou: o valor 0 é por
-                # design e é preenchido quando a fatura é recebida.
-                "aguardando_fatura": amount == 0,
-                "isPaid": data.get("isPaid"),
-                "dueDay": data.get("dueDay"),
-                "category": data.get("category"),
-            })
-
-        total_despesas = sum(float(t.get("amount") or 0) for t in transacoes) + sum(
-            float(c.get("amount") or 0) for c in contas
-        )
-        total_receitas_previstas = sum(float(r.get("amount") or 0) for r in receitas)
-        total_receitas_recebidas = sum(
-            float(r.get("amount") or 0) for r in receitas if r.get("isReceived")
-        )
-        contas_aguardando_fatura = sum(1 for c in contas if c["aguardando_fatura"])
-
-        return {
-            "periodo": periodo,
-            "transacoes": transacoes,
-            "receitas": receitas,
-            "contas_fixas": contas,
-            "total_despesas": total_despesas,
-            "total_receitas_previstas": total_receitas_previstas,
-            "total_receitas_recebidas": total_receitas_recebidas,
-            "total_receitas_a_receber": total_receitas_previstas - total_receitas_recebidas,
-            "saldo_projetado": total_receitas_previstas - total_despesas,
-            "saldo_realizado": total_receitas_recebidas - total_despesas,
-            "contas_aguardando_fatura": contas_aguardando_fatura,
-            "notas_interpretacao": [
-                "Receitas com isReceived=true já entraram no caixa; isReceived=false é previsão pendente.",
-                "Contas fixas com aguardando_fatura=true têm valor variável e ainda sem fatura no mês — "
-                "é o fluxo normal do módulo, não cadastro incompleto; total_despesas ainda não inclui essas faturas.",
-                "Este módulo cobre apenas finanças PESSOAIS: valores de projetos institucionais "
-                "(parcelas SIGEX, fomentos etc.) não pertencem a este caixa.",
-            ],
-        }
-
-    def consultar_saude(dias: int = 14) -> dict:
-        dias = max(1, min(int(dias or 14), 90))
-        cutoff = (datetime.utcnow() - timedelta(days=dias)).strftime("%Y-%m-%d")
-
-        pesos = []
-        for d in db.collection("health_weights").limit(200).stream():
-            data = d.to_dict() or {}
-            if str(data.get("date", "")) >= cutoff:
-                pesos.append({"id": d.id, **data})
-
-        exercicios = [
-            {"id": d.id, **(d.to_dict() or {})}
-            for d in db.collection("health_exercise_logs").limit(200).stream()
-            if d.id >= cutoff
-        ]
-
-        return {
-            "periodo_dias": dias,
-            "pesos": sorted(pesos, key=lambda x: x.get("date", "")),
-            "exercicios": exercicios,
-            "notas_interpretacao": [
-                "Passos e distância em 'walk' vêm apenas de caminhadas/exercícios registrados no "
-                "Google Health — não representam o total de passos do dia; passos baixos = sem treino "
-                "registrado, não sedentarismo total.",
-                "O rastreamento de hábitos diários foi descontinuado e não faz parte do sistema.",
-            ],
-        }
-
     def consultar_metas_estrategicas(apenas_ativas: bool = True) -> dict:
         if not user_uid:
             return {"error": "Sem usuário autenticado — não é possível ler metas pessoais."}
@@ -348,8 +234,6 @@ def _build_tools(
 
     function_map = {
         "consultar_tarefas": consultar_tarefas,
-        "consultar_financeiro": consultar_financeiro,
-        "consultar_saude": consultar_saude,
         "consultar_metas_estrategicas": consultar_metas_estrategicas,
         "buscar_conhecimento": buscar_conhecimento,
     }
@@ -362,9 +246,8 @@ def _build_tools(
             "description": (
                 "Lista tarefas/ações do usuário (título, status, área temática, prazos). "
                 "Por padrão oculta tarefas concluídas — use incluir_concluidas para trazê-las. "
-                "Atenção: tarefas com campo 'projeto' tratam de projetos institucionais; valores "
-                "financeiros citados nelas (parcelas, fomentos) pertencem ao projeto, não às finanças "
-                "pessoais do usuário."
+                "Atenção: tarefas com campo 'projeto' preenchido tratam de projetos institucionais, "
+                "não de assuntos pessoais do usuário."
             ),
             "input_schema": {
                 "type": "object",
@@ -385,38 +268,6 @@ def _build_tools(
                     "limite": {
                         "type": "integer",
                         "description": "Número máximo de tarefas retornadas (padrão 50, máximo 150).",
-                    },
-                },
-            },
-        },
-        {
-            "name": "consultar_financeiro",
-            "description": (
-                "Retorna transações, receitas e contas fixas de um mês/ano do módulo financeiro pessoal, "
-                "com totais de receita (recebida x a receber, via isReceived), despesa e saldos projetado/"
-                "realizado. Contas fixas com aguardando_fatura=true são variáveis sem fatura lançada no mês "
-                "(comportamento por design). Sem parâmetros, usa o mês/ano atual."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "mes": {"type": "integer", "description": "Mês (1-12). Padrão: mês atual."},
-                    "ano": {"type": "integer", "description": "Ano (ex: 2026). Padrão: ano atual."},
-                },
-            },
-        },
-        {
-            "name": "consultar_saude",
-            "description": (
-                "Retorna histórico recente de peso e registros de exercício/telemetria do módulo de saúde. "
-                "Passos refletem apenas caminhadas/exercícios registrados no Google Health, não o total do dia."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "dias": {
-                        "type": "integer",
-                        "description": "Janela de dias para trás a considerar (padrão 14, máximo 90).",
                     },
                 },
             },
