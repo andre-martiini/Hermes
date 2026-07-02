@@ -431,7 +431,7 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
                         onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value)}
                         onPaste={handlePaste}
                         onKeyDown={(e: React.KeyboardEvent) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
+                            if (e.key === 'Enter' && !e.shiftKey && window.innerWidth >= 640) {
                                 e.preventDefault();
                                 handleSend();
                             }
