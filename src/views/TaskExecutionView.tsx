@@ -472,6 +472,10 @@ export const TaskExecutionView = ({
   const [insightState, setInsightState] = useState<InsightState>(null);
   const [isAnalyzingInsight, setIsAnalyzingInsight] = useState(false);
   const [showInsightModal, setShowInsightModal] = useState(false);
+  const [isContextModalOpen, setIsContextModalOpen] = useState(false);
+  const [contextSearchQuery, setContextSearchQuery] = useState('');
+  const [contextTypeFilter, setContextTypeFilter] = useState<'all' | 'link' | 'pdf' | 'excel' | 'word' | 'image' | 'other'>('all');
+  const [contextSortOption, setContextSortOption] = useState<'name-asc' | 'name-desc' | 'date-desc' | 'date-asc'>('name-asc');
   const insightDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const insightMountedRef = useRef(false);
   const insightApplyingRef = useRef(false);
@@ -892,6 +896,475 @@ export const TaskExecutionView = ({
     } finally {
       setIsUploading(false);
     }
+  };
+
+  const getPoolItemCategory = (item: PoolItem): 'link' | 'pdf' | 'excel' | 'word' | 'image' | 'other' => {
+    if (item.tipo === 'link') return 'link';
+    const name = item.nome || '';
+    const ext = name.split('.').pop()?.toLowerCase();
+    if (ext === 'pdf') return 'pdf';
+    if (['xlsx', 'xls', 'csv'].includes(ext || '')) return 'excel';
+    if (['docx', 'doc', 'txt', 'md'].includes(ext || '')) return 'word';
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext || '')) return 'image';
+    return 'other';
+  };
+
+  const formatContextDate = (dateStr?: string) => {
+    if (!dateStr) return '---';
+    try {
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return dateStr;
+      return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const handleRemovePoolItem = (itemId: string) => {
+    const updatedPool = (currentTaskData.pool_dados || []).filter(item => item.id !== itemId);
+    onSave(task.id, { pool_dados: updatedPool });
+    showToast('Documento desvinculado com sucesso.', 'info');
+  };
+
+  const renderContextModal = () => {
+    const poolItems = currentTaskData.pool_dados || [];
+    const counts = {
+      all: poolItems.length,
+      link: poolItems.filter(i => getPoolItemCategory(i) === 'link').length,
+      pdf: poolItems.filter(i => getPoolItemCategory(i) === 'pdf').length,
+      excel: poolItems.filter(i => getPoolItemCategory(i) === 'excel').length,
+      word: poolItems.filter(i => getPoolItemCategory(i) === 'word').length,
+      image: poolItems.filter(i => getPoolItemCategory(i) === 'image').length,
+      other: poolItems.filter(i => getPoolItemCategory(i) === 'other').length,
+    };
+
+    const sortedAndFilteredItems = [...poolItems]
+      .filter(item => {
+        const name = (item.nome || item.valor).toLowerCase();
+        if (contextSearchQuery && !name.includes(contextSearchQuery.toLowerCase())) {
+          return false;
+        }
+        const category = getPoolItemCategory(item);
+        if (contextTypeFilter !== 'all') {
+          if (contextTypeFilter === 'link') return category === 'link';
+          if (contextTypeFilter === 'pdf') return category === 'pdf';
+          if (contextTypeFilter === 'excel') return category === 'excel';
+          if (contextTypeFilter === 'word') return category === 'word';
+          if (contextTypeFilter === 'image') return category === 'image';
+          if (contextTypeFilter === 'other') return category === 'other';
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const aName = a.nome || a.valor;
+        const bName = b.nome || b.valor;
+        if (contextSortOption === 'name-asc') {
+          return aName.localeCompare(bName, 'pt-BR');
+        }
+        if (contextSortOption === 'name-desc') {
+          return bName.localeCompare(aName, 'pt-BR');
+        }
+        const aTime = a.data_criacao ? new Date(a.data_criacao).getTime() : 0;
+        const bTime = b.data_criacao ? new Date(b.data_criacao).getTime() : 0;
+        if (contextSortOption === 'date-desc') {
+          return bTime - aTime;
+        }
+        if (contextSortOption === 'date-asc') {
+          return aTime - bTime;
+        }
+        return 0;
+      });
+
+    return (
+      <div className="fixed inset-0 z-[320] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 lg:p-6 animate-in fade-in duration-200">
+        <div className={`w-full max-w-6xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border ${isDark ? 'bg-[#0b0c16] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+          
+          {/* Header */}
+          <div className={`shrink-0 px-6 py-4 border-b flex items-center justify-between ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+            <div>
+              <h3 className="text-base font-black tracking-tight font-sans flex items-center gap-2">
+                <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Painel de Contexto Expandido
+              </h3>
+              <p className={`text-[10px] mt-0.5 font-sans ${mutedText}`}>Gerenciamento e detalhamento de demanda, base temática e documentos anexados.</p>
+            </div>
+            <button 
+              onClick={() => setIsContextModalOpen(false)} 
+              className={`p-2 rounded-lg transition-all ${isDark ? 'hover:bg-white/10 text-white/40 hover:text-white' : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600'}`}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+
+          {/* Split Content */}
+          <div className="flex-1 min-h-0 flex flex-col md:flex-row">
+            
+            {/* Left Column: Demand, Area, Tags */}
+            <div className={`w-full md:w-80 shrink-0 p-6 border-b md:border-b-0 md:border-r overflow-y-auto flex flex-col gap-6 ${isDark ? 'border-white/10 bg-white/[0.01]' : 'border-slate-100 bg-slate-50/50'}`} style={{ scrollbarWidth: 'thin' }}>
+              
+              {/* Demand Synthesis */}
+              {currentTaskData.descricao && (
+                <div className="space-y-2">
+                  <h4 className={`text-[9px] font-black uppercase tracking-wider ${mutedText}`}>Síntese da Demanda</h4>
+                  <div className={`p-3 rounded-lg border text-xs leading-relaxed font-sans max-h-36 overflow-y-auto ${isDark ? 'bg-white/5 border-white/10 text-white/80' : 'bg-white border-slate-200 text-slate-600'}`}>
+                    {currentTaskData.descricao}
+                  </div>
+                </div>
+              )}
+
+              {/* Area Tematica */}
+              <div className="space-y-2">
+                <h4 className={`text-[9px] font-black uppercase tracking-wider ${mutedText}`}>Área Temática</h4>
+                <div className={`p-3 rounded-lg border ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
+                  <select
+                    value={currentTaskData.area_tematica || 'NÃO CLASSIFICADA'}
+                    onChange={e => {
+                      const newArea = e.target.value;
+                      const base = (knowledgeBases || []).find(b => b.nome.toUpperCase() === (newArea || '').toUpperCase());
+                      const baseId = base ? base.id : undefined;
+                      onSave(task.id, { area_tematica: newArea, base_conhecimento: baseId });
+                    }}
+                    style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                    className={`w-full border-none p-0 text-xs font-bold uppercase tracking-wider focus:ring-0 cursor-pointer font-sans bg-transparent ${isDark ? 'text-white' : 'text-slate-900'}`}
+                  >
+                    <option className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} value="GERAL">Geral</option>
+                    <option className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} value="NÃO CLASSIFICADA">Não Classificada</option>
+                    <optgroup label="Estratégicas">
+                      {STRATEGIC_AREA_OPTIONS.map(option => (
+                        <option className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Operacionais">
+                      {(unidades || []).filter(u => isOperationalArea(u.nome)).map(u => (
+                        <option className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+                {derivedKnowledgeBase && (
+                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[10px] font-bold ${isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                    <span>{derivedKnowledgeBase.emoji || '📚'}</span>
+                    <span className="truncate">Base: {derivedKnowledgeBase.nome}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Dynamic Tags */}
+              <div className="space-y-3 flex-1 flex flex-col">
+                <div className="flex items-center justify-between shrink-0">
+                  <h4 className={`text-[9px] font-black uppercase tracking-wider ${mutedText}`}>Tags Dinâmicas</h4>
+                  <button
+                    onClick={handleAutoClassifyTags}
+                    disabled={isGeneratingTags}
+                    className="flex items-center gap-1.5 px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors text-[9px] font-bold uppercase tracking-wider border border-indigo-100 disabled:opacity-50"
+                  >
+                    {isGeneratingTags ? '...' : '✨ Auto'}
+                  </button>
+                </div>
+                
+                {/* Badges Container */}
+                <div className={`flex-1 min-h-[100px] p-3 rounded-lg border overflow-y-auto flex flex-wrap content-start gap-1.5 ${isDark ? 'bg-black/20 border-white/5' : 'bg-white border-slate-200'}`} style={{ scrollbarWidth: 'thin' }}>
+                  {(currentTaskData.tags || []).map(tag => (
+                    <span key={tag} className="flex items-center gap-1 bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded text-[9px] font-bold border border-indigo-100 font-sans">
+                      #{tag}
+                      <button onClick={(e) => {
+                        e.preventDefault();
+                        const newTags = (currentTaskData.tags || []).filter(t => t !== tag);
+                        onSave(task.id, { tags: newTags });
+                      }} className="text-indigo-400 hover:text-rose-500 scale-110 ml-0.5 transition-colors">&times;</button>
+                    </span>
+                  ))}
+                  {(currentTaskData.tags || []).length === 0 && (
+                    <span className="text-[10px] text-slate-400 font-medium italic font-sans">Nenhuma tag registrada.</span>
+                  )}
+                </div>
+
+                {/* Add Tag Section */}
+                <div className="space-y-1.5 shrink-0">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={tagInput}
+                      onChange={e => setTagInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (tagInput.trim() && !(currentTaskData.tags || []).includes(tagInput.trim())) {
+                            onSave(task.id, { tags: [...(currentTaskData.tags || []), tagInput.trim()] });
+                            setTagInput('');
+                          }
+                        }
+                      }}
+                      className={`flex-1 border rounded-lg px-2.5 py-1 text-[11px] font-medium focus:ring-1 focus:ring-indigo-500 outline-none font-sans ${isDark ? 'bg-black/50 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                      placeholder="Nova tag..."
+                    />
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (tagInput.trim() && !(currentTaskData.tags || []).includes(tagInput.trim())) {
+                          onSave(task.id, { tags: [...(currentTaskData.tags || []), tagInput.trim()] });
+                          setTagInput('');
+                        }
+                      }}
+                      className={`px-3 py-1 rounded-lg transition-all text-[10px] font-bold border ${isDark ? 'bg-white/10 text-white/70 border-white/20 hover:bg-white/20' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Column: Knowledge / Documents Manager */}
+            <div className="flex-1 flex flex-col p-6 min-h-0">
+              
+              {/* Search & Sort Panel */}
+              <div className="flex flex-col sm:flex-row gap-3 mb-6 shrink-0">
+                <div className="relative flex-1">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className={`w-4 h-4 ${isDark ? 'text-white/40' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Buscar documentos por nome..."
+                    value={contextSearchQuery}
+                    onChange={e => setContextSearchQuery(e.target.value)}
+                    className={`w-full pl-9 pr-4 py-2 rounded-xl border text-xs outline-none focus:ring-1 focus:ring-blue-500 font-sans transition-all ${
+                      isDark ? 'bg-slate-900 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400'
+                    }`}
+                  />
+                  {contextSearchQuery && (
+                    <button 
+                      onClick={() => setContextSearchQuery('')}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`text-[10px] font-bold uppercase tracking-wider ${mutedText}`}>Ordenar:</span>
+                  <select
+                    value={contextSortOption}
+                    onChange={e => setContextSortOption(e.target.value as any)}
+                    style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                    className={`px-3 py-2 border rounded-xl text-xs font-bold outline-none cursor-pointer focus:ring-0 ${
+                      isDark ? 'bg-slate-900 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <option value="name-asc">Nome (A-Z)</option>
+                    <option value="name-desc">Nome (Z-A)</option>
+                    <option value="date-desc">Mais Recentes</option>
+                    <option value="date-asc">Mais Antigos</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Categories / Type Filters Bar */}
+              <div className="flex flex-wrap gap-1.5 mb-5 shrink-0 border-b pb-3 border-slate-100 dark:border-white/5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+                {[
+                  { value: 'all', label: 'Todos', count: counts.all, icon: '📂' },
+                  { value: 'link', label: 'Links', count: counts.link, icon: '🔗' },
+                  { value: 'pdf', label: 'PDFs', count: counts.pdf, icon: '📄' },
+                  { value: 'excel', label: 'Planilhas', count: counts.excel, icon: '📊' },
+                  { value: 'word', label: 'Documentos', count: counts.word, icon: '📝' },
+                  { value: 'image', label: 'Imagens', count: counts.image, icon: '🖼️' },
+                  { value: 'other', label: 'Outros', count: counts.other, icon: '🗄️' },
+                ].map(opt => {
+                  const isActive = contextTypeFilter === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={() => setContextTypeFilter(opt.value as any)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition-all border ${
+                        isActive
+                          ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                          : isDark
+                            ? 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10 hover:text-white'
+                            : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200 hover:text-slate-800'
+                      }`}
+                    >
+                      <span>{opt.icon}</span>
+                      <span>{opt.label}</span>
+                      <span className={`px-1.5 py-0.2 rounded-full text-[8px] font-black ${
+                        isActive
+                          ? 'bg-white/20 text-white'
+                          : isDark ? 'bg-white/10 text-white/50' : 'bg-slate-200 text-slate-500'
+                      }`}>
+                        {opt.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Documents Grid / Main Section */}
+              <div className="flex-1 overflow-y-auto min-h-0" style={{ scrollbarWidth: 'thin' }}>
+                {sortedAndFilteredItems.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-20 text-center">
+                    <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-900 flex items-center justify-center mb-3">
+                      <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>
+                    </div>
+                    <h5 className="text-sm font-bold">Nenhum documento encontrado</h5>
+                    <p className={`text-xs mt-1 max-w-xs ${mutedText}`}>Tente alterar os filtros de categoria ou limpar sua pesquisa.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-4">
+                    {sortedAndFilteredItems.map(item => {
+                      const category = getPoolItemCategory(item);
+                      
+                      // Custom styled visual representations for each document type
+                      let badgeBg = '';
+                      let badgeText = '';
+                      let iconSvg = null;
+                      let typeLabel = '';
+
+                      if (category === 'link') {
+                        badgeBg = isDark ? 'bg-indigo-500/10 border-indigo-500/20' : 'bg-indigo-50 border-indigo-100';
+                        badgeText = 'text-indigo-500 dark:text-indigo-400';
+                        typeLabel = 'LINK';
+                        iconSvg = (
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                          </svg>
+                        );
+                      } else if (category === 'pdf') {
+                        badgeBg = isDark ? 'bg-red-500/10 border-red-500/20' : 'bg-red-50 border-red-100';
+                        badgeText = 'text-red-500 dark:text-red-400';
+                        typeLabel = 'PDF';
+                        iconSvg = (
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2zM9 9h1.5m-1.5 4h5m-5 4h5" />
+                          </svg>
+                        );
+                      } else if (category === 'excel') {
+                        badgeBg = isDark ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-emerald-50 border-emerald-100';
+                        badgeText = 'text-emerald-600 dark:text-emerald-400';
+                        typeLabel = item.nome?.split('.').pop()?.toUpperCase() || 'XLSX';
+                        iconSvg = (
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                        );
+                      } else if (category === 'word') {
+                        badgeBg = isDark ? 'bg-blue-500/10 border-blue-500/20' : 'bg-blue-50 border-blue-100';
+                        badgeText = 'text-blue-500 dark:text-blue-400';
+                        typeLabel = item.nome?.split('.').pop()?.toUpperCase() || 'DOC';
+                        iconSvg = (
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                        );
+                      } else if (category === 'image') {
+                        badgeBg = isDark ? 'bg-amber-500/10 border-amber-500/20' : 'bg-amber-50 border-amber-100';
+                        badgeText = 'text-amber-500 dark:text-amber-400';
+                        typeLabel = item.nome?.split('.').pop()?.toUpperCase() || 'IMG';
+                        iconSvg = (
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                        );
+                      } else {
+                        badgeBg = isDark ? 'bg-slate-500/10 border-slate-500/20' : 'bg-slate-100 border-slate-200';
+                        badgeText = 'text-slate-500 dark:text-slate-400';
+                        typeLabel = item.nome?.split('.').pop()?.toUpperCase() || 'ARQ';
+                        iconSvg = (
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                          </svg>
+                        );
+                      }
+
+                      return (
+                        <div 
+                          key={item.id} 
+                          className={`group relative flex flex-col justify-between p-4 rounded-2xl border transition-all ${
+                            isDark 
+                              ? 'bg-white/[0.02] border-white/10 hover:border-blue-500/50 hover:bg-white/[0.04]' 
+                              : 'bg-slate-50 border-slate-100 hover:border-blue-500/30 hover:bg-white'
+                          } hover:shadow-lg`}
+                        >
+                          <div>
+                            {/* Top Bar inside Card */}
+                            <div className="flex items-start justify-between gap-3">
+                              <div className={`p-2 rounded-xl border flex items-center justify-center shrink-0 ${badgeBg} ${badgeText}`}>
+                                {iconSvg}
+                              </div>
+                              <span className={`px-2 py-0.5 rounded-md text-[8px] font-black tracking-widest border shrink-0 ${badgeBg} ${badgeText}`}>
+                                {typeLabel}
+                              </span>
+                            </div>
+
+                            {/* Title / Name */}
+                            <h4 
+                              onClick={() => window.open(item.valor, '_blank')}
+                              className={`text-xs font-black tracking-tight line-clamp-2 mt-4 cursor-pointer hover:underline ${
+                                isDark ? 'text-white' : 'text-slate-800'
+                              }`}
+                              title={item.nome || item.valor}
+                            >
+                              {item.nome || item.valor}
+                            </h4>
+
+                            {/* Meta Details */}
+                            <p className={`text-[9px] mt-2 font-medium ${mutedText}`}>
+                              Adicionado em: {formatContextDate(item.data_criacao)}
+                            </p>
+                          </div>
+
+                          {/* Actions Footer inside Card */}
+                          <div className="flex items-center gap-2 mt-5 pt-3 border-t border-slate-100 dark:border-white/5">
+                            <button
+                              onClick={() => window.open(item.valor, '_blank')}
+                              className={`flex-1 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-wider text-center transition-all ${
+                                isDark ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-slate-200/50 hover:bg-slate-200 text-slate-700'
+                              }`}
+                            >
+                              Abrir
+                            </button>
+                            
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(item.valor);
+                                showToast('Link copiado para a área de transferência.', 'success');
+                              }}
+                              title="Copiar link"
+                              className={`p-1.5 rounded-lg transition-all ${
+                                isDark ? 'bg-white/5 hover:bg-white/10 text-white/70' : 'bg-slate-200/50 hover:bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`Deseja realmente desvincular o documento "${item.nome || item.valor}" desta ação?`)) {
+                                  handleRemovePoolItem(item.id);
+                                }
+                              }}
+                              title="Remover"
+                              className={`p-1.5 rounded-lg transition-all ${
+                                isDark ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400' : 'bg-rose-50 hover:bg-rose-100 text-rose-600'
+                              }`}
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const handleFileUploadInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2109,11 +2582,26 @@ export const TaskExecutionView = ({
 
                     {/* 3. CONTEXTO (Agrupado) */}
                     <div className={`rounded-lg border ${cardBg}`}>
-                      <div className="px-4 py-3 border-b border-[#e5e7eb] dark:border-white/10 flex items-center gap-2">
-                        <svg className={`w-3.5 h-3.5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <p className={labelCls}>Contexto</p>
+                      <div className="px-4 py-3 border-b border-[#e5e7eb] dark:border-white/10 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <svg className={`w-3.5 h-3.5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <p className={labelCls}>Contexto</p>
+                        </div>
+                        <button
+                          onClick={() => setIsContextModalOpen(true)}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-all border ${
+                            isDark
+                              ? 'bg-blue-500/10 border-blue-500/30 text-blue-300 hover:bg-blue-500/20'
+                              : 'bg-blue-50 border-blue-200 text-blue-600 hover:bg-blue-100'
+                          }`}
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5" />
+                          </svg>
+                          Expandir
+                        </button>
                       </div>
                       
                       <div className="p-4 flex flex-col gap-6">
@@ -2786,6 +3274,11 @@ export const TaskExecutionView = ({
           </div>
         </div>
       )}
+
+      {/* ══════════════════════════════════════════════════════════
+          PANEL DE CONTEXTO MODAL (LARGE & QUALIFIED)
+      ══════════════════════════════════════════════════════════ */}
+      {isContextModalOpen && renderContextModal()}
 
       {/* ══════════════════════════════════════════════════════════
           MODAL SYSTEM (link / contact / edit / delete / upload / reminder)

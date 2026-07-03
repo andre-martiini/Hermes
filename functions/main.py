@@ -66,6 +66,7 @@ from knowledge_graph import (  # noqa: F401 — registra as Cloud Functions
     buscar_procedimento,
     crystallize_task_manual,
     extract_kg_rag_context,
+    processar_artefato_kg,
     monitorar_acervo_global,
     executar_monitoramento_acervo_global,
     sincronizar_acervo_manual,
@@ -7398,10 +7399,24 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 if not resumo:
                     resumo = f"Documento público do processo SIPAC {numero_processo} do tipo {doc_alvo.get('tipo')}."
 
+                import uuid as _uuid
+                from datetime import datetime as _dt
+                if url not in existing_urls:
+                    artefato_id = f"sipac_{_uuid.uuid4().hex[:12]}"
+                    pool_dados.append({
+                        "id": artefato_id,
+                        "nome": f"SIPAC: {nome_doc}",
+                        "tipo": "arquivo",
+                        "valor": url,
+                        "data_criacao": _dt.now().isoformat()
+                    })
+                    task_ref.update({"pool_dados": pool_dados})
+                else:
+                    # Se já existe, pega o ID original ou gera um novo apenas para o índice
+                    artefato_id = f"sipac_{_uuid.uuid4().hex[:12]}"
+                
                 embedding = _get_embedding(resumo, gemini_key)
 
-                import uuid as _uuid
-                artefato_id = f"sipac_{_uuid.uuid4().hex[:12]}"
                 db.collection('indice_artefatos').document(artefato_id).set({
                     "nome": f"SIPAC: {nome_doc}",
                     "url": url,
@@ -7416,13 +7431,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "indexed_at": firestore.SERVER_TIMESTAMP
                 })
                 
-                if url not in existing_urls:
-                    pool_dados.append({
-                        "nome": f"SIPAC: {nome_doc}",
-                        "tipo": "arquivo",
-                        "valor": url
-                    })
-                    task_ref.update({"pool_dados": pool_dados})
+
                     
                 return (
                     f"Sucesso: O documento '{nome_doc}' do processo SIPAC {numero_processo} "
