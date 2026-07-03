@@ -40,7 +40,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from firebase_admin import firestore
-from firebase_functions import firestore_fn, https_fn, options, pubsub_fn, scheduler_fn
+from firebase_functions import firestore_fn, https_fn, options, scheduler_fn
 from google.cloud.firestore_v1 import ArrayUnion
 from google.cloud.firestore_v1.vector import Vector
 from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
@@ -74,7 +74,7 @@ KG_TOKEN_LIMIT     = 6_000   # budget máximo para Nós Conceituais no RAG híbr
 ACERVO_TOKEN_LIMIT = 2_000   # budget máximo para Acervo Global no RAG híbrido
 MAX_TENTATIVAS_ACERVO = 5    # após N re-despachos sem sucesso, marca falha_permanente
 ARTEFATO_CHAR_CAP     = ARTEFATO_TOKEN_CAP * CHARS_PER_TOKEN  # ≈ 60 000 chars
-ARTEFATO_PUBSUB_TOPIC = "hermes-artefato-kg"
+ARTEFATO_QUEUE_COLLECTION = "kg_artefato_queue"
 SUPPORTED_MIMES = frozenset({
     "application/pdf",
     "application/msword",
@@ -484,12 +484,8 @@ def _aggregate_artefatos(task_data: dict, db) -> list[dict]:
 
 
 def _dispatch_artefatos_pubsub(project_id: str, task_id: str, artefatos: list) -> None:
-    """Publica uma mensagem por artefato no tópico hermes-artefato-kg (origem='tarefa')."""
-    import json
-    from google.cloud import pubsub_v1
-
-    publisher = pubsub_v1.PublisherClient()
-    topic_path = publisher.topic_path(project_id, ARTEFATO_PUBSUB_TOPIC)
+    """Enfileira uma mensagem por artefato no Firestore (origem='tarefa')."""
+    db = _get_db()
     for idx, art in enumerate(artefatos):
         msg = {
             "origem": "tarefa",
@@ -499,9 +495,11 @@ def _dispatch_artefatos_pubsub(project_id: str, task_id: str, artefatos: list) -
             "tipo_mime": art["tipo_mime"],
             "drive_file_id": art.get("drive_file_id", ""),
             "nome": art["nome"],
+            "status": "pendente",
+            "created_at": firestore.SERVER_TIMESTAMP,
         }
-        publisher.publish(topic_path, json.dumps(msg).encode("utf-8"))
-    print(f"[KG Artefato] {len(artefatos)} mensagens publicadas para tarefa {task_id}")
+        db.collection(ARTEFATO_QUEUE_COLLECTION).document(f"task_{task_id}_{idx}_{uuid.uuid4().hex[:8]}").set(msg)
+    print(f"[KG Artefato] {len(artefatos)} mensagens enfileiradas para tarefa {task_id}")
 
 
 def _update_artefato_status(
@@ -865,12 +863,9 @@ Responda:"""
 def _dispatch_acervo_pubsub(
     project_id: str, acervo_id: str, url: str, tipo_mime: str, drive_file_id: str, nome: str
 ) -> None:
-    """Publica uma mensagem única de acervo no tópico hermes-artefato-kg e aguarda confirmação."""
-    import json as _json
-    from google.cloud import pubsub_v1
+    """Enfileira uma mensagem unica de acervo no Firestore."""
 
-    publisher = pubsub_v1.PublisherClient()
-    topic_path = publisher.topic_path(project_id, ARTEFATO_PUBSUB_TOPIC)
+    db = _get_db()
     msg = {
         "origem": "acervo",
         "acervo_id": acervo_id,
@@ -878,9 +873,10 @@ def _dispatch_acervo_pubsub(
         "tipo_mime": tipo_mime,
         "drive_file_id": drive_file_id,
         "nome": nome,
+        "status": "pendente",
+        "created_at": firestore.SERVER_TIMESTAMP,
     }
-    future = publisher.publish(topic_path, _json.dumps(msg).encode("utf-8"))
-    future.result(timeout=10)  # Garante que a mensagem foi aceita pelo Pub/Sub
+    db.collection(ARTEFATO_QUEUE_COLLECTION).document(f"acervo_{acervo_id}_{uuid.uuid4().hex[:8]}").set(msg)
 
 
 # ─── Fase 1: geração de tags Retrieval-First ─────────────────────────────────
@@ -1175,7 +1171,7 @@ Resumo:"""
 
     print(f"[KG Fase2] Tarefa {task_id} cristalizada -> no {node_id} (peso={peso})")
 
-    # ── Módulo de Artefatos: agrega e despacha Pub/Sub ────────────────────────
+    # ── Módulo de Artefatos: agrega e enfileira processamento ─────────────────
     import os as _os
     artefatos = _aggregate_artefatos(task_data, db)
     if artefatos:
@@ -1184,7 +1180,7 @@ Resumo:"""
         try:
             _dispatch_artefatos_pubsub(project_id, task_id, artefatos)
         except Exception as exc:
-            print(f"[KG Artefato] Erro ao despachar Pub/Sub para {task_id}: {exc}")
+            print(f"[KG Artefato] Erro ao enfileirar artefatos para {task_id}: {exc}")
 
 
 @firestore_fn.on_document_updated(document="tarefas/{taskId}", memory=options.MemoryOption.GB_1, timeout_sec=300)
@@ -1223,16 +1219,16 @@ def on_tarefa_concluida_kg(event: firestore_fn.Event[firestore_fn.Change[firesto
         print(f"[KG Fase2] Erro ao cristalizar tarefa {task_id}: {traceback.format_exc()}")
 
 
-# ─── Módulo de Artefatos: worker Pub/Sub ─────────────────────────────────────
+# ─── Módulo de Artefatos: worker de fila Firestore ────────────────────────────
 
-@pubsub_fn.on_message_published(
-    topic=ARTEFATO_PUBSUB_TOPIC,
+@firestore_fn.on_document_created(
+    document=f"{ARTEFATO_QUEUE_COLLECTION}/{{queueId}}",
     memory=options.MemoryOption.GB_1,
     timeout_sec=300,
 )
-def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedData]):
+def processar_artefato_kg(event):
     """
-    Worker Pub/Sub — processa um artefato de Tarefa ou do Acervo Global.
+    Worker Firestore — processa um artefato de Tarefa ou do Acervo Global.
 
     Bifurcação por campo 'origem':
       'tarefa' (padrão): atualiza artefatos_kg[idx] na tarefa + grava em indice_artefatos.
@@ -1246,33 +1242,38 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
       5. Gera embedding do resumo
       6. Despacho final conforme origem
 
-    Tópico: hermes-artefato-kg
+    Fila: kg_artefato_queue
     """
-    import base64 as _b64
-    import json
 
-    # ── Decodifica mensagem ───────────────────────────────────────────────────
+    # ── Le mensagem da fila ───────────────────────────────────────────────────
     try:
-        # No Gen 2, event.data.message.data contém os bytes em base64
-        msg_bytes = event.data.message.data
-        if msg_bytes:
-            # O SDK pode já entregar os bytes decodificados ou em base64 string
-            if isinstance(msg_bytes, str):
-                raw = _b64.b64decode(msg_bytes).decode("utf-8")
-            else:
-                raw = msg_bytes.decode("utf-8")
-        else:
-            # Fallback para .text se disponível (compatibilidade)
-            raw = getattr(event.data.message, "text", "")
-
-        if not raw:
-            print("[KG Artefato] Erro: Mensagem Pub/Sub vazia.")
+        if not event.data:
+            print("[KG Artefato] Erro: documento de fila vazio.")
             return
 
-        data = json.loads(raw)
+        data = event.data.to_dict() or {}
+        if not data:
+            print("[KG Artefato] Erro: payload de fila vazio.")
+            try:
+                event.data.reference.update({
+                    "status": "falha_payload",
+                    "processed_at": firestore.SERVER_TIMESTAMP,
+                })
+            except Exception:
+                pass
+            return
     except Exception as exc:
-        print(f"[KG Artefato] Erro ao decodificar mensagem Pub/Sub: {exc}")
+        print(f"[KG Artefato] Erro ao ler mensagem da fila: {exc}")
         return
+
+    queue_ref = event.data.reference
+    try:
+        queue_ref.update({
+            "status": "processando",
+            "started_at": firestore.SERVER_TIMESTAMP,
+        })
+    except Exception:
+        pass
 
     origem        = data.get("origem", "tarefa")  # backward compat: default 'tarefa'
     url           = data.get("url", "")
@@ -1446,6 +1447,15 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
             except Exception as exc:
                 print(f"[KG Acervo] Erro ao sync tag_vocabulary: {exc}")
 
+    try:
+        queue_ref.update({
+            "status": "concluido",
+            "resultado": status_final,
+            "processed_at": firestore.SERVER_TIMESTAMP,
+        })
+    except Exception:
+        pass
+
     print(f"[KG Artefato] OK — {nome} [{status_final}] ({origem})")
 
 
@@ -1575,7 +1585,7 @@ def executar_monitoramento_acervo_global(resetar_falhas_permanentes: bool = Fals
                     except Exception as exc:
                         print(f"[Acervo] Erro ao marcar falha_permanente {nome}: {exc}")
                     continue
-                # Já existe mas está travado ou falhou? Re-despacha para o Worker Pub/Sub
+                # Já existe mas está travado ou falhou? Re-enfileira para o worker
                 try:
                     db.collection("acervo_global").document(info["id"]).update({
                         "status_indexacao": "pendente",
