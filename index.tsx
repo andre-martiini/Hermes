@@ -2276,6 +2276,19 @@ const App: React.FC = () => {
       };
       payload = applyStandbyDateRules(payload, previousTask);
 
+      if (payload.pool_dados && Array.isArray(payload.pool_dados)) {
+        payload.pool_dados = payload.pool_dados.map((item: any) => {
+          if (!item.id || !item.data_criacao) {
+            return {
+              ...item,
+              id: item.id || Math.random().toString(36).substring(2, 11),
+              data_criacao: item.data_criacao || now
+            };
+          }
+          return item;
+        });
+      }
+
       if (previousTask) {
         const dateChanged = (updates.data_limite && updates.data_limite !== previousTask.data_limite) ||
                             (updates.data_inicio && updates.data_inicio !== previousTask.data_inicio);
@@ -2306,8 +2319,8 @@ const App: React.FC = () => {
       // Cleanup payload for Firestore (remove undefined values)
       const cleanPayload = JSON.parse(JSON.stringify(payload));
       await updateDoc(docRef, cleanPayload);
-      if (updates.pool_dados && updates.pool_dados.length > 0) {
-        for (const item of updates.pool_dados) {
+      if (payload.pool_dados && payload.pool_dados.length > 0) {
+        for (const item of payload.pool_dados) {
           const knowledgeItem: ConhecimentoItem = {
             id: item.id,
             titulo: item.nome || 'Sem título',
