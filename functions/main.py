@@ -2212,6 +2212,203 @@ def scheduled_sync(event: scheduler_fn.ScheduledEvent) -> None:
     run_full_sync('scheduled')
 
 
+def _page_monitor_html_to_text(html_content: str, seletor_css: str | None = None) -> str:
+    """Extrai texto visivel de uma pagina HTML para comparacao por hash."""
+    try:
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html_content or "", "html.parser")
+        for tag in soup(["script", "style", "noscript", "svg"]):
+            tag.decompose()
+        root = soup
+        if seletor_css:
+            selected = soup.select_one(seletor_css)
+            if selected is not None:
+                root = selected
+        text = root.get_text(separator="\n")
+    except Exception as exc:
+        print(f"[PageMonitor] Fallback regex para extrair texto: {exc}")
+        cleaned = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", html_content or "")
+        cleaned = re.sub(r"(?s)<[^>]+>", " ", cleaned)
+        text = cleaned
+
+    lines = [line.strip() for line in str(text or "").splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
+def _page_monitor_fetch_text(url: str, seletor_css: str | None = None, timeout: int = 30) -> str:
+    import requests
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+        ),
+        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.6",
+    }
+    response = requests.get(url, headers=headers, timeout=timeout)
+    response.raise_for_status()
+    return _page_monitor_html_to_text(response.text, seletor_css)
+
+
+def _page_monitor_analyze_change(db, objetivo: str, texto_antigo: str | None, texto_novo: str | None) -> dict | None:
+    gemini_key = get_gemini_api_key()
+    if not gemini_key:
+        return None
+
+    try:
+        genai = get_genai_module()
+        client = genai.Client(api_key=gemini_key)
+        prompt = (
+            "Voce compara duas versoes do texto visivel de uma pagina da web e avalia uma mudanca "
+            "em relacao a um OBJETIVO.\n"
+            f"OBJETIVO DO USUARIO: {objetivo}\n\n"
+            "--- VERSAO ANTERIOR ---\n"
+            f"{(texto_antigo or '')[:8000]}\n\n"
+            "--- VERSAO ATUAL ---\n"
+            f"{(texto_novo or '')[:8000]}\n\n"
+            "Tarefa: (1) descreva objetivamente o que mudou de relevante, ignorando rodape, banners, "
+            "datas de acesso, menus e contadores triviais. (2) decida se a mudanca AVANCA ou ATENDE "
+            "o objetivo do usuario.\n"
+            "Responda APENAS um JSON: "
+            "{\"avanca_objetivo\": true|false, \"resumo\": \"explicacao objetiva em 1-3 frases\"}"
+        )
+        response = generate_content_logged(
+            client,
+            model=GEMINI_LIGHT_MODEL,
+            contents=prompt,
+            feature="page_monitor.change_analysis",
+            db=db,
+        )
+        raw = (getattr(response, "text", None) or "").strip()
+        match = re.search(r"\{.*\}", raw, re.S)
+        if not match:
+            return {"avanca_objetivo": False, "resumo": raw[:500] or "Sem resposta do modelo."}
+        parsed = json.loads(match.group(0))
+        return {
+            "avanca_objetivo": bool(parsed.get("avanca_objetivo")),
+            "resumo": str(parsed.get("resumo") or "").strip()[:1500],
+        }
+    except Exception as exc:
+        print(f"[PageMonitor] Falha na analise Gemini: {exc}")
+        return None
+
+
+def _page_monitor_build_message(apelido: str, objetivo: str, url: str, resumo: str | None, fallback: bool = False) -> str:
+    if fallback:
+        return (
+            f"Monitor de Paginas: {apelido}\n\n"
+            "A pagina mudou, mas nao foi possivel avaliar o objetivo automaticamente.\n\n"
+            f"Objetivo: {objetivo}\n"
+            f"{url}"
+        )[:4090]
+
+    return (
+        f"Monitor de Paginas: {apelido}\n\n"
+        f"{resumo or 'Mudanca relevante detectada.'}\n\n"
+        f"Objetivo: {objetivo}\n"
+        f"{url}"
+    )[:4090]
+
+
+@scheduler_fn.on_schedule(
+    schedule="every 30 minutes",
+    timeout_sec=540,
+    memory=options.MemoryOption.GB_1,
+)
+def scheduled_page_monitor(event: scheduler_fn.ScheduledEvent) -> None:
+    """Verifica paginas monitoradas e envia alerta por Telegram quando o objetivo avancar."""
+    import hashlib
+
+    db = get_db()
+    try:
+        docs = list(db.collection("paginas_monitoradas").where("ativo", "==", True).stream())
+    except Exception as exc:
+        print(f"[PageMonitor] Falha ao listar paginas monitoradas: {exc}")
+        return
+
+    print(f"[PageMonitor] Verificando {len(docs)} pagina(s) ativa(s).")
+    for doc_snap in docs:
+        data = doc_snap.to_dict() or {}
+        url = str(data.get("url") or "").strip()
+        apelido = str(data.get("apelido") or url or doc_snap.id).strip()
+        objetivo = str(data.get("objetivo") or "").strip()
+        if not url:
+            continue
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        update_payload = {"ultima_verificacao": now_iso}
+        try:
+            texto_novo = _page_monitor_fetch_text(url, data.get("seletor_css"))
+            novo_hash = hashlib.sha256(texto_novo.encode("utf-8")).hexdigest()
+        except Exception as exc:
+            print(f"[PageMonitor] Falha ao buscar '{apelido}': {exc}")
+            update_payload["ultima_falha"] = now_iso
+            update_payload["erro_ultima_verificacao"] = str(exc)[:500]
+            try:
+                doc_snap.reference.update(update_payload)
+            except Exception as update_exc:
+                print(f"[PageMonitor] Falha ao registrar erro de '{apelido}': {update_exc}")
+            continue
+
+        hash_antigo = data.get("hash_atual")
+        if not hash_antigo:
+            update_payload.update({
+                "hash_atual": novo_hash,
+                "texto_atual": texto_novo[:20000],
+                "erro_ultima_verificacao": None,
+            })
+            doc_snap.reference.update(update_payload)
+            print(f"[PageMonitor] Baseline capturado para '{apelido}'.")
+            continue
+
+        if novo_hash == hash_antigo:
+            update_payload["erro_ultima_verificacao"] = None
+            doc_snap.reference.update(update_payload)
+            continue
+
+        print(f"[PageMonitor] Mudanca detectada em '{apelido}'.")
+        update_payload.update({
+            "hash_atual": novo_hash,
+            "texto_atual": texto_novo[:20000],
+            "ultima_mudanca": now_iso,
+            "erro_ultima_verificacao": None,
+        })
+
+        analise = _page_monitor_analyze_change(db, objetivo, data.get("texto_atual", ""), texto_novo)
+        chat_id = _resolve_telegram_chat_id_for_uid(db, data.get("userId")) or _resolve_default_telegram_chat_id(db)
+
+        if analise is None:
+            update_payload["ultima_analise"] = (
+                "Mudanca detectada - analise indisponivel; alerta enviado como fallback."
+            )
+            sent = _send_telegram_message_raw(
+                db,
+                chat_id,
+                _page_monitor_build_message(apelido, objetivo, url, None, fallback=True),
+            )
+            update_payload["ultimo_alerta_telegram"] = now_iso if sent else None
+            update_payload["erro_telegram"] = None if sent else "send_failed_or_chat_id_missing"
+            print(f"[PageMonitor] Alerta fallback para '{apelido}': sent={sent}.")
+        else:
+            update_payload["ultima_analise"] = analise["resumo"]
+            if analise["avanca_objetivo"]:
+                sent = _send_telegram_message_raw(
+                    db,
+                    chat_id,
+                    _page_monitor_build_message(apelido, objetivo, url, analise["resumo"]),
+                )
+                update_payload["ultimo_alerta_telegram"] = now_iso if sent else None
+                update_payload["erro_telegram"] = None if sent else "send_failed_or_chat_id_missing"
+                print(f"[PageMonitor] Alerta para '{apelido}': sent={sent}.")
+            else:
+                print(f"[PageMonitor] Mudanca em '{apelido}' nao avancou o objetivo; sem alerta.")
+
+        doc_snap.reference.update(update_payload)
+
+    print("[PageMonitor] Verificacao concluida.")
+
+
 def _normalize_notification_title(title: str | None) -> str:
     normalized = unicodedata.normalize("NFKD", str(title or ""))
     normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
