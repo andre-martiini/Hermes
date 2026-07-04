@@ -239,6 +239,10 @@ export interface PaginaMonitorada {
     ultima_verificacao?: string;
     ultima_mudanca?: string;
     ultima_analise?: string;
+    ultima_falha?: string;
+    erro_ultima_verificacao?: string | null;
+    ultimo_alerta_telegram?: string | null;
+    erro_telegram?: string | null;
     ativo: boolean;
     userId: string;
     criado_em: string;
