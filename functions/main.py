@@ -12598,6 +12598,9 @@ from daily_reset_job import daily_wip_reset_and_degradation
 # Import daily morning briefing job
 from daily_morning_briefing import briefing_matinal_acoes
 
+# Import monthly recurring actions job
+from monthly_recurring_actions import gerar_acoes_recorrentes_mensais
+
 
 @https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=60)
 def gerarResumoFinanceiro(req: https_fn.CallableRequest):

@@ -705,6 +705,8 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
   const [autoClassified, setAutoClassified] = useState(false);
   const [tags, setTags] = useState<string[]>(initialData?.tags || []);
   const [tagInput, setTagInput] = useState('');
+  const [recorrenciaMensal, setRecorrenciaMensal] = useState(false);
+  const [diaDoMesRecorrencia, setDiaDoMesRecorrencia] = useState<number>(new Date().getDate());
 
   const recognitionRef = useRef<any>(null);
 
@@ -1280,6 +1282,33 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                   className="w-full bg-slate-100 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
                 />
               </div>
+
+              {/* Recorrência Mensal */}
+              <div className="space-y-2 border-t border-slate-100 pt-3">
+                <label className="flex items-center gap-2 pl-1 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={recorrenciaMensal}
+                    onChange={e => setRecorrenciaMensal(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                  />
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Repetir mensalmente</span>
+                </label>
+                {recorrenciaMensal && (
+                  <div className="flex items-center gap-2 pl-1">
+                    <span className="text-[11px] font-bold text-slate-500">Todo dia</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={31}
+                      value={diaDoMesRecorrencia}
+                      onChange={e => setDiaDoMesRecorrencia(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
+                      className="w-16 bg-slate-100 border-none rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                    />
+                    <span className="text-[11px] font-bold text-slate-500">do mês, uma nova ação será criada automaticamente.</span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -1317,7 +1346,8 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                 } : {}),
                 ...(selectedReuniao?.firestoreId ? { reuniao_vinculada_id: selectedReuniao.firestoreId } : {}),
                 ...(initialData?.estrategia_indicador_id ? { estrategia_indicador_id: initialData.estrategia_indicador_id } : {}),
-                ...(initialData?.estrategia_objetivo_id ? { estrategia_objetivo_id: initialData.estrategia_objetivo_id } : {})
+                ...(initialData?.estrategia_objetivo_id ? { estrategia_objetivo_id: initialData.estrategia_objetivo_id } : {}),
+                ...(recorrenciaMensal ? { recorrencia: { ativo: true, dia_do_mes: diaDoMesRecorrencia } } : {})
               });
               onClose();
             }}
