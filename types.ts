@@ -56,6 +56,12 @@ export interface TaskReminder {
     message?: string;
 }
 
+export interface RecorrenciaMensal {
+    ativo: boolean;
+    dia_do_mes: number; // 1-31 (dias além do fim do mês caem no último dia)
+    ultima_geracao?: string; // "YYYY-MM" do último mês em que uma instância foi gerada
+}
+
 export interface Tarefa {
     id: string;
     titulo: string;
@@ -109,6 +115,7 @@ export interface Tarefa {
     auto_data_atualizada?: boolean;
     estrategia_objetivo_id?: string;
     estrategia_indicador_id?: string;
+    recorrencia?: RecorrenciaMensal;
 }
 
 export interface ArtefatoKG {

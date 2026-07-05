@@ -8475,6 +8475,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             sourceKnowledgeText: str = None,
             horario_inicio: str = None,
             horario_fim: str = None,
+            recorrencia_mensal: bool = False,
+            dia_do_mes_recorrencia: int = None,
         ):
             """
             Cria uma nova ação/tarefa no sistema Hermes após confirmação explícita do usuário.
@@ -8492,6 +8494,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             - sourceKnowledgeText: se houver texto do e-mail longo a ser arquivado, passe-o aqui para instanciar um Nó de RAG.
             - horario_inicio: horário de início no formato HH:MM (se agendado)
             - horario_fim: horário de fim no formato HH:MM (se agendado)
+            - recorrencia_mensal: True se o usuário pedir para a ação se repetir todo mês (ex.: "todo dia 5", "mensalmente"). Nesse caso, uma nova ação equivalente é gerada automaticamente todo mês no dia informado.
+            - dia_do_mes_recorrencia: dia do mês (1 a 31) em que a ação deve se repetir. Obrigatório quando recorrencia_mensal=True. Meses com menos dias usam o último dia do mês.
             Retorna o ID da tarefa criada ou mensagem de erro.
             """
             try:
@@ -8616,6 +8620,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
                     "sourceGmailMessageId": sourceGmailMessageId or None,
                     "sourceKnowledgeId": source_knowledge_id or None,}
+
+                if recorrencia_mensal and dia_do_mes_recorrencia:
+                    doc["recorrencia"] = {
+                        "ativo": True,
+                        "dia_do_mes": max(1, min(31, int(dia_do_mes_recorrencia))),
+                    }
 
                 db.collection("tarefas").document(task_id).set(doc)
                 print(f"[Copiloto] Ação criada: id={task_id}, titulo='{titulo}'")
@@ -12597,6 +12607,9 @@ from daily_reset_job import daily_wip_reset_and_degradation
 
 # Import daily morning briefing job
 from daily_morning_briefing import briefing_matinal_acoes
+
+# Import monthly recurring actions job
+from monthly_recurring_actions import gerar_acoes_recorrentes_mensais
 
 
 @https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=60)
