@@ -3678,12 +3678,16 @@ def _process_telegram_message(db, data: dict):
         plano_acao: list[str] = None,
         horario_inicio: str = None,
         horario_fim: str = None,
+        recorrencia_mensal: bool = False,
+        dia_do_mes_recorrencia: int = None,
     ):
         """
         Cria uma nova ação no Hermes. Apresente draft ao usuário antes de chamar.
         Retorna 'OK|{ID}' em caso de sucesso ou 'ERRO|{detalhe}'.
         IMPORTANTE: area_tematica deve ser EXATAMENTE UMA das áreas temáticas válidas
         listadas no contexto do sistema. Nunca invente uma nova; se nenhuma se encaixar, use 'GERAL'.
+        - recorrencia_mensal: True se o usuário pedir para a ação se repetir todo mês (ex.: "todo dia 5", "mensalmente").
+        - dia_do_mes_recorrencia: dia do mês (1 a 31) em que a ação deve se repetir. Obrigatório quando recorrencia_mensal=True.
         """
         import uuid as _uuid
         # Garante que o copiloto só use áreas temáticas existentes (fallback 'GERAL').
@@ -3755,6 +3759,11 @@ def _process_telegram_message(db, data: dict):
             "acompanhamento": [],
             "sync_status": "new",
         }
+        if recorrencia_mensal and dia_do_mes_recorrencia:
+            doc["recorrencia"] = {
+                "ativo": True,
+                "dia_do_mes": max(1, min(31, int(dia_do_mes_recorrencia))),
+            }
         try:
             db.collection("tarefas").document(task_id).set(doc)
             return f"OK|{task_id}"

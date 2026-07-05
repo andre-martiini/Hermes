@@ -1379,6 +1379,8 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
   const [newChecklistItem, setNewChecklistItem] = useState('');
   const [tags, setTags] = useState<string[]>(task.tags || []);
   const [tagInput, setTagInput] = useState('');
+  const [recorrenciaMensal, setRecorrenciaMensal] = useState(task.recorrencia?.ativo || false);
+  const [diaDoMesRecorrencia, setDiaDoMesRecorrencia] = useState<number>(task.recorrencia?.dia_do_mes || new Date().getDate());
 
   const addChecklistItem = () => {
     if (!newChecklistItem.trim()) return;
@@ -1586,6 +1588,33 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
               </select>
             </div>
           </div>
+
+          {/* Recorrência Mensal */}
+          <div className="space-y-2 border-t border-slate-100 pt-3">
+            <label className="flex items-center gap-2 pl-1 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={recorrenciaMensal}
+                onChange={e => setRecorrenciaMensal(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+              />
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Repetir mensalmente</span>
+            </label>
+            {recorrenciaMensal && (
+              <div className="flex items-center gap-2 pl-1">
+                <span className="text-[11px] font-bold text-slate-500">Todo dia</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={diaDoMesRecorrencia}
+                  onChange={e => setDiaDoMesRecorrencia(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
+                  className="w-16 bg-slate-100 border-none rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                />
+                <span className="text-[11px] font-bold text-slate-500">do mês, uma nova ação será criada automaticamente.</span>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="p-6 bg-slate-50 border-t border-[#e5e7eb] dark:border-white/10 flex flex-col md:flex-row gap-3 flex-shrink-0">
@@ -1604,7 +1633,10 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                 tags,
                 tipo_acao: tipoAcao,
                 plano_acao: planoAcao,
-                data_inicio: formData.data_limite || ''
+                data_inicio: formData.data_limite || '',
+                ...(recorrenciaMensal
+                  ? { recorrencia: { ativo: true, dia_do_mes: diaDoMesRecorrencia, ...(task.recorrencia?.ultima_geracao ? { ultima_geracao: task.recorrencia.ultima_geracao } : {}) } }
+                  : (task.recorrencia ? { recorrencia: { ...task.recorrencia, ativo: false } } : {}))
               });
               onClose();
             }}
