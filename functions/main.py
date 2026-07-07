@@ -11205,6 +11205,95 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             message=str(e)
         )
 
+
+class _CopilotJobAuth:
+    def __init__(self, uid: str | None):
+        self.uid = uid
+
+
+class _CopilotJobRequest:
+    def __init__(self, data: dict, uid: str | None):
+        self.data = data
+        self.auth = _CopilotJobAuth(uid) if uid else None
+
+
+@firestore_fn.on_document_created(
+    document="copilot_jobs/{jobId}",
+    memory=options.MemoryOption.GB_2,
+    timeout_sec=540,
+)
+def on_copilot_job_created(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):
+    """Processa comandos do Copiloto fora do ciclo de vida da aba do navegador."""
+    snap = event.data
+    if snap is None or not snap.exists:
+        return
+
+    db = get_db()
+    job_ref = snap.reference
+    job = snap.to_dict() or {}
+    payload = job.get("payload") or {}
+    session_id = payload.get("sessionId") or job.get("sessionId")
+    user_uid = job.get("userId")
+
+    if not session_id or not payload.get("prompt"):
+        job_ref.set({
+            "status": "error",
+            "error": "Job sem sessionId ou prompt.",
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+        return
+
+    def _set_session_status(text: str | None):
+        session_ref = db.collection("sessoes_copiloto").document(session_id)
+        try:
+            if text:
+                session_ref.set({
+                    "copilotStatus": text,
+                    "copilotStatusAt": firestore.SERVER_TIMESTAMP,
+                }, merge=True)
+            else:
+                session_ref.update({
+                    "copilotStatus": firestore.DELETE_FIELD,
+                    "copilotStatusAt": firestore.DELETE_FIELD,
+                })
+        except Exception as status_err:
+            print(f"[CopilotJob] Falha ao atualizar status da sessão {session_id}: {status_err}")
+
+    try:
+        job_ref.set({
+            "status": "processing",
+            "startedAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+        _set_session_status("Processando em segundo plano...")
+
+        req = _CopilotJobRequest(payload, user_uid)
+        result = askCopilotoHermes(req)
+
+        job_ref.set({
+            "status": "completed",
+            "completedAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+            "resultSummary": str((result or {}).get("result", ""))[:500] if isinstance(result, dict) else "",
+        }, merge=True)
+    except Exception as exc:
+        err_msg = str(getattr(exc, "message", None) or exc)
+        print(f"[CopilotJob] Erro ao processar job {event.params.get('jobId')}: {err_msg}")
+        job_ref.set({
+            "status": "error",
+            "error": err_msg,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+        try:
+            db.collection("sessoes_copiloto").document(session_id).collection("mensagens").add({
+                "role": "assistant",
+                "content": f"**Erro ao processar a solicitação em segundo plano:**\n`{err_msg}`",
+                "timestamp": firestore.SERVER_TIMESTAMP,
+            })
+        except Exception as msg_err:
+            print(f"[CopilotJob] Falha ao registrar erro na sessão {session_id}: {msg_err}")
+        _set_session_status(None)
+
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
     memory=options.MemoryOption.GB_1,

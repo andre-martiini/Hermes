@@ -5,6 +5,7 @@ import {
   addDoc,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDocs,
   limit,
@@ -24,7 +25,6 @@ import { getRoutingIndex, toolsRegistry } from './toolRegistry';
 import { isInternalAppHref, navigateWithinApp } from '../../utils/internalNavigation';
 
 export const UPLOAD_ENDPOINT = 'https://us-central1-gestao-hermes.cloudfunctions.net/uploadFileForCopiloto';
-const COPILOTO_CALLABLE_TIMEOUT_MS = 240000;
 const LARGE_PASTE_THRESHOLD = 1500;
 const COMPOSER_MAX_LINES = 8;
 export const COPILOTO_SUPPORTED_FILE_EXTENSIONS = [
@@ -181,20 +181,6 @@ interface HermesGlobalChatProps {
   onInitialPromptConsumed?: () => void;
 }
 
-const withClientTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-};
-
 const getCopilotoErrorMessage = (err: any) => {
   const raw = err?.message || err?.details || String(err) || '';
   const code = String(err?.code || '').toLowerCase();
@@ -271,7 +257,10 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   const micStreamRef = useRef<MediaStream | null>(null);
   const dragCounterRef = useRef(0);
 
-  const isBlocked = isLoading || uploadPhase !== 'idle' || isProcessingMic || isTranscribing;
+  const activeSession = sessions.find((session) => session.id === currentSessionId);
+  const activeCopilotStatus = activeSession?.copilotStatus;
+  const isWaitingForCopilot = isLoading || !!activeCopilotStatus;
+  const isBlocked = isWaitingForCopilot || uploadPhase !== 'idle' || isProcessingMic || isTranscribing;
   const modeLabel = copilotMode === 'finance' ? 'Financeiro' : copilotMode === 'saude' ? 'Saúde' : copilotMode === 'estrategia' ? 'Estratégia' : 'Global';
 
   const shellClass = isDark ? 'bg-[#151c27] text-[#ebf1ff]' : 'bg-[#ffffff] text-[#151c27]';
@@ -436,7 +425,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, isLoading]);
+  }, [messages, isWaitingForCopilot]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -659,22 +648,6 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
         timestamp: Timestamp.now(),
       });
 
-      const pastePrefix = pasteToSend ? `[CONTEXTO COLADO]\n${pasteToSend.text}\n[/CONTEXTO]\n\n` : '';
-      const askCopiloto = httpsCallable(functions, 'askCopilotoHermes', { timeout: COPILOTO_CALLABLE_TIMEOUT_MS });
-      const response = await withClientTimeout(askCopiloto({
-        sessionId,
-        prompt: pastePrefix + (text.trim() || (hasFile || hasPaste ? '' : text)),
-        taskId: null,
-        systemId: null,
-        driveFileId,
-        driveFileName,
-        copilotMode,
-        copilotScope: 'global',
-        strategyDirectives,
-        routingIndex: getRoutingIndex(),
-      }), COPILOTO_CALLABLE_TIMEOUT_MS, 'O copiloto demorou demais para responder.');
-
-      const data = response.data as any;
       const sessionUpdates: Partial<Session> = {
         copilotMode,
         copilotScope: 'global',
@@ -683,14 +656,41 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
         lastMessageAt: Timestamp.now(),
       };
       if (messages.length === 0) {
-        sessionUpdates.title = data?.suggestedTitle || `${userMessageContent.slice(0, 46)}${userMessageContent.length > 46 ? '...' : ''}`;
+        sessionUpdates.title = `${userMessageContent.slice(0, 46)}${userMessageContent.length > 46 ? '...' : ''}`;
       }
+      sessionUpdates.copilotStatus = 'Solicitação enfileirada...';
       await touchSession(sessionId, sessionUpdates);
+
+      const pastePrefix = pasteToSend ? `[CONTEXTO COLADO]\n${pasteToSend.text}\n[/CONTEXTO]\n\n` : '';
+      await addDoc(collection(db, 'copilot_jobs'), {
+        userId,
+        sessionId,
+        status: 'queued',
+        source: 'HermesGlobalChat',
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+        payload: {
+          sessionId,
+          prompt: pastePrefix + (text.trim() || (hasFile || hasPaste ? '' : text)),
+          taskId: null,
+          systemId: null,
+          driveFileId,
+          driveFileName,
+          copilotMode,
+          copilotScope: 'global',
+          strategyDirectives,
+          routingIndex: getRoutingIndex(),
+        },
+      });
     } catch (err: any) {
       const errMsg = getCopilotoErrorMessage(err);
       setFooterError(errMsg);
       const targetSessionId = sessionId || currentSessionId;
       if (targetSessionId) {
+        await updateDoc(doc(db, 'sessoes_copiloto', targetSessionId), {
+          copilotStatus: deleteField(),
+          copilotStatusAt: deleteField(),
+        }).catch(() => undefined);
         await addDoc(collection(db, 'sessoes_copiloto', targetSessionId, 'mensagens'), {
           role: 'assistant',
           content: `**Erro ao processar a solicitação:**\n\`${errMsg}\``,
@@ -1175,13 +1175,13 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                     </div>
                   );
                 })}
-                {isLoading && (
+                {isWaitingForCopilot && (
                   <div className="flex items-center gap-3">
                     <div className={`h-8 w-8 border p-1.5 ${isDark ? 'bg-white border-white/10' : 'bg-white border-border-grid shadow-soft-touch'}`}>
                       <img src="/logo.png" alt="" className="h-full w-full object-contain" />
                     </div>
                     <div className={`border px-4 py-3 font-mono text-[10px] font-black uppercase tracking-widest ${raisedClass} ${mutedClass}`}>
-                      {uploadPhase === 'uploading' ? 'Enviando arquivo...' : uploadPhase === 'processing' ? 'Processando contexto...' : (sessions.find(s => s.id === currentSessionId)?.copilotStatus || 'Pensando...')}
+                      {uploadPhase === 'uploading' ? 'Enviando arquivo...' : uploadPhase === 'processing' ? 'Processando contexto...' : (activeCopilotStatus || 'Pensando...')}
                     </div>
                   </div>
                 )}
