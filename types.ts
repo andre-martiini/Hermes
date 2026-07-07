@@ -116,7 +116,20 @@ export interface Tarefa {
     estrategia_objetivo_id?: string;
     estrategia_indicador_id?: string;
     recorrencia?: RecorrenciaMensal;
+    email_trigger?: EmailTrigger;
 }
+
+export interface EmailTrigger {
+    enabled: boolean;
+    sender?: string;
+    subjectKeywords?: string;
+    bodyKeywords?: string;
+    action_to_take: 'status_to_andamento' | 'run_ai_analysis';
+    ai_instructions?: string;
+    telegram_alert: boolean;
+    last_triggered_email_id?: string;
+}
+
 
 export interface ArtefatoKG {
     nome: string;

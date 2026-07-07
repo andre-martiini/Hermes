@@ -45,6 +45,41 @@
       "horario_fim": {
         "type": "string",
         "description": "Horário de fim no formato HH:MM (se agendado)"
+      },
+      "email_trigger": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Se o gatilho está habilitado. Sempre True se quiser ativar o gatilho."
+          },
+          "sender": {
+            "type": "string",
+            "description": "Remetente específico do e-mail (opcional)"
+          },
+          "subjectKeywords": {
+            "type": "string",
+            "description": "Palavras-chave no assunto separadas por vírgula (opcional)"
+          },
+          "bodyKeywords": {
+            "type": "string",
+            "description": "Palavras-chave no corpo separadas por vírgula (opcional)"
+          },
+          "action_to_take": {
+            "type": "string",
+            "enum": ["status_to_andamento", "run_ai_analysis"],
+            "description": "Ação a tomar: 'status_to_andamento' (mover para Em Andamento) ou 'run_ai_analysis' (executar análise de IA com instruções adicionais)"
+          },
+          "ai_instructions": {
+            "type": "string",
+            "description": "Instruções adicionais para a IA extrair dados e preencher na tarefa se action_to_take for 'run_ai_analysis'"
+          },
+          "telegram_alert": {
+            "type": "boolean",
+            "description": "Enviar aviso no Telegram quando o gatilho disparar. Padrão: true"
+          }
+        },
+        "description": "Gatilho de e-mail opcional para reativar ação de stand-by quando um e-mail correspondente chegar"
       }
     },
     "required": ["titulo", "area_tematica", "data_limite"]

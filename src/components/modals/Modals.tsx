@@ -707,6 +707,13 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
   const [tagInput, setTagInput] = useState('');
   const [recorrenciaMensal, setRecorrenciaMensal] = useState(false);
   const [diaDoMesRecorrencia, setDiaDoMesRecorrencia] = useState<number>(new Date().getDate());
+  const [emailTriggerEnabled, setEmailTriggerEnabled] = useState(initialData?.email_trigger?.enabled || false);
+  const [emailSender, setEmailSender] = useState(initialData?.email_trigger?.sender || '');
+  const [emailSubjectKeywords, setEmailSubjectKeywords] = useState(initialData?.email_trigger?.subjectKeywords || '');
+  const [emailBodyKeywords, setEmailBodyKeywords] = useState(initialData?.email_trigger?.bodyKeywords || '');
+  const [emailActionToTake, setEmailActionToTake] = useState<'status_to_andamento' | 'run_ai_analysis'>(initialData?.email_trigger?.action_to_take || 'status_to_andamento');
+  const [emailAiInstructions, setEmailAiInstructions] = useState(initialData?.email_trigger?.ai_instructions || '');
+  const [emailTelegramAlert, setEmailTelegramAlert] = useState(initialData?.email_trigger?.telegram_alert ?? true);
 
   const recognitionRef = useRef<any>(null);
 
@@ -1309,6 +1316,84 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                   </div>
                 )}
               </div>
+
+              {/* Gatilho de E-mail */}
+              <div className="space-y-2 border-t border-slate-100 pt-3">
+                <label className="flex items-center gap-2 pl-1 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={emailTriggerEnabled}
+                    onChange={e => setEmailTriggerEnabled(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                  />
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Gatilho de E-mail (Stand-by)</span>
+                </label>
+                {emailTriggerEnabled && (
+                  <div className="space-y-3 pl-1 pt-1 border-l-2 border-slate-200 ml-1.5 pl-3 transition-all animate-in slide-in-from-top-2 duration-200">
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Remetente do E-mail</label>
+                      <input
+                        type="text"
+                        value={emailSender}
+                        onChange={e => setEmailSender(e.target.value)}
+                        placeholder="Ex: professor@ifes.edu.br (opcional)"
+                        className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-medium text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Palavras no Assunto</label>
+                      <input
+                        type="text"
+                        value={emailSubjectKeywords}
+                        onChange={e => setEmailSubjectKeywords(e.target.value)}
+                        placeholder="Ex: fatura, relatório (separe por vírgula)"
+                        className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-medium text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Palavras no Corpo</label>
+                      <input
+                        type="text"
+                        value={emailBodyKeywords}
+                        onChange={e => setEmailBodyKeywords(e.target.value)}
+                        placeholder="Ex: aprovado, concluído (separe por vírgula)"
+                        className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-medium text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ação ao Receber</label>
+                      <select
+                        value={emailActionToTake}
+                        onChange={e => setEmailActionToTake(e.target.value as any)}
+                        className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+                      >
+                        <option value="status_to_andamento">Mover para 'Em Andamento'</option>
+                        <option value="run_ai_analysis">Análise de IA + Atualizar notas/checklist</option>
+                      </select>
+                    </div>
+                    {emailActionToTake === 'run_ai_analysis' && (
+                      <div className="space-y-1 animate-in slide-in-from-top-2 duration-200">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Instruções para a IA</label>
+                        <textarea
+                          value={emailAiInstructions}
+                          onChange={e => setEmailAiInstructions(e.target.value)}
+                          placeholder="Ex: Extraia o valor aprovado do orçamento e anote nas notas. Marque o primeiro passo do checklist se a resposta for afirmativa."
+                          className="w-full bg-slate-100 border-none rounded-xl px-4 py-3 text-xs font-medium text-slate-700 focus:ring-2 focus:ring-slate-900 transition-all font-sans min-h-[60px] resize-none"
+                        />
+                      </div>
+                    )}
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={emailTelegramAlert}
+                        onChange={e => setEmailTelegramAlert(e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                      />
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Notificar no Telegram</span>
+                    </label>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -1347,7 +1432,16 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                 ...(selectedReuniao?.firestoreId ? { reuniao_vinculada_id: selectedReuniao.firestoreId } : {}),
                 ...(initialData?.estrategia_indicador_id ? { estrategia_indicador_id: initialData.estrategia_indicador_id } : {}),
                 ...(initialData?.estrategia_objetivo_id ? { estrategia_objetivo_id: initialData.estrategia_objetivo_id } : {}),
-                ...(recorrenciaMensal ? { recorrencia: { ativo: true, dia_do_mes: diaDoMesRecorrencia } } : {})
+                ...(recorrenciaMensal ? { recorrencia: { ativo: true, dia_do_mes: diaDoMesRecorrencia } } : {}),
+                email_trigger: {
+                  enabled: emailTriggerEnabled,
+                  sender: emailSender.trim() || undefined,
+                  subjectKeywords: emailSubjectKeywords.trim() || undefined,
+                  bodyKeywords: emailBodyKeywords.trim() || undefined,
+                  action_to_take: emailActionToTake,
+                  ai_instructions: emailAiInstructions.trim() || undefined,
+                  telegram_alert: emailTelegramAlert
+                }
               });
               onClose();
             }}
@@ -1381,6 +1475,13 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
   const [tagInput, setTagInput] = useState('');
   const [recorrenciaMensal, setRecorrenciaMensal] = useState(task.recorrencia?.ativo || false);
   const [diaDoMesRecorrencia, setDiaDoMesRecorrencia] = useState<number>(task.recorrencia?.dia_do_mes || new Date().getDate());
+  const [emailTriggerEnabled, setEmailTriggerEnabled] = useState(task.email_trigger?.enabled || false);
+  const [emailSender, setEmailSender] = useState(task.email_trigger?.sender || '');
+  const [emailSubjectKeywords, setEmailSubjectKeywords] = useState(task.email_trigger?.subjectKeywords || '');
+  const [emailBodyKeywords, setEmailBodyKeywords] = useState(task.email_trigger?.bodyKeywords || '');
+  const [emailActionToTake, setEmailActionToTake] = useState<'status_to_andamento' | 'run_ai_analysis'>(task.email_trigger?.action_to_take || 'status_to_andamento');
+  const [emailAiInstructions, setEmailAiInstructions] = useState(task.email_trigger?.ai_instructions || '');
+  const [emailTelegramAlert, setEmailTelegramAlert] = useState(task.email_trigger?.telegram_alert ?? true);
 
   const addChecklistItem = () => {
     if (!newChecklistItem.trim()) return;
@@ -1615,6 +1716,84 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
               </div>
             )}
           </div>
+
+          {/* Gatilho de E-mail */}
+          <div className="space-y-2 border-t border-slate-100 pt-3">
+            <label className="flex items-center gap-2 pl-1 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={emailTriggerEnabled}
+                onChange={e => setEmailTriggerEnabled(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+              />
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Gatilho de E-mail (Stand-by)</span>
+            </label>
+            {emailTriggerEnabled && (
+              <div className="space-y-3 pl-1 pt-1 border-l-2 border-slate-200 ml-1.5 pl-3 transition-all animate-in slide-in-from-top-2 duration-200">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Remetente do E-mail</label>
+                  <input
+                    type="text"
+                    value={emailSender}
+                    onChange={e => setEmailSender(e.target.value)}
+                    placeholder="Ex: professor@ifes.edu.br (opcional)"
+                    className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-medium text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Palavras no Assunto</label>
+                  <input
+                    type="text"
+                    value={emailSubjectKeywords}
+                    onChange={e => setEmailSubjectKeywords(e.target.value)}
+                    placeholder="Ex: fatura, relatório (separe por vírgula)"
+                    className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-medium text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Palavras no Corpo</label>
+                  <input
+                    type="text"
+                    value={emailBodyKeywords}
+                    onChange={e => setEmailBodyKeywords(e.target.value)}
+                    placeholder="Ex: aprovado, concluído (separe por vírgula)"
+                    className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-medium text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ação ao Receber</label>
+                  <select
+                    value={emailActionToTake}
+                    onChange={e => setEmailActionToTake(e.target.value as any)}
+                    className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+                  >
+                    <option value="status_to_andamento">Mover para 'Em Andamento'</option>
+                    <option value="run_ai_analysis">Análise de IA + Atualizar notas/checklist</option>
+                  </select>
+                </div>
+                {emailActionToTake === 'run_ai_analysis' && (
+                  <div className="space-y-1 animate-in slide-in-from-top-2 duration-200">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Instruções para a IA</label>
+                    <textarea
+                      value={emailAiInstructions}
+                      onChange={e => setEmailAiInstructions(e.target.value)}
+                      placeholder="Ex: Extraia o valor aprovado do orçamento e anote nas notas. Marque o primeiro passo do checklist se a resposta for afirmativa."
+                      className="w-full bg-slate-100 border-none rounded-xl px-4 py-3 text-xs font-medium text-slate-700 focus:ring-2 focus:ring-slate-900 transition-all font-sans min-h-[60px] resize-none"
+                    />
+                  </div>
+                )}
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={emailTelegramAlert}
+                    onChange={e => setEmailTelegramAlert(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                  />
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Notificar no Telegram</span>
+                </label>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="p-6 bg-slate-50 border-t border-[#e5e7eb] dark:border-white/10 flex flex-col md:flex-row gap-3 flex-shrink-0">
@@ -1636,7 +1815,17 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                 data_inicio: formData.data_limite || '',
                 ...(recorrenciaMensal
                   ? { recorrencia: { ativo: true, dia_do_mes: diaDoMesRecorrencia, ...(task.recorrencia?.ultima_geracao ? { ultima_geracao: task.recorrencia.ultima_geracao } : {}) } }
-                  : (task.recorrencia ? { recorrencia: { ...task.recorrencia, ativo: false } } : {}))
+                  : (task.recorrencia ? { recorrencia: { ...task.recorrencia, ativo: false } } : {})),
+                email_trigger: {
+                  enabled: emailTriggerEnabled,
+                  sender: emailSender.trim() || undefined,
+                  subjectKeywords: emailSubjectKeywords.trim() || undefined,
+                  bodyKeywords: emailBodyKeywords.trim() || undefined,
+                  action_to_take: emailActionToTake,
+                  ai_instructions: emailAiInstructions.trim() || undefined,
+                  telegram_alert: emailTelegramAlert,
+                  last_triggered_email_id: task.email_trigger?.last_triggered_email_id || undefined
+                }
               });
               onClose();
             }}
