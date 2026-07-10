@@ -11268,12 +11268,14 @@ def on_copilot_job_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
         _set_session_status("Processando em segundo plano...")
 
         req = _CopilotJobRequest(payload, user_uid)
-        # askCopilotoHermes é decorada com @https_fn.on_call, então o nome aponta
-        # para o wrapper HTTP (que acessa request.method e espera um objeto de
-        # requisição bruto). Aqui invocamos a função original sem o decorator via
-        # __wrapped__ (exposto por functools.wraps), passando o _CopilotJobRequest
-        # que expõe apenas .data e .auth — como um CallableRequest.
-        core_fn = getattr(askCopilotoHermes, "__wrapped__", askCopilotoHermes)
+        # askCopilotoHermes é decorada com @https_fn.on_call, que empilha DUAS
+        # camadas preservadas por functools.wraps: o wrapper de CORS (flask_cors,
+        # camada externa) e o on_call_wrapped (que chama _on_call_handler e acessa
+        # request.method). Ambos esperam uma requisição HTTP bruta. Precisamos da
+        # função original, que espera apenas .data/.auth como um CallableRequest.
+        # inspect.unwrap percorre toda a cadeia de __wrapped__ até chegar nela.
+        import inspect as _inspect
+        core_fn = _inspect.unwrap(askCopilotoHermes)
         result = core_fn(req)
 
         job_ref.set({
