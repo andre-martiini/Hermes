@@ -851,7 +851,8 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
 
   return (
     <div
-      className={isInline ? 'relative flex h-full min-h-0 w-full justify-end' : 'fixed inset-0 z-[700] flex justify-end'}
+      className={isInline ? 'absolute inset-y-0 right-0 flex min-h-0 justify-end transition-[width] duration-300' : 'fixed inset-0 z-[700] flex justify-end'}
+      style={isInline ? { width: showHistory ? 'min(760px, calc(100vw - 2rem))' : '100%' } : undefined}
       onDragEnter={(event) => {
         if (!Array.from(event.dataTransfer.types).includes('Files') || isBlocked) return;
         event.preventDefault();
@@ -892,7 +893,15 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
               <p className={`truncate font-sans text-[9px] font-semibold uppercase tracking-wider ${mutedClass}`}>Histórico global</p>
             </div>
           </div>
-          <button type="button" onClick={() => setShowMobileHistory(false)} className={`p-2 md:hidden ${hoverClass}`} aria-label="Fechar histórico">
+          <button
+            type="button"
+            onClick={() => {
+              setShowMobileHistory(false);
+              setShowHistory(false);
+            }}
+            className={`shrink-0 p-2 ${hoverClass}`}
+            aria-label="Fechar histórico"
+          >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
@@ -971,7 +980,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
         </div>
       </aside>
 
-      <main className={`flex min-w-0 flex-1 flex-col border-l-0 ${panelClass}`}>
+      <main className={`flex min-w-[min(420px,100%)] flex-1 flex-col border-l-0 ${panelClass}`}>
         <header className={`flex h-16 shrink-0 items-center justify-between border-b px-4 md:px-6 ${isDark ? 'border-white/10' : 'border-[#e5e7eb]'}`}>
           <div className="flex min-w-0 items-center gap-3">
             <button
@@ -983,12 +992,12 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                 }
                 setShowHistory(prev => !prev);
               }}
-              className={`border px-3 py-2 font-sans text-[10px] font-semibold uppercase tracking-wider transition-all rounded-lg ${
+              className={`relative z-10 shrink-0 border px-3 py-2 font-sans text-[10px] font-semibold uppercase tracking-wider transition-all rounded-lg ${
                 showHistory
                   ? (isDark ? 'border-blue-400/40 bg-blue-500/10 text-blue-200' : 'border-[#7800ce] bg-[#f5f3ff] text-[#7800ce]')
                   : (isDark ? 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-white' : 'border-[#e5e7eb] text-slate-500 hover:bg-slate-50 hover:text-slate-900')
               }`}
-              aria-label="Abrir histórico"
+              aria-label={showHistory || showMobileHistory ? 'Fechar histórico' : 'Abrir histórico'}
               aria-pressed={showHistory}
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
@@ -1005,7 +1014,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
             <button
               type="button"
               onClick={startNewConversation}
-              className={`hidden border px-3 py-2 font-sans text-[10px] font-semibold uppercase tracking-wider transition-all rounded-lg sm:inline-flex ${
+              className={`${showHistory ? 'hidden lg:inline-flex' : 'hidden sm:inline-flex'} border px-3 py-2 font-sans text-[10px] font-semibold uppercase tracking-wider transition-all rounded-lg ${
                 isDark ? 'border-white/10 text-slate-300 hover:bg-white/5 hover:text-white' : 'border-[#e5e7eb] text-slate-600 hover:bg-slate-50 hover:text-slate-900'
               }`}
             >

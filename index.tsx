@@ -4978,7 +4978,7 @@ const App: React.FC = () => {
                       />
                     </div>
                     {isStrategySplitCopilot && (
-                      <aside className="w-[420px] shrink-0">
+                      <aside className="relative z-20 w-[420px] shrink-0">
                         <HermesGlobalChat
                           isOpen={isCopilotoOpen}
                           onClose={closeCopiloto}
