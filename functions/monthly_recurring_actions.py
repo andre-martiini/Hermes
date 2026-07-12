@@ -13,29 +13,52 @@ def _last_day_of_month(ref: datetime.datetime) -> int:
     return (next_month.replace(day=1) - datetime.timedelta(days=1)).day
 
 
+def _indice_semana(d: datetime.date) -> int:
+    # Índice absoluto de semanas com início no domingo (alinhado à convenção 0=domingo)
+    return (d.toordinal() - 7) // 7
+
+
 def _deve_gerar_hoje(recorrencia: dict, now_sp: datetime.datetime) -> tuple[bool, str | None]:
     """
     Decide se o template deve gerar uma instância hoje.
     Retorna (deve_gerar, marcador_de_geracao). O marcador é gravado em
     recorrencia.ultima_geracao para evitar duplicidade: "YYYY-MM" na
     recorrência mensal e "YYYY-MM-DD" na semanal.
-    Convenção de dia_da_semana: 0=domingo ... 6=sábado (mesma do JS getDay()).
+    Convenção de dias da semana: 0=domingo ... 6=sábado (mesma do JS getDay()).
     Templates sem o campo 'frequencia' são tratados como mensais (retrocompatibilidade).
+    Semanal aceita múltiplos dias (dias_da_semana) e intervalo_semanas (ex.: 2 =
+    a cada duas semanas), ancorado na semana da última geração.
     """
     frequencia = recorrencia.get("frequencia")
     if not frequencia:
-        frequencia = "semanal" if recorrencia.get("dia_da_semana") is not None else "mensal"
+        frequencia = "semanal" if (
+            recorrencia.get("dia_da_semana") is not None or recorrencia.get("dias_da_semana")
+        ) else "mensal"
 
     if frequencia == "semanal":
-        dia_da_semana = recorrencia.get("dia_da_semana")
-        if dia_da_semana is None:
-            return False, None
+        dias = recorrencia.get("dias_da_semana")
+        if not dias:
+            dia_unico = recorrencia.get("dia_da_semana")
+            if dia_unico is None:
+                return False, None
+            dias = [dia_unico]
         hoje_dow = (now_sp.weekday() + 1) % 7  # weekday(): 0=segunda -> converte para 0=domingo
-        if hoje_dow != int(dia_da_semana):
+        if hoje_dow not in {int(d) for d in dias}:
             return False, None
         marcador = now_sp.strftime("%Y-%m-%d")
-        if recorrencia.get("ultima_geracao") == marcador:
+        ultima = recorrencia.get("ultima_geracao")
+        if ultima == marcador:
             return False, None
+        intervalo = max(1, int(recorrencia.get("intervalo_semanas") or 1))
+        if intervalo > 1 and ultima:
+            # Como só geramos em semanas alinhadas, a semana da última geração
+            # serve de âncora para o intervalo.
+            try:
+                semana_ultima = _indice_semana(datetime.date.fromisoformat(ultima))
+                if (_indice_semana(now_sp.date()) - semana_ultima) % intervalo != 0:
+                    return False, None
+            except ValueError:
+                pass  # ultima_geracao em formato inesperado (ex.: mensal): ignora a âncora
         return True, marcador
 
     dia_do_mes = recorrencia.get("dia_do_mes")

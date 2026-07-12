@@ -62,7 +62,9 @@ export interface RecorrenciaAcao {
     ativo: boolean;
     frequencia?: FrequenciaRecorrencia; // ausente = 'mensal' (retrocompatibilidade)
     dia_do_mes?: number; // 1-31, para frequência mensal (dias além do fim do mês caem no último dia)
-    dia_da_semana?: number; // 0 (domingo) a 6 (sábado), para frequência semanal
+    dia_da_semana?: number; // legado: um único dia da semana (0=domingo a 6=sábado)
+    dias_da_semana?: number[]; // 0 (domingo) a 6 (sábado), um ou mais dias, para frequência semanal
+    intervalo_semanas?: number; // 1 = toda semana (padrão); 2 = a cada 2 semanas; etc.
     ultima_geracao?: string; // "YYYY-MM" (mensal) ou "YYYY-MM-DD" (semanal) da última instância gerada
 }
 
