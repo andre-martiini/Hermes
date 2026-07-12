@@ -5,7 +5,8 @@ import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import type { MeetingHistoryEntry } from '../tools/MeetingTranscriptionTool';
 import {
   Tarefa, Status, Categoria, EntregaInstitucional,
-  AppSettings, HermesModalProps, CustomNotification, TipoAcao, ActionPlanItem, ConhecimentoItem
+  AppSettings, HermesModalProps, CustomNotification, TipoAcao, ActionPlanItem, ConhecimentoItem,
+  FrequenciaRecorrencia, RecorrenciaAcao
 } from '../../../types';
 import { formatDate, formatDateLocalISO } from '../../../types';
 import { detectAreaFromTitle, callScrapeSipac } from '../../utils/helpers';
@@ -13,6 +14,16 @@ import { isOperationalArea, STRATEGIC_AREA_OPTIONS } from '../../utils/strategic
 import { WysiwygEditor } from '../ui/UIComponents';
 
 type ThemeMode = 'system' | 'dark' | 'light';
+
+// 0=domingo ... 6=sábado (mesma convenção de Date.getDay() e do job de recorrência no backend)
+const DIAS_DA_SEMANA = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+
+const buildRecorrencia = (frequencia: FrequenciaRecorrencia, diaDoMes: number, diaDaSemana: number, ultimaGeracao?: string): RecorrenciaAcao => ({
+  ativo: true,
+  frequencia,
+  ...(frequencia === 'semanal' ? { dia_da_semana: diaDaSemana } : { dia_do_mes: diaDoMes }),
+  ...(ultimaGeracao ? { ultima_geracao: ultimaGeracao } : {})
+});
 
 export const HermesModal = ({ isOpen, title, message, type, onConfirm, onCancel, confirmLabel, cancelLabel }: HermesModalProps) => {
   if (!isOpen) return null;
@@ -705,8 +716,10 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
   const [autoClassified, setAutoClassified] = useState(false);
   const [tags, setTags] = useState<string[]>(initialData?.tags || []);
   const [tagInput, setTagInput] = useState('');
-  const [recorrenciaMensal, setRecorrenciaMensal] = useState(false);
+  const [recorrenciaAtiva, setRecorrenciaAtiva] = useState(false);
+  const [frequenciaRecorrencia, setFrequenciaRecorrencia] = useState<FrequenciaRecorrencia>('mensal');
   const [diaDoMesRecorrencia, setDiaDoMesRecorrencia] = useState<number>(new Date().getDate());
+  const [diaDaSemanaRecorrencia, setDiaDaSemanaRecorrencia] = useState<number>(new Date().getDay());
   const [emailTriggerEnabled, setEmailTriggerEnabled] = useState(initialData?.email_trigger?.enabled || false);
   const [emailSender, setEmailSender] = useState(initialData?.email_trigger?.sender || '');
   const [emailSubjectKeywords, setEmailSubjectKeywords] = useState(initialData?.email_trigger?.subjectKeywords || '');
@@ -1290,29 +1303,58 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                 />
               </div>
 
-              {/* Recorrência Mensal */}
+              {/* Recorrência */}
               <div className="space-y-2 border-t border-slate-100 pt-3">
                 <label className="flex items-center gap-2 pl-1 cursor-pointer select-none">
                   <input
                     type="checkbox"
-                    checked={recorrenciaMensal}
-                    onChange={e => setRecorrenciaMensal(e.target.checked)}
+                    checked={recorrenciaAtiva}
+                    onChange={e => setRecorrenciaAtiva(e.target.checked)}
                     className="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
                   />
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Repetir mensalmente</span>
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ação Recorrente</span>
                 </label>
-                {recorrenciaMensal && (
-                  <div className="flex items-center gap-2 pl-1">
-                    <span className="text-[11px] font-bold text-slate-500">Todo dia</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={31}
-                      value={diaDoMesRecorrencia}
-                      onChange={e => setDiaDoMesRecorrencia(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
-                      className="w-16 bg-slate-100 border-none rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
-                    />
-                    <span className="text-[11px] font-bold text-slate-500">do mês, uma nova ação será criada automaticamente.</span>
+                {recorrenciaAtiva && (
+                  <div className="space-y-2 pl-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold text-slate-500">Repetir</span>
+                      <select
+                        value={frequenciaRecorrencia}
+                        onChange={e => setFrequenciaRecorrencia(e.target.value as FrequenciaRecorrencia)}
+                        className="bg-slate-100 border-none rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+                      >
+                        <option value="semanal">Semanalmente</option>
+                        <option value="mensal">Mensalmente</option>
+                      </select>
+                    </div>
+                    {frequenciaRecorrencia === 'semanal' ? (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] font-bold text-slate-500">Toda</span>
+                        <select
+                          value={diaDaSemanaRecorrencia}
+                          onChange={e => setDiaDaSemanaRecorrencia(Number(e.target.value))}
+                          className="bg-slate-100 border-none rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+                        >
+                          {DIAS_DA_SEMANA.map((dia, idx) => (
+                            <option key={idx} value={idx}>{dia}</option>
+                          ))}
+                        </select>
+                        <span className="text-[11px] font-bold text-slate-500">uma nova ação será criada automaticamente.</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] font-bold text-slate-500">Todo dia</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={31}
+                          value={diaDoMesRecorrencia}
+                          onChange={e => setDiaDoMesRecorrencia(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
+                          className="w-16 bg-slate-100 border-none rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                        />
+                        <span className="text-[11px] font-bold text-slate-500">do mês, uma nova ação será criada automaticamente.</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1432,7 +1474,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                 ...(selectedReuniao?.firestoreId ? { reuniao_vinculada_id: selectedReuniao.firestoreId } : {}),
                 ...(initialData?.estrategia_indicador_id ? { estrategia_indicador_id: initialData.estrategia_indicador_id } : {}),
                 ...(initialData?.estrategia_objetivo_id ? { estrategia_objetivo_id: initialData.estrategia_objetivo_id } : {}),
-                ...(recorrenciaMensal ? { recorrencia: { ativo: true, dia_do_mes: diaDoMesRecorrencia } } : {}),
+                ...(recorrenciaAtiva ? { recorrencia: buildRecorrencia(frequenciaRecorrencia, diaDoMesRecorrencia, diaDaSemanaRecorrencia) } : {}),
                 email_trigger: {
                   enabled: emailTriggerEnabled,
                   sender: emailSender.trim() || undefined,
@@ -1473,8 +1515,12 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
   const [newChecklistItem, setNewChecklistItem] = useState('');
   const [tags, setTags] = useState<string[]>(task.tags || []);
   const [tagInput, setTagInput] = useState('');
-  const [recorrenciaMensal, setRecorrenciaMensal] = useState(task.recorrencia?.ativo || false);
+  const [recorrenciaAtiva, setRecorrenciaAtiva] = useState(task.recorrencia?.ativo || false);
+  const [frequenciaRecorrencia, setFrequenciaRecorrencia] = useState<FrequenciaRecorrencia>(
+    task.recorrencia?.frequencia || (task.recorrencia?.dia_da_semana != null ? 'semanal' : 'mensal')
+  );
   const [diaDoMesRecorrencia, setDiaDoMesRecorrencia] = useState<number>(task.recorrencia?.dia_do_mes || new Date().getDate());
+  const [diaDaSemanaRecorrencia, setDiaDaSemanaRecorrencia] = useState<number>(task.recorrencia?.dia_da_semana ?? new Date().getDay());
   const [emailTriggerEnabled, setEmailTriggerEnabled] = useState(task.email_trigger?.enabled || false);
   const [emailSender, setEmailSender] = useState(task.email_trigger?.sender || '');
   const [emailSubjectKeywords, setEmailSubjectKeywords] = useState(task.email_trigger?.subjectKeywords || '');
@@ -1690,29 +1736,58 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
             </div>
           </div>
 
-          {/* Recorrência Mensal */}
+          {/* Recorrência */}
           <div className="space-y-2 border-t border-slate-100 pt-3">
             <label className="flex items-center gap-2 pl-1 cursor-pointer select-none">
               <input
                 type="checkbox"
-                checked={recorrenciaMensal}
-                onChange={e => setRecorrenciaMensal(e.target.checked)}
+                checked={recorrenciaAtiva}
+                onChange={e => setRecorrenciaAtiva(e.target.checked)}
                 className="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
               />
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Repetir mensalmente</span>
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ação Recorrente</span>
             </label>
-            {recorrenciaMensal && (
-              <div className="flex items-center gap-2 pl-1">
-                <span className="text-[11px] font-bold text-slate-500">Todo dia</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={31}
-                  value={diaDoMesRecorrencia}
-                  onChange={e => setDiaDoMesRecorrencia(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
-                  className="w-16 bg-slate-100 border-none rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
-                />
-                <span className="text-[11px] font-bold text-slate-500">do mês, uma nova ação será criada automaticamente.</span>
+            {recorrenciaAtiva && (
+              <div className="space-y-2 pl-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-bold text-slate-500">Repetir</span>
+                  <select
+                    value={frequenciaRecorrencia}
+                    onChange={e => setFrequenciaRecorrencia(e.target.value as FrequenciaRecorrencia)}
+                    className="bg-slate-100 border-none rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+                  >
+                    <option value="semanal">Semanalmente</option>
+                    <option value="mensal">Mensalmente</option>
+                  </select>
+                </div>
+                {frequenciaRecorrencia === 'semanal' ? (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-bold text-slate-500">Toda</span>
+                    <select
+                      value={diaDaSemanaRecorrencia}
+                      onChange={e => setDiaDaSemanaRecorrencia(Number(e.target.value))}
+                      className="bg-slate-100 border-none rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+                    >
+                      {DIAS_DA_SEMANA.map((dia, idx) => (
+                        <option key={idx} value={idx}>{dia}</option>
+                      ))}
+                    </select>
+                    <span className="text-[11px] font-bold text-slate-500">uma nova ação será criada automaticamente.</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-bold text-slate-500">Todo dia</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={31}
+                      value={diaDoMesRecorrencia}
+                      onChange={e => setDiaDoMesRecorrencia(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
+                      className="w-16 bg-slate-100 border-none rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                    />
+                    <span className="text-[11px] font-bold text-slate-500">do mês, uma nova ação será criada automaticamente.</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1813,8 +1888,18 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                 tipo_acao: tipoAcao,
                 plano_acao: planoAcao,
                 data_inicio: formData.data_limite || '',
-                ...(recorrenciaMensal
-                  ? { recorrencia: { ativo: true, dia_do_mes: diaDoMesRecorrencia, ...(task.recorrencia?.ultima_geracao ? { ultima_geracao: task.recorrencia.ultima_geracao } : {}) } }
+                ...(recorrenciaAtiva
+                  ? {
+                      recorrencia: buildRecorrencia(
+                        frequenciaRecorrencia,
+                        diaDoMesRecorrencia,
+                        diaDaSemanaRecorrencia,
+                        // ultima_geracao só é preservada se a frequência não mudou ("YYYY-MM" mensal vs "YYYY-MM-DD" semanal)
+                        (task.recorrencia?.frequencia || (task.recorrencia?.dia_da_semana != null ? 'semanal' : 'mensal')) === frequenciaRecorrencia
+                          ? task.recorrencia?.ultima_geracao
+                          : undefined
+                      )
+                    }
                   : (task.recorrencia ? { recorrencia: { ...task.recorrencia, ativo: false } } : {})),
                 email_trigger: {
                   enabled: emailTriggerEnabled,

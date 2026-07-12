@@ -13,6 +13,44 @@ def _last_day_of_month(ref: datetime.datetime) -> int:
     return (next_month.replace(day=1) - datetime.timedelta(days=1)).day
 
 
+def _deve_gerar_hoje(recorrencia: dict, now_sp: datetime.datetime) -> tuple[bool, str | None]:
+    """
+    Decide se o template deve gerar uma instância hoje.
+    Retorna (deve_gerar, marcador_de_geracao). O marcador é gravado em
+    recorrencia.ultima_geracao para evitar duplicidade: "YYYY-MM" na
+    recorrência mensal e "YYYY-MM-DD" na semanal.
+    Convenção de dia_da_semana: 0=domingo ... 6=sábado (mesma do JS getDay()).
+    Templates sem o campo 'frequencia' são tratados como mensais (retrocompatibilidade).
+    """
+    frequencia = recorrencia.get("frequencia")
+    if not frequencia:
+        frequencia = "semanal" if recorrencia.get("dia_da_semana") is not None else "mensal"
+
+    if frequencia == "semanal":
+        dia_da_semana = recorrencia.get("dia_da_semana")
+        if dia_da_semana is None:
+            return False, None
+        hoje_dow = (now_sp.weekday() + 1) % 7  # weekday(): 0=segunda -> converte para 0=domingo
+        if hoje_dow != int(dia_da_semana):
+            return False, None
+        marcador = now_sp.strftime("%Y-%m-%d")
+        if recorrencia.get("ultima_geracao") == marcador:
+            return False, None
+        return True, marcador
+
+    dia_do_mes = recorrencia.get("dia_do_mes")
+    if not dia_do_mes:
+        return False, None
+    # Dias que não existem no mês corrente (ex.: 31 em abril) caem no último dia do mês
+    effective_day = min(int(dia_do_mes), _last_day_of_month(now_sp))
+    if now_sp.day != effective_day:
+        return False, None
+    marcador = now_sp.strftime("%Y-%m")
+    if recorrencia.get("ultima_geracao") == marcador:
+        return False, None
+    return True, marcador
+
+
 @scheduler_fn.on_schedule(
     schedule="10 0 * * *",  # Todo dia à 00:10
     timezone="America/Sao_Paulo",
@@ -20,13 +58,13 @@ def _last_day_of_month(ref: datetime.datetime) -> int:
     timeout_sec=120,
 )
 def gerar_acoes_recorrentes_mensais(event: scheduler_fn.ScheduledEvent):
+    # Apesar do nome (mantido para não recriar a função agendada no deploy),
+    # este job processa recorrências semanais E mensais.
     from main import get_db
     db = get_db()
     sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
     now_sp = datetime.datetime.now(sp_tz)
     today_str = now_sp.strftime("%Y-%m-%d")
-    current_month = now_sp.strftime("%Y-%m")
-    last_day = _last_day_of_month(now_sp)
 
     templates = db.collection("tarefas").where(
         filter=firestore.FieldFilter("recorrencia.ativo", "==", True)
@@ -36,15 +74,8 @@ def gerar_acoes_recorrentes_mensais(event: scheduler_fn.ScheduledEvent):
     for template_doc in templates:
         template_data = template_doc.to_dict()
         recorrencia = template_data.get("recorrencia") or {}
-        dia_do_mes = recorrencia.get("dia_do_mes")
-        if not dia_do_mes:
-            continue
-
-        # Dias que não existem no mês corrente (ex.: 31 em abril) caem no último dia do mês
-        effective_day = min(int(dia_do_mes), last_day)
-        if now_sp.day != effective_day:
-            continue
-        if recorrencia.get("ultima_geracao") == current_month:
+        deve_gerar, marcador = _deve_gerar_hoje(recorrencia, now_sp)
+        if not deve_gerar:
             continue
 
         new_task = {
@@ -65,9 +96,9 @@ def gerar_acoes_recorrentes_mensais(event: scheduler_fn.ScheduledEvent):
                 new_task[optional_field] = template_data[optional_field]
 
         db.collection("tarefas").add(new_task)
-        template_doc.reference.update({"recorrencia.ultima_geracao": current_month})
+        template_doc.reference.update({"recorrencia.ultima_geracao": marcador})
         created_count += 1
-        print(f"[Recorrência Mensal] Gerada nova instância de '{new_task['titulo']}' a partir do template {template_doc.id}.")
+        print(f"[Recorrência] Gerada nova instância de '{new_task['titulo']}' a partir do template {template_doc.id}.")
 
     if created_count == 0:
-        print(f"[Recorrência Mensal] Nenhuma ação recorrente para gerar em {today_str}.")
+        print(f"[Recorrência] Nenhuma ação recorrente para gerar em {today_str}.")
