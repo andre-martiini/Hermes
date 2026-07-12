@@ -8477,6 +8477,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             horario_fim: str = None,
             recorrencia_mensal: bool = False,
             dia_do_mes_recorrencia: int = None,
+            recorrencia_semanal: bool = False,
+            dias_da_semana_recorrencia: list[int] = None,
+            intervalo_semanas_recorrencia: int = None,
             email_trigger: dict = None,
         ):
             """
@@ -8497,6 +8500,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             - horario_fim: horário de fim no formato HH:MM (se agendado)
             - recorrencia_mensal: True se o usuário pedir para a ação se repetir todo mês (ex.: "todo dia 5", "mensalmente"). Nesse caso, uma nova ação equivalente é gerada automaticamente todo mês no dia informado.
             - dia_do_mes_recorrencia: dia do mês (1 a 31) em que a ação deve se repetir. Obrigatório quando recorrencia_mensal=True. Meses com menos dias usam o último dia do mês.
+            - recorrencia_semanal: True se o usuário pedir para a ação se repetir semanalmente (ex.: "todos os domingos", "toda segunda e quarta", "a cada 15 dias").
+            - dias_da_semana_recorrencia: lista com os dias da semana em que a ação deve se repetir: 0=domingo, 1=segunda, 2=terça, 3=quarta, 4=quinta, 5=sexta, 6=sábado. Aceita um ou mais dias (ex.: [0] para todos os domingos, [1, 3] para segundas e quartas). Obrigatório quando recorrencia_semanal=True.
+            - intervalo_semanas_recorrencia: repetir a cada N semanas (1=toda semana, 2=a cada duas semanas/quinzenal, etc.). Opcional; padrão 1.
+            Use recorrencia_semanal OU recorrencia_mensal, nunca ambas.
             Retorna o ID da tarefa criada ou mensagem de erro.
             """
             try:
@@ -8636,9 +8643,18 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "sourceGmailMessageId": sourceGmailMessageId or None,
                     "sourceKnowledgeId": source_knowledge_id or None,}
 
-                if recorrencia_mensal and dia_do_mes_recorrencia:
+                if recorrencia_semanal and dias_da_semana_recorrencia:
                     doc["recorrencia"] = {
                         "ativo": True,
+                        "frequencia": "semanal",
+                        "dias_da_semana": sorted({max(0, min(6, int(d))) for d in dias_da_semana_recorrencia}),
+                    }
+                    if intervalo_semanas_recorrencia and int(intervalo_semanas_recorrencia) > 1:
+                        doc["recorrencia"]["intervalo_semanas"] = min(12, int(intervalo_semanas_recorrencia))
+                elif recorrencia_mensal and dia_do_mes_recorrencia:
+                    doc["recorrencia"] = {
+                        "ativo": True,
+                        "frequencia": "mensal",
                         "dia_do_mes": max(1, min(31, int(dia_do_mes_recorrencia))),
                     }
 

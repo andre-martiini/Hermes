@@ -3680,6 +3680,9 @@ def _process_telegram_message(db, data: dict):
         horario_fim: str = None,
         recorrencia_mensal: bool = False,
         dia_do_mes_recorrencia: int = None,
+        recorrencia_semanal: bool = False,
+        dias_da_semana_recorrencia: list[int] = None,
+        intervalo_semanas_recorrencia: int = None,
     ):
         """
         Cria uma nova ação no Hermes. Apresente draft ao usuário antes de chamar.
@@ -3688,6 +3691,10 @@ def _process_telegram_message(db, data: dict):
         listadas no contexto do sistema. Nunca invente uma nova; se nenhuma se encaixar, use 'GERAL'.
         - recorrencia_mensal: True se o usuário pedir para a ação se repetir todo mês (ex.: "todo dia 5", "mensalmente").
         - dia_do_mes_recorrencia: dia do mês (1 a 31) em que a ação deve se repetir. Obrigatório quando recorrencia_mensal=True.
+        - recorrencia_semanal: True se o usuário pedir para a ação se repetir semanalmente (ex.: "todos os domingos", "toda segunda e quarta", "a cada 15 dias").
+        - dias_da_semana_recorrencia: lista de dias da semana (0=domingo, 1=segunda, ..., 6=sábado). Aceita um ou mais dias. Obrigatório quando recorrencia_semanal=True.
+        - intervalo_semanas_recorrencia: repetir a cada N semanas (1=toda semana, 2=quinzenal, etc.). Opcional; padrão 1.
+        Use recorrencia_semanal OU recorrencia_mensal, nunca ambas.
         """
         import uuid as _uuid
         # Garante que o copiloto só use áreas temáticas existentes (fallback 'GERAL').
@@ -3759,9 +3766,18 @@ def _process_telegram_message(db, data: dict):
             "acompanhamento": [],
             "sync_status": "new",
         }
-        if recorrencia_mensal and dia_do_mes_recorrencia:
+        if recorrencia_semanal and dias_da_semana_recorrencia:
             doc["recorrencia"] = {
                 "ativo": True,
+                "frequencia": "semanal",
+                "dias_da_semana": sorted({max(0, min(6, int(d))) for d in dias_da_semana_recorrencia}),
+            }
+            if intervalo_semanas_recorrencia and int(intervalo_semanas_recorrencia) > 1:
+                doc["recorrencia"]["intervalo_semanas"] = min(12, int(intervalo_semanas_recorrencia))
+        elif recorrencia_mensal and dia_do_mes_recorrencia:
+            doc["recorrencia"] = {
+                "ativo": True,
+                "frequencia": "mensal",
                 "dia_do_mes": max(1, min(31, int(dia_do_mes_recorrencia))),
             }
         try:

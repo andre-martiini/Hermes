@@ -56,10 +56,16 @@ export interface TaskReminder {
     message?: string;
 }
 
-export interface RecorrenciaMensal {
+export type FrequenciaRecorrencia = 'semanal' | 'mensal';
+
+export interface RecorrenciaAcao {
     ativo: boolean;
-    dia_do_mes: number; // 1-31 (dias além do fim do mês caem no último dia)
-    ultima_geracao?: string; // "YYYY-MM" do último mês em que uma instância foi gerada
+    frequencia?: FrequenciaRecorrencia; // ausente = 'mensal' (retrocompatibilidade)
+    dia_do_mes?: number; // 1-31, para frequência mensal (dias além do fim do mês caem no último dia)
+    dia_da_semana?: number; // legado: um único dia da semana (0=domingo a 6=sábado)
+    dias_da_semana?: number[]; // 0 (domingo) a 6 (sábado), um ou mais dias, para frequência semanal
+    intervalo_semanas?: number; // 1 = toda semana (padrão); 2 = a cada 2 semanas; etc.
+    ultima_geracao?: string; // "YYYY-MM" (mensal) ou "YYYY-MM-DD" (semanal) da última instância gerada
 }
 
 export interface Tarefa {
@@ -115,7 +121,7 @@ export interface Tarefa {
     auto_data_atualizada?: boolean;
     estrategia_objetivo_id?: string;
     estrategia_indicador_id?: string;
-    recorrencia?: RecorrenciaMensal;
+    recorrencia?: RecorrenciaAcao;
     email_trigger?: EmailTrigger;
 }
 
