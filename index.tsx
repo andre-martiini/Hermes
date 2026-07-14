@@ -2194,20 +2194,9 @@ const App: React.FC = () => {
         setPgdTerminalLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [HEALTH] ${msg}`]);
       };
 
-      addTerminalLog("Iniciando sincronização biométrica...");
+      addTerminalLog("Iniciando sincronização de peso...");
 
-      const telemetry = await GoogleHealthService.getDailyTelemetry(today);
       const weightData = await GoogleHealthService.getWeight(today);
-
-      const cleanTelemetry = Object.fromEntries(
-        Object.entries(telemetry).filter(([, v]) => v !== undefined && v !== null)
-      );
-      if (Object.keys(cleanTelemetry).length > 0) {
-        await setDoc(doc(db, 'health_exercise_logs', todayStr), cleanTelemetry, { merge: true });
-        addTerminalLog(`Telemetria capturada: ${telemetry.walk?.steps || 0} passos, ${telemetry.sleep?.totalMinutes || 0} min sono.`);
-      } else {
-        addTerminalLog("Nenhuma telemetria nova encontrada para hoje.");
-      }
 
       if (weightData?.weight) {
         const alreadyHasWeight = healthWeights.some(w => w.date === todayStr);

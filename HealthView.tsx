@@ -4,7 +4,6 @@ import {
     ExerciseSettings, formatDate, formatDateLocalISO,
     HealthExam, HealthTelegramReminder
 } from './types';
-import { HealthSummaryCard } from './src/components/HealthSummaryCard';
 
 interface HealthViewProps {
     weights: HealthWeight[];
@@ -25,7 +24,7 @@ interface HealthViewProps {
     isDark?: boolean;
 }
 
-type IconName = 'scale' | 'steps' | 'flame' | 'moon' | 'chevron' | 'heart' | 'calendar' | 'file' | 'plus';
+type IconName = 'scale' | 'chevron' | 'heart' | 'calendar' | 'file' | 'plus' | 'trash';
 type NumericTrendPoint = { id: string; label: string; value: number; marker?: boolean };
 type PainTrendPoint = { id: string; label: string; morning?: number; evening?: number; crisis?: boolean };
 
@@ -67,12 +66,6 @@ const Icon = ({ name, className = 'h-4 w-4' }: { name: IconName; className?: str
     switch (name) {
         case 'scale':
             return <svg {...common}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 19h12M7 19l1.5-9h7L17 19M9 10a3 3 0 116 0M12 10v3" /></svg>;
-        case 'steps':
-            return <svg {...common}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 20c1.8 0 3-1.2 3-3v-1.5H8.5A2.5 2.5 0 006 18c0 1.2.8 2 2 2zM16 4c-1.8 0-3 1.2-3 3v1.5h2.5A2.5 2.5 0 0018 6c0-1.2-.8-2-2-2zM11 15.5V12m2-3.5V12" /></svg>;
-        case 'flame':
-            return <svg {...common}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 22a7 7 0 007-7c0-4.5-3.5-8-5.1-12-.9 2.8-2.8 4.3-5 6.2A7.3 7.3 0 005 15a7 7 0 007 7z" /></svg>;
-        case 'moon':
-            return <svg {...common}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 13.2A8 8 0 1110.8 3a6.5 6.5 0 0010.2 10.2z" /></svg>;
         case 'chevron':
             return <svg {...common}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 9l6 6 6-6" /></svg>;
         case 'heart':
@@ -83,6 +76,8 @@ const Icon = ({ name, className = 'h-4 w-4' }: { name: IconName; className?: str
             return <svg {...common}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 3v5h5" /></svg>;
         case 'plus':
             return <svg {...common}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 5v14M5 12h14" /></svg>;
+        case 'trash':
+            return <svg {...common}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>;
         default:
             return null;
     }
@@ -291,13 +286,14 @@ const PainTrendChart = ({ points }: { points: PainTrendPoint[] }) => {
 };
 
 const HealthView: React.FC<HealthViewProps> = ({
-    weights, settings, onUpdateSettings,
+    weights, settings, onUpdateSettings, onAddWeight, onDeleteWeight,
     exerciseLogs, onSaveExerciseLog, exams,
     telegramReminders, onSaveTelegramReminder, onDeleteTelegramReminder,
     isDark = false
 }) => {
     const [selectedDate, setSelectedDate] = useState<string>(formatDateLocalISO(new Date()));
     const [activeTab, setActiveTab] = useState<'telemetry' | 'archive'>('telemetry');
+    const [weightInput, setWeightInput] = useState<string>('');
 
     const sortedWeights = useMemo(() => [...weights].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [weights]);
     const currentWeight = sortedWeights[0]?.weight || 0;
@@ -306,11 +302,6 @@ const HealthView: React.FC<HealthViewProps> = ({
     const targetDelta = settings.targetWeight && currentWeight ? currentWeight - settings.targetWeight : null;
 
     const todayLog = useMemo(() => exerciseLogs.find(l => l.id === selectedDate) || { id: selectedDate }, [exerciseLogs, selectedDate]);
-    const walkingMinimum = settings.walkingMinimumMinutes ?? 45;
-    const walkingIdeal = settings.walkingIdealMinutes ?? 100;
-    const walkingMinutes = todayLog.walk?.done ?? todayLog.activeMinutes ?? 0;
-    const walkingProgress = Math.min(100, Math.round((walkingMinutes / Math.max(walkingIdeal, 1)) * 100));
-    const sleepHours = todayLog.sleep ? (todayLog.sleep.totalMinutes / 60).toFixed(1) : null;
     const selectedDateLabel = formatDate(selectedDate);
     const weightTrendPoints = useMemo<NumericTrendPoint[]>(() =>
         [...weights]
@@ -338,6 +329,14 @@ const HealthView: React.FC<HealthViewProps> = ({
         [exerciseLogs]
     );
 
+    const handleAddWeight = () => {
+        const value = parseFloat(weightInput.replace(',', '.'));
+        if (!isNaN(value) && value > 0) {
+            onAddWeight(value, selectedDate);
+            setWeightInput('');
+        }
+    };
+
     const activeReminders = useMemo(() => {
         const byId = new Map(telegramReminders.map(reminder => [reminder.id, reminder]));
         DEFAULT_HEALTH_REMINDERS.forEach(reminder => {
@@ -355,7 +354,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                             <p className={labelClasses}>Saude integrada</p>
                             <h2 className="mt-1 text-2xl font-bold tracking-tight text-on-surface">Painel de saude</h2>
                             <p className="mt-2 max-w-3xl text-sm leading-relaxed text-on-surface-variant">
-                                Biometria, caminhada, sono, calorias, dor e registros medicos em um painel de acompanhamento continuo.
+                                Registro manual de peso, acompanhamento de dor lombar e arquivo medico em um painel de acompanhamento continuo.
                             </p>
                         </div>
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -390,7 +389,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="grid grid-cols-1 gap-4 sm:max-w-sm">
                         <MetricCard
                             label="Peso atual"
                             value={currentWeight ? currentWeight.toFixed(1) : '--'}
@@ -398,42 +397,11 @@ const HealthView: React.FC<HealthViewProps> = ({
                             helper={weightDelta !== 0 ? `${weightDelta > 0 ? '+' : ''}${weightDelta.toFixed(1)} kg desde o registro anterior` : 'Sem variacao no ultimo registro'}
                             icon="scale"
                         />
-                        <MetricCard
-                            label="Passos do dia"
-                            value={todayLog.walk?.steps?.toLocaleString('pt-BR') || '0'}
-                            helper={`${todayLog.walk?.distance?.toFixed(1) || '0,0'} km registrados em ${selectedDateLabel}`}
-                            icon="steps"
-                            tone="text-secondary-container"
-                        />
-                        <MetricCard
-                            label="Calorias"
-                            value={todayLog.calories ? Math.round(todayLog.calories).toLocaleString('pt-BR') : '0'}
-                            unit="kcal"
-                            helper="Total informado pelo Google Fit para o periodo sincronizado"
-                            icon="flame"
-                            tone="text-error"
-                        />
-                        <MetricCard
-                            label="Sono"
-                            value={sleepHours || '--'}
-                            unit="h"
-                            helper={todayLog.sleep ? `${todayLog.sleep.totalMinutes} minutos totais${todayLog.sleep.deepMinutes ? `, ${todayLog.sleep.deepMinutes} min profundos` : ''}` : 'Sem dados de sono para esta data'}
-                            icon="moon"
-                            tone="text-primary"
-                        />
                     </div>
                 </div>
             </div>
 
             <main className="mx-auto max-w-[1440px] px-6 py-6 lg:px-8">
-                <div className="mb-6">
-                    <HealthSummaryCard
-                        weights={weights}
-                        exerciseLogs={exerciseLogs}
-                        settings={settings}
-                    />
-                </div>
-
                 {activeTab === 'telemetry' ? (
                     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
                         <div className="space-y-6">
@@ -495,38 +463,77 @@ const HealthView: React.FC<HealthViewProps> = ({
                         </div>
 
                         <div className="space-y-6">
-                            <HealthSection title="Caminhada" eyebrow="Meta primaria do dia">
-                                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_240px]">
+                            <HealthSection title="Registro de peso" eyebrow="Entrada manual">
+                                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr]">
                                     <div className="rounded-2xl border border-border-subtle bg-background p-5">
-                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                                            <div>
-                                                <p className={labelClasses}>Minutos ativos</p>
-                                                <div className="mt-2 flex items-baseline gap-2">
-                                                    <span className="text-4xl font-bold text-on-surface">{walkingMinutes}</span>
-                                                    <span className="text-sm font-semibold text-on-surface-variant">/ {walkingIdeal} min</span>
-                                                </div>
-                                            </div>
-                                            <p className="text-sm font-semibold text-on-surface-variant">{todayLog.walk?.steps?.toLocaleString('pt-BR') || 0} passos</p>
-                                        </div>
-                                        <div className="mt-5 h-2 rounded-full bg-surface-container-high">
-                                            <div className="h-full rounded-full bg-primary-container transition-all" style={{ width: `${walkingProgress}%` }} />
-                                        </div>
-                                        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-on-surface-variant">
-                                            <span>Minimo: {walkingMinimum} min</span>
-                                            <span>Ideal: {walkingIdeal} min</span>
-                                            <span>{todayLog.walk?.distance?.toFixed(1) || '0.0'} km</span>
-                                        </div>
+                                        <label className="block">
+                                            <span className={labelClasses}>Peso (kg)</span>
+                                            <input
+                                                type="text"
+                                                inputMode="decimal"
+                                                value={weightInput}
+                                                onChange={e => setWeightInput(e.target.value)}
+                                                onKeyDown={e => { if (e.key === 'Enter') handleAddWeight(); }}
+                                                placeholder="Ex: 78.5"
+                                                className={inputClasses}
+                                            />
+                                        </label>
+                                        <p className="mt-2 text-xs font-medium text-on-surface-variant">
+                                            Data do registro: {selectedDateLabel}
+                                        </p>
+                                        <button
+                                            type="button"
+                                            onClick={handleAddWeight}
+                                            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary-container px-4 py-2.5 text-sm font-bold text-white transition hover:opacity-90"
+                                        >
+                                            <Icon name="plus" className="h-4 w-4" />
+                                            Adicionar registro
+                                        </button>
                                     </div>
                                     <div className="rounded-2xl border border-border-subtle bg-background p-5">
                                         <label className="block">
-                                            <span className={labelClasses}>Minimo diario</span>
-                                            <input type="number" value={walkingMinimum} onChange={e => onUpdateSettings({ ...settings, walkingMinimumMinutes: parseInt(e.target.value) || 0 })} className={inputClasses} />
+                                            <span className={labelClasses}>Meta de peso (kg)</span>
+                                            <input
+                                                type="number"
+                                                step="0.1"
+                                                value={settings.targetWeight || ''}
+                                                onChange={e => onUpdateSettings({ ...settings, targetWeight: parseFloat(e.target.value) || 0 })}
+                                                placeholder="Ex: 75.0"
+                                                className={inputClasses}
+                                            />
                                         </label>
-                                        <label className="mt-4 block">
-                                            <span className={labelClasses}>Ideal diario</span>
-                                            <input type="number" value={walkingIdeal} onChange={e => onUpdateSettings({ ...settings, walkingIdealMinutes: parseInt(e.target.value) || 0 })} className={inputClasses} />
-                                        </label>
+                                        {targetDelta !== null && (
+                                            <p className="mt-3 text-xs font-semibold text-on-surface-variant">
+                                                Distancia ate a meta: {targetDelta > 0 ? '+' : ''}{targetDelta.toFixed(1)} kg
+                                            </p>
+                                        )}
                                     </div>
+                                </div>
+
+                                <div className="mt-5">
+                                    <p className={`${labelClasses} mb-2`}>Registros recentes</p>
+                                    {sortedWeights.length > 0 ? (
+                                        <div className="max-h-[240px] space-y-2 overflow-y-auto">
+                                            {sortedWeights.slice(0, 20).map(weight => (
+                                                <div key={weight.id} className="flex items-center justify-between gap-3 rounded-xl border border-border-subtle bg-white px-4 py-2.5">
+                                                    <div className="flex items-baseline gap-2">
+                                                        <span className="text-sm font-bold text-on-surface">{weight.weight.toFixed(1)} kg</span>
+                                                        <span className="text-xs font-medium text-on-surface-variant">{formatDate(weight.date)}</span>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onDeleteWeight(weight.id)}
+                                                        className="rounded-lg p-1.5 text-on-surface-variant transition hover:bg-error-container hover:text-on-error-container"
+                                                        aria-label="Remover registro"
+                                                    >
+                                                        <Icon name="trash" className="h-4 w-4" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs font-semibold text-on-surface-variant">Nenhum registro de peso ainda.</p>
+                                    )}
                                 </div>
                             </HealthSection>
 
