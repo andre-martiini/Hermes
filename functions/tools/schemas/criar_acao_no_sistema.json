@@ -14,7 +14,11 @@
       },
       "data_limite": {
         "type": "string",
-        "description": "Data limite no formato YYYY-MM-DD"
+        "description": "Data de execução (dia em que o trabalho deve ser feito) no formato YYYY-MM-DD"
+      },
+      "prazo_final": {
+        "type": "string",
+        "description": "Prazo final real, opcional, no formato YYYY-MM-DD — só preencha se for diferente da data de execução"
       },
       "descricao": {
         "type": "string",

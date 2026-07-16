@@ -134,7 +134,8 @@ interface PendingEdit {
 const FIELD_LABELS: Record<string, string> = {
   titulo: 'Título',
   descricao: 'Descrição',
-  data_limite: 'Prazo',
+  data_limite: 'Data de Execução',
+  prazo_final: 'Prazo Final',
   data_inicio: 'Data Início',
   horario_inicio: 'Horário Início',
   horario_fim: 'Horário Fim',

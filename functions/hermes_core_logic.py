@@ -1846,6 +1846,7 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
                 "descricao": pending.get("descricao") or "",
                 "area_tematica": pending.get("area_tematica") or "GERAL",
                 "data_limite": pending.get("data_limite"),
+                "prazo_final": pending.get("prazo_final"),
                 "horario_inicio": pending.get("horario_inicio"),
                 "horario_fim": pending.get("horario_fim"),
                 "tipo_acao": pending.get("tipo_acao") or "fast",
@@ -3672,6 +3673,7 @@ def _process_telegram_message(db, data: dict):
         descricao: str = "",
         area_tematica: str = "GERAL",
         data_limite: str = None,
+        prazo_final: str = None,
         tipo_acao: str = "fast",
         tags: list[str] = None,
         notas: str = "",
@@ -3689,6 +3691,8 @@ def _process_telegram_message(db, data: dict):
         Retorna 'OK|{ID}' em caso de sucesso ou 'ERRO|{detalhe}'.
         IMPORTANTE: area_tematica deve ser EXATAMENTE UMA das áreas temáticas válidas
         listadas no contexto do sistema. Nunca invente uma nova; se nenhuma se encaixar, use 'GERAL'.
+        - data_limite: DATA DE EXECUÇÃO (YYYY-MM-DD), o dia em que o trabalho deve ser feito. Não é o prazo.
+        - prazo_final: PRAZO FINAL (YYYY-MM-DD), opcional — só preencha se o usuário mencionar um prazo real distinto da data de execução.
         - recorrencia_mensal: True se o usuário pedir para a ação se repetir todo mês (ex.: "todo dia 5", "mensalmente").
         - dia_do_mes_recorrencia: dia do mês (1 a 31) em que a ação deve se repetir. Obrigatório quando recorrencia_mensal=True.
         - recorrencia_semanal: True se o usuário pedir para a ação se repetir semanalmente (ex.: "todos os domingos", "toda segunda e quarta", "a cada 15 dias").
@@ -3726,6 +3730,9 @@ def _process_telegram_message(db, data: dict):
         if not data_limite or str(data_limite) < today_local:
             data_limite = today_local
 
+        if prazo_final and str(prazo_final) < today_local:
+            prazo_final = today_local
+
         if data_limite == today_local and horario_inicio:
             current_time_str = now_local.strftime("%H:%M")
             if horario_inicio < current_time_str:
@@ -3752,6 +3759,7 @@ def _process_telegram_message(db, data: dict):
             "descricao": descricao or "",
             "area_tematica": area_tematica or "GERAL",
             "data_limite": data_limite,
+            "prazo_final": prazo_final,
             "horario_inicio": horario_inicio,
             "horario_fim": horario_fim,
             "tipo_acao": tipo_acao or "fast",
@@ -3978,6 +3986,7 @@ def _process_telegram_message(db, data: dict):
         descricao: str = "",
         area_tematica: str = "GERAL",
         data_limite: str = None,
+        prazo_final: str = None,
         tipo_acao: str = "fast",
         tags: list[str] = None,
         notas: str = "",
@@ -3988,6 +3997,8 @@ def _process_telegram_message(db, data: dict):
         """
         Gera uma proposta de criação de ação para o usuário confirmar via botões.
         Use esta ferramenta SEMPRE antes de criar uma ação.
+        - data_limite: DATA DE EXECUÇÃO (YYYY-MM-DD), o dia em que o trabalho deve ser feito. Não é o prazo.
+        - prazo_final: PRAZO FINAL (YYYY-MM-DD), opcional — só preencha se o usuário mencionar um prazo real distinto da data de execução.
         """
         # Normalização de horários
         def normalize_hhmm(t_str: str) -> str | None:
@@ -4015,6 +4026,10 @@ def _process_telegram_message(db, data: dict):
         if eff_limit < today_local:
             eff_limit = today_local
 
+        eff_prazo_final = prazo_final
+        if eff_prazo_final and eff_prazo_final < today_local:
+            eff_prazo_final = today_local
+
         if eff_limit == today_local and horario_inicio:
             current_time_str = now_local.strftime("%H:%M")
             if horario_inicio < current_time_str:
@@ -4025,6 +4040,7 @@ def _process_telegram_message(db, data: dict):
             "descricao": descricao,
             "area_tematica": area_tematica,
             "data_limite": eff_limit,
+            "prazo_final": eff_prazo_final,
             "tipo_acao": tipo_acao,
             "tags": tags or [],
             "notas": notas,
@@ -4034,13 +4050,15 @@ def _process_telegram_message(db, data: dict):
         }
         session.setdefault("pending_confirmations", {})["acao"] = pending_data
         session["_pending_confirm_type"] = "acao"
-        
+
         draft = (
             f"📝 <b>PROPOSTA DE AÇÃO</b>\n"
             f"• Título: {titulo}\n"
             f"• Área: {area_tematica}\n"
-            f"• Prazo: {pending_data['data_limite']}\n"
+            f"• Data de Execução: {pending_data['data_limite']}\n"
         )
+        if pending_data['prazo_final']:
+            draft += f"• Prazo Final: {pending_data['prazo_final']}\n"
         if tags: draft += f"• Tags: {', '.join(tags)}\n"
         if plano_acao: draft += f"• Passos: {len(plano_acao)}\n"
         

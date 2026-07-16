@@ -719,6 +719,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
   const [formData, setFormData] = useState({
     titulo: initialData?.titulo || '',
     data_limite: initialData?.data_limite || initialData?.data_inicio || formatDateLocalISO(new Date()),
+    prazo_final: initialData?.prazo_final || '',
     data_criacao: new Date().toISOString(),
     status: initialData?.status || 'em andamento' as Status,
     area_tematica: initialData?.area_tematica || 'GERAL' as Categoria,
@@ -1305,10 +1306,10 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                 </>
               )}
 
-              {/* Prazo (Comum) */}
+              {/* Data de Execução / Prazo Final (Comum) */}
               <div className="space-y-1 border-t border-slate-100 pt-3">
                 <div className="flex items-center justify-between gap-3 pl-1">
-                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Prazo Final</label>
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Data de Execução</label>
                   {formData.status === 'stand-by' && (
                     <button type="button" onClick={() => setFormData({ ...formData, data_limite: '' })} className="text-[9px] font-bold uppercase tracking-wider text-slate-500 hover:text-slate-900">Sem prazo</button>
                   )}
@@ -1318,6 +1319,14 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                   min={formatDateLocalISO(new Date())}
                   value={formData.data_limite}
                   onChange={e => setFormData({ ...formData, data_limite: e.target.value })}
+                  className="w-full bg-slate-100 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans mb-3"
+                />
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Prazo Final (Opcional)</label>
+                <input
+                  type="date"
+                  min={formatDateLocalISO(new Date())}
+                  value={formData.prazo_final}
+                  onChange={e => setFormData({ ...formData, prazo_final: e.target.value })}
                   className="w-full bg-slate-100 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
                 />
               </div>
@@ -1479,7 +1488,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
           <button
             onClick={() => {
               if (!formData.titulo || (!formData.data_limite && formData.status !== 'stand-by')) {
-                showAlert("Atenção", "Preencha o título e o prazo final.");
+                showAlert("Atenção", "Preencha o título e a data de execução.");
                 return;
               }
               if (formData.data_limite && formData.data_limite < formatDateLocalISO(new Date())) {
@@ -1493,6 +1502,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
 
               onSave({
                 ...formData,
+                prazo_final: formData.prazo_final || undefined,
                 tags,
                 tipo_acao: tipoAcao,
                 plano_acao: planoAcao,
@@ -1538,6 +1548,7 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
   const [formData, setFormData] = useState({
     titulo: task.titulo,
     data_limite: task.data_limite === '-' ? (task.data_inicio || '') : (task.data_limite || task.data_inicio || ''),
+    prazo_final: task.prazo_final || '',
     data_criacao: task.data_criacao,
     status: task.status,
     area_tematica: task.area_tematica || 'NÃO CLASSIFICADA',
@@ -1729,7 +1740,7 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
 
           <div className="space-y-1">
             <div className="flex items-center justify-between gap-3 pl-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Prazo</label>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Data de Execução</label>
               {formData.status === 'stand-by' && (
                 <button type="button" onClick={() => setFormData({ ...formData, data_limite: '' })} className="text-[9px] font-bold uppercase tracking-wider text-slate-500 hover:text-slate-900">Sem prazo</button>
               )}
@@ -1739,6 +1750,14 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
               min={formatDateLocalISO(new Date())}
               value={formData.data_limite}
               onChange={e => setFormData({ ...formData, data_limite: e.target.value })}
+              className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans mb-3"
+            />
+            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Prazo Final (Opcional)</label>
+            <input
+              type="date"
+              min={formatDateLocalISO(new Date())}
+              value={formData.prazo_final}
+              onChange={e => setFormData({ ...formData, prazo_final: e.target.value })}
               className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
             />
           </div>
@@ -1932,7 +1951,7 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
           <button
             onClick={() => {
               if (!formData.titulo || (!formData.data_limite && formData.status !== 'stand-by')) {
-                showAlert("Atenção", "Preencha o título e o prazo final.");
+                showAlert("Atenção", "Preencha o título e a data de execução.");
                 return;
               }
               if (formData.data_limite && formData.data_limite < formatDateLocalISO(new Date())) {

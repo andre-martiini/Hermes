@@ -3354,7 +3354,7 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
        IMPORTANTE: Escolha a tag que mais se adeque ao contexto da ação. Se nenhuma for perfeitamente adequada, escolha "GERAL" ou "NÃO CLASSIFICADA". NUNCA INVENTE OUTRA TAG.
     5. Crie um PLANO DE AÇÃO (checklist) com no máximo 5 etapas concretas e sequenciais para resolver a demanda.
        REGRAS DO PLANO: cada etapa deve ser específica e acionável para ESTA demanda. Mencione elementos concretos presentes no conteúdo (nomes, sistemas, processos, documentos). Proibido etapas genéricas como "analisar o processo" sem especificar qual. Se a demanda for simples e não justificar 5 etapas, use menos.
-    6. Defina a DATA LIMITE seguindo estas regras obrigatórias:
+    6. Defina a DATA DE EXECUÇÃO (data_limite) seguindo estas regras obrigatórias:
        - Se houver uma data ou prazo mencionado no conteúdo, use-o — MAS a data gerada DEVE ser igual ou posterior a {today}.
        - Se nenhum prazo for mencionado, use a data de hoje ({today}).
        - NUNCA gere uma data anterior a {today}. Isso é proibido.
@@ -8467,6 +8467,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             descricao: str = "",
             area_tematica: str = "GERAL",
             data_limite: str = None,
+            prazo_final: str = None,
             tipo_acao: str = "fast",
             tags: list[str] = [],
             notas: str = "",
@@ -8489,7 +8490,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             - titulo: título obrigatório da ação
             - descricao: descrição detalhada (opcional)
             - area_tematica: escolha EXATAMENTE UMA das áreas temáticas válidas listadas no contexto do sistema; nunca invente uma nova. Se nenhuma se encaixar, use 'GERAL'.
-            - data_limite: prazo no formato YYYY-MM-DD (opcional)
+            - data_limite: DATA DE EXECUÇÃO no formato YYYY-MM-DD (opcional) — o dia em que o trabalho deve ser feito. Não confundir com prazo.
+            - prazo_final: PRAZO FINAL no formato YYYY-MM-DD (opcional) — o prazo real/fatal da entrega, quando diferente ou posterior à data de execução. Só preencha se o usuário mencionar explicitamente um prazo distinto da data de execução.
             - tipo_acao: 'fast' para ações rápidas, 'deep' para trabalho profundo
             - tags: lista de tags (opcional)
             - notas: observações adicionais (opcional)
@@ -8538,6 +8540,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
                 if not data_limite or str(data_limite) < today_brt:
                     data_limite = today_brt
+
+                if prazo_final and str(prazo_final) < today_brt:
+                    prazo_final = today_brt
 
                 if data_limite == today_brt and horario_inicio:
                     current_time_str = now_local.strftime("%H:%M")
@@ -8620,6 +8625,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "descricao": descricao or "",
                     "area_tematica": (area_tematica or "GERAL").upper(),
                     "data_limite": data_limite or None,
+                    "prazo_final": prazo_final or None,
                     "tipo_acao": tipo_acao if tipo_acao in ("fast", "deep") else "fast",
                     "tags": list(tags) if tags else [],
                     "notas": notas or "",
@@ -9015,19 +9021,23 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Parâmetros:
             - task_id: ID da tarefa a ser editada
             - alteracoes: dicionário com campos e novos valores.
-              Campos suportados: titulo, descricao, data_limite, status, tags, area_tematica, tipo_acao, notas
+              Campos suportados: titulo, descricao, data_limite (data de execução), prazo_final (prazo real, opcional), status, tags, area_tematica, tipo_acao, notas
               Exemplo: {"data_limite": "2026-05-15", "titulo": "Novo Título"}
             - justificativa: frase curta explicando o motivo (gravada silenciosamente no diário)
 
             Retorna JSON string com payload de confirmação ou string de erro.
             """
             try:
-                _ALLOWED_FIELDS = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_trigger'}
+                _ALLOWED_FIELDS = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_trigger'}
                 today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 if 'data_limite' in (alteracoes or {}):
                     val = alteracoes['data_limite']
                     if val and val not in ('-', '0000-00-00') and val < today_str:
                         return f"ERRO|A data de execução não pode ser no passado ({val})."
+                if 'prazo_final' in (alteracoes or {}):
+                    val = alteracoes['prazo_final']
+                    if val and val not in ('-', '0000-00-00') and val < today_str:
+                        return f"ERRO|O prazo final não pode ser no passado ({val})."
 
                 def _normalizar_status_acao(valor):
                     if valor is None:
@@ -9646,7 +9656,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "NUNCA misture dados numéricos (valores, itens, quantidades) de processos ou documentos distintos.\n\n"
             "## CRIAÇÃO E ALOCAÇÃO DE AÇÕES (CRÍTICO)\n\n"
             "Quando o usuário solicitar a criação de uma ação/tarefa, siga OBRIGATORIAMENTE este protocolo:\n\n"
-            "1. POR PADRÃO (Criação Normal): Não proponha nem defina horários de início/fim (campos horario_inicio e horario_fim devem ser nulos/vazios), definindo apenas o dia/prazo (data_limite). Apresente o draft ao usuário mostrando o horário como vazio/não definido.\n"
+            "1. POR PADRÃO (Criação Normal): Não proponha nem defina horários de início/fim (campos horario_inicio e horario_fim devem ser nulos/vazios), definindo apenas o dia de trabalho (data_limite = DATA DE EXECUÇÃO, não um prazo). data_limite e prazo_final são campos DISTINTOS: data_limite é o dia em que o trabalho será feito; prazo_final é o prazo real/fatal da entrega, só deve ser preenchido se o usuário mencionar explicitamente uma data de prazo diferente da data de execução. Se o usuário citar apenas uma data, use-a como data_limite e deixe prazo_final vazio. Se citar duas (ex.: \"comece dia X, mas o prazo final é dia Y\"), use data_limite=X e prazo_final=Y. Apresente o draft ao usuário mostrando o horário como vazio/não definido.\n"
             "2. SE O USUÁRIO PEDIR EXPLICITAMENTE PARA AGENDAR UM HORÁRIO ESPECÍFICO:\n"
             "   - Você DEVE usar consultar_agenda(data_inicio, data_fim) ou encontrar_slot_livre(data) ANTES de apresentar qualquer proposta ao usuário.\n"
             "   - Se o agendamento for para hoje, o horário inicial DEVE ser sempre posterior ao horário local atual.\n"
@@ -9656,7 +9666,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Apresente um resumo estruturado para o usuário confirmar:\n"
             "  📋 **Draft da Ação**\n"
             "  - **Título:** [título]\n"
-            "  - **Prazo:** [ex: 2026-05-15]\n"
+            "  - **Data de Execução:** [ex: 2026-05-15]\n"
+            "  - **Prazo Final (se houver):** [opcional, só se diferente da data de execução]\n"
             "  - **Horário:** [vazio/não definido, OU início/fim ex: 14:00 às 14:30 se pedido e validado]\n"
             "  - **Área Temática:** [área ou projeto baseada no contexto; PERGUNTE SE FOR AMBÍGUA]\n"
             "  - **Tipo:** [fast / deep]\n"
@@ -11384,7 +11395,7 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
             return {'status': 'invalidated', 'message': msg}
 
         # Aplica mudanças — somente campos whitelistados
-        _ALLOWED = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_trigger'}
+        _ALLOWED = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_trigger'}
 
         def _normalizar_status_acao(valor):
             if valor is None:

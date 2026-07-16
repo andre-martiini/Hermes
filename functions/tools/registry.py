@@ -10,7 +10,7 @@ _CATALOG: dict[str, str] = {
     "ler_pagina_web": "Le e extrai o conteudo completo de uma URL",
     "consultar_agenda": "Consulta eventos e compromissos na agenda do Google Calendar",
     "encontrar_slot_livre": "Encontra o proximo horario livre disponivel na agenda",
-    "criar_acao_no_sistema": "Cria uma nova acao ou tarefa no Hermes com titulo, area, prazo e plano",
+    "criar_acao_no_sistema": "Cria uma nova acao ou tarefa no Hermes com titulo, area, data de execucao, prazo final opcional e plano",
     "agendar_lembrete_acao": "Agenda um lembrete para uma acao do Hermes com data, horario e texto opcional",
     "salvar_memoria_global": "Salva um fato duravel ou preferencia permanente na memoria global",
     "registrar_correcao_procedimento": "Registra uma correcao ou melhoria em um procedimento existente",
