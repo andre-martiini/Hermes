@@ -10437,7 +10437,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 system_instruction=system_instruction + _correcao_hint,
                 temperature=COPILOT_TEMPERATURE,
                 http_options=types.HttpOptions(timeout=COPILOT_MODEL_TIMEOUT_MS),
-                tools=static_tools + dynamic_tools,
+                tools=static_tools + ([types.Tool(function_declarations=dynamic_tools)] if dynamic_tools else []),
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             ),
             history=history
