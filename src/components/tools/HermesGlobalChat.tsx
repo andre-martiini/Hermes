@@ -233,6 +233,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showTools, setShowTools] = useState(false);
+  const [popsList, setPopsList] = useState<{ id: string; titulo: string; gatilhos: string[] }[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [showMobileHistory, setShowMobileHistory] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -473,6 +474,30 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
       const trimmedStart = prev.trimStart();
       if (trimmedStart.startsWith(tag)) return prev;
       return prev.trim().length > 0 ? `${tag} ${prev}` : `${tag} `;
+    });
+    setShowTools(false);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const q = collection(db, 'pops_diretrizes');
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const data = snapshot.docs.map((docItem) => ({ id: docItem.id, ...docItem.data() }) as { id: string; titulo: string; gatilhos: string[] });
+        setPopsList(data);
+      },
+      (error) => console.error('Erro ao buscar POPs:', error),
+    );
+  }, [isOpen]);
+
+  const insertPopShortcut = (pop: { titulo: string; gatilhos?: string[] }) => {
+    const gatilhoPrincipal = (pop.gatilhos && pop.gatilhos.length > 0 && pop.gatilhos[0]) ? pop.gatilhos[0] : pop.titulo;
+    setInput((prev) => {
+      const trimmedStart = prev.trimStart();
+      if (trimmedStart.toLowerCase().startsWith(gatilhoPrincipal.toLowerCase())) return prev;
+      return prev.trim().length > 0 ? `${gatilhoPrincipal} ${prev}` : `${gatilhoPrincipal} `;
     });
     setShowTools(false);
     setTimeout(() => textareaRef.current?.focus(), 0);
@@ -1224,22 +1249,33 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 5v14m-7-7h14" /></svg>
               </button>
               <div className="relative shrink-0" ref={toolMenuRef}>
-                <button type="button" disabled={isBlocked} onClick={() => setShowTools((prev) => !prev)} title="Ferramentas" className={`flex h-10 w-10 items-center justify-center transition-all ${showTools ? (isDark ? 'bg-white/10' : 'bg-slate-100') : hoverClass} disabled:opacity-30`}>
+                <button type="button" disabled={isBlocked} onClick={() => setShowTools((prev) => !prev)} title="POPs Cadastrados" className={`flex h-10 w-10 items-center justify-center transition-all ${showTools ? (isDark ? 'bg-white/10' : 'bg-slate-100') : hoverClass} disabled:opacity-30`}>
                   <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="5" cy="5" r="1.8" /><circle cx="12" cy="5" r="1.8" /><circle cx="19" cy="5" r="1.8" /><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /><circle cx="5" cy="19" r="1.8" /><circle cx="12" cy="19" r="1.8" /><circle cx="19" cy="19" r="1.8" /></svg>
                 </button>
                 {showTools && (
-                  <div className={`absolute bottom-full left-0 z-[850] mb-3 max-h-[360px] w-[min(22rem,calc(100vw-2rem))] overflow-y-auto border shadow-2xl ${raisedClass}`}>
-                    <div className={`sticky top-0 border-b px-3 py-2 font-sans text-[10px] font-bold uppercase tracking-wider ${isDark ? 'border-white/10 bg-slate-900 text-slate-500' : 'border-[#e5e7eb] bg-white text-slate-400'}`}>Ferramentas</div>
+                  <div className={`absolute bottom-full left-0 z-[850] mb-3 max-h-[360px] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto border shadow-2xl ${raisedClass}`}>
+                    <div className={`sticky top-0 border-b px-3 py-2 font-sans text-[10px] font-bold uppercase tracking-wider ${isDark ? 'border-white/10 bg-slate-900 text-slate-500' : 'border-[#e5e7eb] bg-white text-slate-400'}`}>POPs Cadastrados</div>
                     <div className="p-2">
-                      {toolsRegistry.map((tool) => (
-                        <button key={tool.id} type="button" onClick={() => insertToolShortcut(tool.ui_metadata.tag)} className={`w-full px-3 py-2 text-left transition-all ${hoverClass}`}>
-                          <div className="flex items-center justify-between gap-3">
-                            <span className={`text-xs font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{tool.ui_metadata.title}</span>
-                            <span className="font-mono text-[9px] font-bold text-[#2563eb]">{tool.ui_metadata.tag}</span>
-                          </div>
-                          <p className={`mt-1 text-[10px] leading-relaxed ${mutedClass}`}>{tool.ui_metadata.description}</p>
-                        </button>
-                      ))}
+                      {popsList.length === 0 ? (
+                        <div className={`px-3 py-4 text-center text-xs font-medium ${mutedClass}`}>Nenhum POP cadastrado</div>
+                      ) : (
+                        popsList.map((pop) => {
+                          const gatilho = pop.gatilhos && pop.gatilhos.length > 0 ? pop.gatilhos[0] : pop.titulo;
+                          return (
+                            <button key={pop.id} type="button" onClick={() => insertPopShortcut(pop)} className={`w-full px-3 py-2.5 text-left transition-all ${hoverClass}`}>
+                              <div className={`text-xs font-bold leading-normal ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{pop.titulo}</div>
+                              <div className="mt-1.5 flex items-center">
+                                <span className={`inline-block max-w-full truncate rounded px-1.5 py-0.5 font-mono text-[9px] font-bold ${isDark ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>{gatilho}</span>
+                              </div>
+                              {pop.gatilhos && pop.gatilhos.length > 1 && (
+                                <p className={`mt-1 text-[10px] leading-relaxed truncate ${mutedClass}`}>
+                                  Gatilhos: {pop.gatilhos.join(', ')}
+                                </p>
+                              )}
+                            </button>
+                          );
+                        })
+                      )}
                     </div>
                   </div>
                 )}

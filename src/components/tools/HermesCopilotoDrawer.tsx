@@ -494,6 +494,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     const [isFocused, setIsFocused] = useState(false);
     const [showToolMenu, setShowToolMenu] = useState(false);
+    const [popsList, setPopsList] = useState<{ id: string; titulo: string; gatilhos: string[] }[]>([]);
 
     // Estado de anexo
     const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -775,6 +776,31 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             const trimmedStart = prev.trimStart();
             if (trimmedStart.startsWith(tag)) return prev;
             return prev.trim().length > 0 ? `${tag} ${prev}` : `${tag} `;
+        });
+        setShowToolMenu(false);
+        setIsFocused(true);
+        setTimeout(() => textareaRef.current?.focus(), 0);
+    };
+
+    useEffect(() => {
+        if (!isOpen) return;
+        const q = collection(db, 'pops_diretrizes');
+        return onSnapshot(
+            q,
+            (snapshot) => {
+                const data = snapshot.docs.map((docItem) => ({ id: docItem.id, ...docItem.data() }) as { id: string; titulo: string; gatilhos: string[] });
+                setPopsList(data);
+            },
+            (error) => console.error('Erro ao buscar POPs no HermesCopilotoDrawer:', error),
+        );
+    }, [isOpen]);
+
+    const insertPopShortcut = (pop: { titulo: string; gatilhos?: string[] }) => {
+        const gatilhoPrincipal = (pop.gatilhos && pop.gatilhos.length > 0 && pop.gatilhos[0]) ? pop.gatilhos[0] : pop.titulo;
+        setInput(prev => {
+            const trimmedStart = prev.trimStart();
+            if (trimmedStart.toLowerCase().startsWith(gatilhoPrincipal.toLowerCase())) return prev;
+            return prev.trim().length > 0 ? `${gatilhoPrincipal} ${prev}` : `${gatilhoPrincipal} `;
         });
         setShowToolMenu(false);
         setIsFocused(true);
@@ -2846,9 +2872,9 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                 <button
                                     onClick={() => setShowToolMenu(prev => !prev)}
                                     disabled={isBlocked}
-                                    aria-label="Ações Rápidas"
+                                    aria-label="POPs Cadastrados"
                                     aria-expanded={showToolMenu}
-                                    title="Atalhos de ferramentas"
+                                    title="POPs Cadastrados"
                                     className={`flex h-9 w-9 items-center justify-center rounded-lg transition-all ${isDark ? 'text-white/55 hover:bg-white/10 hover:text-white/85' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'} disabled:opacity-30 disabled:cursor-not-allowed`}
                                 >
                                     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -2864,54 +2890,36 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     </svg>
                                 </button>
                                 {showToolMenu && (
-                                    <div className={`absolute bottom-full left-0 mb-2 z-[80] min-w-[280px] max-w-[min(22rem,calc(100vw-2rem))] max-h-[min(28rem,calc(100vh-14rem))] overflow-y-auto overflow-x-hidden rounded-2xl border shadow-lg ${isDark ? 'border-[#e5e7eb] dark:border-white/10 bg-[#101827]' : 'border-[#e5e7eb] dark:border-white/10 bg-white'}`}>
+                                    <div className={`absolute bottom-full left-0 mb-2 z-[80] min-w-[280px] max-w-[min(24rem,calc(100vw-2rem))] max-h-[min(28rem,calc(100vh-14rem))] overflow-y-auto overflow-x-hidden rounded-2xl border shadow-lg ${isDark ? 'border-[#e5e7eb] dark:border-white/10 bg-[#101827]' : 'border-[#e5e7eb] dark:border-white/10 bg-white'}`}>
                                         <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-b border-[#e5e7eb] dark:border-white/10 bg-[#101827] text-white/40' : 'border-b border-slate-100 bg-white text-slate-400'}`}>
-                                            Ferramentas Interativas
+                                            POPs Cadastrados
                                         </div>
                                         <div className="p-2">
-                                            {toolsRegistry.map(tool => (
-                                                <button
-                                                    key={tool.id}
-                                                    onClick={() => insertToolShortcut(tool.ui_metadata.tag)}
-                                                    className={`w-full rounded-lg px-3 py-2 text-left transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-50'}`}
-                                                >
-                                                    <div className="flex items-center justify-between gap-3">
-                                                        <span className={`text-[11px] font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{tool.ui_metadata.title}</span>
-                                                        <span className={`text-[9px] font-sans ${isDark ? 'text-blue-300' : 'text-blue-600'}`}>{tool.ui_metadata.tag}</span>
-                                                    </div>
-                                                    <p className={`mt-1 text-[10px] leading-relaxed ${isDark ? 'text-white/50' : 'text-slate-500'}`}>{tool.ui_metadata.description}</p>
-                                                </button>
-                                            ))}
-                                        </div>
-                                        <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-t border-[#e5e7eb] dark:border-white/10 bg-[#101827] text-white/40' : 'border-t border-slate-100 bg-white text-slate-400'}`}>
-                                            Capacidades de IA
-                                        </div>
-                                        <div className="p-2 pb-3">
-                                            {([
-                                                { key: 'pesquisar_internet', label: 'Pesquisar na Internet', desc: 'Busca informações em tempo real na web.' },
-                                                { key: 'ler_pagina_web', label: 'Ler Página Web', desc: 'Extrai e resume o conteúdo de um URL.' },
-                                                { key: 'buscar_arquivos_acervo', label: 'Buscar no Acervo', desc: 'Localiza documentos e arquivos do sistema.' },
-                                                { key: 'consultar_historico_acoes', label: 'Consultar Histórico', desc: 'Recupera o grafo de execução de ações.' },
-                                                { key: 'consultar_financas_v2', label: 'Consultar Finanças', desc: 'Acesse balanços, metas e extratos financeiros internos.' },
-                                                { key: 'registrar_item_financeiro_v2', label: 'Registrar Item Financeiro', desc: 'Adiciona novas rendas ou despesas ao sistema.' },
-                                                { key: 'criar_acao_no_sistema', label: 'Criar Ação', desc: 'Cria uma nova ação diretamente no sistema.' },
-                                                { key: 'agendar_lembrete_acao', label: 'Agendar Lembrete', desc: 'Cria lembretes datados para ações.' },
-                                                { key: 'registrar_no_diario', label: 'Registrar no Diário', desc: 'Adiciona uma entrada no diário de bordo.' },
-                                                { key: 'gerar_relatorio', label: 'Gerar Relatório', desc: 'Compila um relatório estruturado.' },
-                                                { key: 'consultar_agenda', label: 'Consultar Agenda', desc: 'Verifica compromissos e eventos do calendário.' },
-                                                { key: 'encontrar_slot_livre', label: 'Encontrar Slot Livre', desc: 'Sugere horários disponíveis na agenda.' },
-                                                { key: 'buscar_e_analisar_email', label: 'Analisar E-mail', desc: 'Busca e analisa e-mails relevantes.' },
-                                                { key: 'salvar_memoria_global', label: 'Salvar Memória', desc: 'Persiste informações na memória global.' },
-                                                { key: 'gerar_rascunho_formulario', label: 'Gerar Formulário', desc: 'Cria rascunho de formulário estruturado.' },
-                                            ] as { key: string; label: string; desc: string }[]).map(cap => (
-                                                <div
-                                                    key={cap.key}
-                                                    className={`rounded-lg px-3 py-2 ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
-                                                >
-                                                    <span className={`text-[11px] font-black ${isDark ? 'text-white/80' : 'text-slate-700'}`}>{cap.label}</span>
-                                                    <p className={`mt-0.5 text-[10px] leading-relaxed ${isDark ? 'text-white/40' : 'text-slate-400'}`}>{cap.desc}</p>
-                                                </div>
-                                            ))}
+                                            {popsList.length === 0 ? (
+                                                <div className={`px-3 py-4 text-center text-xs font-medium ${isDark ? 'text-white/40' : 'text-slate-400'}`}>Nenhum POP cadastrado</div>
+                                            ) : (
+                                                popsList.map(pop => {
+                                                    const gatilho = pop.gatilhos && pop.gatilhos.length > 0 ? pop.gatilhos[0] : pop.titulo;
+                                                    return (
+                                                        <button
+                                                            key={pop.id}
+                                                            type="button"
+                                                            onClick={() => insertPopShortcut(pop)}
+                                                            className={`w-full rounded-lg px-3 py-2 text-left transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-50'}`}
+                                                        >
+                                                            <div className={`text-[11px] font-black leading-normal ${isDark ? 'text-white' : 'text-slate-900'}`}>{pop.titulo}</div>
+                                                            <div className="mt-1.5 flex items-center">
+                                                                <span className={`inline-block max-w-full truncate rounded px-1.5 py-0.5 text-[9px] font-mono font-bold ${isDark ? 'bg-blue-500/10 text-blue-300' : 'bg-blue-50 text-blue-600'}`}>{gatilho}</span>
+                                                            </div>
+                                                            {pop.gatilhos && pop.gatilhos.length > 1 && (
+                                                                <p className={`mt-1 text-[10px] leading-relaxed truncate ${isDark ? 'text-white/50' : 'text-slate-500'}`}>
+                                                                    Gatilhos: {pop.gatilhos.join(', ')}
+                                                                </p>
+                                                            )}
+                                                        </button>
+                                                    );
+                                                })
+                                            )}
                                         </div>
                                     </div>
                                 )}
