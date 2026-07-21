@@ -110,9 +110,11 @@ registry existente, não de um catálogo novo.
 
 ```
 ┌──────────────────────────── CLIENTE LOCAL (PC, RTX 3050) ────────────────────────────┐
-│ [Mic] → [AEC (WebRTC APM)] → [Silero VAD] → [faster-whisper large-v3-turbo int8]     │
-│    ▲            │ barge-in real (eco cancelado)                  │ texto             │
-│ [Speakers] ← [Piper/Kokoro pt-BR, síntese por sentença] ← [Orquestrador local]       │
+│ UI web em localhost (navegador): forma de onda + chat de texto + mic com AEC nativo  │
+│         │ áudio (WebSocket)                          ▲ áudio TTS + transcrições      │
+│         ▼                                            │                               │
+│ [Silero VAD] → [faster-whisper large-v3-turbo int8] → [Orquestrador FastAPI]         │
+│                            [Piper/Kokoro pt-BR, síntese por sentença] ──┘            │
 │                                    histórico FIFO 6–8 turnos + persistência remota   │
 └──────────────────────────────────────────────┬───────────────────────────────────────┘
                                                │ HTTPS
@@ -146,18 +148,35 @@ registry existente, não de um catálogo novo.
   (tool, args, uid, canal) em Firestore.
 - `min-instances=1` para eliminar cold start no caminho crítico.
 
-### Módulo A — Cliente local de áudio
+### Módulo A — Cliente local com interface visual
 
-- Python 3.11+, loop: AEC (WebRTC APM) → Silero VAD (silêncio 1,0 s, com endpointing
-  adaptativo depois) → faster-whisper **`large-v3-turbo` int8** (`language="pt"`,
-  ~1,5 GB VRAM; fallback `small` ~0,5 GB) → orquestrador → TTS **Piper pt-BR** (CPU)
-  ou Kokoro pt (GPU), com **síntese por sentença** (streaming percebido).
-- **Barge-in**: mic ativo durante TTS com eco cancelado; nova fala válida cancela a
-  reprodução **e** a geração LLM em andamento.
-- Fase inicial em **push-to-talk** (hotkey) para validar o pipeline antes de ligar
-  VAD/barge-in.
+Decisão registrada (2026-07-21): a prioridade é **redução de custos**, portanto o
+processamento de áudio fica local (GPU RTX 3050). O requisito de experiência é abrir
+uma **interface que mostra o sinal de voz** e permite conversar tanto por voz quanto
+por texto, como um chatbot comum — não um script headless.
+
+- **Arquitetura do cliente**: orquestrador Python 3.11+ (FastAPI) rodando em
+  `localhost`, servindo uma **UI web local** aberta no navegador. A UI tem: forma de
+  onda ao vivo (Web Audio API `AnalyserNode` + canvas), histórico do chat, campo de
+  texto (mensagens digitadas pulam o STT) e botão/hotkey de microfone.
+- **Captura de áudio no navegador** via `getUserMedia({echoCancellation: true})` —
+  o AEC nativo do Chrome resolve o problema do barge-in sem WebRTC APM manual; o áudio
+  segue por WebSocket para o orquestrador local.
+- Pipeline no orquestrador: Silero VAD (silêncio 1,0 s, endpointing adaptativo depois)
+  → faster-whisper **`large-v3-turbo` int8** (`language="pt"`, ~1,5 GB VRAM; fallback
+  `small` ~0,5 GB) → loop LLM/MCP → TTS **Piper pt-BR** (CPU) ou Kokoro pt (GPU), com
+  **síntese por sentença**, reproduzida na UI.
+- **Barge-in**: mic ativo durante TTS (eco cancelado pelo navegador); nova fala válida
+  cancela a reprodução **e** a geração LLM em andamento.
+- Fase inicial em **push-to-talk** para validar o pipeline antes de ligar VAD/barge-in.
 - Refresh token do Firebase no **keyring do SO**; renovação do ID token via Firebase
   Auth REST.
+
+**Caminho de evolução para online**: como a UI já é web e o servidor MCP já é cloud,
+migrar para o formato online (dentro do web app do Hermes) significa apenas portar o
+componente de UI para o React do Hermes e trocar o processamento local de áudio por um
+serviço na nuvem (Gemini Live ou STT/TTS gerenciado) — o cérebro, o catálogo e a
+interface permanecem os mesmos.
 
 ### Módulo B — Raciocínio
 
@@ -180,8 +199,10 @@ registry existente, não de um catálogo novo.
 1. **Servidor MCP** sobre o registry (tools/list, tools/call, resources, auth, auditoria)
    + flag `voice_enabled` no registry. *Critério de aceite: chamar
    `consultar_historico_acoes` via MCP com ID token válido.*
-2. **Cliente local mínimo** em push-to-talk: whisper → Gemini → tools MCP → TTS.
-   *Aceite: "quais minhas tarefas de hoje?" respondido por voz em < 4 s.*
+2. **Cliente local mínimo** com UI web em localhost (forma de onda, chat de texto,
+   push-to-talk): whisper → Gemini → tools MCP → TTS.
+   *Aceite: "quais minhas tarefas de hoje?" respondido por voz em < 4 s, com a
+   transcrição e a resposta visíveis no chat.*
 3. **VAD + barge-in + AEC** e endpointing adaptativo; persistência de sessão e
    confirmação falada para tools mutantes.
 4. **Convergência do voice-bridge**: migrar o canal Twilio (que continua precisando de
