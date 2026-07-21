@@ -13,6 +13,13 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+# Precisa rodar antes de importar stt/tts/orchestrator: esses modulos (ou
+# modulos que eles importam) leem variaveis de ambiente na primeira vez que
+# sao usados, e orchestrator.py tem uma leitura em nivel de modulo
+# (GEMINI_MODEL) que so ve o .env se ele ja tiver sido carregado.
+load_dotenv()
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,8 +27,6 @@ from fastapi.staticfiles import StaticFiles
 import stt
 import tts
 from orchestrator import VoiceSession
-
-load_dotenv()
 
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
@@ -32,6 +37,15 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 # Audio minimo considerado valido (~0.15s a 16kHz/16bit mono) — evita mandar
 # ruido de clique curto do push-to-talk para o whisper.
 _MIN_UTTERANCE_BYTES = 4800
+
+# O servidor so escuta em loopback, mas WebSocket nao segue same-origin policy:
+# qualquer aba aberta no navegador do usuario pode tentar abrir
+# ws://127.0.0.1:<porta>/ws e usar o refresh token guardado no keyring para
+# falar com o MCP do Hermes. Rejeitamos handshakes cuja Origin nao seja a
+# propria UI local servida por este processo.
+def _allowed_ws_origins() -> set[str]:
+    port = os.environ.get("PORT", "8765")
+    return {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
 
 
 @app.get("/")
@@ -46,6 +60,11 @@ async def healthz() -> dict:
 
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket) -> None:
+    origin = websocket.headers.get("origin")
+    if origin not in _allowed_ws_origins():
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
 
     gemini_api_key = os.environ.get("GEMINI_API_KEY", "").strip()

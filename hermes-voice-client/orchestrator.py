@@ -15,9 +15,16 @@ from google.genai import types
 
 import mcp_client
 
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
 MAX_TOOL_ROUNDS = 4
 MAX_HISTORY_TURNS = 8  # cada turno = 1 entrada de usuario + 1 de modelo no history
+
+
+def _gemini_model() -> str:
+    # Lido em tempo de uso (nao em nivel de modulo) para nao depender da ordem
+    # de import de quem consome este modulo — load_dotenv() precisa ter
+    # rodado antes, e isso e responsabilidade de quem inicializa o processo
+    # (main.py), nao deste modulo.
+    return os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
 VOICE_SYSTEM_SUFFIX = """
 
@@ -113,7 +120,7 @@ class VoiceSession:
             tools=gemini_tools,
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
-        self._chat = self._client.chats.create(model=GEMINI_MODEL, config=self._chat_config)
+        self._chat = self._client.chats.create(model=_gemini_model(), config=self._chat_config)
         return self._chat
 
     def _trim_history_if_needed(self) -> None:
@@ -123,7 +130,7 @@ class VoiceSession:
             return
         trimmed = history[-max_entries:]
         self._chat = self._client.chats.create(
-            model=GEMINI_MODEL,
+            model=_gemini_model(),
             config=self._chat_config,
             history=trimmed,
         )
