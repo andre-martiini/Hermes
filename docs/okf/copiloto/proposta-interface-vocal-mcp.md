@@ -198,7 +198,9 @@ interface permanecem os mesmos.
 
 1. **Servidor MCP** sobre o registry (tools/list, tools/call, resources, auth, auditoria)
    + flag `voice_enabled` no registry. *Critério de aceite: chamar
-   `consultar_historico_acoes` via MCP com ID token válido.*
+   `consultar_historico_acoes` via MCP com ID token válido.* ✅ **Implementado**
+   (ver seção 4 abaixo — `functions/mcp_server.py`, branch
+   `claude/hermes-vocal-interface-review-3wdf6x`).
 2. **Cliente local mínimo** com UI web em localhost (forma de onda, chat de texto,
    push-to-talk): whisper → Gemini → tools MCP → TTS.
    *Aceite: "quais minhas tarefas de hoje?" respondido por voz em < 4 s, com a
@@ -230,3 +232,82 @@ interface permanecem os mesmos.
   canal de voz até haver mecanismo de notificação proativa.
 - Whitelist de UID e auditoria são pré-requisitos de segurança antes de expor qualquer
   tool mutante via MCP público.
+
+## 4. Fase 1 implementada — servidor MCP
+
+Implementado sobre o `functions/tools/registry.py` existente, **como Cloud Function
+Python dentro do codebase já deployado** (`functions/`), e não como serviço Cloud Run
+separado — decisão tomada em cima da priorização de custo: reaproveita o deploy, a
+inicialização do Firebase Admin e o auth já existentes, sem `min-instances` adicional.
+
+### Arquivos novos/alterados
+
+- `functions/mcp_server.py` — Cloud Function HTTP `mcpServer`, JSON-RPC 2.0 síncrono
+  sobre POST (`initialize`, `tools/list`, `tools/call`, `resources/list`,
+  `resources/read`); GET retorna um health-check simples.
+- `functions/tools/mcp_dispatch.py` — executores das tools MCP-enabled, fora de
+  qualquer closure (ver nota de escopo abaixo).
+- `functions/copilot_context.py` — monta o resource `hermes://voice-context`
+  (persona + perfil do usuário autenticado + memórias recentes), adaptado de
+  `hermes-voice-bridge/context.py` para usar o uid do ID token em vez de env var.
+- `functions/tools/registry.py` — novos `_MCP_ENABLED` / `_VOICE_ENABLED` +
+  `is_mcp_enabled()`, `is_voice_enabled()`, `list_mcp_enabled_tools()`.
+- `functions/main.py` — **uma única linha adicionada** (`from mcp_server import
+  mcpServer`), para não arriscar tocar no arquivo de 13,8 mil linhas do copiloto web.
+
+### Escopo real desta fase (importante)
+
+As ~42 tools do catálogo majoritariamente vivem como *closures* dentro de
+`askCopilotoHermes`, presas ao escopo da requisição (`db`, `session_id`, `user_uid`,
+`gemini_key` fechados por closure). Não é seguro nem seria honesto expor todas via
+`tools/list` fingindo que funcionam. Por isso a fase 1 liga de verdade **4 tools**,
+todas somente-leitura ou puras, sem dependência de estado de sessão:
+
+- `consultar_historico_acoes`, `buscar_arquivos_acervo`, `buscar_contato`, `calculadora`
+
+`tools/list` retorna **apenas** essas — listar uma tool que falha ao ser chamada seria
+pior do que não listá-la. A lógica de busca em si (`buscar_tarefas`, `buscar_acervo`) é
+100% reaproveitada dos módulos já existentes em `functions/tools/`; apenas o
+"encaixe"/formatação em torno delas foi replicado de `main.py` para fora do closure —
+duplicação deliberada e pequena (~80 linhas), documentada no topo de `mcp_dispatch.py`
+como débito técnico a convergir quando `main.py` for refatorado.
+
+Novas tools entram no MCP adicionando: schema em `tools/schemas/`, executor em
+`mcp_dispatch.py` e o nome em `registry._MCP_ENABLED`. Tools que exigem confirmação
+(`registry.needs_confirmation`) já são bloqueadas em `tools/call` até a chamada trazer
+`arguments._confirmed = true` — pronto para quando tools mutantes forem migradas.
+
+### Contrato de auth e configuração necessária antes do deploy
+
+- Header obrigatório: `Authorization: Bearer <Firebase ID Token>`.
+- Whitelist de UID: documento Firestore `system/mcp_access` com campo
+  `allowed_uids: ["<seu-uid-firebase>"]`, **ou** env var `HERMES_MCP_ALLOWED_UIDS`
+  (lista separada por vírgula) nas configurações da função. **Sem nenhum dos dois
+  configurados, o acesso é negado por padrão (fail closed)** — este documento não cria
+  o doc/env var automaticamente, é um passo manual antes do primeiro uso.
+- Auditoria: cada `tools/call` grava um doc em `mcp_audit_log` (uid, tool, argumentos,
+  latência). Rate limit é *best-effort* em memória por instância (60 chamadas/min por
+  uid) — aceitável para uso single-user; se o MCP ganhar mais clientes, mover para
+  contador em Firestore.
+
+### Verificação feita nesta fase
+
+Testado localmente (fora do Firebase, com Firestore/Auth stubados) via `werkzeug` +
+contexto Flask simulando o ciclo de request do Functions Framework: `main.py` importa
+com a nova função registrada; `tools/list` retorna o schema correto das 4 tools;
+`tools/call` executa `calculadora` corretamente (`10*4` → `40`); tool desconhecida e
+requisição sem token retornam os erros JSON-RPC esperados (`-32003` e `-32001`
+respectivamente); gating de confirmação testado isoladamente. **Não testado**: chamada
+real contra Firestore de produção, nem deploy real no Cloud Functions (exige
+`firebase deploy --only functions:python` e as credenciais do projeto).
+
+### Próximos passos (fase 2 e além)
+
+1. Configurar `system/mcp_access.allowed_uids` (ou a env var) no projeto real e rodar
+   `firebase deploy --only functions:python`.
+2. Testar `tools/call consultar_historico_acoes` contra dados reais.
+3. Iniciar o cliente local (Módulo A da fase 2): UI web em localhost, push-to-talk,
+   consumindo este mesmo endpoint MCP.
+4. Migrar mais tools para `mcp_dispatch.py` conforme a necessidade do cliente de voz
+   for exigindo (ex.: `consultar_agenda`, `criar_acao_no_sistema` já com o gating de
+   confirmação pronto para recebê-la).

@@ -38,6 +38,7 @@ from pdf_precision import extract_pdf_text_with_fallback, is_pdf_mime_type
 from godmode import (  # noqa: F401 — registra as Cloud Functions
     askHermesGodmode,
 )
+from mcp_server import mcpServer  # noqa: F401 — registra a Cloud Function
 
 DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
