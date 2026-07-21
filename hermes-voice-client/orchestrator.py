@@ -24,7 +24,7 @@ def _gemini_model() -> str:
     # de import de quem consome este modulo — load_dotenv() precisa ter
     # rodado antes, e isso e responsabilidade de quem inicializa o processo
     # (main.py), nao deste modulo.
-    return os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
+    return os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 VOICE_SYSTEM_SUFFIX = """
 

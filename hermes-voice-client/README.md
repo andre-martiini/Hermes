@@ -17,7 +17,7 @@ navegador (forma de onda + chat)
 main.py (FastAPI, local)
    │
    ├─ stt.py       → faster-whisper (transcreve a fala)
-   ├─ orchestrator.py → Gemini (gemini-3.1-flash-lite) com as tools do MCP
+   ├─ orchestrator.py → Gemini (gemini-3.5-flash-lite) com as tools do MCP
    │                    como function declarations
    ├─ mcp_client.py → chama o servidor MCP do Hermes (tools/list, tools/call,
    │                   resources/read) autenticado por Firebase ID Token

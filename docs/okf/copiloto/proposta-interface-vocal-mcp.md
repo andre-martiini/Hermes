@@ -26,7 +26,7 @@ realidade:
 | Copiloto acessível por rota HTTP REST | O copiloto principal é o callable Firebase `askCopilotoHermes` (`functions/main.py:7029`), com RAG híbrido, memória de sessão em Firestore (`sessoes_copiloto`), persona (`system/copilot_soul`), perfil do usuário e protocolos de gating |
 | Autenticação a definir (Firebase ID Token) | Web usa Firebase Auth via callables; o voice-bridge atual usa **senha falada** validada contra a transcrição (frágil); Telegram usa whitelist de chat_id |
 | Memória = FIFO de 4–6 turnos no cliente | O Hermes já tem memória de sessão server-side (`sessoes_copiloto`), memória global (`knowledge_nodes`), POPs e perfil deduzido do usuário |
-| Gemini 3.1 Flash-Lite | Coerente: o copiloto já usa `gemini-3.1-flash-lite` (chat) com escalada para `gemini-3.5-flash` em prompts complexos (`gemini_cost_controls.py`) |
+| Gemini 3.5 Flash-Lite | Coerente: o copiloto já usa `gemini-3.5-flash-lite` (chat) com escalada para `gemini-3.6-flash` em prompts complexos (`gemini_cost_controls.py`) — modelos atualizados em 2026-07-21 (ver changelog no fim deste documento) |
 | STT/TTS inexistentes | Backend já transcreve com **Groq Whisper-Large-V3-Turbo** (fallback Gemini) e sintetiza TTS com `gemini-2.5-flash-preview-tts` (canal Telegram); frontend tem Web Speech API e MediaRecorder |
 
 **Diagnóstico central:** o problema real do Hermes hoje não é ausência de voz — é
@@ -94,7 +94,7 @@ registry existente, não de um catálogo novo.
 
 10. **Pontos corretos da proposta** (a preservar): topologia híbrida (áudio local +
     raciocínio cloud) é mais barata que Gemini Live API para uso em desktop; modelo
-    `gemini-3.1-flash-lite` coincide com o já usado; JSON-RPC 2.0 stateless sobre HTTP
+    `gemini-3.5-flash-lite` coincide com o já usado; JSON-RPC 2.0 stateless sobre HTTP
     é aderente ao transporte **Streamable HTTP** do MCP atual; hospedagem em Cloud Run
     é coerente com a infra existente (o voice-bridge já está lá).
 
@@ -120,8 +120,8 @@ registry existente, não de um catálogo novo.
                                                │ HTTPS
                     ┌──────────────────────────┼──────────────────────────┐
                     ▼                          ▼                          │
-        Gemini API (gemini-3.1-flash-lite;     Servidor MCP (Cloud Run,   │
-        escalada p/ 3.5-flash em turnos        Streamable HTTP, SDK       │
+        Gemini API (gemini-3.5-flash-lite;     Servidor MCP (Cloud Run,   │
+        escalada p/ 3.6-flash em turnos        Streamable HTTP, SDK       │
         complexos; SEM grounding nativo —      oficial) — Firebase ID     │
         internet via tool pesquisar_internet)  Token + whitelist de UID   │
                                                │ reusa registry + schemas │
@@ -180,8 +180,8 @@ interface permanecem os mesmos.
 
 ### Módulo B — Raciocínio
 
-- `gemini-3.1-flash-lite` como padrão (mesmo modelo do copiloto), com a mesma
-  heurística de escalada para `gemini-3.5-flash` em turnos complexos.
+- `gemini-3.5-flash-lite` como padrão (mesmo modelo do copiloto), com a mesma
+  heurística de escalada para `gemini-3.6-flash` em turnos complexos.
 - **Sem Google Search Grounding nativo** (conflito documentado com function calling em
   Flash-Lite); internet via tools `pesquisar_internet` / `ler_pagina_web` do MCP.
 - System prompt = resource `hermes://voice-context` + instruções de brevidade vocal
@@ -409,3 +409,18 @@ camadas, cada uma isolando a variável relevante:
    proxy deste ambiente; como o `TestClient` já prova a lógica da aplicação correta,
    isso foi registrado como limitação do ambiente de teste, não perseguido mais a
    fundo. Vale reconfirmar na primeira execução real na máquina do usuário.
+
+## Changelog
+
+- **2026-07-21**: Google lançou Gemini 3.6 Flash e 3.5 Flash-Lite (GA). Modelos
+  padrão do copiloto e do cliente de voz atualizados: `gemini-3.1-flash-lite` →
+  `gemini-3.5-flash-lite` (chat/luz), `gemini-3.5-flash` → `gemini-3.6-flash`
+  (escalada em prompts complexos). Atualizado em `functions/gemini_cost_controls.py`
+  (defaults + tabela de preços, mantendo as entradas antigas para telemetria
+  histórica), `functions/main.py` (22 ocorrências), `hermes_cli.py`,
+  `scripts/gemini_usage_report.py` e `hermes-voice-client/` (orchestrator, .env.example,
+  README). `gemini-3.6-flash` reduz o preço de output de US$9,00 para US$7,50 por
+  1M tokens (input e cache mantêm US$1,50 / US$0,15); `gemini-3.5-flash-lite` custa
+  US$0,30 / US$2,50 (input/output) — preço de cache estimado por interpolação (10%
+  do input, mesmo padrão das demais linhas da tabela; não confirmado em fonte
+  oficial).
