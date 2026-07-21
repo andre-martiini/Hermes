@@ -10,9 +10,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 
-GEMINI_LIGHT_MODEL = os.environ.get("GEMINI_LIGHT_MODEL", "gemini-3.1-flash-lite")
-GEMINI_BALANCED_MODEL = os.environ.get("GEMINI_BALANCED_MODEL", "gemini-3.1-flash-lite")
-GEMINI_FRONTIER_MODEL = os.environ.get("GEMINI_FRONTIER_MODEL", "gemini-3.5-flash")
+GEMINI_LIGHT_MODEL = os.environ.get("GEMINI_LIGHT_MODEL", "gemini-3.5-flash-lite")
+GEMINI_BALANCED_MODEL = os.environ.get("GEMINI_BALANCED_MODEL", "gemini-3.5-flash-lite")
+GEMINI_FRONTIER_MODEL = os.environ.get("GEMINI_FRONTIER_MODEL", "gemini-3.6-flash")
 GEMINI_PRO_MODEL = os.environ.get("GEMINI_PRO_MODEL", "gemini-3.1-pro-preview")
 GEMINI_ROUTING_MODEL = os.environ.get("GEMINI_ROUTING_MODEL", GEMINI_LIGHT_MODEL)
 GEMINI_STRUCTURED_MODEL = os.environ.get("GEMINI_STRUCTURED_MODEL", GEMINI_LIGHT_MODEL)
@@ -39,6 +39,8 @@ _DEFAULT_FLEX_FEATURES = {
 # Text-token estimate for Gemini Developer API paid tier, USD per 1M tokens.
 # This is telemetry only; billing source of truth remains Google/AI Studio.
 _MODEL_PRICE_USD_PER_MTOK = {
+    "gemini-3.6-flash": {"input": 1.50, "output": 7.50, "cached_input": 0.15},
+    "gemini-3.5-flash-lite": {"input": 0.30, "output": 2.50, "cached_input": 0.03},
     "gemini-3.5-flash": {"input": 1.50, "output": 9.00, "cached_input": 0.15},
     "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.50, "cached_input": 0.025},
     "gemini-2.5-flash-lite": {"input": 0.10, "output": 0.40, "cached_input": 0.01},

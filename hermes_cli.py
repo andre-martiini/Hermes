@@ -901,7 +901,7 @@ def _wp_analisar_mudanca(db, objetivo, texto_antigo, texto_novo):
         "Responda APENAS um JSON: {\"avanca_objetivo\": true|false, \"resumo\": \"explicação objetiva em 1-3 frases\"}"
     )
     try:
-        resp = client.models.generate_content(model='gemini-3.1-flash-lite', contents=prompt)
+        resp = client.models.generate_content(model='gemini-3.5-flash-lite', contents=prompt)
         raw = (resp.text or '').strip()
         m = re.search(r'\{.*\}', raw, re.S)
         if not m:

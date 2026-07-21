@@ -28,6 +28,8 @@ DEFAULT_CREDENTIALS = ROOT / "firebase_service_account_key.json"
 # Preços (USD por 1M tokens) — espelham gemini_cost_controls._MODEL_PRICE_USD_PER_MTOK.
 # Usados apenas como fallback de estimativa quando o doc não traz estimated_usd.
 PRICE_PER_MTOK = {
+    "gemini-3.6-flash": {"input": 1.50, "output": 7.50, "cached_input": 0.15},
+    "gemini-3.5-flash-lite": {"input": 0.30, "output": 2.50, "cached_input": 0.03},
     "gemini-3.5-flash": {"input": 1.50, "output": 9.00, "cached_input": 0.15},
     "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.50, "cached_input": 0.025},
     "gemini-2.5-flash-lite": {"input": 0.10, "output": 0.40, "cached_input": 0.01},

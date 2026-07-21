@@ -68,6 +68,23 @@ _ASYNC_TOOLS: set[str] = {
     "ler_pagina_web",
 }
 
+# Tools com execucao ja extraida para fora dos closures de askCopilotoHermes
+# (functions/tools/mcp_dispatch.py) e por isso disponiveis via servidor MCP.
+# A maioria das ~42 tools do catalogo ainda vive como closure presa ao estado
+# da requisicao do copiloto web (db/session/user_uid fechados por escopo) — vao
+# sendo migradas para ca incrementalmente. Nao adicionar um nome aqui sem
+# tambem implementar seu executor em mcp_dispatch.py.
+_MCP_ENABLED: set[str] = {
+    "consultar_historico_acoes",
+    "buscar_arquivos_acervo",
+    "buscar_contato",
+    "calculadora",
+}
+
+# Subconjunto de _MCP_ENABLED liberado para o canal de voz (algumas tools MCP
+# podem nao fazer sentido faladas mesmo estando disponiveis via MCP).
+_VOICE_ENABLED: set[str] = set(_MCP_ENABLED)
+
 _schema_cache: dict[str, dict] = {}
 
 
@@ -93,6 +110,19 @@ def needs_confirmation(tool_name: str) -> bool:
 
 def is_async(tool_name: str) -> bool:
     return tool_name in _ASYNC_TOOLS
+
+
+def is_mcp_enabled(tool_name: str) -> bool:
+    return tool_name in _MCP_ENABLED
+
+
+def is_voice_enabled(tool_name: str) -> bool:
+    return tool_name in _VOICE_ENABLED
+
+
+def list_mcp_enabled_tools() -> list[str]:
+    """Nomes do catalogo com executor real ligado ao servidor MCP, na ordem do catalogo."""
+    return [name for name in _CATALOG if name in _MCP_ENABLED]
 
 
 def get_required_params(tool_name: str) -> list[str]:
