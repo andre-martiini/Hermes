@@ -204,7 +204,10 @@ interface permanecem os mesmos.
 2. **Cliente local mínimo** com UI web em localhost (forma de onda, chat de texto,
    push-to-talk): whisper → Gemini → tools MCP → TTS.
    *Aceite: "quais minhas tarefas de hoje?" respondido por voz em < 4 s, com a
-   transcrição e a resposta visíveis no chat.*
+   transcrição e a resposta visíveis no chat.* ✅ **Implementado** (ver seção 5 —
+   `hermes-voice-client/`, mesmo branch). Latência real (< 4s) não pôde ser medida
+   nesta fase por falta de credenciais reais no ambiente de implementação; a
+   mecânica ponta a ponta foi verificada por outras vias (ver seção 5).
 3. **VAD + barge-in + AEC** e endpointing adaptativo; persistência de sessão e
    confirmação falada para tools mutantes.
 4. **Convergência do voice-bridge**: migrar o canal Twilio (que continua precisando de
@@ -301,13 +304,108 @@ respectivamente); gating de confirmação testado isoladamente. **Não testado**
 real contra Firestore de produção, nem deploy real no Cloud Functions (exige
 `firebase deploy --only functions:python` e as credenciais do projeto).
 
-### Próximos passos (fase 2 e além)
+### Próximos passos (fase 3 e além)
 
 1. Configurar `system/mcp_access.allowed_uids` (ou a env var) no projeto real e rodar
    `firebase deploy --only functions:python`.
 2. Testar `tools/call consultar_historico_acoes` contra dados reais.
-3. Iniciar o cliente local (Módulo A da fase 2): UI web em localhost, push-to-talk,
-   consumindo este mesmo endpoint MCP.
-4. Migrar mais tools para `mcp_dispatch.py` conforme a necessidade do cliente de voz
+3. ~~Iniciar o cliente local (Módulo A da fase 2)~~ — feito, ver seção 5.
+4. Medir a latência real ("< 4s") com credenciais reais (Firebase, Gemini, MCP
+   deployado) — não foi possível neste ambiente de implementação.
+5. Validar por escuta a qualidade da voz Piper pt-BR (`pt_BR-faber-medium` vs
+   alternativas) e trocar o default se necessário.
+6. Fase 3: VAD contínuo + barge-in (a captura hoje é só push-to-talk) e persistência
+   de sessão entre reinícios do cliente local.
+7. Migrar mais tools para `mcp_dispatch.py` conforme a necessidade do cliente de voz
    for exigindo (ex.: `consultar_agenda`, `criar_acao_no_sistema` já com o gating de
    confirmação pronto para recebê-la).
+
+## 5. Fase 2 implementada — cliente local (`hermes-voice-client/`)
+
+Novo diretório self-contained, paralelo a `hermes-voice-bridge/` (que continua servindo
+o canal Twilio/Gemini Live e não foi alterado). Não é deployado ao Firebase — roda na
+máquina do usuário via `uvicorn main:app`.
+
+### Arquivos
+
+- `main.py` — FastAPI: serve a UI estática e o WebSocket `/ws` (protocolo JSON de
+  controle + frames binários PCM16 para áudio, nos dois sentidos).
+- `stt.py` — faster-whisper (`WHISPER_MODEL`, padrão `large-v3-turbo` int8, baixado na
+  1ª execução).
+- `tts.py` — Piper (`PIPER_VOICE`, padrão `pt_BR-faber-medium`), síntese frase a frase,
+  baixa a voz na 1ª execução via `piper.download_voices`.
+- `orchestrator.py` — `VoiceSession`: `client.chats.create` do Gemini com
+  `automatic_function_calling` desabilitado e loop manual de `function_calls`,
+  espelhando fielmente o padrão já usado em `functions/main.py::askCopilotoHermes`
+  — só que as tools chamadas são as do servidor MCP (`mcp_client.call_tool`), com
+  conversão de JSON Schema (`inputSchema` do MCP) para `types.Schema` do Gemini.
+  Historico da sessao é truncado para as ultimas 8 trocas (FIFO).
+- `mcp_client.py` — cliente JSON-RPC fino para `functions/mcp_server.py`, com retry
+  automático de token expirado (401 → força renovação → repete a chamada uma vez).
+- `auth.py` / `login.py` — Firebase ID Token via refresh token no keyring do SO
+  (nunca em arquivo texto); `login.py` é um script de autenticação única
+  (email/senha → refresh token, senha descartada da memória imediatamente).
+- `static/index.html` + `app.js` + `style.css` — UI: forma de onda em canvas
+  (alimentada tanto pelo nível do microfone quanto pelo nível do áudio de resposta
+  tocando), chat com bolhas usuário/assistente, campo de texto e botão de
+  push-to-talk (mousedown/touchstart para segurar).
+
+### Decisões de escopo
+
+- **Push-to-talk, não VAD contínuo** — segurar o botão para falar. VAD/barge-in fica
+  para a fase 3 (como já estava planejado no Módulo A).
+- **GEMINI_API_KEY própria e local** — não passa pelo backend do Hermes
+  (`system/api_keys` no Firestore), para não exigir mais uma chamada autenticada só
+  para buscar a chave. É a chave pessoal do usuário, fica só no `.env` local.
+- **Cancelamento de eco pelo navegador** (`getUserMedia({echoCancellation:true})`) em
+  vez de WebRTC APM manual — decisão já registrada na fase anterior da proposta.
+- **Captura via `ScriptProcessorNode`** (não `AudioWorklet`) — API depreciada mas
+  universalmente suportada, simples de embutir inline sem um arquivo de worklet
+  separado; troca por `AudioWorklet` é um upgrade futuro de baixo risco se
+  necessário.
+
+### Verificação feita nesta fase (e o que não pôde ser verificado)
+
+Sem GPU, sem credenciais reais (Firebase/Gemini/MCP deployado) e sem microfone/
+alto-falante físicos neste ambiente de implementação, a verificação foi feita por
+camadas, cada uma isolando a variável relevante:
+
+1. **Sintaxe e imports**: todos os módulos Python compilam e importam corretamente
+   (incluindo `main.py`/FastAPI com a rota `/ws` registrada) com as dependências reais
+   instaladas (`pip install -r requirements.txt`, sem mocks).
+2. **`orchestrator.py`**: testada a conversão de JSON Schema → `types.Schema` do
+   Gemini (tipos, `required`, aninhamento) e a montagem do `types.Tool` a partir de um
+   `tools/list` simulado.
+3. **`mcp_client.py`**: testado com HTTP mockado — formato da requisição JSON-RPC,
+   parsing de `tools/call`/`tools/list`, propagação de `McpError`, e o fluxo de retry
+   em 401 (**um bug real foi encontrado e corrigido aqui**: o retry chamava
+   `auth.get_id_token(force_refresh=True)` e descartava o retorno, contando com efeito
+   colateral de cache em `auth.py` em vez de usar o token renovado diretamente — agora
+   `_call` usa o token devolvido pela chamada com `force_refresh` sem depender de
+   estado implícito entre módulos).
+4. **Ponta a ponta via navegador real (Playwright + Chromium, microfone sintético
+   via `--use-fake-device-for-media-stream`)**: a UI carrega sem erros de console
+   relevantes, o WebSocket conecta, uma mensagem de texto digitada é enviada e uma
+   bolha de erro aparece corretamente quando uma dependência falha (prova que o
+   caminho de erro chega até a UI), e o push-to-talk captura áudio real do
+   dispositivo sintético e envia os frames binários pelo WebSocket
+   (`micChunksSent: 4` em ~1,2s de captura) — ou seja, `getUserMedia` →
+   `AudioContext(16000)` → `ScriptProcessorNode` → conversão para Int16 → envio
+   binário funciona de ponta a ponta no navegador.
+5. **Backend via `Starlette TestClient`** (mesmo app ASGI, sem rede real): o fluxo
+   completo `mic_start` → áudio binário → `mic_stop` → status "Transcrevendo..." →
+   falha controlada da inicialização do faster-whisper → mensagem de erro JSON
+   entregue ao cliente — funcionou corretamente na primeira tentativa.
+6. **Não verificado nesta fase** (bloqueado por limitações do ambiente, não por
+   decisão de escopo): download real do modelo Whisper/voz Piper (o ambiente de
+   implementação bloqueia `huggingface.co` no proxy de saída — confirmado como
+   `403 Forbidden`, reproduzido de forma isolada e determinística); chamada real ao
+   Gemini API; chamada real ao servidor MCP deployado; login real via Firebase Auth
+   REST; qualidade audível do TTS Piper; e o critério de latência "< 4s" fim a fim.
+   Interessante notar: ao rodar via `uvicorn` real (em vez do `TestClient`), a mesma
+   falha de rede do Whisper que retornava em segundos em chamadas isoladas passou a
+   nunca completar dentro da janela observada (~30s) — não foi possível confirmar se
+   é backoff/retry mais agressivo em processo "frio" ou outra particularidade do
+   proxy deste ambiente; como o `TestClient` já prova a lógica da aplicação correta,
+   isso foi registrado como limitação do ambiente de teste, não perseguido mais a
+   fundo. Vale reconfirmar na primeira execução real na máquina do usuário.

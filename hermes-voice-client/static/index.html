@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hermes — Copiloto de Voz</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='11' fill='%236ea8fe'/%3E%3Cpath fill='%230f1115' d='M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1>Hermes <span class="accent">Copiloto de Voz</span></h1>
+      <div class="conn-indicator" id="connIndicator" data-state="connecting">
+        <span class="dot"></span>
+        <span class="conn-label" id="connLabel">conectando...</span>
+      </div>
+    </header>
+
+    <canvas id="waveform" class="waveform" height="90"></canvas>
+
+    <div class="status-line" id="statusLine"></div>
+
+    <main class="chat-log" id="chatLog" aria-live="polite"></main>
+
+    <footer class="composer">
+      <button id="micButton" class="mic-button" type="button" title="Segure para falar">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/>
+        </svg>
+      </button>
+      <input
+        id="textInput"
+        class="text-input"
+        type="text"
+        placeholder="Digite uma mensagem ou segure o microfone para falar..."
+        autocomplete="off"
+      />
+      <button id="sendButton" class="send-button" type="button">Enviar</button>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

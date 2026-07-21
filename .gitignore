@@ -46,6 +46,10 @@ functions_node/.cache/
 services/whatsapp-capture/.wwebjs_auth/
 services/whatsapp-capture/.wwebjs_cache/
 services/whatsapp-capture/node_modules/
+
+# Cliente de voz local (hermes-voice-client) — venv e modelos baixados em runtime
+hermes-voice-client/.venv/
+hermes-voice-client/voices/
 .claude/
 
 # Pastas locais de conhecimento e repositorios
