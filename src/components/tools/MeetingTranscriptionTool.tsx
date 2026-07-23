@@ -438,10 +438,17 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
       startSystemAudioMonitor(systemStream);
 
       const wsUrl = 'wss://api.deepgram.com/v1/listen?model=nova-2&language=pt-BR';
-      const apiKey = import.meta.env.VITE_DEEPGRAM_API_KEY ||
-                     localStorage.getItem('DEEPGRAM_API_KEY') ||
-                     localStorage.getItem('deepgram_api_key') ||
-                     'c915ba7025c121faac69056fc6bbc5e1c0b6e015';
+      let apiKey = import.meta.env.VITE_DEEPGRAM_API_KEY ||
+                   localStorage.getItem('DEEPGRAM_API_KEY') ||
+                   localStorage.getItem('deepgram_api_key');
+
+      if (!apiKey) {
+        const userProvidedKey = window.prompt('Chave da API do Deepgram não encontrada. Insira a sua chave API do Deepgram (será salva no seu navegador):');
+        if (userProvidedKey && userProvidedKey.trim()) {
+          apiKey = userProvidedKey.trim();
+          localStorage.setItem('DEEPGRAM_API_KEY', apiKey);
+        }
+      }
 
       if (!apiKey) {
         showToast('Chave API do Deepgram não configurada.', 'error');
