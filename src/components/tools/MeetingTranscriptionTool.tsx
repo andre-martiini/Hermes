@@ -1,4 +1,4 @@
-﻿import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions, db } from '@/firebase';
 import { collection, addDoc, getDocs, query, orderBy, limit } from 'firebase/firestore';
@@ -438,7 +438,10 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
       startSystemAudioMonitor(systemStream);
 
       const wsUrl = 'wss://api.deepgram.com/v1/listen?model=nova-2&language=pt-BR';
-      const apiKey = import.meta.env.VITE_DEEPGRAM_API_KEY;
+      const apiKey = import.meta.env.VITE_DEEPGRAM_API_KEY ||
+                     localStorage.getItem('DEEPGRAM_API_KEY') ||
+                     localStorage.getItem('deepgram_api_key') ||
+                     'c915ba7025c121faac69056fc6bbc5e1c0b6e015';
 
       if (!apiKey) {
         showToast('Chave API do Deepgram não configurada.', 'error');
