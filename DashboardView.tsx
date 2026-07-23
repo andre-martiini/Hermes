@@ -239,7 +239,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
     const painLogs = useMemo(() => {
         return [...exerciseLogs]
-            .filter(log => log.pain?.morning !== undefined || log.pain?.evening !== undefined)
+            .filter(log => log.pain?.evening !== undefined)
             .sort((a, b) => a.id.localeCompare(b.id))
             .slice(-7);
     }, [exerciseLogs]);
@@ -516,19 +516,11 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                     )}
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-2 mt-0.5">
-                                    <div className="flex flex-col">
-                                        <span className="text-[8px] text-slate-400 font-mono uppercase">Manhã</span>
-                                        <span className="text-xs font-bold font-mono text-slate-700 dark:text-slate-200">
-                                            {todayHealthLog?.pain?.morning !== undefined ? `${todayHealthLog.pain.morning}/10` : '--'}
-                                        </span>
-                                    </div>
-                                    <div className="flex flex-col">
-                                        <span className="text-[8px] text-slate-400 font-mono uppercase">Noite / Telegram</span>
-                                        <span className="text-xs font-bold font-mono text-slate-700 dark:text-slate-200">
-                                            {todayHealthLog?.pain?.evening !== undefined ? `${todayHealthLog.pain.evening}/10` : '--'}
-                                        </span>
-                                    </div>
+                                <div className="flex items-center justify-between mt-0.5">
+                                    <span className="text-[8px] text-slate-400 font-mono uppercase">Registro Noturno (Telegram)</span>
+                                    <span className="text-xs font-bold font-mono text-slate-700 dark:text-slate-200">
+                                        {todayHealthLog?.pain?.evening !== undefined ? `${todayHealthLog.pain.evening}/10` : '--'}
+                                    </span>
                                 </div>
 
                                 {todayHealthLog?.pain?.notes && (
@@ -538,16 +530,16 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 )}
                             </div>
 
-                            {/* 3. MINI GRÁFICO / TENDÊNCIA DE DOR (7 REGISTROS RECENTES) */}
+                            {/* 3. MINI GRÁFICO / TENDÊNCIA DE DOR NOTURNA (7 REGISTROS RECENTES) */}
                             <div className={`p-3.5 rounded-xl border flex flex-col gap-2 ${
                                 isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
                             }`}>
-                                <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Tendência Recente de Dor (0-10)</span>
+                                <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Tendência Recente de Dor Noturna (0-10)</span>
                                 
                                 {painLogs.length >= 2 ? (
                                     <div className="h-16 w-full flex items-end justify-between gap-1 pt-2">
                                         {painLogs.map(log => {
-                                            const val = Math.max(log.pain?.morning ?? 0, log.pain?.evening ?? 0);
+                                            const val = log.pain?.evening ?? 0;
                                             const heightPct = Math.max(val * 10, 10);
                                             const isHigh = val >= 6;
                                             const isMid = val >= 3;
