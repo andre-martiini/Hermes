@@ -242,23 +242,7 @@ export const SpeedDialMenu = ({
         </svg>
       ),
     },
-    {
-      code: 'SYS-001',
-      label: 'Notificações',
-      title: 'Notificações',
-      desc: 'Central de alertas e notificações do sistema.',
-      color: 'text-amber-600',
-      bgColor: 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400',
-      badge: notifications.some(n => !n.isRead)
-        ? <span className={`absolute right-2 top-2 h-2.5 w-2.5 border-2 bg-rose-500 rounded-full ${actionBadgeClass}`} />
-        : null as React.ReactNode,
-      onClick: () => { setOpen(false); onToggleNotifications(); },
-      icon: (
-        <svg className="w-6 h-6 sm:w-7 sm:h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-        </svg>
-      ),
-    },
+
     {
       code: 'SYS-002',
       label: isSyncing ? 'Sincronizando…' : 'Sincronizar',
@@ -294,7 +278,7 @@ export const SpeedDialMenu = ({
     },
   ];
 
-  const hasUrgentBadge = notifications.some(n => !n.isRead) || isSyncing;
+  const hasUrgentBadge = isSyncing;
 
   return (
     <div ref={ref} className="relative flex flex-col items-center">
@@ -433,17 +417,6 @@ export const SpeedDialMenu = ({
         )}
       </button>
 
-      {/* NotificationCenter Panel */}
-      <NotificationCenter
-        notifications={notifications}
-        onMarkAsRead={onMarkAsRead}
-        onDismiss={onDismiss}
-        isOpen={isNotificationCenterOpen}
-        onClose={onCloseNotifications}
-        onUpdateOverdue={onUpdateOverdue}
-        onNavigate={onNavigate}
-        direction={direction}
-      />
     </div>
   );
 };
