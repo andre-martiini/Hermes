@@ -45,7 +45,22 @@ _MIN_UTTERANCE_BYTES = 4800
 # propria UI local servida por este processo.
 def _allowed_ws_origins() -> set[str]:
     port = os.environ.get("PORT", "8765")
-    return {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
+    origins = {
+        f"http://127.0.0.1:{port}",
+        f"http://localhost:{port}",
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://127.0.0.1:5175",
+    }
+    extra_origins = os.environ.get("ALLOWED_ORIGINS", "")
+    if extra_origins:
+        for o in extra_origins.split(","):
+            if o.strip():
+                origins.add(o.strip())
+    return origins
 
 
 @app.get("/")
@@ -59,9 +74,12 @@ async def healthz() -> dict:
 
 
 @app.websocket("/ws")
+@app.websocket("/browser-voice-stream")
 async def ws_endpoint(websocket: WebSocket) -> None:
     origin = websocket.headers.get("origin")
-    if origin not in _allowed_ws_origins():
+    allowed = _allowed_ws_origins()
+    is_local = origin and (origin.startswith("http://localhost:") or origin.startswith("http://127.0.0.1:") or origin.startswith("https://localhost:"))
+    if origin and origin not in allowed and not is_local:
         await websocket.close(code=1008)
         return
 

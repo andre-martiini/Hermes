@@ -150,8 +150,14 @@ def _allowed_browser_origins() -> set[str]:
         {
             "http://localhost:5173",
             "http://127.0.0.1:5173",
+            "http://localhost:5174",
+            "http://127.0.0.1:5174",
+            "http://localhost:5175",
+            "http://127.0.0.1:5175",
             "http://localhost:3001",
             "http://127.0.0.1:3001",
+            "http://localhost:8765",
+            "http://127.0.0.1:8765",
         }
     )
     return origins

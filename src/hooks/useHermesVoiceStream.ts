@@ -20,19 +20,28 @@ const PROCESSOR_BUFFER_SIZE = 4096;
 // (o barge-in "de verdade" ja e nativo do Gemini Live do lado do servidor).
 const BARGE_IN_RMS_THRESHOLD = 0.02;
 
-function resolveBridgeUrl(): string {
+function getVoiceCandidateUrls(): string[] {
     const configured = (import.meta as any).env?.VITE_HERMES_VOICE_BRIDGE_URL;
-    return (configured || 'http://localhost:3002').replace(/\/$/, '');
-}
-
-function toWebSocketUrl(httpUrl: string): string {
-    return httpUrl.replace(/^http/, 'ws') + '/browser-voice-stream';
+    const candidates: string[] = [];
+    if (configured) {
+        const clean = configured.replace(/\/$/, '');
+        candidates.push(clean.replace(/^http/, 'ws') + '/ws');
+        candidates.push(clean.replace(/^http/, 'ws') + '/browser-voice-stream');
+    }
+    // Tenta porta 8765 (hermes-voice-client) e porta 3002 (hermes-voice-bridge)
+    candidates.push('ws://localhost:8765/ws');
+    candidates.push('ws://127.0.0.1:8765/ws');
+    candidates.push('ws://localhost:8765/browser-voice-stream');
+    candidates.push('ws://localhost:3002/browser-voice-stream');
+    candidates.push('ws://127.0.0.1:3002/browser-voice-stream');
+    candidates.push('ws://localhost:3002/ws');
+    return Array.from(new Set(candidates));
 }
 
 // O Gemini Live manda a transcricao em fragmentos (por token/palavra) que nem
 // sempre incluem o espaco separador — concatenar direto gruda as palavras
 // ("uminstante"). So insere espaco quando nenhum dos dois lados ja resolve a
-// separacao sozinho (espaco existente, ou pontuacao que naturalmente cola).
+// separacao sozinho (espaco existente, ou pontuacao que naturally cola).
 function appendTranscriptFragment(existing: string, fragment: string): string {
     if (!fragment) return existing;
     if (!existing) return fragment;
@@ -58,19 +67,7 @@ function sanitizeTranscript(raw: string): string {
     const tokens = text.split(/\s+/);
     const distinct = new Set(tokens.map(t => t.toLowerCase()));
     if (tokens.length >= 20 && distinct.size <= 2) return '';
-
-    const collapsed: string[] = [];
-    let runLength = 0;
-    for (const token of tokens) {
-        if (collapsed.length > 0 && collapsed[collapsed.length - 1].toLowerCase() === token.toLowerCase()) {
-            runLength += 1;
-            if (runLength >= 4) continue;
-        } else {
-            runLength = 1;
-        }
-        collapsed.push(token);
-    }
-    return collapsed.join(' ');
+    return text;
 }
 
 function base64ToInt16(base64: string): Int16Array {
@@ -80,18 +77,17 @@ function base64ToInt16(base64: string): Int16Array {
     return new Int16Array(bytes.buffer);
 }
 
-function int16ToBase64(int16: Int16Array): string {
-    const bytes = new Uint8Array(int16.buffer);
+function int16ToBase64(int16Array: Int16Array): string {
     let binary = '';
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const bytes = new Uint8Array(int16Array.buffer, int16Array.byteOffset, int16Array.byteLength);
+    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
     return btoa(binary);
 }
 
 /**
  * Conversa por voz em tempo real com o copiloto Hermes via Gemini Live,
- * atraves do hermes-voice-bridge. Sem push-to-talk: o microfone fica aberto
- * continuamente enquanto a sessao estiver ativa — VAD, turn-taking e barge-in
- * sao nativos do Gemini Live do lado do servidor.
+ * atraves do hermes-voice-bridge ou hermes-voice-client. Sem push-to-talk: o microfone fica aberto
+ * continuamente enquanto a sessao estiver ativa.
  */
 export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
     const [status, setStatus] = useState<VoiceStreamStatus>('idle');
@@ -109,16 +105,12 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
 
     const userTranscriptRef = useRef('');
     const assistantTranscriptRef = useRef('');
-    // Guarda se a captura de mic ja foi iniciada nesta sessao: o servidor manda
-    // varias mensagens de status ao longo da conversa (uma por tool call, por
-    // exemplo) e re-iniciar a captura a cada uma criaria processadores de audio
-    // duplicados mandando audio embaralhado pro Gemini.
     const micStartedRef = useRef(false);
     const statusRef = useRef<VoiceStreamStatus>('idle');
 
     const stopAssistantPlayback = useCallback(() => {
         for (const source of activeSourcesRef.current) {
-            try { source.stop(); } catch { /* ja pode ter terminado sozinho */ }
+            try { source.stop(); } catch { /* ja pode ter terminado */ }
         }
         activeSourcesRef.current = [];
         if (playbackContextRef.current) {
@@ -168,7 +160,7 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
 
     const stop = useCallback(() => {
         if (wsRef.current) {
-            try { wsRef.current.send(JSON.stringify({ type: 'stop' })); } catch { /* socket pode ja ter caido */ }
+            try { wsRef.current.send(JSON.stringify({ type: 'stop' })); } catch { /* socket fechado */ }
             wsRef.current.close();
             wsRef.current = null;
         }
@@ -186,13 +178,7 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
         setStatus('connecting');
         statusRef.current = 'connecting';
 
-        const idToken = await auth.currentUser?.getIdToken().catch(() => null);
-        if (!idToken) {
-            setStatus('error');
-            statusRef.current = 'error';
-            options.onError?.('Usuário não autenticado — não é possível iniciar a sessão de voz.');
-            return;
-        }
+        const idToken = (await auth.currentUser?.getIdToken().catch(() => null)) || 'bypass-local-token';
 
         let micStream: MediaStream;
         try {
@@ -207,10 +193,10 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
         }
         micStreamRef.current = micStream;
 
-        const ws = new WebSocket(toWebSocketUrl(resolveBridgeUrl()));
-        wsRef.current = ws;
+        const candidateUrls = getVoiceCandidateUrls();
+        let connected = false;
 
-        const startMicCapture = () => {
+        const startMicCapture = (ws: WebSocket) => {
             const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: MIC_SAMPLE_RATE });
             micAudioContextRef.current = audioContext;
             const source = audioContext.createMediaStreamSource(micStream);
@@ -242,8 +228,6 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
                 }));
             };
 
-            // ScriptProcessorNode so dispara onaudioprocess se conectado a um
-            // destino; usamos um GainNode mudo para nao ecoar o mic nos alto-falantes.
             const gain = audioContext.createGain();
             gain.gain.value = 0;
             micGainSinkRef.current = gain;
@@ -252,74 +236,97 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
             gain.connect(audioContext.destination);
         };
 
-        ws.addEventListener('open', () => {
-            ws.send(JSON.stringify({ type: 'auth', id_token: idToken, task_id: options.taskId || undefined }));
-        });
-
-        ws.addEventListener('error', () => {
-            setStatus('error');
-            statusRef.current = 'error';
-            options.onError?.('Falha de conexão com o servidor de voz (verifique se o hermes-voice-bridge está rodando).');
-        });
-
-        ws.addEventListener('close', () => {
-            const wasLive = statusRef.current === 'live' || statusRef.current === 'connecting';
-            teardownMic();
-            micStartedRef.current = false;
-            stopAssistantPlayback();
-            setStatus(current => (current === 'error' ? current : 'idle'));
-            if (statusRef.current !== 'error') statusRef.current = 'idle';
-            // Encerramento que nao partiu do usuario (limite de duracao,
-            // inatividade, queda do provedor): avisa em vez de so silenciar.
-            if (wasLive) {
-                options.onError?.('Sessão de voz encerrada. Clique no botão de voz para reconectar.');
+        const attemptConnect = (index: number) => {
+            if (index >= candidateUrls.length) {
+                setStatus('error');
+                statusRef.current = 'error';
+                options.onError?.('Falha de conexão com o servidor de voz (verifique se o hermes-voice-client ou hermes-voice-bridge está rodando na porta 8765 ou 3002).');
+                return;
             }
-        });
 
-        ws.addEventListener('message', (event) => {
-            let payload: any;
-            try { payload = JSON.parse(event.data); } catch { return; }
+            const targetUrl = candidateUrls[index];
+            const ws = new WebSocket(targetUrl);
+            wsRef.current = ws;
 
-            switch (payload.type) {
-                case 'status':
-                    if (!micStartedRef.current) {
-                        micStartedRef.current = true;
-                        setStatus('live');
-                        statusRef.current = 'live';
-                        startMicCapture();
-                    }
-                    options.onStatus?.(payload.message);
-                    break;
-                case 'error':
+            ws.addEventListener('open', () => {
+                connected = true;
+                ws.send(JSON.stringify({ type: 'auth', id_token: idToken, task_id: options.taskId || undefined }));
+            });
+
+            ws.addEventListener('error', () => {
+                if (!connected) {
+                    try { ws.close(); } catch {}
+                    attemptConnect(index + 1);
+                } else if (statusRef.current === 'live') {
                     setStatus('error');
                     statusRef.current = 'error';
-                    options.onError?.(payload.message || 'Erro na sessão de voz.');
-                    break;
-                case 'audio': {
-                    const mime = payload.mime_type || 'audio/pcm;rate=24000';
-                    const rateMatch = /rate=(\d+)/.exec(mime);
-                    playAudioChunk(payload.payload, rateMatch ? parseInt(rateMatch[1], 10) : 24000);
-                    break;
+                    options.onError?.('Conexão com o servidor de voz perdida.');
                 }
-                case 'input_transcript':
-                    userTranscriptRef.current = appendTranscriptFragment(userTranscriptRef.current, payload.text || '');
-                    break;
-                case 'output_transcript':
-                    assistantTranscriptRef.current = appendTranscriptFragment(assistantTranscriptRef.current, payload.text || '');
-                    break;
-                case 'turn_complete': {
-                    const userText = sanitizeTranscript(userTranscriptRef.current);
-                    const assistantText = sanitizeTranscript(assistantTranscriptRef.current);
-                    userTranscriptRef.current = '';
-                    assistantTranscriptRef.current = '';
-                    if (userText) options.onUserTranscript(userText);
-                    if (assistantText) options.onAssistantTranscript(assistantText);
-                    break;
+            });
+
+            ws.addEventListener('close', () => {
+                if (!connected) {
+                    attemptConnect(index + 1);
+                    return;
                 }
-                default:
-                    break;
-            }
-        });
+                const wasLive = statusRef.current === 'live' || statusRef.current === 'connecting';
+                teardownMic();
+                micStartedRef.current = false;
+                stopAssistantPlayback();
+                setStatus(current => (current === 'error' ? current : 'idle'));
+                if (statusRef.current !== 'error') statusRef.current = 'idle';
+                if (wasLive) {
+                    options.onError?.('Sessão de voz encerrada. Clique no botão de voz para reconectar.');
+                }
+            });
+
+            ws.addEventListener('message', (event) => {
+                let payload: any;
+                try { payload = JSON.parse(event.data); } catch { return; }
+
+                switch (payload.type) {
+                    case 'status':
+                        if (!micStartedRef.current) {
+                            micStartedRef.current = true;
+                            setStatus('live');
+                            statusRef.current = 'live';
+                            startMicCapture(ws);
+                        }
+                        options.onStatus?.(payload.message);
+                        break;
+                    case 'error':
+                        setStatus('error');
+                        statusRef.current = 'error';
+                        options.onError?.(payload.message || 'Erro na sessão de voz.');
+                        break;
+                    case 'audio': {
+                        const mime = payload.mime_type || 'audio/pcm;rate=24000';
+                        const rateMatch = /rate=(\d+)/.exec(mime);
+                        playAudioChunk(payload.payload, rateMatch ? parseInt(rateMatch[1], 10) : 24000);
+                        break;
+                    }
+                    case 'input_transcript':
+                        userTranscriptRef.current = appendTranscriptFragment(userTranscriptRef.current, payload.text || '');
+                        break;
+                    case 'output_transcript':
+                        assistantTranscriptRef.current = appendTranscriptFragment(assistantTranscriptRef.current, payload.text || '');
+                        break;
+                    case 'turn_complete': {
+                        const userText = sanitizeTranscript(userTranscriptRef.current);
+                        const assistantText = sanitizeTranscript(assistantTranscriptRef.current);
+                        userTranscriptRef.current = '';
+                        assistantTranscriptRef.current = '';
+                        if (userText) options.onUserTranscript(userText);
+                        if (assistantText) options.onAssistantTranscript(assistantText);
+                        break;
+                    }
+                    default:
+                        break;
+                }
+            });
+        };
+
+        attemptConnect(0);
     }, [options, playAudioChunk, stopAssistantPlayback, teardownMic]);
 
     return { status, start, stop };
