@@ -986,10 +986,13 @@ const FinanceView = ({
 
                                     {/* Eixo X - Rótulos dos Dias */}
                                     <div className="flex justify-between text-[9px] font-mono text-slate-400 px-1 border-t border-slate-200/50 dark:border-white/5 pt-2">
-                                        {Array.from({ length: Math.ceil(daysInMonth / 5) + 1 }).map((_, idx) => {
-                                            const dayNum = Math.min(idx * 5 + 1, daysInMonth);
-                                            return <span key={dayNum}>DIA {String(dayNum).padStart(2, '0')}</span>;
-                                        })}
+                                        {Array.from({ length: Math.ceil(daysInMonth / 5) + 1 })
+                                            .map((_, idx) => Math.min(idx * 5 + 1, daysInMonth))
+                                            .filter((dayNum, i, arr) => arr.indexOf(dayNum) === i)
+                                            .map((dayNum) => (
+                                                <span key={`tick-${dayNum}`}>DIA {String(dayNum).padStart(2, '0')}</span>
+                                            ))
+                                        }
                                     </div>
                                 </div>
 
