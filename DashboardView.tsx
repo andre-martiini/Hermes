@@ -537,24 +537,27 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Tendência Recente de Dor Noturna (0-10)</span>
                                 
                                 {painLogs.length >= 2 ? (
-                                    <div className="h-16 w-full flex items-end justify-between gap-1 pt-2">
+                                    <div className="h-20 w-full flex items-end justify-between gap-1.5 pt-2">
                                         {painLogs.map(log => {
                                             const val = log.pain?.evening ?? 0;
-                                            const heightPct = Math.max(val * 10, 10);
+                                            const heightPct = Math.max(val * 10, 8);
                                             const isHigh = val >= 6;
                                             const isMid = val >= 3;
                                             const dayLabel = log.id.split('-')[2] || log.id;
                                             return (
-                                                <div key={log.id} className="flex-1 flex flex-col items-center gap-1 group/bar relative">
-                                                    <div 
-                                                        className={`w-full rounded-t transition-all duration-300 ${
-                                                            log.pain?.crisis ? 'bg-rose-600' : isHigh ? 'bg-rose-500' : isMid ? 'bg-amber-500' : 'bg-emerald-500'
-                                                        }`}
-                                                        style={{ height: `${heightPct}%` }}
-                                                    />
-                                                    <span className="text-[8px] font-mono text-slate-400">{dayLabel}</span>
-                                                    <div className="absolute -top-7 hidden group-hover/bar:block bg-slate-900 text-white text-[9px] px-1.5 py-0.5 rounded shadow z-10 whitespace-nowrap font-mono">
-                                                        {log.id}: {val}/10
+                                                <div key={log.id} className="flex-1 h-full flex flex-col justify-end items-center group/bar relative">
+                                                    <div className="w-full flex-1 flex items-end justify-center">
+                                                        <div 
+                                                            className={`w-full rounded-t transition-all duration-300 ${
+                                                                log.pain?.crisis ? 'bg-rose-600' : isHigh ? 'bg-rose-500' : isMid ? 'bg-amber-500' : 'bg-emerald-500'
+                                                            }`}
+                                                            style={{ height: `${heightPct}%` }}
+                                                        />
+                                                    </div>
+                                                    <span className="text-[8px] font-mono text-slate-400 font-semibold mt-1 shrink-0">{dayLabel}</span>
+                                                    <div className="absolute -top-8 hidden group-hover/bar:flex flex-col items-center bg-slate-900 text-white text-[9px] px-2 py-1 rounded shadow-xl z-20 whitespace-nowrap font-mono border border-slate-700 pointer-events-none">
+                                                        <span className="font-bold text-amber-400">{log.id}</span>
+                                                        <span>Dor Noturna: {val}/10</span>
                                                     </div>
                                                 </div>
                                             );
