@@ -94,6 +94,8 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         await websocket.close(code=1011)
         return
 
+    await websocket.send_json({"type": "status", "message": "Conectado ao Hermes Voice."})
+
     loop = asyncio.get_event_loop()
 
     def status_cb(message: str) -> None:
@@ -133,11 +135,29 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     continue
 
                 msg_type = payload.get("type")
-                if msg_type == "mic_start":
+                if msg_type in ("auth", "hello"):
+                    await websocket.send_json({"type": "status", "message": "Autenticado."})
+                elif msg_type == "audio":
+                    b64_audio = payload.get("payload")
+                    if b64_audio:
+                        try:
+                            raw_pcm = base64.b64decode(b64_audio)
+                            recording_buffer.extend(raw_pcm)
+                            is_recording = True
+                        except Exception:
+                            pass
+                elif msg_type == "mic_start":
                     cancel_current_turn()
                     recording_buffer = bytearray()
                     is_recording = True
-                elif msg_type == "mic_stop":
+                elif msg_type in ("mic_stop", "stop"):
+                    is_recording = False
+                    pcm_bytes = bytes(recording_buffer)
+                    recording_buffer = bytearray()
+                    if pcm_bytes:
+                        current_turn_task = asyncio.create_task(
+                            _handle_utterance_audio(websocket, session, loop, pcm_bytes)
+                        )
                     is_recording = False
                     pcm_bytes = bytes(recording_buffer)
                     recording_buffer = bytearray()

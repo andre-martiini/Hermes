@@ -250,6 +250,12 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
 
             ws.addEventListener('open', () => {
                 connected = true;
+                setStatus('live');
+                statusRef.current = 'live';
+                if (!micStartedRef.current) {
+                    micStartedRef.current = true;
+                    startMicCapture(ws);
+                }
                 ws.send(JSON.stringify({ type: 'auth', id_token: idToken, task_id: options.taskId || undefined }));
             });
 
@@ -286,12 +292,6 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
 
                 switch (payload.type) {
                     case 'status':
-                        if (!micStartedRef.current) {
-                            micStartedRef.current = true;
-                            setStatus('live');
-                            statusRef.current = 'live';
-                            startMicCapture(ws);
-                        }
                         options.onStatus?.(payload.message);
                         break;
                     case 'error':
@@ -299,16 +299,20 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
                         statusRef.current = 'error';
                         options.onError?.(payload.message || 'Erro na sessão de voz.');
                         break;
-                    case 'audio': {
-                        const mime = payload.mime_type || 'audio/pcm;rate=24000';
+                    case 'audio':
+                    case 'assistant_audio': {
+                        const mime = payload.mime_type || `audio/pcm;rate=${payload.sampleRate || 24000}`;
                         const rateMatch = /rate=(\d+)/.exec(mime);
-                        playAudioChunk(payload.payload, rateMatch ? parseInt(rateMatch[1], 10) : 24000);
+                        playAudioChunk(payload.payload, rateMatch ? parseInt(rateMatch[1], 10) : (payload.sampleRate || 24000));
                         break;
                     }
                     case 'input_transcript':
+                    case 'user_transcript':
                         userTranscriptRef.current = appendTranscriptFragment(userTranscriptRef.current, payload.text || '');
                         break;
                     case 'output_transcript':
+                    case 'assistant_text':
+                    case 'assistant_transcript':
                         assistantTranscriptRef.current = appendTranscriptFragment(assistantTranscriptRef.current, payload.text || '');
                         break;
                     case 'turn_complete': {
