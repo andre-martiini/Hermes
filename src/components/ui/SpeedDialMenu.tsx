@@ -139,11 +139,11 @@ export const SpeedDialMenu = ({
     },
     {
       code: 'ID-004',
-      label: 'Transcrição de Áudio',
-      title: 'Transcrição de Áudio',
+      label: 'Transcrição Rápida',
+      title: 'Transcrição Rápida',
       desc: 'Transcreva e refine áudios do WhatsApp e outros.',
-      color: 'text-purple-600',
-      bgColor: 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
+      color: 'text-rose-600',
+      bgColor: 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400',
       badge: null as React.ReactNode,
       onClick: () => { setOpen(false); onOpenTranscription(); },
       icon: (

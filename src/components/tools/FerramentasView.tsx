@@ -230,11 +230,11 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
       {
         id: 'transcription',
         code: 'ID-004',
-        title: 'Transcrição de Áudio',
+        title: 'Transcrição Rápida',
         desc: 'Transcreva e refine áudios do WhatsApp e outros.',
-        dotColor: 'bg-purple-500',
-        iconClasses: isDark ? 'text-purple-400 group-hover:bg-purple-600' : 'text-purple-600 group-hover:bg-purple-600',
-        lineColor: 'group-hover:bg-purple-500',
+        dotColor: 'bg-rose-500',
+        iconClasses: isDark ? 'text-rose-400 group-hover:bg-rose-600' : 'text-rose-600 group-hover:bg-rose-600',
+        lineColor: 'group-hover:bg-rose-500',
         icon: <svg className="w-6 h-6 md:w-7 md:h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
       },
 
