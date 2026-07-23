@@ -1,8 +1,27 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill, BillRubric, IncomeEntry, IncomeRubric } from './types';
 import { storage, db } from './firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, setDoc } from 'firebase/firestore';
+
+const parseDateDay = (dateStr?: string) => {
+    if (!dateStr) return null;
+    const isoMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+        return {
+            year: Number(isoMatch[1]),
+            month: Number(isoMatch[2]) - 1,
+            day: Number(isoMatch[3])
+        };
+    }
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return null;
+    return {
+        year: d.getFullYear(),
+        month: d.getMonth(),
+        day: d.getDate()
+    };
+};
 import { resolveTwoStepAction } from './src/utils/destructiveActions';
 import { NFSeGenerator } from './src/components/NFSeGenerator';
 import { FinancialHealthCard } from './src/components/FinancialHealthCard';
@@ -189,6 +208,9 @@ const FinanceView = ({
 
     // NFSe Generator State
     const [isNFSeGeneratorOpen, setIsNFSeGeneratorOpen] = useState(false);
+
+    // Budget Chart Selector Tab ('accumulated' | 'daily')
+    const [budgetChartTab, setBudgetChartTab] = useState<'accumulated' | 'daily'>('accumulated');
 
     // Emergency Reserve Local State for Sync
     const [localEmergencyCurrent, setLocalEmergencyCurrent] = useState(emergencyReserve.current);
@@ -404,6 +426,62 @@ const FinanceView = ({
     };
 
     const health = getHealthStatus();
+
+    // --- DAILY CONSUMPTION CHART CALCULATIONS ---
+    const currentMonthTransactionsList = useMemo(() => {
+        return transactions.filter(t => {
+            const parts = parseDateDay(t.date);
+            return parts && parts.month === currentMonth && parts.year === currentYear;
+        });
+    }, [transactions, currentMonth, currentYear]);
+
+    const dailyChartData = useMemo(() => {
+        const amountByDay = new Map<number, { amount: number; count: number }>();
+        currentMonthTransactionsList.forEach(t => {
+            const parts = parseDateDay(t.date);
+            if (!parts) return;
+            const prev = amountByDay.get(parts.day) || { amount: 0, count: 0 };
+            amountByDay.set(parts.day, {
+                amount: prev.amount + t.amount,
+                count: prev.count + 1
+            });
+        });
+
+        const now = new Date();
+        const isCurrentMonth = now.getMonth() === currentMonth && now.getFullYear() === currentYear;
+        const currentDay = isCurrentMonth ? now.getDate() : 0;
+
+        return Array.from({ length: daysInMonth }, (_, idx) => {
+            const day = idx + 1;
+            const data = amountByDay.get(day) || { amount: 0, count: 0 };
+            return {
+                day,
+                amount: data.amount,
+                count: data.count,
+                isToday: day === currentDay,
+                isPast: isCurrentMonth ? day <= currentDay : true
+            };
+        });
+    }, [currentMonthTransactionsList, daysInMonth, currentMonth, currentYear]);
+
+    const maxDailyAmount = useMemo(() => {
+        return Math.max(...dailyChartData.map(d => d.amount), 1);
+    }, [dailyChartData]);
+
+    const peakDay = useMemo(() => {
+        let max = { day: 0, amount: 0 };
+        dailyChartData.forEach(d => {
+            if (d.amount > max.amount) max = { day: d.day, amount: d.amount };
+        });
+        return max;
+    }, [dailyChartData]);
+
+    const averageDailySpend = useMemo(() => {
+        const now = new Date();
+        const isCurrentMonth = now.getMonth() === currentMonth && now.getFullYear() === currentYear;
+        const elapsedDays = isCurrentMonth ? Math.max(now.getDate(), 1) : daysInMonth;
+        return currentMonthTotal / elapsedDays;
+    }, [currentMonthTotal, currentMonth, currentYear, daysInMonth]);
 
     const handleSaveBill = async () => {
         if (!newBill.description || newBill.amount === undefined || newBill.amount === null) return;
@@ -743,64 +821,190 @@ const FinanceView = ({
                             <p className="text-[9px] font-sans font-semibold uppercase text-slate-400 tracking-wider">Saldo Líquido Estimado</p>
                         </div>
                     </div>
-                    {/* Budget Bar Section */}
-                    <div className="bg-surface p-6 md:p-8 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none relative overflow-hidden">
-                        <div className="flex justify-between items-end mb-6">
+                    {/* Budget Bar & Daily Consumption Section */}
+                    <div className="bg-surface p-6 md:p-8 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none relative overflow-hidden flex flex-col gap-6">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                             <div>
-                                <h4 className="text-2xl font-sans font-semibold text-on-surface tracking-tight mb-1">
-                                    // GASTO ACUMULADO • {new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}
+                                <h4 className="text-xl md:text-2xl font-sans font-semibold text-on-surface tracking-tight mb-1">
+                                    {budgetChartTab === 'accumulated'
+                                        ? `// GASTO ACUMULADO • ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}`
+                                        : `// CONSUMO DIÁRIO DO PERÍODO • ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}`
+                                    }
                                 </h4>
-                                <div className="text-2xl md:text-5xl font-sans font-semibold text-on-surface tracking-tighter leading-none">
-                                    R$ {currentMonthTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                    <span className="text-slate-400 text-sm md:text-2xl ml-1">/ {currentBudget.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                                </div>
-                                <div className="flex flex-wrap gap-4 mt-2">
-                                    <p className="text-slate-500 text-[9px] md:text-[10px] font-sans font-semibold uppercase tracking-widest flex items-center gap-1">
-                                        <span className="w-1 h-1 bg-primary-tactile rounded-full"></span>
-                                        DISPONÍVEL: R$ {(currentBudget - currentMonthTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                    </p>
-                                </div>
+                                <p className="text-[10px] font-sans text-slate-500 uppercase tracking-wider">
+                                    {budgetChartTab === 'accumulated'
+                                        ? 'Progresso orçamentário mensal e tempo decorrido'
+                                        : 'Detalhamento diário dos lançamentos e picos de consumo do mês'
+                                    }
+                                </p>
                             </div>
-                            <div className={`px-3 py-1.5 rounded-soft-touch text-[9px] md:text-[10px] font-sans font-semibold uppercase tracking-widest text-white shadow-sm ${getSprintStatus()}`}>
-                                SPRINT {currentSprint}
+
+                            <div className="flex items-center gap-3 self-end sm:self-auto">
+                                {/* TAB SELECTOR */}
+                                <div className="flex p-1 bg-slate-100 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/10">
+                                    <button
+                                        type="button"
+                                        onClick={() => setBudgetChartTab('accumulated')}
+                                        className={`px-3 py-1.5 rounded-lg text-[9px] md:text-[10px] font-sans font-bold uppercase tracking-wider transition-all ${
+                                            budgetChartTab === 'accumulated'
+                                                ? 'bg-white dark:bg-slate-800 text-primary-tactile shadow-sm'
+                                                : 'text-slate-500 hover:text-on-surface'
+                                        }`}
+                                    >
+                                        Acumulado
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setBudgetChartTab('daily')}
+                                        className={`px-3 py-1.5 rounded-lg text-[9px] md:text-[10px] font-sans font-bold uppercase tracking-wider transition-all ${
+                                            budgetChartTab === 'daily'
+                                                ? 'bg-white dark:bg-slate-800 text-primary-tactile shadow-sm'
+                                                : 'text-slate-500 hover:text-on-surface'
+                                        }`}
+                                    >
+                                        Consumo Diário
+                                    </button>
+                                </div>
+
+                                <div className={`px-3 py-1.5 rounded-soft-touch text-[9px] md:text-[10px] font-sans font-semibold uppercase tracking-widest text-white shadow-sm shrink-0 ${getSprintStatus()}`}>
+                                    SPRINT {currentSprint}
+                                </div>
                             </div>
                         </div>
 
-                        <div className="relative h-4 overflow-visible">
-                            <div className="absolute inset-0 bg-slate-200 rounded-lg overflow-hidden border border-[#e5e7eb] dark:border-white/10">
-                                <div
-                                    className={`h-full transition-all duration-1000 ${getBudgetColor(budgetPercentage)}`}
-                                    style={{ width: `${budgetPercentage}%` }}
-                                />
-                            </div>
-                            <div className="absolute top-0 bottom-0 left-[25%] w-px bg-on-surface/10 z-10"></div>
-                            <div className="absolute top-0 bottom-0 left-[50%] w-px bg-on-surface/10 z-10"></div>
-                            <div className="absolute top-0 bottom-0 left-[75%] w-px bg-on-surface/10 z-10"></div>
-
-                            {monthProgress !== null && (
-                                <div
-                                    className="absolute top-1/2 -translate-y-1/2 z-20"
-                                    style={{ left: `${Math.min(monthProgress, 100)}%` }}
-                                >
-                                    <div className="relative -translate-x-1/2">
-                                        <div className="absolute left-1/2 -top-6 h-6 w-px bg-on-surface/30" />
-                                        <div className="absolute left-1/2 top-2 h-2 w-2 -translate-x-1/2 bg-on-surface border border-surface" />
-                                        <div className="absolute left-1/2 -top-10 -translate-x-1/2 whitespace-nowrap bg-on-surface px-2 py-0.5 text-[8px] font-sans font-semibold uppercase tracking-widest text-white">
-                                            ATUAL
-                                        </div>
+                        {budgetChartTab === 'accumulated' ? (
+                            <div className="flex flex-col gap-6">
+                                <div>
+                                    <div className="text-2xl md:text-5xl font-sans font-semibold text-on-surface tracking-tighter leading-none">
+                                        R$ {currentMonthTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        <span className="text-slate-400 text-sm md:text-2xl ml-1">/ {currentBudget.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                    </div>
+                                    <div className="flex flex-wrap gap-4 mt-2">
+                                        <p className="text-slate-500 text-[9px] md:text-[10px] font-sans font-semibold uppercase tracking-widest flex items-center gap-1">
+                                            <span className="w-1 h-1 bg-primary-tactile rounded-full"></span>
+                                            DISPONÍVEL: R$ {(currentBudget - currentMonthTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </p>
                                     </div>
                                 </div>
-                            )}
 
-                            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-sans font-semibold text-on-surface/40">
-                                {budgetPercentage.toFixed(1)}%
+                                <div className="relative h-4 overflow-visible">
+                                    <div className="absolute inset-0 bg-slate-200 rounded-lg overflow-hidden border border-[#e5e7eb] dark:border-white/10">
+                                        <div
+                                            className={`h-full transition-all duration-1000 ${getBudgetColor(budgetPercentage)}`}
+                                            style={{ width: `${budgetPercentage}%` }}
+                                        />
+                                    </div>
+                                    <div className="absolute top-0 bottom-0 left-[25%] w-px bg-on-surface/10 z-10"></div>
+                                    <div className="absolute top-0 bottom-0 left-[50%] w-px bg-on-surface/10 z-10"></div>
+                                    <div className="absolute top-0 bottom-0 left-[75%] w-px bg-on-surface/10 z-10"></div>
+
+                                    {monthProgress !== null && (
+                                        <div
+                                            className="absolute top-1/2 -translate-y-1/2 z-20"
+                                            style={{ left: `${Math.min(monthProgress, 100)}%` }}
+                                        >
+                                            <div className="relative -translate-x-1/2">
+                                                <div className="absolute left-1/2 -top-6 h-6 w-px bg-on-surface/30" />
+                                                <div className="absolute left-1/2 top-2 h-2 w-2 -translate-x-1/2 bg-on-surface border border-surface" />
+                                                <div className="absolute left-1/2 -top-10 -translate-x-1/2 whitespace-nowrap bg-on-surface px-2 py-0.5 text-[8px] font-sans font-semibold uppercase tracking-widest text-white">
+                                                    ATUAL
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-sans font-semibold text-on-surface/40">
+                                        {budgetPercentage.toFixed(1)}%
+                                    </div>
+                                </div>
+
+                                <div className="flex justify-between text-[9px] font-sans font-semibold text-slate-500 uppercase tracking-widest">
+                                    <span>01 / MONTH_START</span>
+                                    <span>MONTH_END / {daysInMonth}</span>
+                                </div>
                             </div>
-                        </div>
+                        ) : (
+                            <div className="flex flex-col gap-6">
+                                {/* Resumo de Métricas Diárias */}
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                    <div className="p-3.5 rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] flex flex-col gap-1">
+                                        <span className="text-[9px] font-sans font-bold uppercase tracking-wider text-slate-400">Total Gasto (Mês)</span>
+                                        <span className="text-base font-sans font-bold text-on-surface">
+                                            R$ {currentMonthTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </span>
+                                    </div>
+                                    <div className="p-3.5 rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] flex flex-col gap-1">
+                                        <span className="text-[9px] font-sans font-bold uppercase tracking-wider text-slate-400">Média Diária (Decorridos)</span>
+                                        <span className="text-base font-sans font-bold text-primary-tactile">
+                                            R$ {averageDailySpend.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </span>
+                                    </div>
+                                    <div className="p-3.5 rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] flex flex-col gap-1">
+                                        <span className="text-[9px] font-sans font-bold uppercase tracking-wider text-slate-400">Pico de Gasto Diário</span>
+                                        <span className="text-base font-sans font-bold text-rose-500">
+                                            {peakDay.amount > 0 ? `R$ ${peakDay.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (Dia ${String(peakDay.day).padStart(2, '0')})` : 'Sem lançamentos'}
+                                        </span>
+                                    </div>
+                                </div>
 
-                        <div className="mt-4 flex justify-between text-[9px] font-sans font-semibold text-slate-500 uppercase tracking-widest">
-                            <span>01 / MONTH_START</span>
-                            <span>MONTH_END / {daysInMonth}</span>
-                        </div>
+                                {/* Gráfico de Barras Diário Detalhado */}
+                                <div className="flex flex-col gap-2">
+                                    <div className="h-44 w-full flex items-end gap-1 sm:gap-1.5 pt-6 pb-2 px-1 relative">
+                                        {dailyChartData.map((item) => {
+                                            const heightPercent = item.amount > 0 ? Math.max((item.amount / maxDailyAmount) * 100, 6) : 0;
+                                            const isPeak = item.day === peakDay.day && peakDay.amount > 0;
+
+                                            return (
+                                                <div key={item.day} className="flex-1 min-w-[6px] h-full flex flex-col justify-end items-center group relative">
+                                                    <div
+                                                        style={{ height: item.amount > 0 ? `${heightPercent}%` : '3px' }}
+                                                        className={`w-full rounded-t transition-all duration-300 ${
+                                                            item.isToday
+                                                                ? 'bg-[#9333ea] shadow-[0_0_8px_rgba(147,51,234,0.5)] ring-1 ring-white'
+                                                                : isPeak
+                                                                ? 'bg-rose-500 group-hover:bg-rose-400'
+                                                                : item.amount > 0
+                                                                ? 'bg-emerald-500/70 dark:bg-emerald-400/60 group-hover:bg-emerald-500'
+                                                                : 'bg-slate-200 dark:bg-white/10'
+                                                        }`}
+                                                    />
+
+                                                    {/* Tooltip no Hover */}
+                                                    <div className="absolute -top-12 hidden group-hover:flex flex-col items-center bg-slate-900 text-white text-[9px] px-2.5 py-1.5 rounded-lg shadow-xl z-30 whitespace-nowrap font-mono border border-slate-700 pointer-events-none">
+                                                        <span className="font-bold text-emerald-400">Dia {String(item.day).padStart(2, '0')}: R$ {item.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                        <span className="text-[8px] text-slate-300">{item.count} lançamento(s)</span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+
+                                    {/* Eixo X - Rótulos dos Dias */}
+                                    <div className="flex justify-between text-[9px] font-mono text-slate-400 px-1 border-t border-slate-200/50 dark:border-white/5 pt-2">
+                                        {Array.from({ length: Math.ceil(daysInMonth / 5) + 1 }).map((_, idx) => {
+                                            const dayNum = Math.min(idx * 5 + 1, daysInMonth);
+                                            return <span key={dayNum}>DIA {String(dayNum).padStart(2, '0')}</span>;
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* Legenda */}
+                                <div className="flex flex-wrap items-center justify-between text-[9px] font-mono text-slate-500 gap-3">
+                                    <div className="flex items-center gap-4">
+                                        <span className="flex items-center gap-1.5">
+                                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Gastos Diários
+                                        </span>
+                                        <span className="flex items-center gap-1.5">
+                                            <span className="w-2 h-2 rounded-full bg-rose-500"></span> Pico do Mês
+                                        </span>
+                                        <span className="flex items-center gap-1.5">
+                                            <span className="w-2 h-2 rounded-full bg-[#9333ea]"></span> Hoje
+                                        </span>
+                                    </div>
+                                    <span className="italic">* Passe o cursor sobre as barras para ver o detalhamento diário.</span>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* Content Grid */}
