@@ -24,7 +24,6 @@ const parseDateDay = (dateStr?: string) => {
 };
 import { resolveTwoStepAction } from './src/utils/destructiveActions';
 import { NFSeGenerator } from './src/components/NFSeGenerator';
-import { FinancialHealthCard } from './src/components/FinancialHealthCard';
 interface FinanceViewProps {
     transactions: FinanceTransaction[];
     goals: FinanceGoal[];
@@ -749,20 +748,6 @@ const FinanceView = ({
             {/* DASHBOARD VIEW */}
             {activeTab === 'dashboard' && (
                 <div className="flex flex-col gap-6 md:gap-8">
-                    <FinancialHealthCard
-                        transactions={transactions}
-                        goals={goals}
-                        emergencyReserve={emergencyReserve}
-                        settings={settings}
-                        currentMonthTotal={currentMonthTotal}
-                        currentMonthIncome={currentMonthIncome}
-                        fixedBills={fixedBills}
-                        incomeEntries={incomeEntries}
-                        currentMonth={currentMonth}
-                        currentYear={currentYear}
-                        onOpenFinancialCopilot={onOpenFinancialCopilot}
-                    />
-
                     {/* COMPARATIVE HUB */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="lg:col-span-2 bg-surface p-6 md:p-8 rounded-2xl border border-slate-200 dark:border-white/10 shadow-card flex flex-col justify-between relative overflow-hidden group">
