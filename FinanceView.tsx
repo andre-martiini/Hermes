@@ -211,6 +211,9 @@ const FinanceView = ({
     // Budget Chart Selector Tab ('accumulated' | 'daily')
     const [budgetChartTab, setBudgetChartTab] = useState<'accumulated' | 'daily'>('accumulated');
 
+    // Selected Day Modal State
+    const [selectedDayModal, setSelectedDayModal] = useState<number | null>(null);
+
     // Emergency Reserve Local State for Sync
     const [localEmergencyCurrent, setLocalEmergencyCurrent] = useState(emergencyReserve.current);
     const [localEmergencyTarget, setLocalEmergencyTarget] = useState(emergencyReserve.target);
@@ -481,6 +484,18 @@ const FinanceView = ({
         const elapsedDays = isCurrentMonth ? Math.max(now.getDate(), 1) : daysInMonth;
         return currentMonthTotal / elapsedDays;
     }, [currentMonthTotal, currentMonth, currentYear, daysInMonth]);
+
+    const selectedDayTransactions = useMemo(() => {
+        if (selectedDayModal === null) return [];
+        return currentMonthTransactionsList.filter(t => {
+            const parts = parseDateDay(t.date);
+            return parts && parts.day === selectedDayModal;
+        }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }, [selectedDayModal, currentMonthTransactionsList]);
+
+    const selectedDayTotal = useMemo(() => {
+        return selectedDayTransactions.reduce((acc, t) => acc + t.amount, 0);
+    }, [selectedDayTransactions]);
 
     const handleSaveBill = async () => {
         if (!newBill.description || newBill.amount === undefined || newBill.amount === null) return;
@@ -932,7 +947,7 @@ const FinanceView = ({
                                     </div>
                                 </div>
 
-                                {/* Gráfico de Barras Diário Detalhado */}
+                                 {/* Gráfico de Barras Diário Detalhado */}
                                 <div className="flex flex-col gap-2">
                                     <div className="h-44 w-full flex items-end gap-1 sm:gap-1.5 pt-6 pb-2 px-1 relative">
                                         {dailyChartData.map((item) => {
@@ -940,7 +955,12 @@ const FinanceView = ({
                                             const isPeak = item.day === peakDay.day && peakDay.amount > 0;
 
                                             return (
-                                                <div key={item.day} className="flex-1 min-w-[6px] h-full flex flex-col justify-end items-center group relative">
+                                                <div
+                                                    key={item.day}
+                                                    onClick={() => setSelectedDayModal(item.day)}
+                                                    className="flex-1 min-w-[6px] h-full flex flex-col justify-end items-center group relative cursor-pointer"
+                                                    title={`Clique para ver lançamentos do Dia ${String(item.day).padStart(2, '0')}`}
+                                                >
                                                     <div
                                                         style={{ height: item.amount > 0 ? `${heightPercent}%` : '3px' }}
                                                         className={`w-full rounded-t transition-all duration-300 ${
@@ -951,13 +971,13 @@ const FinanceView = ({
                                                                 : item.amount > 0
                                                                 ? 'bg-emerald-500/70 dark:bg-emerald-400/60 group-hover:bg-emerald-500'
                                                                 : 'bg-slate-200 dark:bg-white/10'
-                                                        }`}
+                                                        } group-hover:brightness-110`}
                                                     />
 
                                                     {/* Tooltip no Hover */}
-                                                    <div className="absolute -top-12 hidden group-hover:flex flex-col items-center bg-slate-900 text-white text-[9px] px-2.5 py-1.5 rounded-lg shadow-xl z-30 whitespace-nowrap font-mono border border-slate-700 pointer-events-none">
+                                                    <div className="absolute -top-14 hidden group-hover:flex flex-col items-center bg-slate-900 text-white text-[9px] px-2.5 py-1.5 rounded-lg shadow-xl z-30 whitespace-nowrap font-mono border border-slate-700 pointer-events-none">
                                                         <span className="font-bold text-emerald-400">Dia {String(item.day).padStart(2, '0')}: R$ {item.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                                                        <span className="text-[8px] text-slate-300">{item.count} lançamento(s)</span>
+                                                        <span className="text-[8px] text-slate-300">{item.count} lançamento(s) • Clique para ver</span>
                                                     </div>
                                                 </div>
                                             );
@@ -986,11 +1006,118 @@ const FinanceView = ({
                                             <span className="w-2 h-2 rounded-full bg-[#9333ea]"></span> Hoje
                                         </span>
                                     </div>
-                                    <span className="italic">* Passe o cursor sobre as barras para ver o detalhamento diário.</span>
+                                    <span className="italic">* Passe o cursor ou clique nas barras para ver os lançamentos do dia.</span>
                                 </div>
                             </div>
                         )}
                     </div>
+
+                    {/* Modal Detalhado de Lançamentos do Dia */}
+                    {selectedDayModal !== null && (
+                        <div
+                            className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+                            onClick={() => setSelectedDayModal(null)}
+                        >
+                            <div
+                                className="w-full max-w-xl bg-surface border border-[#e5e7eb] dark:border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200"
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                {/* Modal Header */}
+                                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02] shrink-0">
+                                    <div>
+                                        <h3 className="text-sm md:text-base font-sans font-bold uppercase tracking-tight text-on-surface flex items-center gap-2">
+                                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                                            LANÇAMENTOS DO DIA {String(selectedDayModal).padStart(2, '0')} DE {new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth)).toUpperCase()}
+                                        </h3>
+                                        <p className="text-xs text-slate-500 font-sans mt-0.5">
+                                            {selectedDayTransactions.length} lançamento(s) registrado(s) • Total: <strong className="text-on-surface">R$ {selectedDayTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedDayModal(null)}
+                                        className="px-3 py-1.5 rounded-xl text-slate-400 hover:text-on-surface hover:bg-slate-200/50 dark:hover:bg-white/10 transition-all font-mono text-xs font-bold"
+                                    >
+                                        ✕ FECHAR
+                                    </button>
+                                </div>
+
+                                {/* Modal Content */}
+                                <div className="p-5 overflow-y-auto custom-scrollbar flex-1 space-y-3">
+                                    {selectedDayTransactions.length > 0 ? (
+                                        selectedDayTransactions.map((t) => (
+                                            <div
+                                                key={t.id}
+                                                className="group relative flex flex-col sm:flex-row sm:justify-between sm:items-center p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-xl hover:border-primary-tactile/50 transition-all shadow-sm gap-3"
+                                            >
+                                                <div className="flex items-center gap-3.5 min-w-0">
+                                                    <div className="w-10 h-10 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-center text-on-surface font-sans font-bold text-xs shrink-0">
+                                                        {String(selectedDayModal).padStart(2, '0')}
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <div
+                                                            className="text-xs font-sans font-bold text-on-surface uppercase tracking-tight truncate pr-2"
+                                                            title={t.description}
+                                                        >
+                                                            {t.description || 'LOG_ITEM_STREAM'}
+                                                        </div>
+                                                        <div className="flex items-center gap-2 text-[9px] text-slate-400 font-sans font-semibold uppercase tracking-widest mt-0.5">
+                                                            <span>{new Date(t.date).toLocaleDateString('pt-BR')}</span>
+                                                            {t.sprint && <span>// SPRINT_{t.sprint}</span>}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex items-center justify-between sm:justify-end gap-4 shrink-0">
+                                                    <div className="font-sans font-bold text-on-surface text-sm">
+                                                        - R$ {t.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <button
+                                                            onClick={() => {
+                                                                setSelectedDayModal(null);
+                                                                setEditingTransaction(t);
+                                                            }}
+                                                            className="p-2 text-slate-400 hover:text-primary-tactile transition-all border border-slate-200 dark:border-white/10 rounded-lg"
+                                                            title="Editar Lançamento"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                                            </svg>
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleTwoStepDelete(`transaction_${t.id}`, () => onDeleteTransaction(t.id))}
+                                                            className={`p-2 rounded-lg transition-all border ${
+                                                                pendingDeleteKey === `transaction_${t.id}`
+                                                                    ? 'bg-rose-500 text-white border-rose-600'
+                                                                    : 'text-slate-400 border-slate-200 dark:border-white/10 hover:text-rose-500 hover:border-rose-200'
+                                                            }`}
+                                                            title="Excluir Lançamento"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                            </svg>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="py-12 text-center flex flex-col items-center justify-center gap-2">
+                                            <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-white/5 flex items-center justify-center text-slate-400">
+                                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                </svg>
+                                            </div>
+                                            <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                                                Nenhum gasto registrado nesta data
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Content Grid */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
