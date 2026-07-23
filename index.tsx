@@ -4363,7 +4363,7 @@ const App: React.FC = () => {
               className={`flex items-center gap-4 cursor-pointer hover:opacity-80 transition-opacity ${isSidebarRetracted ? 'flex-col' : ''}`}
               onClick={() => setIsSidebarRetracted(!isSidebarRetracted)}
             >
-              <img src="/logo.png" alt="Hermes" className={`${isSidebarRetracted ? 'w-12 h-12' : 'w-11 h-11'} object-contain`} />
+              <img src="/logo.png" alt="Hermes" className={`${isSidebarRetracted ? 'w-12 h-12' : 'w-11 h-11'} object-contain ${isDarkTheme ? 'bg-white rounded p-1' : ''}`} />
               {!isSidebarRetracted && (
                 <div>
                   <h1 className="text-xl font-black tracking-tight font-mono uppercase">Hermes</h1>
@@ -4488,7 +4488,7 @@ const App: React.FC = () => {
                       onClick={() => { setActiveModule('dashboard'); setViewMode('dashboard'); }}
                       className="flex items-center cursor-pointer hover:opacity-80 transition-opacity"
                     >
-                      <img src="/logo.png" alt="Hermes" className="w-9 h-9 object-contain" />
+                      <img src="/logo.png" alt="Hermes" className={`w-9 h-9 object-contain ${isDarkTheme ? 'bg-white rounded p-1' : ''}`} />
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -6813,10 +6813,11 @@ const App: React.FC = () => {
             }`}
           >
             <img
-              src="/logo-white.png"
+              src="/logo.png"
               alt=""
               aria-hidden="true"
               className="h-8 w-8 object-contain sm:h-9 sm:w-9"
+              style={{ filter: 'brightness(0) invert(1)' }}
             />
           </button>
         )}
