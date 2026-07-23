@@ -219,14 +219,29 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     // --- HEALTH LOGIC ---
     const sortedWeights = useMemo(() => [...healthWeights].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [healthWeights]);
     const currentWeight = sortedWeights[0]?.weight || 0;
-    const initialWeight = sortedWeights[sortedWeights.length - 1]?.weight || 0;
-    const weightDelta = initialWeight > 0 ? initialWeight - currentWeight : 0;
-    const weightDeltaAbs = Math.abs(weightDelta);
-    const weightDeltaPrefix = weightDelta < -0.05 ? '+' : weightDelta > 0.05 ? '-' : '';
+    const previousWeight = sortedWeights[1]?.weight || currentWeight;
+    const weightDelta = previousWeight > 0 && currentWeight > 0 ? currentWeight - previousWeight : 0;
 
-    const todayTelemetry = useMemo(() => {
-        const key = new Date().toISOString().slice(0, 10);
-        return exerciseLogs.find(l => l.id === key) || null;
+    const targetWeight = healthSettings?.targetWeight || 0;
+    const targetDelta = (targetWeight > 0 && currentWeight > 0) ? currentWeight - targetWeight : null;
+
+    const todayKey = useMemo(() => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }, []);
+
+    const todayHealthLog = useMemo(() => {
+        return exerciseLogs.find(l => l.id === todayKey) || null;
+    }, [exerciseLogs, todayKey]);
+
+    const painLogs = useMemo(() => {
+        return [...exerciseLogs]
+            .filter(log => log.pain?.morning !== undefined || log.pain?.evening !== undefined)
+            .sort((a, b) => a.id.localeCompare(b.id))
+            .slice(-7);
     }, [exerciseLogs]);
     // --- PROGRESS BAR RENDER HELPER ---
     const renderProgressBar = (value: number, max: number) => {
@@ -443,59 +458,121 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                     <DashboardCard title="Saúde & Telemetria" isDark={isDark} onRedirect={() => onNavigate('saude')}>
                         <div className="flex flex-col gap-4">
                             <div className="flex items-center justify-between shrink-0">
-                                <span className="text-[9px] uppercase tracking-wider text-slate-400 font-mono">// TELEMETRIA DIÁRIA</span>
+                                <span className="text-[9px] uppercase tracking-wider text-slate-400 font-mono">// BIOMETRIA & SINAL CLÍNICO</span>
+                                <span className="text-[9px] font-bold text-[#9333ea] dark:text-[#ddb8ff] uppercase tracking-wider font-mono">PAINEL INTEGRADO →</span>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-3">
-                                <div className={`p-3 rounded-xl border flex flex-col justify-center ${
-                                    isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
-                                }`}>
-                                    <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Massa</span>
-                                    <div className="text-base font-bold font-mono mt-0.5">
-                                        {currentWeight > 0 ? `${currentWeight.toFixed(1)}` : '-'}
-                                        {currentWeight > 0 && <span className="text-[10px] text-slate-400 font-sans ml-0.5">KG</span>}
+                            {/* 1. SEÇÃO PESO E META */}
+                            <div className={`p-3.5 rounded-xl border flex flex-col gap-2.5 ${
+                                isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
+                            }`}>
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Massa Corporal</span>
+                                        <div className="text-lg font-bold font-mono mt-0.5 flex items-baseline gap-1">
+                                            {currentWeight > 0 ? currentWeight.toFixed(1) : '--'}
+                                            <span className="text-[10px] text-slate-400 font-sans">KG</span>
+                                        </div>
                                     </div>
-                                    <div className="text-[9px] font-bold font-mono text-slate-400 mt-0.5">
-                                        Delta {currentWeight > 0 ? `${weightDeltaPrefix}${weightDeltaAbs.toFixed(1)}` : '-'}
+
+                                    <div className="text-right">
+                                        <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Variação</span>
+                                        <div className={`text-xs font-bold font-mono mt-0.5 ${
+                                            weightDelta > 0 ? 'text-amber-500' : weightDelta < 0 ? 'text-emerald-500' : 'text-slate-400'
+                                        }`}>
+                                            {currentWeight > 0 && previousWeight > 0 && currentWeight !== previousWeight
+                                                ? `${weightDelta > 0 ? '+' : ''}${weightDelta.toFixed(1)} kg`
+                                                : 'Estável'}
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div className={`p-3 rounded-xl border flex flex-col justify-center ${
-                                    isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
-                                }`}>
-                                    <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Passos</span>
-                                    <div className="text-base font-bold font-mono mt-0.5">
-                                        {todayTelemetry?.walk?.steps ? todayTelemetry.walk.steps.toLocaleString('pt-BR') : '-'}
+                                {targetWeight > 0 && (
+                                    <div className="pt-2 border-t border-slate-200/40 dark:border-white/5 flex flex-col gap-1.5">
+                                        <div className="flex items-center justify-between text-[9px] font-mono">
+                                            <span className="text-slate-400 font-bold uppercase">Meta: {targetWeight.toFixed(1)} kg</span>
+                                            <span className="font-bold text-[#9333ea] dark:text-[#ddb8ff]">
+                                                {targetDelta !== null ? (
+                                                    targetDelta > 0 ? `+${targetDelta.toFixed(1)} kg até a meta` : targetDelta < 0 ? `${Math.abs(targetDelta).toFixed(1)} kg abaixo` : 'Na meta!'
+                                                ) : ''}
+                                            </span>
+                                        </div>
                                     </div>
-                                    <div className="text-[9px] font-bold font-mono text-slate-400 mt-0.5">
-                                        {todayTelemetry?.walk?.distance ? `${todayTelemetry.walk.distance.toFixed(1)} KM` : '-'}
+                                )}
+                            </div>
+
+                            {/* 2. SEÇÃO DOR LOMBAR / CHECK-IN TELEGRAM */}
+                            <div className={`p-3.5 rounded-xl border flex flex-col gap-2.5 ${
+                                isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
+                            }`}>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Dor Lombar (Hoje)</span>
+                                    {todayHealthLog?.pain?.crisis ? (
+                                        <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded bg-rose-500/20 text-rose-500 animate-pulse">CRISE ATIVA</span>
+                                    ) : todayHealthLog?.pain?.sciatica ? (
+                                        <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded bg-amber-500/20 text-amber-500">CIÁTICA</span>
+                                    ) : (
+                                        <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded bg-emerald-500/20 text-emerald-500">ESTÁVEL</span>
+                                    )}
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 mt-0.5">
+                                    <div className="flex flex-col">
+                                        <span className="text-[8px] text-slate-400 font-mono uppercase">Manhã</span>
+                                        <span className="text-xs font-bold font-mono text-slate-700 dark:text-slate-200">
+                                            {todayHealthLog?.pain?.morning !== undefined ? `${todayHealthLog.pain.morning}/10` : '--'}
+                                        </span>
+                                    </div>
+                                    <div className="flex flex-col">
+                                        <span className="text-[8px] text-slate-400 font-mono uppercase">Noite / Telegram</span>
+                                        <span className="text-xs font-bold font-mono text-slate-700 dark:text-slate-200">
+                                            {todayHealthLog?.pain?.evening !== undefined ? `${todayHealthLog.pain.evening}/10` : '--'}
+                                        </span>
                                     </div>
                                 </div>
 
-                                <div className={`p-3 rounded-xl border flex flex-col justify-center ${
-                                    isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
-                                }`}>
-                                    <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Calorias</span>
-                                    <div className="text-base font-bold font-mono mt-0.5">
-                                        {todayTelemetry?.calories ? Math.round(todayTelemetry.calories).toLocaleString('pt-BR') : '-'}
-                                        {todayTelemetry?.calories && <span className="text-[9px] text-slate-400 font-sans ml-0.5">KCAL</span>}
-                                    </div>
-                                    <div className="text-[9px] font-bold font-mono text-slate-400 mt-0.5">
-                                        {todayTelemetry?.activeMinutes ? `${todayTelemetry.activeMinutes} MIN ATIVOS` : '-'}
-                                    </div>
-                                </div>
+                                {todayHealthLog?.pain?.notes && (
+                                    <p className="text-[10px] italic text-slate-400 border-t border-slate-200/40 dark:border-white/5 pt-1.5 truncate">
+                                        "{todayHealthLog.pain.notes}"
+                                    </p>
+                                )}
+                            </div>
 
-                                <div className={`p-3 rounded-xl border flex flex-col justify-center ${
-                                    isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
-                                }`}>
-                                    <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Repouso</span>
-                                    <div className="text-base font-bold font-mono mt-0.5">
-                                        {todayTelemetry?.sleep?.totalMinutes ? `${Math.floor(todayTelemetry.sleep.totalMinutes / 60)}h ${todayTelemetry.sleep.totalMinutes % 60}m` : '-'}
+                            {/* 3. MINI GRÁFICO / TENDÊNCIA DE DOR (7 REGISTROS RECENTES) */}
+                            <div className={`p-3.5 rounded-xl border flex flex-col gap-2 ${
+                                isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
+                            }`}>
+                                <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Tendência Recente de Dor (0-10)</span>
+                                
+                                {painLogs.length >= 2 ? (
+                                    <div className="h-16 w-full flex items-end justify-between gap-1 pt-2">
+                                        {painLogs.map(log => {
+                                            const val = Math.max(log.pain?.morning ?? 0, log.pain?.evening ?? 0);
+                                            const heightPct = Math.max(val * 10, 10);
+                                            const isHigh = val >= 6;
+                                            const isMid = val >= 3;
+                                            const dayLabel = log.id.split('-')[2] || log.id;
+                                            return (
+                                                <div key={log.id} className="flex-1 flex flex-col items-center gap-1 group/bar relative">
+                                                    <div 
+                                                        className={`w-full rounded-t transition-all duration-300 ${
+                                                            log.pain?.crisis ? 'bg-rose-600' : isHigh ? 'bg-rose-500' : isMid ? 'bg-amber-500' : 'bg-emerald-500'
+                                                        }`}
+                                                        style={{ height: `${heightPct}%` }}
+                                                    />
+                                                    <span className="text-[8px] font-mono text-slate-400">{dayLabel}</span>
+                                                    <div className="absolute -top-7 hidden group-hover/bar:block bg-slate-900 text-white text-[9px] px-1.5 py-0.5 rounded shadow z-10 whitespace-nowrap font-mono">
+                                                        {log.id}: {val}/10
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
-                                    <div className="text-[9px] font-bold font-mono text-slate-400 mt-0.5">
-                                        STATUS NOMINAL
-                                    </div>
-                                </div>
+                                ) : (
+                                    <p className="text-[10px] text-slate-400 font-mono italic text-center py-2">
+                                        Aguardando histórico de check-ins.
+                                    </p>
+                                )}
                             </div>
 
                         </div>
