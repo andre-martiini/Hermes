@@ -23,6 +23,7 @@ import remarkGfm from 'remark-gfm';
 import MermaidBlock from './MermaidBlock';
 import { getRoutingIndex, toolsRegistry } from './toolRegistry';
 import { isInternalAppHref, navigateWithinApp } from '../../utils/internalNavigation';
+import { useHermesVoiceStream } from '@/src/hooks/useHermesVoiceStream';
 
 export const UPLOAD_ENDPOINT = 'https://us-central1-gestao-hermes.cloudfunctions.net/uploadFileForCopiloto';
 const LARGE_PASTE_THRESHOLD = 1500;
@@ -243,6 +244,34 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessingMic, setIsProcessingMic] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+
+  // ── Conversa por voz em tempo real (Gemini Live via hermes-voice-bridge) ──
+  const [voiceStreamStatusMessage, setVoiceStreamStatusMessage] = useState('');
+  const currentSessionIdRef = useRef<string | null>(null);
+  currentSessionIdRef.current = currentSessionId;
+
+  const voiceStream = useHermesVoiceStream({
+    onUserTranscript: (text) => {
+      const sId = currentSessionIdRef.current;
+      if (!sId) return;
+      addDoc(collection(db, 'sessoes_copiloto', sId, 'mensagens'), {
+        role: 'user',
+        content: text,
+        timestamp: Timestamp.now(),
+      }).catch(() => {});
+    },
+    onAssistantTranscript: (text) => {
+      const sId = currentSessionIdRef.current;
+      if (!sId) return;
+      addDoc(collection(db, 'sessoes_copiloto', sId, 'mensagens'), {
+        role: 'assistant',
+        content: text,
+        timestamp: Timestamp.now(),
+      }).catch(() => {});
+    },
+    onStatus: (message) => setVoiceStreamStatusMessage(message),
+    onError: (message) => { setFooterError(message); setVoiceStreamStatusMessage(''); },
+  });
   const [sessionPendingDeleteId, setSessionPendingDeleteId] = useState<string | null>(null);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
@@ -445,10 +474,17 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
     return () => clearTimeout(timer);
   }, [isOpen, autoStartMic]);
 
+  // Encerra a sessao de voz ao vivo se o painel fechar (costuma so ficar
+  // oculto, nao desmontar, entao o cleanup de unmount abaixo nao cobre isso).
+  useEffect(() => {
+    if (!isOpen) voiceStream.stop();
+  }, [isOpen]);
+
   useEffect(() => {
     return () => {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop();
       if (micStreamRef.current) micStreamRef.current.getTracks().forEach((track) => track.stop());
+      voiceStream.stop();
     };
   }, []);
 
@@ -1293,9 +1329,37 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                   }
                 }}
                 disabled={isBlocked}
-                placeholder={isRecording ? 'Gravando... clique no microfone para parar' : isProcessingMic || isTranscribing ? 'Transcrevendo áudio...' : attachedFile || pastedContext ? 'Pergunte sobre o contexto anexado...' : copilotMode === 'estrategia' ? 'Converse sobre seus objetivos e diretrizes...' : 'Mensagem para o Hermes'}
+                placeholder={voiceStream.status === 'live' ? `🔊 ${voiceStreamStatusMessage || 'Conversa ao vivo — pode falar'}` : voiceStream.status === 'connecting' ? '🔊 Conectando à voz ao vivo…' : isRecording ? 'Gravando... clique no microfone para parar' : isProcessingMic || isTranscribing ? 'Transcrevendo áudio...' : attachedFile || pastedContext ? 'Pergunte sobre o contexto anexado...' : copilotMode === 'estrategia' ? 'Converse sobre seus objetivos e diretrizes...' : 'Mensagem para o Hermes'}
                 className={`min-h-10 flex-1 resize-none overflow-y-hidden bg-transparent px-2 py-2.5 text-sm font-medium leading-5 outline-none disabled:opacity-40 ${isDark ? 'text-slate-100 placeholder:text-slate-600' : 'text-slate-900 placeholder:text-slate-400'}`}
               />
+              <button
+                type="button"
+                disabled={isRecording}
+                onClick={async () => {
+                  if (voiceStream.status === 'idle' || voiceStream.status === 'error') {
+                    if (!currentSessionIdRef.current) {
+                      await createSession();
+                    }
+                    voiceStream.start();
+                  } else {
+                    voiceStream.stop();
+                  }
+                }}
+                title={voiceStream.status === 'live' ? 'Encerrar conversa por voz' : voiceStream.status === 'connecting' ? 'Conectando…' : 'Conversar por voz (tempo real)'}
+                className={`flex h-10 w-10 shrink-0 items-center justify-center transition-all disabled:opacity-30 ${
+                  voiceStream.status === 'live'
+                    ? 'bg-emerald-600 text-white animate-pulse rounded-lg'
+                    : voiceStream.status === 'connecting'
+                      ? 'bg-amber-500 text-white rounded-lg'
+                      : hoverClass
+                }`}
+              >
+                {voiceStream.status === 'connecting' ? (
+                  <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                ) : (
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4h16v11H7.17L4 18.17V4Zm2 2v8.17L6.17 13H18V6H6Z" /></svg>
+                )}
+              </button>
               <button type="button" disabled={isBlocked && !isRecording} onClick={() => isRecording ? stopRecording() : startRecording()} title={isRecording ? 'Parar gravação' : 'Gravar áudio'} className={`flex h-10 w-10 shrink-0 items-center justify-center transition-all disabled:opacity-30 ${isRecording ? 'bg-rose-600 text-white animate-pulse rounded-lg' : hoverClass}`}>
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" /></svg>
               </button>

@@ -173,6 +173,35 @@ body {
   border-color: var(--danger);
 }
 
+.mic-button[data-disabled="true"] {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.conversation-toggle {
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.conversation-toggle[data-active="true"] {
+  background: var(--ok);
+  color: #fff;
+  border-color: var(--ok);
+}
+
+.conversation-toggle[data-active="true"][data-listening="true"] {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 35%, transparent);
+}
+
 @media (prefers-color-scheme: light) {
   :root {
     color-scheme: light;

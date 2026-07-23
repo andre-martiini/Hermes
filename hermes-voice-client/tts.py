@@ -13,9 +13,11 @@ import re
 from pathlib import Path
 
 from piper import PiperVoice
+from piper.config import SynthesisConfig
 from piper.download_voices import download_voice
 
 _voice: PiperVoice | None = None
+_syn_config: SynthesisConfig | None = None
 
 
 def _voice_dir() -> Path:
@@ -45,6 +47,15 @@ def _get_voice() -> PiperVoice:
     return _voice
 
 
+def _get_syn_config() -> SynthesisConfig:
+    global _syn_config
+    if _syn_config is None:
+        # length_scale < 1.0 acelera a fala (1.0 = velocidade padrao do modelo).
+        length_scale = float(os.environ.get("PIPER_LENGTH_SCALE", "0.9"))
+        _syn_config = SynthesisConfig(length_scale=length_scale)
+    return _syn_config
+
+
 def split_sentences(text: str) -> list[str]:
     text = (text or "").strip()
     if not text:
@@ -60,7 +71,7 @@ def synthesize_sentence(text: str) -> tuple[bytes, int]:
         return b"", 0
 
     voice = _get_voice()
-    chunks = list(voice.synthesize(text))
+    chunks = list(voice.synthesize(text, syn_config=_get_syn_config()))
     if not chunks:
         return b"", 0
 

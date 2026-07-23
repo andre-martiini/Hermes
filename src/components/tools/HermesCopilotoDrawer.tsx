@@ -11,6 +11,7 @@ import { ReportModal } from './ReportModal';
 import { getRoutingIndex, toolsRegistry } from './toolRegistry';
 import { isInternalAppHref, navigateWithinApp } from '../../utils/internalNavigation';
 import { CollapsibleContainer } from '../ui/UIComponents';
+import { useHermesVoiceStream } from '@/src/hooks/useHermesVoiceStream';
 
 // URL do endpoint HTTP de upload (Node.js Functions)
 const UPLOAD_ENDPOINT = 'https://us-central1-gestao-hermes.cloudfunctions.net/uploadFileForCopiloto';
@@ -673,6 +674,36 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     // ── Gravação de áudio por microfone ───────────────────────────────────────
     const [isRecording, setIsRecording] = useState(false);
     const [isProcessingMic, setIsProcessingMic] = useState(false);
+
+    // ── Conversa por voz em tempo real (Gemini Live via hermes-voice-bridge) ──
+    const [voiceStreamStatusMessage, setVoiceStreamStatusMessage] = useState('');
+    const currentSessionIdRef = useRef<string | null>(null);
+    currentSessionIdRef.current = currentSessionId;
+
+    const voiceStream = useHermesVoiceStream({
+        taskId,
+        onUserTranscript: (text) => {
+            const sId = currentSessionIdRef.current;
+            if (!sId) return;
+            addDoc(collection(db, 'sessoes_copiloto', sId, 'mensagens'), {
+                role: 'user',
+                content: text,
+                timestamp: Timestamp.now(),
+            }).catch(() => {});
+        },
+        onAssistantTranscript: (text) => {
+            const sId = currentSessionIdRef.current;
+            if (!sId) return;
+            addDoc(collection(db, 'sessoes_copiloto', sId, 'mensagens'), {
+                role: 'assistant',
+                content: text,
+                timestamp: Timestamp.now(),
+            }).catch(() => {});
+        },
+        onStatus: (message) => setVoiceStreamStatusMessage(message),
+        onError: (message) => { setFooterError(message); setVoiceStreamStatusMessage(''); },
+    });
+
     const isBlocked = isLoading || uploadPhase !== 'idle' || isTranscribing || isProcessingMic;
     // Status efêmero gravado pelo backend no doc da sessão durante o processamento
     const copilotStatus = sessions.find(s => s.id === currentSessionId)?.copilotStatus;
@@ -870,6 +901,12 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             return () => clearTimeout(timer);
         }
     }, [isOpen, autoStartMic]);
+
+    // Encerra a sessao de voz ao vivo se o drawer fechar (drawer costuma so
+    // ficar oculto, nao desmontar, entao o cleanup de unmount nao cobre isso).
+    useEffect(() => {
+        if (!isOpen) voiceStream.stop();
+    }, [isOpen]);
 
     // Load Messages for current session
     useEffect(() => {
@@ -1525,6 +1562,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         return () => {
             if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop();
             if (micStreamRef.current) { micStreamRef.current.getTracks().forEach(t => t.stop()); micStreamRef.current = null; }
+            voiceStream.stop();
         };
     }, []);
 
@@ -1543,11 +1581,14 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             });
 
             setCurrentSessionId(sessRef.id);
+            currentSessionIdRef.current = sessRef.id;
             if (initialPrompt) {
                 await sendMessage(initialPrompt, sessRef.id);
             }
+            return sessRef.id;
         } catch (err) {
             console.error("Erro ao criar sessão:", err);
+            return null;
         } finally {
             setIsLoading(false);
         }
@@ -2993,10 +3034,47 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             }
                                         }
                                     }}
-                                    placeholder={isRecording ? '🎙 Gravando… clique no microfone para parar' : isProcessingMic ? 'Transcrevendo áudio...' : isTranscribing ? 'Transcrevendo áudio...' : attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : pastedContext ? 'Pergunte sobre o contexto ou envie sem texto…' : isFinancialCopilot ? 'Pergunte sobre gastos, fluxo, reserva ou investimentos' : 'Escreva Aqui'}
+                                    placeholder={voiceStream.status === 'live' ? `🔊 ${voiceStreamStatusMessage || 'Conversa ao vivo — pode falar'}` : voiceStream.status === 'connecting' ? '🔊 Conectando à voz ao vivo…' : isRecording ? '🎙 Gravando… clique no microfone para parar' : isProcessingMic ? 'Transcrevendo áudio...' : isTranscribing ? 'Transcrevendo áudio...' : attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : pastedContext ? 'Pergunte sobre o contexto ou envie sem texto…' : isFinancialCopilot ? 'Pergunte sobre gastos, fluxo, reserva ou investimentos' : 'Escreva Aqui'}
                                     className={`w-full px-2 pt-2.5 pb-1.5 text-sm leading-5 font-sans font-medium outline-none border-0 resize-none bg-transparent ${isDark ? 'text-white placeholder:text-white/20' : 'text-slate-700 placeholder:text-slate-400'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
                                 />
                             </div>
+
+                            {/* Botão de conversa por voz ao vivo (Gemini Live) */}
+                            <button
+                                onClick={async () => {
+                                    if (voiceStream.status === 'idle' || voiceStream.status === 'error') {
+                                        if (!currentSessionIdRef.current) {
+                                            await handleCreateSession();
+                                        }
+                                        voiceStream.start();
+                                    } else {
+                                        voiceStream.stop();
+                                    }
+                                }}
+                                disabled={isRecording}
+                                title={
+                                    voiceStream.status === 'live' ? 'Encerrar conversa por voz'
+                                        : voiceStream.status === 'connecting' ? 'Conectando…'
+                                            : 'Conversar por voz (tempo real)'
+                                }
+                                className={`flex h-9 w-9 items-center justify-center rounded-lg transition-all active:scale-95 flex-shrink-0 ${
+                                    voiceStream.status === 'live'
+                                        ? 'bg-emerald-500 text-white animate-pulse hover:bg-emerald-600'
+                                        : voiceStream.status === 'connecting'
+                                            ? 'bg-amber-400 text-white'
+                                            : isDark
+                                                ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white'
+                                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
+                                } disabled:opacity-30 disabled:cursor-not-allowed`}
+                            >
+                                {voiceStream.status === 'connecting' ? (
+                                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                                ) : (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4h16v11H7.17L4 18.17V4Zm2 2v8.17L6.17 13H18V6H6Z" />
+                                    </svg>
+                                )}
+                            </button>
 
                             {/* Botão de gravação (sempre visível) */}
                             <button

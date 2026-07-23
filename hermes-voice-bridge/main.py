@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import time
 import unicodedata
 from urllib.parse import urlparse
 
@@ -17,7 +18,10 @@ from google import genai
 from google.genai import types
 from twilio.twiml.voice_response import Connect, Stream, VoiceResponse
 
+import hermes_mcp
+import task_tools
 from context import build_voice_context
+from database import BrowserAuthError, verify_browser_id_token
 from tools import GEMINI_TOOL_DECLARATIONS, call_tool
 
 load_dotenv()
@@ -45,6 +49,16 @@ perguntas sobre dados internos do Hermes e acionar ferramentas quando necessario
 Suas respostas devem ser curtas, diretas e naturais, otimizadas para audicao por
 voz. Evite listas longas, markdown, links extensos e detalhes desnecessarios.
 
+Para perguntas sobre tarefas/acoes em uma data especifica (hoje, amanha,
+atrasadas, ou um periodo entre datas), SEMPRE prefira as ferramentas exatas
+buscar_tarefas_pendentes_hoje, buscar_tarefas_amanha, buscar_tarefas_atrasadas
+ou buscar_tarefas_por_periodo — elas filtram pela data_limite exata no banco e
+sao a fonte de verdade para contagem. NAO use consultar_historico_acoes (busca
+por texto aproximado) para contar ou listar tarefas de uma data: ela e uma
+busca fuzzy e pode retornar resultados incompletos, levando a contagens
+erradas. Use consultar_historico_acoes so quando a pergunta for sobre um termo,
+assunto ou numero de processo, nao sobre uma data.
+
 Sempre que decidir acionar uma ferramenta do banco de dados, voce DEVE dizer:
 "Aguarde um instante, estou verificando os dados" ANTES de executar a funcao.
 
@@ -70,6 +84,16 @@ normalmente.
 
 Suas respostas devem ser curtas, diretas e naturais, otimizadas para audicao por
 telefone. Evite listas longas, markdown, links extensos e detalhes desnecessarios.
+
+Para perguntas sobre tarefas/acoes em uma data especifica (hoje, amanha,
+atrasadas, ou um periodo entre datas), SEMPRE prefira as ferramentas exatas
+buscar_tarefas_pendentes_hoje, buscar_tarefas_amanha, buscar_tarefas_atrasadas
+ou buscar_tarefas_por_periodo — elas filtram pela data_limite exata no banco e
+sao a fonte de verdade para contagem. NAO use consultar_historico_acoes (busca
+por texto aproximado) para contar ou listar tarefas de uma data: ela e uma
+busca fuzzy e pode retornar resultados incompletos, levando a contagens
+erradas. Use consultar_historico_acoes so quando a pergunta for sobre um termo,
+assunto ou numero de processo, nao sobre uma data.
 
 Sempre que decidir acionar uma ferramenta do banco de dados, voce DEVE dizer:
 "Aguarde um instante, estou verificando os dados" ANTES de executar a funcao.
@@ -110,6 +134,53 @@ async def _stop_voice_session_after(stop_event: asyncio.Event) -> None:
     await asyncio.sleep(seconds)
     stop_event.set()
     logger.info("Voice session max duration reached (%ss)", seconds)
+
+
+def _voice_max_idle_seconds() -> int:
+    try:
+        return int(os.getenv("HERMES_VOICE_MAX_IDLE_SECONDS", "90"))
+    except (TypeError, ValueError):
+        return 90
+
+
+def _allowed_browser_origins() -> set[str]:
+    raw = os.getenv("HERMES_VOICE_ALLOWED_ORIGINS", "").strip()
+    origins = {o.strip() for o in raw.split(",") if o.strip()}
+    origins.update(
+        {
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3001",
+            "http://127.0.0.1:3001",
+        }
+    )
+    return origins
+
+
+class _ActivityTracker:
+    """Marca a ultima vez que houve audio indo ou vindo, para o watchdog de
+    inatividade poder encerrar sessoes esquecidas com o microfone aberto."""
+
+    def __init__(self) -> None:
+        self.last = time.monotonic()
+
+    def touch(self) -> None:
+        self.last = time.monotonic()
+
+
+async def _stop_voice_session_after_idle(activity: "_ActivityTracker", stop_event: asyncio.Event) -> None:
+    idle_limit = _voice_max_idle_seconds()
+    if idle_limit <= 0:
+        await stop_event.wait()
+        return
+    while not stop_event.is_set():
+        await asyncio.sleep(5)
+        if stop_event.is_set():
+            return
+        if time.monotonic() - activity.last >= idle_limit:
+            stop_event.set()
+            logger.info("Voice session idle timeout reached (%ss)", idle_limit)
+            return
 
 
 class AudioConverter:
@@ -260,15 +331,69 @@ async def media_stream(websocket: WebSocket) -> None:
 
 @app.websocket("/browser-voice-stream")
 async def browser_voice_stream(websocket: WebSocket) -> None:
+    origin = websocket.headers.get("origin")
+    if origin not in _allowed_browser_origins():
+        logger.warning("Rejected browser voice stream from disallowed origin: %s", origin)
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
     stop_event = asyncio.Event()
-    auth_event = asyncio.Event()
-    if not _requires_voice_password():
-        auth_event.set()
+    activity = _ActivityTracker()
 
     logger.info("Browser voice stream connected")
 
     try:
+        # Handshake de autenticacao: a primeira mensagem PRECISA ser o Firebase
+        # ID Token do usuario, validado contra a mesma whitelist do servidor
+        # MCP (system/mcp_access.allowed_uids). So depois disso abrimos a sessao
+        # Gemini Live — ela custa dinheiro por minuto, entao nao vale abrir
+        # antes de saber que quem esta do outro lado tem permissao.
+        try:
+            raw_auth = await asyncio.wait_for(websocket.receive_text(), timeout=10)
+        except asyncio.TimeoutError:
+            logger.warning("Browser voice stream timed out waiting for auth message")
+            await websocket.close(code=1008)
+            return
+
+        try:
+            auth_message = json.loads(raw_auth)
+        except json.JSONDecodeError:
+            await websocket.close(code=1003)
+            return
+
+        id_token = auth_message.get("id_token") if auth_message.get("type") == "auth" else None
+        if not id_token:
+            await websocket.send_json(
+                {"type": "error", "message": "Primeira mensagem deve ser {type: 'auth', id_token: ...}."}
+            )
+            await websocket.close(code=1008)
+            return
+
+        try:
+            uid = verify_browser_id_token(id_token)
+        except BrowserAuthError as exc:
+            logger.warning("Browser voice stream auth failed: %s", exc)
+            await websocket.send_json({"type": "error", "message": str(exc)})
+            await websocket.close(code=1008)
+            return
+
+        logger.info("Browser voice stream authenticated for uid=%s", uid)
+        auth_event = asyncio.Event()
+        auth_event.set()  # autenticacao ja resolvida via Firebase ID Token, nao por senha falada
+
+        # Sessao pode nascer dentro de uma acao (drawer do copiloto): o
+        # frontend manda o task_id no handshake e a sessao ganha contexto e
+        # ferramentas de escrita daquela acao.
+        session_task_id = str(auth_message.get("task_id") or "").strip() or None
+        task_context = ""
+        if session_task_id:
+            try:
+                task_context = await asyncio.to_thread(task_tools.build_task_context, session_task_id)
+                logger.info("Voice session scoped to task %s", session_task_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Falha ao montar contexto da acao %s: %s", session_task_id, exc)
+
         gemini_api_key = os.getenv("GEMINI_API_KEY")
         if not gemini_api_key:
             logger.error("GEMINI_API_KEY is not configured")
@@ -278,6 +403,17 @@ async def browser_voice_stream(websocket: WebSocket) -> None:
             await websocket.close(code=1011)
             return
 
+        # Tools auditadas do MCP + contexto do copiloto, com o token do proprio
+        # usuario. Falha aqui nao derruba a sessao: segue so com as tools locais.
+        mcp_declarations: list[dict] = []
+        mcp_context = ""
+        try:
+            mcp_declarations = await asyncio.to_thread(hermes_mcp.list_tools, id_token)
+            mcp_context = await asyncio.to_thread(hermes_mcp.read_voice_context, id_token)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("MCP indisponivel para a sessao de voz (%s); seguindo so com tools locais", exc)
+        mcp_tool_names = hermes_mcp.tool_names(mcp_declarations)
+
         client = genai.Client(api_key=gemini_api_key)
         model = os.getenv(
             "GEMINI_LIVE_MODEL",
@@ -286,17 +422,13 @@ async def browser_voice_stream(websocket: WebSocket) -> None:
 
         async with client.aio.live.connect(
             model=model,
-            config=_gemini_live_config(),
+            config=_gemini_live_config(
+                mcp_declarations + task_tools.TASK_TOOL_DECLARATIONS,
+                (mcp_context + ("\n\n" + task_context if task_context else "")).strip(),
+            ),
         ) as session:
             await websocket.send_json(
-                {
-                    "type": "status",
-                    "message": (
-                        "Sessao Gemini Live iniciada. Autenticacao local ativa."
-                        if auth_event.is_set()
-                        else "Sessao Gemini Live iniciada."
-                    ),
-                }
+                {"type": "status", "message": "Sessao Gemini Live iniciada."}
             )
 
             browser_task = asyncio.create_task(
@@ -304,6 +436,7 @@ async def browser_voice_stream(websocket: WebSocket) -> None:
                     websocket=websocket,
                     session=session,
                     stop_event=stop_event,
+                    activity=activity,
                 )
             )
             gemini_task = asyncio.create_task(
@@ -312,19 +445,25 @@ async def browser_voice_stream(websocket: WebSocket) -> None:
                     session=session,
                     stop_event=stop_event,
                     auth_event=auth_event,
+                    activity=activity,
+                    mcp_tool_names=mcp_tool_names,
+                    id_token=id_token,
+                    session_task_id=session_task_id,
                 )
             )
             timer_task = asyncio.create_task(_stop_voice_session_after(stop_event))
+            idle_task = asyncio.create_task(_stop_voice_session_after_idle(activity, stop_event))
 
             done, pending = await asyncio.wait(
-                {browser_task, gemini_task, timer_task},
+                {browser_task, gemini_task, timer_task, idle_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
-            if timer_task in done:
+            if timer_task in done or idle_task in done:
+                reason = "limite de duracao" if timer_task in done else "inatividade"
                 with contextlib.suppress(RuntimeError, WebSocketDisconnect):
                     await websocket.send_json(
-                        {"type": "status", "message": "Sessao de voz encerrada por limite de duracao."}
+                        {"type": "status", "message": f"Sessao de voz encerrada por {reason}."}
                     )
                     await websocket.close(code=1000)
 
@@ -350,7 +489,20 @@ async def browser_voice_stream(websocket: WebSocket) -> None:
             await websocket.close(code=1011)
 
 
-def _gemini_live_config() -> dict:
+def _gemini_live_config(
+    extra_declarations: list[dict] | None = None,
+    extra_context: str = "",
+) -> dict:
+    # GEMINI_TOOL_DECLARATIONS e [{"function_declarations": [...]}]; as tools
+    # extras (MCP) entram no mesmo bloco para o Gemini ver um catalogo unico.
+    merged_declarations = list(GEMINI_TOOL_DECLARATIONS[0]["function_declarations"])
+    if extra_declarations:
+        merged_declarations.extend(extra_declarations)
+
+    system_instruction = _build_system_instruction()
+    if extra_context:
+        system_instruction += "\n\n[CONTEXTO ADICIONAL DO COPILOTO]\n" + extra_context
+
     return {
         "response_modalities": ["AUDIO"],
         "speech_config": {
@@ -358,11 +510,15 @@ def _gemini_live_config() -> dict:
                 "prebuilt_voice_config": {
                     "voice_name": os.getenv("GEMINI_VOICE_NAME", "Charon")
                 }
-            }
+            },
+            # Trava o idioma da sessao: sem isso a transcricao de entrada
+            # ocasionalmente deriva para ingles ou degenera em repeticao.
+            "language_code": os.getenv("GEMINI_VOICE_LANGUAGE", "pt-BR"),
         },
-        "tools": GEMINI_TOOL_DECLARATIONS,
-        "system_instruction": _build_system_instruction(),
+        "tools": [{"function_declarations": merged_declarations}],
+        "system_instruction": system_instruction,
         "input_audio_transcription": {},
+        "output_audio_transcription": {},
     }
 
 
@@ -466,6 +622,7 @@ async def _forward_browser_audio_to_gemini(
     websocket: WebSocket,
     session,
     stop_event: asyncio.Event,
+    activity: "_ActivityTracker",
 ) -> None:
     while not stop_event.is_set():
         raw_message = await websocket.receive_text()
@@ -484,6 +641,10 @@ async def _forward_browser_audio_to_gemini(
         if not payload:
             continue
 
+        # Nao marca atividade aqui: com o mic continuamente aberto, cada frame
+        # de audio (mesmo silencio) contaria como atividade e o watchdog de
+        # inatividade nunca dispararia. Atividade real e medida no caminho de
+        # retorno (transcricoes e respostas do Gemini).
         pcm_audio = base64.b64decode(payload, validate=True)
         try:
             await session.send_realtime_input(
@@ -514,38 +675,29 @@ async def _forward_gemini_audio_to_browser(
     session,
     stop_event: asyncio.Event,
     auth_event: asyncio.Event,
+    activity: "_ActivityTracker",
+    mcp_tool_names: set[str] | None = None,
+    id_token: str | None = None,
+    session_task_id: str | None = None,
 ) -> None:
+    # auth_event ja chega sempre "set" aqui — a autenticacao do canal navegador
+    # acontece via Firebase ID Token antes da sessao Gemini Live ser aberta
+    # (ver browser_voice_stream), diferente do canal Twilio que usa senha falada.
+    #
+    # session.receive() encerra a cada fim de turno (dai o while). Um ciclo que
+    # termina SEM entregar nenhuma mensagem indica que a sessao Gemini morreu
+    # do lado do provedor (limite interno de duracao, GoAway etc.) — sem essa
+    # deteccao o loop giraria em vazio para sempre e o navegador ficaria com a
+    # UI "ao vivo" porem muda.
+    empty_cycles = 0
     while not stop_event.is_set():
+        received_any = False
         async for response in session.receive():
+            received_any = True
             if stop_event.is_set():
                 break
 
-            authenticated_now = _mark_authenticated_from_transcription(
-                response,
-                auth_event,
-            )
-            if authenticated_now:
-                await websocket.send_json(
-                    {
-                        "type": "status",
-                        "message": "Sessao autenticada pelo servidor.",
-                    }
-                )
-                await session.send_client_content(
-                    turns={
-                        "role": "user",
-                        "parts": [
-                            {
-                                "text": (
-                                    "[SISTEMA] A senha falada foi validada pelo "
-                                    "backend. A sessao esta autenticada. Nao "
-                                    "repita nem revele a senha."
-                                )
-                            }
-                        ],
-                    },
-                    turn_complete=True,
-                )
+            activity.touch()
 
             tool_call = getattr(response, "tool_call", None)
             if tool_call:
@@ -559,12 +711,27 @@ async def _forward_gemini_audio_to_browser(
                     session=session,
                     tool_call=tool_call,
                     auth_event=auth_event,
+                    mcp_tool_names=mcp_tool_names,
+                    id_token=id_token,
+                    session_task_id=session_task_id,
                 )
                 continue
+
+            input_transcript = _extract_input_transcript(response)
+            if input_transcript:
+                await websocket.send_json({"type": "input_transcript", "text": input_transcript})
+
+            output_transcript = _extract_output_transcript(response)
+            if output_transcript:
+                await websocket.send_json({"type": "output_transcript", "text": output_transcript})
 
             server_content = getattr(response, "server_content", None)
             model_turn = getattr(server_content, "model_turn", None)
             parts = getattr(model_turn, "parts", None) or []
+
+            turn_complete = bool(getattr(server_content, "turn_complete", False))
+            if turn_complete:
+                await websocket.send_json({"type": "turn_complete"})
 
             for part in parts:
                 inline_data = getattr(part, "inline_data", None)
@@ -588,9 +755,35 @@ async def _forward_gemini_audio_to_browser(
                     }
                 )
 
+        if received_any:
+            empty_cycles = 0
+        else:
+            empty_cycles += 1
+            if empty_cycles >= 3:
+                logger.info("Gemini Live session ended upstream; closing browser voice stream")
+                with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "message": "A sessao de voz expirou do lado do provedor. Clique no botao de voz para reconectar.",
+                        }
+                    )
+                stop_event.set()
+                break
+            await asyncio.sleep(0.2)
 
-async def _handle_gemini_tool_call(*, session, tool_call, auth_event: asyncio.Event) -> None:
+
+async def _handle_gemini_tool_call(
+    *,
+    session,
+    tool_call,
+    auth_event: asyncio.Event,
+    mcp_tool_names: set[str] | None = None,
+    id_token: str | None = None,
+    session_task_id: str | None = None,
+) -> None:
     function_responses = []
+    mcp_tool_names = mcp_tool_names or set()
 
     for function_call in getattr(tool_call, "function_calls", []) or []:
         name = getattr(function_call, "name", "")
@@ -598,13 +791,22 @@ async def _handle_gemini_tool_call(*, session, tool_call, auth_event: asyncio.Ev
         function_id = getattr(function_call, "id", None)
 
         logger.info("Gemini requested tool call: %s", name)
-        if auth_event.is_set():
-            result = call_tool(name, args)
-        else:
+        if not auth_event.is_set():
             logger.warning("Blocked unauthenticated Gemini tool call: %s", name)
             result = {
                 "erro": "A ligacao ainda nao foi autenticada pela senha falada. Ferramenta bloqueada."
             }
+        elif name in task_tools.TASK_TOOL_NAMES:
+            # Tools de acao (diario, plano) — escrevem no Firestore; o task_id
+            # da sessao entra como padrao quando o modelo nao informa um.
+            result = await asyncio.to_thread(task_tools.call_task_tool, name, dict(args), session_task_id)
+        elif name in mcp_tool_names and id_token:
+            # Tool auditada do servidor MCP, executada com o token do usuario
+            # da sessao (mantem audit log e whitelist do MCP). Em thread para
+            # nao bloquear o streaming de audio durante a chamada HTTP.
+            result = await asyncio.to_thread(hermes_mcp.call_tool, name, dict(args), id_token)
+        else:
+            result = await asyncio.to_thread(call_tool, name, dict(args))
         function_responses.append(
             types.FunctionResponse(
                 name=name,
@@ -639,20 +841,28 @@ def _mark_authenticated_from_transcription(response, auth_event: asyncio.Event) 
 
 
 def _extract_input_transcript(response) -> str:
+    return _extract_transcript(response, "input_transcription")
+
+
+def _extract_output_transcript(response) -> str:
+    return _extract_transcript(response, "output_transcription")
+
+
+def _extract_transcript(response, field: str) -> str:
     candidates = []
 
     server_content = getattr(response, "server_content", None)
     candidates.extend(
         [
-            getattr(server_content, "input_transcription", None),
-            getattr(server_content, "input_transcription_result", None),
+            getattr(server_content, field, None),
+            getattr(server_content, f"{field}_result", None),
         ]
     )
 
     candidates.extend(
         [
-            getattr(response, "input_transcription", None),
-            getattr(response, "input_transcription_result", None),
+            getattr(response, field, None),
+            getattr(response, f"{field}_result", None),
         ]
     )
 

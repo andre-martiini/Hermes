@@ -90,6 +90,15 @@ async def ws_endpoint(websocket: WebSocket) -> None:
 
     recording_buffer = bytearray()
     is_recording = False
+    current_turn_task: asyncio.Task | None = None
+
+    def cancel_current_turn() -> None:
+        # Barge-in: um novo turno sempre cancela a fala/raciocinio anterior
+        # que ainda estiver em andamento, para o usuario poder interromper.
+        nonlocal current_turn_task
+        if current_turn_task is not None and not current_turn_task.done():
+            current_turn_task.cancel()
+        current_turn_task = None
 
     try:
         while True:
@@ -107,17 +116,23 @@ async def ws_endpoint(websocket: WebSocket) -> None:
 
                 msg_type = payload.get("type")
                 if msg_type == "mic_start":
+                    cancel_current_turn()
                     recording_buffer = bytearray()
                     is_recording = True
                 elif msg_type == "mic_stop":
                     is_recording = False
                     pcm_bytes = bytes(recording_buffer)
                     recording_buffer = bytearray()
-                    await _handle_utterance_audio(websocket, session, loop, pcm_bytes)
+                    current_turn_task = asyncio.create_task(
+                        _handle_utterance_audio(websocket, session, loop, pcm_bytes)
+                    )
                 elif msg_type == "text_message":
                     text = str(payload.get("text") or "").strip()
                     if text:
-                        await _handle_utterance_text(websocket, session, loop, text)
+                        cancel_current_turn()
+                        current_turn_task = asyncio.create_task(
+                            _handle_utterance_text(websocket, session, loop, text)
+                        )
 
             bytes_payload = message.get("bytes")
             if bytes_payload is not None and is_recording:
@@ -125,6 +140,8 @@ async def ws_endpoint(websocket: WebSocket) -> None:
 
     except WebSocketDisconnect:
         pass
+    finally:
+        cancel_current_turn()
 
 
 async def _handle_utterance_audio(websocket: WebSocket, session: VoiceSession, loop, pcm_bytes: bytes) -> None:
