@@ -808,9 +808,8 @@ def log_to_firestore(sync_ref, logs, message, force_update=False):
 
             emit_notification_backend("Erro de Sincronização", message, 'error')
 
-    elif message_upper.startswith("[PIX] PROCESSADO"):
-
-        emit_notification_backend("Gasto Realizado via Pix", message, 'expense', 'financeiro')
+    # Nota: a notificação "Gasto Realizado via Pix" é emitida diretamente em sync_pix_emails
+    # (já com valor e saldo disponível), não mais a partir do texto deste log.
 
 
 
@@ -1616,7 +1615,8 @@ def sync_pix_emails(service, sync_ref, logs):
                 'amount': data.get('amount', 0.0),
                 'date': parse_iso_date(data.get('date')),
                 'pix_id': data.get('pix_id'),
-                'google_message_id': data.get('google_message_id')
+                'google_message_id': data.get('google_message_id'),
+                'status': data.get('status')
             })
             if data.get('google_message_id'): existing_google_ids.add(data['google_message_id'])
 
@@ -1648,6 +1648,20 @@ def sync_pix_emails(service, sync_ref, logs):
             desc = d.get('description', '')
             keywords = [w.strip().lower() for w in re.split(r'[\(\)\s,-]+', desc) if len(w.strip()) > 2]
             bill_rubrics_cache.append({'id': r.id, 'desc': desc.lower(), 'keywords': keywords, 'full_desc': desc})
+
+        # Orçamento do mês corrente e gasto acumulado, para exibir "Saldo disponível" nas notificações de Pix
+        now_utc = datetime.now(timezone.utc)
+        current_month_key = f"{now_utc.year}-{now_utc.month:02d}"
+        finance_settings_doc = db.collection('finance_settings').document('config').get()
+        finance_settings_data = finance_settings_doc.to_dict() if finance_settings_doc.exists else {}
+        monthly_budget = (finance_settings_data.get('monthlyBudgets') or {}).get(
+            current_month_key, finance_settings_data.get('monthlyBudget', 0) or 0
+        )
+        current_month_spend = sum(
+            t['amount'] for t in existing_transactions
+            if t.get('status') != 'deleted' and t.get('date')
+            and t['date'].year == now_utc.year and t['date'].month == now_utc.month
+        )
 
         for msg in messages:
             msg_id = msg['id']
@@ -1821,8 +1835,17 @@ def sync_pix_emails(service, sync_ref, logs):
                         'google_message_id': msg_id, 'pix_id': pix_id
                     }
                     doc_ref = db.collection('finance_transactions').add(new_record)[1]
-                    existing_transactions.append({'doc_id': doc_ref.id, 'amount': amount, 'date': dt, 'pix_id': pix_id, 'description': description, 'google_message_id': msg_id})
-                
+                    existing_transactions.append({'doc_id': doc_ref.id, 'amount': amount, 'date': dt, 'pix_id': pix_id, 'description': description, 'google_message_id': msg_id, 'status': None})
+
+                    if dt.year == now_utc.year and dt.month == now_utc.month:
+                        current_month_spend += amount
+                    saldo_disponivel = monthly_budget - current_month_spend
+                    emit_notification_backend(
+                        "Gasto Realizado via Pix",
+                        f"Valor: R$ {amount:.2f}\nSaldo disponível: R$ {saldo_disponivel:.2f}",
+                        'expense', 'financeiro'
+                    )
+
                 new_processed_ids.append(msg_id)
                 log_to_firestore(sync_ref, logs, f"[PIX] Processado: {description} (R$ {amount:.2f})")
                 archive_gmail_message(service, msg_id, sync_ref, logs, "pix-lancado")
@@ -2534,9 +2557,10 @@ def _build_telegram_notification_message(notif: dict) -> str:
         lines.extend(["", f"📝 <b>Assunto Detalhado:</b> {assunto}"])
     if message:
         lines.extend(["", message])
-    if link:
-        label = "Link" if link.startswith(("http://", "https://")) else "Destino no Hermes"
-        lines.extend(["", f"{label}: {link}"])
+    # Links internos (ex: "financeiro") só servem para navegação dentro do app e não são
+    # clicáveis no Telegram — exibimos apenas links http(s) reais, que fazem sentido ali.
+    if link and link.startswith(("http://", "https://")):
+        lines.extend(["", f"Link: {link}"])
     return "\n".join(lines)
 
 @firestore_fn.on_document_created(document="notificacoes/{notification_id}", memory=options.MemoryOption.MB_512)

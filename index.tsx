@@ -2111,9 +2111,10 @@ const App: React.FC = () => {
         const isNewDay = localStorage.getItem('lastBudgetRiskNotifyDate') !== todayStr;
         const hasSpendIncreased = totalSpend > lastNotifiedSpend;
         if (budgetRatio > timeRatio * 1.15 && budgetRatio > 0.1 && hasSpendIncreased && isNewDay) {
+          const saldoDisponivel = monthlyBudget - totalSpend;
           emitNotification(
             "Alerta de Orçamento",
-            `Atenção: Gastos elevados! Você já utilizou ${(budgetRatio * 100).toFixed(0)}% do orçamento em ${(timeRatio * 100).toFixed(0)}% do mês.`,
+            `Você já utilizou ${(budgetRatio * 100).toFixed(0)}% do orçamento em ${(timeRatio * 100).toFixed(0)}% do mês.\nSaldo disponível atual R$ ${saldoDisponivel.toFixed(2)}`,
             'warning',
             'financeiro',
             `budget-${todayStr}`
