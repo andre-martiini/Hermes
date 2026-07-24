@@ -602,7 +602,13 @@ def sync_pix_emails(db, log_list=None, sync_ref=None):
     Busca emails de Pix e registra no Financeiro (Versão CLI)
     """
     def log(msg, force_ui=False):
-        print(msg)
+        try:
+            print(msg)
+        except Exception:
+            try:
+                print(str(msg).encode('utf-8', errors='replace').decode('utf-8', errors='replace'))
+            except Exception:
+                pass
         if log_list is not None: 
             log_list.append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
             if sync_ref:
@@ -612,11 +618,20 @@ def sync_pix_emails(db, log_list=None, sync_ref=None):
     try:
         service = get_gmail_service()
         log("Buscando emails de Pix a partir de 01/02/2026...")
-        # Query: Assuntos de Pix + Data limite
-        query = 'after:2026/02/01 subject:(Pix recebido OR Pix realizado OR "Pix enviado" OR "transferência Pix" OR "Pix enviado")'
+        query = 'after:2026/02/01 (subject:(Pix OR "Google Pay" OR "PicPay" OR "Pagamento" OR "Transferência" OR "Comprovante") OR "Pix" OR "Google Pay" OR "PicPay")'
         
-        results = service.users().messages().list(userId='me', q=query, maxResults=50).execute()
-        messages = results.get('messages', [])
+        messages = []
+        page_token = None
+        while True:
+            results = service.users().messages().list(
+                userId='me', q=query, maxResults=100, pageToken=page_token
+            ).execute()
+            batch = results.get('messages', [])
+            if batch:
+                messages.extend(batch)
+            page_token = results.get('nextPageToken')
+            if not page_token or len(messages) >= 500:
+                break
         
         if not messages:
             log("Nenhum Pix encontrado para os critérios de busca.")
@@ -629,23 +644,54 @@ def sync_pix_emails(db, log_list=None, sync_ref=None):
         existing_income = []
         existing_google_ids = set()
 
+        def parse_iso_date(date_str):
+            if not date_str: return None
+            try:
+                dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+            except:
+                return None
+
         for t in db.collection('finance_transactions').stream():
             data = t.to_dict()
-            existing_transactions.append((data.get('description'), data.get('amount'), data.get('date')))
+            existing_transactions.append({
+                'doc_id': t.id,
+                'description': data.get('description', ''),
+                'amount': data.get('amount', 0.0),
+                'date': parse_iso_date(data.get('date')),
+                'pix_id': data.get('pix_id'),
+                'google_message_id': data.get('google_message_id')
+            })
             if data.get('google_message_id'): existing_google_ids.add(data['google_message_id'])
 
         for t in db.collection('finance_income').stream():
             data = t.to_dict()
-            existing_income.append((data.get('description'), data.get('amount'), data.get('date')))
+            existing_income.append({
+                'doc_id': t.id,
+                'description': data.get('description', ''),
+                'amount': data.get('amount', 0.0),
+                'date': parse_iso_date(data.get('date')),
+                'pix_id': data.get('pix_id'),
+                'google_message_id': data.get('google_message_id')
+            })
             if data.get('google_message_id'): existing_google_ids.add(data['google_message_id'])
 
         processed_emails_doc = db.collection('system').document('processed_emails').get()
-        processed_ids = processed_emails_doc.to_dict().get('ids', []) if processed_emails_doc.exists else []
+        processed_ids = set(processed_emails_doc.to_dict().get('ids', [])) if processed_emails_doc.exists else set()
         new_processed_ids = []
+
+        bill_rubrics_cache = []
+        for r in db.collection('bill_rubrics').stream():
+            d = r.to_dict()
+            desc = d.get('description', '')
+            keywords = [w.strip().lower() for w in re.split(r'[\(\)\s,-]+', desc) if len(w.strip()) > 2]
+            bill_rubrics_cache.append({'id': r.id, 'desc': desc.lower(), 'keywords': keywords, 'full_desc': desc})
 
         for msg in messages:
             msg_id = msg['id']
-            if msg_id in processed_ids or msg_id in existing_google_ids:
+            if msg_id in existing_google_ids:
                 archive_gmail_message(service, msg_id, log, "pix-ja-processado")
                 continue
             
@@ -656,47 +702,208 @@ def sync_pix_emails(db, log_list=None, sync_ref=None):
             snippet = details.get('snippet', '')
             subject = ''
             for header in details.get('payload', {}).get('headers', []):
-                if header['name'] == 'Subject': subject = header['value']; break
+                if header['name'].lower() == 'subject':
+                    subject = header['value']
+                    break
             
-            value_match = re.search(r'R\$\s*(\d+(?:[\.,]\d+)?)', f"{subject} {snippet}")
+            content = f"{subject} {snippet}"
+            value_match = re.search(r'R\$\s*(\d+(?:[\.,]\d+)?)', content)
+            pix_id_match = re.search(r'\b(E[A-Z0-9]{31})\b', content)
+            pix_id = pix_id_match.group(1) if pix_id_match else None
+
             if value_match:
                 val_str = value_match.group(1).replace('.', '').replace(',', '.')
-                amount = float(val_str)
-                is_income = any(word in subject.lower() or word in snippet.lower() for word in ['recebido', 'recebeu', 'recebida'])
+                try:
+                    amount = float(val_str)
+                except ValueError:
+                    continue
+
+                if amount <= 0:
+                    continue
+
+                is_income = any(word in content.lower() for word in ['recebido', 'recebeu', 'recebida', 'recebimento', 'creditado', 'entrada'])
                 description = f"Pix: {subject}"
                 iso_date = dt.isoformat()
-                
-                # Verificação de redundância adicional (mesmo que não esteja no processed_ids)
-                record = (description, amount, iso_date)
-                if is_income:
-                    if record in existing_income:
+
+                # Conciliação com Rubricas de Contas (Contas Fixas / Saídas)
+                if not is_income:
+                    matched_bill_rubric = None
+                    clean_content = content.lower()
+                    for rb in bill_rubrics_cache:
+                        if rb['desc'] in clean_content or any(kw in clean_content for kw in rb['keywords']):
+                            matched_bill_rubric = rb
+                            break
+
+                    if matched_bill_rubric:
+                        month = dt.month - 1
+                        year = dt.year
+                        
+                        found_bill_doc = None
+                        for fb_doc in db.collection('fixed_bills').where('month', '==', month).where('year', '==', year).stream():
+                            fb_data = fb_doc.to_dict()
+                            if fb_data.get('rubricId') == matched_bill_rubric['id'] or matched_bill_rubric['desc'] in fb_data.get('description', '').lower():
+                                found_bill_doc = fb_doc
+                                break
+                        
+                        if found_bill_doc:
+                            db.collection('fixed_bills').document(found_bill_doc.id).update({
+                                'isPaid': True,
+                                'amount': amount,
+                                'data_pagamento': iso_date,
+                                'google_message_id': msg_id,
+                                'pix_id': pix_id
+                            })
+                            log(f"[CONCILIAÇÃO] Conta Fixa '{matched_bill_rubric['full_desc']}' baixada como PAGA (R$ {amount:.2f}). Ignorada nos lançamentos avulsos.")
+                        else:
+                            db.collection('fixed_bills').add({
+                                'description': matched_bill_rubric['full_desc'],
+                                'amount': amount,
+                                'dueDay': dt.day,
+                                'month': month,
+                                'year': year,
+                                'isPaid': True,
+                                'rubricId': matched_bill_rubric['id'],
+                                'google_message_id': msg_id,
+                                'pix_id': pix_id,
+                                'created_at': iso_date
+                            })
+                            log(f"[CONCILIAÇÃO] Criada e baixada Conta Fixa '{matched_bill_rubric['full_desc']}' (R$ {amount:.2f}). Ignorada nos lançamentos avulsos.")
+                        
                         new_processed_ids.append(msg_id)
-                        archive_gmail_message(service, msg_id, log, "pix-duplicado")
+                        archive_gmail_message(service, msg_id, log, "pix-conciliado-conta-fixa")
                         continue
-                    db.collection('finance_income').add({
+                
+                is_duplicate = False
+                target_cache = existing_income if is_income else existing_transactions
+
+                for item in target_cache:
+                    if item.get('google_message_id') == msg_id:
+                        is_duplicate = True
+                        break
+                    if pix_id and item.get('pix_id') == pix_id:
+                        is_duplicate = True
+                        break
+                    if item.get('amount') and abs(item['amount'] - amount) < 0.01 and item.get('date'):
+                        item_dt = item['date']
+                        if item_dt.tzinfo is None:
+                            item_dt = item_dt.replace(tzinfo=timezone.utc)
+                        diff_seconds = abs((item_dt - dt).total_seconds())
+                        if diff_seconds <= 7200: # 2 horas
+                            is_duplicate = True
+                            existing_desc = item.get('description', '')
+                            if ("pagamento realizado via pix" in existing_desc.lower() or "pix:" in existing_desc.lower()) and "google pay" in description.lower():
+                                update_fields = {'description': description}
+                                if pix_id: update_fields['pix_id'] = pix_id
+                                collection_name = 'finance_income' if is_income else 'finance_transactions'
+                                db.collection(collection_name).document(item['doc_id']).update(update_fields)
+                                item['description'] = description
+                                log(f"[PIX] Atualizada descrição do lançamento existente para: '{description}'")
+                            break
+
+                if is_duplicate:
+                    new_processed_ids.append(msg_id)
+                    archive_gmail_message(service, msg_id, log, "pix-duplicado")
+                    continue
+
+                if is_income:
+                    doc_ref = db.collection('finance_income').add({
                         'description': description, 'amount': amount, 'day': dt.day,
                         'month': dt.month - 1, 'year': dt.year, 'status': 'active',
-                        'data_recebimento': iso_date, 'google_message_id': msg_id
-                    })
+                        'data_recebimento': iso_date, 'google_message_id': msg_id, 'pix_id': pix_id
+                    })[1]
+                    existing_income.append({'doc_id': doc_ref.id, 'amount': amount, 'date': dt, 'pix_id': pix_id, 'description': description, 'google_message_id': msg_id})
                 else:
-                    if record in existing_transactions:
-                        new_processed_ids.append(msg_id)
-                        archive_gmail_message(service, msg_id, log, "pix-duplicado")
-                        continue
-                    db.collection('finance_transactions').add({
+                    sprint = 1 if dt.day < 8 else 2 if dt.day < 15 else 3 if dt.day < 22 else 4
+                    doc_ref = db.collection('finance_transactions').add({
                         'description': description, 'amount': amount, 'date': iso_date,
-                        'status': 'active', 'google_message_id': msg_id
-                    })
+                        'sprint': sprint, 'status': 'active', 'google_message_id': msg_id, 'pix_id': pix_id
+                    })[1]
+                    existing_transactions.append({'doc_id': doc_ref.id, 'amount': amount, 'date': dt, 'pix_id': pix_id, 'description': description, 'google_message_id': msg_id})
                     
                 new_processed_ids.append(msg_id)
                 log(f"[PIX] Processado: {description} (R$ {amount:.2f})")
                 archive_gmail_message(service, msg_id, log, "pix-lancado")
         
         if new_processed_ids:
-            updated_ids = list(set(processed_ids + new_processed_ids))
+            updated_ids = list(processed_ids.union(new_processed_ids))[-1000:]
             db.collection('system').document('processed_emails').set({'ids': updated_ids}, merge=True)
+
+        cleanup_retroactive_pix_duplicates(db, log)
+
     except Exception as e:
         log(f"ERRO PIX: {e}")
+
+
+def cleanup_retroactive_pix_duplicates(db, log_func=None):
+    """
+    Varre a coleção finance_transactions e finance_income para identificar e consolidar
+    duplicatas retroativas (ex: e-mail do Google Pay + e-mail do PicPay/Banco para a mesma compra < 2 horas).
+    """
+    from datetime import datetime, timezone
+
+    def _log(msg):
+        if log_func: log_func(msg)
+        else: print(msg)
+
+    def parse_dt(d_str):
+        if not d_str: return None
+        try:
+            dt = datetime.fromisoformat(d_str.replace('Z', '+00:00'))
+            if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except: return None
+
+    _log("Iniciando verificação retroativa de duplicatas no Firestore...")
+
+    for col in ['finance_transactions', 'finance_income']:
+        try:
+            docs = list(db.collection(col).stream())
+            items = []
+            for doc in docs:
+                d = doc.to_dict()
+                if d.get('status') == 'deleted': continue
+                items.append({
+                    'id': doc.id,
+                    'description': d.get('description', ''),
+                    'amount': d.get('amount', 0.0),
+                    'date': parse_dt(d.get('date')),
+                    'google_message_id': d.get('google_message_id'),
+                    'pix_id': d.get('pix_id')
+                })
+
+            items.sort(key=lambda x: x['date'] or datetime.min.replace(tzinfo=timezone.utc))
+
+            removed_count = 0
+            to_delete = set()
+            for i in range(len(items)):
+                if items[i]['id'] in to_delete: continue
+                for j in range(i + 1, len(items)):
+                    if items[j]['id'] in to_delete: continue
+
+                    if items[i]['date'] and items[j]['date']:
+                        diff = abs((items[j]['date'] - items[i]['date']).total_seconds())
+                        if diff > 7200:
+                            break
+
+                    if abs(items[i]['amount'] - items[j]['amount']) < 0.01:
+                        item_i_gpay = 'google pay' in items[i]['description'].lower()
+                        item_j_gpay = 'google pay' in items[j]['description'].lower()
+
+                        if item_j_gpay and not item_i_gpay:
+                            to_delete.add(items[i]['id'])
+                            removed_count += 1
+                            break
+                        else:
+                            to_delete.add(items[j]['id'])
+                            removed_count += 1
+
+            for doc_id in to_delete:
+                db.collection(col).document(doc_id).delete()
+
+            if removed_count > 0:
+                _log(f"[{col}] Limpeza retroativa concluída: {removed_count} duplicata(s) removida(s).")
+        except Exception as e:
+            _log(f"ERRO LIMPEZA RETROATIVA ({col}): {e}")
 
 def sync_google_drive_acervo(db, logs=None, sync_ref=None):
     def log(msg):

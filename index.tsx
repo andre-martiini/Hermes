@@ -1000,6 +1000,9 @@ const App: React.FC = () => {
     sprintDates: { 1: "08", 2: "15", 3: "22", 4: "01" },
     emergencyReserveTarget: 0,
     emergencyReserveCurrent: 0,
+    investmentReserveTarget: 50000,
+    investmentReserveCurrent: 0,
+    defaultPrincipalIncome: 0,
     billCategories: ['Conta Fixa', 'Poupança', 'Investimento'],
     incomeCategories: ['Renda Principal', 'Renda Extra', 'Dividendos', 'Outros']
   });
@@ -5686,16 +5689,13 @@ const App: React.FC = () => {
                         .filter(b => b.category === 'Poupança' && b.isPaid)
                         .reduce((acc, curr) => acc + curr.amount, 0);
                       const emergencyCurrent = financeSettings.emergencyReserveCurrent || 0;
-                      let remaining = Math.max(0, totalSavings + emergencyCurrent - (financeSettings.emergencyReserveTarget || 0));
-                      // Note: The logic here is a bit tricky. If "Poupança" bills are the ONLY thing that fills goals,
-                      // and emergency reserve is a manual pot, then typically goals = totalSavings if emergency is full.
-                      // But if emergency is manual, maybe the user wants: Remaining = total_saved_in_savings_bills.
-                      // Let's assume goals are filled by "Poupança" items, but only if the manual emergency reserve is >= target.
                       const isEmergencyFull = emergencyCurrent >= (financeSettings.emergencyReserveTarget || 0);
-                      let availableForGoals = isEmergencyFull ? totalSavings : 0;
+                      const investmentCurrent = financeSettings.investmentReserveCurrent || 0;
+                      const availableForGoals = investmentCurrent + (isEmergencyFull ? totalSavings : 0);
+
                       return [...financeGoals].sort((a, b) => a.priority - b.priority).map(goal => {
-                        const allocated = Math.min(availableForGoals, goal.targetAmount);
-                        availableForGoals -= allocated;
+                        if (goal.status === 'completed') return goal;
+                        const allocated = goal.targetAmount > 0 ? Math.min(goal.targetAmount, availableForGoals) : 0;
                         return { ...goal, currentAmount: allocated };
                       });
                     })()}

@@ -302,6 +302,9 @@ export interface FinanceSettings {
     sprintDates: { [key: number]: string };
     emergencyReserveTarget: number;
     emergencyReserveCurrent: number;
+    investmentReserveTarget?: number;
+    investmentReserveCurrent?: number;
+    defaultPrincipalIncome?: number;
     billCategories: string[];
     incomeCategories: string[];
     externalSpendingLimit?: number;
@@ -411,6 +414,7 @@ export interface IncomeRubric {
     expectedDay: number;
     category: string;
     defaultAmount?: number;
+    eventual?: boolean; // true = fonte esporádica (ex: substituição de chefia); não cobra lançamento todo mês
 }
 
 

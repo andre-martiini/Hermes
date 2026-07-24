@@ -93,6 +93,109 @@ const FinanceSection = ({ title, children, defaultExpanded = true, disableCollap
     );
 };
 
+const FormattedCurrencyInput: React.FC<{
+    value: number;
+    onChange: (val: number) => void;
+    onSave?: (val: number) => void;
+    className?: string;
+    prefixColorClass?: string;
+}> = ({ value, onChange, onSave, className = '', prefixColorClass = 'text-emerald-600' }) => {
+    const formatValue = (num: number): string => {
+        if (num === undefined || num === null || isNaN(num)) return '0,00';
+        return num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+
+    const [displayStr, setDisplayStr] = useState<string>(formatValue(value));
+    const [isFocused, setIsFocused] = useState(false);
+
+    useEffect(() => {
+        if (!isFocused) {
+            setDisplayStr(formatValue(value));
+        }
+    }, [value, isFocused]);
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const raw = e.target.value;
+        setDisplayStr(raw);
+
+        const clean = raw.replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '');
+        const num = parseFloat(clean);
+        if (!isNaN(num)) {
+            onChange(num);
+        }
+    };
+
+    const handleBlur = () => {
+        setIsFocused(false);
+        const clean = displayStr.replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '');
+        const num = parseFloat(clean);
+        const validNum = isNaN(num) ? 0 : num;
+        setDisplayStr(formatValue(validNum));
+        onChange(validNum);
+        if (onSave) onSave(validNum);
+    };
+
+    return (
+        <div className="group/edit relative flex items-baseline">
+            <span className={`text-2xl font-sans font-semibold ${prefixColorClass} mr-2 select-none`}>R$</span>
+            <input
+                type="text"
+                inputMode="decimal"
+                className={`text-2xl font-sans font-semibold ${prefixColorClass} bg-transparent border-none outline-none focus:ring-0 p-0 ${className}`}
+                value={displayStr}
+                onChange={handleInputChange}
+                onFocus={() => setIsFocused(true)}
+                onBlur={handleBlur}
+            />
+        </div>
+    );
+};
+
+const GoalTargetInput: React.FC<{
+    targetAmount: number;
+    onSave: (newTarget: number) => void;
+}> = ({ targetAmount, onSave }) => {
+    const formatValue = (num: number): string => {
+        if (num === undefined || num === null || isNaN(num)) return '0,00';
+        return num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+
+    const [str, setStr] = useState<string>(formatValue(targetAmount));
+    const [isFocused, setIsFocused] = useState(false);
+
+    useEffect(() => {
+        if (!isFocused) {
+            setStr(formatValue(targetAmount));
+        }
+    }, [targetAmount, isFocused]);
+
+    const handleBlur = () => {
+        setIsFocused(false);
+        const clean = str.replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '');
+        const num = parseFloat(clean);
+        const validNum = isNaN(num) ? 0 : num;
+        setStr(formatValue(validNum));
+        if (validNum !== targetAmount) {
+            onSave(validNum);
+        }
+    };
+
+    return (
+        <div className="flex items-center gap-1">
+            <span className="text-slate-400 font-normal">Meta: R$</span>
+            <input
+                type="text"
+                inputMode="decimal"
+                className="bg-transparent border-b border-slate-200 dark:border-white/10 p-0 text-xs font-sans font-semibold text-on-surface w-28 outline-none focus:border-indigo-500"
+                value={str}
+                onChange={(e) => setStr(e.target.value)}
+                onFocus={() => setIsFocused(true)}
+                onBlur={handleBlur}
+            />
+        </div>
+    );
+};
+
 type SortDirection = 'asc' | 'desc';
 
 const formatCurrency = (value: number) => `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
@@ -218,6 +321,12 @@ const FinanceView = ({
     const [localEmergencyCurrent, setLocalEmergencyCurrent] = useState(emergencyReserve.current);
     const [localEmergencyTarget, setLocalEmergencyTarget] = useState(emergencyReserve.target);
 
+    // Investment Reserve Local State for Sync
+    const [localInvestmentCurrent, setLocalInvestmentCurrent] = useState(settings.investmentReserveCurrent ?? 0);
+    const [localInvestmentTarget, setLocalInvestmentTarget] = useState(settings.investmentReserveTarget ?? 50000);
+    const [localDefaultPrincipalIncome, setLocalDefaultPrincipalIncome] = useState(settings.defaultPrincipalIncome ?? 0);
+    const [revenueYear, setRevenueYear] = useState<number>(currentYear);
+
     // Sync local state when props change (from parent/firebase)
     useEffect(() => {
         setLocalEmergencyCurrent(emergencyReserve.current);
@@ -226,6 +335,96 @@ const FinanceView = ({
     useEffect(() => {
         setLocalEmergencyTarget(emergencyReserve.target);
     }, [emergencyReserve.target]);
+
+    useEffect(() => {
+        setLocalInvestmentCurrent(settings.investmentReserveCurrent ?? 0);
+    }, [settings.investmentReserveCurrent]);
+
+    useEffect(() => {
+        setLocalInvestmentTarget(settings.investmentReserveTarget ?? 50000);
+    }, [settings.investmentReserveTarget]);
+
+    useEffect(() => {
+        setLocalDefaultPrincipalIncome(settings.defaultPrincipalIncome ?? 0);
+    }, [settings.defaultPrincipalIncome]);
+
+    // Monthly Revenue Consolidation for Selected Year
+    const monthlyRevenueData = useMemo(() => {
+        const months = [
+            'JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN',
+            'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'
+        ];
+        const defaultSalary = settings.defaultPrincipalIncome || 0;
+
+        return months.map((mName, mIdx) => {
+            const monthEntries = incomeEntries.filter(e => e.month === mIdx && e.year === revenueYear);
+
+            // 1. Remuneração / Renda Principal
+            const explicitPrincipalEntries = monthEntries.filter(e =>
+                e.category === 'Renda Principal' ||
+                (e.category && e.category.toLowerCase().includes('remuneraç')) ||
+                (e.category && e.category.toLowerCase().includes('salário')) ||
+                (e.description && e.description.toLowerCase().includes('remuneraç')) ||
+                (e.description && e.description.toLowerCase().includes('salário')) ||
+                (e.description && e.description.toLowerCase().includes('pro-labore'))
+            );
+
+            const principalAmount = explicitPrincipalEntries.length > 0
+                ? explicitPrincipalEntries.reduce((a, c) => a + c.amount, 0)
+                : defaultSalary;
+
+            // 2. Receita Programada de Serviços / Contratos (inclui parcelas vinculadas via rubricId e categorias de serviços)
+            const serviceEntries = monthEntries.filter(e =>
+                !explicitPrincipalEntries.includes(e) && (
+                    Boolean(e.rubricId) ||
+                    (e.category && e.category.toLowerCase().includes('serviç')) ||
+                    (e.category && e.category.toLowerCase().includes('consultoria')) ||
+                    (e.category && e.category.toLowerCase().includes('projeto')) ||
+                    (e.category && e.category.toLowerCase().includes('contrato')) ||
+                    (e.description && e.description.toLowerCase().includes('serviç')) ||
+                    (e.description && e.description.toLowerCase().includes('contrato')) ||
+                    (e.description && e.description.toLowerCase().includes('nota fiscal')) ||
+                    (e.description && e.description.toLowerCase().includes('nfse'))
+                )
+            );
+            const serviceAmount = serviceEntries.reduce((a, c) => a + c.amount, 0);
+
+            // 3. Outras Entradas & Rendimentos (apenas o que não for Renda Principal nem Serviços)
+            const otherEntries = monthEntries.filter(e =>
+                !explicitPrincipalEntries.includes(e) &&
+                !serviceEntries.includes(e)
+            );
+            const otherAmount = otherEntries.reduce((a, c) => a + c.amount, 0);
+
+            const receivedAmount = monthEntries.filter(e => e.isReceived).reduce((a, c) => a + c.amount, 0);
+            const totalForecast = principalAmount + serviceAmount + otherAmount;
+
+            return {
+                monthIndex: mIdx,
+                monthName: mName,
+                principalAmount,
+                serviceAmount,
+                otherAmount,
+                totalForecast,
+                receivedAmount,
+                isCurrentMonth: mIdx === currentMonth && revenueYear === currentYear,
+                hasExplicitEntries: monthEntries.length > 0
+            };
+        });
+    }, [incomeEntries, revenueYear, settings.defaultPrincipalIncome, currentMonth, currentYear]);
+
+    const totalAnnualForecast = useMemo(() => {
+        return monthlyRevenueData.reduce((acc, curr) => acc + curr.totalForecast, 0);
+    }, [monthlyRevenueData]);
+
+    const totalAnnualReceived = useMemo(() => {
+        return monthlyRevenueData.reduce((acc, curr) => acc + curr.receivedAmount, 0);
+    }, [monthlyRevenueData]);
+
+    const maxMonthlyForecast = useMemo(() => {
+        const max = Math.max(...monthlyRevenueData.map(d => d.totalForecast), 1);
+        return max;
+    }, [monthlyRevenueData]);
 
     const handleTwoStepDelete = (key: string, action: () => void | Promise<void>) => {
         const decision = resolveTwoStepAction(pendingDeleteKey, key);
@@ -288,8 +487,8 @@ const FinanceView = ({
     const handleExportCSV = () => {
         const filteredTransactions = transactions
             .filter(t => {
-                const d = new Date(t.date);
-                return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+                const parts = parseDateDay(t.date);
+                return parts && parts.month === currentMonth && parts.year === currentYear;
             })
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
@@ -298,11 +497,17 @@ const FinanceView = ({
         }
 
         const headers = ['Data', 'Descrição', 'Valor'];
-        const rows = filteredTransactions.map(t => [
-            new Date(t.date).toLocaleDateString('pt-BR'),
-            t.description || 'LOG_ITEM_STREAM',
-            t.amount.toFixed(2).replace('.', ',')
-        ]);
+        const rows = filteredTransactions.map(t => {
+            const parts = parseDateDay(t.date);
+            const formattedDate = parts 
+                ? `${String(parts.day).padStart(2, '0')}/${String(parts.month + 1).padStart(2, '0')}/${parts.year}`
+                : new Date(t.date).toLocaleDateString('pt-BR');
+            return [
+                formattedDate,
+                t.description || 'LOG_ITEM_STREAM',
+                t.amount.toFixed(2).replace('.', ',')
+            ];
+        });
 
         const csvContent = [
             headers.join(';'),
@@ -343,7 +548,8 @@ const FinanceView = ({
         .reduce((acc, curr) => acc + curr.amount, 0);
     const currentMonthIncomeEntries = incomeEntries.filter(e => e.month === currentMonth && e.year === currentYear);
     const currentMonthBills = fixedBills.filter(b => b.month === currentMonth && b.year === currentYear);
-    const pendingIncomeRubrics = incomeRubrics.filter(rubric => !currentMonthIncomeEntries.some(entry => entry.rubricId === rubric.id));
+    const pendingIncomeRubrics = incomeRubrics.filter(rubric => !rubric.eventual && !currentMonthIncomeEntries.some(entry => entry.rubricId === rubric.id));
+    const eventualIncomeRubrics = incomeRubrics.filter(rubric => rubric.eventual);
     const pendingBillRubrics = billRubrics.filter(rubric => !currentMonthBills.some(bill => bill.rubricId === rubric.id));
 
     const toggleIncomeSort = (key: 'description' | 'category' | 'amount' | 'day' | 'status') => {
@@ -409,6 +615,22 @@ const FinanceView = ({
         .filter(entry => !entry.isReceived)
         .reduce((acc, curr) => acc + curr.amount, 0);
     const incomeOverallTotal = currentMonthIncomeEntries.reduce((acc, curr) => acc + curr.amount, 0);
+
+    // Previsão de Receita Calculations
+    const principalIncomeTotal = currentMonthIncomeEntries
+        .filter(e => e.category === 'Renda Principal' || e.description.toLowerCase().includes('remuneração') || e.description.toLowerCase().includes('salário') || e.description.toLowerCase().includes('pro-labore'))
+        .reduce((acc, curr) => acc + curr.amount, 0);
+
+    const serviceIncomeTotal = currentMonthIncomeEntries
+        .filter(e => e.category === 'Serviços' || e.category === 'Consultoria' || e.category === 'Projetos' || e.description.toLowerCase().includes('serviço') || e.description.toLowerCase().includes('contrato') || e.description.toLowerCase().includes('nota fiscal') || e.description.toLowerCase().includes('nfse'))
+        .reduce((acc, curr) => acc + curr.amount, 0);
+
+    const otherIncomeTotal = Math.max(0, incomeOverallTotal - (principalIncomeTotal + serviceIncomeTotal));
+    const pendingRubricsTotal = pendingIncomeRubrics.reduce((acc, curr) => acc + (curr.defaultAmount || 0), 0);
+    const totalRevenueForecast = Math.max(incomeOverallTotal, incomeOverallTotal + pendingRubricsTotal);
+    const totalRevenueReceived = incomeReceivedTotal;
+    const revenuePercentage = totalRevenueForecast > 0 ? Math.min((totalRevenueReceived / totalRevenueForecast) * 100, 100) : 0;
+    const pendingRevenue = Math.max(0, totalRevenueForecast - totalRevenueReceived);
 
     const billsPaidTotal = currentMonthBills
         .filter(bill => bill.isPaid)
@@ -593,7 +815,7 @@ const FinanceView = ({
                         <div>
                             <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider mb-2 text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
                                 <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
-                                Saldo Atual da Reserva
+                                Saldo Atual da Reserva (Com Rendimentos)
                             </h4>
                             <input
                                 type="number"
@@ -602,6 +824,54 @@ const FinanceView = ({
                                 onBlur={(e) => onUpdateSettings({ ...settings, emergencyReserveCurrent: Number(e.target.value) })}
                                 className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-3 text-on-surface font-sans font-semibold outline-none focus:ring-1 focus:ring-primary-tactile w-full"
                             />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">
+                        <div>
+                            <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider mb-2 text-indigo-600 dark:text-indigo-400 flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>
+                                Meta de Investimentos & Objetivos
+                            </h4>
+                            <input
+                                type="number"
+                                value={localInvestmentTarget}
+                                onChange={(e) => setLocalInvestmentTarget(Number(e.target.value))}
+                                onBlur={(e) => onUpdateSettings({ ...settings, investmentReserveTarget: Number(e.target.value) })}
+                                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-3 text-on-surface font-sans font-semibold outline-none focus:ring-1 focus:ring-indigo-500 w-full"
+                            />
+                        </div>
+                        <div>
+                            <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider mb-2 text-indigo-600 dark:text-indigo-400 flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>
+                                Saldo Atual de Investimentos
+                            </h4>
+                            <input
+                                type="number"
+                                value={localInvestmentCurrent}
+                                onChange={(e) => setLocalInvestmentCurrent(Number(e.target.value))}
+                                onBlur={(e) => onUpdateSettings({ ...settings, investmentReserveCurrent: Number(e.target.value) })}
+                                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-3 text-on-surface font-sans font-semibold outline-none focus:ring-1 focus:ring-indigo-500 w-full"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="pt-4">
+                        <div>
+                            <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider mb-2 text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
+                                Remuneração Mensal Padrão (Renda Principal)
+                            </h4>
+                            <input
+                                type="number"
+                                value={localDefaultPrincipalIncome}
+                                onChange={(e) => setLocalDefaultPrincipalIncome(Number(e.target.value))}
+                                onBlur={(e) => onUpdateSettings({ ...settings, defaultPrincipalIncome: Number(e.target.value) })}
+                                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-3 text-on-surface font-sans font-semibold outline-none focus:ring-1 focus:ring-emerald-500 w-full"
+                            />
+                            <p className="text-[9px] text-slate-400 uppercase mt-1 font-sans font-semibold tracking-wider">
+                                Valor base de salário/remuneração aplicável nos meses sem lançamento específico
+                            </p>
                         </div>
                     </div>
 
@@ -821,6 +1091,63 @@ const FinanceView = ({
                             <p className="text-[9px] font-sans font-semibold uppercase text-slate-400 tracking-wider">Saldo Líquido Estimado</p>
                         </div>
                     </div>
+
+                    {/* TRÍPTICO DE SALDOS AUDITADOS (EXTRATO PICPAY) */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* Card 1: Saldo Real da Conta (PicPay) */}
+                        <div className="bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-transparent p-5 rounded-2xl border border-emerald-500/30 flex flex-col gap-1 shadow-sm relative overflow-hidden">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                                    🏦 Saldo Real da Conta (PicPay)
+                                </span>
+                                <span className="text-[8px] font-sans font-extrabold bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 px-2 py-0.5 rounded-full uppercase">
+                                    Auditado
+                                </span>
+                            </div>
+                            <div className="text-2xl md:text-3xl font-sans font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight mt-1">
+                                R$ 294,61
+                            </div>
+                            <p className="text-[9px] font-sans font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mt-0.5">
+                                Saldo real em conta bancária PicPay
+                            </p>
+                        </div>
+
+                        {/* Card 2: Orçamento Somente para Pix */}
+                        <div className="bg-gradient-to-br from-indigo-500/10 via-purple-500/5 to-transparent p-5 rounded-2xl border border-indigo-500/30 flex flex-col gap-1 shadow-sm relative overflow-hidden">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
+                                    📱 Orçamento Somente Pix
+                                </span>
+                                <span className="text-[8px] font-sans font-extrabold bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 px-2 py-0.5 rounded-full uppercase">
+                                    Pix
+                                </span>
+                            </div>
+                            <div className="text-2xl md:text-3xl font-sans font-extrabold text-indigo-600 dark:text-indigo-400 tracking-tight mt-1">
+                                R$ 277,25
+                            </div>
+                            <p className="text-[9px] font-sans font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mt-0.5">
+                                Teto disponível restrito a pagamentos Pix
+                            </p>
+                        </div>
+
+                        {/* Card 3: Orçamento Geral de Gastos */}
+                        <div className="bg-gradient-to-br from-purple-500/10 via-pink-500/5 to-transparent p-5 rounded-2xl border border-purple-500/30 flex flex-col gap-1 shadow-sm relative overflow-hidden">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 flex items-center gap-1.5">
+                                    📊 Orçamento Geral (Todos os Gastos)
+                                </span>
+                                <span className="text-[8px] font-sans font-extrabold bg-purple-500/20 text-purple-600 dark:text-purple-300 px-2 py-0.5 rounded-full uppercase">
+                                    Geral
+                                </span>
+                            </div>
+                            <div className="text-2xl md:text-3xl font-sans font-extrabold text-purple-600 dark:text-purple-400 tracking-tight mt-1">
+                                R$ 274,15
+                            </div>
+                            <p className="text-[9px] font-sans font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mt-0.5">
+                                Saldo disponível para todos os gastos
+                            </p>
+                        </div>
+                    </div>
                     {/* Budget Bar & Daily Consumption Section */}
                     <div className="bg-surface p-6 md:p-8 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none relative overflow-hidden flex flex-col gap-6">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -828,20 +1155,24 @@ const FinanceView = ({
                                 <h4 className="text-xl md:text-2xl font-sans font-semibold text-on-surface tracking-tight mb-1">
                                     {budgetChartTab === 'accumulated'
                                         ? `// GASTO ACUMULADO • ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}`
-                                        : `// CONSUMO DIÁRIO DO PERÍODO • ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}`
+                                        : budgetChartTab === 'daily'
+                                        ? `// CONSUMO DIÁRIO DO PERÍODO • ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}`
+                                        : `// PREVISÃO DE RECEITA • ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}`
                                     }
                                 </h4>
                                 <p className="text-[10px] font-sans text-slate-500 uppercase tracking-wider">
                                     {budgetChartTab === 'accumulated'
                                         ? 'Progresso orçamentário mensal e tempo decorrido'
-                                        : 'Detalhamento diário dos lançamentos e picos de consumo do mês'
+                                        : budgetChartTab === 'daily'
+                                        ? 'Detalhamento diário dos lançamentos e picos de consumo do mês'
+                                        : 'Projeção de receitas programadas, remuneração principal e entradas adicionais'
                                     }
                                 </p>
                             </div>
 
                             <div className="flex items-center gap-3 self-end sm:self-auto">
                                 {/* TAB SELECTOR */}
-                                <div className="flex p-1 bg-slate-100 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/10">
+                                <div className="flex p-1 bg-slate-100 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/10 flex-wrap">
                                     <button
                                         type="button"
                                         onClick={() => setBudgetChartTab('accumulated')}
@@ -863,6 +1194,17 @@ const FinanceView = ({
                                         }`}
                                     >
                                         Consumo Diário
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setBudgetChartTab('revenue_forecast')}
+                                        className={`px-3 py-1.5 rounded-lg text-[9px] md:text-[10px] font-sans font-bold uppercase tracking-wider transition-all ${
+                                            budgetChartTab === 'revenue_forecast'
+                                                ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm'
+                                                : 'text-slate-500 hover:text-on-surface'
+                                        }`}
+                                    >
+                                        Previsão de Receita
                                     </button>
                                 </div>
 
@@ -923,7 +1265,7 @@ const FinanceView = ({
                                     <span>MONTH_END / {daysInMonth}</span>
                                 </div>
                             </div>
-                        ) : (
+                        ) : budgetChartTab === 'daily' ? (
                             <div className="flex flex-col gap-6">
                                 {/* Resumo de Métricas Diárias */}
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1010,6 +1352,203 @@ const FinanceView = ({
                                         </span>
                                     </div>
                                     <span className="italic">* Passe o cursor ou clique nas barras para ver os lançamentos do dia.</span>
+                                </div>
+                            </div>
+                        ) : (
+                            /* Previsão de Receita View - Consolidado Mês a Mês (12 meses) */
+                            <div className="flex flex-col gap-6">
+                                {/* Top Controls & Summary Banner */}
+                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50 dark:bg-white/[0.02] p-4 rounded-xl border border-slate-200 dark:border-white/5">
+                                    <div>
+                                        <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-slate-400">Total Projeção Anual ({revenueYear})</span>
+                                        <div className="text-2xl md:text-3xl font-sans font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight mt-0.5">
+                                            R$ {totalAnnualForecast.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </div>
+                                        <div className="flex flex-wrap gap-3 mt-1.5 text-[9px] font-sans font-semibold uppercase tracking-wider">
+                                            <span className="text-emerald-500 flex items-center gap-1">
+                                                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
+                                                Confirmado: R$ {totalAnnualReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </span>
+                                            <span className="text-slate-400 flex items-center gap-1">
+                                                <span className="w-1.5 h-1.5 bg-amber-500 rounded-full"></span>
+                                                Pendente: R$ {Math.max(0, totalAnnualForecast - totalAnnualReceived).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {/* Year Selector Dropdown */}
+                                    <div className="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 px-3 py-2 rounded-lg shadow-sm">
+                                        <span className="text-[9px] font-sans font-bold uppercase tracking-wider text-slate-400">EXIBIR ANO:</span>
+                                        <select
+                                            value={revenueYear}
+                                            onChange={(e) => setRevenueYear(Number(e.target.value))}
+                                            className="bg-transparent text-xs font-sans font-extrabold text-on-surface outline-none cursor-pointer pr-1"
+                                        >
+                                            {[2024, 2025, 2026, 2027, 2028].map(yr => (
+                                                <option key={yr} value={yr} className="bg-surface text-on-surface">
+                                                    {yr} {yr === currentYear ? '• (Atual)' : ''}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                {/* Gráfico de 12 Meses (Consolidado Mês a Mês Empilhado) */}
+                                <div className="flex flex-col gap-2">
+                                    <div className="h-48 w-full flex items-end gap-1.5 sm:gap-2 pt-6 pb-2 px-1 relative">
+                                        {monthlyRevenueData.map((item) => {
+                                            const heightPercent = item.totalForecast > 0
+                                                ? Math.max((item.totalForecast / maxMonthlyForecast) * 100, 8)
+                                                : 0;
+
+                                            return (
+                                                <div
+                                                    key={item.monthIndex}
+                                                    className="flex-1 min-w-[12px] h-full flex flex-col justify-end items-center group relative cursor-pointer"
+                                                >
+                                                    {/* Bar Box Empilhado com 3 Segmentos de Cores */}
+                                                    <div
+                                                        style={{ height: item.totalForecast > 0 ? `${heightPercent}%` : '4px' }}
+                                                        className={`w-full rounded-t overflow-hidden flex flex-col justify-end transition-all duration-300 ${
+                                                            item.isCurrentMonth
+                                                                ? 'ring-2 ring-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.35)] z-10'
+                                                                : ''
+                                                        }`}
+                                                    >
+                                                        {/* Segmento 3: Outras Entradas (Âmbar / Amarelo) - Topo */}
+                                                        {item.otherAmount > 0 && item.totalForecast > 0 && (
+                                                            <div
+                                                                style={{ height: `${(item.otherAmount / item.totalForecast) * 100}%` }}
+                                                                className="w-full bg-amber-500 hover:bg-amber-400 transition-all duration-200"
+                                                            />
+                                                        )}
+
+                                                        {/* Segmento 2: Serviços / Contratos (Índigo / Roxo) - Meio */}
+                                                        {item.serviceAmount > 0 && item.totalForecast > 0 && (
+                                                            <div
+                                                                style={{ height: `${(item.serviceAmount / item.totalForecast) * 100}%` }}
+                                                                className="w-full bg-indigo-500 hover:bg-indigo-400 transition-all duration-200"
+                                                            />
+                                                        )}
+
+                                                        {/* Segmento 1: Remuneração Principal (Esmeralda / Verde) - Base */}
+                                                        {item.principalAmount > 0 && item.totalForecast > 0 && (
+                                                            <div
+                                                                style={{ height: `${(item.principalAmount / item.totalForecast) * 100}%` }}
+                                                                className="w-full bg-emerald-500 hover:bg-emerald-400 transition-all duration-200"
+                                                            />
+                                                        )}
+
+                                                        {/* Fallback para mês sem receita */}
+                                                        {item.totalForecast === 0 && (
+                                                            <div className="w-full h-full bg-slate-200 dark:bg-white/10" />
+                                                        )}
+                                                    </div>
+
+                                                    {/* Tooltip no Hover com Detalhamento do Mês */}
+                                                    <div className="absolute -top-36 hidden group-hover:flex flex-col bg-slate-900 text-white text-[9px] px-3 py-2 rounded-xl shadow-2xl z-50 whitespace-nowrap font-mono border border-slate-700 pointer-events-none min-w-[195px]">
+                                                        <div className="font-bold text-emerald-400 border-b border-slate-800 pb-1 mb-1.5 flex justify-between items-center">
+                                                            <span>{item.monthName} / {revenueYear}</span>
+                                                            <span className="text-[8px] text-slate-400">{item.isCurrentMonth ? '(Mês Atual)' : ''}</span>
+                                                        </div>
+                                                        <div className="flex justify-between gap-4 text-slate-300">
+                                                            <span className="flex items-center gap-1">
+                                                                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
+                                                                💼 Remuneração:
+                                                            </span>
+                                                            <span className="font-semibold text-white">R$ {item.principalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                        </div>
+                                                        <div className="flex justify-between gap-4 text-slate-300">
+                                                            <span className="flex items-center gap-1">
+                                                                <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>
+                                                                📄 Serviços/Contratos:
+                                                            </span>
+                                                            <span className="font-semibold text-white">R$ {item.serviceAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                        </div>
+                                                        <div className="flex justify-between gap-4 text-slate-300">
+                                                            <span className="flex items-center gap-1">
+                                                                <span className="w-1.5 h-1.5 bg-amber-500 rounded-full"></span>
+                                                                💰 Outras Entradas:
+                                                            </span>
+                                                            <span className="font-semibold text-white">R$ {item.otherAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                        </div>
+                                                        <div className="border-t border-slate-800 pt-1 mt-1 flex justify-between text-emerald-400 font-bold">
+                                                            <span>Total Projeção:</span>
+                                                            <span>R$ {item.totalForecast.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                        </div>
+                                                        <div className="flex justify-between text-[8px] text-slate-400 mt-0.5">
+                                                            <span>Confirmado / Recebido:</span>
+                                                            <span>R$ {item.receivedAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+
+                                    {/* Eixo X - Nomes dos Meses */}
+                                    <div className="flex justify-between text-[9px] font-mono text-slate-400 px-1 border-t border-slate-200/50 dark:border-white/5 pt-2">
+                                        {monthlyRevenueData.map((item) => (
+                                            <span
+                                                key={item.monthIndex}
+                                                className={`text-center flex-1 ${item.isCurrentMonth ? 'text-emerald-500 font-bold' : ''}`}
+                                            >
+                                                {item.monthName}
+                                            </span>
+                                        ))}
+                                    </div>
+
+                                    {/* Legenda de Cores dos Segmentos */}
+                                    <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4 text-[9px] font-mono text-slate-500 pt-1">
+                                        <span className="flex items-center gap-1.5">
+                                            <span className="w-2.5 h-2.5 rounded bg-emerald-500"></span> Remuneração Principal
+                                        </span>
+                                        <span className="flex items-center gap-1.5">
+                                            <span className="w-2.5 h-2.5 rounded bg-indigo-500"></span> Serviços / Contratos
+                                        </span>
+                                        <span className="flex items-center gap-1.5">
+                                            <span className="w-2.5 h-2.5 rounded bg-amber-500"></span> Outras Entradas & Rendimentos
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Legenda e Cards de Composição Anual */}
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                                    <div className="p-3 rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] flex flex-col gap-1">
+                                        <span className="text-[9px] font-sans font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                                            💼 Remuneração Padrão
+                                        </span>
+                                        <span className="text-sm font-sans font-bold text-on-surface">
+                                            R$ {(settings.defaultPrincipalIncome || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} / mês
+                                        </span>
+                                        <span className="text-[8px] text-slate-400 italic">
+                                            {settings.defaultPrincipalIncome ? 'Definido nas configurações' : 'Nenhum valor padrão definido'}
+                                        </span>
+                                    </div>
+
+                                    <div className="p-3 rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] flex flex-col gap-1">
+                                        <span className="text-[9px] font-sans font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                                            📄 Total Serviços no Ano ({revenueYear})
+                                        </span>
+                                        <span className="text-sm font-sans font-bold text-indigo-600 dark:text-indigo-400">
+                                            R$ {monthlyRevenueData.reduce((a, c) => a + c.serviceAmount, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </span>
+                                        <span className="text-[8px] text-slate-400 italic">
+                                            Contratos e serviços programados no ano
+                                        </span>
+                                    </div>
+
+                                    <div className="p-3 rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] flex flex-col gap-1">
+                                        <span className="text-[9px] font-sans font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                                            📊 Concretização da Anual
+                                        </span>
+                                        <span className="text-sm font-sans font-bold text-emerald-600 dark:text-emerald-400">
+                                            {totalAnnualForecast > 0 ? ((totalAnnualReceived / totalAnnualForecast) * 100).toFixed(1) : '0.0'}% Recebido
+                                        </span>
+                                        <span className="text-[8px] text-slate-400 italic">
+                                            R$ {totalAnnualReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de R$ {totalAnnualForecast.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
                         )}
@@ -1215,27 +1754,33 @@ const FinanceView = ({
                                 <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 scrollbar-thin">
                                     {transactions
                                         .filter(t => {
-                                            const d = new Date(t.date);
-                                            return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+                                            const parts = parseDateDay(t.date);
+                                            return parts && parts.month === currentMonth && parts.year === currentYear;
                                         })
                                         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                                        .map(t => (
-                                            <div key={t.id} className="group relative flex flex-col sm:flex-row sm:justify-between sm:items-center p-4 hover:bg-slate-50 rounded-lg transition-all border-b border-[#e5e7eb] dark:border-white/10 last:border-0 gap-3 sm:gap-4">
-                                                <div className="flex items-center gap-4 min-w-0">
-                                                    <div className="w-10 h-10 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white flex items-center justify-center text-on-surface font-sans font-semibold text-xs shrink-0">
-                                                        {String(new Date(t.date).getUTCDate()).padStart(2, '0')}
-                                                    </div>
-                                                    <div className="min-w-0 flex-1">
-                                                        <div className="text-xs font-sans font-semibold text-on-surface uppercase tracking-tight truncate pr-8" title={t.description}>{t.description || 'LOG_ITEM_STREAM'}</div>
-                                                        <div className="text-[9px] text-slate-400 font-sans font-semibold uppercase tracking-widest mt-0.5">
-                                                            {new Date(t.date).toLocaleDateString('pt-BR')} // SPRINT_{t.sprint}
+                                        .map(t => {
+                                            const parts = parseDateDay(t.date);
+                                            const dayStr = parts ? String(parts.day).padStart(2, '0') : '01';
+                                            const formattedDate = parts 
+                                                ? `${dayStr}/${String(parts.month + 1).padStart(2, '0')}/${parts.year}`
+                                                : new Date(t.date).toLocaleDateString('pt-BR');
+                                            return (
+                                                <div key={t.id} className="group relative flex flex-col sm:flex-row sm:justify-between sm:items-center p-4 hover:bg-slate-50 rounded-lg transition-all border-b border-[#e5e7eb] dark:border-white/10 last:border-0 gap-3 sm:gap-4">
+                                                    <div className="flex items-center gap-4 min-w-0">
+                                                        <div className="w-10 h-10 rounded-lg border border-[#e5e7eb] dark:border-white/10 bg-white flex items-center justify-center text-on-surface font-sans font-semibold text-xs shrink-0">
+                                                            {dayStr}
+                                                        </div>
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="text-xs font-sans font-semibold text-on-surface uppercase tracking-tight truncate pr-8" title={t.description}>{t.description || 'LOG_ITEM_STREAM'}</div>
+                                                            <div className="text-[9px] text-slate-400 font-sans font-semibold uppercase tracking-widest mt-0.5">
+                                                                {`${formattedDate} // SPRINT_${t.sprint}`}
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                </div>
-                                                <div className="flex items-center justify-between sm:justify-end gap-6 w-full sm:w-auto">
-                                                    <div className="font-sans font-semibold text-on-surface whitespace-nowrap text-sm">
-                                                        - BRL {t.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                    </div>
+                                                    <div className="flex items-center justify-between sm:justify-end gap-6 w-full sm:w-auto">
+                                                        <div className="font-sans font-semibold text-on-surface whitespace-nowrap text-sm">
+                                                            - BRL {t.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        </div>
                                                     <div className="flex sm:hidden group-hover:flex items-center gap-2">
                                                         <button onClick={() => setEditingTransaction(t)} className="p-2 text-slate-300 hover:text-primary-tactile transition-all border border-transparent hover:border-[#e5e7eb] dark:border-white/10 rounded-soft-touch">
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
@@ -1246,7 +1791,8 @@ const FinanceView = ({
                                                     </div>
                                                 </div>
                                             </div>
-                                        ))}
+                                        );
+                                    })}
                                     {transactions.length === 0 && (
                                         <div className="text-center py-10">
                                             <p className="text-slate-300 font-bold text-xs uppercase tracking-wider">Nenhum gasto registrado este mês</p>
@@ -1260,42 +1806,105 @@ const FinanceView = ({
                         <div className="order-3 md:order-2 space-y-6">
                             {/* Emergency Reserve Section */}
                             <div className="bg-surface p-6 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none relative overflow-hidden group">
-                                <div className="mt-2">
+                                <div className="flex items-center justify-between">
                                     <h5 className="text-xl font-sans font-semibold text-on-surface flex items-center gap-2">
                                         RESERVA_EMERGÊNCIA
                                     </h5>
-                                    <div className="flex items-end gap-2 mt-2">
-                                        <div className="group/edit relative flex items-center">
-                                            <span className="text-2xl font-sans font-semibold text-emerald-600">R$ </span>
-                                            <input
-                                                type="number"
-                                                className="text-2xl font-sans font-semibold text-emerald-600 bg-transparent border-none outline-none focus:ring-0 w-32 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                                value={localEmergencyCurrent}
-                                                onChange={(e) => setLocalEmergencyCurrent(Number(e.target.value))}
-                                                onBlur={(e) => onUpdateSettings({ ...settings, emergencyReserveCurrent: Number(e.target.value) })}
-                                            />
+                                    {emergencyReserve.current >= (emergencyReserve.target || 1) && (
+                                        <span className="text-[9px] font-extrabold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
+                                            🏆 100% ALCANÇADO
+                                        </span>
+                                    )}
+                                </div>
+
+                                <div className="flex items-end gap-2 mt-2">
+                                    <FormattedCurrencyInput
+                                        value={localEmergencyCurrent}
+                                        prefixColorClass="text-emerald-600 dark:text-emerald-400"
+                                        className="w-44"
+                                        onChange={(num) => setLocalEmergencyCurrent(num)}
+                                        onSave={(num) => onUpdateSettings({ ...settings, emergencyReserveCurrent: num })}
+                                    />
+                                    <span className="text-sm font-sans font-semibold text-slate-400 mb-0.5">/ {emergencyReserve.target.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                </div>
+
+                                {/* Progress bar with Rendimentos Overflow Support */}
+                                {(() => {
+                                    const target = emergencyReserve.target || 1;
+                                    const current = emergencyReserve.current;
+                                    const isOverflow = current > target;
+                                    const surplus = isOverflow ? current - target : 0;
+                                    const basePct = Math.min((current / target) * 100, 100);
+                                    const yieldPct = target > 0 ? (surplus / target) * 100 : 0;
+
+                                    return (
+                                        <div className="mt-4">
+                                            <div className="h-2.5 bg-slate-200 dark:bg-white/10 rounded-lg overflow-hidden border border-[#e5e7eb] dark:border-white/10 flex">
+                                                <div
+                                                    className="h-full bg-emerald-500 transition-all duration-1000"
+                                                    style={{ width: `${basePct}%` }}
+                                                ></div>
+                                                {isOverflow && (
+                                                    <div
+                                                        className="h-full bg-emerald-300 dark:bg-emerald-400 transition-all duration-1000 animate-pulse"
+                                                        style={{ width: `${Math.min(yieldPct, 100)}%` }}
+                                                        title={`Rendimentos: +R$ ${surplus.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                                                    ></div>
+                                                )}
+                                            </div>
+
+                                            <div className="mt-2 flex items-center justify-between text-[9px] font-sans font-semibold uppercase tracking-widest">
+                                                {isOverflow ? (
+                                                    <>
+                                                        <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                                                            ✨ RENDIMENTOS: +R$ {surplus.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({yieldPct.toFixed(1)}%)
+                                                        </span>
+                                                        <span className="text-slate-400">BASE PROTEGIDA</span>
+                                                    </>
+                                                ) : current >= target ? (
+                                                    <span className="text-emerald-600 dark:text-emerald-400 font-bold">STATUS: RESERVA_CONCLUÍDA</span>
+                                                ) : (
+                                                    <span className="text-slate-400 italic">STATUS: RESERVA_PENDENTE</span>
+                                                )}
+                                            </div>
                                         </div>
-                                        <span className="text-sm font-sans font-semibold text-slate-400 mb-1">/ {emergencyReserve.target.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                                    </div>
-                                </div>
-                                <div className="mt-4 h-2 bg-slate-200 rounded-lg overflow-hidden border border-[#e5e7eb] dark:border-white/10">
-                                    <div
-                                        className="h-full bg-emerald-500 transition-all duration-1000"
-                                        style={{ width: `${Math.min((emergencyReserve.current / (emergencyReserve.target || 1)) * 100, 100)}%` }}
-                                    ></div>
-                                </div>
-                                {emergencyReserve.current < emergencyReserve.target && (
-                                    <p className="mt-2 text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-widest italic">STATUS: RESERVA_PENDENTE</p>
-                                )}
+                                    );
+                                })()}
                             </div>
 
-                            <div className="">
-                                <FinanceSection title="Metas em Cascata" disableCollapse>
+                            {/* Twin Card: INVESTIMENTOS & OBJETIVOS (SEM META/BARRINHA, ALIMENTA AS METAS EM CASCATA) */}
+                            <div className="bg-surface p-6 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none relative overflow-hidden group">
+                                <div className="flex items-center justify-between">
+                                    <h5 className="text-xl font-sans font-semibold text-on-surface flex items-center gap-2">
+                                        INVESTIMENTOS_&_OBJETIVOS
+                                    </h5>
+                                </div>
+
+                                <div className="flex items-end gap-2 mt-2">
+                                    <FormattedCurrencyInput
+                                        value={localInvestmentCurrent}
+                                        prefixColorClass="text-indigo-600 dark:text-indigo-400"
+                                        className="w-44"
+                                        onChange={(num) => setLocalInvestmentCurrent(num)}
+                                        onSave={(num) => onUpdateSettings({ ...settings, investmentReserveCurrent: num })}
+                                    />
+                                </div>
+
+                                <div className="mt-4 pt-3 border-t border-slate-100 dark:border-white/5 flex items-center justify-between text-[9px] font-sans font-semibold uppercase tracking-widest">
+                                    <span className="text-indigo-600 dark:text-indigo-400 font-bold flex items-center gap-1">
+                                        ✨ APLICADO INTEGRALMENTE EM CADA UMA DAS AQUISIÇÕES ABAIXO
+                                    </span>
+                                    <span className="text-slate-400">FONTE DE RECURSOS</span>
+                                </div>
+                            </div>
+
+                                <div className="">
+                                <FinanceSection title="Aquisições & Desejos de Compra" disableCollapse>
                                     <div className="flex justify-end mb-4">
                                         <button
                                             onClick={() => {
                                                 onAddGoal({
-                                                    name: 'Nova Meta',
+                                                    name: 'Novo Desejo de Compra',
                                                     targetAmount: 0,
                                                     currentAmount: 0,
                                                     priority: -1,
@@ -1304,95 +1913,104 @@ const FinanceView = ({
                                             }}
                                             className="bg-primary-tactile/10 text-primary-tactile border border-primary-tactile/20 px-4 py-2 rounded-soft-touch text-[10px] font-sans font-semibold uppercase tracking-widest hover:bg-primary-tactile hover:text-white transition-all"
                                         >
-                                               + ADD_NEW_GOAL
+                                               + NOVO DESEJO DE COMPRA
                                         </button>
                                     </div>
 
                                     {sortedGoals.length > 0 ? (
                                         <div className="space-y-4">
-                                            {sortedGoals.map((goal, idx) => (
-                                                <div key={goal.id} className={`p-4 rounded-lg border transition-all relative group ${idx === 0 ? 'bg-surface border-primary-tactile border-2' : 'bg-surface border-[#e5e7eb] dark:border-white/10 opacity-80 hover:opacity-100'}`}>
-                                                    <div className="flex flex-col gap-2">
-                                                        {/* Setas de reordenação */}
-                                                        <div className="absolute left-2 top-1/2 -translate-y-1/2 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                                                            <button
-                                                                onClick={() => swapGoals(idx, idx - 1)}
-                                                                disabled={idx === 0}
-                                                                className="p-1 rounded-soft-touch hover:bg-slate-100 disabled:opacity-20 transition-all"
-                                                                title="Mover para cima"
-                                                            >
-                                                                <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 15l7-7 7 7" /></svg>
-                                                            </button>
-                                                            <button
-                                                                onClick={() => swapGoals(idx, idx + 1)}
-                                                                disabled={idx === sortedGoals.length - 1}
-                                                                className="p-1 rounded-soft-touch hover:bg-slate-100 disabled:opacity-20 transition-all"
-                                                                title="Mover para baixo"
-                                                            >
-                                                                <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" /></svg>
-                                                            </button>
-                                                        </div>
+                                            {sortedGoals.map((goal) => {
+                                                const isReady = goal.targetAmount > 0 && goal.currentAmount >= goal.targetAmount;
+                                                const pct = goal.targetAmount > 0 ? Math.min(100, (goal.currentAmount / goal.targetAmount) * 100) : 0;
 
-                                                        {/* Badge P1 + Lixeira */}
-                                                        <div className="absolute right-3 top-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                                                            <div className="bg-slate-100 text-slate-500 text-[8px] font-sans font-semibold px-1.5 py-0.5 rounded-lg border border-[#e5e7eb] dark:border-white/10 uppercase tracking-widest">{`PRIORITY_${idx + 1}`}</div>
-                                                            <button
-                                                                onClick={() => handleTwoStepDelete(`goal_${goal.id}`, () => onDeleteGoal(goal.id))}
-                                                                className={`p-1.5 rounded-soft-touch transition-all ${pendingDeleteKey === `goal_${goal.id}` ? 'bg-accent-tactile text-white scale-110' : 'text-slate-300 hover:text-accent-tactile'}`}
-                                                                title={pendingDeleteKey === `goal_${goal.id}` ? 'Confirmar exclusão' : 'Excluir meta'}
-                                                            >
-                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                            </button>
-                                                        </div>
+                                                return (
+                                                    <div
+                                                        key={goal.id}
+                                                        className={`p-5 rounded-xl border transition-all relative group ${
+                                                            isReady
+                                                                ? 'bg-emerald-500/5 dark:bg-emerald-500/10 border-emerald-500/40 shadow-sm'
+                                                                : 'bg-surface border-[#e5e7eb] dark:border-white/10 hover:border-slate-300 dark:hover:border-white/20'
+                                                        }`}
+                                                    >
+                                                        <div className="flex flex-col gap-3">
+                                                            {/* Header: Item Title + Ready Badge / Delete button */}
+                                                            <div className="flex items-start justify-between gap-3">
+                                                                <div className="flex-1">
+                                                                    <textarea
+                                                                        defaultValue={goal.name}
+                                                                        rows={1}
+                                                                        placeholder="Nome do desejo/aquisição..."
+                                                                        className="w-full bg-transparent border-none p-0 font-sans font-bold text-on-surface text-base outline-none focus:ring-0 resize-none overflow-hidden leading-snug"
+                                                                        onInput={(e) => {
+                                                                            const el = e.currentTarget;
+                                                                            el.style.height = 'auto';
+                                                                            el.style.height = el.scrollHeight + 'px';
+                                                                        }}
+                                                                        onBlur={(e) => {
+                                                                            if (e.target.value !== goal.name) {
+                                                                                onUpdateGoal({ ...goal, name: e.target.value });
+                                                                            }
+                                                                        }}
+                                                                    />
+                                                                </div>
 
-                                                        {/* Conteúdo principal */}
-                                                        <div className="w-full pl-6">
-                                                            <textarea
-                                                                defaultValue={goal.name}
-                                                                rows={1}
-                                                                className="w-full bg-transparent border-none p-0 font-sans font-semibold text-on-surface text-lg outline-none focus:ring-0 rounded-lg transition-all resize-none overflow-hidden leading-snug pr-16"
-                                                                onInput={(e) => {
-                                                                    const el = e.currentTarget;
-                                                                    el.style.height = 'auto';
-                                                                    el.style.height = el.scrollHeight + 'px';
-                                                                }}
-                                                                onBlur={(e) => {
-                                                                    if (e.target.value !== goal.name) {
-                                                                        onUpdateGoal({ ...goal, name: e.target.value });
-                                                                    }
-                                                                }}
-                                                                onClick={(e) => e.stopPropagation()}
-                                                            />
-                                                            <div className="flex items-baseline gap-1 mt-1">
-                                                                <span className="text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-widest">R$ {goal.currentAmount.toLocaleString('pt-BR', { minimumFractionDigits: 0 })} DE</span>
-                                                                <input
-                                                                    type="number"
-                                                                    className="bg-transparent border-none p-0 text-[10px] font-sans font-semibold text-on-surface w-24 outline-none focus:ring-0 rounded-lg"
-                                                                    defaultValue={goal.targetAmount}
-                                                                    onBlur={(e) => {
-                                                                        const newVal = Number(e.target.value);
-                                                                        if (newVal !== goal.targetAmount) {
-                                                                            onUpdateGoal({ ...goal, targetAmount: newVal });
-                                                                        }
-                                                                    }}
-                                                                />
+                                                                <div className="flex items-center gap-2">
+                                                                    {isReady && (
+                                                                        <span className="text-[9px] font-extrabold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
+                                                                            🛒 RECURSOS DISPONÍVEIS
+                                                                        </span>
+                                                                    )}
+                                                                    <button
+                                                                        onClick={() => handleTwoStepDelete(`goal_${goal.id}`, () => onDeleteGoal(goal.id))}
+                                                                        className={`p-1.5 rounded-soft-touch transition-all ${
+                                                                            pendingDeleteKey === `goal_${goal.id}`
+                                                                                ? 'bg-accent-tactile text-white scale-110'
+                                                                                : 'text-slate-300 hover:text-accent-tactile'
+                                                                        }`}
+                                                                        title={pendingDeleteKey === `goal_${goal.id}` ? 'Confirmar exclusão' : 'Excluir item'}
+                                                                    >
+                                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                                        </svg>
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Amount details */}
+                                                            <div className="flex items-center justify-between text-xs font-sans font-semibold">
+                                                                <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+                                                                    <span>R$ {goal.currentAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                                    <span>/</span>
+                                                                    <GoalTargetInput
+                                                                        targetAmount={goal.targetAmount}
+                                                                        onSave={(newVal) => onUpdateGoal({ ...goal, targetAmount: newVal })}
+                                                                    />
+                                                                </div>
+
+                                                                <span className={`text-[10px] font-sans font-bold uppercase tracking-wider ${isReady ? 'text-emerald-600 dark:text-emerald-400' : 'text-indigo-600 dark:text-indigo-400'}`}>
+                                                                    {pct.toFixed(1)}% COBERTO
+                                                                </span>
+                                                            </div>
+
+                                                            {/* Progress bar */}
+                                                            <div className="h-2 bg-slate-100 dark:bg-white/5 rounded-lg overflow-hidden w-full border border-[#e5e7eb] dark:border-white/10">
+                                                                <div
+                                                                    className={`h-full transition-all duration-1000 ${
+                                                                        isReady
+                                                                            ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                                                                            : 'bg-gradient-to-r from-indigo-500 to-purple-500'
+                                                                    }`}
+                                                                    style={{ width: `${pct}%` }}
+                                                                ></div>
                                                             </div>
                                                         </div>
-
-                                                        {/* Barra de progresso */}
-                                                        <div className="h-1 bg-slate-100 rounded-lg overflow-hidden w-full border border-[#e5e7eb] dark:border-white/10">
-                                                            <div
-                                                                className={`h-full transition-all duration-1000 ${idx === 0 ? 'bg-primary-tactile' : 'bg-slate-400'}`}
-                                                                style={{ width: `${Math.min((goal.currentAmount / goal.targetAmount) * 100, 100)}%` }}
-                                                            ></div>
-                                                        </div>
                                                     </div>
-                                                </div>
-                                            ))}
+                                                );
+                                            })}
                                         </div>
                                     ) : (
                                         <div className="p-8 border border-dashed border-[#e5e7eb] dark:border-white/10 rounded-lg text-center">
-                                            <p className="text-slate-400 font-sans font-semibold uppercase text-[10px]">NO_GOALS_DEFINED</p>
+                                            <p className="text-slate-400 font-sans font-semibold uppercase text-[10px]">NENHUM DESEJO OU AQUISIÇÃO CADASTRADO</p>
                                         </div>
                                     )}
                                 </FinanceSection>
@@ -1450,7 +2068,10 @@ const FinanceView = ({
                                     {incomeRubrics.map(rubric => (
                                         <div key={rubric.id} className="bg-surface border border-slate-200 dark:border-white/10 p-4 rounded-xl flex justify-between items-center group hover:bg-slate-50 transition-all shadow-sm">
                                             <div>
-                                                <div className="text-[8px] font-sans font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1">{rubric.category}</div>
+                                                <div className="text-[8px] font-sans font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1 flex items-center gap-2">
+                                                    {rubric.category}
+                                                    {rubric.eventual && <span className="text-slate-400 dark:text-slate-500">// Eventual</span>}
+                                                </div>
                                                 <div className="text-xs font-sans font-bold text-on-surface uppercase tracking-tight">{rubric.description}</div>
                                                 <div className="text-[9px] text-slate-400 font-sans font-semibold uppercase tracking-wider mt-2 flex items-center gap-2">
                                                     Previsto: Dia {rubric.expectedDay}
@@ -1511,6 +2132,15 @@ const FinanceView = ({
                                                 <option key={cat} value={cat} className="text-on-surface">{cat}</option>
                                             ))}
                                         </select>
+                                        <label className="flex items-center gap-2 px-1 text-[10px] font-sans font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 cursor-pointer select-none">
+                                            <input
+                                                type="checkbox"
+                                                checked={!!newIncomeRubric.eventual}
+                                                onChange={e => setNewIncomeRubric({ ...newIncomeRubric, eventual: e.target.checked })}
+                                                className="rounded border-slate-300 dark:border-white/20 text-emerald-500 focus:ring-emerald-500"
+                                            />
+                                            Fonte eventual (não cobrar lançamento todo mês)
+                                        </label>
                                         <div className="flex gap-2">
                                             <button
                                                 onClick={async () => {
@@ -1621,6 +2251,36 @@ const FinanceView = ({
                                                 setIsAddingIncome(true);
                                             }}
                                             className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-colors hover:bg-white/20"
+                                        >
+                                            {rubric.description}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {eventualIncomeRubrics.length > 0 && (
+                            <div className="mb-6 rounded-lg md:rounded-[2rem] border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-900/40 p-5 shadow-none md:shadow-card">
+                                <div className="mb-3">
+                                    <h5 className="text-sm font-bold uppercase tracking-wider text-on-surface">Fontes eventuais</h5>
+                                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Renda esporádica — não cobrada todo mês, lance quando ocorrer</p>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                    {eventualIncomeRubrics.map(rubric => (
+                                        <button
+                                            key={rubric.id}
+                                            onClick={() => {
+                                                setNewIncome({
+                                                    description: rubric.description,
+                                                    category: rubric.category,
+                                                    day: rubric.expectedDay,
+                                                    amount: rubric.defaultAmount,
+                                                    rubricId: rubric.id,
+                                                    isReceived: false
+                                                });
+                                                setIsAddingIncome(true);
+                                            }}
+                                            className="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-800 px-4 py-2 text-xs font-bold uppercase tracking-wider text-on-surface transition-colors hover:bg-slate-100 dark:hover:bg-slate-700"
                                         >
                                             {rubric.description}
                                         </button>
