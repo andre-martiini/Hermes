@@ -1661,6 +1661,7 @@ def sync_pix_emails(service, sync_ref, logs):
             internal_date_ms = int(details.get('internalDate', time.time() * 1000))
             dt = datetime.fromtimestamp(internal_date_ms / 1000.0, tz=timezone.utc)
 
+            snippet = details.get('snippet', '')
             sender = ''
             subject = ''
             for header in details.get('payload', {}).get('headers', []):
