@@ -1672,7 +1672,8 @@ def sync_pix_emails(service, sync_ref, logs):
                     subject = header['value']
 
             # Descartar e-mails da XP do extrato de conta corrente PicPay
-            if 'xp.com' in sender.lower() or 'xp investimentos' in sender.lower() or 'xpinvestimentos' in sender.lower() or 'xp ' in subject.lower():
+            # (remetente real é "XP Inc." <no_reply@xpi.com.br> — "xp.com" nunca casava com "xpi.com.br")
+            if 'xpi.com.br' in sender.lower() or 'xp investimentos' in sender.lower() or 'xpinvestimentos' in sender.lower() or 'xp inc' in sender.lower() or 'xp ' in subject.lower():
                 log_to_firestore(sync_ref, logs, f"[GMAIL-PIX] Ignorando e-mail da XP no extrato da conta PicPay (msg_id: {msg_id})")
                 archive_gmail_message(service, msg_id, sync_ref, logs, "pix-xp-ignorado")
                 continue
