@@ -1677,6 +1677,7 @@ def sync_pix_emails(service, sync_ref, logs):
                 archive_gmail_message(service, msg_id, sync_ref, logs, "pix-xp-ignorado")
                 continue
 
+            snippet = details.get('snippet', '')
             content = f"{subject} {snippet}"
             value_match = re.search(r'R\$\s*([\d\.,]+)', content)
             pix_id_match = re.search(r'\b(E[A-Z0-9]{31})\b', content)
