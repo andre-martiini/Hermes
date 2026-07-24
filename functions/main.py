@@ -808,7 +808,7 @@ def log_to_firestore(sync_ref, logs, message, force_update=False):
 
             emit_notification_backend("Erro de Sincronização", message, 'error')
 
-    elif "[PIX]" in message_upper:
+    elif message_upper.startswith("[PIX] PROCESSADO"):
 
         emit_notification_backend("Gasto Realizado via Pix", message, 'expense', 'financeiro')
 
@@ -1652,7 +1652,7 @@ def sync_pix_emails(service, sync_ref, logs):
         for msg in messages:
             msg_id = msg['id']
 
-            if msg_id in existing_google_ids:
+            if msg_id in processed_ids or msg_id in existing_google_ids:
                 archive_gmail_message(service, msg_id, sync_ref, logs, "pix-ja-processado")
                 continue
 
@@ -1677,7 +1677,6 @@ def sync_pix_emails(service, sync_ref, logs):
                 archive_gmail_message(service, msg_id, sync_ref, logs, "pix-xp-ignorado")
                 continue
 
-            snippet = details.get('snippet', '')
             content = f"{subject} {snippet}"
             value_match = re.search(r'R\$\s*([\d\.,]+)', content)
             pix_id_match = re.search(r'\b(E[A-Z0-9]{31})\b', content)
@@ -1686,9 +1685,20 @@ def sync_pix_emails(service, sync_ref, logs):
             if value_match:
                 val_raw = value_match.group(1).rstrip('.').rstrip(',')
                 if '.' in val_raw and ',' in val_raw:
+                    # Formato BR completo: "." separador de milhar, "," separador decimal (ex: "2.708,53")
                     val_str = val_raw.replace('.', '').replace(',', '.')
                 elif ',' in val_raw:
+                    # Só decimal, sem milhar (ex: "51,86")
                     val_str = val_raw.replace(',', '.')
+                elif '.' in val_raw:
+                    # Só ponto: pode ser separador de milhar sem centavos (ex: "1.343" = R$ 1.343,00)
+                    # ou decimal informal (ex: "1.34"). Milhar em pt-BR sempre agrupa em blocos de 3 dígitos;
+                    # decimais de moeda têm no máximo 2 casas — usamos isso para desambiguar.
+                    integer_part, _, frac_part = val_raw.rpartition('.')
+                    if len(frac_part) == 3 and integer_part:
+                        val_str = val_raw.replace('.', '')
+                    else:
+                        val_str = val_raw
                 else:
                     val_str = val_raw
                 try:
@@ -1871,12 +1881,22 @@ def cleanup_retroactive_pix_duplicates(db, sync_ref=None, logs=None):
 
                     if items[i]['date'] and items[j]['date']:
                         diff = abs((items[j]['date'] - items[i]['date']).total_seconds())
-                        if diff > 7200:
+                        if diff > 900:
                             break
 
+                    # Só considera duplicata quando há um ID de Pix (E2E) confirmado e igual entre os dois,
+                    # ou quando um dos lançamentos é claramente a versão "Google Pay" do outro (mesma
+                    # transação relatada por dois provedores diferentes). Nunca remove por valor coincidente
+                    # isoladamente, pois isso pode apagar dois pagamentos reais e distintos do mesmo valor.
                     if abs(items[i]['amount'] - items[j]['amount']) < 0.01:
+                        same_pix_id = bool(items[i]['pix_id']) and items[i]['pix_id'] == items[j]['pix_id']
+
                         item_i_gpay = 'google pay' in items[i]['description'].lower()
                         item_j_gpay = 'google pay' in items[j]['description'].lower()
+                        is_cross_provider_pair = item_i_gpay != item_j_gpay
+
+                        if not (same_pix_id or is_cross_provider_pair):
+                            continue
 
                         if item_j_gpay and not item_i_gpay:
                             to_delete.add(items[i]['id'])
@@ -1887,10 +1907,10 @@ def cleanup_retroactive_pix_duplicates(db, sync_ref=None, logs=None):
                             removed_count += 1
 
             for doc_id in to_delete:
-                db.collection(col).document(doc_id).delete()
+                db.collection(col).document(doc_id).update({'status': 'deleted'})
 
             if removed_count > 0:
-                log_to_firestore(sync_ref, logs, f"[{col}] Limpeza retroativa concluída: {removed_count} duplicata(s) removida(s).")
+                log_to_firestore(sync_ref, logs, f"[{col}] Limpeza retroativa concluída: {removed_count} duplicata(s) marcada(s) como removida(s).")
         except Exception as e:
             log_to_firestore(sync_ref, logs, f"ERRO LIMPEZA RETROATIVA ({col}): {e}")
 
