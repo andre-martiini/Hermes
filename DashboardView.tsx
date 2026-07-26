@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import {
     Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry,
-    HealthWeight, HealthSettings, ExerciseLog
+    HealthWeight, HealthSettings, ExerciseLog, WalkBlock,
+    formatDateLocalISO, sumWalkBlocksKm
 } from './types';
 
 interface DashboardViewProps {
@@ -14,6 +15,7 @@ interface DashboardViewProps {
     healthWeights: HealthWeight[];
     healthSettings: HealthSettings;
     exerciseLogs: ExerciseLog[];
+    onSaveExerciseLog?: (date: string, data: Partial<ExerciseLog>) => Promise<void>;
     unidades: { id: string, nome: string }[];
     currentMonth: number;
     currentYear: number;
@@ -138,6 +140,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     healthWeights = [],
     healthSettings = {} as HealthSettings,
     exerciseLogs = [] as ExerciseLog[],
+    onSaveExerciseLog,
     currentMonth = new Date().getMonth(),
     currentYear = new Date().getFullYear(),
     onNavigate
@@ -225,13 +228,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     const targetWeight = healthSettings?.targetWeight || 0;
     const targetDelta = (targetWeight > 0 && currentWeight > 0) ? currentWeight - targetWeight : null;
 
-    const todayKey = useMemo(() => {
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const day = String(now.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    }, []);
+    const todayKey = useMemo(() => formatDateLocalISO(new Date()), []);
 
     const todayHealthLog = useMemo(() => {
         return exerciseLogs.find(l => l.id === todayKey) || null;
@@ -243,6 +240,37 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             .sort((a, b) => a.id.localeCompare(b.id))
             .slice(-7);
     }, [exerciseLogs]);
+
+    // --- WALK GOAL LOGIC ---
+    const todayWalkKm = useMemo(() => sumWalkBlocksKm(todayHealthLog), [todayHealthLog]);
+    const walkingMinimumKm = healthSettings?.walkingMinimumKm ?? 5;
+    const walkingIdealKm = healthSettings?.walkingIdealKm ?? 10;
+    const walkMetMinimum = todayWalkKm >= walkingMinimumKm;
+    const walkMetIdeal = todayWalkKm >= walkingIdealKm;
+
+    const [isWalkModalOpen, setIsWalkModalOpen] = useState(false);
+    const [walkKmInput, setWalkKmInput] = useState('');
+    const [isSavingWalk, setIsSavingWalk] = useState(false);
+
+    const handleQuickRegisterWalk = async () => {
+        const distance = parseFloat(walkKmInput.replace(',', '.'));
+        if (!onSaveExerciseLog || isNaN(distance) || distance <= 0 || distance > 50) return;
+        setIsSavingWalk(true);
+        try {
+            const block: WalkBlock = {
+                id: `walk_${Date.now()}`,
+                time: new Date().toTimeString().slice(0, 5),
+                distance,
+                source: 'web',
+            };
+            const existingBlocks = todayHealthLog?.walkBlocks || [];
+            await onSaveExerciseLog(todayKey, { walkBlocks: [...existingBlocks, block] });
+            setWalkKmInput('');
+            setIsWalkModalOpen(false);
+        } finally {
+            setIsSavingWalk(false);
+        }
+    };
     // --- PROGRESS BAR RENDER HELPER ---
     const renderProgressBar = (value: number, max: number) => {
         const percent = max > 0 ? Math.min((value / max) * 100, 100) : 0;
@@ -501,7 +529,56 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 )}
                             </div>
 
-                            {/* 2. SEÇÃO DOR LOMBAR / CHECK-IN TELEGRAM */}
+                            {/* 2. SEÇÃO CAMINHADA NA ESTEIRA */}
+                            <div className={`p-3.5 rounded-xl border flex flex-col gap-2.5 ${
+                                isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
+                            }`}>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Caminhada (Hoje)</span>
+                                    {walkMetIdeal ? (
+                                        <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded bg-emerald-500/20 text-emerald-500">Meta ideal</span>
+                                    ) : walkMetMinimum ? (
+                                        <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded bg-amber-500/20 text-amber-500">Mínimo ok</span>
+                                    ) : (
+                                        <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded bg-slate-500/20 text-slate-400">Abaixo do mínimo</span>
+                                    )}
+                                </div>
+
+                                <div className="flex items-center justify-between">
+                                    <div className="text-lg font-bold font-mono flex items-baseline gap-1">
+                                        {todayWalkKm.toFixed(1)}
+                                        <span className="text-[10px] text-slate-400 font-sans">KM</span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); setIsWalkModalOpen(true); }}
+                                        className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-wider transition-all ${
+                                            isDark
+                                                ? 'bg-white/5 text-[#ddb8ff] hover:bg-white/10'
+                                                : 'bg-[#f5f3ff] text-[#7800ce] hover:bg-[#ece5ff]'
+                                        }`}
+                                    >
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 5v14M5 12h14" /></svg>
+                                        Registrar
+                                    </button>
+                                </div>
+
+                                <div className="relative h-[6px] w-full rounded-full overflow-hidden mt-0.5">
+                                    <div className={`absolute inset-0 rounded-full ${isDark ? 'bg-[#2a313d]' : 'bg-[#f3f4f6]'}`} />
+                                    <div
+                                        style={{ width: `${Math.min((todayWalkKm / Math.max(walkingIdealKm, walkingMinimumKm, todayWalkKm, 1)) * 100, 100)}%` }}
+                                        className={`absolute inset-y-0 left-0 rounded-full transition-all duration-500 ${
+                                            walkMetIdeal ? 'bg-emerald-500' : walkMetMinimum ? 'bg-amber-500' : 'bg-[#9333ea]'
+                                        }`}
+                                    />
+                                </div>
+                                <div className="flex items-center justify-between text-[8px] font-mono text-slate-400 font-bold uppercase">
+                                    <span>Mín. {walkingMinimumKm} km</span>
+                                    <span>Ideal {walkingIdealKm} km</span>
+                                </div>
+                            </div>
+
+                            {/* 3. SEÇÃO DOR LOMBAR / CHECK-IN TELEGRAM */}
                             <div className={`p-3.5 rounded-xl border flex flex-col gap-2.5 ${
                                 isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
                             }`}>
@@ -530,7 +607,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 )}
                             </div>
 
-                            {/* 3. MINI GRÁFICO / TENDÊNCIA DE DOR NOTURNA (7 REGISTROS RECENTES) */}
+                            {/* 4. MINI GRÁFICO / TENDÊNCIA DE DOR NOTURNA (7 REGISTROS RECENTES) */}
                             <div className={`p-3.5 rounded-xl border flex flex-col gap-2 ${
                                 isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
                             }`}>
@@ -576,6 +653,72 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
 
             </div>
+
+            {isWalkModalOpen && (
+                <div
+                    className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
+                    onClick={() => setIsWalkModalOpen(false)}
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className={`w-full max-w-xs rounded-2xl p-6 shadow-2xl animate-in zoom-in-95 ${
+                            isDark ? 'bg-[#151c27] border border-[#2a313d] text-white' : 'bg-white text-[#151c27]'
+                        }`}
+                    >
+                        <h3 className="text-sm font-bold uppercase tracking-wider">Registrar caminhada</h3>
+                        <p className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                            Distância do bloco em km. Soma automaticamente ao total de hoje ({todayWalkKm.toFixed(1)} km).
+                        </p>
+                        <input
+                            type="text"
+                            inputMode="decimal"
+                            autoFocus
+                            value={walkKmInput}
+                            onChange={(e) => setWalkKmInput(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleQuickRegisterWalk(); }}
+                            placeholder="Ex: 2.5"
+                            className={`mt-4 w-full rounded-xl border px-4 py-3 text-center text-2xl font-bold font-mono outline-none transition focus:ring-2 focus:ring-[#9333ea] ${
+                                isDark ? 'bg-white/5 border-[#2a313d] text-white' : 'bg-slate-50 border-slate-200 text-slate-800'
+                            }`}
+                        />
+                        <div className="mt-2 flex flex-wrap gap-2">
+                            {[1, 1.5, 2, 2.5, 3].map(preset => (
+                                <button
+                                    key={preset}
+                                    type="button"
+                                    onClick={() => setWalkKmInput(String(preset))}
+                                    className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                                        isDark
+                                            ? 'border-[#2a313d] text-slate-300 hover:border-[#861fdd]/40 hover:text-[#ddb8ff]'
+                                            : 'border-slate-200 text-slate-500 hover:border-[#861fdd]/40 hover:text-[#7800ce]'
+                                    }`}
+                                >
+                                    {preset.toString().replace('.', ',')} km
+                                </button>
+                            ))}
+                        </div>
+                        <div className="mt-5 flex gap-3">
+                            <button
+                                type="button"
+                                onClick={() => { setIsWalkModalOpen(false); setWalkKmInput(''); }}
+                                className={`flex-1 rounded-xl py-2.5 text-xs font-bold uppercase tracking-wider transition ${
+                                    isDark ? 'text-slate-400 hover:bg-white/5' : 'text-slate-400 hover:bg-slate-50'
+                                }`}
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                disabled={isSavingWalk || !walkKmInput.trim()}
+                                onClick={handleQuickRegisterWalk}
+                                className="flex-1 rounded-xl bg-[#9333ea] py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-lg transition hover:bg-[#7800ce] disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {isSavingWalk ? 'Salvando…' : 'Registrar'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

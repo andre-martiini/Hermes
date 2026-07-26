@@ -4991,6 +4991,7 @@ const App: React.FC = () => {
                         healthWeights={healthWeights}
                         healthSettings={healthSettings}
                         exerciseLogs={exerciseLogs}
+                        onSaveExerciseLog={handleSaveExerciseLog}
                         unidades={unidades}
                         currentMonth={currentMonth}
                         currentYear={currentYear}

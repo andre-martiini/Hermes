@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
     HealthWeight, HealthSettings, ExerciseLog,
     ExerciseSettings, formatDate, formatDateLocalISO,
-    HealthExam, HealthTelegramReminder, WalkBlock
+    HealthExam, HealthTelegramReminder, WalkBlock, sumWalkBlocksKm
 } from './types';
 
 interface HealthViewProps {
@@ -96,12 +96,6 @@ const formatShortDate = (value: string) => {
 };
 
 const formatKm = (value: number) => value.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
-
-// Distancia diaria: apenas blocos registrados no Hermes (painel ou Telegram).
-const walkKmForLog = (log?: ExerciseLog | null): number => {
-    if (!log?.walkBlocks) return 0;
-    return log.walkBlocks.reduce((sum, block) => sum + (block.distance || 0), 0);
-};
 
 const MetricCard = ({
     label,
@@ -450,10 +444,10 @@ const HealthView: React.FC<HealthViewProps> = ({
     const walkingMinimumKm = settings.walkingMinimumKm ?? 5;
     const walkingIdealKm = settings.walkingIdealKm ?? 10;
     const selectedWalkBlocks = todayLog.walkBlocks || [];
-    const selectedWalkKm = walkKmForLog(todayLog);
+    const selectedWalkKm = sumWalkBlocksKm(todayLog);
     const todayWalkKm = useMemo(() => {
         const todayKey = formatDateLocalISO(new Date());
-        return walkKmForLog(exerciseLogs.find(log => log.id === todayKey));
+        return sumWalkBlocksKm(exerciseLogs.find(log => log.id === todayKey));
     }, [exerciseLogs]);
     const walkChartDays = useMemo(() => {
         const days: { id: string; label: string; km: number }[] = [];
@@ -462,7 +456,7 @@ const HealthView: React.FC<HealthViewProps> = ({
             const day = new Date(base);
             day.setDate(base.getDate() - offset);
             const id = formatDateLocalISO(day);
-            days.push({ id, label: formatShortDate(id), km: walkKmForLog(exerciseLogs.find(log => log.id === id)) });
+            days.push({ id, label: formatShortDate(id), km: sumWalkBlocksKm(exerciseLogs.find(log => log.id === id)) });
         }
         return days;
     }, [exerciseLogs]);

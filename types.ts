@@ -597,6 +597,13 @@ export const formatDateLocalISO = (date: Date) => {
     return `${year}-${month}-${day}`;
 };
 
+// Distancia diaria de caminhada: soma apenas os blocos registrados no Hermes
+// (painel web ou comando do Telegram). O antigo campo `walk` e legado.
+export const sumWalkBlocksKm = (log?: ExerciseLog | null): number => {
+    if (!log?.walkBlocks) return 0;
+    return log.walkBlocks.reduce((sum, block) => sum + (block.distance || 0), 0);
+};
+
 
 
 export interface GoogleCalendarEvent {
