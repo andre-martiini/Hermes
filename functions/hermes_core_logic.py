@@ -875,7 +875,8 @@ def _handle_command(text: str, session: dict) -> Optional[str]:
             "Comandos disponíveis:\n"
             "• <code>/entrar [termo]</code> — busca ações e trava o contexto nelas\n"
             "• <code>/sair</code> — sai do contexto trancado, retorna ao modo geral\n"
-            "• <code>/status</code> — mostra o contexto e histórico atuais\n\n"
+            "• <code>/status</code> — mostra o contexto e histórico atuais\n"
+            "• <code>caminhada 2.5</code> — registra bloco de esteira em km (aceita min, passos e kcal)\n\n"
             "Envie texto, áudio ou arquivos. Tamanho máximo: 20 MB."
         )
 
@@ -894,6 +895,123 @@ def _handle_command(text: str, session: dict) -> Optional[str]:
         return f"✅ Histórico do contexto <b>{ctx}</b> foi limpo. Podemos recomeçar!"
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Registro rápido de caminhada na esteira (determinístico, sem LLM)
+# ---------------------------------------------------------------------------
+
+_WALK_REGISTER_RE = re.compile(
+    r"^(?:hoje\s+)?/?(?:(?:registrar?|registra|registrei|anotar?|anota)\s+)?"
+    r"(?:caminhada|caminhei|esteira)\s*[:\-]?\s*(?:de\s+)?"
+    r"(?P<dist>\d+(?:[.,]\d+)?)\s*(?:km|quil[oô]metros?)?"
+    r"(?P<rest>.*)$",
+    re.IGNORECASE,
+)
+_WALK_MINUTES_RE = re.compile(r"(\d+)\s*min(?:utos?)?\b", re.IGNORECASE)
+_WALK_STEPS_RE = re.compile(r"(\d+)\s*passos\b", re.IGNORECASE)
+_WALK_KCAL_RE = re.compile(r"(\d+)\s*(?:kcal|calorias?)\b", re.IGNORECASE)
+_WALK_FILLER_RE = re.compile(r"\b(?:em|e|com|de|na|no|esteira|hoje|agora)\b", re.IGNORECASE)
+
+
+def _format_km(value: float) -> str:
+    text = f"{value:.2f}".rstrip("0").rstrip(".")
+    return text.replace(".", ",")
+
+
+def _try_register_walk_block(db, text: str) -> Optional[str]:
+    """
+    Detecta mensagens como "registrar caminhada 2.5", "caminhada 2,5 km 40 min"
+    ou "caminhei 1.8" e grava um bloco em health_exercise_logs/{hoje}.
+    Retorna o texto de resposta, ou None para deixar a mensagem seguir ao LLM.
+    """
+    match = _WALK_REGISTER_RE.match((text or "").strip())
+    if not match:
+        return None
+
+    rest = match.group("rest") or ""
+    minutes_match = _WALK_MINUTES_RE.search(rest)
+    steps_match = _WALK_STEPS_RE.search(rest)
+    kcal_match = _WALK_KCAL_RE.search(rest)
+
+    # Se sobrar conteúdo além dos extras conhecidos, não é um registro direto
+    # (ex.: "caminhada 5 vezes por semana faz bem?") — deixa para o LLM.
+    leftovers = rest
+    for pattern in (_WALK_MINUTES_RE, _WALK_STEPS_RE, _WALK_KCAL_RE):
+        leftovers = pattern.sub(" ", leftovers)
+    leftovers = _WALK_FILLER_RE.sub(" ", leftovers)
+    if re.sub(r"[\s.,;:!\-–—]+", "", leftovers):
+        return None
+
+    distance = float(match.group("dist").replace(",", "."))
+    if distance <= 0 or distance > 50:
+        return (
+            "⚠️ Distância fora do esperado. Informe o valor em km, "
+            "ex.: <code>caminhada 2.5</code>."
+        )
+
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    date_key = now.strftime("%Y-%m-%d")
+
+    block = {
+        "id": f"walk_{int(now.timestamp() * 1000)}",
+        "time": now.strftime("%H:%M"),
+        "distance": distance,
+        "source": "telegram",
+    }
+    if minutes_match:
+        block["minutes"] = int(minutes_match.group(1))
+    if steps_match:
+        block["steps"] = int(steps_match.group(1))
+    if kcal_match:
+        block["calories"] = int(kcal_match.group(1))
+
+    doc_ref = db.collection("health_exercise_logs").document(date_key)
+    snapshot = doc_ref.get()
+    blocks = ((snapshot.to_dict() or {}).get("walkBlocks") or []) if snapshot.exists else []
+    blocks = [b for b in blocks if isinstance(b, dict)]
+    blocks.append(block)
+    doc_ref.set({"walkBlocks": blocks}, merge=True)
+
+    total_km = sum(float(b.get("distance") or 0) for b in blocks)
+
+    try:
+        settings_doc = db.collection("health_settings").document("config").get()
+        settings = settings_doc.to_dict() or {}
+    except Exception:
+        settings = {}
+    minimum_km = float(settings.get("walkingMinimumKm") or 5)
+    ideal_km = float(settings.get("walkingIdealKm") or 10)
+
+    if total_km >= ideal_km:
+        progress = f"🏆 Meta ideal de {_format_km(ideal_km)} km atingida!"
+    elif total_km >= minimum_km:
+        progress = (
+            f"✅ Mínimo garantido — faltam {_format_km(ideal_km - total_km)} km "
+            f"para o ideal de {_format_km(ideal_km)} km."
+        )
+    else:
+        progress = (
+            f"Faltam {_format_km(minimum_km - total_km)} km "
+            f"para o mínimo de {_format_km(minimum_km)} km."
+        )
+
+    extras = []
+    if block.get("minutes"):
+        extras.append(f"{block['minutes']} min")
+    if block.get("steps"):
+        extras.append(f"{block['steps']} passos")
+    if block.get("calories"):
+        extras.append(f"{block['calories']} kcal")
+    extras_text = f" ({', '.join(extras)})" if extras else ""
+
+    plural = "blocos" if len(blocks) > 1 else "bloco"
+    return (
+        f"🚶 Caminhada registrada: <b>{_format_km(distance)} km</b> às {block['time']}{extras_text}.\n"
+        f"Total de hoje: <b>{_format_km(total_km)} km</b> em {len(blocks)} {plural}.\n"
+        f"{progress}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2961,6 +3079,13 @@ def _process_telegram_message(db, data: dict):
     voice_profile, text = _extract_voice_profile(text, "masculina")
     print(f"[Core] initial response_mode={response_mode} voice_profile={voice_profile}")
     _perf_mark(perf_state, "telegram.session_load")
+
+    # --- Registro rápido de caminhada na esteira (determinístico, sem LLM) ---
+    walk_reply = _try_register_walk_block(db, text)
+    if walk_reply:
+        _persist_turn_to_copilot(text, walk_reply)
+        _send_telegram_session_message(db, token, chat_id, walk_reply, session=session)
+        return
 
     # --- /entrar command — busca semântica de ações para travamento de contexto ---
     if re.match(r"^/entrar(\s|$)", text, re.IGNORECASE):

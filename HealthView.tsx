@@ -97,14 +97,10 @@ const formatShortDate = (value: string) => {
 
 const formatKm = (value: number) => value.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
 
-// Distancia diaria: blocos manuais tem prioridade; sem blocos, usa o agregado
-// sincronizado (Google Fit) para nao contar a mesma caminhada duas vezes.
+// Distancia diaria: apenas blocos registrados no Hermes (painel ou Telegram).
 const walkKmForLog = (log?: ExerciseLog | null): number => {
-    if (!log) return 0;
-    if (log.walkBlocks && log.walkBlocks.length > 0) {
-        return log.walkBlocks.reduce((sum, block) => sum + (block.distance || 0), 0);
-    }
-    return log.walk?.distance || 0;
+    if (!log?.walkBlocks) return 0;
+    return log.walkBlocks.reduce((sum, block) => sum + (block.distance || 0), 0);
 };
 
 const MetricCard = ({

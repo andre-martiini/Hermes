@@ -428,6 +428,7 @@ export interface WalkBlock {
     minutes?: number;
     steps?: number;
     calories?: number;
+    source?: 'web' | 'telegram';
 }
 
 export interface ExerciseLog {
