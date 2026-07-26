@@ -421,6 +421,16 @@ export interface IncomeRubric {
 // Health Module Types
 export type PullupPhase = 'dead_hang' | 'negative' | 'assisted' | 'full';
 
+export interface WalkBlock {
+    id: string;
+    time?: string; // HH:mm
+    distance: number; // km
+    minutes?: number;
+    steps?: number;
+    calories?: number;
+    source?: 'web' | 'telegram';
+}
+
 export interface ExerciseLog {
     id: string; // date string (YYYY-MM-DD)
     pushups?: { done: number; goal: number };
@@ -430,6 +440,7 @@ export interface ExerciseLog {
     birdDog?: { reps: number };
     squats?: { reps: number };
     walk?: { done: number; distance?: number; steps?: number }; // minutes, km, steps
+    walkBlocks?: WalkBlock[]; // blocos intermitentes de esteira registrados manualmente
     calories?: number;
     activeMinutes?: number;
     heartRate?: {
@@ -475,6 +486,8 @@ export interface HealthSettings {
     targetWeight: number;
     walkingMinimumMinutes?: number;
     walkingIdealMinutes?: number;
+    walkingMinimumKm?: number;
+    walkingIdealKm?: number;
 }
 
 export interface HealthTelegramReminder {
@@ -582,6 +595,13 @@ export const formatDateLocalISO = (date: Date) => {
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+};
+
+// Distancia diaria de caminhada: soma apenas os blocos registrados no Hermes
+// (painel web ou comando do Telegram). O antigo campo `walk` e legado.
+export const sumWalkBlocksKm = (log?: ExerciseLog | null): number => {
+    if (!log?.walkBlocks) return 0;
+    return log.walkBlocks.reduce((sum, block) => sum + (block.distance || 0), 0);
 };
 
 

@@ -13,7 +13,6 @@ import {
   HealthTelegramReminder, EstrategiaPessoal, EstrategiaIndicadorSucesso
 } from './types';
 import HealthView from './HealthView';
-import { GoogleHealthService } from './GoogleHealthService';
 import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscriptionTool';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
 import { db, functions, auth, storage, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
@@ -2186,38 +2185,6 @@ const App: React.FC = () => {
     } catch (e) {
       console.error(e);
       showToast("Erro ao solicitar sincronização profunda.", "error");
-    }
-
-    // 2. Client-side Health Sync
-    try {
-      const today = new Date();
-      const todayStr = formatDateLocalISO(today);
-
-      // Helper to add logs to the visual terminal
-      const addTerminalLog = (msg: string) => {
-        setPgdTerminalLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [HEALTH] ${msg}`]);
-      };
-
-      addTerminalLog("Iniciando sincronização de peso...");
-
-      const weightData = await GoogleHealthService.getWeight(today);
-
-      if (weightData?.weight) {
-        const alreadyHasWeight = healthWeights.some(w => w.date === todayStr);
-        if (!alreadyHasWeight) {
-          await handleAddHealthWeight(weightData.weight, todayStr);
-          addTerminalLog(`Peso sincronizado: ${weightData.weight}kg.`);
-        } else {
-          addTerminalLog(`Peso já registrado para hoje (${healthWeights.find(w => w.date === todayStr)?.weight}kg). Sync ignorado.`);
-        }
-      } else {
-        addTerminalLog("Nenhum registro de peso encontrado para hoje.");
-      }
-
-      showToast("Saúde sincronizada com sucesso!", "success");
-    } catch (healthError: any) {
-      console.warn("Health sync skipped or failed:", healthError);
-      setPgdTerminalLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [HEALTH] Erro: ${healthError.message || 'Falha na conexão'}`]);
     }
 
     setIsSyncing(false);
@@ -5024,6 +4991,7 @@ const App: React.FC = () => {
                         healthWeights={healthWeights}
                         healthSettings={healthSettings}
                         exerciseLogs={exerciseLogs}
+                        onSaveExerciseLog={handleSaveExerciseLog}
                         unidades={unidades}
                         currentMonth={currentMonth}
                         currentYear={currentYear}

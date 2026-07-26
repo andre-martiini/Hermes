@@ -103,7 +103,7 @@ Contratos/serviços (freelance, consultoria): `titulo`, `cliente`, `status`, `ti
 ## Saúde
 
 ### `health_exercise_logs`
-Log diário (`id` = `YYYY-MM-DD`): exercícios (`pushups`, `pullups`, `plank`, `squats`, `walk`...), `calories`, `heartRate`, `sleep`, `pain`. O campo `walk` (minutos, passos, km) vem apenas de sessões de caminhada/exercício registradas no Google Health/Fit — não é o total de passos do dia.
+Log diário (`id` = `YYYY-MM-DD`): exercícios (`pushups`, `pullups`, `plank`, `squats`, `walk`...), `calories`, `heartRate`, `sleep`, `pain`, `walkBlocks[]`. O campo `walkBlocks` guarda os blocos intermitentes de caminhada na esteira (`distance` em km obrigatório; `time`, `minutes`, `steps`, `calories` e `source` `web`|`telegram` opcionais), registrados pelo painel de saúde ou pelo comando "caminhada X" no Telegram — é a fonte da meta diária de distância. O campo `walk` é legado da antiga sincronização com o Google Health/Fit (removida) e não é mais gravado.
 
 ### `health_weights`
 Histórico de peso por dia: `date`, `weight`, `fatPercentage`, `muscleMass`.
