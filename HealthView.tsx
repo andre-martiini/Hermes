@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { arrayUnion, arrayRemove } from 'firebase/firestore';
 import {
     HealthWeight, HealthSettings, ExerciseLog,
     ExerciseSettings, formatDate, formatDateLocalISO,
@@ -468,11 +469,12 @@ const HealthView: React.FC<HealthViewProps> = ({
 
     const handleAddWalkBlock = async () => {
         const distance = parsePositiveNumber(walkDistanceInput);
-        if (!distance) return;
+        if (!distance || distance > 50) return;
         const block: WalkBlock = {
             id: `walk_${Date.now()}`,
             time: new Date().toTimeString().slice(0, 5),
             distance,
+            source: 'web',
         };
         const minutes = parsePositiveNumber(walkMinutesInput);
         const steps = parsePositiveNumber(walkStepsInput);
@@ -480,7 +482,7 @@ const HealthView: React.FC<HealthViewProps> = ({
         if (minutes) block.minutes = Math.round(minutes);
         if (steps) block.steps = Math.round(steps);
         if (calories) block.calories = Math.round(calories);
-        await onSaveExerciseLog(selectedDate, { walkBlocks: [...selectedWalkBlocks, block] });
+        await onSaveExerciseLog(selectedDate, { walkBlocks: arrayUnion(block) } as unknown as Partial<ExerciseLog>);
         setWalkDistanceInput('');
         setWalkMinutesInput('');
         setWalkStepsInput('');
@@ -488,7 +490,9 @@ const HealthView: React.FC<HealthViewProps> = ({
     };
 
     const handleDeleteWalkBlock = async (id: string) => {
-        await onSaveExerciseLog(selectedDate, { walkBlocks: selectedWalkBlocks.filter(block => block.id !== id) });
+        const block = selectedWalkBlocks.find(b => b.id === id);
+        if (!block) return;
+        await onSaveExerciseLog(selectedDate, { walkBlocks: arrayRemove(block) } as unknown as Partial<ExerciseLog>);
     };
 
     const handleAddWeight = () => {

@@ -968,11 +968,18 @@ def _try_register_walk_block(db, text: str) -> Optional[str]:
         block["calories"] = int(kcal_match.group(1))
 
     doc_ref = db.collection("health_exercise_logs").document(date_key)
-    snapshot = doc_ref.get()
-    blocks = ((snapshot.to_dict() or {}).get("walkBlocks") or []) if snapshot.exists else []
-    blocks = [b for b in blocks if isinstance(b, dict)]
-    blocks.append(block)
-    doc_ref.set({"walkBlocks": blocks}, merge=True)
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def _append_walk_block(transaction, doc_ref, new_block):
+        snapshot = doc_ref.get(transaction=transaction)
+        blocks = ((snapshot.to_dict() or {}).get("walkBlocks") or []) if snapshot.exists else []
+        blocks = [b for b in blocks if isinstance(b, dict)]
+        blocks.append(new_block)
+        transaction.set(doc_ref, {"walkBlocks": blocks}, merge=True)
+        return blocks
+
+    blocks = _append_walk_block(transaction, doc_ref, block)
 
     total_km = sum(float(b.get("distance") or 0) for b in blocks)
 
@@ -981,8 +988,10 @@ def _try_register_walk_block(db, text: str) -> Optional[str]:
         settings = settings_doc.to_dict() or {}
     except Exception:
         settings = {}
-    minimum_km = float(settings.get("walkingMinimumKm") or 5)
-    ideal_km = float(settings.get("walkingIdealKm") or 10)
+    minimum_setting = settings.get("walkingMinimumKm")
+    ideal_setting = settings.get("walkingIdealKm")
+    minimum_km = float(minimum_setting) if minimum_setting is not None else 5.0
+    ideal_km = float(ideal_setting) if ideal_setting is not None else 10.0
 
     if total_km >= ideal_km:
         progress = f"🏆 Meta ideal de {_format_km(ideal_km)} km atingida!"

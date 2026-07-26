@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { arrayUnion } from 'firebase/firestore';
 import {
     Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry,
     HealthWeight, HealthSettings, ExerciseLog, WalkBlock,
@@ -263,8 +264,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 distance,
                 source: 'web',
             };
-            const existingBlocks = todayHealthLog?.walkBlocks || [];
-            await onSaveExerciseLog(todayKey, { walkBlocks: [...existingBlocks, block] });
+            await onSaveExerciseLog(todayKey, { walkBlocks: arrayUnion(block) } as unknown as Partial<ExerciseLog>);
             setWalkKmInput('');
             setIsWalkModalOpen(false);
         } finally {
