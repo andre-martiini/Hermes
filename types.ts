@@ -421,6 +421,15 @@ export interface IncomeRubric {
 // Health Module Types
 export type PullupPhase = 'dead_hang' | 'negative' | 'assisted' | 'full';
 
+export interface WalkBlock {
+    id: string;
+    time?: string; // HH:mm
+    distance: number; // km
+    minutes?: number;
+    steps?: number;
+    calories?: number;
+}
+
 export interface ExerciseLog {
     id: string; // date string (YYYY-MM-DD)
     pushups?: { done: number; goal: number };
@@ -430,6 +439,7 @@ export interface ExerciseLog {
     birdDog?: { reps: number };
     squats?: { reps: number };
     walk?: { done: number; distance?: number; steps?: number }; // minutes, km, steps
+    walkBlocks?: WalkBlock[]; // blocos intermitentes de esteira registrados manualmente
     calories?: number;
     activeMinutes?: number;
     heartRate?: {
@@ -475,6 +485,8 @@ export interface HealthSettings {
     targetWeight: number;
     walkingMinimumMinutes?: number;
     walkingIdealMinutes?: number;
+    walkingMinimumKm?: number;
+    walkingIdealKm?: number;
 }
 
 export interface HealthTelegramReminder {
