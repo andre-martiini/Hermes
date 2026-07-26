@@ -1939,6 +1939,59 @@ def cleanup_retroactive_pix_duplicates(db, sync_ref=None, logs=None):
             log_to_firestore(sync_ref, logs, f"ERRO LIMPEZA RETROATIVA ({col}): {e}")
 
 
+def _format_brl(amount) -> str:
+    """Formata valores monetários sem depender do locale da Cloud Function."""
+    try:
+        formatted = f"{float(amount):,.2f}"
+    except (TypeError, ValueError):
+        return "valor não informado"
+    return "R$ " + formatted.replace(",", "_").replace(".", ",").replace("_", ".")
+
+
+def _gmail_message_headers(message: dict) -> tuple[str, str]:
+    """Extrai remetente e assunto do payload retornado pela API do Gmail."""
+    headers = (message.get('payload') or {}).get('headers') or []
+    values = {
+        str(header.get('name') or '').strip().lower(): str(header.get('value') or '').strip()
+        for header in headers
+    }
+    return values.get('from', ''), values.get('subject', '')
+
+
+def _build_imported_bills_notification(imported_bills: list[dict]) -> str:
+    """Monta um resumo legível no Telegram para os boletos da sincronização."""
+    count = len(imported_bills)
+    header = f"{count} boleto{' foi' if count == 1 else 's foram'} importado{' ' if count == 1 else 's '}do Gmail."
+    total = sum(
+        float(bill.get('amount') or 0)
+        for bill in imported_bills
+        if str(bill.get('amount') or '').strip()
+    )
+
+    if count == 1:
+        bill = imported_bills[0]
+        lines = [header, '', f"📄 {bill['description']}", f"💰 Valor: {_format_brl(bill['amount'])}"]
+        if bill.get('due_date'):
+            lines.append(f"📅 Vencimento: {bill['due_date'].strftime('%d/%m/%Y')}")
+        if bill.get('rubric'):
+            lines.append(f"🏷️ Rubrica: {bill['rubric']}")
+        if bill.get('sender'):
+            lines.append(f"✉️ Remetente: {bill['sender']}")
+        if bill.get('subject'):
+            lines.append(f"📝 Assunto: {bill['subject']}")
+        return "\n".join(lines)
+
+    lines = [header, '']
+    for index, bill in enumerate(imported_bills, start=1):
+        due = bill['due_date'].strftime('%d/%m') if bill.get('due_date') else 'sem vencimento'
+        rubric = f" · {bill['rubric']}" if bill.get('rubric') else ''
+        lines.append(f"{index}. {bill['description']} — {_format_brl(bill['amount'])} — vence {due}{rubric}")
+        if bill.get('sender'):
+            lines.append(f"   ✉️ {bill['sender']}")
+    lines.extend(['', f"💰 Total: {_format_brl(total)}"])
+    return "\n".join(lines)
+
+
 def sync_boletos_gmail(service, sync_ref, logs):
     """
     Explora o Gmail em busca de boletos, extraia dados via IA e salva no Firestore (fixed_bills).
@@ -1972,6 +2025,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
         client = genai.Client(api_key=api_key)
 
         processed_count = 0
+        imported_bills = []
         
         # Cache de boletos existentes para permitir duplicatas ou vinculação
         existing_bills_cache = []
@@ -1982,6 +2036,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 'id': b.id,
                 'desc': d.get('description', '').lower(),
                 'amount': d.get('amount'),
+                'dueDay': d.get('dueDay'),
                 'month': d.get('month'),
                 'year': d.get('year'),
                 'isPaid': d.get('isPaid', False),
@@ -1996,7 +2051,8 @@ def sync_boletos_gmail(service, sync_ref, logs):
             d = r.to_dict()
             rubrics_cache.append({
                 'id': r.id,
-                'desc': d.get('description', '').lower()
+                'desc': d.get('description', '').lower(),
+                'label': d.get('description', '').strip()
             })
 
         processed_emails_doc = db.collection('system').document('processed_emails').get()
@@ -2012,6 +2068,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
             
             msg = service.users().messages().get(userId='me', id=msg_id).execute()
             snippet = msg.get('snippet', '')
+            sender, subject = _gmail_message_headers(msg)
 
             # Tentar baixar o primeiro PDF encontrado
             pdf_data = None
@@ -2091,14 +2148,14 @@ def sync_boletos_gmail(service, sync_ref, logs):
                             found_existing_id = eb['id']
                             found_existing_rubric_id = eb.get('rubricId')
                             # Se valor for igual, é exatamente o mesmo registro
-                            if abs(eb['amount'] - data['amount']) < 0.01:
+                            if abs(eb['amount'] - data['amount']) < 0.01 and eb.get('dueDay') == due_dt.day:
                                 is_exact_dup = True
                             break
 
                         # 2. Lógica de vinculação via nome (Fallback/Ambiguidade)
                         if name_extracted in eb['desc'] or eb['desc'] in name_extracted:
                             # Se o valor também for igual, é uma duplicata exata
-                            if abs(eb['amount'] - data['amount']) < 0.01:
+                            if abs(eb['amount'] - data['amount']) < 0.01 and eb.get('dueDay') == due_dt.day:
                                 is_exact_dup = True
                                 break
                             # Caso contrário, vamos vincular a este card (atualizá-lo)
@@ -2115,6 +2172,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
                     # VINCULAÇÃO: Atualiza card existente
                     update_data = {
                         'amount': data['amount'],
+                        'dueDay': due_dt.day,
                         'barcode': data.get('barcode', ''),
                         'pixCode': data.get('pix_code', ''),
                         'google_message_id': msg_id,
@@ -2133,6 +2191,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
                     db.collection('fixed_bills').document(found_existing_id).update(update_data)
                     log_to_firestore(sync_ref, logs, f"[BOLETO] Vinculado ao card '{data['description']}': R$ {data['amount']}")
                     processed_count += 1
+                    effective_rubric_id = update_data.get('rubricId') or found_existing_rubric_id
                     archive_gmail_message(service, msg_id, sync_ref, logs, "boleto-vinculado")
                 else:
                     # BUSCA EM RUBRICAS (Fallback se a IA não retornou rubric_id)
@@ -2161,7 +2220,21 @@ def sync_boletos_gmail(service, sync_ref, logs):
                     })
                     log_to_firestore(sync_ref, logs, f"[BOLETO] Importado (Novo Card): {data['description']} (R$ {data['amount']})")
                     processed_count += 1
+                    effective_rubric_id = matched_rubric_id
                     archive_gmail_message(service, msg_id, sync_ref, logs, "boleto-lancado")
+
+                rubric_label = next(
+                    (rubric['label'] for rubric in rubrics_cache if rubric['id'] == effective_rubric_id),
+                    ''
+                )
+                imported_bills.append({
+                    'description': str(data.get('description') or 'Conta sem identificação').strip(),
+                    'amount': data.get('amount'),
+                    'due_date': due_dt,
+                    'rubric': rubric_label,
+                    'sender': sender,
+                    'subject': subject,
+                })
                 
                 new_processed_ids.append(msg_id)
 
@@ -2179,7 +2252,12 @@ def sync_boletos_gmail(service, sync_ref, logs):
 
         if processed_count > 0:
             log_to_firestore(sync_ref, logs, f"Sincronização de boletos concluída. {processed_count} novos boletos.")
-            emit_notification_backend("Novos Boletos", f"{processed_count} novos boletos foram importados do Gmail.", "success", "financeiro")
+            emit_notification_backend(
+                "Novos Boletos",
+                _build_imported_bills_notification(imported_bills),
+                "success",
+                "financeiro"
+            )
     
     except Exception as e:
         log_to_firestore(sync_ref, logs, f"ERRO na busca de boletos: {e}")
