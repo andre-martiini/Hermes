@@ -505,6 +505,11 @@ export const TaskExecutionView = ({
 
   // Plan history viewer (Feature 5)
   const [showPlanHistory, setShowPlanHistory] = useState(false);
+  const [showCompletedPlanItems, setShowCompletedPlanItems] = useState(false);
+
+  useEffect(() => {
+    setShowCompletedPlanItems(false);
+  }, [currentTaskData.id]);
 
   // Proactive insight system
   type ProposedActionIdea = { titulo: string; descricao: string; tags: string[] };
@@ -634,6 +639,16 @@ export const TaskExecutionView = ({
     const done = items.filter(i => i.completed).length;
     return Math.round((done / items.length) * 100);
   }, [currentTaskData.plano_acao]);
+
+  const pendingPlanItems = useMemo(
+    () => (currentTaskData.plano_acao || []).filter(item => !item.completed),
+    [currentTaskData.plano_acao]
+  );
+
+  const completedPlanItems = useMemo(
+    () => (currentTaskData.plano_acao || []).filter(item => item.completed),
+    [currentTaskData.plano_acao]
+  );
 
 
   const taskReminders = useMemo(() => {
@@ -2080,6 +2095,31 @@ export const TaskExecutionView = ({
     return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 font-sans';
   };
 
+  const renderPlanItem = (item: ActionPlanItem) => (
+    <button
+      key={item.id}
+      onClick={() => handleToggleChecklistItem(item.id)}
+      className={`w-full flex items-start gap-3 p-2.5 rounded-lg text-left transition-all group ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
+    >
+      <div className={`w-4 h-4 mt-0.5 rounded-lg border-2 flex items-center justify-center shrink-0 transition-all ${item.completed
+        ? 'bg-emerald-500 border-emerald-500'
+        : isDark ? 'border-white/30 group-hover:border-emerald-400' : 'border-slate-300 group-hover:border-emerald-500'
+        }`}>
+        {item.completed && (
+          <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
+          </svg>
+        )}
+      </div>
+      <span className={`text-xs font-medium leading-snug transition-all font-sans ${item.completed
+        ? isDark ? 'text-white/30 line-through' : 'text-slate-300 line-through'
+        : isDark ? 'text-white/80' : 'text-slate-700'
+        }`}>
+        {item.text}
+      </span>
+    </button>
+  );
+
   // ─── Columns visibility (mobile tabs) ────────────────────────
   const showMapa = mobileTab === 'mapa';
   const showDiario = mobileTab === 'diario';
@@ -2432,34 +2472,74 @@ export const TaskExecutionView = ({
                         </div>
                       )}
 
-                      <div className="px-3 pb-3 space-y-1.5">
+                      <div className="px-3 pb-3">
                         {(currentTaskData.plano_acao || []).length === 0 ? (
                           <p className={`text-xs text-center py-4 ${mutedText}`}>Nenhum passo no plano.</p>
                         ) : (
-                          (currentTaskData.plano_acao || []).map(item => (
-                            <button
-                              key={item.id}
-                              onClick={() => handleToggleChecklistItem(item.id)}
-                              className={`w-full flex items-start gap-3 p-2.5 rounded-lg text-left transition-all group ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
-                            >
-                              <div className={`w-4 h-4 mt-0.5 rounded-lg border-2 flex items-center justify-center shrink-0 transition-all ${item.completed
-                                ? 'bg-emerald-500 border-emerald-500'
-                                : isDark ? 'border-white/30 group-hover:border-emerald-400' : 'border-slate-300 group-hover:border-emerald-500'
-                                }`}>
-                                {item.completed && (
-                                  <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
-                                  </svg>
+                          <>
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between px-2.5 py-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                                  <span className={`text-[9px] font-bold uppercase tracking-wider font-sans ${isDark ? 'text-blue-300' : 'text-blue-600'}`}>
+                                    Em andamento
+                                  </span>
+                                </div>
+                                <span className={`text-[9px] font-bold font-sans ${mutedText}`}>
+                                  {pendingPlanItems.length}
+                                </span>
+                              </div>
+
+                              {pendingPlanItems.length > 0 ? (
+                                pendingPlanItems.map(renderPlanItem)
+                              ) : (
+                                <p className={`px-2.5 py-2 text-[10px] font-medium font-sans ${mutedText}`}>
+                                  Nenhuma etapa em andamento.
+                                </p>
+                              )}
+                            </div>
+
+                            {completedPlanItems.length > 0 && (
+                              <div className={`mt-2 border-t pt-2 ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowCompletedPlanItems(current => !current)}
+                                  aria-expanded={showCompletedPlanItems}
+                                  className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left transition-all ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-500">
+                                      <svg className="h-2.5 w-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
+                                      </svg>
+                                    </span>
+                                    <span className={`text-[9px] font-bold uppercase tracking-wider font-sans ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                                      Concluídas
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className={`text-[9px] font-bold font-sans ${mutedText}`}>
+                                      {completedPlanItems.length}
+                                    </span>
+                                    <svg
+                                      className={`h-3 w-3 transition-transform ${showCompletedPlanItems ? 'rotate-180' : ''} ${mutedText}`}
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                  </div>
+                                </button>
+
+                                {showCompletedPlanItems && (
+                                  <div className="mt-1 space-y-1.5">
+                                    {completedPlanItems.map(renderPlanItem)}
+                                  </div>
                                 )}
                               </div>
-                              <span className={`text-xs font-medium leading-snug transition-all font-sans ${item.completed
-                                ? isDark ? 'text-white/30 line-through' : 'text-slate-300 line-through'
-                                : isDark ? 'text-white/80' : 'text-slate-700'
-                                }`}>
-                                {item.text}
-                              </span>
-                            </button>
-                          ))
+                            )}
+                          </>
                         )}
                       </div>
 
