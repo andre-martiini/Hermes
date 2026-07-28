@@ -242,7 +242,7 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialS
                     ))}
                   </div>
                   <div className={`p-3 rounded-none-none border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-slate-50 border-slate-200'}`}>
-                    <p className={`text-sm font-mono whitespace-pre-wrap line-clamp-3 group-hover:line-clamp-none transition-all ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    <p className={`text-sm font-mono whitespace-pre-wrap line-clamp-3 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                       {pop.instrucao_sistema}
                     </p>
                   </div>
