@@ -42,6 +42,8 @@ import {
   RowCard, WysiwygEditor, NotificationCenter, AutoExpandingTextarea
 } from './src/components/ui/UIComponents';
 import { PgdAuditRow } from './src/components/ui/PgdAuditRow';
+import { CreatePgdPlanModal } from './src/components/pgd/CreatePgdPlanModal';
+import { CreatePgdPlanPayload } from './src/utils/pgdPlanAutomation';
 import {
   HermesModal, SettingsModal,
   TaskCreateModal, TaskEditModal
@@ -1014,6 +1016,7 @@ const App: React.FC = () => {
   // Systems State
   const [isPgdTerminalOpen, setIsPgdTerminalOpen] = useState(false);
   const [pgdTerminalLogs, setPgdTerminalLogs] = useState<string[]>([]);
+  const [isCreatePgdPlanOpen, setIsCreatePgdPlanOpen] = useState(false);
   const [isShoppingAIModalOpen, setIsShoppingAIModalOpen] = useState(false);
   const [isTranscriptionAIModalOpen, setIsTranscriptionAIModalOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -1873,6 +1876,27 @@ const App: React.FC = () => {
       if (eventSource) eventSource.close();
     };
   }, [isPgdTerminalOpen]);
+  const handleCreatePgdPlan = async (payload: CreatePgdPlanPayload) => {
+    const response = await fetch('http://127.0.0.1:8000/api/automations/criar-plano-pgd', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      let message = 'O servidor local não conseguiu iniciar a criação do plano.';
+      try {
+        const errorData = await response.json();
+        if (errorData?.detail) message = String(errorData.detail);
+      } catch {
+        // Mantém a mensagem padrão quando a resposta não for JSON.
+      }
+      throw new Error(message);
+    }
+    setPgdTerminalLogs([]);
+    setIsPgdTerminalOpen(true);
+    setIsCreatePgdPlanOpen(false);
+    showToast('Automação iniciada. Conclua o login no Petrvs, se solicitado.', 'success');
+  };
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [settingsTab, setSettingsTab] = useState<'notifications' | 'context'>('notifications');
   // --- HermesNotification System & App Settings ---
@@ -6302,6 +6326,34 @@ const App: React.FC = () => {
                                 Executar Script
                               </button>
                             </div>
+                            {/* Card: Criação de Plano PGD */}
+                            <div className="border-2 border-border-grid rounded-none p-6 bg-slate-50 group flex flex-col justify-between h-full relative overflow-hidden transition-all hover:border-violet-500/50">
+                              <div className="absolute top-0 left-0 w-1.5 h-full bg-violet-500 opacity-20 group-hover:opacity-100 transition-opacity"></div>
+                              <div>
+                                <div className="flex items-center gap-3 mb-4">
+                                  <div className="p-2 bg-violet-100 text-violet-600 rounded-none border border-violet-200">
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
+                                    </svg>
+                                  </div>
+                                  <h4 className="text-[11px] font-black text-slate-800 uppercase tracking-widest font-mono">Criar Plano PGD</h4>
+                                </div>
+                                <p className="text-[10px] text-slate-500 font-mono leading-relaxed mb-6">
+                                  Seleção de entregas, descrições históricas e distribuição automática de carga para o próximo plano mensal.
+                                </p>
+                                <div className="mb-6 p-3 bg-violet-50 border border-violet-200">
+                                  <p className="text-[9px] font-black text-violet-700 leading-tight uppercase font-mono">
+                                    Inclui as duas entregas fixas e grava o plano no Petrvs.
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => setIsCreatePgdPlanOpen(true)}
+                                className="w-full bg-slate-900 text-white py-3 rounded-none text-[10px] font-black uppercase tracking-[0.2em] hover:bg-violet-600 transition-all shadow-md font-mono"
+                              >
+                                Preparar novo plano
+                              </button>
+                            </div>
                             {/* Card: Execução PGD (Petrvs) */}
                             <div className="border-2 border-border-grid rounded-none p-6 bg-slate-50 group flex flex-col justify-between h-full relative overflow-hidden transition-all hover:border-blue-500/50">
                               <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-500 opacity-20 group-hover:opacity-100 transition-opacity"></div>
@@ -6453,6 +6505,13 @@ const App: React.FC = () => {
             </div>
           </>
         </div>
+        {isCreatePgdPlanOpen && (
+          <CreatePgdPlanModal
+            plans={planosTrabalho}
+            onClose={() => setIsCreatePgdPlanOpen(false)}
+            onSubmit={handleCreatePgdPlan}
+          />
+        )}
         <ToastContainer toasts={toasts} removeToast={removeToast} />
         <HermesModal {...modalState} />
         {
