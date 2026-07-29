@@ -23,6 +23,7 @@ const parseDateDay = (dateStr?: string) => {
     };
 };
 import { resolveTwoStepAction } from './src/utils/destructiveActions';
+import { getFinancePeriodSummary } from './src/utils/financeBudget';
 import { NFSeGenerator } from './src/components/NFSeGenerator';
 interface FinanceViewProps {
     transactions: FinanceTransaction[];
@@ -461,8 +462,9 @@ const FinanceView = ({
     };
 
     const periodKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
-    const currentBudget = settings.monthlyBudgets?.[periodKey] || settings.monthlyBudget;
-    const budgetPercentage = Math.min((currentMonthTotal / currentBudget) * 100, 100);
+    const budgetSummary = getFinancePeriodSummary(transactions, settings, currentYear, currentMonth);
+    const currentBudget = budgetSummary.budget;
+    const budgetPercentage = Math.min(budgetSummary.budgetRatio * 100, 100);
 
     const sortedGoals = [...goals].sort((a, b) => a.priority - b.priority);
 
@@ -1092,23 +1094,23 @@ const FinanceView = ({
                         </div>
                     </div>
 
-                    {/* TRÍPTICO DE SALDOS AUDITADOS (EXTRATO PICPAY) */}
+                    {/* SALDOS FINANCEIROS DO PERÍODO */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {/* Card 1: Saldo Real da Conta (PicPay) */}
+                        {/* O Hermes ainda não recebe o saldo bancário atual do PicPay. */}
                         <div className="bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-transparent p-5 rounded-2xl border border-emerald-500/30 flex flex-col gap-1 shadow-sm relative overflow-hidden">
                             <div className="flex items-center justify-between">
                                 <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
                                     🏦 Saldo Real da Conta (PicPay)
                                 </span>
                                 <span className="text-[8px] font-sans font-extrabold bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 px-2 py-0.5 rounded-full uppercase">
-                                    Auditado
+                                    Sem integração
                                 </span>
                             </div>
                             <div className="text-2xl md:text-3xl font-sans font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight mt-1">
-                                R$ 294,61
+                                Não sincronizado
                             </div>
                             <p className="text-[9px] font-sans font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mt-0.5">
-                                Saldo real em conta bancária PicPay
+                                Consulte o aplicativo bancário para o saldo atual
                             </p>
                         </div>
 
@@ -1123,10 +1125,10 @@ const FinanceView = ({
                                 </span>
                             </div>
                             <div className="text-2xl md:text-3xl font-sans font-extrabold text-indigo-600 dark:text-indigo-400 tracking-tight mt-1">
-                                R$ 277,25
+                                {formatCurrency(budgetSummary.pixAvailable)}
                             </div>
                             <p className="text-[9px] font-sans font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mt-0.5">
-                                Teto disponível restrito a pagamentos Pix
+                                Orçamento menos os gastos Pix do período
                             </p>
                         </div>
 
@@ -1141,7 +1143,7 @@ const FinanceView = ({
                                 </span>
                             </div>
                             <div className="text-2xl md:text-3xl font-sans font-extrabold text-purple-600 dark:text-purple-400 tracking-tight mt-1">
-                                R$ 274,15
+                                {formatCurrency(budgetSummary.available)}
                             </div>
                             <p className="text-[9px] font-sans font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mt-0.5">
                                 Saldo disponível para todos os gastos

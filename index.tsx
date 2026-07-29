@@ -70,6 +70,7 @@ import {
 } from './src/utils/knowledgeLogic';
 import { parseDiaryRichNote } from './src/utils/diaryEntries';
 import { getAreaForStrategyPillar, normalizeAreaName } from './src/utils/strategicAreas';
+import { getFinancePeriodSummary } from './src/utils/financeBudget';
 type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
 type DateFilter = 'today' | 'week' | 'month';
 type ThemeMode = 'system' | 'dark' | 'light';
@@ -986,6 +987,8 @@ const App: React.FC = () => {
 
   // Finance State
   const [financeTransactions, setFinanceTransactions] = useState<FinanceTransaction[]>([]);
+  const [financeTransactionsServerConfirmed, setFinanceTransactionsServerConfirmed] = useState(false);
+  const [financeSettingsServerConfirmed, setFinanceSettingsServerConfirmed] = useState(false);
   const [financeGoals, setFinanceGoals] = useState<FinanceGoal[]>([]);
   const [fixedBills, setFixedBills] = useState<FixedBill[]>([]);
   const [billRubrics, setBillRubrics] = useState<BillRubric[]>([]);
@@ -1211,22 +1214,26 @@ const App: React.FC = () => {
   // Finance Sync
   useEffect(() => {
     if (!user) return;
+    setFinanceTransactionsServerConfirmed(false);
+    setFinanceSettingsServerConfirmed(false);
     const unsubGoogleCalendar = onSnapshot(collection(db, 'google_calendar_events'), (snapshot) => {
       setGoogleCalendarEvents(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as GoogleCalendarEvent)));
     }, handleSnapshotError('google_calendar_events'));
-    const unsubTransactions = onSnapshot(collection(db, 'finance_transactions'), (snapshot) => {
+    const unsubTransactions = onSnapshot(collection(db, 'finance_transactions'), { includeMetadataChanges: true }, (snapshot) => {
       setFinanceTransactions(snapshot.docs
         .map(d => ({ id: d.id, ...d.data() } as FinanceTransaction))
         .filter(t => t.status !== 'deleted')
       );
+      setFinanceTransactionsServerConfirmed(!snapshot.metadata.fromCache);
     }, handleSnapshotError('finance_transactions'));
     const unsubGoals = onSnapshot(collection(db, 'finance_goals'), (snapshot) => {
       setFinanceGoals(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as FinanceGoal)));
     }, handleSnapshotError('finance_goals'));
-    const unsubSettings = onSnapshot(doc(db, 'finance_settings', 'config'), (doc) => {
-      if (doc.exists()) {
-        setFinanceSettings(doc.data() as FinanceSettings);
+    const unsubSettings = onSnapshot(doc(db, 'finance_settings', 'config'), { includeMetadataChanges: true }, (settingsDoc) => {
+      if (settingsDoc.exists()) {
+        setFinanceSettings(settingsDoc.data() as FinanceSettings);
       }
+      setFinanceSettingsServerConfirmed(!settingsDoc.metadata.fromCache);
     }, handleSnapshotError('finance_settings/config'));
     const qFixedBills = query(collection(db, 'fixed_bills'));
     const unsubFixedBills = onSnapshot(qFixedBills, (snapshot) => {
@@ -2092,18 +2099,25 @@ const App: React.FC = () => {
   useEffect(() => {
     const todayStr = formatDateLocalISO(new Date());
     // 2. Budget Risk (Whenever data changes, throttled to once per day notification AND real spending increase)
-    if (appSettings.notifications.budgetRisk.enabled) {
+    if (
+      appSettings.notifications.budgetRisk.enabled
+      && financeTransactionsServerConfirmed
+      && financeSettingsServerConfirmed
+    ) {
       const now = new Date();
       const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const monthlyBudget = financeSettings.monthlyBudgets?.[currentMonthStr] || financeSettings.monthlyBudget;
-      const totalSpend = financeTransactions.filter(t => {
-        const d = new Date(t.date);
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-      }).reduce((acc, t) => acc + t.amount, 0);
+      const budgetSummary = getFinancePeriodSummary(
+        financeTransactions,
+        financeSettings,
+        now.getFullYear(),
+        now.getMonth()
+      );
+      const monthlyBudget = budgetSummary.budget;
+      const totalSpend = budgetSummary.totalSpend;
       if (monthlyBudget > 0) {
         const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
         const currentDay = now.getDate();
-        const budgetRatio = totalSpend / monthlyBudget;
+        const budgetRatio = budgetSummary.budgetRatio;
         const timeRatio = currentDay / daysInMonth;
         // Condition: Over budget velocity AND (New day OR spending increased since last notification)
         const lastNotifiedSpend = parseFloat(localStorage.getItem(`lastBudgetRiskNotifiedSpend_${currentMonthStr}`) || '0');
@@ -2138,7 +2152,15 @@ const App: React.FC = () => {
         localStorage.setItem('lastPgcNotifyDate', todayStr);
       }
     }
-  }, [tarefas, financeTransactions, financeSettings, planosTrabalho, appSettings.notifications]);
+  }, [
+    tarefas,
+    financeTransactions,
+    financeSettings,
+    financeTransactionsServerConfirmed,
+    financeSettingsServerConfirmed,
+    planosTrabalho,
+    appSettings.notifications
+  ]);
   // Welcome HermesNotification
   useEffect(() => {
     if (!user) return;
@@ -5679,10 +5701,12 @@ const App: React.FC = () => {
                       setCurrentMonth(m);
                       setCurrentYear(y);
                     }}
-                    currentMonthTotal={financeTransactions.filter(t => {
-                      const d = new Date(t.date);
-                      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-                    }).reduce((acc, curr) => acc + curr.amount, 0)}
+                    currentMonthTotal={getFinancePeriodSummary(
+                      financeTransactions,
+                      financeSettings,
+                      currentYear,
+                      currentMonth
+                    ).totalSpend}
                     currentMonthIncome={incomeEntries.filter(e => {
                       return e.month === currentMonth && e.year === currentYear && e.isReceived;
                     }).reduce((acc, curr) => acc + curr.amount, 0)}
