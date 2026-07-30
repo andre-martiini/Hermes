@@ -7217,6 +7217,159 @@ INTENCAO DO USUARIO:
 
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=120
+)
+def assistirPopComIA(req: https_fn.CallableRequest):
+    """
+    Gera ou refina um POP (Procedimento Operacional Padrao) usando IA.
+    modo="criar": recebe texto bruto e gera titulo/gatilhos/instrucao_sistema do zero.
+    modo="editar": recebe o POP atual e um pedido de ajuste, retorna a versao atualizada.
+    """
+    from google import genai
+    from google.genai import types
+
+    data = req.data or {}
+    modo = str(data.get("modo") or "").strip()
+    if modo not in ("criar", "editar"):
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="Parametro 'modo' deve ser 'criar' ou 'editar'."
+        )
+
+    if modo == "criar":
+        texto_bruto = str(data.get("textoBruto") or "").strip()
+        if not texto_bruto:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+                message="Texto bruto e obrigatorio para criar um POP."
+            )
+        prompt = f"""
+Voce e um especialista em criar POPs (Procedimentos Operacionais Padrao) que orientam um copiloto de IA institucional a executar ou replicar processos administrativos.
+
+A partir do TEXTO BRUTO abaixo (que pode ser um rascunho, e-mail, anotacoes soltas ou instrucoes desorganizadas), estruture um POP completo.
+
+REGRAS:
+- Responda somente JSON valido, sem markdown ao redor do JSON.
+- "titulo": curto e descritivo (maximo ~80 caracteres).
+- "gatilhos": lista de 3 a 8 palavras ou frases curtas, em minusculas, sem acentuacao obrigatoria mas preferencialmente com, que um usuario diria para ativar este POP.
+- "instrucao_sistema": texto completo em markdown, preservando TODOS os passos, regras, numeros, links e detalhes tecnicos presentes no texto bruto. Organize em secoes/etapas quando fizer sentido. Nao invente informacoes que nao estejam no texto bruto nem no bom senso do dominio.
+
+FORMATO:
+{{
+  "titulo": "string",
+  "gatilhos": ["string"],
+  "instrucao_sistema": "string"
+}}
+
+TEXTO BRUTO:
+{texto_bruto}
+"""
+        feature_tag = "pop_gerar_ia"
+    else:
+        titulo_atual = str(data.get("tituloAtual") or "").strip()
+        instrucao_atual = str(data.get("instrucaoAtual") or "").strip()
+        gatilhos_atuais = [str(g).strip() for g in (data.get("gatilhosAtuais") or []) if str(g).strip()]
+        pedido_ajuste = str(data.get("pedidoAjuste") or "").strip()
+        if not instrucao_atual:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+                message="POP atual e obrigatorio para editar."
+            )
+        if not pedido_ajuste:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+                message="Descreva o ajuste desejado."
+            )
+        prompt = f"""
+Voce e um especialista em refinar POPs (Procedimentos Operacionais Padrao) que orientam um copiloto de IA institucional.
+
+Abaixo esta o POP ATUAL e um PEDIDO DE AJUSTE do usuario. Aplique exatamente o ajuste solicitado, preservando todo o restante do conteudo que nao foi mencionado no pedido.
+
+REGRAS:
+- Responda somente JSON valido, sem markdown ao redor do JSON.
+- "titulo": mantenha o atual a menos que o ajuste peca para mudar.
+- "gatilhos": lista de 3 a 8 palavras/frases curtas em minusculas; ajuste apenas se o pedido pedir.
+- "instrucao_sistema": texto completo e atualizado em markdown, com o ajuste aplicado.
+
+POP ATUAL:
+Titulo: {titulo_atual}
+Gatilhos: {json.dumps(gatilhos_atuais, ensure_ascii=False)}
+Instrucao de sistema:
+{instrucao_atual}
+
+PEDIDO DE AJUSTE DO USUARIO:
+{pedido_ajuste}
+
+FORMATO:
+{{
+  "titulo": "string",
+  "gatilhos": ["string"],
+  "instrucao_sistema": "string"
+}}
+"""
+        feature_tag = "pop_editar_ia"
+
+    try:
+        db = get_db()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
+        gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        if not gemini_key:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="Chave Gemini nao configurada."
+            )
+
+        client = genai.Client(api_key=gemini_key)
+        response = client.models.generate_content(
+            model=GEMINI_ROUTING_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.2,
+                http_options=types.HttpOptions(timeout=60000),
+            )
+        )
+        log_gemini_usage(response, model=GEMINI_ROUTING_MODEL, feature=feature_tag, db=db)
+        raw_text = (response.text or "").strip()
+        try:
+            parsed = json.loads(raw_text)
+        except Exception:
+            match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+            parsed = json.loads(match.group(0)) if match else {}
+
+        titulo_final = str(parsed.get("titulo") or "").strip()
+        gatilhos_final = [
+            str(item).strip().lower()
+            for item in (parsed.get("gatilhos") or [])
+            if str(item).strip()
+        ][:8]
+        instrucao_final = str(parsed.get("instrucao_sistema") or "").strip()
+
+        if not titulo_final or not gatilhos_final or not instrucao_final:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.INTERNAL,
+                message="A IA nao retornou um POP valido. Tente reformular o pedido."
+            )
+
+        return {
+            "titulo": titulo_final,
+            "gatilhos": gatilhos_final,
+            "instrucao_sistema": instrucao_final,
+        }
+
+    except https_fn.HttpsError:
+        raise
+    except Exception as e:
+        print(f"Erro em assistirPopComIA: {e}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message="Falha ao processar o POP com IA."
+        )
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
     memory=options.MemoryOption.GB_2,
     timeout_sec=COPILOT_FUNCTION_TIMEOUT_SEC
 )

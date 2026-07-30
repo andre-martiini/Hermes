@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { db } from '@/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '@/firebase';
 
 interface Pop {
   id: string;
@@ -30,6 +31,14 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialS
   const [titulo, setTitulo] = useState('');
   const [gatilhos, setGatilhos] = useState('');
   const [instrucao, setInstrucao] = useState('');
+
+  // IA State (criação e ajuste assistidos)
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [showAiCreateBox, setShowAiCreateBox] = useState(false);
+  const [aiRawText, setAiRawText] = useState('');
+  const [showAiEditBox, setShowAiEditBox] = useState(false);
+  const [aiAdjustText, setAiAdjustText] = useState('');
 
   const getErrorMessage = (error: unknown) => {
     const code = typeof error === 'object' && error !== null && 'code' in error
@@ -105,6 +114,9 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialS
     setTitulo(pop.titulo);
     setGatilhos(pop.gatilhos.join(', '));
     setInstrucao(pop.instrucao_sistema);
+    requestAnimationFrame(() => {
+      document.getElementById(`pop-card-${pop.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
   };
 
   const handleDelete = async (id: string) => {
@@ -124,6 +136,59 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialS
     setTitulo('');
     setGatilhos('');
     setInstrucao('');
+    setShowAiCreateBox(false);
+    setAiRawText('');
+    setShowAiEditBox(false);
+    setAiAdjustText('');
+    setAiError(null);
+  };
+
+  const handleGenerateWithAI = async () => {
+    if (!aiRawText.trim()) return;
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const fn = httpsCallable(functions, 'assistirPopComIA');
+      const result = await fn({ modo: 'criar', textoBruto: aiRawText });
+      const data = result.data as { titulo: string; gatilhos: string[]; instrucao_sistema: string };
+      setTitulo(data.titulo);
+      setGatilhos(data.gatilhos.join(', '));
+      setInstrucao(data.instrucao_sistema);
+      setShowAiCreateBox(false);
+      setAiRawText('');
+    } catch (error) {
+      console.error('Erro ao gerar POP com IA:', error);
+      setAiError(getErrorMessage(error));
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleAdjustWithAI = async () => {
+    if (!aiAdjustText.trim()) return;
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const fn = httpsCallable(functions, 'assistirPopComIA');
+      const result = await fn({
+        modo: 'editar',
+        tituloAtual: titulo,
+        gatilhosAtuais: gatilhos.split(',').map(g => g.trim()).filter(g => g),
+        instrucaoAtual: instrucao,
+        pedidoAjuste: aiAdjustText,
+      });
+      const data = result.data as { titulo: string; gatilhos: string[]; instrucao_sistema: string };
+      setTitulo(data.titulo);
+      setGatilhos(data.gatilhos.join(', '));
+      setInstrucao(data.instrucao_sistema);
+      setShowAiEditBox(false);
+      setAiAdjustText('');
+    } catch (error) {
+      console.error('Erro ao ajustar POP com IA:', error);
+      setAiError(getErrorMessage(error));
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   return (
@@ -152,63 +217,90 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialS
           </div>
         )}
 
-        {/* Formulário de Criação/Edição */}
-        <div className={`p-6 rounded-none-none border shadow-none ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200'}`}>
-          <h3 className={`text-lg font-bold mb-4 ${isDark ? 'text-white' : 'text-slate-800'}`}>{editingId ? 'Editar POP' : 'Novo POP'}</h3>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className={`block text-sm font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Título</label>
-              <input
-                type="text"
-                placeholder="Ex: Formatação de Relatório Financeiro"
-                value={titulo}
-                onChange={(e) => setTitulo(e.target.value)}
-                required
-                className={`w-full p-3 border rounded-none-none focus:ring-1 outline-none transition-colors ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-cyan-500/50 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 focus:ring-blue-500 placeholder-slate-400'}`}
-              />
-            </div>
-            <div>
-              <label className={`block text-sm font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Gatilhos (separados por vírgula)</label>
-              <input
-                type="text"
-                placeholder="Ex: relatório financeiro, formatar gastos"
-                value={gatilhos}
-                onChange={(e) => setGatilhos(e.target.value)}
-                required
-                className={`w-full p-3 border rounded-none-none focus:ring-1 outline-none transition-colors ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-cyan-500/50 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 focus:ring-blue-500 placeholder-slate-400'}`}
-              />
-            </div>
-            <div>
-              <label className={`block text-sm font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Instrução de Sistema</label>
-              <textarea
-                placeholder="Descreva a regra exata e o formato que o LLM deve seguir..."
-                value={instrucao}
-                onChange={(e) => setInstrucao(e.target.value)}
-                required
-                className={`w-full p-3 border rounded-none-none h-32 resize-none focus:ring-1 outline-none transition-colors ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-cyan-500/50 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 focus:ring-blue-500 placeholder-slate-400'}`}
-              />
+        {/* Formulário de Criação (edição acontece inline no card) */}
+        {!editingId && (
+          <div className={`p-6 rounded-none-none border shadow-none ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200'}`}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>Novo POP</h3>
+              <button
+                type="button"
+                onClick={() => { setShowAiCreateBox(v => !v); setAiError(null); }}
+                className={`flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-none-none transition-colors ${isDark ? 'bg-purple-900/30 text-purple-300 hover:bg-purple-900/50' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'}`}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>
+                Criar com IA
+              </button>
             </div>
 
-            <div className="flex gap-3 pt-2">
-              <button
-                type="submit"
-                disabled={saving}
-                className={`font-bold py-3 px-6 rounded-none-none transition-colors ${isDark ? 'bg-cyan-600 hover:bg-cyan-500 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
-              >
-                {saving ? 'Salvando...' : editingId ? 'Atualizar POP' : 'Salvar POP'}
-              </button>
-              {editingId && (
+            {showAiCreateBox && (
+              <div className={`mb-4 p-4 rounded-none-none border ${isDark ? 'bg-purple-900/10 border-purple-800/40' : 'bg-purple-50 border-purple-200'}`}>
+                <label className={`block text-sm font-semibold mb-1 ${isDark ? 'text-purple-300' : 'text-purple-800'}`}>Cole aqui as informações do processo (texto bruto)</label>
+                <textarea
+                  placeholder="Cole um e-mail, anotações, ou descreva livremente o processo. A IA vai estruturar o título, os gatilhos e a instrução de sistema."
+                  value={aiRawText}
+                  onChange={(e) => setAiRawText(e.target.value)}
+                  className={`w-full p-3 border rounded-none-none h-32 resize-y focus:ring-1 outline-none transition-colors text-sm ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-purple-500/50 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 focus:ring-purple-500 placeholder-slate-400'}`}
+                />
+                {aiError && <p className={`mt-2 text-sm font-medium ${isDark ? 'text-red-400' : 'text-red-600'}`}>{aiError}</p>}
+                <div className="flex gap-3 pt-3">
+                  <button
+                    type="button"
+                    onClick={handleGenerateWithAI}
+                    disabled={aiLoading || !aiRawText.trim()}
+                    className={`font-bold py-2 px-5 rounded-none-none transition-colors disabled:opacity-50 ${isDark ? 'bg-purple-600 hover:bg-purple-500 text-white' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}
+                  >
+                    {aiLoading ? 'Gerando...' : 'Gerar POP com IA'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className={`block text-sm font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Título</label>
+                <input
+                  type="text"
+                  placeholder="Ex: Formatação de Relatório Financeiro"
+                  value={titulo}
+                  onChange={(e) => setTitulo(e.target.value)}
+                  required
+                  className={`w-full p-3 border rounded-none-none focus:ring-1 outline-none transition-colors ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-cyan-500/50 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 focus:ring-blue-500 placeholder-slate-400'}`}
+                />
+              </div>
+              <div>
+                <label className={`block text-sm font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Gatilhos (separados por vírgula)</label>
+                <input
+                  type="text"
+                  placeholder="Ex: relatório financeiro, formatar gastos"
+                  value={gatilhos}
+                  onChange={(e) => setGatilhos(e.target.value)}
+                  required
+                  className={`w-full p-3 border rounded-none-none focus:ring-1 outline-none transition-colors ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-cyan-500/50 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 focus:ring-blue-500 placeholder-slate-400'}`}
+                />
+              </div>
+              <div>
+                <label className={`block text-sm font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Instrução de Sistema</label>
+                <textarea
+                  placeholder="Descreva a regra exata e o formato que o LLM deve seguir..."
+                  value={instrucao}
+                  onChange={(e) => setInstrucao(e.target.value)}
+                  required
+                  className={`w-full p-3 border rounded-none-none h-32 resize-none focus:ring-1 outline-none transition-colors ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-cyan-500/50 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 focus:ring-blue-500 placeholder-slate-400'}`}
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
                 <button
-                  type="button"
-                  onClick={resetForm}
-                  className={`font-bold py-3 px-6 rounded-none-none transition-colors ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}
+                  type="submit"
+                  disabled={saving}
+                  className={`font-bold py-3 px-6 rounded-none-none transition-colors ${isDark ? 'bg-cyan-600 hover:bg-cyan-500 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
                 >
-                  Cancelar
+                  {saving ? 'Salvando...' : 'Salvar POP'}
                 </button>
-              )}
-            </div>
-          </form>
-        </div>
+              </div>
+            </form>
+          </div>
+        )}
 
         {/* Lista de POPs */}
         <div>
@@ -221,33 +313,125 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialS
             </div>
           ) : (
             <div className="grid gap-4">
-              {pops.map((pop) => (
-                <div key={pop.id} className={`border rounded-none-none p-5 shadow-none hover:shadow-none transition-shadow group ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200'}`}>
-                  <div className="flex justify-between items-start mb-3">
-                    <h4 className={`font-bold text-lg ${isDark ? 'text-white' : 'text-slate-800'}`}>{pop.titulo}</h4>
-                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => handleEdit(pop)} className={`p-1 transition-colors ${isDark ? 'text-cyan-400 hover:text-cyan-300' : 'text-blue-500 hover:text-blue-700'}`}>
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                      </button>
-                      <button onClick={() => handleDelete(pop.id)} className={`p-1 transition-colors ${isDark ? 'text-red-400 hover:text-red-300' : 'text-red-500 hover:text-red-700'}`}>
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                      </button>
-                    </div>
+              {pops.map((pop) => {
+                const isEditingThis = editingId === pop.id;
+                return (
+                  <div key={pop.id} id={`pop-card-${pop.id}`} className={`border rounded-none-none p-5 shadow-none hover:shadow-none transition-shadow group ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200'} ${isEditingThis ? (isDark ? 'ring-1 ring-cyan-500/50' : 'ring-1 ring-blue-500/50') : ''}`}>
+                    {isEditingThis ? (
+                      <form onSubmit={handleSubmit} className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <span className={`text-sm font-bold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Editando POP</span>
+                          <button
+                            type="button"
+                            onClick={() => { setShowAiEditBox(v => !v); setAiError(null); }}
+                            className={`flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-none-none transition-colors ${isDark ? 'bg-purple-900/30 text-purple-300 hover:bg-purple-900/50' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'}`}
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>
+                            Ajustar com IA
+                          </button>
+                        </div>
+
+                        {showAiEditBox && (
+                          <div className={`p-4 rounded-none-none border ${isDark ? 'bg-purple-900/10 border-purple-800/40' : 'bg-purple-50 border-purple-200'}`}>
+                            <label className={`block text-sm font-semibold mb-1 ${isDark ? 'text-purple-300' : 'text-purple-800'}`}>O que você quer mudar neste POP?</label>
+                            <textarea
+                              placeholder="Ex: adicione uma etapa de conferência antes do envio, ou torne o texto mais direto..."
+                              value={aiAdjustText}
+                              onChange={(e) => setAiAdjustText(e.target.value)}
+                              autoFocus
+                              className={`w-full p-3 border rounded-none-none h-20 resize-y focus:ring-1 outline-none transition-colors text-sm ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-purple-500/50 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 focus:ring-purple-500 placeholder-slate-400'}`}
+                            />
+                            {aiError && <p className={`mt-2 text-sm font-medium ${isDark ? 'text-red-400' : 'text-red-600'}`}>{aiError}</p>}
+                            <div className="flex gap-3 pt-3">
+                              <button
+                                type="button"
+                                onClick={handleAdjustWithAI}
+                                disabled={aiLoading || !aiAdjustText.trim()}
+                                className={`font-bold py-2 px-5 rounded-none-none transition-colors disabled:opacity-50 ${isDark ? 'bg-purple-600 hover:bg-purple-500 text-white' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}
+                              >
+                                {aiLoading ? 'Ajustando...' : 'Aplicar ajuste com IA'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        <div>
+                          <label className={`block text-sm font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Título</label>
+                          <input
+                            type="text"
+                            value={titulo}
+                            onChange={(e) => setTitulo(e.target.value)}
+                            required
+                            autoFocus
+                            className={`w-full p-3 border rounded-none-none focus:ring-1 outline-none transition-colors font-bold text-lg ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-cyan-500/50' : 'bg-white border-slate-300 text-slate-900 focus:ring-blue-500'}`}
+                          />
+                        </div>
+                        <div>
+                          <label className={`block text-sm font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Gatilhos (separados por vírgula)</label>
+                          <input
+                            type="text"
+                            value={gatilhos}
+                            onChange={(e) => setGatilhos(e.target.value)}
+                            required
+                            className={`w-full p-3 border rounded-none-none focus:ring-1 outline-none transition-colors ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-cyan-500/50' : 'bg-white border-slate-300 text-slate-900 focus:ring-blue-500'}`}
+                          />
+                        </div>
+                        <div>
+                          <label className={`block text-sm font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Instrução de Sistema</label>
+                          <textarea
+                            value={instrucao}
+                            onChange={(e) => setInstrucao(e.target.value)}
+                            required
+                            className={`w-full p-3 border rounded-none-none h-64 resize-y focus:ring-1 outline-none transition-colors font-mono text-sm ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-cyan-500/50' : 'bg-white border-slate-300 text-slate-900 focus:ring-blue-500'}`}
+                          />
+                        </div>
+                        <div className="flex gap-3 pt-1">
+                          <button
+                            type="submit"
+                            disabled={saving}
+                            className={`font-bold py-2 px-5 rounded-none-none transition-colors ${isDark ? 'bg-cyan-600 hover:bg-cyan-500 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
+                          >
+                            {saving ? 'Salvando...' : 'Atualizar POP'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={resetForm}
+                            className={`font-bold py-2 px-5 rounded-none-none transition-colors ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <>
+                        <div className="flex justify-between items-start mb-3">
+                          <h4 className={`font-bold text-lg ${isDark ? 'text-white' : 'text-slate-800'}`}>{pop.titulo}</h4>
+                          <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => handleEdit(pop)} className={`p-1 transition-colors ${isDark ? 'text-cyan-400 hover:text-cyan-300' : 'text-blue-500 hover:text-blue-700'}`}>
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                            </button>
+                            <button onClick={() => handleDelete(pop.id)} className={`p-1 transition-colors ${isDark ? 'text-red-400 hover:text-red-300' : 'text-red-500 hover:text-red-700'}`}>
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                            </button>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2 mb-3">
+                          {pop.gatilhos.map((g, i) => (
+                            <span key={i} className={`text-xs font-bold px-2 py-1 rounded-none-none ${isDark ? 'bg-cyan-900/30 text-cyan-400' : 'bg-blue-50 text-blue-700'}`}>
+                              {g}
+                            </span>
+                          ))}
+                        </div>
+                        <div className={`p-3 rounded-none-none border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-slate-50 border-slate-200'}`}>
+                          <p className={`text-sm font-mono whitespace-pre-wrap line-clamp-3 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                            {pop.instrucao_sistema}
+                          </p>
+                        </div>
+                      </>
+                    )}
                   </div>
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    {pop.gatilhos.map((g, i) => (
-                      <span key={i} className={`text-xs font-bold px-2 py-1 rounded-none-none ${isDark ? 'bg-cyan-900/30 text-cyan-400' : 'bg-blue-50 text-blue-700'}`}>
-                        {g}
-                      </span>
-                    ))}
-                  </div>
-                  <div className={`p-3 rounded-none-none border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-slate-50 border-slate-200'}`}>
-                    <p className={`text-sm font-mono whitespace-pre-wrap line-clamp-3 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                      {pop.instrucao_sistema}
-                    </p>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
