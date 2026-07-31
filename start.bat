@@ -1,6 +1,10 @@
 @echo off
-REM Hermes - Inicializador Completo
+REM Hermes - Inicializador Completo (uso manual, com janelas visiveis)
 REM Inicia o frontend e a sincronização automaticamente
+REM
+REM Para inicializacao AUTOMATICA e SILENCIOSA (sem janelas), o Windows usa
+REM start_hermes_hidden.vbs via atalho na pasta Startup - nao apague esse
+REM arquivo achando que e "codigo morto" so porque nada no repo o referencia.
 
 echo ========================================
 echo   HERMES - SISTEMA DE GESTAO
