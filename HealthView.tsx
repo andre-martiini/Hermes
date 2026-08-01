@@ -396,7 +396,7 @@ const WalkDailyChart = ({
 
 const HealthView: React.FC<HealthViewProps> = ({
     weights, settings, onUpdateSettings, onAddWeight, onDeleteWeight,
-    exerciseLogs, onSaveExerciseLog, exams,
+    exerciseLogs, onSaveExerciseLog, exams, onAddExam, onDeleteExam,
     telegramReminders, onSaveTelegramReminder, onDeleteTelegramReminder,
     isDark = false
 }) => {
@@ -407,6 +407,12 @@ const HealthView: React.FC<HealthViewProps> = ({
     const [walkMinutesInput, setWalkMinutesInput] = useState<string>('');
     const [walkStepsInput, setWalkStepsInput] = useState<string>('');
     const [walkCaloriesInput, setWalkCaloriesInput] = useState<string>('');
+    const [examTitulo, setExamTitulo] = useState<string>('');
+    const [examTipo, setExamTipo] = useState<'exame' | 'consulta'>('exame');
+    const [examData, setExamData] = useState<string>(formatDateLocalISO(new Date()));
+    const [examDoutorLocal, setExamDoutorLocal] = useState<string>('');
+    const [examResultados, setExamResultados] = useState<string>('');
+    const [examFiles, setExamFiles] = useState<File[]>([]);
 
     const sortedWeights = useMemo(() => [...weights].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [weights]);
     const currentWeight = sortedWeights[0]?.weight || 0;
@@ -501,6 +507,32 @@ const HealthView: React.FC<HealthViewProps> = ({
             onAddWeight(value, selectedDate);
             setWeightInput('');
         }
+    };
+
+    const sortedExams = useMemo(
+        () => [...exams].sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime()),
+        [exams]
+    );
+
+    const handleAddExam = () => {
+        const titulo = examTitulo.trim();
+        if (!titulo || !examData) return;
+        onAddExam(
+            {
+                titulo,
+                tipo: examTipo,
+                data: examData,
+                doutor_local: examDoutorLocal.trim() || undefined,
+                resultados: examResultados.trim() || undefined,
+            },
+            examFiles
+        );
+        setExamTitulo('');
+        setExamTipo('exame');
+        setExamData(formatDateLocalISO(new Date()));
+        setExamDoutorLocal('');
+        setExamResultados('');
+        setExamFiles([]);
     };
 
     const activeReminders = useMemo(() => {
@@ -880,16 +912,105 @@ const HealthView: React.FC<HealthViewProps> = ({
                     </div>
                 ) : (
                     <HealthSection title="Arquivo medico" eyebrow="Exames e consultas">
-                        {exams.length > 0 ? (
-                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                                {exams.map(exam => (
+                        <div className="rounded-2xl border border-border-subtle bg-background p-5">
+                            <p className={`${labelClasses} mb-3`}>Novo registro</p>
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                <label className="block">
+                                    <span className={labelClasses}>Titulo</span>
+                                    <input
+                                        type="text"
+                                        value={examTitulo}
+                                        onChange={e => setExamTitulo(e.target.value)}
+                                        placeholder="Ex: Hemograma completo"
+                                        className={inputClasses}
+                                    />
+                                </label>
+                                <label className="block">
+                                    <span className={labelClasses}>Tipo</span>
+                                    <select
+                                        value={examTipo}
+                                        onChange={e => setExamTipo(e.target.value as 'exame' | 'consulta')}
+                                        className={inputClasses}
+                                    >
+                                        <option value="exame">Exame</option>
+                                        <option value="consulta">Consulta</option>
+                                    </select>
+                                </label>
+                                <label className="block">
+                                    <span className={labelClasses}>Data</span>
+                                    <input
+                                        type="date"
+                                        value={examData}
+                                        onChange={e => setExamData(e.target.value)}
+                                        className={inputClasses}
+                                    />
+                                </label>
+                                <label className="block">
+                                    <span className={labelClasses}>Doutor(a) / Local</span>
+                                    <input
+                                        type="text"
+                                        value={examDoutorLocal}
+                                        onChange={e => setExamDoutorLocal(e.target.value)}
+                                        placeholder="Opcional"
+                                        className={inputClasses}
+                                    />
+                                </label>
+                                <label className="block sm:col-span-2">
+                                    <span className={labelClasses}>Resultados / notas</span>
+                                    <textarea
+                                        value={examResultados}
+                                        onChange={e => setExamResultados(e.target.value)}
+                                        placeholder="Opcional"
+                                        className={`${inputClasses} min-h-[72px]`}
+                                    />
+                                </label>
+                                <label className="block sm:col-span-2">
+                                    <span className={labelClasses}>Anexar arquivos</span>
+                                    <input
+                                        type="file"
+                                        multiple
+                                        onChange={e => setExamFiles(e.target.files ? Array.from(e.target.files) : [])}
+                                        className={`${inputClasses} file:mr-3 file:rounded-lg file:border-0 file:bg-primary-container file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white`}
+                                    />
+                                    {examFiles.length > 0 && (
+                                        <p className="mt-1 text-xs font-medium text-on-surface-variant">{examFiles.length} arquivo(s) selecionado(s)</p>
+                                    )}
+                                </label>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={handleAddExam}
+                                disabled={!examTitulo.trim() || !examData}
+                                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary-container px-4 py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+                            >
+                                <Icon name="plus" className="h-4 w-4" />
+                                Adicionar registro
+                            </button>
+                        </div>
+
+                        {sortedExams.length > 0 ? (
+                            <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                                {sortedExams.map(exam => (
                                     <article key={exam.id} className="rounded-2xl border border-border-subtle bg-background p-5">
                                         <div className="flex items-start justify-between gap-3">
                                             <span className="rounded-full bg-surface-container-low px-2.5 py-1 text-[10px] font-semibold uppercase text-on-surface-variant">{exam.tipo}</span>
-                                            <span className="text-xs font-semibold text-on-surface-variant">{formatDate(exam.data)}</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs font-semibold text-on-surface-variant">{formatDate(exam.data)}</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onDeleteExam(exam.id)}
+                                                    className="rounded-lg p-1.5 text-on-surface-variant transition hover:bg-error-container hover:text-on-error-container"
+                                                    aria-label="Remover registro"
+                                                >
+                                                    <Icon name="trash" className="h-4 w-4" />
+                                                </button>
+                                            </div>
                                         </div>
                                         <h4 className="mt-4 text-base font-bold text-on-surface">{exam.titulo}</h4>
                                         <p className="mt-1 text-sm text-on-surface-variant">{exam.doutor_local || 'Local nao informado'}</p>
+                                        {exam.resultados && (
+                                            <p className="mt-2 text-sm text-on-surface-variant">{exam.resultados}</p>
+                                        )}
                                         {exam.pool_dados && exam.pool_dados.length > 0 && (
                                             <div className="mt-4 flex flex-wrap gap-2">
                                                 {exam.pool_dados.map(file => (
@@ -904,7 +1025,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                 ))}
                             </div>
                         ) : (
-                            <div className="rounded-2xl border border-dashed border-border-standard bg-background p-8 text-center">
+                            <div className="mt-5 rounded-2xl border border-dashed border-border-standard bg-background p-8 text-center">
                                 <Icon name="heart" className="mx-auto h-8 w-8 text-on-surface-variant" />
                                 <p className="mt-3 text-sm font-semibold text-on-surface">Nenhum exame registrado</p>
                                 <p className="mt-1 text-sm text-on-surface-variant">Quando houver consultas ou anexos, eles aparecem aqui.</p>
