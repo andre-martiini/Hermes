@@ -136,6 +136,7 @@ Exames e consultas médicas: `titulo`, `doutor_local`, `resultados`, `data`, `ti
 | `whatsapp_messages` | Mensagens capturadas pelo microsserviço WhatsApp — ver [Integração WhatsApp](/docs/okf/integracoes/whatsapp.md) | microsserviço `services/whatsapp-capture` |
 | `system/api_keys`, `system/settings`, `system/config`, `system/sync`, `system/google_credentials`, `system/file_search`, `system/cost_controls` | Documentos de configuração e estado global, na coleção `system` | admin/setup scripts; `on_sync_request`; `start_file_indexing` |
 | `system_usage/gemini/daily/{data}` | Telemetria diária de uso/custo da API Gemini | `log_gemini_usage` (`gemini_cost_controls.py`) |
+| `system_usage/ai_planner_notifications/daily/{data}` | Contador atômico (`count`) do teto diário de `scheduled_notifications` propostas pelo planejador de IA — lido e incrementado dentro da mesma transação Firestore que cria a notificação, para não estourar o teto sob tool calls concorrentes (`ThreadPoolExecutor`) ou execuções sobrepostas do scheduler | `_reserve_and_create_notification` (`ai_notification_planner.py`) |
 | `idempotency` | Deduplicação de requisições (TTL via `expires_at`) | `core/idempotency.py` |
 | `telegram_sessions` | Sessões ativas de Telegram (TTL via `expires_at`) | `core/session.py` |
 | `whitelist` | Chat IDs de Telegram autorizados | admin (`hermes_core_logic.py`) |

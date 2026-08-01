@@ -73,22 +73,57 @@ AI_PLANNER_PERSONA = (
 )
 
 
-def _build_tools(db, now_sp: "datetime.datetime", today_str: str, existing_count: int):
+def _ai_planner_counter_ref(db, today_str: str):
+    return (
+        db.collection("system_usage")
+        .document("ai_planner_notifications")
+        .collection("daily")
+        .document(today_str)
+    )
+
+
+def _reserve_and_create_notification(db, today_str: str, doc_ref, doc_payload: dict) -> bool:
+    """
+    Reserva atomicamente uma vaga no teto diario e cria o documento da notificacao na
+    MESMA transacao Firestore. Necessario porque claude_provider.run_tool_loop executa as
+    tool calls de uma mesma rodada em paralelo (ThreadPoolExecutor) — um contador em
+    memória (nonlocal) permitiria duas threads lerem a mesma contagem antes de qualquer
+    uma incrementar, estourando o teto. A transacao do Firestore serializa essa leitura+
+    escrita mesmo entre threads e entre execucoes sobrepostas do scheduler, porque todas
+    disputam o mesmo documento contador (chave = data de hoje).
+    """
+    counter_ref = _ai_planner_counter_ref(db, today_str)
+
+    @firestore.transactional
+    def _txn(transaction):
+        snap = counter_ref.get(transaction=transaction)
+        current = (snap.to_dict() or {}).get("count", 0) if snap.exists else 0
+        if current >= AI_PLANNER_MAX_DAILY_NOTIFICATIONS:
+            return False
+        transaction.set(counter_ref, {"count": current + 1, "updated_at": firestore.SERVER_TIMESTAMP}, merge=True)
+        transaction.set(doc_ref, doc_payload)
+        return True
+
+    try:
+        return _txn(db.transaction())
+    except Exception as exc:
+        print(f"[AIPlanner] Falha ao reservar vaga de notificacao: {exc}")
+        return False
+
+
+def _build_tools(db, now_sp: "datetime.datetime", today_str: str):
     """Registro de ferramentas do planejador: 3 de leitura + 1 de escrita (propor_notificacao)."""
-    proposed_count = existing_count
 
     def consultar_tarefas_ativas(area_tematica: str = "") -> dict:
-        query = db.collection("tarefas")
+        # Filtra por status ("em andamento"/"stand-by") diretamente no Firestore, antes do
+        # limit — se o filtro fosse aplicado só em memória depois de um limit(N), tarefas
+        # concluidas poderiam ocupar as N vagas e esconder tarefas ativas reais do LLM.
+        query = db.collection("tarefas").where("status", "in", ["em andamento", "stand-by"])
         if area_tematica:
             query = query.where("area_tematica", "==", area_tematica)
         tarefas = []
-        for d in query.limit(300).stream():
+        for d in query.limit(150).stream():
             data = d.to_dict() or {}
-            status = data.get("status")
-            if status not in ("em andamento", "stand-by"):
-                continue
-            if area_tematica and data.get("area_tematica") != area_tematica:
-                continue
             plano = data.get("plano_acao") or []
             pendentes = [
                 str(item.get("text") or "").strip()
@@ -98,7 +133,7 @@ def _build_tools(db, now_sp: "datetime.datetime", today_str: str, existing_count
             tarefas.append({
                 "id": d.id,
                 "titulo": data.get("titulo"),
-                "status": status,
+                "status": data.get("status"),
                 "area_tematica": data.get("area_tematica"),
                 "projeto": data.get("projeto"),
                 "data_limite": data.get("data_limite"),
@@ -108,8 +143,6 @@ def _build_tools(db, now_sp: "datetime.datetime", today_str: str, existing_count
                 "proximos_passos_pendentes": pendentes,
                 "estrategia_objetivo_id": data.get("estrategia_objetivo_id"),
             })
-            if len(tarefas) >= 150:
-                break
         return {"tarefas": tarefas}
 
     def consultar_metas_estrategicas() -> dict:
@@ -152,7 +185,6 @@ def _build_tools(db, now_sp: "datetime.datetime", today_str: str, existing_count
         return {"notificacoes_recentes": recentes}
 
     def propor_notificacao(titulo: str, mensagem: str, horario: str, categoria: str = "geral", motivo: str = "") -> dict:
-        nonlocal proposed_count
         titulo = str(titulo or "").strip()
         mensagem = str(mensagem or "").strip()
         horario = str(horario or "").strip()
@@ -166,8 +198,6 @@ def _build_tools(db, now_sp: "datetime.datetime", today_str: str, existing_count
             return {"erro": "horario deve estar no formato HH:MM (24h)."}
         if horario < AI_PLANNER_WINDOW_START or horario > AI_PLANNER_WINDOW_END:
             return {"erro": f"horario fora da janela permitida ({AI_PLANNER_WINDOW_START}-{AI_PLANNER_WINDOW_END})."}
-        if proposed_count >= AI_PLANNER_MAX_DAILY_NOTIFICATIONS:
-            return {"erro": f"Limite diario de {AI_PLANNER_MAX_DAILY_NOTIFICATIONS} notificacoes ja atingido."}
 
         hh, mm = horario.split(":")
         send_dt = now_sp.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
@@ -175,7 +205,7 @@ def _build_tools(db, now_sp: "datetime.datetime", today_str: str, existing_count
             return {"erro": "horario ja passou ou esta a menos de 1 minuto de distancia — escolha um horario mais tarde hoje."}
 
         doc_ref = db.collection("scheduled_notifications").document()
-        doc_ref.set({
+        reserved = _reserve_and_create_notification(db, today_str, doc_ref, {
             "title": titulo[:120],
             "message": mensagem[:600],
             "category": categoria,
@@ -187,7 +217,8 @@ def _build_tools(db, now_sp: "datetime.datetime", today_str: str, existing_count
             "planner_run_date": today_str,
             "feedback": None,
         })
-        proposed_count += 1
+        if not reserved:
+            return {"erro": f"Limite diario de {AI_PLANNER_MAX_DAILY_NOTIFICATIONS} notificacoes ja atingido."}
         return {"ok": True, "id": doc_ref.id, "agendado_para": horario}
 
     function_map = {
@@ -301,22 +332,21 @@ def ai_notification_planner_daily(event: scheduler_fn.ScheduledEvent):
     now_sp = datetime.datetime.now(sp_tz)
     today_str = now_sp.strftime("%Y-%m-%d")
 
+    # Leitura só para decidir se vale a pena chamar a Claude (economia de custo) — não é o
+    # mecanismo de enforcement do teto, que é feito atomicamente dentro de propor_notificacao
+    # via _reserve_and_create_notification (transação Firestore).
     existing_today = 0
     try:
-        existing_today = sum(
-            1 for _ in db.collection("scheduled_notifications")
-            .where("planner_run_date", "==", today_str)
-            .where("source", "==", "ai_planner")
-            .stream()
-        )
+        counter_snap = _ai_planner_counter_ref(db, today_str).get()
+        existing_today = (counter_snap.to_dict() or {}).get("count", 0) if counter_snap.exists else 0
     except Exception as exc:
-        print(f"[AIPlanner] Falha ao contar notificações já propostas hoje: {exc}")
+        print(f"[AIPlanner] Falha ao ler contador de notificações de hoje: {exc}")
 
     if existing_today >= AI_PLANNER_MAX_DAILY_NOTIFICATIONS:
         print(f"[AIPlanner] Teto diário ({AI_PLANNER_MAX_DAILY_NOTIFICATIONS}) já atingido hoje; não há necessidade de rodar.")
         return
 
-    tools, function_map = _build_tools(db, now_sp, today_str, existing_today)
+    tools, function_map = _build_tools(db, now_sp, today_str)
     client = anthropic.Anthropic(api_key=claude_key)
     user_message = (
         f"Hoje é {today_str}. Analise o estado atual do sistema e proponha, via a ferramenta "

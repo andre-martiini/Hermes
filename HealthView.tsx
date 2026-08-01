@@ -19,7 +19,7 @@ interface HealthViewProps {
     onSaveTelegramReminder: (reminder: HealthTelegramReminder) => Promise<void>;
     onDeleteTelegramReminder: (id: string) => Promise<void>;
     exams: HealthExam[];
-    onAddExam: (exam: Omit<HealthExam, 'id' | 'data_criacao' | 'pool_dados'>, files: File[]) => void;
+    onAddExam: (exam: Omit<HealthExam, 'id' | 'data_criacao' | 'pool_dados'>, files: File[]) => Promise<void>;
     onDeleteExam: (id: string) => void;
     onUpdateExam: (id: string, updates: Partial<HealthExam>) => void;
     isDark?: boolean;
@@ -413,6 +413,7 @@ const HealthView: React.FC<HealthViewProps> = ({
     const [examDoutorLocal, setExamDoutorLocal] = useState<string>('');
     const [examResultados, setExamResultados] = useState<string>('');
     const [examFiles, setExamFiles] = useState<File[]>([]);
+    const [isSavingExam, setIsSavingExam] = useState<boolean>(false);
 
     const sortedWeights = useMemo(() => [...weights].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [weights]);
     const currentWeight = sortedWeights[0]?.weight || 0;
@@ -514,25 +515,34 @@ const HealthView: React.FC<HealthViewProps> = ({
         [exams]
     );
 
-    const handleAddExam = () => {
+    const handleAddExam = async () => {
         const titulo = examTitulo.trim();
-        if (!titulo || !examData) return;
-        onAddExam(
-            {
-                titulo,
-                tipo: examTipo,
-                data: examData,
-                doutor_local: examDoutorLocal.trim() || undefined,
-                resultados: examResultados.trim() || undefined,
-            },
-            examFiles
-        );
-        setExamTitulo('');
-        setExamTipo('exame');
-        setExamData(formatDateLocalISO(new Date()));
-        setExamDoutorLocal('');
-        setExamResultados('');
-        setExamFiles([]);
+        if (!titulo || !examData || isSavingExam) return;
+        setIsSavingExam(true);
+        try {
+            await onAddExam(
+                {
+                    titulo,
+                    tipo: examTipo,
+                    data: examData,
+                    doutor_local: examDoutorLocal.trim() || undefined,
+                    resultados: examResultados.trim() || undefined,
+                },
+                examFiles
+            );
+            // Só limpa o formulário depois que o registro foi persistido — em caso de falha
+            // no upload/gravação, o usuário mantém o que digitou e pode tentar de novo.
+            setExamTitulo('');
+            setExamTipo('exame');
+            setExamData(formatDateLocalISO(new Date()));
+            setExamDoutorLocal('');
+            setExamResultados('');
+            setExamFiles([]);
+        } catch (err) {
+            console.error('Falha ao adicionar registro de saude:', err);
+        } finally {
+            setIsSavingExam(false);
+        }
     };
 
     const activeReminders = useMemo(() => {
@@ -980,11 +990,11 @@ const HealthView: React.FC<HealthViewProps> = ({
                             <button
                                 type="button"
                                 onClick={handleAddExam}
-                                disabled={!examTitulo.trim() || !examData}
+                                disabled={!examTitulo.trim() || !examData || isSavingExam}
                                 className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary-container px-4 py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
                             >
                                 <Icon name="plus" className="h-4 w-4" />
-                                Adicionar registro
+                                {isSavingExam ? 'Salvando...' : 'Adicionar registro'}
                             </button>
                         </div>
 
