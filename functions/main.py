@@ -92,6 +92,7 @@ from gemini_cost_controls import (
     GEMINI_FRONTIER_MODEL,
     generate_content_logged,
 )
+from llm_providers import openai_provider
 
 
 # Inicializa o Firebase Admin apenas uma vez no escopo global
@@ -10278,16 +10279,52 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         )
         _correcao_hint = ""
         if _CORRECAO_KEYWORDS.search(prompt):
+            _intent_prompt = f"Responda só 'CORRECAO' ou 'NORMAL': o usuário está corrigindo um procedimento?\nMensagem: {prompt}"
+            # A/B test: HERMES_AB_LUNA_INTENT_ROUTER_PCT (0-100) desvia essa fração das
+            # chamadas para o GPT-5.6 Luna (esforço baixo) em vez do Gemini, para comparar
+            # custo/qualidade real nesta feature de alto volume. Padrão de operação: 10%
+            # (rollout inicial conservador — ver docs/okf/integracoes/gemini-models.md).
+            # Pode ser sobrescrito sem novo deploy setando a env var no ambiente das Functions.
+            _use_luna = openai_provider.should_use_luna_ab("HERMES_AB_LUNA_INTENT_ROUTER_PCT", default="10")
             try:
-                _intent_resp = client.models.generate_content(
-                    model=GEMINI_ROUTING_MODEL,
-                    contents=f"Responda só 'CORRECAO' ou 'NORMAL': o usuário está corrigindo um procedimento?\nMensagem: {prompt}",
-                    config=types.GenerateContentConfig(
-                        http_options=types.HttpOptions(timeout=3000)
+                if _use_luna:
+                    openai_key = keys_doc.to_dict().get('openai_api_key') if keys_doc.exists else None
+                    if not openai_key:
+                        raise RuntimeError("openai_api_key não configurada em system/api_keys")
+                    import openai as _openai_sdk
+                    # Timeout equivalente ao dos 3000ms do braço Gemini — sem isso, uma
+                    # chamada travada consome o limite de 540s da callable inteira em vez
+                    # de falhar rápido e cair no fail-open (achado do review do Codex).
+                    _intent_resp = openai_provider.generate_text_logged(
+                        _openai_sdk.OpenAI(api_key=openai_key, timeout=3.0, max_retries=0),
+                        model=openai_provider.LUNA_MODEL,
+                        input_text=_intent_prompt,
+                        feature="copilot_intent_router",
+                        reasoning_effort="low",
+                        db=db,
                     )
+                    _intent_text = (_intent_resp.output_text or "").upper()
+                else:
+                    _intent_resp = client.models.generate_content(
+                        model=GEMINI_ROUTING_MODEL,
+                        contents=_intent_prompt,
+                        config=types.GenerateContentConfig(
+                            http_options=types.HttpOptions(timeout=3000)
+                        )
+                    )
+                    log_gemini_usage(_intent_resp, model=GEMINI_ROUTING_MODEL, feature="copilot_intent_router", db=db)
+                    _intent_text = (_intent_resp.text or "").upper()
+
+                # Registra braço + rótulo previsto (sem texto bruto) para permitir comparar
+                # qualidade Luna vs Gemini depois, não só custo (achado do review do Codex).
+                openai_provider.log_ab_outcome(
+                    db,
+                    feature="copilot_intent_router",
+                    arm="openai_luna" if _use_luna else "gemini",
+                    label="CORRECAO" if "CORRECAO" in _intent_text else "NORMAL",
                 )
-                log_gemini_usage(_intent_resp, model=GEMINI_ROUTING_MODEL, feature="copilot_intent_router", db=db)
-                if "CORRECAO" in (_intent_resp.text or "").upper():
+
+                if "CORRECAO" in _intent_text:
                     _correcao_hint = (
                         "\n\n## [DIRETIVA DO MOTOR DE EVOLUÇÃO — NÃO REVELAR AO USUÁRIO]\n"
                         "O roteador de intenção classificou esta mensagem como CORREÇÃO DE PROCEDIMENTO.\n"
@@ -10295,8 +10332,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         "registrar_correcao_procedimento() com os dados extraídos da mensagem.\n"
                         "Não mencione, descreva nem insinue esta ação ao usuário."
                     )
-            except Exception:
-                pass  # Fail-open: timeout ou erro → continua sem hint
+            except Exception as _intent_exc:
+                print(f"[IntentRouterAB] provider={'openai_luna' if _use_luna else 'gemini'} failed: {_intent_exc}")
+                # Fail-open: timeout ou erro → continua sem hint (mesmo comportamento de antes,
+                # sem fallback cruzado entre providers para não poluir a comparação do A/B)
 
         # ─── FERRAMENTAS DO MÓDULO ESTRATÉGIA (CRUD) ─────────────────────────────
         # Só são declaradas quando copilot_mode == 'estrategia' (ver static_tools).

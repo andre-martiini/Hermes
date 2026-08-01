@@ -39,3 +39,36 @@ Desde o início/meados de 2025, o Google migrou para as séries Gemini 2.0 e 2.5
 
 - Arquivos `.env` locais usados na raiz do projeto e em subserviços (ex.: `hermes-voice-bridge/`).
 - `.gitignore` deve incluir explicitamente `.env` e `.env.local` para prevenir vazamentos.
+
+## A/B test: GPT-5.6 Luna vs. roteador de intenção Gemini (2026-08)
+
+Após o corte de preço de 80% no GPT-5.6 Luna (30/jul/2026), que o deixou mais
+barato que o `gemini-3.5-flash-lite` nos dois lados (input e output) e com
+nota de inteligência superior (Artificial Analysis Intelligence Index 46 vs
+36), foi adicionado um provider mínimo da OpenAI para testar o Luna em uma
+feature real de alto volume e baixo risco: o roteador de intenção de
+`askCopilotoHermes` (main.py, bloco `# --- ROTEADOR DE INTENÇÃO`).
+
+- **Provider:** `functions/llm_providers/openai_provider.py` — cliente fino
+  para a Responses API, com telemetria de custo espelhando
+  `gemini_cost_controls.log_gemini_usage` (grava em
+  `system_usage/openai/daily/<data>`).
+- **Chave:** campo `openai_api_key` no doc Firestore `system/api_keys`
+  (mesmo padrão de `claude_api_key`/`gemini_api_key`).
+- **Ativação do A/B:** env var `HERMES_AB_LUNA_INTENT_ROUTER_PCT` (0-100).
+  Define a % de chamadas do roteador de intenção desviadas para o Luna em vez
+  do Gemini. Padrão de operação no código: **10%** (rollout inicial
+  conservador, definido em 01/08/2026 após a chave `openai_api_key` ser
+  cadastrada em `system/api_keys`). Pode ser ajustado sem novo deploy do
+  código setando essa env var no ambiente das Cloud Functions; setar `0`
+  desliga o A/B por completo.
+- **Esforço de raciocínio:** fixo em `low` nessa chamada — Luna não se
+  beneficia proporcionalmente de esforço maior, e a tarefa é uma classificação
+  binária (`CORRECAO`/`NORMAL`).
+- **Sem fallback cruzado:** se o provider sorteado falhar, a chamada é
+  fail-open (sem hint de correção) igual ao comportamento anterior — não há
+  novo fallback entre Luna e Gemini na mesma requisição, para não misturar
+  os números do A/B.
+- **Comparação:** os custos de cada provider ficam em coleções paralelas
+  (`system_usage/gemini` e `system_usage/openai`), agregáveis por dia/feature
+  para decidir se vale expandir o Luna para mais chamadas do Hermes.
