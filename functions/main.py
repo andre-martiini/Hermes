@@ -567,7 +567,7 @@ def archive_gmail_message(service, msg_id, sync_ref=None, logs=None, reason="fin
             userId='me',
             id=msg_id,
             body={'removeLabelIds': ['INBOX']}
-        ).execute()
+        ).execute(num_retries=3)
         if sync_ref is not None and logs is not None:
             log_to_firestore(sync_ref, logs, f"[GMAIL] E-mail financeiro arquivado ({reason}): {msg_id}")
         return True
@@ -2006,7 +2006,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
     query = 'has:attachment filename:pdf (subject:(boleto OR fatura OR bill OR pagamento OR "o seu boleto" OR "sua fatura" OR "vencimento") OR "boleto" OR "fatura")'
     
     try:
-        results = service.users().messages().list(userId='me', q=query, maxResults=15).execute()
+        results = service.users().messages().list(userId='me', q=query, maxResults=15).execute(num_retries=3)
         messages = results.get('messages', [])
         
         if not messages:
@@ -2067,7 +2067,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 continue
             if msg_id in processed_ids: continue
             
-            msg = service.users().messages().get(userId='me', id=msg_id).execute()
+            msg = service.users().messages().get(userId='me', id=msg_id).execute(num_retries=3)
             snippet = msg.get('snippet', '')
             sender, subject = _gmail_message_headers(msg)
 
@@ -2078,7 +2078,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 if part.get('parts'):
                     for sub in part['parts']: find_pdf(sub)
                 if part.get('filename', '').lower().endswith('.pdf') and part.get('body', {}).get('attachmentId'):
-                    att = service.users().messages().attachments().get(userId='me', messageId=msg_id, id=part['body']['attachmentId']).execute()
+                    att = service.users().messages().attachments().get(userId='me', messageId=msg_id, id=part['body']['attachmentId']).execute(num_retries=3)
                     pdf_data = base64.urlsafe_b64decode(att['data'])
                     return
             

@@ -4473,7 +4473,27 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
     # --- Handle callback_query (botões inline — travamento/destravamento de contexto) ---
     callback_query = update.get("callback_query")
     if callback_query:
-        return _handle_telegram_callback(db, token, callback_query)
+        try:
+            return _handle_telegram_callback(db, token, callback_query)
+        except Exception as exc:
+            # Sem este guarda, qualquer falha (ex.: erro transitório do Firestore) no
+            # bootstrap da sessão derruba a requisição inteira antes de responder ao
+            # Telegram, deixando o botão girando e nada é registrado (ex.: check-in de dor).
+            print(f"[telegramWebhook] Falha ao processar callback_query: {exc}")
+            import traceback
+            traceback.print_exc()
+            query_id = callback_query.get("id", "")
+            chat_id = str(((callback_query.get("message") or {}).get("chat") or {}).get("id", ""))
+            try:
+                _answer_callback_query(token, query_id, "Não consegui registrar. Tente novamente.")
+            except Exception:
+                pass
+            try:
+                if chat_id:
+                    _send_telegram_message(token, chat_id, f"⚠️ Erro interno ao processar essa ação: {exc}")
+            except Exception:
+                pass
+            return https_fn.Response("OK", status=200)
 
     # --- Extrair mensagem ---
     message = update.get("message") or update.get("edited_message") or {}
