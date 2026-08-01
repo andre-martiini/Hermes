@@ -1699,15 +1699,23 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         _answer_callback_query(token, query_id)
         return https_fn.Response("OK", status=200)
 
-    session = _get_session(db, chat_id)
-    copilot_session_id = _ensure_copilot_session(
-        db,
-        chat_id,
-        session,
-        first_text=f"[Botão Telegram] {data}",
-        from_user=callback_query.get("from") or {},
-    )
-    _save_session(db, chat_id, session)
+    try:
+        session = _get_session(db, chat_id)
+        copilot_session_id = _ensure_copilot_session(
+            db,
+            chat_id,
+            session,
+            first_text=f"[Botão Telegram] {data}",
+            from_user=callback_query.get("from") or {},
+        )
+        _save_session(db, chat_id, session)
+    except Exception as exc:
+        # Nada foi executado ainda neste ponto (nenhuma ação do botão rodou), então é seguro
+        # afirmar que não foi registrado e pedir para tentar de novo.
+        print(f"[TelegramCallback] Falha ao inicializar sessão para callback '{data}': {exc}")
+        _answer_callback_query(token, query_id, "Não consegui registrar. Tente novamente.")
+        _send_telegram_message(token, chat_id, "⚠️ Erro interno ao iniciar essa ação. Tente novamente.")
+        return https_fn.Response("OK", status=200)
 
     def _persist_callback_turn(user_label: str, assistant_text: str):
         _persist_copilot_message(db, copilot_session_id, "user", user_label, source="telegram_callback")
@@ -4473,7 +4481,33 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
     # --- Handle callback_query (botões inline — travamento/destravamento de contexto) ---
     callback_query = update.get("callback_query")
     if callback_query:
-        return _handle_telegram_callback(db, token, callback_query)
+        try:
+            return _handle_telegram_callback(db, token, callback_query)
+        except Exception as exc:
+            # Rede de segurança para falhas inesperadas que escapem de _handle_telegram_callback
+            # (ela já trata o bootstrap da sessão à parte, com uma mensagem afirmando que nada
+            # foi registrado). Aqui a ação do botão pode já ter sido aplicada antes da exceção
+            # (ex.: exit_context salva a sessão antes de enviar a mensagem final), então evitamos
+            # afirmar que "nada foi registrado" para não incentivar o usuário a repetir uma ação
+            # que já ocorreu (ex.: confirmar um lançamento financeiro duas vezes).
+            print(f"[telegramWebhook] Falha ao processar callback_query: {exc}")
+            import traceback
+            traceback.print_exc()
+            query_id = callback_query.get("id", "")
+            chat_id = str(((callback_query.get("message") or {}).get("chat") or {}).get("id", ""))
+            try:
+                _answer_callback_query(token, query_id, "Ocorreu um erro. Confira o resultado antes de repetir.")
+            except Exception:
+                pass
+            try:
+                if chat_id:
+                    _send_telegram_message(
+                        token, chat_id,
+                        f"⚠️ Ocorreu um erro ao concluir essa ação: {exc}\nVerifique se ela já foi aplicada antes de tentar de novo."
+                    )
+            except Exception:
+                pass
+            return https_fn.Response("OK", status=200)
 
     # --- Extrair mensagem ---
     message = update.get("message") or update.get("edited_message") or {}
