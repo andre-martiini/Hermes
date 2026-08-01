@@ -127,6 +127,48 @@ def log_openai_usage(
     return payload
 
 
+def log_ab_outcome(db: Any, *, feature: str, arm: str, label: str) -> None:
+    """Registra, de forma agregada e sem texto bruto da mensagem, qual braço
+    (gemini/openai_luna) rodou e qual rótulo ele previu. Sem isso, o A/B só
+    compara custo — a telemetria de generate_content_logged/generate_text_logged
+    não guarda o braço nem a predição, então a comparação de qualidade fica
+    impossível de reconstruir depois. Nunca falha o chamador."""
+    if db is None or os.environ.get("HERMES_AB_OUTCOME_FIRESTORE", "1") == "0":
+        return
+    try:
+        from firebase_admin import firestore
+
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        doc = (
+            db.collection("system_usage")
+            .document("ab_tests")
+            .collection("daily")
+            .document(day)
+        )
+        experiment_key = _safe_key(feature)
+        arm_key = _safe_key(arm)
+        label_key = _safe_key(label or "unknown")
+        doc.set(
+            {
+                "date": day,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+                "experiments": {
+                    experiment_key: {
+                        "arms": {
+                            arm_key: {
+                                "calls": firestore.Increment(1),
+                                "labels": {label_key: firestore.Increment(1)},
+                            }
+                        }
+                    }
+                },
+            },
+            merge=True,
+        )
+    except Exception as exc:
+        print(f"[ABOutcome] Firestore aggregate failed: {exc}")
+
+
 def generate_text_logged(
     client: Any,
     *,

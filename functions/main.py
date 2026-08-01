@@ -10292,8 +10292,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     if not openai_key:
                         raise RuntimeError("openai_api_key não configurada em system/api_keys")
                     import openai as _openai_sdk
+                    # Timeout equivalente ao dos 3000ms do braço Gemini — sem isso, uma
+                    # chamada travada consome o limite de 540s da callable inteira em vez
+                    # de falhar rápido e cair no fail-open (achado do review do Codex).
                     _intent_resp = openai_provider.generate_text_logged(
-                        _openai_sdk.OpenAI(api_key=openai_key),
+                        _openai_sdk.OpenAI(api_key=openai_key, timeout=3.0, max_retries=0),
                         model=openai_provider.LUNA_MODEL,
                         input_text=_intent_prompt,
                         feature="copilot_intent_router",
@@ -10311,6 +10314,15 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     )
                     log_gemini_usage(_intent_resp, model=GEMINI_ROUTING_MODEL, feature="copilot_intent_router", db=db)
                     _intent_text = (_intent_resp.text or "").upper()
+
+                # Registra braço + rótulo previsto (sem texto bruto) para permitir comparar
+                # qualidade Luna vs Gemini depois, não só custo (achado do review do Codex).
+                openai_provider.log_ab_outcome(
+                    db,
+                    feature="copilot_intent_router",
+                    arm="openai_luna" if _use_luna else "gemini",
+                    label="CORRECAO" if "CORRECAO" in _intent_text else "NORMAL",
+                )
 
                 if "CORRECAO" in _intent_text:
                     _correcao_hint = (
