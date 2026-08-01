@@ -12,6 +12,7 @@ o usuario pode falar "anota no diario" sem dizer qual tarefa.
 from __future__ import annotations
 
 import difflib
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -119,6 +120,95 @@ TASK_TOOL_DECLARATIONS = [
             "required": ["texto_passo"],
         },
     },
+    {
+        "name": "reagendar_acao",
+        "description": (
+            "Move a data de execucao (data_limite) de uma tarefa para uma nova data. "
+            "E A UNICA ferramenta capaz de adiar, reagendar ou realocar uma tarefa — "
+            "use SEMPRE que o usuario pedir isso. Nao existe outra forma de mudar a "
+            "data; NUNCA diga que uma tarefa foi adiada/reagendada sem chamar esta "
+            "ferramenta e receber status 'ok' de volta."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "nova_data": {
+                    "type": "STRING",
+                    "description": "Nova data de execucao no formato YYYY-MM-DD.",
+                },
+                "justificativa": {
+                    "type": "STRING",
+                    "description": "Motivo da mudanca de data (sera gravado no diario da tarefa).",
+                },
+                "task_id": {
+                    "type": "STRING",
+                    "description": "ID da tarefa. Opcional se a sessao ja esta dentro de uma acao.",
+                },
+            },
+            "required": ["nova_data", "justificativa"],
+        },
+    },
+    {
+        "name": "mudar_status_acao",
+        "description": (
+            "Muda o status de uma tarefa. E A UNICA ferramenta capaz de colocar "
+            "uma tarefa em standby/pausada, reabrir ('em andamento'), concluir ou "
+            "excluir. NUNCA diga que uma tarefa foi pausada, concluida, excluida "
+            "ou reaberta sem chamar esta ferramenta e receber status 'ok' de volta."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "novo_status": {
+                    "type": "STRING",
+                    "description": (
+                        "Um de: 'em andamento' (aberta/reaberta), 'stand-by' "
+                        "(pausada), 'concluído', 'excluído'."
+                    ),
+                },
+                "justificativa": {
+                    "type": "STRING",
+                    "description": "Motivo da mudanca de status (sera gravado no diario da tarefa).",
+                },
+                "task_id": {
+                    "type": "STRING",
+                    "description": "ID da tarefa. Opcional se a sessao ja esta dentro de uma acao.",
+                },
+            },
+            "required": ["novo_status", "justificativa"],
+        },
+    },
+    {
+        "name": "criar_lembrete_acao",
+        "description": (
+            "Agenda um lembrete (notificacao futura) para uma tarefa em uma data e "
+            "horario especificos. E A UNICA ferramenta capaz de criar lembretes. "
+            "NUNCA diga que um lembrete foi criado sem chamar esta ferramenta e "
+            "receber status 'ok' de volta."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "data": {
+                    "type": "STRING",
+                    "description": "Data do lembrete no formato YYYY-MM-DD.",
+                },
+                "horario": {
+                    "type": "STRING",
+                    "description": "Horario do lembrete no formato HH:MM (24h).",
+                },
+                "texto": {
+                    "type": "STRING",
+                    "description": "Texto opcional que aparecera no lembrete.",
+                },
+                "task_id": {
+                    "type": "STRING",
+                    "description": "ID da tarefa. Opcional se a sessao ja esta dentro de uma acao.",
+                },
+            },
+            "required": ["data", "horario"],
+        },
+    },
 ]
 
 TASK_TOOL_NAMES = {decl["name"] for decl in TASK_TOOL_DECLARATIONS}
@@ -144,6 +234,17 @@ def call_task_tool(name: str, args: dict, session_task_id: str | None) -> dict:
     if name == "concluir_passo_plano":
         concluido = args.get("concluido")
         return _concluir_passo(task_id, str(args.get("texto_passo") or ""), True if concluido is None else bool(concluido))
+    if name == "reagendar_acao":
+        return _reagendar_acao(task_id, str(args.get("nova_data") or ""), str(args.get("justificativa") or ""))
+    if name == "mudar_status_acao":
+        return _mudar_status_acao(task_id, str(args.get("novo_status") or ""), str(args.get("justificativa") or ""))
+    if name == "criar_lembrete_acao":
+        return _criar_lembrete_acao(
+            task_id,
+            str(args.get("data") or ""),
+            str(args.get("horario") or ""),
+            str(args.get("texto") or ""),
+        )
     return {"erro": f"Tool de tarefa desconhecida: {name}"}
 
 
@@ -330,6 +431,161 @@ def _concluir_passo(task_id: str, texto_passo: str, concluido: bool) -> dict:
         "acompanhamento": gc_firestore.ArrayUnion([diary_entry]),
     })
     return {"status": "ok", "passo": matches[0], "concluido": concluido}
+
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _reagendar_acao(task_id: str, nova_data: str, justificativa: str) -> dict:
+    nova_data = nova_data.strip()
+    if not _DATE_RE.match(nova_data):
+        return {"erro": "Data invalida — use o formato YYYY-MM-DD."}
+    if not justificativa.strip():
+        return {"erro": "Justificativa vazia — descreva o motivo da mudanca de data."}
+
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if nova_data < today_str:
+        return {"erro": f"A data de execucao nao pode ser no passado ({nova_data})."}
+
+    task_ref = get_db().collection("tarefas").document(task_id)
+    snap = task_ref.get()
+    if not snap.exists:
+        return {"erro": f"Tarefa '{task_id}' nao encontrada."}
+
+    data = snap.to_dict() or {}
+    if data.get("status") in ("concluído", "excluído"):
+        return {"erro": "Esta tarefa ja foi concluida ou excluida e nao pode ser reagendada."}
+
+    data_anterior = data.get("data_limite")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    diary_entry = {
+        "data": now_iso,
+        "nota": f"[Copiloto de Voz] Data de execucao alterada de {data_anterior or 'sem data'} para {nova_data}: {justificativa.strip()}",
+    }
+    task_ref.update({
+        "data_limite": nova_data,
+        "data_atualizacao": now_iso,
+        "acompanhamento": gc_firestore.ArrayUnion([diary_entry]),
+    })
+    return {"status": "ok", "task_id": task_id, "data_anterior": data_anterior, "nova_data": nova_data}
+
+
+_STATUS_VALIDOS = {"em andamento", "stand-by", "concluído", "excluído"}
+
+
+def _normalizar_status_acao(valor: str) -> str | None:
+    raw = str(valor or "").strip().lower()
+    try:
+        import unicodedata
+        raw = "".join(c for c in unicodedata.normalize("NFD", raw) if unicodedata.category(c) != "Mn")
+    except Exception:
+        pass
+    raw = raw.replace("_", " ").replace("-", " ")
+    raw = " ".join(raw.split())
+    if raw in ("concluido", "concluida", "concluir", "finalizado", "finalizada", "completed", "done"):
+        return "concluído"
+    if raw in ("stand by", "standby", "pausado", "pausada", "pausar"):
+        return "stand-by"
+    if raw in ("em andamento", "andamento", "pendente", "aberto", "aberta", "reabrir"):
+        return "em andamento"
+    if raw in ("excluido", "excluir", "excluida", "cancelado", "cancelar", "cancelada", "deletar", "deletado", "apagar", "remover"):
+        return "excluído"
+    return None
+
+
+def _mudar_status_acao(task_id: str, novo_status: str, justificativa: str) -> dict:
+    normalizado = _normalizar_status_acao(novo_status)
+    if not normalizado:
+        return {"erro": f"Status invalido: '{novo_status}'. Use um de: {', '.join(sorted(_STATUS_VALIDOS))}."}
+    if not justificativa.strip():
+        return {"erro": "Justificativa vazia — descreva o motivo da mudanca de status."}
+
+    task_ref = get_db().collection("tarefas").document(task_id)
+    snap = task_ref.get()
+    if not snap.exists:
+        return {"erro": f"Tarefa '{task_id}' nao encontrada."}
+
+    data = snap.to_dict() or {}
+    status_anterior = data.get("status")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    diary_entry = {
+        "data": now_iso,
+        "nota": f"[Copiloto de Voz] Status alterado de '{status_anterior}' para '{normalizado}': {justificativa.strip()}",
+    }
+    task_ref.update({
+        "status": normalizado,
+        "data_atualizacao": now_iso,
+        "acompanhamento": gc_firestore.ArrayUnion([diary_entry]),
+    })
+    return {"status": "ok", "task_id": task_id, "status_anterior": status_anterior, "novo_status": normalizado}
+
+
+_TIME_RE = re.compile(r"^\d{2}:\d{2}$")
+
+
+def _criar_lembrete_acao(task_id: str, data_lembrete: str, horario: str, texto: str) -> dict:
+    data_lembrete = data_lembrete.strip()
+    horario = horario.strip()[:5]
+    texto = texto.strip()[:500]
+
+    if not _DATE_RE.match(data_lembrete):
+        return {"erro": "Data invalida — use o formato YYYY-MM-DD."}
+    if not _TIME_RE.match(horario):
+        return {"erro": "Horario invalido — use o formato HH:MM."}
+    try:
+        datetime.strptime(f"{data_lembrete} {horario}", "%Y-%m-%d %H:%M")
+    except ValueError:
+        return {"erro": "Data ou horario inexistente."}
+
+    task_ref = get_db().collection("tarefas").document(task_id)
+    snap = task_ref.get()
+    if not snap.exists:
+        return {"erro": f"Tarefa '{task_id}' nao encontrada."}
+
+    data = snap.to_dict() or {}
+    titulo = data.get("titulo", task_id)
+    reminder_at = f"{data_lembrete}T{horario}:00"
+
+    reminders_raw = data.get("reminders") if isinstance(data.get("reminders"), list) else []
+    normalized = []
+    for idx, reminder in enumerate(reminders_raw):
+        if not isinstance(reminder, dict) or not reminder.get("reminder_at"):
+            continue
+        normalized.append({
+            "id": str(reminder.get("id") or f"legacy-{idx}"),
+            "reminder_at": str(reminder.get("reminder_at")),
+            "reminder_sent": bool(reminder.get("reminder_sent")),
+            "created_at": str(reminder.get("created_at") or reminder.get("reminder_at")),
+            "message": str(reminder.get("message") or "").strip(),
+        })
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    new_reminder = {
+        "id": str(uuid.uuid4())[:12],
+        "reminder_at": reminder_at,
+        "reminder_sent": False,
+        "created_at": now_iso,
+        "created_by": "voz",
+    }
+    if texto:
+        new_reminder["message"] = texto
+
+    ordered = sorted([*normalized, new_reminder], key=lambda item: item.get("reminder_at") or "")
+    next_pending = next((item for item in ordered if not item.get("reminder_sent")), None)
+
+    diary_entry = {
+        "data": now_iso,
+        "nota": f"[Copiloto de Voz] Lembrete agendado para {data_lembrete} {horario}.",
+    }
+    task_ref.update({
+        "reminders": ordered,
+        "reminder_at": next_pending.get("reminder_at") if next_pending else None,
+        "reminder_sent": bool(next_pending.get("reminder_sent")) if next_pending else True,
+        "data_atualizacao": now_iso,
+        "acompanhamento": gc_firestore.ArrayUnion([diary_entry]),
+    })
+    return {"status": "ok", "task_id": task_id, "titulo": titulo, "reminder_at": reminder_at}
 
 
 def _clip(value, max_chars: int) -> str:

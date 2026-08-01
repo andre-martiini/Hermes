@@ -48,12 +48,18 @@ def _allowed_ws_origins() -> set[str]:
     origins = {
         f"http://127.0.0.1:{port}",
         f"http://localhost:{port}",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "http://localhost:5000",
+        "http://127.0.0.1:5000",
         "http://localhost:5173",
         "http://localhost:5174",
         "http://localhost:5175",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
         "http://127.0.0.1:5175",
+        "https://gestao-hermes.web.app",
+        "https://gestao-hermes.firebaseapp.com",
     }
     extra_origins = os.environ.get("ALLOWED_ORIGINS", "")
     if extra_origins:
@@ -78,8 +84,14 @@ async def healthz() -> dict:
 async def ws_endpoint(websocket: WebSocket) -> None:
     origin = websocket.headers.get("origin")
     allowed = _allowed_ws_origins()
-    is_local = origin and (origin.startswith("http://localhost:") or origin.startswith("http://127.0.0.1:") or origin.startswith("https://localhost:"))
+    is_local = origin and (
+        origin.startswith("http://localhost:")
+        or origin.startswith("http://127.0.0.1:")
+        or origin.startswith("https://localhost:")
+        or origin.startswith("https://127.0.0.1:")
+    )
     if origin and origin not in allowed and not is_local:
+        print(f"[hermes-voice-client] WebSocket rejeitado: origin={origin!r} nao esta na allowlist {sorted(allowed)}")
         await websocket.close(code=1008)
         return
 
@@ -158,12 +170,6 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                         current_turn_task = asyncio.create_task(
                             _handle_utterance_audio(websocket, session, loop, pcm_bytes)
                         )
-                    is_recording = False
-                    pcm_bytes = bytes(recording_buffer)
-                    recording_buffer = bytearray()
-                    current_turn_task = asyncio.create_task(
-                        _handle_utterance_audio(websocket, session, loop, pcm_bytes)
-                    )
                 elif msg_type == "text_message":
                     text = str(payload.get("text") or "").strip()
                     if text:

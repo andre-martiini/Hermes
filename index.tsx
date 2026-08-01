@@ -63,6 +63,7 @@ import { QuickNoteModal } from './src/components/modals/QuickNoteModal';
 import { SpeedDialMenu } from './src/components/ui/SpeedDialMenu';
 import { HermesCopilotoDrawer } from './src/components/tools/HermesCopilotoDrawer';
 import { HermesGlobalChat } from './src/components/tools/HermesGlobalChat';
+import { HermesVoiceOverlay } from './src/components/tools/HermesVoiceOverlay';
 import { generateMarkdown, generateActionsMarkdown, downloadMarkdown } from './src/utils/markdownGenerator';
 import {
   ROOT_ACTIONS_FOLDER_ID,
@@ -1028,6 +1029,8 @@ const App: React.FC = () => {
   const [descriptionSynthesisTaskId, setDescriptionSynthesisTaskId] = useState<string | null>(null);
   const [isBatchDescriptionSynthesisRunning, setIsBatchDescriptionSynthesisRunning] = useState(false);
   const [isCopilotoOpen, setIsCopilotoOpen] = useState(false);
+  const [isCopilotoLauncherOpen, setIsCopilotoLauncherOpen] = useState(false);
+  const [isVoiceLiveActive, setIsVoiceLiveActive] = useState(false);
   const [copilotoAutoStartMic, setCopilotoAutoStartMic] = useState(false);
   const [copilotoMode, setCopilotoMode] = useState<'default' | 'finance' | 'saude' | 'estrategia'>('default');
   const [copilotoInitialPrompt, setCopilotoInitialPrompt] = useState<string | null>(null);
@@ -6886,40 +6889,85 @@ const App: React.FC = () => {
             />
           )
         }
-        {!isCopilotoOpen && viewMode !== 'godmode' && !(selectedTask && (taskModalMode === 'execute' || (taskModalMode === 'default' && selectedTask.area_tematica === 'CLC'))) && (
-          <button
-            type="button"
-            aria-label="Copiloto Hermes"
-            onClick={() => {
-              if (viewMode === 'saude' || activeModule === 'saude') {
-                setCopilotoMode('saude');
-                setCopilotoAutoStartMic(false);
-              } else if (viewMode === 'finance' || activeModule === 'financeiro') {
-                setCopilotoMode('finance');
-                setCopilotoAutoStartMic(false);
-              } else {
-                // No módulo de Estratégia o copiloto abre focado nos objetivos/diretrizes
-                // e com as ferramentas de criação/edição/exclusão habilitadas.
-                setCopilotoMode(viewMode === 'strategy' ? 'estrategia' : 'default');
-              }
-              setIsCopilotoOpen(true);
-            }}
-            className={`fixed bottom-6 right-6 z-[600] flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg transition-all hover:-translate-y-0.5 active:scale-95 sm:h-16 sm:w-16 ${
-              (viewMode === 'saude' || activeModule === 'saude')
-                ? 'bg-red-600 shadow-red-600/30 hover:bg-red-500'
-                : (viewMode === 'finance' || activeModule === 'financeiro')
-                ? 'bg-emerald-600 shadow-emerald-600/30 hover:bg-emerald-500'
-                : 'bg-indigo-600 shadow-indigo-600/30 hover:bg-indigo-500'
-            }`}
-          >
-            <img
-              src="/logo.png"
-              alt=""
-              aria-hidden="true"
-              className="h-8 w-8 object-contain sm:h-9 sm:w-9"
-              style={{ filter: 'brightness(0) invert(1)' }}
-            />
-          </button>
+        {!isCopilotoOpen && !isVoiceLiveActive && viewMode !== 'godmode' && !(selectedTask && (taskModalMode === 'execute' || (taskModalMode === 'default' && selectedTask.area_tematica === 'CLC'))) && (
+          <>
+            {/* Backdrop invisivel: clique fora fecha o menu do launcher */}
+            {isCopilotoLauncherOpen && (
+              <div className="fixed inset-0 z-[595]" onClick={() => setIsCopilotoLauncherOpen(false)} />
+            )}
+            {/* Menu speed-dial: conversa por voz ao vivo ou copiloto por texto */}
+            {isCopilotoLauncherOpen && (
+              <div className="fixed bottom-24 right-6 z-[600] flex flex-col items-end gap-2 sm:bottom-[6.5rem]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCopilotoLauncherOpen(false);
+                    setIsVoiceLiveActive(true);
+                  }}
+                  className={`flex items-center gap-2.5 rounded-full py-2.5 pl-4 pr-5 text-sm font-semibold shadow-lg transition-all hover:-translate-y-0.5 active:scale-95 ${isDarkTheme ? 'bg-slate-800 text-slate-100 border border-white/10' : 'bg-white text-slate-800 border border-slate-200'}`}
+                >
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-600 text-white">
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19v3" />
+                    </svg>
+                  </span>
+                  Conversa por voz
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCopilotoLauncherOpen(false);
+                    if (viewMode === 'saude' || activeModule === 'saude') {
+                      setCopilotoMode('saude');
+                      setCopilotoAutoStartMic(false);
+                    } else if (viewMode === 'finance' || activeModule === 'financeiro') {
+                      setCopilotoMode('finance');
+                      setCopilotoAutoStartMic(false);
+                    } else {
+                      // No módulo de Estratégia o copiloto abre focado nos objetivos/diretrizes
+                      // e com as ferramentas de criação/edição/exclusão habilitadas.
+                      setCopilotoMode(viewMode === 'strategy' ? 'estrategia' : 'default');
+                    }
+                    setIsCopilotoOpen(true);
+                  }}
+                  className={`flex items-center gap-2.5 rounded-full py-2.5 pl-4 pr-5 text-sm font-semibold shadow-lg transition-all hover:-translate-y-0.5 active:scale-95 ${isDarkTheme ? 'bg-slate-800 text-slate-100 border border-white/10' : 'bg-white text-slate-800 border border-slate-200'}`}
+                >
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-white">
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
+                  </span>
+                  Conversa por texto
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              aria-label="Copiloto Hermes"
+              aria-expanded={isCopilotoLauncherOpen}
+              onClick={() => setIsCopilotoLauncherOpen(v => !v)}
+              className={`fixed bottom-6 right-6 z-[600] flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg transition-all hover:-translate-y-0.5 active:scale-95 sm:h-16 sm:w-16 ${
+                (viewMode === 'saude' || activeModule === 'saude')
+                  ? 'bg-red-600 shadow-red-600/30 hover:bg-red-500'
+                  : (viewMode === 'finance' || activeModule === 'financeiro')
+                  ? 'bg-emerald-600 shadow-emerald-600/30 hover:bg-emerald-500'
+                  : 'bg-indigo-600 shadow-indigo-600/30 hover:bg-indigo-500'
+              }`}
+            >
+              <img
+                src="/logo.png"
+                alt=""
+                aria-hidden="true"
+                className={`h-8 w-8 object-contain transition-transform sm:h-9 sm:w-9 ${isCopilotoLauncherOpen ? 'rotate-12 scale-90' : ''}`}
+                style={{ filter: 'brightness(0) invert(1)' }}
+              />
+            </button>
+          </>
+        )}
+        {isVoiceLiveActive && (
+          <HermesVoiceOverlay isDark={isDarkTheme} onExit={() => setIsVoiceLiveActive(false)} />
         )}
         {!isStrategySplitCopilot && (
         <HermesGlobalChat

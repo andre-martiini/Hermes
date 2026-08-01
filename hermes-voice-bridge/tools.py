@@ -144,19 +144,19 @@ GEMINI_TOOL_DECLARATIONS = [
 ]
 
 
-def buscar_tarefas_pendentes_hoje(limite: int = 10) -> dict:
+def buscar_tarefas_pendentes_hoje(limite: int = 25) -> dict:
     today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
     return _buscar_tarefas_por_datas(today, today, limite=limite, label="hoje")
 
 
-def buscar_tarefas_amanha(limite: int = 10) -> dict:
+def buscar_tarefas_amanha(limite: int = 25) -> dict:
     tomorrow = (datetime.now(LOCAL_TZ) + timedelta(days=1)).strftime("%Y-%m-%d")
     return _buscar_tarefas_por_datas(tomorrow, tomorrow, limite=limite, label="amanha")
 
 
-def buscar_tarefas_atrasadas(limite: int = 10) -> dict:
+def buscar_tarefas_atrasadas(limite: int = 30) -> dict:
     today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
-    limit_value = _bounded_limit(limite, default=10, maximum=30)
+    limit_value = _bounded_limit(limite, default=30, maximum=30)
     tasks = _load_task_candidates(max_docs=700)
     filtered = [
         task
@@ -168,7 +168,9 @@ def buscar_tarefas_atrasadas(limite: int = 10) -> dict:
     filtered.sort(key=lambda item: str(item.get("data_limite") or "9999-99-99"))
     return {
         "data_referencia": today,
+        "total_encontrado": len(filtered),
         "total_retornado": min(len(filtered), limit_value),
+        "truncado": len(filtered) > limit_value,
         "tarefas": [_format_task(task["_id"], task) for task in filtered[:limit_value]],
     }
 
@@ -254,7 +256,12 @@ def _buscar_tarefas_por_datas(
         "consulta": label,
         "data_inicio": data_inicio,
         "data_fim": data_fim,
+        # total_encontrado e a contagem REAL no banco; total_retornado pode ser
+        # menor por causa do limite. Ao informar quantas tarefas existem,
+        # SEMPRE use total_encontrado.
+        "total_encontrado": len(filtered),
         "total_retornado": min(len(filtered), limit_value),
+        "truncado": len(filtered) > limit_value,
         "tarefas": [_format_task(task["_id"], task) for task in filtered[:limit_value]],
     }
 

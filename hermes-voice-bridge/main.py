@@ -9,6 +9,9 @@ import time
 import unicodedata
 from urllib.parse import urlparse
 
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 import audioop
 import websockets
 from dotenv import load_dotenv
@@ -31,13 +34,38 @@ logger = logging.getLogger("hermes_voice_bridge")
 
 app = FastAPI(title="Hermes Voice Bridge")
 
+LOCAL_TZ = ZoneInfo(os.getenv("HERMES_TIMEZONE", "America/Sao_Paulo"))
+_WEEKDAY_NAMES_PT = [
+    "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+    "sexta-feira", "sábado", "domingo",
+]
+
 TWILIO_SAMPLE_RATE = 8000
 GEMINI_SAMPLE_RATE = 24000
 SAMPLE_WIDTH_BYTES = 2
 DEFAULT_VOICE_MAX_SESSION_SECONDS = 300
 
 
+def _data_context_block() -> str:
+    # Calculado em Python (nunca confie no modelo para aritmetica de
+    # calendario/dia-da-semana — ele erra "segunda-feira e dia X" com
+    # frequencia). Da uma tabela pronta dos proximos 7 dias para ele so
+    # copiar a data correspondente ao dia da semana pedido pelo usuario.
+    now = datetime.now(LOCAL_TZ)
+    lines = [
+        "## DATA E HORA ATUAIS (fonte de verdade — NUNCA calcule dia da semana de cabeca, so copie desta tabela)",
+        f"- agora: {_WEEKDAY_NAMES_PT[now.weekday()]}, {now.strftime('%Y-%m-%d %H:%M')} ({LOCAL_TZ.key})",
+    ]
+    for offset in range(0, 8):
+        day = now + timedelta(days=offset)
+        weekday_name = _WEEKDAY_NAMES_PT[day.weekday()]
+        prefix = "hoje, " if offset == 0 else "amanha, " if offset == 1 else ""
+        lines.append(f"- {prefix}{weekday_name}: {day.strftime('%Y-%m-%d')}")
+    return "\n".join(lines)
+
+
 def _build_system_instruction() -> str:
+    data_context = _data_context_block()
     hermes_context = _safe_voice_context()
     if not _requires_voice_password():
         return f"""
@@ -59,8 +87,33 @@ busca fuzzy e pode retornar resultados incompletos, levando a contagens
 erradas. Use consultar_historico_acoes so quando a pergunta for sobre um termo,
 assunto ou numero de processo, nao sobre uma data.
 
+Quando o usuario mencionar um dia da semana (segunda, terca, sexta que vem
+etc.) para reagendar ou criar algo, SEMPRE traduza para a data YYYY-MM-DD
+usando a tabela em "DATA E HORA ATUAIS" no topo deste prompt — nunca calcule
+de cabeca.
+
+Quando uma ferramenta de busca retornar o campo total_encontrado, use ESSE
+numero ao dizer quantas tarefas existem — a lista 'tarefas' pode vir cortada
+pelo limite (nesse caso truncado=true).
+
+Ao listar tarefas em voz alta, use SOMENTE os titulos exatos presentes na
+lista 'tarefas' da resposta da ferramenta mais recente. NUNCA misture com
+tarefas de uma pergunta anterior, NUNCA complete a lista de memoria e NUNCA
+cite uma tarefa que voce nao tem certeza absoluta que veio da resposta da
+ferramenta desta chamada especifica. Se a lista vier vazia, diga que nao ha
+tarefas — nao invente nenhuma.
+
 Sempre que decidir acionar uma ferramenta do banco de dados, voce DEVE dizer:
 "Aguarde um instante, estou verificando os dados" ANTES de executar a funcao.
+
+NUNCA diga que uma acao foi feita (salva, alterada, reagendada, adiada,
+concluida, registrada) sem ter chamado a ferramenta correspondente e recebido
+de volta um resultado de sucesso (status "ok", sem campo "erro"). Se a
+ferramenta retornar erro, informe o erro ao usuario em vez de fingir que deu
+certo. Se nao existir ferramenta para o que o usuario pediu, diga claramente
+que voce nao consegue fazer isso agora.
+
+{data_context}
 
 {hermes_context}
 """.strip()
@@ -95,8 +148,33 @@ busca fuzzy e pode retornar resultados incompletos, levando a contagens
 erradas. Use consultar_historico_acoes so quando a pergunta for sobre um termo,
 assunto ou numero de processo, nao sobre uma data.
 
+Quando o usuario mencionar um dia da semana (segunda, terca, sexta que vem
+etc.) para reagendar ou criar algo, SEMPRE traduza para a data YYYY-MM-DD
+usando a tabela em "DATA E HORA ATUAIS" no topo deste prompt — nunca calcule
+de cabeca.
+
+Quando uma ferramenta de busca retornar o campo total_encontrado, use ESSE
+numero ao dizer quantas tarefas existem — a lista 'tarefas' pode vir cortada
+pelo limite (nesse caso truncado=true).
+
+Ao listar tarefas em voz alta, use SOMENTE os titulos exatos presentes na
+lista 'tarefas' da resposta da ferramenta mais recente. NUNCA misture com
+tarefas de uma pergunta anterior, NUNCA complete a lista de memoria e NUNCA
+cite uma tarefa que voce nao tem certeza absoluta que veio da resposta da
+ferramenta desta chamada especifica. Se a lista vier vazia, diga que nao ha
+tarefas — nao invente nenhuma.
+
 Sempre que decidir acionar uma ferramenta do banco de dados, voce DEVE dizer:
 "Aguarde um instante, estou verificando os dados" ANTES de executar a funcao.
+
+NUNCA diga que uma acao foi feita (salva, alterada, reagendada, adiada,
+concluida, registrada) sem ter chamado a ferramenta correspondente e recebido
+de volta um resultado de sucesso (status "ok", sem campo "erro"). Se a
+ferramenta retornar erro, informe o erro ao usuario em vez de fingir que deu
+certo. Se nao existir ferramenta para o que o usuario pediu, diga claramente
+que voce nao consegue fazer isso agora.
+
+{data_context}
 
 {hermes_context}
 """.strip()
@@ -121,9 +199,16 @@ def _safe_voice_context() -> str:
 
 def _voice_max_session_seconds() -> int:
     try:
-        return int(os.getenv("HERMES_VOICE_MAX_SESSION_SECONDS", str(DEFAULT_VOICE_MAX_SESSION_SECONDS)))
+        configured = int(os.getenv("HERMES_VOICE_MAX_SESSION_SECONDS", str(DEFAULT_VOICE_MAX_SESSION_SECONDS)))
     except (TypeError, ValueError):
-        return DEFAULT_VOICE_MAX_SESSION_SECONDS
+        configured = DEFAULT_VOICE_MAX_SESSION_SECONDS
+    # O Gemini Live tambem impoe um limite de duracao do lado do provedor (por
+    # volta de 15 min sem session resumption) e manda um GoAway pouco antes de
+    # fechar a conexao a força. Se o nosso timer local disparar exatamente no
+    # mesmo instante (ou depois), o servidor as vezes vence a corrida e a
+    # sessao morre com uma excecao feia em vez do encerramento gracioso normal.
+    # Uma margem de seguranca garante que SEMPRE fechamos primeiro.
+    return max(60, configured - 60)
 
 
 async def _stop_voice_session_after(stop_event: asyncio.Event) -> None:
@@ -156,11 +241,24 @@ def _allowed_browser_origins() -> set[str]:
             "http://127.0.0.1:5175",
             "http://localhost:3001",
             "http://127.0.0.1:3001",
+            "http://localhost:5000",
+            "http://127.0.0.1:5000",
             "http://localhost:8765",
             "http://127.0.0.1:8765",
+            "https://gestao-hermes.web.app",
+            "https://gestao-hermes.firebaseapp.com",
         }
     )
     return origins
+
+
+def _is_local_origin(origin: str | None) -> bool:
+    return bool(origin) and (
+        origin.startswith("http://localhost:")
+        or origin.startswith("http://127.0.0.1:")
+        or origin.startswith("https://localhost:")
+        or origin.startswith("https://127.0.0.1:")
+    )
 
 
 class _ActivityTracker:
@@ -338,7 +436,7 @@ async def media_stream(websocket: WebSocket) -> None:
 @app.websocket("/browser-voice-stream")
 async def browser_voice_stream(websocket: WebSocket) -> None:
     origin = websocket.headers.get("origin")
-    if origin not in _allowed_browser_origins():
+    if origin not in _allowed_browser_origins() and not _is_local_origin(origin):
         logger.warning("Rejected browser voice stream from disallowed origin: %s", origin)
         await websocket.close(code=1008)
         return
@@ -486,12 +584,22 @@ async def browser_voice_stream(websocket: WebSocket) -> None:
     except json.JSONDecodeError:
         logger.exception("Received invalid JSON from browser voice stream")
         await websocket.close(code=1003)
-    except Exception:
+    except Exception as exc:
         logger.exception("Unexpected browser voice stream failure")
+        # GoAway/1008 do provedor: a conversa foi encerrada pelo lado do Gemini
+        # (limite de duracao) no meio de uma acao. As acoes ja confirmadas por
+        # ferramentas ANTES do encerramento foram salvas normalmente — so a
+        # resposta falada final e que pode ter sido cortada. Mensagem clara em
+        # vez do "falha inesperada" generico, para nao parecer que nada salvou.
+        is_goaway = "GoAway" in str(exc) or "1008" in str(exc)
+        message = (
+            "A sessao de voz atingiu o limite de duracao do provedor e foi encerrada. "
+            "Acoes ja confirmadas antes disso foram salvas normalmente — reconecte para continuar."
+            if is_goaway
+            else "Falha inesperada na sessao de voz."
+        )
         with contextlib.suppress(RuntimeError):
-            await websocket.send_json(
-                {"type": "error", "message": "Falha inesperada na sessao de voz."}
-            )
+            await websocket.send_json({"type": "error", "message": message})
             await websocket.close(code=1011)
 
 
@@ -732,6 +840,15 @@ async def _forward_gemini_audio_to_browser(
                 await websocket.send_json({"type": "output_transcript", "text": output_transcript})
 
             server_content = getattr(response, "server_content", None)
+
+            # Barge-in nativo do Gemini Live: o VAD do servidor detectou fala
+            # real do usuario e interrompeu a geracao. Avisa o navegador para
+            # descartar o audio ja enfileirado — e o unico corte de reproducao
+            # confiavel (o corte local por energia de microfone foi removido
+            # porque som de alto-falante vazando para o mic disparava falso).
+            if bool(getattr(server_content, "interrupted", False)):
+                await websocket.send_json({"type": "interrupted"})
+
             model_turn = getattr(server_content, "model_turn", None)
             parts = getattr(model_turn, "parts", None) or []
 

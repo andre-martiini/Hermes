@@ -625,59 +625,77 @@ const HealthView: React.FC<HealthViewProps> = ({
                 {activeTab === 'telemetry' ? (
                     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
                         <div className="space-y-6">
-                            <HealthSection title="Lembretes Telegram" eyebrow="Intervencoes leves">
-                                <div className="space-y-3">
-                                    {activeReminders.map(reminder => (
-                                        <div key={reminder.id} className="rounded-xl border border-border-subtle bg-background p-4">
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div className="min-w-0">
-                                                    <p className="text-sm font-bold text-on-surface">{reminder.title}</p>
-                                                    <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">{reminder.message}</p>
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => onSaveTelegramReminder({ ...reminder, enabled: !reminder.enabled })}
-                                                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase ${reminder.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}
-                                                >
-                                                    {reminder.enabled ? 'Ativo' : 'Pausado'}
-                                                </button>
-                                            </div>
-                                            <div className="mt-3 flex items-center justify-between gap-3">
-                                                <input
-                                                    type="time"
-                                                    value={reminder.time}
-                                                    onChange={e => onSaveTelegramReminder({ ...reminder, time: e.target.value })}
-                                                    className="rounded-lg border border-border-standard bg-white px-3 py-2 text-sm font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-container"
-                                                />
-                                                {!DEFAULT_HEALTH_REMINDERS.some(defaultReminder => defaultReminder.id === reminder.id) && (
+                            <HealthSection title="Registro de peso" eyebrow="Entrada manual">
+                                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr]">
+                                    <div className="rounded-2xl border border-border-subtle bg-background p-5">
+                                        <label className="block">
+                                            <span className={labelClasses}>Peso (kg)</span>
+                                            <input
+                                                type="text"
+                                                inputMode="decimal"
+                                                value={weightInput}
+                                                onChange={e => setWeightInput(e.target.value)}
+                                                onKeyDown={e => { if (e.key === 'Enter') handleAddWeight(); }}
+                                                placeholder="Ex: 78.5"
+                                                className={inputClasses}
+                                            />
+                                        </label>
+                                        <p className="mt-2 text-xs font-medium text-on-surface-variant">
+                                            Data do registro: {selectedDateLabel}
+                                        </p>
+                                        <button
+                                            type="button"
+                                            onClick={handleAddWeight}
+                                            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary-container px-4 py-2.5 text-sm font-bold text-white transition hover:opacity-90"
+                                        >
+                                            <Icon name="plus" className="h-4 w-4" />
+                                            Adicionar registro
+                                        </button>
+                                    </div>
+                                    <div className="rounded-2xl border border-border-subtle bg-background p-5">
+                                        <label className="block">
+                                            <span className={labelClasses}>Meta de peso (kg)</span>
+                                            <input
+                                                type="number"
+                                                step="0.1"
+                                                value={settings.targetWeight || ''}
+                                                onChange={e => onUpdateSettings({ ...settings, targetWeight: parseFloat(e.target.value) || 0 })}
+                                                placeholder="Ex: 75.0"
+                                                className={inputClasses}
+                                            />
+                                        </label>
+                                        {targetDelta !== null && (
+                                            <p className="mt-3 text-xs font-semibold text-on-surface-variant">
+                                                Distancia ate a meta: {targetDelta > 0 ? '+' : ''}{targetDelta.toFixed(1)} kg
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="mt-5">
+                                    <p className={`${labelClasses} mb-2`}>Registros recentes</p>
+                                    {sortedWeights.length > 0 ? (
+                                        <div className="max-h-[240px] space-y-2 overflow-y-auto">
+                                            {sortedWeights.slice(0, 20).map(weight => (
+                                                <div key={weight.id} className="flex items-center justify-between gap-3 rounded-xl border border-border-subtle bg-white px-4 py-2.5">
+                                                    <div className="flex items-baseline gap-2">
+                                                        <span className="text-sm font-bold text-on-surface">{weight.weight.toFixed(1)} kg</span>
+                                                        <span className="text-xs font-medium text-on-surface-variant">{formatDate(weight.date)}</span>
+                                                    </div>
                                                     <button
                                                         type="button"
-                                                        onClick={() => onDeleteTelegramReminder(reminder.id)}
-                                                        className="text-xs font-semibold text-error hover:underline"
+                                                        onClick={() => onDeleteWeight(weight.id)}
+                                                        className="rounded-lg p-1.5 text-on-surface-variant transition hover:bg-error-container hover:text-on-error-container"
+                                                        aria-label="Remover registro"
                                                     >
-                                                        Remover
+                                                        <Icon name="trash" className="h-4 w-4" />
                                                     </button>
-                                                )}
-                                            </div>
+                                                </div>
+                                            ))}
                                         </div>
-                                    ))}
-                                    <button
-                                        type="button"
-                                        onClick={() => onSaveTelegramReminder({
-                                            id: `custom_${Date.now()}`,
-                                            title: 'Novo lembrete',
-                                            message: 'Andre, lembrete de saude configurado no Hermes.',
-                                            time: '08:00',
-                                            enabled: true,
-                                            daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
-                                            category: 'custom',
-                                            telegramOnly: true,
-                                        })}
-                                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border-standard bg-white px-4 py-3 text-sm font-semibold text-on-surface-variant transition hover:border-primary-container hover:text-primary-container"
-                                    >
-                                        <Icon name="plus" className="h-4 w-4" />
-                                        Adicionar lembrete
-                                    </button>
+                                    ) : (
+                                        <p className="text-xs font-semibold text-on-surface-variant">Nenhum registro de peso ainda.</p>
+                                    )}
                                 </div>
                             </HealthSection>
                         </div>
@@ -802,80 +820,6 @@ const HealthView: React.FC<HealthViewProps> = ({
                                 </div>
                             </HealthSection>
 
-                            <HealthSection title="Registro de peso" eyebrow="Entrada manual">
-                                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr]">
-                                    <div className="rounded-2xl border border-border-subtle bg-background p-5">
-                                        <label className="block">
-                                            <span className={labelClasses}>Peso (kg)</span>
-                                            <input
-                                                type="text"
-                                                inputMode="decimal"
-                                                value={weightInput}
-                                                onChange={e => setWeightInput(e.target.value)}
-                                                onKeyDown={e => { if (e.key === 'Enter') handleAddWeight(); }}
-                                                placeholder="Ex: 78.5"
-                                                className={inputClasses}
-                                            />
-                                        </label>
-                                        <p className="mt-2 text-xs font-medium text-on-surface-variant">
-                                            Data do registro: {selectedDateLabel}
-                                        </p>
-                                        <button
-                                            type="button"
-                                            onClick={handleAddWeight}
-                                            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary-container px-4 py-2.5 text-sm font-bold text-white transition hover:opacity-90"
-                                        >
-                                            <Icon name="plus" className="h-4 w-4" />
-                                            Adicionar registro
-                                        </button>
-                                    </div>
-                                    <div className="rounded-2xl border border-border-subtle bg-background p-5">
-                                        <label className="block">
-                                            <span className={labelClasses}>Meta de peso (kg)</span>
-                                            <input
-                                                type="number"
-                                                step="0.1"
-                                                value={settings.targetWeight || ''}
-                                                onChange={e => onUpdateSettings({ ...settings, targetWeight: parseFloat(e.target.value) || 0 })}
-                                                placeholder="Ex: 75.0"
-                                                className={inputClasses}
-                                            />
-                                        </label>
-                                        {targetDelta !== null && (
-                                            <p className="mt-3 text-xs font-semibold text-on-surface-variant">
-                                                Distancia ate a meta: {targetDelta > 0 ? '+' : ''}{targetDelta.toFixed(1)} kg
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
-
-                                <div className="mt-5">
-                                    <p className={`${labelClasses} mb-2`}>Registros recentes</p>
-                                    {sortedWeights.length > 0 ? (
-                                        <div className="max-h-[240px] space-y-2 overflow-y-auto">
-                                            {sortedWeights.slice(0, 20).map(weight => (
-                                                <div key={weight.id} className="flex items-center justify-between gap-3 rounded-xl border border-border-subtle bg-white px-4 py-2.5">
-                                                    <div className="flex items-baseline gap-2">
-                                                        <span className="text-sm font-bold text-on-surface">{weight.weight.toFixed(1)} kg</span>
-                                                        <span className="text-xs font-medium text-on-surface-variant">{formatDate(weight.date)}</span>
-                                                    </div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => onDeleteWeight(weight.id)}
-                                                        className="rounded-lg p-1.5 text-on-surface-variant transition hover:bg-error-container hover:text-on-error-container"
-                                                        aria-label="Remover registro"
-                                                    >
-                                                        <Icon name="trash" className="h-4 w-4" />
-                                                    </button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <p className="text-xs font-semibold text-on-surface-variant">Nenhum registro de peso ainda.</p>
-                                    )}
-                                </div>
-                            </HealthSection>
-
                             <HealthSection title="Dor lombar" eyebrow="Sinal clinico diario">
                                 <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
                                     <label className="rounded-xl border border-border-subtle bg-background p-4">
@@ -917,6 +861,62 @@ const HealthView: React.FC<HealthViewProps> = ({
                                         Distancia ate a meta: {targetDelta > 0 ? '+' : ''}{targetDelta.toFixed(1)} kg.
                                     </p>
                                 )}
+                            </HealthSection>
+
+                            <HealthSection title="Lembretes Telegram" eyebrow="Intervencoes leves">
+                                <div className="space-y-3">
+                                    {activeReminders.map(reminder => (
+                                        <div key={reminder.id} className="rounded-xl border border-border-subtle bg-background p-4">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-bold text-on-surface">{reminder.title}</p>
+                                                    <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">{reminder.message}</p>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onSaveTelegramReminder({ ...reminder, enabled: !reminder.enabled })}
+                                                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase ${reminder.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}
+                                                >
+                                                    {reminder.enabled ? 'Ativo' : 'Pausado'}
+                                                </button>
+                                            </div>
+                                            <div className="mt-3 flex items-center justify-between gap-3">
+                                                <input
+                                                    type="time"
+                                                    value={reminder.time}
+                                                    onChange={e => onSaveTelegramReminder({ ...reminder, time: e.target.value })}
+                                                    className="rounded-lg border border-border-standard bg-white px-3 py-2 text-sm font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-container"
+                                                />
+                                                {!DEFAULT_HEALTH_REMINDERS.some(defaultReminder => defaultReminder.id === reminder.id) && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onDeleteTelegramReminder(reminder.id)}
+                                                        className="text-xs font-semibold text-error hover:underline"
+                                                    >
+                                                        Remover
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                    <button
+                                        type="button"
+                                        onClick={() => onSaveTelegramReminder({
+                                            id: `custom_${Date.now()}`,
+                                            title: 'Novo lembrete',
+                                            message: 'Andre, lembrete de saude configurado no Hermes.',
+                                            time: '08:00',
+                                            enabled: true,
+                                            daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+                                            category: 'custom',
+                                            telegramOnly: true,
+                                        })}
+                                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border-standard bg-white px-4 py-3 text-sm font-semibold text-on-surface-variant transition hover:border-primary-container hover:text-primary-container"
+                                    >
+                                        <Icon name="plus" className="h-4 w-4" />
+                                        Adicionar lembrete
+                                    </button>
+                                </div>
                             </HealthSection>
                         </div>
                     </div>

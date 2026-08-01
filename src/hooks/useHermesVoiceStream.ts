@@ -15,10 +15,6 @@ interface UseHermesVoiceStreamOptions {
 
 const MIC_SAMPLE_RATE = 16000;
 const PROCESSOR_BUFFER_SIZE = 4096;
-// Nivel de energia (RMS) acima do qual consideramos que o usuario comecou a
-// falar por cima do Hermes — usado so para cortar a reproducao local na hora
-// (o barge-in "de verdade" ja e nativo do Gemini Live do lado do servidor).
-const BARGE_IN_RMS_THRESHOLD = 0.02;
 
 function getVoiceCandidateUrls(): string[] {
     const configured = (import.meta as any).env?.VITE_HERMES_VOICE_BRIDGE_URL;
@@ -208,13 +204,10 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
                 if (ws.readyState !== WebSocket.OPEN) return;
                 const input = event.inputBuffer.getChannelData(0);
 
-                if (activeSourcesRef.current.length > 0) {
-                    let energy = 0;
-                    for (let i = 0; i < input.length; i++) energy += input[i] * input[i];
-                    if (Math.sqrt(energy / input.length) > BARGE_IN_RMS_THRESHOLD) {
-                        stopAssistantPlayback();
-                    }
-                }
+                // O corte local por energia (RMS) foi removido: com saida de som
+                // em alto-falante, a propria voz do Hermes vazava para o mic e
+                // interrompia a reproducao no meio da frase. O barge-in agora e
+                // exclusivamente o nativo do Gemini Live (mensagem 'interrupted').
 
                 const int16 = new Int16Array(input.length);
                 for (let i = 0; i < input.length; i++) {
@@ -247,6 +240,15 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
             const targetUrl = candidateUrls[index];
             const ws = new WebSocket(targetUrl);
             wsRef.current = ws;
+            // 'error' e 'close' disparam os DOIS quando a conexao falha — sem
+            // esse guard, cada candidato com falha avancava a cadeia duas
+            // vezes e abria duas sessoes Gemini Live em paralelo.
+            let advancedToNext = false;
+            const advanceToNextCandidate = () => {
+                if (advancedToNext) return;
+                advancedToNext = true;
+                attemptConnect(index + 1);
+            };
 
             ws.addEventListener('open', () => {
                 connected = true;
@@ -262,7 +264,7 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
             ws.addEventListener('error', () => {
                 if (!connected) {
                     try { ws.close(); } catch {}
-                    attemptConnect(index + 1);
+                    advanceToNextCandidate();
                 } else if (statusRef.current === 'live') {
                     setStatus('error');
                     statusRef.current = 'error';
@@ -272,7 +274,7 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
 
             ws.addEventListener('close', () => {
                 if (!connected) {
-                    attemptConnect(index + 1);
+                    advanceToNextCandidate();
                     return;
                 }
                 const wasLive = statusRef.current === 'live' || statusRef.current === 'connecting';
@@ -298,6 +300,11 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
                         setStatus('error');
                         statusRef.current = 'error';
                         options.onError?.(payload.message || 'Erro na sessão de voz.');
+                        break;
+                    case 'interrupted':
+                        // Barge-in confirmado pelo VAD do Gemini: descarta o
+                        // audio ja agendado para nao falar por cima do usuario.
+                        stopAssistantPlayback();
                         break;
                     case 'audio':
                     case 'assistant_audio': {
