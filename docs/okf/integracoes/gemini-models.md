@@ -55,9 +55,13 @@ feature real de alto volume e baixo risco: o roteador de intenção de
   `system_usage/openai/daily/<data>`).
 - **Chave:** campo `openai_api_key` no doc Firestore `system/api_keys`
   (mesmo padrão de `claude_api_key`/`gemini_api_key`).
-- **Ativação do A/B:** env var `HERMES_AB_LUNA_INTENT_ROUTER_PCT` (0-100,
-  padrão `0` = desligado). Define a % de chamadas do roteador de intenção
-  desviadas para o Luna em vez do Gemini.
+- **Ativação do A/B:** env var `HERMES_AB_LUNA_INTENT_ROUTER_PCT` (0-100).
+  Define a % de chamadas do roteador de intenção desviadas para o Luna em vez
+  do Gemini. Padrão de operação no código: **10%** (rollout inicial
+  conservador, definido em 01/08/2026 após a chave `openai_api_key` ser
+  cadastrada em `system/api_keys`). Pode ser ajustado sem novo deploy do
+  código setando essa env var no ambiente das Cloud Functions; setar `0`
+  desliga o A/B por completo.
 - **Esforço de raciocínio:** fixo em `low` nessa chamada — Luna não se
   beneficia proporcionalmente de esforço maior, e a tarefa é uma classificação
   binária (`CORRECAO`/`NORMAL`).

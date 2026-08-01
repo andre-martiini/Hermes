@@ -10280,10 +10280,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         _correcao_hint = ""
         if _CORRECAO_KEYWORDS.search(prompt):
             _intent_prompt = f"Responda só 'CORRECAO' ou 'NORMAL': o usuário está corrigindo um procedimento?\nMensagem: {prompt}"
-            # A/B test: HERMES_AB_LUNA_INTENT_ROUTER_PCT (0-100, padrão 0 = desligado)
-            # desvia essa fração das chamadas para o GPT-5.6 Luna (esforço baixo) em vez
-            # do Gemini, para comparar custo/qualidade real nesta feature de alto volume.
-            _use_luna = openai_provider.should_use_luna_ab("HERMES_AB_LUNA_INTENT_ROUTER_PCT")
+            # A/B test: HERMES_AB_LUNA_INTENT_ROUTER_PCT (0-100) desvia essa fração das
+            # chamadas para o GPT-5.6 Luna (esforço baixo) em vez do Gemini, para comparar
+            # custo/qualidade real nesta feature de alto volume. Padrão de operação: 10%
+            # (rollout inicial conservador — ver docs/okf/integracoes/gemini-models.md).
+            # Pode ser sobrescrito sem novo deploy setando a env var no ambiente das Functions.
+            _use_luna = openai_provider.should_use_luna_ab("HERMES_AB_LUNA_INTENT_ROUTER_PCT", default="10")
             try:
                 if _use_luna:
                     openai_key = keys_doc.to_dict().get('openai_api_key') if keys_doc.exists else None
