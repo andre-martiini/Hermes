@@ -1750,6 +1750,34 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
             _answer_callback_query(token, query_id, "Não consegui registrar.")
             _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar esse check-in lombar. Tente responder novamente.")
 
+    elif data.startswith("ai_notif:"):
+        parts = data.split(":")
+        notif_id = parts[1] if len(parts) > 1 else ""
+        action = parts[2] if len(parts) > 2 else ""
+        if not notif_id or action not in ("useful", "dismiss"):
+            _answer_callback_query(token, query_id)
+        else:
+            try:
+                doc_ref = db.collection("scheduled_notifications").document(notif_id)
+                doc_ref.set(
+                    {
+                        "feedback": "useful" if action == "useful" else "dismissed",
+                        "feedback_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                    merge=True,
+                )
+                toast = "Marcado como útil, obrigado!" if action == "useful" else "Ok, vou evitar repetir isso."
+                _answer_callback_query(token, query_id, toast)
+                response_text = (
+                    "👍 Feedback registrado: notificação útil."
+                    if action == "useful"
+                    else "👎 Feedback registrado: notificação dispensada."
+                )
+                _persist_callback_turn(f"Feedback IA ({notif_id}): {action}", response_text)
+            except Exception as exc:
+                print(f"[AINotifications] Falha ao registrar feedback de {notif_id}: {exc}")
+                _answer_callback_query(token, query_id, "Não consegui registrar o feedback.")
+
     elif data == "exit_context":
         acao_titulo = session.get("acao_titulo") or "anterior"
         response_text = f"✅ Saindo do contexto <b>{acao_titulo}</b>. Voltando ao modo geral."

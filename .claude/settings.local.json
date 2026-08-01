@@ -69,7 +69,8 @@
       "Skill(claude-mem:smart-explore)",
       "Skill(claude-mem:smart-explore:*)",
       "Bash(find C:\\\\\\\\Users\\\\\\\\T-GAMER\\\\\\\\Documents\\\\\\\\gestao-Hermes\\\\\\\\src\\\\\\\\views -type f -name \"*.tsx\")",
-      "Bash(npx vite *)"
+      "Bash(npx vite *)",
+      "mcp__Claude_Code_Remote__send_later"
     ]
   }
 }

@@ -4,12 +4,12 @@ title: Mapa de Cloud Functions
 description: Cloud Functions exportadas pelo backend Python do Hermes, agrupadas por arquivo e tipo de trigger.
 resource: functions/main.py
 tags: [hermes, okf, cloud-functions, firebase, arquitetura]
-timestamp: 2026-06-17T00:00:00Z
+timestamp: 2026-08-01T00:00:00Z
 ---
 
 # Mapa de Cloud Functions
 
-O backend roda em Cloud Functions Python (gen2). Há ~78 funções exportadas em `functions/`. Tipos de trigger usados: HTTPS Callable (chamada autenticada do frontend via `httpsCallable`), Firestore trigger (on-create/on-update/on-write), Scheduler (cron), PubSub (workers assíncronos), Storage (on-finalize) e HTTP request puro (webhooks).
+O backend roda em Cloud Functions Python (gen2). Há ~79 funções exportadas em `functions/`. Tipos de trigger usados: HTTPS Callable (chamada autenticada do frontend via `httpsCallable`), Firestore trigger (on-create/on-update/on-write), Scheduler (cron), PubSub (workers assíncronos), Storage (on-finalize) e HTTP request puro (webhooks).
 
 ## `functions/main.py` (~51 funções)
 
@@ -29,7 +29,7 @@ O backend roda em Cloud Functions Python (gen2). Há ~78 funções exportadas em
 | Função | Trigger | O que faz |
 |---|---|---|
 | `on_notificacao_created` | Firestore create (`notificacoes/{id}`) | Espelha notificação para o Telegram |
-| `check_and_send_reminders` | Scheduler (1 min) | Dispara reminders de tarefas/saúde/financeiro |
+| `check_and_send_reminders` | Scheduler (1 min) | Dispara reminders de tarefas/saúde/financeiro; também despacha (`dispatch_pending_ai_notifications`) a fila `scheduled_notifications` gerada pelo planejador de IA |
 
 ### Conhecimento e RAG
 | Função | Trigger | O que faz |
@@ -122,6 +122,18 @@ O backend roda em Cloud Functions Python (gen2). Há ~78 funções exportadas em
 |---|---|---|
 | `telegramWebhook` | HTTP request | Recebe updates do bot do Telegram |
 | `on_telegram_inbound` | Firestore create (`telegram_inbound/{id}`) | Processa mensagem recebida do Telegram |
+| `_handle_telegram_callback` | (interno, chamado por `telegramWebhook`) | Processa botões inline, inclusive `ai_notif:{id}:{useful\|dismiss}` — grava feedback em `scheduled_notifications` |
+
+## `functions/ai_notification_planner.py`
+
+Planejador proativo de notificações por IA — módulo aditivo, usa o mesmo provider/loop de tool-calling do Godmode (Claude), mas roda sem interação do usuário.
+
+| Função | Trigger | O que faz |
+|---|---|---|
+| `ai_notification_planner_daily` | Scheduler (6h30 BRT, diário) | Agente com Claude analisa tarefas ativas e metas estratégicas (`estrategia_pessoal`) e propõe, via ferramenta `propor_notificacao`, no máximo `AI_PLANNER_MAX_DAILY_NOTIFICATIONS` (padrão 3) notificações para o dia, gravadas em `scheduled_notifications` (status `pending`) |
+| `dispatch_pending_ai_notifications` | (interno, chamado por `check_and_send_reminders`) | Envia ao Telegram as notificações agendadas cujo `send_at` já chegou, com botões inline de feedback (👍 útil / 👎 dispensar), e marca `status: sent`/`failed` |
+
+Financeiro e saúde estão fora do escopo deste planejador (mesma limitação atual do Godmode — sem ferramentas de leitura calibradas para esses domínios).
 
 ## `functions/security_portals.py`
 
