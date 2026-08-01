@@ -4,7 +4,7 @@ title: Schema do Firestore
 description: Coleções do Firestore usadas pelo Hermes, agrupadas por domínio, com campos principais, quem escreve em cada uma e suas relações.
 resource: types.ts
 tags: [hermes, okf, firestore, schema, arquitetura]
-timestamp: 2026-06-17T00:00:00Z
+timestamp: 2026-08-01T00:00:00Z
 ---
 
 # Schema do Firestore
@@ -22,6 +22,11 @@ Núcleo de toda a aplicação — ações/tarefas do usuário.
 - **Escreve:** frontend (CRUD direto); `run_full_sync` (sync Google Calendar); `on_tarefa_created_kg`/`on_tarefa_concluida_kg` (grafo); `on_processo_updated` (SIPAC); callables diversas do Copiloto.
 - **Relações:** `concept_node_id` → `knowledge_nodes`; `knowledge_item_ids[]` → `conhecimento`; subcoleção implícita em `sessoes_copiloto`.
 - **Índice:** `reminder_sent` + `reminder_at` (ASC).
+
+## Metas e estratégia pessoal
+
+### `estrategia_pessoal`
+Objetivos/metas estratégicas pessoais do usuário (equivalente a metas de PGD/plano de gestão, mas de escopo pessoal). Campos: `userId`, `pilar` (`carreira`\|`financas`\|`saude`\|`intelectual`\|`estilo_vida`), `objetivoMacro`, `tipoMeta` (`absoluta`\|`relativa_qualitativa`), `metricaAlvo` (`valorInicial`, `valorAtual`, `valorObjetivo`, `unidade`), `historicoMetrica[]`, `indicadoresSucesso[]`, `marcos[]`, `diretrizesDerivadas[]`, `status` (`ativo`\|`concluido`\|`revisar`). Escrito pelo frontend (`StrategyDashboardView.tsx`), pelo refinamento por IA (`estrategia_pessoal_refinar`) e pelas tools de chat do Copiloto (`main.py:10296-10520`). Lido também pelo Godmode (`consultar_metas_estrategicas`) e pelo planejador de notificações de IA (ver `scheduled_notifications` abaixo). Relação: `tarefas.estrategia_objetivo_id`/`estrategia_indicador_id` apontam de volta para cá.
 
 ## Conhecimento e RAG
 
@@ -123,6 +128,7 @@ Exames e consultas médicas: `titulo`, `doutor_local`, `resultados`, `data`, `ti
 |---|---|---|
 | `notificacoes` | Notificações do app, espelhadas no Telegram | `emit_notification_backend`, trigger `on_notificacao_created` |
 | `system_reminders` | Cache para evitar duplicar reminders já enviados | `check_and_send_reminders` |
+| `scheduled_notifications` | Fila de notificações agendadas pelo planejador proativo de IA (`title`, `message`, `category`, `send_at`, `status`: `pending`\|`sent`\|`failed`, `source: "ai_planner"`, `motivo`, `feedback`: `null`\|`useful`\|`dismissed`) — enviadas ao Telegram com botões de feedback, não passam pela coleção `notificacoes` | `ai_notification_planner.py` (`propor_notificacao`, `ai_notification_planner_daily`); consumida e marcada por `dispatch_pending_ai_notifications` (chamada de dentro de `check_and_send_reminders`); `feedback` atualizado pelo callback `ai_notif:{id}:{useful\|dismiss}` em `hermes_core_logic.py` |
 | `relatorios` | Relatórios gerados (PGD e resumos) | `salvarRelatorioNoDrive`, callables de resumo |
 | `google_calendar_events` | Eventos do Google Calendar sincronizados | `sync_google_calendar`, `run_full_sync` |
 | `sipac_processos` | Processos SIPAC sincronizados (scraper externo via PubSub) | trigger `on_processo_updated` |

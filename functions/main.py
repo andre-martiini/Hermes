@@ -3009,6 +3009,13 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
         else:
             task_doc.reference.update({'reminder_sent': True})
 
+    # 4. Notificacoes agendadas pelo planejador proativo de IA (scheduled_notifications)
+    try:
+        from ai_notification_planner import dispatch_pending_ai_notifications
+        dispatch_pending_ai_notifications(db, now)
+    except Exception as exc:
+        print(f"[AINotifications] Falha ao despachar notificacoes agendadas: {exc}")
+
 
 
 @https_fn.on_call()
@@ -13103,6 +13110,9 @@ from daily_morning_briefing import briefing_matinal_acoes
 
 # Import monthly recurring actions job
 from monthly_recurring_actions import gerar_acoes_recorrentes_mensais
+
+# Import daily AI notification planner job
+from ai_notification_planner import ai_notification_planner_daily
 
 
 @https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=60)

@@ -49,6 +49,14 @@
       ]
     },
     {
+      "collectionGroup": "scheduled_notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "send_at", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "indice_artefatos",
       "queryScope": "COLLECTION",
       "fields": [
