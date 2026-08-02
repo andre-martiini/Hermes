@@ -638,7 +638,7 @@ def _gemini_live_config(
         "speech_config": {
             "voice_config": {
                 "prebuilt_voice_config": {
-                    "voice_name": os.getenv("GEMINI_VOICE_NAME", "Charon")
+                    "voice_name": os.getenv("GEMINI_VOICE_NAME", "Orus")
                 }
             },
             # Trava o idioma da sessao: sem isso a transcricao de entrada
