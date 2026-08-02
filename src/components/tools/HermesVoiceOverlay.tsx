@@ -11,6 +11,8 @@ interface HermesVoiceOverlayProps {
     isDark: boolean;
     /** Encerra o modo de voz e devolve a bolinha normal do copiloto. */
     onExit: () => void;
+    onUICommand?: (command: string, params: any) => void;
+    uiContext?: any;
 }
 
 const MAX_VISIBLE_BUBBLES = 6;
@@ -22,7 +24,7 @@ const MAX_VISIBLE_BUBBLES = 6;
  * proximos ao canto inferior direito. O usuario continua navegando livremente
  * — o container nao captura cliques fora dos proprios baloes/botoes.
  */
-export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, onExit }) => {
+export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, onExit, onUICommand, uiContext }) => {
     const [bubbles, setBubbles] = useState<VoiceBubbleItem[]>([]);
     const [statusMessage, setStatusMessage] = useState('');
     const [errorMessage, setErrorMessage] = useState('');
@@ -38,6 +40,7 @@ export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, 
         onAssistantTranscript: (text) => pushBubble('assistant', text),
         onStatus: (message) => { setStatusMessage(message); setErrorMessage(''); },
         onError: (message) => { setErrorMessage(message); setStatusMessage(''); },
+        onUICommand,
     });
 
     const voiceStreamRef = useRef(voiceStream);
@@ -50,6 +53,15 @@ export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, 
         }
         return () => { voiceStreamRef.current.stop(); };
     }, []);
+
+    const sendUIContextRef = useRef(voiceStream.sendUIContext);
+    sendUIContextRef.current = voiceStream.sendUIContext;
+
+    useEffect(() => {
+        if (voiceStream.status === 'live' && uiContext) {
+            sendUIContextRef.current(uiContext);
+        }
+    }, [uiContext, voiceStream.status]);
 
     const isLive = voiceStream.status === 'live';
     const isConnecting = voiceStream.status === 'connecting';

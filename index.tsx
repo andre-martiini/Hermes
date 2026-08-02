@@ -4193,6 +4193,47 @@ const App: React.FC = () => {
       entregasSemCadastro: entregaStatus.filter(s => !s.entregaId)
     };
   }, [planosTrabalho, currentYear, currentMonth, pgcEntregas, pgcTasks, atividadesPGC, afastamentos]);
+
+  const currentUIContext = useMemo(() => {
+    return {
+      activeModule,
+      viewMode,
+      selectedTask: selectedTask ? {
+        id: selectedTask.id,
+        titulo: selectedTask.titulo,
+        area_tematica: selectedTask.area_tematica,
+        status: selectedTask.status,
+        prioridade: selectedTask.prioridade,
+        data_limite: selectedTask.data_limite,
+        responsavel: selectedTask.responsavel || (selectedTask as any).responsavel_nome,
+        descricao: selectedTask.descricao || selectedTask.notas,
+        solucao_sugerida: selectedTask.solucao_sugerida || selectedTask.auto_resumo_executivo,
+        processo_sei: selectedTask.processo_sei || undefined,
+        tags: selectedTask.tags || [],
+        pool_dados: selectedTask.pool_dados?.map(p => ({
+          id: p.id,
+          nome: p.nome || (p as any).titulo || 'Anexo',
+          tipo: p.tipo || 'arquivo',
+          valor: p.valor,
+          resumo: (p as any).resumo || (p as any).descricao || undefined,
+        })) || [],
+        plano_acao: selectedTask.plano_acao?.map(p => ({
+          item: p.item,
+          concluido: !!p.concluido,
+          responsavel: p.responsavel,
+        })) || [],
+        acompanhamento: selectedTask.acompanhamento?.slice(-5).map(a => ({
+          data: a.data,
+          nota: a.nota,
+          autor: a.autor,
+        })) || [],
+      } : null,
+      taskModalMode: selectedTask ? taskModalMode : null,
+      activeFerramenta,
+      searchTerm: searchTerm || undefined,
+    };
+  }, [activeModule, viewMode, selectedTask, taskModalMode, activeFerramenta, searchTerm]);
+
   const isDarkTheme = themeMode === 'dark' || (themeMode === 'system' && prefersDark);
   const appBgClass = isDarkTheme ? 'bg-[#0f172a] text-[#f8fafc]' : 'bg-[#f9fafb] text-on-surface';
   const loginPanelClass = isDarkTheme
@@ -4311,6 +4352,160 @@ const App: React.FC = () => {
       setInitialDiagnosisId(id);
     }
   };
+
+  const handleVoiceUICommand = async (command: string, params: any) => {
+    console.log('[Hermes Voice UI Command]', command, params);
+    if (command === 'navegar_sistema') {
+      // Ao navegar para qualquer módulo ou página inicial, fecha o modal de detalhamento de ação se estiver aberto
+      setSelectedTask(null);
+
+      const mod = String(params?.modulo || '').toLowerCase().trim();
+      let label = 'Dashboard';
+      if (mod.includes('finan')) {
+        setActiveModule('financeiro');
+        setViewMode('finance');
+        label = 'Financeiro';
+      } else if (mod.includes('saud') || mod.includes('saú')) {
+        setActiveModule('saude');
+        setViewMode('saude');
+        label = 'Saúde';
+      } else if (mod.includes('serv')) {
+        setActiveModule('servicos');
+        setViewMode('services');
+        label = 'Serviços';
+      } else if (mod.includes('estrat') || mod.includes('okr')) {
+        setActiveModule('estrategia');
+        setViewMode('strategy');
+        label = 'Estratégia';
+      } else if (mod.includes('godmode') || mod.includes('god')) {
+        setActiveModule('estrategia');
+        setViewMode('godmode');
+        label = 'Godmode';
+      } else if (mod.includes('conhec') || mod.includes('wiki')) {
+        setActiveModule('acoes');
+        setViewMode('knowledge');
+        label = 'Conhecimento';
+      } else if (mod.includes('contat') || mod.includes('pess')) {
+        setActiveModule('acoes');
+        setViewMode('contacts');
+        label = 'Contatos';
+      } else if (mod.includes('rag') || mod.includes('area') || mod.includes('área')) {
+        setActiveModule('acoes');
+        setViewMode('rag-bases');
+        label = 'Áreas Temáticas';
+      } else if (mod.includes('ferram')) {
+        setActiveModule('acoes');
+        setViewMode('ferramentas');
+        label = 'Ferramentas';
+      } else if (mod.includes('licit') || mod.includes('licitacao') || mod.includes('licitação')) {
+        setActiveModule('acoes');
+        setViewMode('licitacoes');
+        label = 'Licitações';
+      } else if (mod.includes('assist')) {
+        setActiveModule('acoes');
+        setViewMode('assistencia');
+        label = 'Assistência';
+      } else if (mod.includes('pgd') || mod.includes('pgc')) {
+        setActiveModule('acoes');
+        setViewMode('pgc');
+        label = 'PGD';
+      } else if (mod.includes('conclu')) {
+        setActiveModule('acoes');
+        setViewMode('concluidas');
+        label = 'Concluídas';
+      } else if (mod.includes('acoe') || mod.includes('ações') || mod.includes('galer') || mod.includes('lista')) {
+        setActiveModule('acoes');
+        setViewMode('gallery');
+        label = 'Ações';
+      } else {
+        // Página Inicial / Dashboard / Home
+        setActiveModule('dashboard');
+        setViewMode('dashboard');
+        label = 'Página Inicial';
+      }
+      showToast?.(`Navegando: ${label}`, 'info');
+    } else if (command === 'fechar_detalhe_acao' || command === 'fechar_modal') {
+      setSelectedTask(null);
+      showToast?.('Detalhamento da ação fechado.', 'info');
+    } else if (command === 'abrir_detalhe_acao') {
+      const rawTarget = String(params?.id_ou_termo || '').trim();
+      if (!rawTarget) return;
+
+      // Se estivemos fora do módulo de ações, vamos abrir o módulo de ações para contexto
+      if (activeModule !== 'acoes' && activeModule !== 'dashboard') {
+        setActiveModule('acoes');
+      }
+
+      const cleanedTarget = rawTarget
+        .toLowerCase()
+        .replace(/^(abrir|ver|detalhar|mostrar|acesse|acessar|ação|acao|tarefa|sobre)\s+/gi, '')
+        .trim();
+
+      const targetLower = cleanedTarget || rawTarget.toLowerCase();
+
+      // 1. Procurar por ID exato ou título idêntico
+      let matchedTask = tarefas.find(t => t.id === rawTarget || t.id === cleanedTarget || t.titulo.toLowerCase() === targetLower);
+
+      // 2. Procurar por correspondência parcial contínua de título
+      if (!matchedTask) {
+        matchedTask = tarefas.find(t => t.titulo.toLowerCase().includes(targetLower));
+      }
+
+      // 3. Procurar por correspondência de palavras-chave (token matching)
+      if (!matchedTask) {
+        const keywords = targetLower.split(/\s+/).filter(w => w.length > 2);
+        if (keywords.length > 0) {
+          matchedTask = tarefas.find(t => {
+            const titleLower = t.titulo.toLowerCase();
+            return keywords.every(kw => titleLower.includes(kw));
+          });
+        }
+        if (!matchedTask && keywords.length > 1) {
+          matchedTask = tarefas.find(t => {
+            const titleLower = t.titulo.toLowerCase();
+            return keywords.some(kw => titleLower.includes(kw));
+          });
+        }
+      }
+
+      if (matchedTask) {
+        setSelectedTask(matchedTask);
+        setTaskModalMode('execute');
+        showToast?.(`Abrindo ação: ${matchedTask.titulo}`, 'info');
+        return;
+      }
+
+      // 4. Se não achou no estado local, busca no Firestore por ID
+      try {
+        const snap = await getDoc(doc(db, 'tarefas', rawTarget));
+        if (snap.exists()) {
+          const tData = { id: snap.id, ...snap.data() } as Tarefa;
+          setSelectedTask(tData);
+          setTaskModalMode('execute');
+          showToast?.(`Abrindo ação: ${tData.titulo}`, 'info');
+        } else {
+          showToast?.(`Ação "${rawTarget}" não foi encontrada.`, 'warning');
+        }
+      } catch (e) {
+        console.error('[Hermes Voice UI] Erro ao buscar tarefa no Firestore:', e);
+      }
+    } else if (command === 'abrir_ferramenta') {
+      const toolId = String(params?.ferramenta_id || '').toLowerCase();
+      setActiveModule('acoes');
+      setViewMode('ferramentas');
+      if (toolId) {
+        setActiveFerramenta(toolId as any);
+      }
+    } else if (command === 'filtrar_acoes') {
+      if (params?.termo_busca !== undefined) {
+        setSearchTerm(String(params.termo_busca));
+      }
+      if (params?.status !== undefined) {
+        setStatusFilter([String(params.status)]);
+      }
+    }
+  };
+
   return (
     <>
       <div className={`min-h-screen flex flex-col md:flex-row relative transition-colors ${appBgClass}`}>
@@ -6967,7 +7162,7 @@ const App: React.FC = () => {
           </>
         )}
         {isVoiceLiveActive && (
-          <HermesVoiceOverlay isDark={isDarkTheme} onExit={() => setIsVoiceLiveActive(false)} />
+          <HermesVoiceOverlay isDark={isDarkTheme} onExit={() => setIsVoiceLiveActive(false)} onUICommand={handleVoiceUICommand} uiContext={currentUIContext} />
         )}
         {!isStrategySplitCopilot && (
         <HermesGlobalChat

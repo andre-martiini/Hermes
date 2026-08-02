@@ -8,6 +8,7 @@ interface UseHermesVoiceStreamOptions {
     onAssistantTranscript: (text: string) => void;
     onStatus?: (message: string) => void;
     onError?: (message: string) => void;
+    onUICommand?: (command: string, params: any) => void;
     /** Se a sessao de voz nasce dentro de uma acao, o bridge recebe o id e
      * injeta contexto + ferramentas de escrita daquela acao. */
     taskId?: string | null;
@@ -331,6 +332,9 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
                         if (assistantText) options.onAssistantTranscript(assistantText);
                         break;
                     }
+                    case 'ui_command':
+                        options.onUICommand?.(payload.command, payload.params || {});
+                        break;
                     default:
                         break;
                 }
@@ -340,5 +344,19 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
         attemptConnect(0);
     }, [options, playAudioChunk, stopAssistantPlayback, teardownMic]);
 
-    return { status, start, stop };
+    const sendUIContext = useCallback((context: any) => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            try {
+                wsRef.current.send(JSON.stringify({
+                    type: 'ui_context',
+                    context,
+                }));
+            } catch (err) {
+                console.error('[Hermes Voice] Erro ao enviar ui_context:', err);
+            }
+        }
+    }, []);
+
+    return { status, start, stop, sendUIContext };
 }
+

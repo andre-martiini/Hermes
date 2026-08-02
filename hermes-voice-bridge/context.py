@@ -43,6 +43,19 @@ def _format_core_context(db) -> str:
     lines.append(
         "- modo_voz: responda como conversa falada, priorizando brevidade, clareza e continuidade."
     )
+    lines.append(
+        "- controle_de_interface_ui: Voce possui ferramentas de UI ativas para navegar e abrir/fechar telas no aplicativo do usuario em tempo real! "
+        "1. Para ir a uma aba/modulo ou voltar para a pagina inicial ('dashboard', 'home', 'início', 'ações', 'financeiro', etc.), chame 'navegar_sistema(modulo=...)'. "
+        "2. Para ABRIR o modal de uma acao, chame 'abrir_detalhe_acao(id_ou_termo=...)'. "
+        "3. Para SAIR da acao, FECHAR o detalhamento ou VOLTAR da acao para a lista/tela principal, chame 'fechar_detalhe_acao()'."
+    )
+    lines.append(
+        "- silencio_apos_comando_ui: REGRA CRITICA: Quando voce executar qualquer ferramenta de navegacao ou controle de interface ('navegar_sistema', 'abrir_detalhe_acao', 'fechar_detalhe_acao', 'abrir_ferramenta', 'filtrar_acoes'), VOCE NAO DEVE FALAR NADA! Nao diga 'aguarde um instante', nao diga 'navegando', nao fale nada. Apenas execute a ferramenta em silencio absoluto. O aplicativo exibira o indicador visual na tela do usuario automaticamente."
+    )
+    lines.append(
+        "- leitura_google_drive: Voce possui a ferramenta 'ler_conteudo_link_drive(url_ou_id=...)' para extrair e ler o conteudo completo em texto de qualquer arquivo ou link do Google Drive (Google Docs, Planilhas, PDFs, Word, etc). "
+        "Sempre que uma acao aberta possuir links do Google Drive ou quando o usuario pedir para ler, analisar ou resumir um documento do Drive, chame 'ler_conteudo_link_drive' informando a URL ou ID."
+    )
     return "\n".join(lines)
 
 

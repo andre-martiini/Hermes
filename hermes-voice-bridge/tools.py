@@ -1,5 +1,7 @@
+import io
 import json
 import os
+import re
 from collections import Counter
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -139,9 +141,114 @@ GEMINI_TOOL_DECLARATIONS = [
                     "required": ["termo"],
                 },
             },
+            {
+                "name": "navegar_sistema",
+                "description": (
+                    "Navega na interface do sistema Hermes para um modulo ou visao especifica. "
+                    "Use quando o usuario pedir para ir, abrir ou acessar uma tela/modulo. "
+                    "Modulos aceitos: 'dashboard', 'financeiro', 'saude', 'acoes', 'servicos', 'estrategia', 'godmode', 'conhecimento', 'contatos', 'rag-bases', 'ferramentas', 'licitacoes', 'assistencia', 'pgc', 'concluidas'."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "modulo": {
+                            "type": "STRING",
+                            "description": "Nome do modulo ou visao de destino (ex: financeiro, saude, acoes, dashboard, estrategia, ferramentas, etc).",
+                        }
+                    },
+                    "required": ["modulo"],
+                },
+            },
+            {
+                "name": "abrir_detalhe_acao",
+                "description": (
+                    "OBRIGATORIO: Abre a janela/modal de detalhamento ou execucao de uma acao/tarefa no Hermes na tela do usuario. "
+                    "Chame SEMPRE esta ferramenta quando o usuario pedir para abrir, ver, detalhar ou mostrar uma acao especifica. "
+                    "Nao apenas responda ou busque no banco de dados; voce DEVE chamar esta ferramenta para abrir o modal na tela dele."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "id_ou_termo": {
+                            "type": "STRING",
+                            "description": "ID exato da acao ou titulo/nome da acao que o usuario quer abrir na tela.",
+                        }
+                    },
+                    "required": ["id_ou_termo"],
+                },
+            },
+            {
+                "name": "abrir_ferramenta",
+                "description": (
+                    "Abre uma ferramenta especifica dentro do Hermes. "
+                    "Ferramentas validas: 'shopping' (Lista de Compras), 'transcription' (Transcricao), 'batch_transcription', 'meeting_transcription', 'sipac_tracking' (SIPAC), 'monitor_paginas', 'long_transcription', 'pop_manager'."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "ferramenta_id": {
+                            "type": "STRING",
+                            "description": "ID da ferramenta (ex: shopping, transcription, sipac_tracking, etc).",
+                        }
+                    },
+                    "required": ["ferramenta_id"],
+                },
+            },
+            {
+                "name": "fechar_detalhe_acao",
+                "description": (
+                    "Fecha o modal/janela de detalhamento de acao que esta aberta na tela do usuario. "
+                    "Use quando o usuario pedir para sair da acao, fechar o detalhamento, fechar a tarefa ou voltar da acao para a lista."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {},
+                },
+            },
+            {
+                "name": "filtrar_acoes",
+                "description": (
+                    "Aplica um filtro de busca textual ou status na lista de acoes do Hermes."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "termo_busca": {
+                            "type": "STRING",
+                            "description": "Termo de busca para filtrar na tela de acoes.",
+                        },
+                        "status": {
+                            "type": "STRING",
+                            "description": "Filtro de status (ex: 'em andamento', 'concluida', etc).",
+                        },
+                    },
+                },
+            },
+            {
+                "name": "ler_conteudo_link_drive",
+                "description": (
+                    "Le e extrai o conteudo textual completo de um arquivo ou link do Google Drive "
+                    "(Google Docs, Planilhas, PDFs, Word, arquivos de texto, etc). "
+                    "Use quando o usuario pedir para ler, resumir, analisar ou investigar o conteudo de um link ou arquivo do Google Drive."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "url_ou_id": {
+                            "type": "STRING",
+                            "description": "URL completa do Google Drive/Docs/Sheets (ex: https://drive.google.com/file/d/.../view) ou o ID exato do arquivo no Drive.",
+                        }
+                    },
+                    "required": ["url_ou_id"],
+                },
+            },
         ]
     }
 ]
+
+UI_TOOL_NAMES = {"navegar_sistema", "abrir_detalhe_acao", "fechar_detalhe_acao", "abrir_ferramenta", "filtrar_acoes"}
+
+
 
 
 def buscar_tarefas_pendentes_hoje(limite: int = 25) -> dict:
@@ -368,6 +475,10 @@ def call_tool(name: str, args: dict | None = None) -> dict:
             termo=args.get("termo", ""),
             limite=args.get("limite", 8),
         )
+    if name == "ler_conteudo_link_drive":
+        return ler_conteudo_link_drive(
+            url_ou_id=args.get("url_ou_id") or args.get("url") or args.get("id") or ""
+        )
     return {"erro": f"Ferramenta desconhecida: {name}"}
 
 
@@ -444,3 +555,104 @@ def _normalize(value) -> str:
         "ignore",
     ).decode()
     return re.sub(r"[^a-z0-9]+", " ", ascii_text.casefold()).strip()
+
+
+_DRIVE_ID_RE = re.compile(
+    r"(?:drive\.google\.com/(?:file/d/|open\?id=)|docs\.google\.com/\w+/d/)([a-zA-Z0-9_-]{20,})"
+)
+
+
+def _extract_drive_file_id(value: str) -> str | None:
+    if not value:
+        return None
+    match = _DRIVE_ID_RE.search(value)
+    if match:
+        return match.group(1)
+    cleaned = value.strip()
+    if len(cleaned) >= 20 and "/" not in cleaned and " " not in cleaned:
+        return cleaned
+    return None
+
+
+def ler_conteudo_link_drive(url_ou_id: str) -> dict:
+    """Extrai e le o conteudo em texto de um arquivo ou link do Google Drive."""
+    import io
+    fid = _extract_drive_file_id(url_ou_id)
+    if not fid:
+        return {"erro": f"Nao foi possivel extrair um File ID valido do link fornecido: {url_ou_id}"}
+
+    db = get_db()
+    creds_doc = db.collection("system").document("google_credentials").get()
+    if not creds_doc.exists:
+        return {"erro": "Credenciais do Google Drive nao encontradas no sistema (Firestore: system/google_credentials)."}
+
+    creds_data = creds_doc.to_dict() or {}
+    try:
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+        from googleapiclient.http import MediaIoBaseDownload
+
+        creds = Credentials(
+            token=creds_data.get("token") or creds_data.get("access_token"),
+            refresh_token=creds_data.get("refresh_token"),
+            token_uri=creds_data.get("token_uri", "https://oauth2.googleapis.com/token"),
+            client_id=creds_data.get("client_id"),
+            client_secret=creds_data.get("client_secret"),
+        )
+        service = build("drive", "v3", credentials=creds)
+        meta = service.files().get(fileId=fid, fields="name,mimeType").execute()
+        file_name = meta.get("name", "arquivo_drive")
+        mime = meta.get("mimeType", "application/octet-stream")
+
+        gapps_mime = {
+            "application/vnd.google-apps.document": "text/plain",
+            "application/vnd.google-apps.spreadsheet": "text/csv",
+            "application/vnd.google-apps.presentation": "text/plain",
+        }
+
+        if mime in gapps_mime:
+            request = service.files().export_media(fileId=fid, mimeType=gapps_mime[mime])
+        else:
+            request = service.files().get_media(fileId=fid)
+
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        content_bytes = buffer.getvalue()
+
+        text = ""
+        lower_name = file_name.lower()
+
+        if mime in gapps_mime or lower_name.endswith((".txt", ".csv", ".md", ".json", ".xml", ".html")):
+            text = content_bytes.decode("utf-8", errors="replace")
+        elif lower_name.endswith(".pdf") or mime == "application/pdf":
+            try:
+                import pypdf
+                reader = pypdf.PdfReader(io.BytesIO(content_bytes))
+                text = "\n".join(page.extract_text() or "" for page in reader.pages)
+            except Exception as pdf_err:
+                text = f"[Falha ao ler PDF com pypdf: {pdf_err}]"
+        elif lower_name.endswith(".docx"):
+            try:
+                import mammoth
+                text = mammoth.extract_raw_text(io.BytesIO(content_bytes)).value or ""
+            except Exception as docx_err:
+                text = f"[Falha ao ler DOCX: {docx_err}]"
+        else:
+            text = content_bytes.decode("utf-8", errors="replace")
+
+        cleaned_text = text.lstrip("\ufeff").strip()
+        if len(cleaned_text) > 8000:
+            cleaned_text = cleaned_text[:8000] + "\n... [conteudo truncado para brevidade]"
+
+        return {
+            "status": "sucesso",
+            "nome_arquivo": file_name,
+            "mime_type": mime,
+            "conteudo_texto": cleaned_text or "Arquivo sem texto extraivel.",
+        }
+    except Exception as exc:
+        return {"erro": f"Falha ao acessar ou ler arquivo no Google Drive (ID: {fid}): {exc}"}
+

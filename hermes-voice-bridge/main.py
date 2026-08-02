@@ -25,7 +25,7 @@ import hermes_mcp
 import task_tools
 from context import build_voice_context
 from database import BrowserAuthError, verify_browser_id_token
-from tools import GEMINI_TOOL_DECLARATIONS, call_tool
+from tools import GEMINI_TOOL_DECLARATIONS, UI_TOOL_NAMES, call_tool
 
 load_dotenv()
 
@@ -706,6 +706,7 @@ async def _forward_gemini_audio_to_twilio(
                     session=session,
                     tool_call=tool_call,
                     auth_event=auth_event,
+                    websocket=websocket,
                 )
                 continue
 
@@ -746,6 +747,71 @@ async def _forward_browser_audio_to_gemini(
         if message_type == "stop":
             stop_event.set()
             break
+
+        if message_type == "ui_context":
+            ctx = message.get("context") or {}
+            active_module = ctx.get("activeModule", "")
+            view_mode = ctx.get("viewMode", "")
+            selected_task = ctx.get("selectedTask")
+            active_tool = ctx.get("activeFerramenta")
+
+            context_lines = [
+                f"[SISTEMA - TELA ATUAL DO USUÁRIO]: O usuário está navegando no Hermes (Módulo: '{active_module}', Visão: '{view_mode}')."
+            ]
+
+            if selected_task:
+                task_details = [
+                    f"AÇÃO/TAREFA ABERTA NA TELA DO USUÁRIO AGORA:\n"
+                    f"- ID: {selected_task.get('id')}\n"
+                    f"- Título: {selected_task.get('titulo')}\n"
+                    f"- Área Temática: {selected_task.get('area_tematica')}\n"
+                    f"- Status: {selected_task.get('status')}\n"
+                    f"- Prioridade: {selected_task.get('prioridade')}\n"
+                    f"- Prazo: {selected_task.get('data_limite')}\n"
+                    f"- Responsável: {selected_task.get('responsavel')}\n"
+                    f"- Processo SEI: {selected_task.get('processo_sei') or 'Nenhum'}\n"
+                    f"- Descrição/Notas: {selected_task.get('descricao') or 'Sem descrição'}\n"
+                    f"- Solução/Resumo: {selected_task.get('solucao_sugerida') or 'Sem resumo'}"
+                ]
+
+                pool_dados = selected_task.get("pool_dados") or []
+                if pool_dados:
+                    pool_items_str = "\n".join(
+                        f"  * [{item.get('tipo', 'anexo')}] {item.get('nome')}: {item.get('valor')} "
+                        f"{f'({item.get('resumo')})' if item.get('resumo') else ''}"
+                        for item in pool_dados
+                    )
+                    task_details.append(f"ARQUIVOS, DOCUMENTOS E LINKS ANEXADOS À AÇÃO ({len(pool_dados)}):\n{pool_items_str}")
+
+                plano_acao = selected_task.get("plano_acao") or []
+                if plano_acao:
+                    plano_str = "\n".join(
+                        f"  * [{'X' if item.get('concluido') else ' '}] {item.get('item')} "
+                        f"{f'(Resp: {item.get('responsavel')})' if item.get('responsavel') else ''}"
+                        for item in plano_acao
+                    )
+                    task_details.append(f"PLANO DE AÇÃO E SUBTAREFAS ({len(plano_acao)} passos):\n{plano_str}")
+
+                acompanhamento = selected_task.get("acompanhamento") or []
+                if acompanhamento:
+                    acomp_str = "\n".join(
+                        f"  * [{item.get('data', '')}] {item.get('nota')} "
+                        f"{f'({item.get('autor')})' if item.get('autor') else ''}"
+                        for item in acompanhamento
+                    )
+                    task_details.append(f"HISTÓRICO DE ACOMPANHAMENTO RECENTE:\n{acomp_str}")
+
+                context_lines.append("\n\n".join(task_details))
+            elif active_tool:
+                context_lines.append(f"FERRAMENTA ABERTA NA TELA AGORA: '{active_tool}'.")
+
+            context_prompt = "\n\n".join(context_lines)
+            logger.info("Updating Gemini Live UI context: module=%s, task=%s", active_module, selected_task.get('titulo') if selected_task else None)
+            try:
+                await session.send(input=context_prompt)
+            except Exception as exc:
+                logger.warning("Falha ao enviar ui_context para session: %s", exc)
+            continue
 
         if message_type != "audio":
             logger.debug("Unhandled browser voice message: %s", message_type)
@@ -828,6 +894,7 @@ async def _forward_gemini_audio_to_browser(
                     mcp_tool_names=mcp_tool_names,
                     id_token=id_token,
                     session_task_id=session_task_id,
+                    websocket=websocket,
                 )
                 continue
 
@@ -904,6 +971,7 @@ async def _handle_gemini_tool_call(
     mcp_tool_names: set[str] | None = None,
     id_token: str | None = None,
     session_task_id: str | None = None,
+    websocket: WebSocket | None = None,
 ) -> None:
     function_responses = []
     mcp_tool_names = mcp_tool_names or set()
@@ -919,6 +987,21 @@ async def _handle_gemini_tool_call(
             result = {
                 "erro": "A ligacao ainda nao foi autenticada pela senha falada. Ferramenta bloqueada."
             }
+        elif name in UI_TOOL_NAMES:
+            if websocket:
+                try:
+                    await websocket.send_json({
+                        "type": "ui_command",
+                        "command": name,
+                        "params": dict(args),
+                    })
+                except Exception as exc:
+                    logger.warning("Falha ao enviar ui_command pelo websocket: %s", exc)
+            result = {
+                "status": "sucesso",
+                "instrucao_resposta": "SILENCIO: O comando de navegacao foi executado com sucesso e a notificacao visual ja foi exibida na tela do usuario. NAO FALE NADA, NAO DIGA 'aguarde um instante' e NAO DIGA que esta navegando. Permaneca em silencio absoluto.",
+                "mensagem": f"Comando de interface '{name}' executado silenciosamente.",
+            }
         elif name in task_tools.TASK_TOOL_NAMES:
             # Tools de acao (diario, plano) — escrevem no Firestore; o task_id
             # da sessao entra como padrao quando o modelo nao informa um.
@@ -930,6 +1013,7 @@ async def _handle_gemini_tool_call(
             result = await asyncio.to_thread(hermes_mcp.call_tool, name, dict(args), id_token)
         else:
             result = await asyncio.to_thread(call_tool, name, dict(args))
+
         function_responses.append(
             types.FunctionResponse(
                 name=name,
