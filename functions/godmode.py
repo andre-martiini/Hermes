@@ -17,8 +17,8 @@ from firebase_functions import https_fn, options
 
 from llm_providers import claude_provider
 
-GODMODE_MODEL = os.environ.get("GODMODE_MODEL", "claude-fable-5")
-GODMODE_FALLBACK_MODEL = os.environ.get("GODMODE_FALLBACK_MODEL", "claude-opus-4-8")
+GODMODE_MODEL = os.environ.get("GODMODE_MODEL", "claude-3-5-sonnet-20241022")
+GODMODE_FALLBACK_MODEL = os.environ.get("GODMODE_FALLBACK_MODEL", "claude-3-5-haiku-20241022")
 GODMODE_MAX_TOKENS = int(os.environ.get("GODMODE_MAX_TOKENS", "4096"))
 GODMODE_FUNCTION_TIMEOUT_SEC = 300
 
