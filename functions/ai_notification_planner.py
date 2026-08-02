@@ -33,8 +33,8 @@ from firebase_functions import scheduler_fn, options
 
 from llm_providers import claude_provider
 
-AI_PLANNER_MODEL = os.environ.get("AI_PLANNER_MODEL", "claude-3-5-sonnet-20241022")
-AI_PLANNER_FALLBACK_MODEL = os.environ.get("AI_PLANNER_FALLBACK_MODEL", "claude-3-5-haiku-20241022")
+AI_PLANNER_MODEL = os.environ.get("AI_PLANNER_MODEL", "claude-fable-5")
+AI_PLANNER_FALLBACK_MODEL = os.environ.get("AI_PLANNER_FALLBACK_MODEL", "claude-opus-4-8")
 AI_PLANNER_MAX_TOKENS = int(os.environ.get("AI_PLANNER_MAX_TOKENS", "2048"))
 AI_PLANNER_MAX_DAILY_NOTIFICATIONS = int(os.environ.get("AI_PLANNER_MAX_DAILY_NOTIFICATIONS", "3"))
 AI_PLANNER_WINDOW_START = os.environ.get("AI_PLANNER_WINDOW_START", "07:00")
