@@ -618,6 +618,12 @@ def _gemini_live_config(
         merged_declarations.extend(extra_declarations)
 
     system_instruction = _build_system_instruction()
+    system_instruction += (
+        "\n\n[AUTENTICACAO DO NAVEGADOR]: Esta sessao de voz do navegador ja foi "
+        "totalmente AUTENTICADA pelo Firebase Auth do usuario. VOCE NAO DEVE "
+        "PEDIR NENHUMA SENHA AO USUARIO em nenhuma hipotese! Atenda a todas as "
+        "perguntas e comandos do usuario imediatamente."
+    )
     if extra_context:
         system_instruction += "\n\n[CONTEXTO ADICIONAL DO COPILOTO]\n" + extra_context
 
@@ -782,7 +788,7 @@ async def _forward_browser_audio_to_gemini(
                 if pool_dados:
                     pool_items_str = "\n".join(
                         f"  * [{item.get('tipo', 'anexo')}] {item.get('nome')}: {item.get('valor')} "
-                        f"{f'({item.get('resumo')})' if item.get('resumo') else ''}"
+                        + (f"({item.get('resumo')})" if item.get('resumo') else "")
                         for item in pool_dados
                     )
                     task_details.append(f"ARQUIVOS, DOCUMENTOS E LINKS ANEXADOS À AÇÃO ({len(pool_dados)}):\n{pool_items_str}")
@@ -791,7 +797,7 @@ async def _forward_browser_audio_to_gemini(
                 if plano_acao:
                     plano_str = "\n".join(
                         f"  * [{'X' if item.get('concluido') else ' '}] {item.get('item')} "
-                        f"{f'(Resp: {item.get('responsavel')})' if item.get('responsavel') else ''}"
+                        + (f"(Resp: {item.get('responsavel')})" if item.get('responsavel') else "")
                         for item in plano_acao
                     )
                     task_details.append(f"PLANO DE AÇÃO E SUBTAREFAS ({len(plano_acao)} passos):\n{plano_str}")
@@ -800,7 +806,7 @@ async def _forward_browser_audio_to_gemini(
                 if acompanhamento:
                     acomp_str = "\n".join(
                         f"  * [{item.get('data', '')}] {item.get('nota')} "
-                        f"{f'({item.get('autor')})' if item.get('autor') else ''}"
+                        + (f"({item.get('autor')})" if item.get('autor') else "")
                         for item in acompanhamento
                     )
                     task_details.append(f"HISTÓRICO DE ACOMPANHAMENTO RECENTE:\n{acomp_str}")
