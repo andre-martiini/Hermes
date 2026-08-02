@@ -466,7 +466,11 @@ async def browser_voice_stream(websocket: WebSocket) -> None:
             await websocket.close(code=1003)
             return
 
-        id_token = auth_message.get("id_token") if auth_message.get("type") == "auth" else None
+        id_token = (
+            auth_message.get("id_token") or auth_message.get("token")
+            if auth_message.get("type") == "auth"
+            else None
+        )
         if not id_token:
             await websocket.send_json(
                 {"type": "error", "message": "Primeira mensagem deve ser {type: 'auth', id_token: ...}."}

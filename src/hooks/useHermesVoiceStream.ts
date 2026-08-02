@@ -25,13 +25,20 @@ function getVoiceCandidateUrls(): string[] {
         candidates.push(clean.replace(/^http/, 'ws') + '/ws');
         candidates.push(clean.replace(/^http/, 'ws') + '/browser-voice-stream');
     }
-    // Tenta porta 8765 (hermes-voice-client) e porta 3002 (hermes-voice-bridge)
-    candidates.push('ws://localhost:8765/ws');
-    candidates.push('ws://127.0.0.1:8765/ws');
-    candidates.push('ws://localhost:8765/browser-voice-stream');
-    candidates.push('ws://localhost:3002/browser-voice-stream');
-    candidates.push('ws://127.0.0.1:3002/browser-voice-stream');
-    candidates.push('ws://localhost:3002/ws');
+
+    // Se estiver rodando localmente (dev), tenta as portas locais primeiro
+    if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+        candidates.push('ws://localhost:3002/browser-voice-stream');
+        candidates.push('ws://127.0.0.1:3002/browser-voice-stream');
+        candidates.push('ws://localhost:3002/ws');
+        candidates.push('ws://localhost:8765/ws');
+    }
+
+    // Servidor de Produção no Google Cloud Run
+    const prodCloudRunUrl = 'wss://hermes-voice-bridge-cmpmsnw5zq-uc.a.run.app';
+    candidates.push(`${prodCloudRunUrl}/browser-voice-stream`);
+    candidates.push(`${prodCloudRunUrl}/ws`);
+
     return Array.from(new Set(candidates));
 }
 
@@ -259,7 +266,7 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
                     micStartedRef.current = true;
                     startMicCapture(ws);
                 }
-                ws.send(JSON.stringify({ type: 'auth', id_token: idToken, task_id: options.taskId || undefined }));
+                ws.send(JSON.stringify({ type: 'auth', id_token: idToken, token: idToken, task_id: options.taskId || undefined }));
             });
 
             ws.addEventListener('error', () => {
