@@ -4016,8 +4016,12 @@ _TRANSCRICAO_RAPIDA_VIDEO_EXTS = {
 }
 
 # Limite para o fluxo de microfone (audioBase64), que não passa pelo Storage.
-# Fica abaixo do teto de 25MB por arquivo do Groq Whisper.
-_MAX_AUDIO_BASE64_BYTES = 24 * 1024 * 1024
+# É um limite sobre o binário decodificado; em base64 ele expande ~4/3, então
+# precisa ficar bem abaixo do teto de ~32MB de payload das Cloud Functions
+# (2nd gen) — senão a plataforma rejeita a requisição antes desta checagem
+# rodar, e o cliente volta a ver o erro cru de transporte. Também fica abaixo
+# do teto de 25MB por arquivo do Groq Whisper.
+_MAX_AUDIO_BASE64_BYTES = 18 * 1024 * 1024
 
 # Tamanho máximo de bloco enviado por vez ao Gemini para refinar a transcrição.
 # Transcrições longas em um único prompt gigantesco podem estourar limites da
