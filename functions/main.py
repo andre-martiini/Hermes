@@ -3012,8 +3012,9 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
 
     # 4. Notificacoes agendadas pelo planejador proativo de IA (scheduled_notifications)
     try:
-        from ai_notification_planner import dispatch_pending_ai_notifications
+        from ai_notification_planner import dispatch_pending_ai_notifications, dispatch_scheduled_whatsapp_messages
         dispatch_pending_ai_notifications(db, now)
+        dispatch_scheduled_whatsapp_messages(db, now)
     except Exception as exc:
         print(f"[AINotifications] Falha ao despachar notificacoes agendadas: {exc}")
 

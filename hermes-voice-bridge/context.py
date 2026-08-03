@@ -58,6 +58,11 @@ def _format_core_context(db) -> str:
         "Sempre que uma acao aberta possuir links do Google Drive ou quando o usuario pedir para ler, analisar ou resumir um documento do Drive, chame 'ler_conteudo_link_drive' informando a URL ou ID."
     )
     lines.append(
+        "- whatsapp_envio_e_agendamento: "
+        "1. Para ENVIAR um WhatsApp IMEDIATO para um contato (ex: 'envie um WhatsApp para o Herbalife', 'mande um zap pro Fulano'), chame 'enviar_whatsapp_contato(nome_ou_telefone=..., mensagem=...)'. "
+        "2. Para AGENDAR um WhatsApp para um horário futuro (ex: 'agende um WhatsApp para o Fulano amanhã às 14h'), chame 'agendar_whatsapp_contato(nome_ou_telefone=..., mensagem=..., data_horario=...)'. No horário exato, o Hermes enviará os botões de confirmação no Telegram com a opção de enviar ou cancelar."
+    )
+    lines.append(
         "- regra_horarios_acoes: REGRAS DE AGENDAMENTO DE HORÁRIOS:\n"
         "1. SEM HORÁRIO FALADO: Se o usuário pedir para criar/mover uma ação sem mencionar horários, DEIXE os horários em branco (NÃO defina horario_inicio nem horario_fim).\n"
         "2. APENAS INÍCIO FALADO (ex: 'às 14h'): Passe horario_inicio='14:00'. Por padrão, o sistema atribuirá 30 minutos de duração (horario_fim='14:30').\n"

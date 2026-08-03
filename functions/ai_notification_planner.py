@@ -433,3 +433,62 @@ def dispatch_pending_ai_notifications(db, now) -> None:
             print(f"[AINotifications] Notificação {doc_snap.id} expirou após falhas repetidas; marcada como 'failed'.")
         else:
             print(f"[AINotifications] Falha ao enviar notificação {doc_snap.id}; nova tentativa no próximo ciclo.")
+
+
+def dispatch_scheduled_whatsapp_messages(db, now) -> None:
+    """
+    Consome `whatsapp_outbox` com status 'pending' e scheduled_for <= agora,
+    enviando notificação no Telegram com 2 botões:
+    1. [ ✅ Sim, Enviar no WhatsApp ] -> URL wa.me direct link
+    2. [ ❌ Cancelar ] -> Callback button para desativar agendamento.
+    """
+    import urllib.parse
+    from main import _resolve_default_telegram_chat_id, _send_telegram_message_raw_with_keyboard
+
+    try:
+        pending = (
+            db.collection("whatsapp_outbox")
+            .where("status", "==", "pending")
+            .where("scheduled_for", "<=", now)
+            .stream()
+        )
+    except Exception as exc:
+        print(f"[WhatsAppOutbox] Falha ao consultar fila de WhatsApp agendados: {exc}")
+        return
+
+    for doc_snap in pending:
+        data = doc_snap.to_dict() or {}
+        to_number = str(data.get("to_number") or "").strip()
+        content = str(data.get("content") or "").strip()
+        contact_name = str(data.get("contact_name") or to_number).strip()
+
+        chat_id = _resolve_default_telegram_chat_id(db)
+        if not chat_id:
+            print(f"[WhatsAppOutbox] Nenhum chat_id configurado no Telegram; agendamento {doc_snap.id} mantido.")
+            continue
+
+        msg_encoded = urllib.parse.quote(content)
+        whatsapp_url = f"https://api.whatsapp.com/send?phone={to_number}&text={msg_encoded}"
+
+        text = (
+            f"📲 <b>WhatsApp Programado Chegou na Hora!</b>\n\n"
+            f"👤 <b>Contato</b>: {contact_name} (<code>{to_number}</code>)\n"
+            f"💬 <b>Mensagem</b>:\n<i>\"{content}\"</i>\n\n"
+            f"Deseja enviar esta mensagem agora?"
+        )
+        keyboard = [
+            [
+                {"text": "✅ Sim, Enviar no WhatsApp", "url": whatsapp_url},
+                {"text": "❌ Cancelar", "callback_data": f"wa_cancel:{doc_snap.id}"}
+            ]
+        ]
+
+        sent = _send_telegram_message_raw_with_keyboard(db, chat_id, text, keyboard)
+        if sent:
+            doc_snap.reference.update({
+                "status": "notified",
+                "notified_at": now.isoformat(),
+                "telegram_sent": True
+            })
+            print(f"[WhatsAppOutbox] Agendamento {doc_snap.id} notificado via Telegram com sucesso.")
+

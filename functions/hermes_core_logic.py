@@ -2125,6 +2125,22 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         _persist_callback_turn("Botão: cancelar WhatsApp", response_text)
         _send_telegram_message(token, chat_id, response_text)
 
+    elif data.startswith("wa_cancel:"):
+        doc_id = data.split("wa_cancel:")[1].strip()
+        _answer_callback_query(token, query_id, "Agendamento cancelado.")
+        try:
+            if doc_id:
+                db.collection("whatsapp_outbox").document(doc_id).update({
+                    "status": "canceled",
+                    "canceled_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                })
+        except Exception as exc:
+            print(f"[TelegramCallback] Erro ao cancelar WhatsApp agendado {doc_id}: {exc}")
+
+        response_text = "❌ <b>Envio de WhatsApp agendado foi cancelado.</b>"
+        _persist_callback_turn("Botão: cancelar WhatsApp agendado", response_text)
+        _send_telegram_message(token, chat_id, response_text)
+
     else:
 
         _answer_callback_query(token, query_id)

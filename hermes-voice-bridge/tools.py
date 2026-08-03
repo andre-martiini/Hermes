@@ -263,6 +263,32 @@ GEMINI_TOOL_DECLARATIONS = [
                     "required": ["nome_ou_telefone", "mensagem"],
                 },
             },
+            {
+                "name": "agendar_whatsapp_contato",
+                "description": (
+                    "Agenda o envio de uma mensagem de WhatsApp para um contato num horario futuro. "
+                    "No horario programado, o Hermes enviara os botoes de confirmacao ('Sim, Enviar' / 'Cancelar') no Telegram. "
+                    "Use quando o usuario pedir para agendar, programar ou marcar um WhatsApp para depois/amanha/data especifica."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "nome_ou_telefone": {
+                            "type": "STRING",
+                            "description": "Nome da pessoa nos Contatos ou numero de telefone.",
+                        },
+                        "mensagem": {
+                            "type": "STRING",
+                            "description": "Texto da mensagem a ser enviada.",
+                        },
+                        "data_horario": {
+                            "type": "STRING",
+                            "description": "Data e horario para o envio (ex: '2026-08-04 14:00', 'amanha as 10h', 'hoje as 18h30').",
+                        },
+                    },
+                    "required": ["nome_ou_telefone", "mensagem", "data_horario"],
+                },
+            },
         ]
     }
 ]
@@ -748,6 +774,103 @@ def enviar_whatsapp_contato(nome_ou_telefone: str, mensagem: str) -> dict:
         "mensagem": msg,
         "url_whatsapp": url_whatsapp,
         "instrucao_ui": "enviar_whatsapp_contato",
+    }
+
+
+def agendar_whatsapp_contato(nome_ou_telefone: str, mensagem: str, data_horario: str) -> dict:
+    """Agenda o envio de mensagem de WhatsApp salvando na coleção whatsapp_outbox no Firestore."""
+    from database import get_db
+    import re
+    from datetime import datetime, timedelta, timezone
+
+    nome_ou_tel = str(nome_ou_telefone or "").strip()
+    msg = str(mensagem or "").strip()
+    dh_str = str(data_horario or "").strip()
+
+    if not nome_ou_tel or not msg or not dh_str:
+        return {"erro": "Informe contato, mensagem e data/horário para agendar o WhatsApp."}
+
+    db = get_db()
+    contato_encontrado = None
+    telefone_bruto = None
+
+    if re.search(r"\d{8,}", nome_ou_tel):
+        telefone_bruto = nome_ou_tel
+    else:
+        termo_lower = nome_ou_tel.lower()
+        for snap in db.collection("perfil_pessoas").stream():
+            d = snap.to_dict() or {}
+            nome = str(d.get("nome") or "").strip()
+            tel = d.get("telefone") or d.get("whatsapp") or d.get("celular") or d.get("fone")
+            if nome and tel and termo_lower in nome.lower():
+                contato_encontrado = nome
+                telefone_bruto = str(tel)
+                break
+
+        if not telefone_bruto:
+            for snap in db.collection("usuarios").stream():
+                d = snap.to_dict() or {}
+                nome = str(d.get("nome") or "").strip()
+                tel = d.get("telefone") or d.get("whatsapp") or d.get("celular")
+                if nome and tel and termo_lower in nome.lower():
+                    contato_encontrado = nome
+                    telefone_bruto = str(tel)
+                    break
+
+    if not telefone_bruto:
+        return {
+            "erro": f"Não foi possível encontrar o telefone de '{nome_ou_tel}' nos Contatos. Verifique o cadastro."
+        }
+
+    tel_formatado = _limpar_telefone(telefone_bruto)
+    if not tel_formatado or len(tel_formatado) < 10:
+        return {"erro": f"O número de telefone de '{contato_encontrado or nome_ou_tel}' é inválido."}
+
+    now_local = datetime.now(LOCAL_TZ)
+    dt_target = None
+
+    dh_lower = dh_str.lower()
+    m_time = re.search(r"(\d{1,2})[h:](\d{2})?", dh_lower)
+    hh = int(m_time.group(1)) if m_time else 14
+    mm = int(m_time.group(2)) if (m_time and m_time.group(2)) else 0
+
+    if "amanh" in dh_lower:
+        target_date = (now_local + timedelta(days=1)).date()
+        dt_target = datetime(target_date.year, target_date.month, target_date.day, hh, mm, tzinfo=LOCAL_TZ)
+    elif "hoje" in dh_lower:
+        dt_target = datetime(now_local.year, now_local.month, now_local.day, hh, mm, tzinfo=LOCAL_TZ)
+    else:
+        try:
+            cleaned_iso = dh_str.replace("Z", "").strip()
+            if "T" in cleaned_iso or " " in cleaned_iso:
+                dt_raw = datetime.fromisoformat(cleaned_iso)
+                dt_target = dt_raw.replace(tzinfo=LOCAL_TZ) if dt_raw.tzinfo is None else dt_raw
+        except Exception:
+            pass
+
+    if not dt_target:
+        dt_target = datetime(now_local.year, now_local.month, now_local.day, hh, mm, tzinfo=LOCAL_TZ)
+        if dt_target <= now_local:
+            dt_target += timedelta(days=1)
+
+    doc_ref = db.collection("whatsapp_outbox").document()
+    doc_ref.set({
+        "to_number": tel_formatado,
+        "contact_name": contato_encontrado or nome_ou_tel,
+        "content": msg,
+        "scheduled_for": dt_target,
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc),
+    })
+
+    horario_formatado = dt_target.strftime("%d/%m/%Y às %H:%M")
+    return {
+        "status": "sucesso",
+        "contato": contato_encontrado or nome_ou_tel,
+        "telefone": tel_formatado,
+        "mensagem": msg,
+        "horario_programado": horario_formatado,
+        "resposta_voz": f"WhatsApp para {contato_encontrado or nome_ou_tel} agendado com sucesso para {horario_formatado}. No horário, enviarei os botões de confirmação no Telegram.",
     }
 
 
