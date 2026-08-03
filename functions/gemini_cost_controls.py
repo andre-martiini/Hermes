@@ -405,3 +405,35 @@ def check_and_increment_limit(
         print(f"[GeminiUsage] Failed to check/increment limit for {user_id}/{feature}: {e}")
         return True  # Fail-open if Firestore fails
 
+
+def decrement_limit(
+    db: Any,
+    user_id: str | None,
+    feature: str,
+) -> None:
+    """Decrements the daily limit counter for a feature if an operation fails or produces an error."""
+    if not user_id or db is None:
+        return
+
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        from firebase_admin import firestore
+
+        ref = (
+            db.collection("system_usage")
+            .document("user_limits")
+            .collection(user_id)
+            .document(day)
+        )
+        doc = ref.get()
+        if doc.exists:
+            current = doc.to_dict().get(feature, 0)
+            if current > 0:
+                ref.set({
+                    feature: firestore.Increment(-1),
+                    "updated_at": firestore.SERVER_TIMESTAMP
+                }, merge=True)
+    except Exception as e:
+        print(f"[GeminiUsage] Failed to decrement limit for {user_id}/{feature}: {e}")
+
+

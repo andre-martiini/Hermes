@@ -215,6 +215,16 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
     [showToast],
   );
 
+  const todaySuccessCount = React.useMemo(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    return history.filter((item) => {
+      if (item.status === 'Erro') return false;
+      const itemTime = item.createdAt?.toDate ? item.createdAt.toDate().getTime() : 0;
+      return itemTime >= startOfToday;
+    }).length;
+  }, [history]);
+
   const cardBg = isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
   const textMuted = isDark ? 'text-slate-400' : 'text-slate-500';
   const headingColor = isDark ? 'text-slate-100' : 'text-slate-900';
@@ -223,23 +233,32 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
     <div className={`min-h-full ${isDark ? 'bg-slate-950' : 'bg-slate-50'} p-4 md:p-8`}>
       <div className="max-w-5xl mx-auto">
         {/* Header */}
-        <div className="flex items-center gap-4 mb-6">
-          <button
-            onClick={onBack}
-            className={`w-12 h-12 rounded-none-none flex items-center justify-center border transition-all ${
-              isDark
-                ? 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-100 hover:border-blue-500'
-                : 'bg-white border-slate-200 text-slate-400 hover:text-slate-900 hover:border-slate-900'
-            }`}
-            aria-label="Voltar"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <div>
-            <p className="text-[10px] font-mono font-bold text-blue-500 uppercase tracking-wider mb-0.5">MODULE: ID-009</p>
-            <h2 className={`text-xl font-mono font-bold uppercase tracking-tight ${headingColor}`}>Transcrições Longas</h2>
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={onBack}
+              className={`w-12 h-12 rounded-none-none flex items-center justify-center border transition-all ${
+                isDark
+                  ? 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-100 hover:border-blue-500'
+                  : 'bg-white border-slate-200 text-slate-400 hover:text-slate-900 hover:border-slate-900'
+              }`}
+              aria-label="Voltar"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <div>
+              <p className="text-[10px] font-mono font-bold text-blue-500 uppercase tracking-wider mb-0.5">MODULE: ID-009</p>
+              <h2 className={`text-xl font-mono font-bold uppercase tracking-tight ${headingColor}`}>Transcrições Longas</h2>
+            </div>
+          </div>
+
+          <div className={`px-3 py-1.5 border font-mono text-[11px] font-bold rounded-none flex items-center gap-2 ${
+            isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-700'
+          }`}>
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Limite diário: <strong className="text-blue-500">{todaySuccessCount}</strong> / 8 transcrições</span>
           </div>
         </div>
 

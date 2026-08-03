@@ -85,6 +85,7 @@ from hermes_core_logic import (  # noqa: F401 — registra as Cloud Functions
 )
 from gemini_cost_controls import (
     check_and_increment_limit,
+    decrement_limit,
     log_gemini_usage,
     GEMINI_ROUTING_MODEL,
     GEMINI_LIGHT_MODEL,
@@ -14006,9 +14007,17 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
     client = None
 
     try:
-        limit_long_trans = int(_os.environ.get("LIMIT_LONG_TRANSCRIPTION", "3"))
-        if not check_and_increment_limit(db, user_id, "long_transcription", limit_long_trans):
-            raise RuntimeError("Você atingiu o limite diário de 3 transcrições longas.")
+        limit_long_trans = int(_os.environ.get("LIMIT_LONG_TRANSCRIPTION", "8"))
+        
+        # Desconta transcrições de hoje que deram erro do limite diário
+        start_of_today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        valid_today_docs = db.collection("long_transcriptions").where("userId", "==", user_id).where("createdAt", ">=", start_of_today).stream()
+        non_error_count = sum(1 for d in valid_today_docs if (d.to_dict() or {}).get("status") != "Erro")
+
+        if non_error_count > limit_long_trans:
+            raise RuntimeError(f"Você atingiu o limite diário de {limit_long_trans} transcrições longas.")
+
+        check_and_increment_limit(db, user_id, "long_transcription", limit_long_trans)
 
         api_key = get_gemini_api_key()
         if not api_key:
@@ -14120,6 +14129,7 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
             except Exception:
                 pass
         print(f"[long_transcription] ERRO em {transcription_id}: {msg}")
+        decrement_limit(db, user_id, "long_transcription")
         try:
             doc_ref.update({
                 "status": "Erro",
