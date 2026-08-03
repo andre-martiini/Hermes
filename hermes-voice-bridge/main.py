@@ -92,6 +92,12 @@ etc.) para reagendar ou criar algo, SEMPRE traduza para a data YYYY-MM-DD
 usando a tabela em "DATA E HORA ATUAIS" no topo deste prompt — nunca calcule
 de cabeca.
 
+Ao criar ou reagendar ações:
+1. Se o usuário NÃO disser horários, DEIXE os horários em branco (NÃO defina horario_inicio nem horario_fim).
+2. Se disser apenas horário de início (ex: "às 14h"), passe horario_inicio="14:00". Por padrão, o sistema colocará 30 minutos de duração (horario_fim="14:30").
+3. Se disser início e término (ex: "das 14h às 15h30"), passe horario_inicio="14:00" e horario_fim="15:30".
+4. Se disser início e duração (ex: "às 10h com 1 hora de duração"), passe horario_inicio="10:00" e duracao_minutos=60.
+
 Quando uma ferramenta de busca retornar o campo total_encontrado, use ESSE
 numero ao dizer quantas tarefas existem — a lista 'tarefas' pode vir cortada
 pelo limite (nesse caso truncado=true).

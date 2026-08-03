@@ -3786,6 +3786,9 @@ const App: React.FC = () => {
           if (sfStatus === 'stand-by' || sfStatus === 'cgby') {
             return tStatus === 'stand-by' || tStatus === 'cgby';
           }
+          if (sfStatus === 'em andamento') {
+            return tStatus === 'em andamento' || tStatus === 'nao iniciado' || tStatus === 'pendente';
+          }
           return tStatus === sfStatus;
         });
         // Se a tarefa não tem data válida, ela é considerada stand-by "na prática"

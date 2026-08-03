@@ -20,6 +20,66 @@ from google.cloud import firestore as gc_firestore
 
 from database import get_db
 
+
+def _normalizar_hhmm(hhmm_str: str | None) -> str | None:
+    if not hhmm_str:
+        return None
+    raw = str(hhmm_str).strip().lower().replace("h", ":")
+    parts = raw.split(":")
+    if len(parts) == 1:
+        try:
+            h = int(parts[0])
+            if 0 <= h <= 23:
+                return f"{h:02d}:00"
+        except ValueError:
+            return None
+    elif len(parts) >= 2:
+        try:
+            h = int(parts[0])
+            m = int(parts[1]) if parts[1] else 0
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                return f"{h:02d}:{m:02d}"
+        except ValueError:
+            return None
+    return None
+
+
+def _calcular_horarios(
+    horario_inicio: str | None = None,
+    horario_fim: str | None = None,
+    duracao_minutos: int | str | None = None,
+) -> tuple[str | None, str | None]:
+    if not horario_inicio or not str(horario_inicio).strip():
+        return None, None
+
+    h_ini = _normalizar_hhmm(horario_inicio)
+    if not h_ini:
+        return None, None
+
+    if horario_fim and str(horario_fim).strip():
+        h_fim = _normalizar_hhmm(horario_fim)
+        if h_fim:
+            return h_ini, h_fim
+
+    dur = 30
+    if duracao_minutos is not None:
+        try:
+            dur_val = int(duracao_minutos)
+            if dur_val > 0:
+                dur = dur_val
+        except (ValueError, TypeError):
+            pass
+
+    try:
+        hours, minutes = map(int, h_ini.split(":"))
+        total_mins = hours * 60 + minutes + dur
+        end_hours = (total_mins // 60) % 24
+        end_mins = total_mins % 60
+        return h_ini, f"{end_hours:02d}:{end_mins:02d}"
+    except Exception:
+        return h_ini, None
+
+
 TASK_TOOL_DECLARATIONS = [
     {
         "name": "consultar_acao_atual",
@@ -140,6 +200,18 @@ TASK_TOOL_DECLARATIONS = [
                     "type": "STRING",
                     "description": "Motivo da mudanca de data (sera gravado no diario da tarefa).",
                 },
+                "horario_inicio": {
+                    "type": "STRING",
+                    "description": "Novo horario de inicio no formato HH:MM (ex: '14:00'). Opcional: passe APENAS se o usuario pediu para agendar horario.",
+                },
+                "horario_fim": {
+                    "type": "STRING",
+                    "description": "Novo horario de termino no formato HH:MM (ex: '14:30'). Opcional (se omitido e houver horario_inicio, calcula +30 min).",
+                },
+                "duracao_minutos": {
+                    "type": "INTEGER",
+                    "description": "Duracao da acao em minutos (ex: 30, 45, 60). Opcional.",
+                },
                 "task_id": {
                     "type": "STRING",
                     "description": "ID da tarefa. Opcional se a sessao ja esta dentro de uma acao.",
@@ -231,6 +303,18 @@ TASK_TOOL_DECLARATIONS = [
                     "type": "STRING",
                     "description": "Data limite no formato YYYY-MM-DD (ex: 2026-08-10). Se o usuario disser um dia da semana, converta para YYYY-MM-DD usando a data atual.",
                 },
+                "horario_inicio": {
+                    "type": "STRING",
+                    "description": "Horario de inicio da acao no formato HH:MM (ex: '14:00'). APENAS passe se o usuario pediu para agendar horario. Se nao falar horario, NAO passe (deixe em branco).",
+                },
+                "horario_fim": {
+                    "type": "STRING",
+                    "description": "Horario de termino no formato HH:MM (ex: '14:30'). Opcional (se omitido e houver horario_inicio, calcula +30 min).",
+                },
+                "duracao_minutos": {
+                    "type": "INTEGER",
+                    "description": "Duracao da acao em minutos (ex: 30, 45, 60). Opcional.",
+                },
                 "prioridade": {
                     "type": "STRING",
                     "description": "Prioridade da acao: 'alta', 'media' ou 'baixa'. Padrao e 'media'.",
@@ -260,6 +344,9 @@ def call_task_tool(name: str, args: dict, session_task_id: str | None) -> dict:
             titulo=str(args.get("titulo") or ""),
             descricao=str(args.get("descricao") or ""),
             data_limite=str(args.get("data_limite")) if args.get("data_limite") else None,
+            horario_inicio=str(args.get("horario_inicio")) if args.get("horario_inicio") else None,
+            horario_fim=str(args.get("horario_fim")) if args.get("horario_fim") else None,
+            duracao_minutos=args.get("duracao_minutos"),
             prioridade=str(args.get("prioridade") or "média"),
             responsavel=str(args.get("responsavel")) if args.get("responsavel") else None,
             passos_plano_acao=args.get("passos_plano_acao") if isinstance(args.get("passos_plano_acao"), list) else None,
@@ -284,7 +371,14 @@ def call_task_tool(name: str, args: dict, session_task_id: str | None) -> dict:
         concluido = args.get("concluido")
         return _concluir_passo(task_id, str(args.get("texto_passo") or ""), True if concluido is None else bool(concluido))
     if name == "reagendar_acao":
-        return _reagendar_acao(task_id, str(args.get("nova_data") or ""), str(args.get("justificativa") or ""))
+        return _reagendar_acao(
+            task_id=task_id,
+            nova_data=str(args.get("nova_data") or ""),
+            justificativa=str(args.get("justificativa") or ""),
+            horario_inicio=str(args.get("horario_inicio")) if args.get("horario_inicio") else None,
+            horario_fim=str(args.get("horario_fim")) if args.get("horario_fim") else None,
+            duracao_minutos=args.get("duracao_minutos"),
+        )
     if name == "mudar_status_acao":
         return _mudar_status_acao(task_id, str(args.get("novo_status") or ""), str(args.get("justificativa") or ""))
     if name == "criar_lembrete_acao":
@@ -485,7 +579,14 @@ def _concluir_passo(task_id: str, texto_passo: str, concluido: bool) -> dict:
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-def _reagendar_acao(task_id: str, nova_data: str, justificativa: str) -> dict:
+def _reagendar_acao(
+    task_id: str,
+    nova_data: str,
+    justificativa: str,
+    horario_inicio: str | None = None,
+    horario_fim: str | None = None,
+    duracao_minutos: int | str | None = None,
+) -> dict:
     nova_data = nova_data.strip()
     if not _DATE_RE.match(nova_data):
         return {"erro": "Data invalida — use o formato YYYY-MM-DD."}
@@ -507,16 +608,34 @@ def _reagendar_acao(task_id: str, nova_data: str, justificativa: str) -> dict:
 
     data_anterior = data.get("data_limite")
     now_iso = datetime.now(timezone.utc).isoformat()
+
+    h_ini, h_fim = _calcular_horarios(horario_inicio, horario_fim, duracao_minutos)
+    time_str = f" das {h_ini} às {h_fim}" if h_ini and h_fim else (f" às {h_ini}" if h_ini else "")
+
     diary_entry = {
         "data": now_iso,
-        "nota": f"[Copiloto de Voz] Data de execucao alterada de {data_anterior or 'sem data'} para {nova_data}: {justificativa.strip()}",
+        "nota": f"[Copiloto de Voz] Data de execucao alterada de {data_anterior or 'sem data'} para {nova_data}{time_str}: {justificativa.strip()}",
     }
-    task_ref.update({
+
+    updates = {
         "data_limite": nova_data,
         "data_atualizacao": now_iso,
         "acompanhamento": gc_firestore.ArrayUnion([diary_entry]),
-    })
-    return {"status": "ok", "task_id": task_id, "data_anterior": data_anterior, "nova_data": nova_data}
+    }
+    if h_ini:
+        updates["horario_inicio"] = h_ini
+        if h_fim:
+            updates["horario_fim"] = h_fim
+
+    task_ref.update(updates)
+    return {
+        "status": "ok",
+        "task_id": task_id,
+        "data_anterior": data_anterior,
+        "nova_data": nova_data,
+        "horario_inicio": h_ini,
+        "horario_fim": h_fim,
+    }
 
 
 _STATUS_VALIDOS = {"em andamento", "stand-by", "concluído", "excluído"}
@@ -641,6 +760,9 @@ def _criar_nova_acao(
     titulo: str,
     descricao: str = "",
     data_limite: str | None = None,
+    horario_inicio: str | None = None,
+    horario_fim: str | None = None,
+    duracao_minutos: int | str | None = None,
     prioridade: str = "média",
     responsavel: str | None = None,
     passos_plano_acao: list[str] | None = None,
@@ -672,7 +794,7 @@ def _criar_nova_acao(
         "id": task_id,
         "titulo": titulo.strip(),
         "descricao": (descricao or "").strip(),
-        "status": "não iniciado",
+        "status": "em andamento",
         "prioridade": prioridade if prioridade in ("alta", "média", "baixa") else "média",
         "data_criacao": now_iso,
         "data_atualizacao": now_iso,
@@ -683,6 +805,12 @@ def _criar_nova_acao(
         "plano_acao": plano_acao,
         "acompanhamento": [diary_entry],
     }
+
+    h_ini, h_fim = _calcular_horarios(horario_inicio, horario_fim, duracao_minutos)
+    if h_ini:
+        doc_payload["horario_inicio"] = h_ini
+    if h_fim:
+        doc_payload["horario_fim"] = h_fim
 
     if data_limite and re.match(r"^\d{4}-\d{2}-\d{2}$", data_limite.strip()):
         doc_payload["data_limite"] = data_limite.strip()
@@ -698,6 +826,8 @@ def _criar_nova_acao(
             "task_id": task_id,
             "titulo": titulo.strip(),
             "data_limite": doc_payload.get("data_limite"),
+            "horario_inicio": doc_payload.get("horario_inicio"),
+            "horario_fim": doc_payload.get("horario_fim"),
         }
     except Exception as exc:
         return {"status": "erro", "mensagem": f"Falha ao criar ação no Firestore: {exc}"}

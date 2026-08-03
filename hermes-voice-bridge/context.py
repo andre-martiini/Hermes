@@ -57,6 +57,13 @@ def _format_core_context(db) -> str:
         "Sempre que uma acao aberta possuir links do Google Drive ou quando o usuario pedir para ler, analisar ou resumir um documento do Drive, chame 'ler_conteudo_link_drive' informando a URL ou ID."
     )
     lines.append(
+        "- regra_horarios_acoes: REGRAS DE AGENDAMENTO DE HORÁRIOS:\n"
+        "1. SEM HORÁRIO FALADO: Se o usuário pedir para criar/mover uma ação sem mencionar horários, DEIXE os horários em branco (NÃO defina horario_inicio nem horario_fim).\n"
+        "2. APENAS INÍCIO FALADO (ex: 'às 14h'): Passe horario_inicio='14:00'. Por padrão, o sistema atribuirá 30 minutos de duração (horario_fim='14:30').\n"
+        "3. INÍCIO E TÉRMINO FALADOS (ex: 'das 14h às 15h30'): Passe horario_inicio='14:00' e horario_fim='15:30'.\n"
+        "4. INÍCIO E DURAÇÃO FALADOS (ex: 'às 10h com 1 hora de duração'): Passe horario_inicio='10:00' e duracao_minutos=60."
+    )
+    lines.append(
         "- personalidade_jarvis: Sua personalidade e inspirada no estilo Jarvis — hiper-competente, extremamente eficiente, polida e pontual, porem com um toque sutil de sarcasmo refinado e humor acido moderado. "
         "REGRAS DE PERSONALIDADE:\n"
         "1. EFICIENCIA EM PRIMEIRO LUGAR: Cumpras as tarefas com 100% de precisao e agilidade. Nunca sacrifique a utilidade pelo humor.\n"
