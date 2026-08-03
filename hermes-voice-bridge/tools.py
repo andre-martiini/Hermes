@@ -543,6 +543,21 @@ def call_tool(name: str, args: dict | None = None) -> dict:
         return ler_conteudo_link_drive(
             url_ou_id=args.get("url_ou_id") or args.get("url") or args.get("id") or ""
         )
+    if name == "enviar_whatsapp_contato":
+        return enviar_whatsapp_contato(
+            nome_ou_telefone=args.get("nome_ou_telefone") or args.get("contato") or "",
+            mensagem=args.get("mensagem") or "",
+        )
+    if name == "agendar_whatsapp_contato":
+        return agendar_whatsapp_contato(
+            nome_ou_telefone=args.get("nome_ou_telefone") or args.get("contato") or "",
+            mensagem=args.get("mensagem") or "",
+            data_horario=args.get("data_horario") or args.get("horario") or "",
+        )
+    if name == "buscar_contatos_agenda":
+        return buscar_contatos_agenda(
+            termo_busca=args.get("termo_busca") or args.get("termo") or args.get("nome") or ""
+        )
     return {"erro": f"Ferramenta desconhecida: {name}"}
 
 
