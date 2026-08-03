@@ -49,6 +49,21 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
     const [showProposalsModal, setShowProposalsModal] = useState<boolean>(false);
     const [proposals, setProposals] = useState<MergeProposalGroup[]>([]);
     const [isBatchMerging, setIsBatchMerging] = useState<boolean>(false);
+    const [ignoredPairKeys, setIgnoredPairKeys] = useState<Set<string>>(new Set());
+
+    // Listener para pares de mesclagem ignorados pelo usuário
+    useEffect(() => {
+        const qIgnored = collection(db, 'ignored_contact_merges');
+        const unsub = onSnapshot(qIgnored, (snapshot) => {
+            const keys = new Set<string>();
+            snapshot.docs.forEach(docSnap => {
+                const data = docSnap.data();
+                if (data.pair_key) keys.add(data.pair_key);
+            });
+            setIgnoredPairKeys(keys);
+        });
+        return () => unsub();
+    }, []);
 
     // Add/Edit Modal
     const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -273,11 +288,20 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
             }
         });
 
+        const getPairKey = (id1: string, id2: string) => [id1, id2].sort().join(':');
         const proposalGroups: MergeProposalGroup[] = [];
 
         clusters.forEach((cluster, idx) => {
             const availableItems = cluster.items.filter(item => !usedIds.has(item.id));
             if (availableItems.length >= 2) {
+                const primaryCandidate = availableItems[0];
+                const hasUnignoredPair = availableItems.slice(1).some(sec => {
+                    const key = getPairKey(primaryCandidate.id, sec.id);
+                    return !ignoredPairKeys.has(key);
+                });
+
+                if (!hasUnignoredPair) return;
+
                 availableItems.forEach(item => usedIds.add(item.id));
 
                 const sorted = [...availableItems].sort((a, b) => {
@@ -301,7 +325,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
 
     const detectedProposalsCount = React.useMemo(() => {
         return findMergeProposals(contacts).length;
-    }, [contacts]);
+    }, [contacts, ignoredPairKeys]);
 
     const handleOpenProposalsModal = () => {
         const found = findMergeProposals(contacts);
@@ -311,6 +335,24 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
         }
         setProposals(found);
         setShowProposalsModal(true);
+    };
+
+    const handleIgnoreProposal = async (proposal: MergeProposalGroup) => {
+        try {
+            const getPairKey = (id1: string, id2: string) => [id1, id2].sort().join(':');
+            for (const sec of proposal.secondaryContacts) {
+                const pairKey = getPairKey(proposal.primaryContact.id, sec.id);
+                await addDoc(collection(db, 'ignored_contact_merges'), {
+                    pair_key: pairKey,
+                    reason: proposal.reason,
+                    created_at: new Date().toISOString()
+                });
+            }
+            setProposals(prev => prev.filter(p => p.id !== proposal.id));
+        } catch (err: any) {
+            console.error("Erro ao ignorar sugestão:", err);
+            alert(`Erro ao ignorar sugestão: ${err.message || err}`);
+        }
     };
 
     const handleToggleProposalSelect = (proposalId: string) => {
@@ -1195,13 +1237,24 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                             </span>
                                         </div>
 
-                                        <button
-                                            onClick={() => handleExecuteBatchMerge([prop])}
-                                            disabled={isBatchMerging}
-                                            className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold uppercase tracking-wider rounded border border-indigo-500 transition-all"
-                                        >
-                                            Mesclar Este Grupo
-                                        </button>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => handleIgnoreProposal(prop)}
+                                                disabled={isBatchMerging}
+                                                className="px-2.5 py-1 border border-slate-300 dark:border-slate-700 text-slate-500 hover:text-rose-500 hover:border-rose-500 text-[10px] font-bold uppercase tracking-wider rounded transition-all flex items-center gap-1"
+                                                title="Ignorar esta sugestão permanentemente"
+                                            >
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                Ignorar
+                                            </button>
+                                            <button
+                                                onClick={() => handleExecuteBatchMerge([prop])}
+                                                disabled={isBatchMerging}
+                                                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold uppercase tracking-wider rounded border border-indigo-500 transition-all"
+                                            >
+                                                Mesclar Este Grupo
+                                            </button>
+                                        </div>
                                     </div>
 
                                     {/* Primary vs Secondary breakdown */}

@@ -3010,9 +3010,10 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
         else:
             task_doc.reference.update({'reminder_sent': True})
 
-    # 4. Notificacoes agendadas pelo planejador proativo de IA (scheduled_notifications)
+    # 4. Notificacoes agendadas pelo planejador proativo de IA e Verificacao de Duplicatas de Contatos
     try:
         from ai_notification_planner import dispatch_pending_ai_notifications, dispatch_scheduled_whatsapp_messages
+        from contact_merge_utils import find_and_notify_duplicate_contacts
         dispatch_pending_ai_notifications(db, now)
         dispatch_scheduled_whatsapp_messages(db, now)
     except Exception as exc:
@@ -13862,120 +13863,16 @@ def merge_contacts(req: https_fn.CallableRequest):
                 message="ID do contato principal (primary_id) e IDs secundários (secondary_ids) são obrigatórios."
             )
             
-        # 1. Recuperar o contato principal
-        primary_ref = db.collection("perfil_pessoas").document(primary_id)
-        primary_doc = primary_ref.get()
-        if not primary_doc.exists:
+        from contact_merge_utils import execute_contact_merge
+        res = execute_contact_merge(db, primary_id, secondary_ids)
+        if not res.get("success"):
             raise https_fn.HttpsError(
                 code=https_fn.FunctionsErrorCode.NOT_FOUND,
-                message="Contato principal não encontrado."
+                message=res.get("error", "Erro ao mesclar contatos.")
             )
-        primary_data = primary_doc.to_dict() or {}
-        
-        # 2. Recuperar os contatos secundários e extrair informações
-        extra_emails = []
-        extra_phones = []
-        extra_tags = set(primary_data.get("tags") or [])
-        extra_observacoes_lines = []
-        
-        secondary_names = []
-        
-        for sec_id in secondary_ids:
-            sec_ref = db.collection("perfil_pessoas").document(sec_id)
-            sec_doc = sec_ref.get()
-            if not sec_doc.exists:
-                continue
-            sec_data = sec_doc.to_dict() or {}
-            
-            secondary_names.append(sec_data.get("nome", ""))
-            
-            # Adiciona e-mail se for diferente do principal
-            email = sec_data.get("email")
-            if email and email.lower() != (primary_data.get("email") or "").lower():
-                extra_emails.append(email)
-                
-            # Adiciona telefone se for diferente do principal
-            phone = sec_data.get("telefone")
-            if phone and phone.strip() != (primary_data.get("telefone") or "").strip():
-                extra_phones.append(phone)
-                
-            # Combina tags
-            for t in (sec_data.get("tags") or []):
-                extra_tags.add(t)
-                
-            # Observações do secundário
-            obs = sec_data.get("observacoes")
-            if obs and obs.strip():
-                extra_observacoes_lines.append(f"Nota de {sec_data.get('nome')}: {obs.strip()}")
-                
-            # Resumo IA do secundário se houver
-            sec_resumo = sec_data.get("resumo_ia")
-            if sec_resumo and sec_resumo.strip():
-                extra_observacoes_lines.append(f"Resumo IA anterior de {sec_data.get('nome')}: {sec_resumo.strip()}")
-
-        # 3. Atualizar dados do contato principal
-        merged_payload = {
-            "tags": list(extra_tags),
-            "data_atualizacao": datetime.now(timezone.utc).isoformat()
-        }
-        
-        # Se o principal não tem e-mail, define o primeiro secundário disponível
-        if not primary_data.get("email") and extra_emails:
-            merged_payload["email"] = extra_emails.pop(0)
-            
-        # Se o principal não tem telefone, define o primeiro secundário disponível
-        if not primary_data.get("telefone") and extra_phones:
-            merged_payload["telefone"] = extra_phones.pop(0)
-            
-        # Grava os e-mails/telefones extras nas observações para não perder
-        current_obs = primary_data.get("observacoes") or ""
-        obs_parts = []
-        if current_obs.strip():
-            obs_parts.append(current_obs.strip())
-            
-        if extra_emails:
-            obs_parts.append(f"E-mails mesclados adicionais: {', '.join(extra_emails)}")
-        if extra_phones:
-            obs_parts.append(f"Telefones mesclados adicionais: {', '.join(extra_phones)}")
-        if extra_observacoes_lines:
-            obs_parts.extend(extra_observacoes_lines)
-            
-        if obs_parts:
-            merged_payload["observacoes"] = "\n".join(obs_parts)
-            
-        # 4. Transmitir todas as interações dos contatos secundários para o principal
-        total_interactions_moved = 0
-        
-        for sec_id in secondary_ids:
-            interactions_ref = db.collection("interacoes_pessoas").where("pessoa_id", "==", sec_id).stream()
-            for inter_doc in interactions_ref:
-                db.collection("interacoes_pessoas").document(inter_doc.id).update({
-                    "pessoa_id": primary_id
-                })
-                total_interactions_moved += 1
-
-        # 5. Salvar dados consolidados no principal
-        primary_ref.update(merged_payload)
-        
-        # 6. Deletar os perfis secundários
-        for sec_id in secondary_ids:
-            db.collection("perfil_pessoas").document(sec_id).delete()
-            
-        # 7. Registra uma nova interação manual do tipo mesclagem detalhando a ação
-        merge_desc = f"Perfis de {', '.join(secondary_names)} foram mesclados neste contato. {total_interactions_moved} interações transferidas."
-        db.collection("interacoes_pessoas").document().set({
-            "pessoa_id": primary_id,
-            "tipo": "manual",
-            "data": datetime.now(timezone.utc).isoformat(),
-            "descricao": merge_desc,
-            "data_criacao": datetime.now(timezone.utc).isoformat()
-        })
-        
-        return {
-            "success": True,
-            "message": f"Contatos mesclados com sucesso. {total_interactions_moved} interações transferidas.",
-            "primary_id": primary_id
-        }
+        return res
+    except https_fn.HttpsError:
+        raise
     except Exception as e:
         print(f"Erro ao mesclar contatos: {e}")
         raise https_fn.HttpsError(

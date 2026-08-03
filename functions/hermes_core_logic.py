@@ -2141,6 +2141,56 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         _persist_callback_turn("Botão: cancelar WhatsApp agendado", response_text)
         _send_telegram_message(token, chat_id, response_text)
 
+    elif data.startswith("merge_confirm:"):
+        req_id = data.split("merge_confirm:")[1].strip()
+        req_doc = db.collection("contact_merge_requests").document(req_id).get()
+        if not req_doc.exists:
+            _answer_callback_query(token, query_id, "Solicitação não encontrada.")
+        else:
+            req_data = req_doc.to_dict() or {}
+            primary_id = req_data.get("primary_id")
+            secondary_id = req_data.get("secondary_id")
+
+            from contact_merge_utils import execute_contact_merge
+            res = execute_contact_merge(db, primary_id, [secondary_id])
+
+            if res.get("success"):
+                db.collection("contact_merge_requests").document(req_id).update({
+                    "status": "merged",
+                    "merged_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                })
+                _answer_callback_query(token, query_id, "Contatos mesclados!")
+                msg = f"✅ <b>Contatos mesclados com sucesso!</b>\nOs perfis <b>{html.escape(str(req_data.get('secondary_name', '')))}</b> e <b>{html.escape(str(req_data.get('primary_name', '')))}</b> foram unificados."
+            else:
+                _answer_callback_query(token, query_id, "Erro ao mesclar.")
+                msg = f"❌ Erro ao mesclar contatos: {html.escape(str(res.get('error', '')))}"
+
+            _persist_callback_turn("Botão: confirmar mesclagem de contatos", msg)
+            _send_telegram_message(token, chat_id, msg)
+
+    elif data.startswith("merge_ignore:"):
+        req_id = data.split("merge_ignore:")[1].strip()
+        req_doc = db.collection("contact_merge_requests").document(req_id).get()
+        if not req_doc.exists:
+            _answer_callback_query(token, query_id, "Solicitação não encontrada.")
+        else:
+            req_data = req_doc.to_dict() or {}
+            pair_key = req_data.get("pair_key")
+            if pair_key:
+                db.collection("ignored_contact_merges").add({
+                    "pair_key": pair_key,
+                    "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "reason": req_data.get("reason", "")
+                })
+            db.collection("contact_merge_requests").document(req_id).update({
+                "status": "ignored",
+                "ignored_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            })
+            _answer_callback_query(token, query_id, "Sugestão ignorada.")
+            msg = f"❌ <b>Sugestão de mesclagem ignorada.</b>\nEsta combinação de contatos não será mais sugerida."
+            _persist_callback_turn("Botão: ignorar mesclagem de contatos", msg)
+            _send_telegram_message(token, chat_id, msg)
+
     else:
 
         _answer_callback_query(token, query_id)
