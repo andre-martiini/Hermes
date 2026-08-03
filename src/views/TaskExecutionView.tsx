@@ -131,6 +131,7 @@ interface TaskExecutionViewProps {
   onOpenCopilotoTask?: (taskId: string) => void;
   onOpenCopilotoTool?: (tool: string, id: string) => void;
   onCreateAction: () => void;
+  onUICommand?: (command: string, params: any) => void;
 }
 
 type MobileTab = 'mapa' | 'diario' | 'copiloto';
@@ -189,6 +190,7 @@ export const TaskExecutionView = ({
   onOpenCopilotoTask,
   onOpenCopilotoTool,
   onCreateAction,
+  onUICommand,
 }: TaskExecutionViewProps) => {
 
   // ─── Derived Data ─────────────────────────────────────────────
@@ -2384,6 +2386,7 @@ export const TaskExecutionView = ({
                 sessionId={tempSessionId}
                 onOpenTask={onOpenCopilotoTask}
                 onOpenTool={onOpenCopilotoTool}
+                onUICommand={onUICommand}
                 onCopilotActivity={markCopilotActivity}
               />
             </div>
@@ -3221,6 +3224,7 @@ export const TaskExecutionView = ({
                   sessionId={tempSessionId}
                   onOpenTask={onOpenCopilotoTask}
                   onOpenTool={onOpenCopilotoTool}
+                  onUICommand={onUICommand}
                   onCopilotActivity={markCopilotActivity}
                 />
               </div>

@@ -6761,6 +6761,7 @@ const App: React.FC = () => {
                 unidades={unidades}
                 onClose={() => setSelectedTask(null)}
                 showToast={showToast}
+                onUICommand={handleVoiceUICommand}
                 notifications={notifications}
                 isSyncing={isSyncing}
                 isNotificationCenterOpen={isNotificationCenterOpen}

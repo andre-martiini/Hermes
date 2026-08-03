@@ -440,6 +440,8 @@ interface HermesCopilotoDrawerProps {
     sessionId?: string | null;
     autoStartMic?: boolean;
     copilotMode?: 'default' | 'finance' | 'saude';
+    /** Callback para comandos de UI disparados pela voz */
+    onUICommand?: (command: string, params: any) => void;
     /** Sinaliza ao container que um turno do copiloto começou/terminou,
      *  para que mudanças subsequentes no plano/diário não disparem insight duplicado. */
     onCopilotActivity?: (phase: 'started' | 'completed' | 'failed' | 'cancelled') => void;
@@ -449,7 +451,7 @@ type UploadPhase = 'idle' | 'uploading' | 'processing';
 const MOBILE_BREAKPOINT = 768;
 
 export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
-    isOpen, onClose, taskId, systemId, isDark = false, variant = 'drawer', userId, onOpenTask, onOpenTool, activeDocument, isTemporary, sessionId, autoStartMic = false, copilotMode = 'default' as 'default' | 'finance' | 'saude', onCopilotActivity
+    isOpen, onClose, taskId, systemId, isDark = false, variant = 'drawer', userId, onOpenTask, onOpenTool, activeDocument, isTemporary, sessionId, autoStartMic = false, copilotMode = 'default' as 'default' | 'finance' | 'saude', onUICommand, onCopilotActivity
 }) => {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -682,6 +684,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     const voiceStream = useHermesVoiceStream({
         taskId,
+        onUICommand,
         onUserTranscript: (text) => {
             const sId = currentSessionIdRef.current;
             if (!sId) return;
