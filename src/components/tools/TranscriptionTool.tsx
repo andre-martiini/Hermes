@@ -197,9 +197,9 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
       setTranscription(data);
       saveToHistory(data, file.name, file.size);
       showToast("Transcrição concluída!", "success");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao transcrever:", error);
-      showToast("Erro ao processar áudio.", "error");
+      showToast(error?.message || "Erro ao processar áudio.", "error");
     } finally {
       if (stillProcessingTimer) clearTimeout(stillProcessingTimer);
       setUploadProgress(null);

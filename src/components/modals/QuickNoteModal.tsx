@@ -76,9 +76,9 @@ export const QuickNoteModal: React.FC<QuickNoteModalProps> = ({ isOpen, onClose,
           const response = await transcribeFunc({ audioBase64: base64String });
           const data = response.data as { raw: string, refined: string };
           if (data.refined) onAddIdea(data.refined);
-        } catch (error) {
+        } catch (error: any) {
           console.error("Erro ao transcrever:", error);
-          showAlert("Erro", "Erro ao processar áudio via Hermes AI.");
+          showAlert("Erro", error?.message || "Erro ao processar áudio via Hermes AI.");
         } finally {
           setIsProcessing(false);
         }

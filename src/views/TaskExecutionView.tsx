@@ -1548,7 +1548,7 @@ export const TaskExecutionView = ({
           const res = await fn({ audioBase64: b64 });
           const data = res.data as { raw: string; refined: string };
           if (data.refined) setter(prev => prev + (prev ? '\n' : '') + data.refined);
-        } catch { showToast('Erro ao processar áudio.', 'error'); }
+        } catch (error: any) { showToast(error?.message || 'Erro ao processar áudio.', 'error'); }
         finally { setIsProcessingTranscription(false); }
       };
     } catch { setIsProcessingTranscription(false); }

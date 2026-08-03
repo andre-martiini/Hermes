@@ -863,7 +863,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
               const res = await fn({ audioBase64: b64 });
               const data = res.data as { raw: string; refined: string };
               if (data.refined) setInputText(prev => (prev ? prev + ' ' : '') + data.refined);
-            } catch { showAlert('Erro', 'Erro ao transcrever o áudio.'); }
+            } catch (error: any) { showAlert('Erro', error?.message || 'Erro ao transcrever o áudio.'); }
             finally { setIsTranscribing(false); }
           };
         } catch { setIsTranscribing(false); }
