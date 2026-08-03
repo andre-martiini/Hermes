@@ -289,6 +289,23 @@ GEMINI_TOOL_DECLARATIONS = [
                     "required": ["nome_ou_telefone", "mensagem", "data_horario"],
                 },
             },
+            {
+                "name": "buscar_contatos_agenda",
+                "description": (
+                    "Busca ou lista contatos no modulo de Contatos do Hermes. "
+                    "A busca ignora acentos, maiusculas, minusculas e til. "
+                    "Use quando o usuario perguntar sobre contatos, numeros de telefone ou quiser procurar alguem na agenda."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "termo_busca": {
+                            "type": "STRING",
+                            "description": "Nome, email, cargo ou palavra-chave para buscar contatos. Deixe em branco para listar contatos.",
+                        }
+                    },
+                },
+            },
         ]
     }
 ]
@@ -717,6 +734,92 @@ def _limpar_telefone(raw_phone: str) -> str:
     return digits
 
 
+def _normalizar_texto(text: str) -> str:
+    if not text:
+        return ""
+    import unicodedata
+    nfkd = unicodedata.normalize("NFKD", str(text))
+    return "".join([c for c in nfkd if not unicodedata.combining(c)]).lower().strip()
+
+
+def _buscar_contatos_no_banco(termo_busca: str = "", limite: int = 15) -> list[dict]:
+    """
+    Busca contatos em `perfil_pessoas` e `usuarios` ignorando acentos, maiúsculas, minúsculas e til.
+    """
+    norm_query = _normalizar_texto(termo_busca)
+    tokens_query = [t for t in norm_query.split() if len(t) >= 2]
+    resultados = []
+    vistos = set()
+
+    db = get_db()
+    collections_to_search = [
+        ("perfil_pessoas", ["nome", "apelido", "email", "telefone", "whatsapp", "celular", "fone", "cargo_funcao", "empresa", "tags"]),
+        ("usuarios", ["nome", "email", "telefone", "whatsapp", "celular"]),
+    ]
+
+    for coll_name, fields in collections_to_search:
+        for snap in db.collection(coll_name).stream():
+            d = snap.to_dict() or {}
+            doc_id = snap.id
+            if doc_id in vistos:
+                continue
+
+            nome = str(d.get("nome") or d.get("apelido") or "").strip()
+            tel_raw = d.get("telefone") or d.get("whatsapp") or d.get("celular") or d.get("fone") or ""
+            tel_fmt = _limpar_telefone(tel_raw) if tel_raw else ""
+
+            if not nome:
+                continue
+
+            if not norm_query:
+                vistos.add(doc_id)
+                resultados.append({
+                    "id": doc_id,
+                    "nome": nome,
+                    "telefone": tel_fmt or str(tel_raw),
+                    "email": str(d.get("email") or ""),
+                    "cargo": str(d.get("cargo_funcao") or d.get("cargo") or ""),
+                    "empresa": str(d.get("empresa") or ""),
+                })
+                if len(resultados) >= limite:
+                    break
+                continue
+
+            text_to_search_norm = _normalizar_texto(" ".join(str(d.get(f) or "") for f in fields))
+
+            match = False
+            if norm_query in text_to_search_norm:
+                match = True
+            elif tokens_query and any(tok in text_to_search_norm for tok in tokens_query):
+                match = True
+
+            if match:
+                vistos.add(doc_id)
+                resultados.append({
+                    "id": doc_id,
+                    "nome": nome,
+                    "telefone": tel_fmt or str(tel_raw),
+                    "email": str(d.get("email") or ""),
+                    "cargo": str(d.get("cargo_funcao") or d.get("cargo") or ""),
+                    "empresa": str(d.get("empresa") or ""),
+                })
+                if len(resultados) >= limite:
+                    break
+
+    return resultados
+
+
+def buscar_contatos_agenda(termo_busca: str = "") -> dict:
+    """Busca contatos na agenda do Hermes sem distinção de acentos, maiúsculas ou minúsculas."""
+    encontrados = _buscar_contatos_no_banco(termo_busca, limite=20)
+    return {
+        "status": "sucesso",
+        "total_encontrados": len(encontrados),
+        "contatos": encontrados,
+        "mensagem": f"Encontrados {len(encontrados)} contatos correspondentes a '{termo_busca}'." if termo_busca else f"Listados {len(encontrados)} contatos da agenda."
+    }
+
+
 def enviar_whatsapp_contato(nome_ou_telefone: str, mensagem: str) -> dict:
     """Busca contato no Firestore perfil_pessoas/usuarios e gera a URL de envio do WhatsApp."""
     import urllib.parse
@@ -726,32 +829,18 @@ def enviar_whatsapp_contato(nome_ou_telefone: str, mensagem: str) -> dict:
     if not nome_ou_tel:
         return {"erro": "Informe o nome ou número de telefone do contato."}
 
-    db = get_db()
     contato_encontrado = None
     telefone_bruto = None
 
     if re.search(r"\d{8,}", nome_ou_tel):
         telefone_bruto = nome_ou_tel
     else:
-        termo_lower = nome_ou_tel.lower()
-        for snap in db.collection("perfil_pessoas").stream():
-            d = snap.to_dict() or {}
-            nome = str(d.get("nome") or "").strip()
-            tel = d.get("telefone") or d.get("whatsapp") or d.get("celular") or d.get("fone")
-            if nome and tel and termo_lower in nome.lower():
-                contato_encontrado = nome
-                telefone_bruto = str(tel)
-                break
-
-        if not telefone_bruto:
-            for snap in db.collection("usuarios").stream():
-                d = snap.to_dict() or {}
-                nome = str(d.get("nome") or "").strip()
-                tel = d.get("telefone") or d.get("whatsapp") or d.get("celular")
-                if nome and tel and termo_lower in nome.lower():
-                    contato_encontrado = nome
-                    telefone_bruto = str(tel)
-                    break
+        encontrados = _buscar_contatos_no_banco(nome_ou_tel, limite=5)
+        if encontrados:
+            com_tel = [c for c in encontrados if c.get("telefone")]
+            alvo = com_tel[0] if com_tel else encontrados[0]
+            contato_encontrado = alvo.get("nome")
+            telefone_bruto = alvo.get("telefone")
 
     if not telefone_bruto:
         return {
@@ -790,32 +879,18 @@ def agendar_whatsapp_contato(nome_ou_telefone: str, mensagem: str, data_horario:
     if not nome_ou_tel or not msg or not dh_str:
         return {"erro": "Informe contato, mensagem e data/horário para agendar o WhatsApp."}
 
-    db = get_db()
     contato_encontrado = None
     telefone_bruto = None
 
     if re.search(r"\d{8,}", nome_ou_tel):
         telefone_bruto = nome_ou_tel
     else:
-        termo_lower = nome_ou_tel.lower()
-        for snap in db.collection("perfil_pessoas").stream():
-            d = snap.to_dict() or {}
-            nome = str(d.get("nome") or "").strip()
-            tel = d.get("telefone") or d.get("whatsapp") or d.get("celular") or d.get("fone")
-            if nome and tel and termo_lower in nome.lower():
-                contato_encontrado = nome
-                telefone_bruto = str(tel)
-                break
-
-        if not telefone_bruto:
-            for snap in db.collection("usuarios").stream():
-                d = snap.to_dict() or {}
-                nome = str(d.get("nome") or "").strip()
-                tel = d.get("telefone") or d.get("whatsapp") or d.get("celular")
-                if nome and tel and termo_lower in nome.lower():
-                    contato_encontrado = nome
-                    telefone_bruto = str(tel)
-                    break
+        encontrados = _buscar_contatos_no_banco(nome_ou_tel, limite=5)
+        if encontrados:
+            com_tel = [c for c in encontrados if c.get("telefone")]
+            alvo = com_tel[0] if com_tel else encontrados[0]
+            contato_encontrado = alvo.get("nome")
+            telefone_bruto = alvo.get("telefone")
 
     if not telefone_bruto:
         return {
@@ -853,6 +928,7 @@ def agendar_whatsapp_contato(nome_ou_telefone: str, mensagem: str, data_horario:
         if dt_target <= now_local:
             dt_target += timedelta(days=1)
 
+    db = get_db()
     doc_ref = db.collection("whatsapp_outbox").document()
     doc_ref.set({
         "to_number": tel_formatado,
