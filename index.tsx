@@ -4437,6 +4437,15 @@ const App: React.FC = () => {
     } else if (command === 'fechar_detalhe_acao' || command === 'fechar_modal') {
       setSelectedTask(null);
       showToast?.('Detalhamento da ação fechado.', 'info');
+    } else if (command === 'enviar_whatsapp_contato') {
+      const url = params?.url_whatsapp || (params?.telefone ? `https://api.whatsapp.com/send?phone=${params.telefone}&text=${encodeURIComponent(params.mensagem || '')}` : '');
+      const contatoNome = params?.contato || params?.nome_ou_telefone || 'contato';
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+        showToast?.(`Abrindo conversa do WhatsApp para ${contatoNome}...`, 'success');
+      } else {
+        showToast?.(`Não foi possível abrir o WhatsApp para ${contatoNome}. Telefone não encontrado.`, 'error');
+      }
     } else if (command === 'abrir_detalhe_acao') {
       const rawTarget = String(params?.id_ou_termo || '').trim();
       if (!rawTarget) return;

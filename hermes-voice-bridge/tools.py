@@ -242,6 +242,27 @@ GEMINI_TOOL_DECLARATIONS = [
                     "required": ["url_ou_id"],
                 },
             },
+            {
+                "name": "enviar_whatsapp_contato",
+                "description": (
+                    "Prepara e abre a conversa do WhatsApp no computador/navegador do usuario com um contato do Hermes. "
+                    "Use SEMPRE que o usuario pedir para enviar WhatsApp, mandar um ZAP ou abrir conversa com alguem da agenda de contatos."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "nome_ou_telefone": {
+                            "type": "STRING",
+                            "description": "Nome da pessoa cadastrada no modulo de Contatos do Hermes (ex: 'Maria', 'Joao Silva') ou numero de telefone.",
+                        },
+                        "mensagem": {
+                            "type": "STRING",
+                            "description": "Texto da mensagem a ser enviada no WhatsApp.",
+                        },
+                    },
+                    "required": ["nome_ou_telefone", "mensagem"],
+                },
+            },
         ]
     }
 ]
@@ -655,4 +676,78 @@ def ler_conteudo_link_drive(url_ou_id: str) -> dict:
         }
     except Exception as exc:
         return {"erro": f"Falha ao acessar ou ler arquivo no Google Drive (ID: {fid}): {exc}"}
+
+
+def _limpar_telefone(raw_phone: str) -> str:
+    digits = re.sub(r"\D", "", str(raw_phone or ""))
+    if digits.startswith("0"):
+        digits = digits[1:]
+    if digits.startswith("55") and len(digits) in (12, 13):
+        return digits
+    if len(digits) in (10, 11):
+        return f"55{digits}"
+    if not digits.startswith("55") and len(digits) >= 8:
+        return f"55{digits}"
+    return digits
+
+
+def enviar_whatsapp_contato(nome_ou_telefone: str, mensagem: str) -> dict:
+    """Busca contato no Firestore perfil_pessoas/usuarios e gera a URL de envio do WhatsApp."""
+    import urllib.parse
+
+    nome_ou_tel = str(nome_ou_telefone or "").strip()
+    msg = str(mensagem or "").strip()
+    if not nome_ou_tel:
+        return {"erro": "Informe o nome ou número de telefone do contato."}
+
+    db = get_db()
+    contato_encontrado = None
+    telefone_bruto = None
+
+    if re.search(r"\d{8,}", nome_ou_tel):
+        telefone_bruto = nome_ou_tel
+    else:
+        termo_lower = nome_ou_tel.lower()
+        for snap in db.collection("perfil_pessoas").stream():
+            d = snap.to_dict() or {}
+            nome = str(d.get("nome") or "").strip()
+            tel = d.get("telefone") or d.get("whatsapp") or d.get("celular") or d.get("fone")
+            if nome and tel and termo_lower in nome.lower():
+                contato_encontrado = nome
+                telefone_bruto = str(tel)
+                break
+
+        if not telefone_bruto:
+            for snap in db.collection("usuarios").stream():
+                d = snap.to_dict() or {}
+                nome = str(d.get("nome") or "").strip()
+                tel = d.get("telefone") or d.get("whatsapp") or d.get("celular")
+                if nome and tel and termo_lower in nome.lower():
+                    contato_encontrado = nome
+                    telefone_bruto = str(tel)
+                    break
+
+    if not telefone_bruto:
+        return {
+            "erro": f"Não foi possível encontrar o telefone de '{nome_ou_tel}' no cadastro de Contatos do Hermes. Verifique se a pessoa está cadastrada com número de telefone."
+        }
+
+    tel_formatado = _limpar_telefone(telefone_bruto)
+    if not tel_formatado or len(tel_formatado) < 10:
+        return {
+            "erro": f"O número de telefone de '{contato_encontrado or nome_ou_tel}' ({telefone_bruto}) parece inválido."
+        }
+
+    msg_encoded = urllib.parse.quote(msg)
+    url_whatsapp = f"https://api.whatsapp.com/send?phone={tel_formatado}&text={msg_encoded}"
+
+    return {
+        "status": "ok",
+        "contato": contato_encontrado or nome_ou_tel,
+        "telefone": tel_formatado,
+        "mensagem": msg,
+        "url_whatsapp": url_whatsapp,
+        "instrucao_ui": "enviar_whatsapp_contato",
+    }
+
 

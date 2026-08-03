@@ -1035,6 +1035,15 @@ async def _handle_gemini_tool_call(
             result = await asyncio.to_thread(hermes_mcp.call_tool, name, dict(args), id_token)
         else:
             result = await asyncio.to_thread(call_tool, name, dict(args))
+            if isinstance(result, dict) and result.get("url_whatsapp") and websocket:
+                try:
+                    await websocket.send_json({
+                        "type": "ui_command",
+                        "command": "enviar_whatsapp_contato",
+                        "params": result,
+                    })
+                except Exception as exc:
+                    logger.warning("Falha ao enviar ui_command WhatsApp pelo websocket: %s", exc)
 
         function_responses.append(
             types.FunctionResponse(
