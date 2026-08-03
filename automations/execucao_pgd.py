@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -17,12 +16,14 @@ def _set_native_value(driver, element, value: str) -> None:
         """
         const element = arguments[0];
         const value = arguments[1];
-        const setter = Object.getOwnPropertyDescriptor(
-          window.HTMLInputElement.prototype, 'value'
-        ).set;
+        const proto = element.tagName === 'TEXTAREA'
+          ? window.HTMLTextAreaElement.prototype
+          : window.HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
         setter.call(element, value);
         element.dispatchEvent(new Event('input', { bubbles: true }));
         element.dispatchEvent(new Event('change', { bubbles: true }));
+        element.dispatchEvent(new Event('blur', { bubbles: true }));
         """,
         element,
         value,
@@ -31,7 +32,7 @@ def _set_native_value(driver, element, value: str) -> None:
 
 def preencher_execucao_pgd(dados_pgd: dict) -> None:
     """Automação histórica de registros de execução, mantida para compatibilidade."""
-    driver, espera = iniciar_sessao_pgd()
+    driver, _ = iniciar_sessao_pgd()
     mes_referencia = dados_pgd.get("mes_ano", "")
     entregas = dados_pgd.get("entregas", [])
     print(f"Iniciando registros de execução para {mes_referencia}.")
@@ -65,6 +66,18 @@ def preencher_execucao_pgd(dados_pgd: dict) -> None:
         if "collapsed" in painel.get_attribute("class"):
             driver.execute_script("arguments[0].click();", painel)
             time.sleep(1)
+
+        try:
+            expansores_detalhamento = WebDriverWait(driver, 15).until(
+                EC.presence_of_all_elements_located(
+                    (By.XPATH, "//i[contains(@class,'bi-plus-square')]")
+                )
+            )
+            for expansor in expansores_detalhamento:
+                driver.execute_script("arguments[0].click();", expansor)
+            time.sleep(1)
+        except Exception:
+            pass
 
         for entrega in entregas:
             nome = str(entrega.get("nome_entrega", "")).strip()
@@ -108,8 +121,8 @@ def preencher_execucao_pgd(dados_pgd: dict) -> None:
                 descricao = WebDriverWait(driver, 20).until(
                     EC.visibility_of_element_located((By.XPATH, "//textarea"))
                 )
-                descricao.send_keys(registro.get("descricao_atividade", ""))
-                descricao.send_keys(Keys.TAB)
+                _set_native_value(driver, descricao, registro.get("descricao_atividade", ""))
+                time.sleep(0.5)
 
                 inicio = datetime.fromisoformat(
                     str(registro.get("data_inicio", "")).replace("Z", "")
@@ -126,12 +139,11 @@ def preencher_execucao_pgd(dados_pgd: dict) -> None:
                 _set_native_value(driver, campos[0], inicio.strftime("%Y-%m-%dT%H:%M"))
                 _set_native_value(driver, campos[1], fim.strftime("%Y-%m-%dT%H:%M"))
 
-                salvar = espera.until(
-                    EC.element_to_be_clickable(
-                        (
-                            By.XPATH,
-                            "//button[.//i[contains(@class,'bi-check-circle')]]",
-                        )
+                salvar = WebDriverWait(driver, 15).until(
+                    lambda d: linha.find_element(
+                        By.XPATH,
+                        "./following-sibling::tr//button[contains(@class,'btn-outline-primary')]"
+                        "[.//i[contains(@class,'bi-check-circle')]]",
                     )
                 )
                 driver.execute_script("arguments[0].click();", salvar)
