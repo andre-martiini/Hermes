@@ -145,15 +145,15 @@ GEMINI_TOOL_DECLARATIONS = [
                 "name": "navegar_sistema",
                 "description": (
                     "Navega na interface do sistema Hermes para um modulo ou visao especifica. "
-                    "Use quando o usuario pedir para ir, abrir ou acessar uma tela/modulo. "
-                    "Modulos aceitos: 'dashboard', 'financeiro', 'saude', 'acoes', 'servicos', 'estrategia', 'godmode', 'conhecimento', 'contatos', 'rag-bases', 'ferramentas', 'licitacoes', 'assistencia', 'pgc', 'concluidas'."
+                    "Use quando o usuario pedir para ir, abrir ou acessar uma tela/modulo, ou para 'programar o meu dia' / 'fazer a programação do dia'. "
+                    "Modulos aceitos: 'dashboard', 'programacao_dia' (abrir agenda do dia), 'financeiro', 'saude', 'acoes', 'servicos', 'estrategia', 'godmode', 'conhecimento', 'contatos', 'rag-bases', 'ferramentas', 'licitacoes', 'assistencia', 'pgc', 'concluidas'."
                 ),
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
                         "modulo": {
                             "type": "STRING",
-                            "description": "Nome do modulo ou visao de destino (ex: financeiro, saude, acoes, dashboard, estrategia, ferramentas, etc).",
+                            "description": "Nome do modulo ou visao de destino (ex: programacao_dia, acoes, financeiro, saude, dashboard, estrategia, ferramentas, etc).",
                         }
                     },
                     "required": ["modulo"],

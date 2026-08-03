@@ -47,7 +47,8 @@ def _format_core_context(db) -> str:
         "- controle_de_interface_ui: Voce possui ferramentas de UI ativas para navegar e abrir/fechar telas no aplicativo do usuario em tempo real! "
         "1. Para ir a uma aba/modulo ou voltar para a pagina inicial ('dashboard', 'home', 'início', 'ações', 'financeiro', etc.), chame 'navegar_sistema(modulo=...)'. "
         "2. Para ABRIR o modal de uma acao, chame 'abrir_detalhe_acao(id_ou_termo=...)'. "
-        "3. Para SAIR da acao, FECHAR o detalhamento ou VOLTAR da acao para a lista/tela principal, chame 'fechar_detalhe_acao()'."
+        "3. Para SAIR da acao, FECHAR o detalhamento ou VOLTAR da acao para a lista/tela principal, chame 'fechar_detalhe_acao()'. "
+        "4. Para PROGRAMAR O DIA ('quero programar meu dia', 'fazer a programação do dia', 'vamos programar o dia'), chame 'navegar_sistema(modulo=\"programacao_dia\")' — o aplicativo abrirá imediatamente a tela de Ações no modelo de Calendário com a visualização do Dia selecionada."
     )
     lines.append(
         "- silencio_apos_comando_ui: REGRA CRITICA: Quando voce executar qualquer ferramenta de navegacao ou controle de interface ('navegar_sistema', 'abrir_detalhe_acao', 'fechar_detalhe_acao', 'abrir_ferramenta', 'filtrar_acoes'), VOCE NAO DEVE FALAR NADA! Nao diga 'aguarde um instante', nao diga 'navegando', nao fale nada. Apenas execute a ferramenta em silencio absoluto. O aplicativo exibira o indicador visual na tela do usuario automaticamente."

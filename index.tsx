@@ -4416,6 +4416,13 @@ const App: React.FC = () => {
         setActiveModule('acoes');
         setViewMode('concluidas');
         label = 'Concluídas';
+      } else if (mod.includes('program') || mod.includes('dia') || mod.includes('calen') || mod.includes('agend')) {
+        setActiveModule('acoes');
+        setViewMode('gallery');
+        setDashboardViewMode('calendar');
+        setCalendarViewMode('day');
+        setCalendarDate(new Date());
+        label = 'Programação do Dia';
       } else if (mod.includes('acoe') || mod.includes('ações') || mod.includes('galer') || mod.includes('lista')) {
         setActiveModule('acoes');
         setViewMode('gallery');
