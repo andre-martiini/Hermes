@@ -4015,6 +4015,64 @@ _TRANSCRICAO_RAPIDA_VIDEO_EXTS = {
     "mp4", "mov", "mkv", "avi", "webm", "m4v", "wmv", "flv", "mpeg", "mpg", "3gp", "ts"
 }
 
+# Limite para o fluxo de microfone (audioBase64), que não passa pelo Storage.
+# Fica abaixo do teto de 25MB por arquivo do Groq Whisper.
+_MAX_AUDIO_BASE64_BYTES = 24 * 1024 * 1024
+
+# Tamanho máximo de bloco enviado por vez ao Gemini para refinar a transcrição.
+# Transcrições longas em um único prompt gigantesco podem estourar limites da
+# API e retornar "400 INVALID_ARGUMENT"; dividir em blocos evita isso.
+_GEMINI_REFINE_CHUNK_CHARS = 12000
+
+
+def _split_text_into_chunks(texto, max_chars):
+    """Divide o texto em blocos de até max_chars, cortando em fim de frase quando possível."""
+    if len(texto) <= max_chars:
+        return [texto] if texto else []
+    chunks = []
+    start = 0
+    length = len(texto)
+    while start < length:
+        end = min(start + max_chars, length)
+        if end < length:
+            corte = texto.rfind('. ', start, end)
+            if corte > start:
+                end = corte + 1
+        pedaco = texto[start:end].strip()
+        if pedaco:
+            chunks.append(pedaco)
+        start = end
+    return chunks
+
+
+def _refinar_transcricao_com_gemini(gemini_client, texto_bruto):
+    """
+    Refina o texto bruto com Gemini em blocos, para não estourar limites da API em
+    transcrições longas. Se o refinamento de um bloco falhar, usa o texto bruto
+    daquele bloco como fallback em vez de derrubar a transcrição inteira.
+    """
+    chunks = _split_text_into_chunks(texto_bruto, _GEMINI_REFINE_CHUNK_CHARS)
+    partes_refinadas = []
+    for chunk in chunks:
+        prompt = f"""
+        Atue como um redator especialista. O texto a seguir é um trecho de uma transcrição de voz bruta.
+        Sua tarefa:
+        1. Corrigir pontuação e gramática (pt-BR).
+        2. Remover vícios de linguagem (né, tipo, ahn).
+        3. Manter o tom original e termos técnicos.
+        4. Retorne APENAS o texto corrigido, sem introduções.
+
+        Texto: "{chunk}"
+        """
+        try:
+            result = gemini_client.models.generate_content(model="gemini-3.5-flash-lite", contents=prompt)
+            texto_refinado = (result.text or "").strip()
+            partes_refinadas.append(texto_refinado if texto_refinado else chunk)
+        except Exception as e:
+            print(f"Falha ao refinar bloco da transcrição com Gemini: {e}")
+            partes_refinadas.append(chunk)
+    return " ".join(partes_refinadas)
+
 
 @https_fn.on_call(
     memory=options.MemoryOption.GB_1,
@@ -4137,6 +4195,27 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
 
 
+    # O fluxo de microfone (audioBase64) não passa pelo Storage, então precisa de um
+    # limite explícito aqui: acima disso o Groq (limite de 25MB por arquivo) e o
+    # Gemini rejeitam o pedido, e sem essa checagem o erro cru do provedor vazava
+    # pro cliente (ex.: "400 INVALID_ARGUMENT" em gravações longas pelo mobile).
+    audio_bytes = None
+
+    if audio_base64:
+
+        import base64
+
+        audio_bytes = base64.b64decode(audio_base64)
+
+        if len(audio_bytes) > _MAX_AUDIO_BASE64_BYTES:
+
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+                message="Gravação muito longa para transcrição pelo microfone. Use a ferramenta 'Transcrições Longas' para áudios extensos."
+            )
+
+
+
     temp_filename = None
 
     extracted_audio_filename = None
@@ -4159,11 +4238,9 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
         else:
 
-            import base64
-
             with open(temp_filename, "wb") as audio_file:
 
-                audio_file.write(base64.b64decode(audio_base64))
+                audio_file.write(audio_bytes)
 
 
 
@@ -4219,33 +4296,12 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
 
 
-        # Refinamento via Gemini Flash
+        # Refinamento via Gemini Flash, em blocos (evita "400 INVALID_ARGUMENT" em
+        # transcrições longas e nunca falha a chamada inteira por causa do refino).
 
         gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-        prompt = f"""
-
-        Atue como um redator especialista. O texto a seguir é uma transcrição de voz bruta.
-
-        Sua tarefa:
-
-        1. Corrigir pontuação e gramática (pt-BR).
-
-        2. Remover vícios de linguagem (né, tipo, ahn).
-
-        3. Manter o tom original e termos técnicos.
-
-        4. Retorne APENAS o texto corrigido, sem introduções.
-
-        
-
-        Texto: "{texto_bruto}"
-
-        """
-
-        result = gemini_client.models.generate_content(model="gemini-3.5-flash-lite", contents=prompt)
-
-        texto_refinado = result.text
+        texto_refinado = _refinar_transcricao_com_gemini(gemini_client, texto_bruto)
 
 
 

@@ -1544,7 +1544,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             const res = await fn({ audioBase64: b64, extension: '.m4a' });
                             const data = res.data as { raw: string; refined: string };
                             if (data.refined) setInput(prev => prev + (prev ? '\n' : '') + data.refined);
-                        } catch { setFooterError('Erro ao transcrever áudio do microfone.'); }
+                        } catch (error: any) { setFooterError(error?.message || 'Erro ao transcrever áudio do microfone.'); }
                         finally { setIsProcessingMic(false); }
                     };
                 } catch { setIsProcessingMic(false); }
