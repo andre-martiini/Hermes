@@ -13960,6 +13960,24 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
     Fluxo: (vídeo) extrai só o áudio via ffmpeg embutido -> Files API do Gemini ->
     transcrição literal com gemini-3.5-flash-lite -> grava no Firestore -> expurga o binário original.
     """
+    def _normalize_audio_mime(content_type: str, file_ext: str) -> str:
+        ct = (content_type or "").lower().strip()
+        ext = (file_ext or "").lower().strip().lstrip(".")
+        if "mp3" in ct or ext == "mp3":
+            return "audio/mpeg"
+        if "wav" in ct or ext == "wav":
+            return "audio/wav"
+        if "ogg" in ct or ext == "ogg":
+            return "audio/ogg"
+        if "webm" in ct or ext == "webm":
+            return "audio/webm"
+        if "aac" in ct or ext == "aac":
+            return "audio/aac"
+        if "mp4" in ct or "m4a" in ct or ext in ("m4a", "mp4", "mov", "3gp", "3gpp", "caf", "amr"):
+            return "audio/mp4"
+        if ct.startswith("audio/"):
+            return ct
+        return "audio/mp4"
     import os as _os
     import time as _time
     import tempfile as _tempfile
@@ -14009,10 +14027,25 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
     try:
         limit_long_trans = int(_os.environ.get("LIMIT_LONG_TRANSCRIPTION", "8"))
         
-        # Desconta transcrições de hoje que deram erro do limite diário
+        # Desconta transcrições de hoje que deram erro do limite diário (usa apenas userId no Firestore para dispensar índice composto)
         start_of_today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        valid_today_docs = db.collection("long_transcriptions").where("userId", "==", user_id).where("createdAt", ">=", start_of_today).stream()
-        non_error_count = sum(1 for d in valid_today_docs if (d.to_dict() or {}).get("status") != "Erro")
+        user_today_docs = db.collection("long_transcriptions").where("userId", "==", user_id).stream()
+        non_error_count = 0
+        for d in user_today_docs:
+            ddata = d.to_dict() or {}
+            if ddata.get("status") == "Erro":
+                continue
+            created_at = ddata.get("createdAt")
+            if created_at:
+                try:
+                    dt = created_at.to_datetime() if hasattr(created_at, "to_datetime") else created_at
+                    if isinstance(dt, datetime):
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        if dt >= start_of_today:
+                            non_error_count += 1
+                except Exception:
+                    pass
 
         if non_error_count > limit_long_trans:
             raise RuntimeError(f"Você atingiu o limite diário de {limit_long_trans} transcrições longas.")
@@ -14053,7 +14086,7 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
             upload_mime = "audio/mp4"
         else:
             upload_path = local_media_path
-            upload_mime = content_type or "audio/mpeg"
+            upload_mime = _normalize_audio_mime(content_type, file_ext)
 
         # 3. Upload via Files API e aguardar o estado ACTIVE
         gemini_file = client.files.upload(
