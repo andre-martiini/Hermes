@@ -1,20 +1,7 @@
-' Hermes - Inicializador Silencioso
+' Hermes - Inicializador Silencioso Completo
 '
-' Faz o mesmo que start.bat, mas sem abrir nenhuma janela de terminal
-' (nenhum flash de console, nada na barra de tarefas). A saida de cada
-' servico e redirecionada para arquivos em .\logs\, ja que nao ha console
-' visivel para acompanhar.
-'
-' Use este arquivo (em vez de start.bat) quando quiser que o Hermes inicie
-' junto com o Windows sem janelas persistindo na tela: aponte um atalho na
-' pasta Inicializar (shell:startup) ou uma tarefa no Agendador de Tarefas
-' do Windows para "wscript.exe start_hidden.vbs".
-'
-' ATENCAO: se um atalho na pasta Inicializar do Windows aponta pra ca, isso
-' nao aparece em nenhuma busca dentro do repositorio. Ja aconteceu de uma
-' limpeza de "codigo morto" apagar o launcher oculto anterior por nao achar
-' nenhuma referencia a ele (commit 2e54c8f) - confira os atalhos de Startup
-' antes de remover/renomear este arquivo.
+' Faz o mesmo que start.bat, mas sem abrir nenhuma janela de terminal.
+' A saida de cada servico e redirecionada para arquivos em .\logs\
 
 Set fso = CreateObject("Scripting.FileSystemObject")
 Set shell = CreateObject("WScript.Shell")
@@ -39,3 +26,6 @@ shell.Run "cmd /c title Hermes Automations API && python server.py > """ & logsD
 shell.CurrentDirectory = baseDir
 shell.Run "cmd /c title Hermes Sync (Google Tasks) && python hermes_cli.py watch > """ & logsDir & "\sync.log"" 2>&1", HIDDEN, WAIT_ON_RETURN
 shell.Run "cmd /c title Hermes Sync (Monitor de Paginas) && python hermes_cli.py watch-pages > """ & logsDir & "\watch_pages.log"" 2>&1", HIDDEN, WAIT_ON_RETURN
+
+shell.Run "cmd /c ""cd /d " & baseDir & "\hermes-voice-bridge && .venv\Scripts\python.exe -m uvicorn main:app --port 3002 > " & logsDir & "\voice_bridge.log 2>&1""", HIDDEN, WAIT_ON_RETURN
+shell.Run "cmd /c ""cd /d " & baseDir & "\hermes-voice-client && .venv\Scripts\python.exe -m uvicorn main:app --port 8765 > " & logsDir & "\voice_client.log 2>&1""", HIDDEN, WAIT_ON_RETURN
