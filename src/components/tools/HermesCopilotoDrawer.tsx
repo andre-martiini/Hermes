@@ -501,7 +501,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const [popsList, setPopsList] = useState<{ id: string; titulo: string; gatilhos: string[] }[]>([]);
 
     // Estado de anexo
-    const [attachedFile, setAttachedFile] = useState<File | null>(null);
+    const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
     const [pastedContext, setPastedContext] = useState<{ text: string; name: string } | null>(null);
     const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle');
     // Controla a largura da barra de progresso via CSS transition
@@ -1058,36 +1058,49 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         }
     };
 
-    // ── Seleção de arquivo ────────────────────────────────────────────────────
-    const attachFileToCopiloto = React.useCallback((file: File | null, source: 'input' | 'drop' = 'input') => {
-        if (!file) {
-            setAttachedFile(null);
-            return;
-        }
+    // ── Seleção de arquivos (até 10 simultâneos) ─────────────────────────────
+    const attachFilesToCopiloto = React.useCallback((incomingFiles: File[], source: 'input' | 'drop' = 'input') => {
+        if (!incomingFiles || incomingFiles.length === 0) return;
 
-        if (!isCopilotoFileSupported(file)) {
-            setAttachedFile(null);
+        const supported = incomingFiles.filter(f => isCopilotoFileSupported(f));
+        if (supported.length === 0) {
             setFooterError(`Formato ainda não suportado no copiloto. Use ${COPILOTO_SUPPORTED_FORMATS_LABEL}.`);
             return;
         }
 
-        setFooterError(null);
-        setAttachedFile(file);
+        if (supported.length < incomingFiles.length) {
+            setFooterError(`Alguns arquivos foram ignorados por estarem em formato não suportado. Use ${COPILOTO_SUPPORTED_FORMATS_LABEL}.`);
+        } else {
+            setFooterError(null);
+        }
+
+        setAttachedFiles(prev => {
+            const combined = [...prev, ...supported];
+            if (combined.length > 10) {
+                setFooterError(`O copiloto aceita no máximo 10 arquivos por envio. Mantidos os 10 primeiros.`);
+                return combined.slice(0, 10);
+            }
+            return combined;
+        });
+
         if (source === 'drop') {
             setShowToolMenu(false);
         }
     }, []);
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0] ?? null;
-        attachFileToCopiloto(file, 'input');
-        // Reset o input para permitir re-selecionar o mesmo arquivo
+        const files = Array.from(e.target.files || []);
+        attachFilesToCopiloto(files, 'input');
         e.target.value = '';
     };
 
-    const handleRemoveFile = () => {
-        setAttachedFile(null);
-        setPastedContext(null);
+    const handleRemoveFile = (index?: number) => {
+        if (typeof index === 'number') {
+            setAttachedFiles(prev => prev.filter((_, i) => i !== index));
+        } else {
+            setAttachedFiles([]);
+            setPastedContext(null);
+        }
     };
 
     const handleComposerDragEnter = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -1125,11 +1138,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
         const droppedFiles = Array.from(e.dataTransfer.files || []);
         if (droppedFiles.length === 0) return;
-        if (droppedFiles.length > 1) {
-            setFooterError(`O copiloto aceita um arquivo por vez. Mantive apenas "${droppedFiles[0].name}".`);
-        }
-        attachFileToCopiloto(droppedFiles[0], 'drop');
-    }, [attachFileToCopiloto, isBlocked]);
+        attachFilesToCopiloto(droppedFiles, 'drop');
+    }, [attachFilesToCopiloto, isBlocked]);
 
     const handleDeleteSession = async (sessionId: string) => {
         if (deletingSessionId) return;
@@ -1484,10 +1494,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
             // Se não for áudio, mas houver arquivos (como imagens ou outros)
             // Filtra o primeiro arquivo suportado e anexa
-            const firstSupported = files.find(f => isCopilotoFileSupported(f));
-            if (firstSupported) {
+            const supportedFiles = files.filter(f => isCopilotoFileSupported(f));
+            if (supportedFiles.length > 0) {
                 e.preventDefault();
-                attachFileToCopiloto(firstSupported, 'input');
+                attachFilesToCopiloto(supportedFiles, 'input');
                 return;
             }
         }
@@ -1573,7 +1583,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     // ── Envio de mensagem (com ou sem arquivo) ────────────────────────────────
     const sendMessage = async (text: string, sessionId?: string) => {
         const sId = sessionId || currentSessionId;
-        const hasFile = !!attachedFile;
+        const hasFiles = attachedFiles.length > 0;
         const hasPaste = !!pastedContext;
         let copilotActivityOpen = false;
         const closeCopilotActivity = (phase: 'completed' | 'failed' | 'cancelled') => {
@@ -1582,12 +1592,12 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             copilotActivityOpen = false;
         };
 
-        if (!sId || (!text.trim() && !hasFile && !hasPaste)) return;
+        if (!sId || (!text.trim() && !hasFiles && !hasPaste)) return;
 
-        const fileToSend = attachedFile;
+        const filesToSend = [...attachedFiles];
         const pasteToSend = pastedContext;
         setInput('');
-        setAttachedFile(null);
+        setAttachedFiles([]);
         setPastedContext(null);
         setFooterError(null);
         isCancelledRef.current = false;
@@ -1596,34 +1606,39 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         setIsLoading(true);
 
         try {
-            let driveFileId: string | null = null;
-            let driveFileName: string | null = null;
+            let driveFiles: Array<{ driveFileId: string; driveFileName: string }> = [];
 
-            // ── FASE 1: Upload para o Drive via endpoint HTTP ─────────────────
-            if (fileToSend) {
+            // ── FASE 1: Upload em paralelo para o Drive ───────────────────────
+            if (filesToSend.length > 0) {
                 setUploadPhase('uploading');
 
                 const idToken = await auth.currentUser?.getIdToken();
                 if (!idToken) throw new Error("Usuário não autenticado.");
 
-                const formData = new FormData();
-                formData.append('file', fileToSend, fileToSend.name);
+                const uploadPromises = filesToSend.map(async (file) => {
+                    const formData = new FormData();
+                    formData.append('file', file, file.name);
 
-                const uploadRes = await fetch(UPLOAD_ENDPOINT, {
-                    method: 'POST',
-                    headers: { Authorization: `Bearer ${idToken}` },
-                    body: formData,
-                    signal: abortController.signal
+                    const uploadRes = await fetch(UPLOAD_ENDPOINT, {
+                        method: 'POST',
+                        headers: { Authorization: `Bearer ${idToken}` },
+                        body: formData,
+                        signal: abortController.signal
+                    });
+
+                    if (!uploadRes.ok) {
+                        const errBody = await uploadRes.json().catch(() => ({}));
+                        throw new Error(errBody.error || `Erro no upload do arquivo ${file.name}: HTTP ${uploadRes.status}`);
+                    }
+
+                    const uploadData = await uploadRes.json();
+                    return {
+                        driveFileId: uploadData.driveFileId as string,
+                        driveFileName: (uploadData.fileName || file.name) as string
+                    };
                 });
 
-                if (!uploadRes.ok) {
-                    const errBody = await uploadRes.json().catch(() => ({}));
-                    throw new Error(errBody.error || `Erro no upload: HTTP ${uploadRes.status}`);
-                }
-
-                const uploadData = await uploadRes.json();
-                driveFileId = uploadData.driveFileId;
-                driveFileName = uploadData.fileName || fileToSend.name;
+                driveFiles = await Promise.all(uploadPromises);
 
                 // Transição para Fase 2
                 setUploadPhase('processing');
@@ -1633,8 +1648,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             if (isCancelledRef.current) return;
 
             // Constrói o conteúdo da mensagem do usuário para o histórico
-            const userMessageContent = hasFile && fileToSend
-                ? `📎 ${fileToSend.name}${text.trim() ? `\n\n${text.trim()}` : ''}`
+            const userMessageContent = filesToSend.length > 0
+                ? `📎 ${filesToSend.length} ${filesToSend.length === 1 ? 'arquivo anexado' : 'arquivos anexados'}:\n${filesToSend.map(f => `- ${f.name}`).join('\n')}${text.trim() ? `\n\n${text.trim()}` : ''}`
                 : hasPaste && pasteToSend
                 ? `📎 ${pasteToSend.name}${text.trim() ? `\n\n${text.trim()}` : ''}`
                 : text;
@@ -1669,11 +1684,12 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
             const response = await withClientTimeout(askCopiloto({
                 sessionId: sId,
-                prompt: contextPrefix + pastePrefix + (text.trim() || (hasFile || hasPaste ? '' : text)),
+                prompt: contextPrefix + pastePrefix + (text.trim() || (filesToSend.length > 0 || hasPaste ? '' : text)),
                 taskId: taskId || null,
                 systemId: systemId || null,
-                driveFileId: driveFileId || null,
-                driveFileName: driveFileName || null,
+                driveFileId: driveFiles.length > 0 ? driveFiles[0].driveFileId : null,
+                driveFileName: driveFiles.length > 0 ? driveFiles[0].driveFileName : null,
+                driveFiles: driveFiles.length > 0 ? driveFiles : null,
                 copilotMode,
                 routingIndex: getRoutingIndex()
             }), COPILOTO_CALLABLE_TIMEOUT_MS, COPILOTO_CLIENT_TIMEOUT_MESSAGE);
@@ -2833,22 +2849,40 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             </div>
                         )}
 
-                        {/* Badge de arquivo anexado */}
-                        {(attachedFile || pastedContext) && !isBlocked && (
-                            <div className={`flex items-center gap-2 mb-3 px-3 py-2 rounded-lg text-xs font-semibold ${isDark ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-700 border border-[#e5e7eb] dark:border-white/10'}`}>
-                                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                                </svg>
-                                <span className="truncate flex-1">{attachedFile?.name ?? pastedContext?.name}</span>
-                                <button
-                                    onClick={handleRemoveFile}
-                                    className="shrink-0 hover:text-red-500 transition-colors"
-                                    title="Remover arquivo"
-                                >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                </button>
+                        {/* Badges de arquivos anexados */}
+                        {(attachedFiles.length > 0 || pastedContext) && !isBlocked && (
+                            <div className="flex flex-wrap gap-2 mb-3">
+                                {attachedFiles.map((file, idx) => (
+                                    <div key={`${file.name}-${idx}`} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold max-w-[240px] ${isDark ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-700 border border-[#e5e7eb] dark:border-white/10'}`}>
+                                        <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                        </svg>
+                                        <span className="truncate flex-1" title={file.name}>{file.name}</span>
+                                        <button
+                                            onClick={() => handleRemoveFile(idx)}
+                                            className="shrink-0 hover:text-red-500 transition-colors"
+                                            title="Remover arquivo"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                ))}
+                                {pastedContext && (
+                                    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold max-w-[240px] ${isDark ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-700 border border-[#e5e7eb] dark:border-white/10'}`}>
+                                        <span className="truncate flex-1" title={pastedContext.name}>{pastedContext.name}</span>
+                                        <button
+                                            onClick={() => setPastedContext(null)}
+                                            className="shrink-0 hover:text-red-500 transition-colors"
+                                            title="Remover contexto colado"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -2861,6 +2895,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             <input
                                 ref={fileInputRef}
                                 type="file"
+                                multiple
                                 accept={COPILOTO_FILE_ACCEPT}
                                 className="hidden"
                                 onChange={handleFileSelect}
@@ -2870,9 +2905,9 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             <button
                                 onClick={() => !isBlocked && fileInputRef.current?.click()}
                                 disabled={isBlocked}
-                                title="Anexar arquivo"
+                                title="Anexar arquivos (até 10)"
                                 className={`flex h-9 w-9 items-center justify-center rounded-lg transition-all flex-shrink-0 ${
-                                    (attachedFile || pastedContext)
+                                    (attachedFiles.length > 0 || pastedContext)
                                         ? 'bg-blue-500/10 text-blue-500'
                                         : isDark
                                             ? 'text-white/55 hover:bg-white/10 hover:text-white/85'
@@ -3010,7 +3045,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             }
                                         }
                                     }}
-                                    placeholder={voiceStream.status === 'live' ? `🔊 ${voiceStreamStatusMessage || 'Conversa ao vivo — pode falar'}` : voiceStream.status === 'connecting' ? '🔊 Conectando à voz ao vivo…' : isRecording ? '🎙 Gravando… clique no microfone para parar' : isProcessingMic ? 'Transcrevendo áudio...' : isTranscribing ? 'Transcrevendo áudio...' : attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : pastedContext ? 'Pergunte sobre o contexto ou envie sem texto…' : isFinancialCopilot ? 'Pergunte sobre gastos, fluxo, reserva ou investimentos' : 'Escreva Aqui'}
+                                    placeholder={voiceStream.status === 'live' ? `🔊 ${voiceStreamStatusMessage || 'Conversa ao vivo — pode falar'}` : voiceStream.status === 'connecting' ? '🔊 Conectando à voz ao vivo…' : isRecording ? '🎙 Gravando… clique no microfone para parar' : isProcessingMic ? 'Transcrevendo áudio...' : isTranscribing ? 'Transcrevendo áudio...' : attachedFiles.length > 0 ? `Pergunte sobre os ${attachedFiles.length} ${attachedFiles.length === 1 ? 'arquivo' : 'arquivos'} ou envie sem texto…` : pastedContext ? 'Pergunte sobre o contexto ou envie sem texto…' : isFinancialCopilot ? 'Pergunte sobre gastos, fluxo, reserva ou investimentos' : 'Escreva Aqui'}
                                     className={`w-full px-2 pt-2.5 pb-1.5 text-sm leading-5 font-sans font-medium outline-none border-0 resize-none bg-transparent ${isDark ? 'text-white placeholder:text-white/20' : 'text-slate-700 placeholder:text-slate-400'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
                                 />
                             </div>
@@ -3076,7 +3111,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             </button>
 
                             {/* Botão de envio (visível se houver texto/anexos e não gravando) */}
-                            {(input.trim() || attachedFile || pastedContext) && !isRecording && (
+                            {(input.trim() || attachedFiles.length > 0 || pastedContext) && !isRecording && (
                                 <button
                                     onClick={() => {
                                         if (!currentSessionId) {

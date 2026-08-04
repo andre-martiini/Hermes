@@ -239,7 +239,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   const [showHistory, setShowHistory] = useState(false);
   const [showMobileHistory, setShowMobileHistory] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
-  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [pastedContext, setPastedContext] = useState<{ text: string; name: string } | null>(null);
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle');
   const [footerError, setFooterError] = useState<string | null>(null);
@@ -544,22 +544,31 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
     setTimeout(() => textareaRef.current?.focus(), 0);
   };
 
-  const attachFile = (file: File | null) => {
-    if (!file) {
-      setAttachedFile(null);
-      return;
-    }
-    if (!isCopilotoFileSupported(file)) {
-      setAttachedFile(null);
+  const attachFiles = (incomingFiles: File[]) => {
+    if (!incomingFiles || incomingFiles.length === 0) return;
+    const supported = incomingFiles.filter((file) => isCopilotoFileSupported(file));
+    if (supported.length === 0) {
       setFooterError(`Formato ainda não suportado no copiloto. Use ${COPILOTO_SUPPORTED_FORMATS_LABEL}.`);
       return;
     }
-    setFooterError(null);
-    setAttachedFile(file);
+    if (supported.length < incomingFiles.length) {
+      setFooterError(`Alguns arquivos foram ignorados por estarem em formato não suportado.`);
+    } else {
+      setFooterError(null);
+    }
+    setAttachedFiles((prev) => {
+      const combined = [...prev, ...supported];
+      if (combined.length > 10) {
+        setFooterError(`O copiloto aceita no máximo 10 arquivos por envio. Mantidos os 10 primeiros.`);
+        return combined.slice(0, 10);
+      }
+      return combined;
+    });
   };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    attachFile(event.target.files?.[0] ?? null);
+    const files = Array.from(event.target.files || []);
+    attachFiles(files);
     event.target.value = '';
   };
 
@@ -572,10 +581,10 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
         transcribeAudioFile(audioFile);
         return;
       }
-      const firstSupported = files.find((file) => isCopilotoFileSupported(file));
-      if (firstSupported) {
+      const supportedFiles = files.filter((file) => isCopilotoFileSupported(file));
+      if (supportedFiles.length > 0) {
         event.preventDefault();
-        attachFile(firstSupported);
+        attachFiles(supportedFiles);
         return;
       }
     }
@@ -594,10 +603,8 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
     dragCounterRef.current = 0;
     setIsDragActive(false);
     const droppedFiles = Array.from(event.dataTransfer.files || []);
-    if (droppedFiles.length > 1) {
-      setFooterError(`O copiloto aceita um arquivo por vez. Mantive apenas "${droppedFiles[0].name}".`);
-    }
-    attachFile(droppedFiles[0] ?? null);
+    if (droppedFiles.length === 0) return;
+    attachFiles(droppedFiles);
   };
 
   const transcribeBlob = async (blob: Blob, extension = '.m4a') => {
@@ -654,50 +661,56 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   };
 
   const sendMessage = async (text: string) => {
-    const hasFile = !!attachedFile;
+    const hasFiles = attachedFiles.length > 0;
     const hasPaste = !!pastedContext;
-    if (!text.trim() && !hasFile && !hasPaste) return;
+    if (!text.trim() && !hasFiles && !hasPaste) return;
 
     setIsLoading(true);
     setFooterError(null);
-    const fileToSend = attachedFile;
+    const filesToSend = [...attachedFiles];
     const pasteToSend = pastedContext;
-    const userMessageContent = hasFile && fileToSend
-      ? `Arquivo anexado: ${fileToSend.name}${text.trim() ? `\n\n${text.trim()}` : ''}`
+    const userMessageContent = filesToSend.length > 0
+      ? `📎 ${filesToSend.length} ${filesToSend.length === 1 ? 'arquivo anexado' : 'arquivos anexados'}:\n${filesToSend.map(f => `- ${f.name}`).join('\n')}${text.trim() ? `\n\n${text.trim()}` : ''}`
       : hasPaste && pasteToSend
         ? `Contexto anexado: ${pasteToSend.name}${text.trim() ? `\n\n${text.trim()}` : ''}`
         : text.trim();
 
     setInput('');
-    setAttachedFile(null);
+    setAttachedFiles([]);
     setPastedContext(null);
     setShowTools(false);
 
     let sessionId = currentSessionId;
     try {
-      if (!sessionId) sessionId = await createSession(text.trim() || fileToSend?.name || pasteToSend?.name || 'Nova conversa');
+      if (!sessionId) sessionId = await createSession(text.trim() || (filesToSend[0]?.name) || pasteToSend?.name || 'Nova conversa');
 
-      let driveFileId: string | null = null;
-      let driveFileName: string | null = null;
+      let driveFiles: Array<{ driveFileId: string; driveFileName: string }> = [];
 
-      if (fileToSend) {
+      if (filesToSend.length > 0) {
         setUploadPhase('uploading');
         const idToken = await auth.currentUser?.getIdToken();
         if (!idToken) throw new Error('Usuário não autenticado.');
-        const formData = new FormData();
-        formData.append('file', fileToSend, fileToSend.name);
-        const uploadRes = await fetch(UPLOAD_ENDPOINT, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${idToken}` },
-          body: formData,
+
+        const uploadPromises = filesToSend.map(async (file) => {
+          const formData = new FormData();
+          formData.append('file', file, file.name);
+          const uploadRes = await fetch(UPLOAD_ENDPOINT, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${idToken}` },
+            body: formData,
+          });
+          if (!uploadRes.ok) {
+            const errBody = await uploadRes.json().catch(() => ({}));
+            throw new Error(errBody.error || `Erro no upload do arquivo ${file.name}: HTTP ${uploadRes.status}`);
+          }
+          const uploadData = await uploadRes.json();
+          return {
+            driveFileId: uploadData.driveFileId as string,
+            driveFileName: (uploadData.fileName || file.name) as string,
+          };
         });
-        if (!uploadRes.ok) {
-          const errBody = await uploadRes.json().catch(() => ({}));
-          throw new Error(errBody.error || `Erro no upload: HTTP ${uploadRes.status}`);
-        }
-        const uploadData = await uploadRes.json();
-        driveFileId = uploadData.driveFileId;
-        driveFileName = uploadData.fileName || fileToSend.name;
+
+        driveFiles = await Promise.all(uploadPromises);
         setUploadPhase('processing');
       }
 
@@ -730,11 +743,12 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
         updatedAt: Timestamp.now(),
         payload: {
           sessionId,
-          prompt: pastePrefix + (text.trim() || (hasFile || hasPaste ? '' : text)),
+          prompt: pastePrefix + (text.trim() || (hasFiles || hasPaste ? '' : text)),
           taskId: null,
           systemId: null,
-          driveFileId,
-          driveFileName,
+          driveFileId: driveFiles.length > 0 ? driveFiles[0].driveFileId : null,
+          driveFileName: driveFiles.length > 0 ? driveFiles[0].driveFileName : null,
+          driveFiles: driveFiles.length > 0 ? driveFiles : null,
           copilotMode,
           copilotScope: 'global',
           strategyDirectives,
@@ -1313,18 +1327,27 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                 <button type="button" onClick={() => setFooterError(null)} className="font-sans text-[9px] font-bold uppercase">Fechar</button>
               </div>
             )}
-            {(attachedFile || pastedContext || isTranscribing || isProcessingMic) && (
-              <div className={`mb-3 flex items-center gap-2 border px-3 py-2 font-sans text-[10px] font-bold ${raisedClass}`}>
-                <span className={mutedClass}>{isTranscribing || isProcessingMic ? 'Transcrevendo áudio' : 'Contexto anexado'}</span>
-                <span className="min-w-0 flex-1 truncate">{attachedFile?.name || pastedContext?.name || 'Microfone'}</span>
-                {(attachedFile || pastedContext) && (
-                  <button type="button" onClick={() => { setAttachedFile(null); setPastedContext(null); }} className="font-bold uppercase tracking-wider text-rose-500">Remover</button>
+            {(attachedFiles.length > 0 || pastedContext || isTranscribing || isProcessingMic) && (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {attachedFiles.map((file, idx) => (
+                  <div key={`${file.name}-${idx}`} className={`flex items-center gap-2 border px-3 py-1.5 font-sans text-[10px] font-bold ${raisedClass}`}>
+                    <span className={mutedClass}>Anexo</span>
+                    <span className="max-w-[180px] truncate" title={file.name}>{file.name}</span>
+                    <button type="button" onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))} className="font-bold uppercase tracking-wider text-rose-500 hover:text-rose-700">✕</button>
+                  </div>
+                ))}
+                {pastedContext && (
+                  <div className={`flex items-center gap-2 border px-3 py-1.5 font-sans text-[10px] font-bold ${raisedClass}`}>
+                    <span className={mutedClass}>Contexto</span>
+                    <span className="max-w-[180px] truncate" title={pastedContext.name}>{pastedContext.name}</span>
+                    <button type="button" onClick={() => setPastedContext(null)} className="font-bold uppercase tracking-wider text-rose-500 hover:text-rose-700">✕</button>
+                  </div>
                 )}
               </div>
             )}
             <div className={`relative flex items-end gap-1 border px-2 py-2 ${raisedClass}`}>
-              <input ref={fileInputRef} type="file" accept={COPILOTO_FILE_ACCEPT} className="hidden" onChange={handleFileSelect} />
-              <button type="button" disabled={isBlocked} onClick={() => fileInputRef.current?.click()} title="Anexar arquivo" className={`flex h-10 w-10 shrink-0 items-center justify-center transition-all ${hoverClass} disabled:opacity-30`}>
+              <input ref={fileInputRef} type="file" multiple accept={COPILOTO_FILE_ACCEPT} className="hidden" onChange={handleFileSelect} />
+              <button type="button" disabled={isBlocked} onClick={() => fileInputRef.current?.click()} title="Anexar arquivos (até 10)" className={`flex h-10 w-10 shrink-0 items-center justify-center transition-all ${hoverClass} disabled:opacity-30`}>
                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 5v14m-7-7h14" /></svg>
               </button>
               <div className="relative shrink-0" ref={toolMenuRef}>

@@ -7460,8 +7460,21 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
     task_id_scoped = task_id
     system_id = data.get('systemId')
     session_id = data.get('sessionId')
+    drive_files_raw = data.get('driveFiles') or []
+    drive_files = []
+    if isinstance(drive_files_raw, list):
+        for item in drive_files_raw:
+            if isinstance(item, dict) and item.get('driveFileId'):
+                drive_files.append({
+                    'driveFileId': str(item['driveFileId']).strip(),
+                    'driveFileName': str(item.get('driveFileName') or 'documento').strip()
+                })
     drive_file_id = data.get('driveFileId')
     drive_file_name = (data.get('driveFileName') or 'documento').strip()
+    if drive_file_id and not any(f['driveFileId'] == drive_file_id for f in drive_files):
+        drive_files.insert(0, {'driveFileId': str(drive_file_id).strip(), 'driveFileName': drive_file_name})
+    drive_files = drive_files[:10]
+
     routing_index = data.get('routingIndex') or []
     copilot_mode = (data.get('copilotMode') or 'default').strip()
     strategy_directives_raw = data.get('strategyDirectives') or []
@@ -7476,11 +7489,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         elapsed = time.monotonic() - request_start_monotonic
         return max(0.0, COPILOT_SOFT_DEADLINE_SEC - elapsed)
 
-    # Ingestão muda: arquivo sem texto → prompt padrão de catalogação
-    if not prompt and drive_file_id:
+    # Ingestão muda: arquivos sem texto → prompt padrão de catalogação
+    if not prompt and (drive_files or drive_file_id):
         prompt = (
-            "Analise o arquivo anexado, identifique o que ele mostra e explique "
-            "como isso se relaciona com a ação em contexto."
+            "Analise os arquivos anexados, identifique o que eles mostram e explique "
+            "como eles se relacionam com a ação em contexto."
         )
 
     if not prompt:
@@ -10900,12 +10913,15 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         )
         _perf_mark(perf_state, "web.chat_create")
 
-        # ─── INGESTÃO DOCUMENTAL ─────────────────────────────────────────────────
-        # Se um driveFileId foi enviado, baixa o binário, extrai metadados via
-        # Gemini File API (sem parsers locais) e grava no indice_artefatos (RAG).
-        file_context = ""
-        if drive_file_id:
-            _set_copilot_status(f"Processando arquivo: {drive_file_name}...")
+        # ─── INGESTÃO DOCUMENTAL (MÚLTIPLOS ARQUIVOS - ATÉ 10) ───────────────────
+        file_contexts = []
+        if drive_files:
+            total_files = len(drive_files)
+            for file_idx, f_item in enumerate(drive_files, start=1):
+                drive_file_id = f_item['driveFileId']
+                drive_file_name = f_item['driveFileName']
+                file_context = ""
+                _set_copilot_status(f"Processando arquivo ({file_idx}/{total_files}): {drive_file_name}...")
             try:
                 import io
                 import os
@@ -11242,7 +11258,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 except Exception as log_err:
                     print(f"[Copiloto] Falha ao gravar quality_log: {log_err}")
 
-                file_context = f"⚠️ Não foi possível processar o arquivo '{drive_file_name}': {err_str}"
+                if file_context:
+                    file_contexts.append(file_context)
         # ─────────────────────────────────────────────────────────────────────────
 
         # Injeta contexto inicial se houver task_id
@@ -11260,8 +11277,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             context_parts.append(memory_context)
         if session_conflict_context:
             context_parts.append(session_conflict_context)
-        if file_context:
-            context_parts.append(file_context)
+        if file_contexts:
+            context_parts.append("\n\n".join(file_contexts))
         context_parts.append(f"USUÁRIO: {prompt}")
         if matched_pop_directives:
             pop_lines = [

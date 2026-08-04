@@ -938,3 +938,9 @@ export interface Servico {
     data_atualizacao: string;
     base_id?: string;
 }
+
+export interface CopilotDriveFile {
+    driveFileId: string;
+    driveFileName?: string | null;
+}
+
