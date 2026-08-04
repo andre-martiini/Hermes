@@ -887,11 +887,16 @@ async def _forward_gemini_audio_to_browser(
     # (ver browser_voice_stream), diferente do canal Twilio que usa senha falada.
     #
     # session.receive() encerra a cada fim de turno (dai o while). Um ciclo que
-    # termina SEM entregar nenhuma mensagem indica que a sessao Gemini morreu
-    # do lado do provedor (limite interno de duracao, GoAway etc.) — sem essa
-    # deteccao o loop giraria em vazio para sempre e o navegador ficaria com a
-    # UI "ao vivo" porem muda.
-    empty_cycles = 0
+    # termina SEM entregar nenhuma mensagem PODE indicar que a sessao Gemini
+    # morreu do lado do provedor (limite interno de duracao, GoAway etc.) — mas
+    # tambem acontece legitimamente logo apos uma tool call (o modelo leva um
+    # tempo para processar o resultado da funcao e comecar o proximo turno) ou
+    # em qualquer boundary normal entre turnos. Por isso a deteccao exige que
+    # fiquemos SEM NENHUMA mensagem por um periodo real minimo (nao so um
+    # numero fixo de ciclos, que podia disparar em bem menos de 1s) antes de
+    # concluir que a sessao morreu de verdade.
+    empty_since: float | None = None
+    EMPTY_STREAK_LIMIT_SECONDS = 8.0
     while not stop_event.is_set():
         received_any = False
         async for response in session.receive():
@@ -968,10 +973,12 @@ async def _forward_gemini_audio_to_browser(
                 )
 
         if received_any:
-            empty_cycles = 0
+            empty_since = None
         else:
-            empty_cycles += 1
-            if empty_cycles >= 3:
+            now = time.monotonic()
+            if empty_since is None:
+                empty_since = now
+            elif now - empty_since >= EMPTY_STREAK_LIMIT_SECONDS:
                 logger.info("Gemini Live session ended upstream; closing browser voice stream")
                 with contextlib.suppress(RuntimeError, WebSocketDisconnect):
                     await websocket.send_json(
