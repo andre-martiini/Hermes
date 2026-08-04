@@ -12,6 +12,7 @@ import { getRoutingIndex, toolsRegistry } from './toolRegistry';
 import { isInternalAppHref, navigateWithinApp } from '../../utils/internalNavigation';
 import { CollapsibleContainer } from '../ui/UIComponents';
 import { useHermesVoiceStream } from '@/src/hooks/useHermesVoiceStream';
+import { buildRecordedAudioBlob, transcribeAudioViaStorage } from '@/src/utils/audioTranscription';
 
 // URL do endpoint HTTP de upload (Node.js Functions)
 const UPLOAD_ENDPOINT = 'https://us-central1-gestao-hermes.cloudfunctions.net/uploadFileForCopiloto';
@@ -1469,35 +1470,13 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 setFooterError(null);
 
                 try {
-                    const reader = new FileReader();
-                    reader.readAsDataURL(audioFile);
-                    reader.onloadend = async () => {
-                        try {
-                            const b64 = (reader.result as string).split(',')[1];
-                            const nameParts = audioFile.name.split('.');
-                            const ext = nameParts.length > 1
-                                ? '.' + nameParts.pop()
-                                : '.' + (audioFile.type.split('/')[1]?.split(';')[0] || 'm4a');
-
-                            const fn = httpsCallable(functions, 'transcreverAudio');
-                            const res = await fn({ audioBase64: b64, extension: ext });
-                            const data = res.data as { raw: string; refined: string };
-
-                            if (data.refined) {
-                                setInput(prev => prev + (prev ? '\n' : '') + data.refined);
-                            }
-                        } catch (err: any) {
-                            setFooterError('Erro ao transcrever áudio: ' + (err?.message || 'Tente novamente.'));
-                        } finally {
-                            setIsTranscribing(false);
-                        }
-                    };
-                    reader.onerror = () => {
-                        setFooterError('Não foi possível ler o arquivo de áudio colado.');
-                        setIsTranscribing(false);
-                    };
+                    const nameParts = audioFile.name.split('.');
+                    const ext = nameParts.length > 1 ? `.${nameParts.pop()}` : undefined;
+                    const data = await transcribeAudioViaStorage(audioFile, ext);
+                    if (data.refined) setInput(prev => prev + (prev ? '\n' : '') + data.refined);
                 } catch (err: any) {
                     setFooterError('Erro ao transcrever áudio: ' + (err?.message || 'Tente novamente.'));
+                } finally {
                     setIsTranscribing(false);
                 }
                 return;
@@ -1531,23 +1510,17 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             audioChunksRef.current = [];
             mr.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
             mr.onstop = async () => {
-                const blob = new Blob(audioChunksRef.current, { type: 'audio/m4a' });
+                const blob = buildRecordedAudioBlob(audioChunksRef.current, mr);
                 if (micStreamRef.current) { micStreamRef.current.getTracks().forEach(t => t.stop()); micStreamRef.current = null; }
                 setIsProcessingMic(true);
                 try {
-                    const reader = new FileReader();
-                    reader.readAsDataURL(blob);
-                    reader.onloadend = async () => {
-                        try {
-                            const b64 = (reader.result as string).split(',')[1];
-                            const fn = httpsCallable(functions, 'transcreverAudio');
-                            const res = await fn({ audioBase64: b64, extension: '.m4a' });
-                            const data = res.data as { raw: string; refined: string };
-                            if (data.refined) setInput(prev => prev + (prev ? '\n' : '') + data.refined);
-                        } catch (error: any) { setFooterError(error?.message || 'Erro ao transcrever áudio do microfone.'); }
-                        finally { setIsProcessingMic(false); }
-                    };
-                } catch { setIsProcessingMic(false); }
+                    const data = await transcribeAudioViaStorage(blob);
+                    if (data.refined) setInput(prev => prev + (prev ? '\n' : '') + data.refined);
+                } catch (error: any) {
+                    setFooterError(error?.message || 'Erro ao transcrever áudio do microfone.');
+                } finally {
+                    setIsProcessingMic(false);
+                }
             };
             mr.start();
             setIsRecording(true);

@@ -1,6 +1,4 @@
 import React, { useState, useRef } from 'react';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '@/firebase';
 import { BrainstormIdea, formatDate, ConhecimentoItem } from '@/types';
 import { AutoExpandingTextarea } from '../ui/UIComponents';
 import { ShoppingListTool } from './ShoppingListTool';
@@ -11,6 +9,7 @@ import { SipacTrackingTool } from './SipacTrackingTool';
 import { MonitorPaginasTool } from './MonitorPaginasTool';
 import { LongTranscriptionTool } from './LongTranscriptionTool';
 import { BatchTranscriptionTool } from './BatchTranscriptionTool';
+import { buildRecordedAudioBlob, transcribeAudioViaStorage } from '@/src/utils/audioTranscription';
 
 type FerramentaAtiva = 'brainstorming' | 'shopping' | 'transcription' | 'meeting_transcription' | 'pop_manager' | 'whatsapp_assistant' | 'sipac_tracking' | 'long_transcription' | 'batch_transcription' | 'monitor_paginas' | null;
 
@@ -145,7 +144,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
       audioChunksRef.current = [];
       mediaRecorder.ondataavailable = (event) => { if (event.data.size > 0) audioChunksRef.current.push(event.data); };
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/m4a' });
+        const audioBlob = buildRecordedAudioBlob(audioChunksRef.current, mediaRecorder);
         // Stop hardware immediately
         if (stream) stream.getTracks().forEach(track => track.stop());
         streamRef.current = null;
@@ -169,24 +168,12 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   const handleProcessAudio = async (audioBlob: Blob) => {
     setIsProcessing(true);
     try {
-      const reader = new FileReader();
-      reader.readAsDataURL(audioBlob);
-      reader.onloadend = async () => {
-        try {
-          const base64String = (reader.result as string).split(',')[1];
-          const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
-          const response = await transcribeFunc({ audioBase64: base64String });
-          const data = response.data as { raw: string, refined: string };
-          if (data.refined) onAddTextIdea(data.refined);
-        } catch (error: any) {
-          console.error("Erro ao transcrever:", error);
-          showAlert("Erro", error?.message || "Erro ao processar áudio via Hermes AI.");
-        } finally {
-          setIsProcessing(false);
-        }
-      };
-    } catch (error) {
-      console.error("Erro ao ler áudio:", error);
+      const data = await transcribeAudioViaStorage(audioBlob);
+      if (data.refined) onAddTextIdea(data.refined);
+    } catch (error: any) {
+      console.error("Erro ao transcrever:", error);
+      showAlert("Erro", error?.message || "Erro ao processar áudio via Hermes AI.");
+    } finally {
       setIsProcessing(false);
     }
   };

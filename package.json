@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "watch:pages": "python hermes_cli.py watch-pages",
     "sync:pages": "python hermes_cli.py sync-watch-pages",
-    "test": "vitest run src/utils/destructiveActions.test.ts src/utils/shoppingTransitions.test.ts",
+    "test": "vitest run src/utils/destructiveActions.test.ts src/utils/shoppingTransitions.test.ts src/utils/audioTranscription.test.ts",
     "whatsapp:worker": "npm --prefix services/whatsapp-capture start"
   },
   "dependencies": {

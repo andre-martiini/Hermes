@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { formatDate } from '@/types';
 import { AutoExpandingTextarea } from '../ui/UIComponents';
+import { buildRecordedAudioBlob, transcribeAudioViaStorage } from '@/src/utils/audioTranscription';
 import {
     UPLOAD_ENDPOINT,
     COPILOTO_FILE_ACCEPT,
@@ -139,15 +140,7 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
     const transcribeBlob = async (blob: Blob, extension = '.m4a') => {
         setIsProcessingMic(true);
         try {
-            const reader = new FileReader();
-            const base64 = await new Promise<string>((resolve, reject) => {
-                reader.onloadend = () => resolve(String(reader.result || '').split(',')[1] || '');
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
-            const transcreverAudio = httpsCallable(functions, 'transcreverAudio');
-            const result = await transcreverAudio({ audioBase64: base64, extension });
-            const data = result.data as { raw?: string; refined?: string };
+            const data = await transcribeAudioViaStorage(blob, extension);
             if (data.refined) setInput((prev) => prev + (prev ? '\n' : '') + data.refined);
         } catch (err: any) {
             showToast('Erro ao transcrever áudio: ' + (err?.message || 'Tente novamente.'), 'error');
@@ -167,12 +160,12 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
                 if (event.data.size > 0) audioChunksRef.current.push(event.data);
             };
             recorder.onstop = async () => {
-                const blob = new Blob(audioChunksRef.current, { type: 'audio/m4a' });
+                const blob = buildRecordedAudioBlob(audioChunksRef.current, recorder);
                 if (micStreamRef.current) {
                     micStreamRef.current.getTracks().forEach((track) => track.stop());
                     micStreamRef.current = null;
                 }
-                await transcribeBlob(blob, '.m4a');
+                await transcribeBlob(blob);
             };
             recorder.start();
             setIsRecording(true);

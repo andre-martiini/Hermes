@@ -12,6 +12,7 @@ import { formatDate, formatDateLocalISO } from '../../../types';
 import { detectAreaFromTitle, callScrapeSipac } from '../../utils/helpers';
 import { isOperationalArea, STRATEGIC_AREA_OPTIONS } from '../../utils/strategicAreas';
 import { WysiwygEditor } from '../ui/UIComponents';
+import { buildRecordedAudioBlob, transcribeAudioViaStorage } from '../../utils/audioTranscription';
 
 type ThemeMode = 'system' | 'dark' | 'light';
 
@@ -851,22 +852,16 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
       mr.onstop = async () => {
         if (stream) stream.getTracks().forEach(t => t.stop());
         streamRef.current = null;
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const blob = buildRecordedAudioBlob(audioChunksRef.current, mr);
         setIsTranscribing(true);
         try {
-          const reader = new FileReader();
-          reader.readAsDataURL(blob);
-          reader.onloadend = async () => {
-            try {
-              const b64 = (reader.result as string).split(',')[1];
-              const fn = httpsCallable(functions, 'transcreverAudio');
-              const res = await fn({ audioBase64: b64 });
-              const data = res.data as { raw: string; refined: string };
-              if (data.refined) setInputText(prev => (prev ? prev + ' ' : '') + data.refined);
-            } catch (error: any) { showAlert('Erro', error?.message || 'Erro ao transcrever o áudio.'); }
-            finally { setIsTranscribing(false); }
-          };
-        } catch { setIsTranscribing(false); }
+          const data = await transcribeAudioViaStorage(blob);
+          if (data.refined) setInputText(prev => (prev ? prev + ' ' : '') + data.refined);
+        } catch (error: any) {
+          showAlert('Erro', error?.message || 'Erro ao transcrever o áudio.');
+        } finally {
+          setIsTranscribing(false);
+        }
       };
       mr.start();
       setIsRecording(true);

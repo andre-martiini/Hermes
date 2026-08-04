@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytesResumable } from 'firebase/storage';
 import { db, auth, storage } from '@/firebase';
+import { getMediaContentType } from '@/src/utils/audioTranscription';
 
 interface LongTranscriptionToolProps {
   onBack: () => void;
@@ -27,6 +28,7 @@ interface LongTranscription {
   userId: string;
   fileName: string;
   fileSize: number;
+  mimeType?: string | null;
   status: TranscriptionStatus;
   storagePath?: string;
   transcriptionRaw?: string | null;
@@ -62,6 +64,11 @@ const getExtension = (fileName: string): string => {
   const idx = fileName.lastIndexOf('.');
   return idx >= 0 ? fileName.slice(idx + 1).toLowerCase() : 'bin';
 };
+
+const SUPPORTED_MEDIA_EXTENSIONS = new Set([
+  'aac', 'aiff', 'aif', 'amr', 'caf', 'flac', 'm4a', 'mp3', 'mp4', 'mov',
+  'mpeg', 'mpg', 'oga', 'ogg', 'opus', 'wav', 'webm', '3gp', '3gpp',
+]);
 
 const statusStyles = (status: TranscriptionStatus, isDark: boolean): string => {
   switch (status) {
@@ -121,7 +128,9 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
         showToast('Você precisa estar autenticado.', 'error');
         return;
       }
-      const isMedia = file.type.startsWith('audio/') || file.type.startsWith('video/');
+      const ext = getExtension(file.name);
+      // Safari/iOS às vezes entrega File.type vazio mesmo para gravações válidas.
+      const isMedia = file.type.startsWith('audio/') || file.type.startsWith('video/') || SUPPORTED_MEDIA_EXTENSIONS.has(ext);
       if (!isMedia) {
         showToast('Selecione um arquivo de áudio ou vídeo.', 'error');
         return;
@@ -132,6 +141,7 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
           userId: uid,
           fileName: file.name,
           fileSize: file.size,
+          mimeType: file.type || null,
           status: 'Enviando' as TranscriptionStatus,
           storagePath: '',
           transcriptionRaw: '',
@@ -140,11 +150,12 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
           updatedAt: serverTimestamp(),
         });
 
-        const ext = getExtension(file.name);
         const storagePath = `long_transcriptions/${uid}/${docRef.id}.${ext}`;
         await updateDoc(doc(db, 'long_transcriptions', docRef.id), { storagePath });
 
-        const task = uploadBytesResumable(ref(storage, storagePath), file, { contentType: file.type });
+        const task = uploadBytesResumable(ref(storage, storagePath), file, {
+          contentType: getMediaContentType(file, `.${ext}`),
+        });
         setUploadProgress((p) => ({ ...p, [docRef.id]: 0 }));
 
         task.on(

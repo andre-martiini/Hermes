@@ -8,6 +8,7 @@ import {
 import { normalizeStatus } from '../utils/helpers';
 import { buildDiaryRichNote, ensureHttpUrl, getRenamedFileName, parseDiaryRichNote } from '../utils/diaryEntries';
 import { isOperationalArea, STRATEGIC_AREA_OPTIONS } from '../utils/strategicAreas';
+import { buildRecordedAudioBlob, transcribeAudioViaStorage } from '../utils/audioTranscription';
 import { NotificationCenter } from '../components/ui/UIComponents';
 import { db, functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
@@ -1503,7 +1504,7 @@ export const TaskExecutionView = ({
       audioChunksRef.current = [];
       mr.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       mr.onstop = async () => {
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/m4a' });
+        const blob = buildRecordedAudioBlob(audioChunksRef.current, mr);
         // Stop hardware immediately instead of waiting for transcription processing
         if (stream) stream.getTracks().forEach(t => t.stop());
         streamRef.current = null;
@@ -1539,19 +1540,13 @@ export const TaskExecutionView = ({
     setIsProcessingTranscription(true);
     const setter = target === 'chat' ? setChatInput : setNewFollowUp;
     try {
-      const reader = new FileReader();
-      reader.readAsDataURL(audioBlob);
-      reader.onloadend = async () => {
-        try {
-          const b64 = (reader.result as string).split(',')[1];
-          const fn = httpsCallable(functions, 'transcreverAudio');
-          const res = await fn({ audioBase64: b64 });
-          const data = res.data as { raw: string; refined: string };
-          if (data.refined) setter(prev => prev + (prev ? '\n' : '') + data.refined);
-        } catch (error: any) { showToast(error?.message || 'Erro ao processar áudio.', 'error'); }
-        finally { setIsProcessingTranscription(false); }
-      };
-    } catch { setIsProcessingTranscription(false); }
+      const data = await transcribeAudioViaStorage(audioBlob);
+      if (data.refined) setter(prev => prev + (prev ? '\n' : '') + data.refined);
+    } catch (error: any) {
+      showToast(error?.message || 'Erro ao processar áudio.', 'error');
+    } finally {
+      setIsProcessingTranscription(false);
+    }
   };
 
   // ─── Modal Confirm ────────────────────────────────────────────
