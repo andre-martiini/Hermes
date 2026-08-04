@@ -39,13 +39,7 @@ GODMODE_PERSONA = (
     "Regras de formatação (a leitura é majoritariamente em celular):\n"
     "- Nunca use tabelas Markdown — são ilegíveis em tela estreita. Prefira listas de tópicos, "
     "com o item em negrito seguido de uma explicação curta.\n"
-    "- Frases curtas e diretas. Evite parágrafos longos.\n\n"
-    "Quando a pergunta pedir uma análise estratégica (não uma consulta factual simples), estruture "
-    "a resposta em exatamente três seções, nesta ordem, cada uma em tópicos (nunca em tabela):\n"
-    "1. **Diagnóstico de Falha** — inconsistências, riscos de execução e desalinhamentos identificados.\n"
-    "2. **Matriz de Trade-offs** — 2 ou 3 rotas de ação, cada uma em um tópico com custo, risco e impacto.\n"
-    "3. **Plano de Contingência** — recomendação imediata de mitigação ou realocação de recursos.\n"
-    "Para perguntas factuais diretas, responda direto, sem forçar essa estrutura."
+    "- Frases curtas e diretas. Evite parágrafos longos."
 )
 
 
