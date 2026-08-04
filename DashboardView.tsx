@@ -17,6 +17,7 @@ interface DashboardViewProps {
     healthSettings: HealthSettings;
     exerciseLogs: ExerciseLog[];
     onSaveExerciseLog?: (date: string, data: Partial<ExerciseLog>) => Promise<void>;
+    onAddHealthWeight?: (weight: number, date: string) => Promise<void>;
     unidades: { id: string, nome: string }[];
     currentMonth: number;
     currentYear: number;
@@ -142,6 +143,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     healthSettings = {} as HealthSettings,
     exerciseLogs = [] as ExerciseLog[],
     onSaveExerciseLog,
+    onAddHealthWeight,
     currentMonth = new Date().getMonth(),
     currentYear = new Date().getFullYear(),
     onNavigate
@@ -244,8 +246,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
     // --- WALK GOAL LOGIC ---
     const todayWalkKm = useMemo(() => sumWalkBlocksKm(todayHealthLog), [todayHealthLog]);
-    const walkingMinimumKm = healthSettings?.walkingMinimumKm ?? 5;
-    const walkingIdealKm = healthSettings?.walkingIdealKm ?? 10;
+    const walkingMinimumKm = healthSettings?.walkingMinimumKm ?? 3;
+    const walkingIdealKm = healthSettings?.walkingIdealKm ?? 8;
     const walkMetMinimum = todayWalkKm >= walkingMinimumKm;
     const walkMetIdeal = todayWalkKm >= walkingIdealKm;
 
@@ -271,7 +273,38 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             setIsSavingWalk(false);
         }
     };
+
+    // --- REGISTRO RAPIDO DE PESO ---
+    const [isWeightModalOpen, setIsWeightModalOpen] = useState(false);
+    const [weightKgInput, setWeightKgInput] = useState('');
+    const [isSavingWeight, setIsSavingWeight] = useState(false);
+
+    const handleQuickRegisterWeight = async () => {
+        const weight = parseFloat(weightKgInput.replace(',', '.'));
+        if (!onAddHealthWeight || isNaN(weight) || weight <= 0 || weight > 400) return;
+        setIsSavingWeight(true);
+        try {
+            await onAddHealthWeight(weight, todayKey);
+            setWeightKgInput('');
+            setIsWeightModalOpen(false);
+        } finally {
+            setIsSavingWeight(false);
+        }
+    };
     // --- PROGRESS BAR RENDER HELPER ---
+    // Nivelamento suave de cor da caminhada: abaixo do minimo fica em cinza
+    // (nao entrou na zona de pontuacao ainda); do minimo ao ideal, a cor
+    // desliza continuamente de vermelho -> laranja -> amarelo -> verde (em
+    // vez de saltar entre 3 cores fixas); do ideal em diante e "lucro" e
+    // fica no verde cheio.
+    const walkGradientColor = (km: number, minKm: number, idealKm: number) => {
+        if (minKm <= 0 || km < minKm) return isDark ? '#475569' : '#94a3b8';
+        if (km >= idealKm) return '#10b981';
+        const t = idealKm > minKm ? (km - minKm) / (idealKm - minKm) : 1;
+        const hue = t * 142; // 0 = vermelho, ~142 = verde-esmeralda
+        return `hsl(${hue}, 82%, 46%)`;
+    };
+
     const renderProgressBar = (value: number, max: number) => {
         const percent = max > 0 ? Math.min((value / max) * 100, 100) : 0;
         return (
@@ -515,6 +548,21 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                     </div>
                                 </div>
 
+                                <div className="flex items-center justify-end">
+                                    <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); setIsWeightModalOpen(true); }}
+                                        className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-wider transition-all ${
+                                            isDark
+                                                ? 'bg-white/5 text-[#ddb8ff] hover:bg-white/10'
+                                                : 'bg-[#f5f3ff] text-[#7800ce] hover:bg-[#ece5ff]'
+                                        }`}
+                                    >
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 5v14M5 12h14" /></svg>
+                                        Registrar
+                                    </button>
+                                </div>
+
                                 {targetWeight > 0 && (
                                     <div className="pt-2 border-t border-slate-200/40 dark:border-white/5 flex flex-col gap-1.5">
                                         <div className="flex items-center justify-between text-[9px] font-mono">
@@ -535,13 +583,15 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                             }`}>
                                 <div className="flex items-center justify-between">
                                     <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Caminhada (Hoje)</span>
-                                    {walkMetIdeal ? (
-                                        <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded bg-emerald-500/20 text-emerald-500">Meta ideal</span>
-                                    ) : walkMetMinimum ? (
-                                        <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded bg-amber-500/20 text-amber-500">Mínimo ok</span>
-                                    ) : (
-                                        <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded bg-slate-500/20 text-slate-400">Abaixo do mínimo</span>
-                                    )}
+                                    <span
+                                        className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded"
+                                        style={{
+                                            color: walkGradientColor(todayWalkKm, walkingMinimumKm, walkingIdealKm),
+                                            backgroundColor: `${walkGradientColor(todayWalkKm, walkingMinimumKm, walkingIdealKm)}33`,
+                                        }}
+                                    >
+                                        {walkMetIdeal ? 'Meta ideal' : walkMetMinimum ? 'Mínimo ok' : 'Abaixo do mínimo'}
+                                    </span>
                                 </div>
 
                                 <div className="flex items-center justify-between">
@@ -566,10 +616,11 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 <div className="relative h-[6px] w-full rounded-full overflow-hidden mt-0.5">
                                     <div className={`absolute inset-0 rounded-full ${isDark ? 'bg-[#2a313d]' : 'bg-[#f3f4f6]'}`} />
                                     <div
-                                        style={{ width: `${Math.min((todayWalkKm / Math.max(walkingIdealKm, walkingMinimumKm, todayWalkKm, 1)) * 100, 100)}%` }}
-                                        className={`absolute inset-y-0 left-0 rounded-full transition-all duration-500 ${
-                                            walkMetIdeal ? 'bg-emerald-500' : walkMetMinimum ? 'bg-amber-500' : 'bg-[#9333ea]'
-                                        }`}
+                                        style={{
+                                            width: `${Math.min((todayWalkKm / Math.max(walkingIdealKm, walkingMinimumKm, todayWalkKm, 1)) * 100, 100)}%`,
+                                            backgroundColor: walkGradientColor(todayWalkKm, walkingMinimumKm, walkingIdealKm),
+                                        }}
+                                        className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
                                     />
                                 </div>
                                 <div className="flex items-center justify-between text-[8px] font-mono text-slate-400 font-bold uppercase">
@@ -714,6 +765,56 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 className="flex-1 rounded-xl bg-[#9333ea] py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-lg transition hover:bg-[#7800ce] disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 {isSavingWalk ? 'Salvando…' : 'Registrar'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isWeightModalOpen && (
+                <div
+                    className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
+                    onClick={() => setIsWeightModalOpen(false)}
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className={`w-full max-w-xs rounded-2xl p-6 shadow-2xl animate-in zoom-in-95 ${
+                            isDark ? 'bg-[#151c27] border border-[#2a313d] text-white' : 'bg-white text-[#151c27]'
+                        }`}
+                    >
+                        <h3 className="text-sm font-bold uppercase tracking-wider">Registrar peso</h3>
+                        <p className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                            Peso atual em quilos{currentWeight > 0 ? ` (último registro: ${currentWeight.toFixed(1)} kg)` : ''}.
+                        </p>
+                        <input
+                            type="text"
+                            inputMode="decimal"
+                            autoFocus
+                            value={weightKgInput}
+                            onChange={(e) => setWeightKgInput(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleQuickRegisterWeight(); }}
+                            placeholder="Ex: 94.8"
+                            className={`mt-4 w-full rounded-xl border px-4 py-3 text-center text-2xl font-bold font-mono outline-none transition focus:ring-2 focus:ring-[#9333ea] ${
+                                isDark ? 'bg-white/5 border-[#2a313d] text-white' : 'bg-slate-50 border-slate-200 text-slate-800'
+                            }`}
+                        />
+                        <div className="mt-5 flex gap-3">
+                            <button
+                                type="button"
+                                onClick={() => { setIsWeightModalOpen(false); setWeightKgInput(''); }}
+                                className={`flex-1 rounded-xl py-2.5 text-xs font-bold uppercase tracking-wider transition ${
+                                    isDark ? 'text-slate-400 hover:bg-white/5' : 'text-slate-400 hover:bg-slate-50'
+                                }`}
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                disabled={isSavingWeight || !weightKgInput.trim()}
+                                onClick={handleQuickRegisterWeight}
+                                className="flex-1 rounded-xl bg-[#9333ea] py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-lg transition hover:bg-[#7800ce] disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {isSavingWeight ? 'Salvando…' : 'Registrar'}
                             </button>
                         </div>
                     </div>

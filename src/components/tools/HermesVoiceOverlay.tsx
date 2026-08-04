@@ -28,6 +28,10 @@ export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, 
     const [bubbles, setBubbles] = useState<VoiceBubbleItem[]>([]);
     const [statusMessage, setStatusMessage] = useState('');
     const [errorMessage, setErrorMessage] = useState('');
+    // Minimizado esconde os baloes da conversa e o chip de status, deixando so
+    // o icone flutuante — a chamada continua ativa. Diferente de onExit, que
+    // desliga a sessao de voz de verdade.
+    const [isMinimized, setIsMinimized] = useState(false);
     const nextIdRef = useRef(1);
     const startedRef = useRef(false);
 
@@ -73,9 +77,9 @@ export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, 
     const userBubbleClass = 'bg-indigo-600/95 text-white';
 
     return (
-        <div className="pointer-events-none fixed bottom-6 right-6 z-[650] flex w-[min(20rem,calc(100vw-3rem))] flex-col items-end gap-2">
+        <div className={`pointer-events-none fixed bottom-6 right-6 z-[650] flex flex-col items-end gap-2 ${isMinimized ? '' : 'w-[min(20rem,calc(100vw-3rem))]'}`}>
             {/* Baloes da conversa (ultimos turnos), do mais antigo para o mais recente */}
-            {bubbles.length > 0 && (
+            {!isMinimized && bubbles.length > 0 && (
                 <div className="flex w-full flex-col items-end gap-1.5">
                     {bubbles.map(bubble => (
                         <div
@@ -93,7 +97,7 @@ export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, 
             )}
 
             {/* Chip de status/erro */}
-            {(errorMessage || statusMessage || isConnecting) && (
+            {!isMinimized && (errorMessage || statusMessage || isConnecting) && (
                 <div
                     className={`pointer-events-auto max-w-full truncate rounded-full px-3 py-1 text-[11px] font-medium backdrop-blur-sm ${
                         errorMessage
@@ -118,12 +122,13 @@ export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, 
                     </button>
                 )}
 
-                {/* Bolinha em modo gravacao — clicar encerra a conversa */}
+                {/* Bolinha em modo gravacao — clicar minimiza/expande os baloes, a
+                    chamada continua ativa. Encerrar de verdade e o botao "x" ao lado. */}
                 <button
                     type="button"
-                    aria-label="Encerrar conversa por voz"
-                    title="Encerrar conversa por voz"
-                    onClick={onExit}
+                    aria-label={isMinimized ? 'Expandir conversa por voz' : 'Minimizar conversa por voz'}
+                    title={isMinimized ? 'Expandir conversa por voz' : 'Minimizar conversa por voz'}
+                    onClick={() => setIsMinimized(prev => !prev)}
                     className={`pointer-events-auto relative flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg transition-all hover:-translate-y-0.5 active:scale-95 sm:h-16 sm:w-16 ${
                         isError
                             ? 'bg-rose-600 shadow-rose-600/40'
@@ -151,6 +156,21 @@ export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, 
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19v3" />
                         </svg>
                     )}
+                </button>
+
+                {/* Encerrar a chamada de verdade — sempre visivel, separado do botao de minimizar */}
+                <button
+                    type="button"
+                    aria-label="Encerrar conversa por voz"
+                    title="Encerrar conversa por voz"
+                    onClick={onExit}
+                    className={`pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full text-white shadow-lg transition-all hover:-translate-y-0.5 active:scale-95 ${
+                        isDark ? 'bg-slate-700 hover:bg-rose-600' : 'bg-slate-500 hover:bg-rose-600'
+                    }`}
+                >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
                 </button>
             </div>
         </div>

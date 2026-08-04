@@ -23,6 +23,7 @@ import remarkGfm from 'remark-gfm';
 import MermaidBlock from './MermaidBlock';
 import { getRoutingIndex, toolsRegistry } from './toolRegistry';
 import { isInternalAppHref, navigateWithinApp } from '../../utils/internalNavigation';
+import { buildRecordedAudioBlob, transcribeAudioViaStorage } from '../../utils/audioTranscription';
 import { useHermesVoiceStream } from '@/src/hooks/useHermesVoiceStream';
 
 export const UPLOAD_ENDPOINT = 'https://us-central1-gestao-hermes.cloudfunctions.net/uploadFileForCopiloto';
@@ -237,6 +238,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   const [popsList, setPopsList] = useState<{ id: string; titulo: string; gatilhos: string[] }[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [showMobileHistory, setShowMobileHistory] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [pastedContext, setPastedContext] = useState<{ text: string; name: string } | null>(null);
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle');
@@ -477,7 +479,10 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   // Encerra a sessao de voz ao vivo se o painel fechar (costuma so ficar
   // oculto, nao desmontar, entao o cleanup de unmount abaixo nao cobre isso).
   useEffect(() => {
-    if (!isOpen) voiceStream.stop();
+    if (!isOpen) {
+      voiceStream.stop();
+      setIsMinimized(false);
+    }
   }, [isOpen]);
 
   useEffect(() => {
@@ -599,15 +604,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
     setIsProcessingMic(true);
     setFooterError(null);
     try {
-      const reader = new FileReader();
-      const base64 = await new Promise<string>((resolve, reject) => {
-        reader.onloadend = () => resolve(String(reader.result || '').split(',')[1] || '');
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-      const transcreverAudio = httpsCallable(functions, 'transcreverAudio');
-      const result = await transcreverAudio({ audioBase64: base64, extension });
-      const data = result.data as { raw?: string; refined?: string };
+      const data = await transcribeAudioViaStorage(blob, extension);
       if (data.refined) setInput((prev) => prev + (prev ? '\n' : '') + data.refined);
     } catch (err: any) {
       setFooterError('Erro ao transcrever áudio: ' + (err?.message || 'Tente novamente.'));
@@ -635,12 +632,12 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
         if (event.data.size > 0) audioChunksRef.current.push(event.data);
       };
       recorder.onstop = async () => {
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/m4a' });
+        const blob = buildRecordedAudioBlob(audioChunksRef.current, recorder);
         if (micStreamRef.current) {
           micStreamRef.current.getTracks().forEach((track) => track.stop());
           micStreamRef.current = null;
         }
-        await transcribeBlob(blob, '.m4a');
+        await transcribeBlob(blob);
       };
       recorder.start();
       setIsRecording(true);
@@ -909,6 +906,41 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
 
   if (!isOpen) return null;
 
+  if (isMinimized) {
+    const lastMessage = messages[messages.length - 1];
+    const isVoiceLive = voiceStream.status === 'live' || voiceStream.status === 'connecting';
+    const subtitle = isVoiceLive
+      ? (voiceStream.status === 'live' ? '🔊 Conversa por voz ao vivo' : '🔊 Conectando à voz…')
+      : isWaitingForCopilot
+        ? 'Pensando…'
+        : lastMessage?.content
+          ? lastMessage.content.slice(0, 60)
+          : 'Conversa em segundo plano';
+
+    return (
+      <button
+        type="button"
+        onClick={() => setIsMinimized(false)}
+        className={`fixed bottom-5 right-5 z-[700] flex max-w-[280px] items-center gap-3 border px-4 py-3 text-left shadow-2xl transition-all hover:-translate-y-0.5 rounded-full ${
+          isDark ? 'border-white/10 bg-[#191c1c] text-slate-100' : 'border-[#e5e7eb] bg-white text-slate-900'
+        }`}
+        aria-label="Reabrir conversa com o Hermes"
+        title="Reabrir conversa"
+      >
+        <span className={`relative flex h-9 w-9 shrink-0 items-center justify-center border p-1.5 rounded-full ${isDark ? 'border-white/10 bg-white' : 'border-[#e5e7eb] bg-white'}`}>
+          <img src="/logo.png" alt="Hermes" className="h-full w-full object-contain" />
+          {isVoiceLive && (
+            <span className="absolute -right-0.5 -top-0.5 h-3 w-3 animate-pulse rounded-full border-2 border-white bg-emerald-500" />
+          )}
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate font-sans text-[10px] font-bold uppercase tracking-wider">Hermes</span>
+          <span className={`block truncate font-sans text-[10px] font-medium ${mutedClass}`}>{subtitle}</span>
+        </span>
+      </button>
+    );
+  }
+
   const isInline = layout === 'inline';
 
   return (
@@ -1081,6 +1113,17 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
               }`}
             >
               Nova conversa
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsMinimized(true)}
+              className={`border p-2 font-sans text-[10px] font-semibold uppercase tracking-wider transition-all rounded-lg ${
+                isDark ? 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-white' : 'border-[#e5e7eb] text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+              }`}
+              aria-label="Minimizar conversa"
+              title="Minimizar (continua ativa em segundo plano)"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 12h14" /></svg>
             </button>
             <button
               type="button"

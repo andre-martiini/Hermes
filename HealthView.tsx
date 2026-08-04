@@ -449,8 +449,8 @@ const HealthView: React.FC<HealthViewProps> = ({
         [exerciseLogs]
     );
 
-    const walkingMinimumKm = settings.walkingMinimumKm ?? 5;
-    const walkingIdealKm = settings.walkingIdealKm ?? 10;
+    const walkingMinimumKm = settings.walkingMinimumKm ?? 3;
+    const walkingIdealKm = settings.walkingIdealKm ?? 8;
     const selectedWalkBlocks = todayLog.walkBlocks || [];
     const selectedWalkKm = sumWalkBlocksKm(todayLog);
     const todayWalkKm = useMemo(() => {
@@ -794,7 +794,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                     type="number"
                                                     step="0.5"
                                                     min="0"
-                                                    value={settings.walkingMinimumKm ?? 5}
+                                                    value={settings.walkingMinimumKm ?? 3}
                                                     onChange={e => onUpdateSettings({ ...settings, walkingMinimumKm: parseFloat(e.target.value) || 0 })}
                                                     className={inputClasses}
                                                 />
@@ -805,7 +805,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                     type="number"
                                                     step="0.5"
                                                     min="0"
-                                                    value={settings.walkingIdealKm ?? 10}
+                                                    value={settings.walkingIdealKm ?? 8}
                                                     onChange={e => onUpdateSettings({ ...settings, walkingIdealKm: parseFloat(e.target.value) || 0 })}
                                                     className={inputClasses}
                                                 />
