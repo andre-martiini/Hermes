@@ -3,12 +3,22 @@ import { auth } from '@/firebase';
 
 export type VoiceStreamStatus = 'idle' | 'connecting' | 'live' | 'error';
 
+export interface VoiceDocumentPayload {
+    name: string;
+    text: string;
+    driveFileId?: string;
+}
+
 interface UseHermesVoiceStreamOptions {
     onUserTranscript: (text: string) => void;
     onAssistantTranscript: (text: string) => void;
     onStatus?: (message: string) => void;
     onError?: (message: string) => void;
     onUICommand?: (command: string, params: any) => void;
+    /** Chamado quando o bridge confirma a ingestao dos documentos. */
+    onDocumentIngested?: (fileNames: string[]) => void;
+    /** Chamado quando o bridge recebe o documento, mas falha ao injeta-lo no Gemini. */
+    onDocumentError?: (message: string) => void;
     /** Se a sessao de voz nasce dentro de uma acao, o bridge recebe o id e
      * injeta contexto + ferramentas de escrita daquela acao. */
     taskId?: string | null;
@@ -342,6 +352,12 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
                     case 'ui_command':
                         options.onUICommand?.(payload.command, payload.params || {});
                         break;
+                    case 'document_ingested':
+                        options.onDocumentIngested?.(payload.fileNames || []);
+                        break;
+                    case 'document_error':
+                        options.onDocumentError?.(payload.message || 'O servidor de voz não conseguiu ler o documento.');
+                        break;
                     default:
                         break;
                 }
@@ -364,6 +380,22 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
         }
     }, []);
 
-    return { status, start, stop, sendUIContext };
-}
+    const sendDocumentContext = useCallback((documents: VoiceDocumentPayload[]): boolean => {
+        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+            console.warn('[Hermes Voice] sendDocumentContext: WebSocket não está aberto.');
+            return false;
+        }
+        try {
+            wsRef.current.send(JSON.stringify({
+                type: 'document_context',
+                documents,
+            }));
+            return true;
+        } catch (err) {
+            console.error('[Hermes Voice] Erro ao enviar document_context:', err);
+            return false;
+        }
+    }, []);
 
+    return { status, start, stop, sendUIContext, sendDocumentContext };
+}

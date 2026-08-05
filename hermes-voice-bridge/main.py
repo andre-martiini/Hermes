@@ -835,6 +835,60 @@ async def _forward_browser_audio_to_gemini(
                 logger.warning("Falha ao enviar ui_context para session: %s", exc)
             continue
 
+        if message_type == "document_context":
+            documents = message.get("documents") or []
+            if not documents:
+                continue
+
+            doc_sections = []
+            for doc in documents[:10]:
+                doc_name = doc.get("name") or "documento"
+                doc_text = (doc.get("text") or "").strip()
+                if doc_text:
+                    doc_sections.append(
+                        f"--- DOCUMENTO: {doc_name} ---\n{doc_text[:30000]}\n--- FIM DO DOCUMENTO ---"
+                    )
+
+            if not doc_sections:
+                continue
+
+            file_names = [
+                doc.get("name", "documento")
+                for doc in documents[:10]
+                if (doc.get("text") or "").strip()
+            ]
+            plural = "s" if len(doc_sections) > 1 else ""
+            doc_prompt = (
+                f"[SISTEMA - DOCUMENTOS ENVIADOS PELO USUÁRIO]\n"
+                f"O usuário acabou de enviar {len(doc_sections)} documento{plural} para você analisar. "
+                f"Leia o conteúdo abaixo e confirme que recebeu, mencionando o nome do arquivo. "
+                f"A partir de agora você pode responder perguntas sobre este{plural} documento{plural}.\n\n"
+                + "\n\n".join(doc_sections)
+            )
+            logger.info("Injetando contexto de %d documento(s) na sessão de voz: %s", len(doc_sections), file_names)
+
+            # Injeta em background para nao bloquear o streaming de audio, mas so
+            # confirma ao navegador depois que o Gemini Live aceitar o contexto.
+            async def _send_doc_context(prompt: str, names: list[str]) -> None:
+                try:
+                    await session.send(input=prompt)
+                    await websocket.send_text(json.dumps({
+                        "type": "document_ingested",
+                        "fileNames": names,
+                    }))
+                except Exception as exc:
+                    logger.warning("Falha ao enviar document_context para session: %s", exc)
+                    try:
+                        await websocket.send_text(json.dumps({
+                            "type": "document_error",
+                            "message": "O Gemini Live nao aceitou o contexto do documento. Tente enviar o arquivo novamente.",
+                        }))
+                    except Exception:
+                        pass
+
+            asyncio.create_task(_send_doc_context(doc_prompt, file_names))
+            continue
+
         if message_type != "audio":
             logger.debug("Unhandled browser voice message: %s", message_type)
             continue

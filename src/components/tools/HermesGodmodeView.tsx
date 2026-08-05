@@ -44,7 +44,9 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [input, setInput] = useState('');
     const [isSending, setIsSending] = useState(false);
-    const [attachedFile, setAttachedFile] = useState<File | null>(null);
+    const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+    const attachedFile = attachedFiles[0] || null;
+    const setAttachedFile = (file: File | null) => setAttachedFiles(file ? [file] : []);
     const [uploadPhase, setUploadPhase] = useState<'idle' | 'uploading' | 'processing'>('idle');
     const [isRecording, setIsRecording] = useState(false);
     const [isProcessingMic, setIsProcessingMic] = useState(false);
@@ -88,8 +90,6 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
     }, [userId]);
 
     useEffect(() => {
-        // Rola apenas a lista interna de mensagens — scrollIntoView rolaria a
-        // página inteira em mobile, escondendo o cabeçalho fixo do módulo.
         const el = messagesScrollRef.current;
         if (el) el.scrollTop = el.scrollHeight;
     }, [messages, isSending]);
@@ -101,30 +101,55 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
         };
     }, []);
 
+    const attachFiles = (files: File | File[] | null) => {
+        if (!files) return;
+        const fileList = Array.isArray(files) ? files : [files];
+        const validFiles: File[] = [];
+
+        for (const file of fileList) {
+            if (!isCopilotoFileSupported(file)) {
+                showToast(`Formato de "${file.name}" não suportado. Use ${COPILOTO_SUPPORTED_FORMATS_LABEL}.`, 'error');
+                continue;
+            }
+            validFiles.push(file);
+        }
+
+        if (validFiles.length === 0) return;
+
+        setAttachedFiles(prev => {
+            const combined = [...prev, ...validFiles];
+            if (combined.length > 10) {
+                showToast(`Você pode anexar no máximo 10 documentos. Mantive os 10 primeiros.`, 'info');
+                return combined.slice(0, 10);
+            }
+            return combined;
+        });
+    };
+
     const attachFile = (file: File | null) => {
-        if (!file) {
-            setAttachedFile(null);
-            return;
-        }
-        if (!isCopilotoFileSupported(file)) {
-            setAttachedFile(null);
-            showToast(`Formato ainda não suportado. Use ${COPILOTO_SUPPORTED_FORMATS_LABEL}.`, 'error');
-            return;
-        }
-        setAttachedFile(file);
+        attachFiles(file);
     };
 
     const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-        attachFile(event.target.files?.[0] ?? null);
+        const files = event.target.files ? Array.from(event.target.files) : [];
+        attachFiles(files);
         event.target.value = '';
+    };
+
+    const handleRemoveFile = (indexToRemove?: number) => {
+        if (typeof indexToRemove === 'number') {
+            setAttachedFiles(prev => prev.filter((_, i) => i !== indexToRemove));
+        } else {
+            setAttachedFiles([]);
+        }
     };
 
     const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
         const files = Array.from(event.clipboardData.files);
-        const firstSupported = files.find((file) => isCopilotoFileSupported(file));
-        if (firstSupported) {
+        const supported = files.filter((file) => isCopilotoFileSupported(file));
+        if (supported.length > 0) {
             event.preventDefault();
-            attachFile(firstSupported);
+            attachFiles(supported);
         }
     };
 
@@ -134,7 +159,8 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
         event.stopPropagation();
         dragCounterRef.current = 0;
         setIsDragActive(false);
-        attachFile(event.dataTransfer.files?.[0] ?? null);
+        const files = Array.from(event.dataTransfer.files || []);
+        attachFiles(files);
     };
 
     const transcribeBlob = async (blob: Blob, extension = '.m4a') => {
@@ -183,35 +209,43 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
 
     const handleSend = async () => {
         const prompt = input.trim();
-        const fileToSend = attachedFile;
-        if (!prompt && !fileToSend) return;
+        const filesToSend = [...attachedFiles];
+        if (!prompt && filesToSend.length === 0) return;
         if (isSending) return;
 
         setInput('');
-        setAttachedFile(null);
+        setAttachedFiles([]);
         setIsSending(true);
         try {
-            let driveFileId: string | undefined;
-            let driveFileName: string | undefined;
+            const driveFiles: Array<{ driveFileId: string; driveFileName: string }> = [];
 
-            if (fileToSend) {
+            if (filesToSend.length > 0) {
                 setUploadPhase('uploading');
                 const idToken = await auth.currentUser?.getIdToken();
                 if (!idToken) throw new Error('Usuário não autenticado.');
-                const formData = new FormData();
-                formData.append('file', fileToSend, fileToSend.name);
-                const uploadRes = await fetch(UPLOAD_ENDPOINT, {
-                    method: 'POST',
-                    headers: { Authorization: `Bearer ${idToken}` },
-                    body: formData,
-                });
-                if (!uploadRes.ok) {
-                    const errBody = await uploadRes.json().catch(() => ({}));
-                    throw new Error(errBody.error || `Erro no upload: HTTP ${uploadRes.status}`);
-                }
-                const uploadData = await uploadRes.json();
-                driveFileId = uploadData.driveFileId;
-                driveFileName = uploadData.fileName || fileToSend.name;
+
+                const uploadResults = await Promise.all(
+                    filesToSend.map(async (file) => {
+                        const formData = new FormData();
+                        formData.append('file', file, file.name);
+                        const uploadRes = await fetch(UPLOAD_ENDPOINT, {
+                            method: 'POST',
+                            headers: { Authorization: `Bearer ${idToken}` },
+                            body: formData,
+                        });
+                        if (!uploadRes.ok) {
+                            const errBody = await uploadRes.json().catch(() => ({}));
+                            throw new Error(errBody.error || `Erro no upload de "${file.name}": HTTP ${uploadRes.status}`);
+                        }
+                        const uploadData = await uploadRes.json();
+                        return {
+                            driveFileId: uploadData.driveFileId as string,
+                            driveFileName: (uploadData.fileName || file.name) as string,
+                        };
+                    })
+                );
+
+                driveFiles.push(...uploadResults);
                 setUploadPhase('processing');
             }
 
@@ -219,8 +253,9 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
             const response = await askGodmode({
                 prompt,
                 sessionId: sessionId || undefined,
-                driveFileId,
-                driveFileName,
+                driveFiles,
+                driveFileId: driveFiles[0]?.driveFileId,
+                driveFileName: driveFiles[0]?.driveFileName,
             });
             const data = response.data as { sessionId: string };
             if (data.sessionId && data.sessionId !== sessionId) {
@@ -238,7 +273,7 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
     const handleNewSession = () => {
         setSessionId('');
         setMessages([]);
-        setAttachedFile(null);
+        setAttachedFiles([]);
         setInput('');
         localStorage.removeItem('hermes-godmode-session');
         setIsHistoryOpen(false);
@@ -275,7 +310,7 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
             }}
             onDrop={handleDrop}
         >
-            {/* Glow decorativo — sutil, não interativo */}
+            {/* Glow decorativo */}
             <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full bg-violet-500/20 blur-3xl" aria-hidden="true" />
             <div className="pointer-events-none absolute -bottom-32 -left-16 h-64 w-64 rounded-full bg-fuchsia-400/10 blur-3xl" aria-hidden="true" />
 
@@ -395,30 +430,38 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
                 {isSending && (
                     <div className={`flex items-center gap-2 text-xs italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-500" />
-                        {uploadPhase === 'uploading' ? 'Enviando arquivo...' : uploadPhase === 'processing' ? 'Processando anexo...' : 'Godmode está analisando…'}
+                        {uploadPhase === 'uploading' ? 'Enviando arquivos...' : uploadPhase === 'processing' ? 'Processando anexos...' : 'Godmode está analisando…'}
                     </div>
                 )}
             </div>
 
             <div className={`relative px-5 py-4 border-t backdrop-blur-sm ${isDark ? 'border-violet-400/10' : 'border-violet-200/70'}`}>
-                {(attachedFile || isProcessingMic) && (
-                    <div className={`mb-3 flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-bold ${isDark ? 'border-violet-400/20 bg-violet-500/5 text-slate-200' : 'border-violet-200 bg-violet-50 text-slate-700'}`}>
-                        <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>{isProcessingMic ? 'Transcrevendo áudio' : 'Anexo pronto'}</span>
-                        <span className="min-w-0 flex-1 truncate">{attachedFile?.name || 'Microfone'}</span>
-                        {attachedFile && (
-                            <button type="button" onClick={() => setAttachedFile(null)} className="font-black uppercase tracking-wider text-rose-500">Remover</button>
+                {(attachedFiles.length > 0 || isProcessingMic) && (
+                    <div className="mb-3 flex flex-wrap items-center gap-1.5 max-h-32 overflow-y-auto">
+                        {attachedFiles.map((file, idx) => (
+                            <div key={`${file.name}-${idx}`} className={`flex items-center gap-1.5 rounded-xl border px-3 py-1 text-[11px] font-bold ${isDark ? 'border-violet-400/20 bg-violet-500/5 text-slate-200' : 'border-violet-200 bg-violet-50 text-slate-700'}`}>
+                                <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Anexo {idx + 1}</span>
+                                <span className="max-w-[160px] truncate" title={file.name}>{file.name}</span>
+                                <button type="button" onClick={() => handleRemoveFile(idx)} className="font-black uppercase tracking-wider text-rose-500 hover:text-rose-600 ml-1">×</button>
+                            </div>
+                        ))}
+                        {isProcessingMic && (
+                            <div className={`flex items-center gap-2 rounded-xl border px-3 py-1 text-[11px] font-bold ${isDark ? 'border-violet-400/20 bg-violet-500/5 text-slate-200' : 'border-violet-200 bg-violet-50 text-slate-700'}`}>
+                                <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Microfone</span>
+                                <span>Transcrevendo áudio...</span>
+                            </div>
                         )}
                     </div>
                 )}
                 <div className={`flex items-end gap-1.5 rounded-2xl border px-2 py-2 transition-shadow ${
                     isDark ? 'border-violet-400/20 bg-white/[0.03] focus-within:shadow-[0_0_0_1px_rgba(167,139,250,0.4)]' : 'border-violet-200 bg-white/80 focus-within:shadow-[0_0_0_1px_rgba(139,92,246,0.35)]'
                 }`}>
-                    <input ref={fileInputRef} type="file" accept={COPILOTO_FILE_ACCEPT} className="hidden" onChange={handleFileSelect} />
+                    <input ref={fileInputRef} type="file" multiple accept={COPILOTO_FILE_ACCEPT} className="hidden" onChange={handleFileSelect} />
                     <button
                         type="button"
-                        disabled={isBlocked}
+                        disabled={isBlocked || attachedFiles.length >= 10}
                         onClick={() => fileInputRef.current?.click()}
-                        title="Anexar arquivo"
+                        title={attachedFiles.length >= 10 ? "Limite máximo de 10 arquivos atingido" : "Anexar arquivo(s)"}
                         className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all disabled:opacity-30 ${isDark ? 'text-violet-200 hover:bg-violet-500/10' : 'text-violet-700 hover:bg-violet-50'}`}
                     >
                         <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 5v14m-7-7h14" /></svg>
@@ -434,7 +477,7 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
                             }
                         }}
                         disabled={isBlocked}
-                        placeholder={isRecording ? 'Gravando... clique no microfone para parar' : isProcessingMic ? 'Transcrevendo áudio...' : attachedFile ? 'Pergunte sobre o anexo...' : 'Pergunte ao Godmode...'}
+                        placeholder={isRecording ? 'Gravando... clique no microfone para parar' : isProcessingMic ? 'Transcrevendo áudio...' : attachedFiles.length > 0 ? `${attachedFiles.length} documento(s) anexado(s)...` : 'Pergunte ao Godmode...'}
                         className={`min-h-10 flex-1 resize-none bg-transparent px-2 py-2.5 text-sm disabled:opacity-40 ${isDark ? 'text-white placeholder:text-slate-500' : 'text-slate-900 placeholder:text-slate-400'}`}
                     />
                     <button
@@ -452,7 +495,7 @@ export const HermesGodmodeView: React.FC<HermesGodmodeViewProps> = ({ userId, is
                     </button>
                     <button
                         onClick={handleSend}
-                        disabled={isBlocked || (!input.trim() && !attachedFile)}
+                        disabled={isBlocked || (!input.trim() && attachedFiles.length === 0)}
                         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-600 to-fuchsia-500 text-white shadow-md shadow-violet-500/30 transition-all hover:brightness-110 disabled:opacity-30 disabled:shadow-none"
                         title="Enviar"
                     >

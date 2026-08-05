@@ -7460,8 +7460,21 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
     task_id_scoped = task_id
     system_id = data.get('systemId')
     session_id = data.get('sessionId')
+
     drive_file_id = data.get('driveFileId')
     drive_file_name = (data.get('driveFileName') or 'documento').strip()
+    drive_files_raw = data.get('driveFiles') or []
+    drive_files = []
+    if isinstance(drive_files_raw, list) and drive_files_raw:
+        for df in drive_files_raw[:10]:
+            if isinstance(df, dict) and df.get('driveFileId'):
+                drive_files.append({
+                    'driveFileId': str(df['driveFileId']).strip(),
+                    'driveFileName': str(df.get('driveFileName') or 'documento').strip()
+                })
+    elif drive_file_id:
+        drive_files.append({'driveFileId': str(drive_file_id).strip(), 'driveFileName': drive_file_name})
+
     routing_index = data.get('routingIndex') or []
     copilot_mode = (data.get('copilotMode') or 'default').strip()
     strategy_directives_raw = data.get('strategyDirectives') or []
@@ -10841,9 +10854,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         if _gate_formularios:
             static_tools.append(gerar_rascunho_formulario)
         if _gate_reagendamento:
-            static_tools.append(preparar_reagendamento_em_lote)
-            static_tools.append(preparar_remocao_horarios_em_lote)
-        if _protocolo_ativo("sipac", "processo", "protocolo"):
+if _protocolo_ativo("sipac", "processo", "protocolo"):
             static_tools.append(consultar_processo_sipac_copiloto)
             static_tools.append(incorporar_documento_especifico_sipac_no_rag_da_acao)
             static_tools.append(acompanhar_processo_sipac_copiloto)
@@ -10904,274 +10915,34 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         # Se um driveFileId foi enviado, baixa o binário, extrai metadados via
         # Gemini File API (sem parsers locais) e grava no indice_artefatos (RAG).
         file_context = ""
-        if drive_file_id:
-            _set_copilot_status(f"Processando arquivo: {drive_file_name}...")
-            try:
-                import io
-                import os
-                import tempfile
-                import uuid as _uuid
-                from googleapiclient.http import MediaIoBaseDownload
-                from google.cloud.firestore_v1.vector import Vector
+        if drive_files:
+            file_context_blocks = []
+            for file_idx, df_item in enumerate(drive_files[:10]):
+                cur_drive_file_id = df_item.get('driveFileId')
+                cur_drive_file_name = df_item.get('driveFileName') or 'documento'
+                if not cur_drive_file_id:
+                    continue
 
-                drive_service = get_drive_service()
-
-                # 1. Busca metadados do arquivo no Drive
-                file_meta = drive_service.files().get(
-                    fileId=drive_file_id,
-                    fields='name,mimeType'
-                ).execute()
-                real_file_name = file_meta.get('name', drive_file_name)
-                real_mime_type = file_meta.get('mimeType', 'application/octet-stream')
-                is_image_file = real_mime_type.startswith('image/')
-                task_context_summary = ""
-                if task_id:
-                    try:
-                        task_doc = db.collection('tarefas').document(task_id).get()
-                        if task_doc.exists:
-                            task_data = task_doc.to_dict() or {}
-                            plano = task_data.get('plano_acao', []) or []
-                            task_context_summary = (
-                                f"Tarefa atual: {task_data.get('titulo', 'Sem título')}\n"
-                                f"Área temática: {task_data.get('area_tematica', 'Não informada')}\n"
-                                f"Descrição: {task_data.get('descricao', '')[:1200]}\n"
-                                f"Plano atual: {' | '.join(plano[:5]) if plano else 'Não definido'}"
-                            )
-                    except Exception as task_ctx_err:
-                        print(f"[Copiloto] Aviso: falha ao montar contexto resumido da tarefa {task_id}: {task_ctx_err}")
-
-                # 2. Baixa o binário para memória volátil
-                request_dl = drive_service.files().get_media(fileId=drive_file_id)
-                fh = io.BytesIO()
-                downloader = MediaIoBaseDownload(fh, request_dl)
-                done = False
-                while not done:
-                    _, done = downloader.next_chunk()
-                fh.seek(0)
-                file_bytes = fh.read()
-                fh.close()
-                del fh  # libera o buffer BytesIO imediatamente (evita cópia dupla em memória)
-                local_pdf_text = ""
-                local_pdf_metadata = None
-                local_docx_text = ""
-                local_docx_metadata = None
-                if is_pdf_mime_type(real_file_name, real_mime_type):
-                    pdf_result = extract_pdf_text_with_fallback(
-                        file_bytes,
-                        real_file_name,
-                        api_key=gemini_key,
-                        allow_gemini_fallback=False,
-                    )
-                    local_pdf_text = (pdf_result.get('text') or '').strip()
-                    local_pdf_metadata = pdf_result.get('metadata')
-                elif is_docx_mime_type(real_file_name, real_mime_type):
-                    local_docx_text, local_docx_metadata = extract_docx_text(file_bytes)
-                elif real_mime_type == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or real_mime_type == 'application/vnd.ms-excel' or real_file_name.lower().endswith(('.xlsx', '.xls')):
-                    import pandas as _pd
-                    import io as _io
-                    try:
-                        _df_list = _pd.read_excel(_io.BytesIO(file_bytes), sheet_name=None)
-                        _sheets_text = []
-                        for _sheet_name, _df in _df_list.items():
-                            _sheets_text.append(f"ABA: {_sheet_name}\n{_df.to_csv(index=False)}")
-                        local_docx_text = "\n\n".join(_sheets_text).strip()
-                        local_docx_metadata = {"natureza": "planilha_excel", "abas": list(_df_list.keys())}
-                    except Exception as xl_err:
-                        print(f"[Copiloto] Erro ao extrair Excel: {xl_err}")
-                elif real_mime_type == 'application/vnd.openxmlformats-officedocument.presentationml.presentation' or real_file_name.lower().endswith('.pptx'):
-                    from pptx import Presentation as _Presentation
-                    import io as _io
-                    try:
-                        _prs = _Presentation(_io.BytesIO(file_bytes))
-                        _slides_text = []
-                        for _slide in _prs.slides:
-                            for _shape in _slide.shapes:
-                                if hasattr(_shape, 'text') and _shape.text.strip():
-                                    _slides_text.append(_shape.text.strip())
-                        local_docx_text = '\n'.join(_slides_text).strip()
-                        local_docx_metadata = {"natureza": "apresentacao_powerpoint", "slides_count": len(_prs.slides)}
-                    except Exception as ppt_err:
-                        print(f"[Copiloto] Erro ao extrair PowerPoint: {ppt_err}")
-
-                gemini_file = None
-                local_extracted_text = local_pdf_text or local_docx_text
-                local_extraction_metadata = local_pdf_metadata or local_docx_metadata
-                if is_image_file or not local_extracted_text:
-                    # 3. Salva em arquivo temporário para a File API do Gemini
-                    file_ext = os.path.splitext(real_file_name)[1] or '.bin'
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
-                        tmp.write(file_bytes)
-                        tmp_path = tmp.name
-                    del file_bytes  # libera bytes após gravar no disco; File API vai ler do tmp_path
-
-                    # 4. Faz upload para a File API do Gemini
-                    gemini_file = client.files.upload(
-                        file=tmp_path,
-                        config=types.UploadFileConfig(
-                            mime_type=real_mime_type,
-                            display_name=real_file_name
-                        )
-                    )
-                    os.unlink(tmp_path)
-                else:
-                    del file_bytes  # texto já extraído localmente; bytes brutos não são mais necessários
-
-                # O bloco try/finally abaixo garante que o arquivo seja sempre
-                # deletado da File API do Gemini, mesmo que a extração falhe.
-                # Sem isso cada upload acumularia dados até estourar a cota de 2GB.
+                _set_copilot_status(f"Processando arquivo ({file_idx + 1}/{len(drive_files)}): {cur_drive_file_name}...")
                 try:
-                    # 5. Extrai metadados com truncamento semântico de ~8.000 tokens
-                    if is_image_file:
-                        extraction_prompt = (
-                            f"Você recebeu a imagem '{real_file_name}'. "
-                            "Analise o conteúdo visual integral e retorne EXCLUSIVAMENTE um JSON válido, "
-                            "sem markdown, sem texto extra, com esta estrutura:\n"
-                            '{"titulo": "...", "natureza": "...", "resumo": "...", '
-                            '"ocr": "...", "descricao_visual": "...", '
-                            '"elementos_chave": ["..."], "evidencias": ["..."], '
-                            '"relacao_com_acao": "...", "utilidade_pratica": "..."}\n'
-                            "Regras:\n"
-                            "- titulo: nome curto e útil do anexo.\n"
-                            "- natureza: classifique a imagem com precisão (ex: print de sistema, comprovante, gráfico, documento fotografado, quadro, planilha capturada, foto de ambiente).\n"
-                            "- resumo: resumo executivo em 3 a 5 frases.\n"
-                            "- ocr: transcreva o texto visível mais relevante. Se não houver, use string vazia.\n"
-                            "- descricao_visual: descreva objetivamente o que aparece na imagem.\n"
-                            "- elementos_chave: liste de 3 a 8 elementos centrais percebidos.\n"
-                            "- evidencias: liste fatos observáveis que sustentam sua leitura.\n"
-                            "- relacao_com_acao: explique como a imagem se conecta com a tarefa em foco. Se não houver contexto suficiente, diga isso explicitamente.\n"
-                            "- utilidade_pratica: diga como o Hermes deve usar esta imagem para apoiar a ação.\n"
-                            f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}"
-                        )
-                    elif local_extracted_text:
-                        extraction_prompt = (
-                            f"Você recebeu o texto extraído localmente do arquivo '{real_file_name}'. "
-                            "Retorne EXCLUSIVAMENTE um JSON válido, sem markdown, sem texto extra, com esta estrutura:\n"
-                            '{"titulo": "...", "natureza": "...", "resumo": "...", '
-                            '"relacao_com_acao": "...", "utilidade_pratica": "..."}\n'
-                            "Onde:\n"
-                            "- titulo: nome/título do documento\n"
-                            "- natureza: categoria (ex: Edital, Contrato, Relatório, Manual, Planilha, etc.)\n"
-                            "- resumo: resumo executivo em 3 a 5 frases sobre conteúdo e utilidade\n"
-                            "- relacao_com_acao: explique a conexão do arquivo com a tarefa atual; se não houver contexto suficiente, diga isso explicitamente\n"
-                            "- utilidade_pratica: diga como o Hermes deve usar este arquivo para apoiar a ação\n"
-                            f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}\n\n"
-                            f"METADADOS DA EXTRAÇÃO LOCAL: {json.dumps(local_extraction_metadata or {}, ensure_ascii=False)}\n\n"
-                            f"TEXTO EXTRAÍDO:\n{local_extracted_text[:120000]}"
-                        )
-                        extraction_response = client.models.generate_content(
-                            model=model_id,
-                            contents=[extraction_prompt]
-                        )
-                    else:
-                        extraction_prompt = (
-                            f"Você recebeu o arquivo '{real_file_name}'. "
-                            "Leia no máximo os primeiros 8.000 tokens de conteúdo. "
-                            "Retorne EXCLUSIVAMENTE um JSON válido, sem markdown, sem texto extra, com esta estrutura:\n"
-                            '{"titulo": "...", "natureza": "...", "resumo": "...", '
-                            '"relacao_com_acao": "...", "utilidade_pratica": "..."}\n'
-                            "Onde:\n"
-                            "- titulo: nome/título do documento\n"
-                            "- natureza: categoria (ex: Edital, Contrato, Relatório, Manual, Planilha, etc.)\n"
-                            "- resumo: resumo executivo em 3 a 5 frases sobre conteúdo e utilidade\n"
-                            "- relacao_com_acao: explique a conexão do arquivo com a tarefa atual; se não houver contexto suficiente, diga isso explicitamente\n"
-                            "- utilidade_pratica: diga como o Hermes deve usar este arquivo para apoiar a ação\n"
-                            f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}"
-                        )
-                    if is_image_file or not local_extracted_text:
-                        extraction_response = client.models.generate_content(
-                            model=model_id,
-                            contents=[
-                                types.Content(parts=[
-                                    types.Part.from_uri(
-                                        file_uri=gemini_file.uri,
-                                        mime_type=real_mime_type
-                                    ),
-                                    types.Part(text=extraction_prompt)
-                                ])
-                            ]
-                        )
-                    log_gemini_usage(extraction_response, model=model_id, feature="copilot_file_ingestion", db=db)
-                    extraction_text = extraction_response.text.strip()
-                    # Remove blocos de código caso o modelo os inclua mesmo instruído
-                    if extraction_text.startswith("```"):
-                        extraction_text = extraction_text.split("```")[1]
-                        if extraction_text.startswith("json"):
-                            extraction_text = extraction_text[4:]
+                    import io
+                    import os
+                    import tempfile
+                    import uuid as _uuid
+                    from googleapiclient.http import MediaIoBaseDownload
+                    from google.cloud.firestore_v1.vector import Vector
 
-                    meta = json.loads(extraction_text)
-                    if isinstance(meta, list):
-                        meta = meta[0] if meta else {}
-                    if not isinstance(meta, dict):
-                        meta = {}
-                    titulo_doc = meta.get('titulo', real_file_name)
-                    natureza_doc = meta.get('natureza', 'Documento')
-                    resumo_doc = meta.get('resumo', '')
-                    relacao_com_acao = meta.get('relacao_com_acao', '')
-                    utilidade_pratica = meta.get('utilidade_pratica', '')
-                    ocr_doc = meta.get('ocr', '') if is_image_file else ''
-                    descricao_visual = meta.get('descricao_visual', '') if is_image_file else ''
-                    elementos_chave = meta.get('elementos_chave', []) if is_image_file else []
-                    evidencias = meta.get('evidencias', []) if is_image_file else []
-                    if not isinstance(elementos_chave, list):
-                        elementos_chave = [str(elementos_chave)]
-                    if not isinstance(evidencias, list):
-                        evidencias = [str(evidencias)]
+                    drive_service = get_drive_service()
 
-                    # 6. Vetoriza e grava no indice_artefatos
-                    from knowledge_graph import _get_embedding
-                    embed_text_parts = [
-                        titulo_doc,
-                        natureza_doc,
-                        resumo_doc,
-                        relacao_com_acao,
-                        utilidade_pratica,
-                    ]
-                    if is_image_file:
-                        embed_text_parts.extend([
-                            descricao_visual,
-                            ocr_doc,
-                            " | ".join(elementos_chave[:8]),
-                            " | ".join(evidencias[:8]),
-                        ])
-                    embed_text = " | ".join(part for part in embed_text_parts if part)
-                    embedding = _get_embedding(embed_text, gemini_key)
-                    embedding_floats = list(map(float, embedding))
-
-                    artefato_id = str(_uuid.uuid4())[:12]
-                    drive_link = f"https://drive.google.com/file/d/{drive_file_id}/view"
-
-                    # Origem bifurcada: tarefa (se task_id ativo) ou acervo global
-                    origem_doc = (
-                        {'modulo': 'tarefa', 'id_origem': task_id, 'session_id': session_id or 'direto'}
-                        if task_id
-                        else {'modulo': 'copiloto', 'id_origem': session_id or 'direto'}
-                    )
-                    db.collection('indice_artefatos').document(artefato_id).set({
-                        'titulo': titulo_doc,
-                        'trecho': resumo_doc,
-                        'texto_bruto': (local_extracted_text or ocr_doc or resumo_doc)[:500000],
-                        'fonte': natureza_doc,
-                        'embedding': Vector(embedding_floats),
-                        'tipo_arquivo': real_mime_type.split('/')[-1],
-                        'mime_type': real_mime_type,
-                        'url_drive': drive_link,
-                        'drive_file_id': drive_file_id,
-                        'data_criacao': firestore.SERVER_TIMESTAMP,
-                        'origem': origem_doc,
-                        'task_id': task_id or None,
-                        'categoria': 'Copiloto Hermes',
-                        'relacao_com_acao': relacao_com_acao,
-                        'utilidade_pratica': utilidade_pratica,
-                        'ocr': ocr_doc,
-                        'descricao_visual': descricao_visual,
-                        'elementos_chave': elementos_chave[:8],
-                        'evidencias': evidencias[:8],
-                        'texto_extraido_por': 'local_extractor' if local_extracted_text else ('gemini_ocr' if is_image_file else 'gemini_file_api'),
-                        'extraction_metadata': local_extraction_metadata if local_extraction_metadata else None,
-                    })
-                    print(f"[Copiloto] Artefato '{titulo_doc}' gravado em indice_artefatos (id={artefato_id})")
-
-                    # Dupla cidadania: vínculo físico e histórico à tarefa ativa
+                    # 1. Busca metadados do arquivo no Drive
+                    file_meta = drive_service.files().get(
+                        fileId=cur_drive_file_id,
+                        fields='name,mimeType'
+                    ).execute()
+                    real_file_name = file_meta.get('name', cur_drive_file_name)
+                    real_mime_type = file_meta.get('mimeType', 'application/octet-stream')
+                    is_image_file = real_mime_type.startswith('image/')
+                    task_context_summary = ""
                     if task_id:
                         from datetime import datetime as _dt
                         now_iso = _dt.now().isoformat()
@@ -13942,11 +13713,6 @@ def merge_contacts(req: https_fn.CallableRequest):
         )
 
 
-_LONG_TRANSCRIPTION_VIDEO_EXTS = {
-    "mp4", "mov", "mkv", "avi", "webm", "m4v", "wmv", "flv", "mpeg", "mpg", "3gp", "ts"
-}
-
-
 @storage_fn.on_object_finalized(
     bucket="gestao-hermes.firebasestorage.app",
     region="us-east1",
@@ -13957,27 +13723,9 @@ _LONG_TRANSCRIPTION_VIDEO_EXTS = {
 def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
     """Transcreve arquivos pesados de áudio/vídeo enviados para `long_transcriptions/{uid}/{id}.{ext}`.
 
-    Fluxo: (vídeo) extrai só o áudio via ffmpeg embutido -> Files API do Gemini ->
+    Fluxo: normaliza qualquer mídia para AAC via ffmpeg -> Files API do Gemini ->
     transcrição literal com gemini-3.5-flash-lite -> grava no Firestore -> expurga o binário original.
     """
-    def _normalize_audio_mime(content_type: str, file_ext: str) -> str:
-        ct = (content_type or "").lower().strip()
-        ext = (file_ext or "").lower().strip().lstrip(".")
-        if "mp3" in ct or ext == "mp3":
-            return "audio/mpeg"
-        if "wav" in ct or ext == "wav":
-            return "audio/wav"
-        if "ogg" in ct or ext == "ogg":
-            return "audio/ogg"
-        if "webm" in ct or ext == "webm":
-            return "audio/webm"
-        if "aac" in ct or ext == "aac":
-            return "audio/aac"
-        if "mp4" in ct or "m4a" in ct or ext in ("m4a", "mp4", "mov", "3gp", "3gpp", "caf", "amr"):
-            return "audio/mp4"
-        if ct.startswith("audio/"):
-            return ct
-        return "audio/mp4"
     import os as _os
     import time as _time
     import tempfile as _tempfile
@@ -14017,12 +13765,14 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
 
     from google import genai
     from google.genai import types
+    from groq import Groq
 
     bucket_name = event.data.bucket
     local_media_path = None
-    local_audio_path = None
+    local_chunk_dir = None
     gemini_file = None
-    client = None
+    gemini_client = None
+    groq_client = None
 
     try:
         limit_long_trans = int(_os.environ.get("LIMIT_LONG_TRANSCRIPTION", "8"))
@@ -14052,10 +13802,16 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
 
         check_and_increment_limit(db, user_id, "long_transcription", limit_long_trans)
 
-        api_key = get_gemini_api_key()
-        if not api_key:
-            raise RuntimeError("Chave Gemini não configurada em system/api_keys.")
-        client = genai.Client(api_key=api_key)
+        keys_doc = _cached_doc_get(db, "system", "api_keys")
+        keys = keys_doc.to_dict() if keys_doc.exists else {}
+        groq_key = keys.get("groq_api_key")
+        gemini_key = keys.get("gemini_api_key")
+        if not groq_key and not gemini_key:
+            raise RuntimeError("Nenhum motor de transcrição está configurado.")
+        if groq_key:
+            groq_client = Groq(api_key=groq_key)
+        if gemini_key:
+            gemini_client = genai.Client(api_key=gemini_key)
 
         # 1. Baixar o binário do Storage para arquivo temporário
         bucket = admin_storage.bucket(bucket_name)
@@ -14065,92 +13821,270 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
         _os.close(fd)
         blob.download_to_filename(local_media_path)
 
-        content_type = (event.data.content_type or "").lower()
-        is_video = content_type.startswith("video/") or file_ext in _LONG_TRANSCRIPTION_VIDEO_EXTS
+        # Arquivos de gravadores móveis podem ter edit lists/timestamps que o FFmpeg
+        # interpreta como uma faixa vazia. Se o original já cabe no Whisper e possui
+        # uma extensão aceita, tente-o diretamente antes de qualquer conversão.
+        groq_direct_extensions = {"flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"}
+        original_size = _os.path.getsize(local_media_path)
+        direct_groq_error = None
+        if groq_client is not None and file_ext in groq_direct_extensions and original_size <= 24 * 1024 * 1024:
+            doc_ref.update({"processingStage": "Transcrevendo arquivo original", "updatedAt": firestore.SERVER_TIMESTAMP})
+            try:
+                with open(local_media_path, "rb") as original_stream:
+                    direct_result = groq_client.audio.transcriptions.create(
+                        file=(f"original.{file_ext}", original_stream),
+                        model="whisper-large-v3-turbo",
+                        response_format="json",
+                        language="pt",
+                        temperature=0.0,
+                    )
+                direct_text = (direct_result.text or "").strip()
+                if direct_text:
+                    doc_ref.update({
+                        "status": "Concluído",
+                        "transcriptionRaw": direct_text,
+                        "transcriptionEngine": "groq-direct",
+                        "transcriptionChunks": 1,
+                        "chunkDiagnostics": [{"bytes": original_size, "source": "original"}],
+                        "processingStage": None,
+                        "errorMessage": None,
+                        "updatedAt": firestore.SERVER_TIMESTAMP,
+                    })
+                    print(
+                        f"[long_transcription] {transcription_id} concluído diretamente "
+                        f"pelo Groq ({len(direct_text)} chars, {original_size} bytes)."
+                    )
+                    return
+                direct_groq_error = RuntimeError("Whisper retornou texto vazio para o arquivo original.")
+            except Exception as exc:
+                direct_groq_error = exc
+                print(f"[long_transcription] Groq direto falhou: {exc}")
 
-        # 2. Para vídeo: extrair apenas a faixa de áudio (muito mais barato e suporta arquivos longos)
-        if is_video:
-            import imageio_ffmpeg
-            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-            fd2, local_audio_path = _tempfile.mkstemp(suffix=".m4a")
-            _os.close(fd2)
-            _subprocess.run(
-                [
-                    ffmpeg_exe, "-y", "-i", local_media_path,
-                    "-vn", "-acodec", "aac", "-b:a", "128k", local_audio_path,
-                ],
-                check=True,
-                capture_output=True,
+        # 2. Normalizar e segmentar sempre. WAV PCM evita qualquer ambiguidade de codec,
+        # cabeçalho ou contêiner. Dez minutos em 16 kHz/mono/16-bit ocupam ~19,2 MB,
+        # abaixo do limite de 25 MB por arquivo do Whisper.
+        import imageio_ffmpeg
+        import wave as _wave
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        local_chunk_dir = _tempfile.mkdtemp(prefix="hermes_long_transcription_")
+        chunk_pattern = _os.path.join(local_chunk_dir, "chunk_%03d.wav")
+        doc_ref.update({"processingStage": "Preparando trechos de áudio", "updatedAt": firestore.SERVER_TIMESTAMP})
+        def _clear_wav_chunks():
+            for name in _os.listdir(local_chunk_dir):
+                path = _os.path.join(local_chunk_dir, name)
+                if name.lower().endswith(".wav") and _os.path.isfile(path):
+                    _os.remove(path)
+
+        def _build_wav_chunks(ignore_edit_list=False, source_path=None):
+            _clear_wav_chunks()
+            input_path = source_path or local_media_path
+            input_options = []
+            if ignore_edit_list:
+                input_options = [
+                    "-ignore_editlist", "1", "-fflags", "+genpts+discardcorrupt",
+                    "-err_detect", "ignore_err", "-analyzeduration", "200M", "-probesize", "200M",
+                ]
+            command = [ffmpeg_exe, "-y", *input_options, "-i", input_path]
+            command.extend([
+                "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000",
+                "-af", "aresample=async=1:first_pts=0", "-acodec", "pcm_s16le",
+                "-f", "segment", "-segment_format", "wav", "-segment_time", "600",
+                "-reset_timestamps", "1", chunk_pattern,
+            ])
+            completed = _subprocess.run(command, check=True, capture_output=True)
+            stderr_text = completed.stderr.decode("utf-8", "ignore")[-3000:]
+            paths = [
+                _os.path.join(local_chunk_dir, name)
+                for name in sorted(_os.listdir(local_chunk_dir))
+                if name.lower().endswith(".wav")
+            ]
+            diagnostics = []
+            for path in paths:
+                with _wave.open(path, "rb") as wav_file:
+                    frames = wav_file.getnframes()
+                    sample_rate = wav_file.getframerate()
+                    diagnostics.append({
+                        "bytes": _os.path.getsize(path),
+                        "durationSeconds": round(frames / sample_rate, 2) if sample_rate else 0,
+                        "channels": wav_file.getnchannels(),
+                        "sampleRate": sample_rate,
+                        "sampleWidth": wav_file.getsampwidth(),
+                        "frames": frames,
+                    })
+            return paths, diagnostics, stderr_text
+
+        repair_diagnostics = None
+        chunk_paths, chunk_diagnostics, ffmpeg_stderr = _build_wav_chunks(ignore_edit_list=False)
+        if not chunk_paths or not any(item.get("frames", 0) for item in chunk_diagnostics):
+            print(
+                f"[long_transcription] primeira extração vazia em {transcription_id}; "
+                "tentando sem edit list e com timestamps reconstruídos."
             )
-            upload_path = local_audio_path
-            upload_mime = "audio/mp4"
-        else:
-            upload_path = local_media_path
-            upload_mime = _normalize_audio_mime(content_type, file_ext)
+            chunk_paths, chunk_diagnostics, ffmpeg_stderr = _build_wav_chunks(ignore_edit_list=True)
 
-        # 3. Upload via Files API e aguardar o estado ACTIVE
-        gemini_file = client.files.upload(
-            file=upload_path,
-            config=types.UploadFileConfig(mime_type=upload_mime, display_name=data.get("fileName") or transcription_id),
-        )
-        waited = 0
-        while str(getattr(gemini_file.state, "name", gemini_file.state)) == "PROCESSING":
-            if waited >= 240:
-                raise TimeoutError("Files API demorou demais para preparar o áudio (>4min).")
-            _time.sleep(5)
-            waited += 5
-            gemini_file = client.files.get(name=gemini_file.name)
-        final_state = str(getattr(gemini_file.state, "name", gemini_file.state))
-        if final_state == "FAILED":
-            raise RuntimeError("Files API falhou ao processar o arquivo de áudio.")
+        # Alguns M4A de gravadores Samsung chegam com o `mdat` preservado, mas a
+        # tabela STSZ termina antes da quantidade declarada de amostras AAC. O
+        # FFmpeg descarta toda a tabela nesse caso. Corrigimos somente uma copia
+        # temporaria, limitando a contagem as entradas realmente presentes.
+        if not chunk_paths or not any(item.get("frames", 0) for item in chunk_diagnostics):
+            from mp4_repair import repair_truncated_stsz
 
-        # 4. Transcrição literal (sem pós-processamento)
+            repaired_media_path = _os.path.join(
+                local_chunk_dir,
+                f"repaired_source.{file_ext or 'm4a'}",
+            )
+            repair_diagnostics = repair_truncated_stsz(local_media_path, repaired_media_path)
+            if repair_diagnostics:
+                print(
+                    f"[long_transcription] STSZ truncado em {transcription_id}; "
+                    f"tentando copia reparada: {repair_diagnostics}"
+                )
+                doc_ref.update({
+                    "processingStage": "Recuperando audio de arquivo M4A danificado",
+                    "mp4RepairDiagnostics": repair_diagnostics,
+                    "updatedAt": firestore.SERVER_TIMESTAMP,
+                })
+                chunk_paths, chunk_diagnostics, ffmpeg_stderr = _build_wav_chunks(
+                    ignore_edit_list=True,
+                    source_path=repaired_media_path,
+                )
+        if not chunk_paths or not any(item.get("frames", 0) for item in chunk_diagnostics):
+            doc_ref.update({
+                "ffmpegDiagnostics": ffmpeg_stderr,
+                "chunkDiagnostics": chunk_diagnostics,
+                "mp4RepairDiagnostics": repair_diagnostics,
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            })
+            raise RuntimeError(
+                "O arquivo contém dados, mas nenhum quadro de áudio pôde ser decodificado. "
+                f"Groq direto: {direct_groq_error or 'não tentado'}; "
+                f"FFmpeg: {ffmpeg_stderr[-800:]}"
+            )
+        if any(not item.get("frames", 0) for item in chunk_diagnostics):
+            raise RuntimeError(f"Um dos trechos WAV ficou vazio: {chunk_diagnostics}")
+        for item in chunk_diagnostics:
+            item.pop("frames", None)
+        doc_ref.update({"chunkDiagnostics": chunk_diagnostics, "updatedAt": firestore.SERVER_TIMESTAMP})
+        print(f"[long_transcription] {transcription_id} trechos WAV: {chunk_diagnostics}")
+
+        # 3. Transcrever cada trecho com Whisper (motor dedicado). O Gemini fica como
+        # fallback por trecho, e não mais como ponto único de falha do arquivo inteiro.
         prompt = (
             "Transcreva integral e literalmente o áudio a seguir para texto. "
             "Inclua tudo o que for falado, na ordem em que ocorre, sem resumir, sem corrigir, "
             "sem traduzir, sem adicionar comentários, títulos, marcações de tempo ou formatação extra. "
             "Responda apenas com o texto transcrito."
         )
-        response = client.models.generate_content(
-            model="gemini-3.5-flash-lite",
-            contents=[
-                types.Content(parts=[
-                    types.Part.from_uri(
-                        file_uri=gemini_file.uri,
-                        mime_type=getattr(gemini_file, "mime_type", None) or upload_mime,
-                    ),
-                    types.Part(text=prompt),
-                ])
-            ],
-            config=types.GenerateContentConfig(
-                temperature=0,
-                max_output_tokens=65536,
-            ),
-        )
-        transcription_raw = (response.text or "").strip()
-        if not transcription_raw:
-            raise RuntimeError("O modelo retornou uma transcrição vazia.")
+        transcript_parts = []
+        engines_used = set()
+        was_truncated = False
+        for index, chunk_path in enumerate(chunk_paths, start=1):
+            doc_ref.update({
+                "processingStage": f"Transcrevendo trecho {index} de {len(chunk_paths)}",
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            })
+            chunk_text = ""
+            groq_error = None
+            gemini_error = None
+            if groq_client is not None:
+                try:
+                    with open(chunk_path, "rb") as chunk_stream:
+                        result = groq_client.audio.transcriptions.create(
+                            file=(_os.path.basename(chunk_path), chunk_stream),
+                            model="whisper-large-v3-turbo",
+                            response_format="json",
+                            language="pt",
+                            temperature=0.0,
+                        )
+                    chunk_text = (result.text or "").strip()
+                    if chunk_text:
+                        engines_used.add("groq")
+                except Exception as exc:
+                    groq_error = exc
+                    print(f"[long_transcription] Groq falhou no trecho {index}: {exc}")
 
-        # Detecta truncamento por limite de tokens de saída e sinaliza no resultado
-        try:
-            finish_reason = str(getattr(response.candidates[0], "finish_reason", "") or "")
-        except Exception:
-            finish_reason = ""
-        was_truncated = "MAX_TOKENS" in finish_reason.upper()
+            if not chunk_text and gemini_client is not None:
+                try:
+                    gemini_file = gemini_client.files.upload(
+                        file=chunk_path,
+                        config=types.UploadFileConfig(
+                            mime_type="audio/wav",
+                            display_name=f"{transcription_id}_trecho_{index}.wav",
+                        ),
+                    )
+                    waited = 0
+                    while str(getattr(gemini_file.state, "name", gemini_file.state)) == "PROCESSING":
+                        if waited >= 120:
+                            raise TimeoutError("Files API demorou demais para preparar um trecho (>2min).")
+                        _time.sleep(3)
+                        waited += 3
+                        gemini_file = gemini_client.files.get(name=gemini_file.name)
+                    final_state = str(getattr(gemini_file.state, "name", gemini_file.state))
+                    if final_state == "FAILED":
+                        raise RuntimeError("Files API falhou ao preparar um trecho de áudio.")
+                    response = gemini_client.models.generate_content(
+                        model="gemini-3.5-flash-lite",
+                        contents=[prompt, gemini_file],
+                        config=types.GenerateContentConfig(max_output_tokens=16384),
+                    )
+                    chunk_text = (response.text or "").strip()
+                    try:
+                        finish_reason = str(getattr(response.candidates[0], "finish_reason", "") or "")
+                        was_truncated = was_truncated or "MAX_TOKENS" in finish_reason.upper()
+                    except Exception:
+                        pass
+                    if chunk_text:
+                        engines_used.add("gemini")
+                except Exception as exc:
+                    gemini_error = exc
+                    print(f"[long_transcription] Gemini falhou no trecho {index}: {exc}")
+                finally:
+                    if gemini_file is not None:
+                        try:
+                            gemini_client.files.delete(name=gemini_file.name)
+                        except Exception:
+                            pass
+                        gemini_file = None
+
+            if not chunk_text:
+                if groq_error is not None or gemini_error is not None:
+                    raise RuntimeError(
+                        f"Falha ao transcrever o trecho {index}. "
+                        f"Groq: {groq_error or 'indisponível'}; "
+                        f"Gemini: {gemini_error or 'indisponível'}"
+                    )
+                raise RuntimeError(f"Os motores retornaram vazio no trecho {index}.")
+            transcript_parts.append(chunk_text)
+
+        transcription_raw = "\n\n".join(transcript_parts).strip()
+        if not transcription_raw:
+            raise RuntimeError("A transcrição final ficou vazia.")
+
+        warning_messages = []
+        if repair_diagnostics:
+            warning_messages.append(
+                "A gravação M4A estava com o índice de áudio truncado; "
+                "foi transcrita a parte que pôde ser recuperada."
+            )
+        if was_truncated:
+            warning_messages.append(
+                "A transcrição pode ter sido truncada por exceder o limite de saída do modelo "
+                "(áudio muito longo)."
+            )
 
         doc_ref.update({
             "status": "Concluído",
             "transcriptionRaw": transcription_raw,
-            "errorMessage": (
-                "Atenção: a transcrição pode ter sido truncada por exceder o limite de saída do modelo "
-                "(áudio muito longo)."
-                if was_truncated else None
-            ),
+            "transcriptionEngine": "+".join(sorted(engines_used)),
+            "transcriptionChunks": len(chunk_paths),
+            "processingStage": None,
+            "errorMessage": " ".join(warning_messages) or None,
             "updatedAt": firestore.SERVER_TIMESTAMP,
         })
         print(
             f"[long_transcription] {transcription_id} concluído "
-            f"({len(transcription_raw)} chars, truncado={was_truncated})."
+            f"({len(transcription_raw)} chars, trechos={len(chunk_paths)}, "
+            f"motores={sorted(engines_used)}, truncado={was_truncated})."
         )
 
     except Exception as e:
@@ -14167,6 +14101,7 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
             doc_ref.update({
                 "status": "Erro",
                 "errorMessage": msg[:1500],
+                "processingStage": None,
                 "updatedAt": firestore.SERVER_TIMESTAMP,
             })
         except Exception as e2:
@@ -14178,16 +14113,22 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
             admin_storage.bucket(bucket_name).blob(object_path).delete()
         except Exception as e:
             print(f"[long_transcription] falha ao expurgar {object_path}: {e}")
-        # Deleta o arquivo temporário na Files API do Gemini
+        # Deleta eventual arquivo temporário ainda ativo na Files API do Gemini
         try:
-            if gemini_file is not None and client is not None:
-                client.files.delete(name=gemini_file.name)
+            if gemini_file is not None and gemini_client is not None:
+                gemini_client.files.delete(name=gemini_file.name)
         except Exception:
             pass
         # Limpa temporários locais
-        for _p in (local_media_path, local_audio_path):
+        if local_media_path:
             try:
-                if _p and _os.path.exists(_p):
-                    _os.remove(_p)
+                if _os.path.exists(local_media_path):
+                    _os.remove(local_media_path)
+            except Exception:
+                pass
+        if local_chunk_dir:
+            try:
+                import shutil as _shutil
+                _shutil.rmtree(local_chunk_dir, ignore_errors=True)
             except Exception:
                 pass

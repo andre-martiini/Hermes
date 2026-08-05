@@ -741,3 +741,135 @@ exports.scheduledSipacSync = functions.runWith({
     return null;
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// extractDocumentTextForVoice — Lê o conteúdo bruto de um arquivo no Drive e
+// retorna o texto extraído para ser injetado no contexto do copiloto de voz.
+// Autenticação: Bearer token Firebase Auth.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.extractDocumentTextForVoice = functions.runWith({
+    timeoutSeconds: 120,
+    memory: '512MB'
+}).https.onRequest((req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+
+    if (req.method === 'OPTIONS') return res.status(204).send('');
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Método não permitido.' });
+
+    const authHeader = req.headers['authorization'] || '';
+    if (!authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Token de autenticação ausente.' });
+    }
+
+    const idToken = authHeader.slice(7);
+
+    return admin.auth().verifyIdToken(idToken).then(async () => {
+        const { driveFileId, fileName } = req.body || {};
+        if (!driveFileId) {
+            return res.status(400).json({ error: 'driveFileId é obrigatório.' });
+        }
+
+        try {
+            const auth = await getGoogleAuth();
+            const drive = google.drive({ version: 'v3', auth });
+
+            // Fetch metadata
+            const meta = await drive.files.get({
+                fileId: driveFileId,
+                fields: 'name,mimeType,size'
+            });
+            const mimeType = meta.data.mimeType || 'application/octet-stream';
+            const realName = meta.data.name || fileName || 'documento';
+
+            // Google Workspace docs → export as plain text
+            const GAPPS_EXPORT_MAP = {
+                'application/vnd.google-apps.document': 'text/plain',
+                'application/vnd.google-apps.spreadsheet': 'text/csv',
+                'application/vnd.google-apps.presentation': 'text/plain',
+            };
+
+            let textContent = '';
+
+            if (GAPPS_EXPORT_MAP[mimeType]) {
+                const exportMime = GAPPS_EXPORT_MAP[mimeType];
+                const exportRes = await drive.files.export(
+                    { fileId: driveFileId, mimeType: exportMime },
+                    { responseType: 'arraybuffer' }
+                );
+                textContent = Buffer.from(exportRes.data).toString('utf-8').slice(0, 150000);
+            } else if (mimeType === 'text/plain' || mimeType === 'text/csv' ||
+                       realName.endsWith('.txt') || realName.endsWith('.csv') ||
+                       realName.endsWith('.md')) {
+                // Plain text files — download directly
+                const dlRes = await drive.files.get(
+                    { fileId: driveFileId, alt: 'media' },
+                    { responseType: 'arraybuffer' }
+                );
+                textContent = Buffer.from(dlRes.data).toString('utf-8').slice(0, 150000);
+            } else {
+                // PDF, DOCX, XLSX e outros formatos binários:
+                // Baixa os bytes do Drive e usa Gemini inline data para extrair o texto.
+                const dlRes = await drive.files.get(
+                    { fileId: driveFileId, alt: 'media' },
+                    { responseType: 'arraybuffer' }
+                );
+                const fileBytes = Buffer.from(dlRes.data);
+                const base64Data = fileBytes.toString('base64');
+
+                // Busca a chave Gemini no Firestore (mesmo padrão das Cloud Functions Python)
+                const keysDoc = await db.collection('system').doc('api_keys').get();
+                const geminiKey = keysDoc.exists ? keysDoc.data().gemini_api_key : null;
+
+                if (geminiKey && base64Data.length > 0) {
+                    try {
+                        const documentExtractionModel = 'gemini-3.5-flash-lite';
+                        const geminiRes = await axios.post(
+                            `https://generativelanguage.googleapis.com/v1beta/models/${documentExtractionModel}:generateContent?key=${geminiKey}`,
+                            {
+                                contents: [{
+                                    parts: [
+                                        {
+                                            text: 'Extraia todo o texto deste documento de forma estruturada. Preserve títulos, listas e tabelas em Markdown quando possível. Retorne apenas o texto extraído, sem comentários ou introduções.'
+                                        },
+                                        {
+                                            inlineData: {
+                                                mimeType: mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                                                    ? 'application/pdf' // Gemini não suporta docx inline — pode não funcionar perfeitamente
+                                                    : mimeType,
+                                                data: base64Data
+                                            }
+                                        }
+                                    ]
+                                }],
+                                generationConfig: { maxOutputTokens: 8192 }
+                            },
+                            { headers: { 'Content-Type': 'application/json' }, timeout: 90000 }
+                        );
+                        textContent = (geminiRes.data?.candidates?.[0]?.content?.parts || [])
+                            .map(part => part?.text || '')
+                            .join('')
+                            .trim();
+                    } catch (geminiErr) {
+                        console.error('Erro ao extrair texto via Gemini:', geminiErr?.response?.data || geminiErr.message);
+                        textContent = `[O usuário tentou enviar o arquivo "${realName}", mas houve uma falha técnica ao ler o conteúdo do documento. Informe o usuário que não foi possível ler o arquivo neste momento.]`;
+                    }
+                } else {
+                    textContent = `[O usuário enviou o arquivo "${realName}", mas o conteúdo está indisponível.]`;
+                }
+            }
+
+            return res.status(200).json({
+                text: textContent,
+                fileName: realName,
+                mimeType,
+                driveFileId
+            });
+        } catch (err) {
+            console.error('Erro em extractDocumentTextForVoice:', err);
+            return res.status(500).json({ error: err.message });
+        }
+    }).catch(() => {
+        return res.status(401).json({ error: 'Token inválido.' });
+    });
+});

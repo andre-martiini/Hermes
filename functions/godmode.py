@@ -361,6 +361,21 @@ def askHermesGodmode(req: https_fn.CallableRequest):
     session_id = (data.get("sessionId") or "").strip()
     drive_file_id = (data.get("driveFileId") or "").strip() or None
     drive_file_name = (data.get("driveFileName") or "").strip() or None
+    drive_files_raw = data.get("driveFiles") or []
+    drive_files = []
+    if isinstance(drive_files_raw, list) and drive_files_raw:
+        for df in drive_files_raw[:10]:
+            if isinstance(df, dict) and df.get("driveFileId"):
+                drive_files.append({
+                    "driveFileId": str(df["driveFileId"]).strip(),
+                    "driveFileName": str(df.get("driveFileName") or "documento").strip()
+                })
+    elif drive_file_id:
+        drive_files.append({"driveFileId": drive_file_id, "driveFileName": drive_file_name or "documento"})
+
+    first_file_id = drive_files[0]["driveFileId"] if drive_files else None
+    first_file_name = drive_files[0]["driveFileName"] if drive_files else None
+
     user_uid = req.auth.uid if req.auth else None
 
     if not user_uid:
@@ -368,13 +383,14 @@ def askHermesGodmode(req: https_fn.CallableRequest):
             code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
             message="Autenticação obrigatória para usar o Hermes Godmode.",
         )
-    if not prompt and not drive_file_id:
+    if not prompt and not drive_files:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
             message="Prompt é obrigatório.",
         )
     if not prompt:
-        prompt = f"Arquivo anexado: {drive_file_name or 'documento'}"
+        names = ", ".join(f"'{df['driveFileName']}'" for df in drive_files)
+        prompt = f"Arquivos anexados: {names}"
 
     try:
         import anthropic
@@ -422,12 +438,15 @@ def askHermesGodmode(req: https_fn.CallableRequest):
 
     client = anthropic.Anthropic(api_key=claude_key)
     system_instruction = _get_persona(db) + "\n\n## PERFIL DO USUÁRIO\n" + _get_user_profile_text(db, user_uid)
-    tools, function_map = _build_tools(db, user_uid, gemini_key, drive_file_id, drive_file_name)
+    tools, function_map = _build_tools(db, user_uid, gemini_key, first_file_id, first_file_name)
 
     llm_user_message = prompt
-    if drive_file_id:
+    if drive_files:
+        file_notices = []
+        for df in drive_files:
+            file_notices.append(f"'{df['driveFileName']}' (ID: {df['driveFileId']})")
         llm_user_message = (
-            f"[O usuário anexou o arquivo '{drive_file_name or 'documento'}' a esta mensagem. "
+            f"[O usuário anexou os seguintes arquivos a esta mensagem: {', '.join(file_notices)}. "
             "Use a ferramenta ler_arquivo_anexado para consultar o conteúdo antes de responder.]\n\n"
             f"{prompt}"
         )
