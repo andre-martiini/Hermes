@@ -88,6 +88,13 @@ function int16ToBase64(int16Array: Int16Array): string {
     return btoa(binary);
 }
 
+// Mensagens de status (texto) que confirmam que a sessao de voz esta de fato
+// ativa do lado do servidor — compatibilidade com versoes do bridge/client que
+// ainda nao mandam o evento estruturado 'live_started'.
+const LIVE_CONFIRMATION_RE = /gemini live iniciada|autenticado|conectado ao hermes voice/i;
+// Idem para o inicio de uma consulta a ferramentas em versoes antigas do bridge.
+const THINKING_STATUS_RE = /gemini solicitou consulta/i;
+
 /**
  * Conversa por voz em tempo real com o copiloto Hermes via Gemini Live,
  * atraves do hermes-voice-bridge ou hermes-voice-client. Sem push-to-talk: o microfone fica aberto
@@ -95,6 +102,9 @@ function int16ToBase64(int16Array: Int16Array): string {
  */
 export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
     const [status, setStatus] = useState<VoiceStreamStatus>('idle');
+    // Modelo processando (tool call / consulta longa) sem falar: a UI mostra
+    // um estado visual de "pensando" em vez de o modelo anunciar "aguarde".
+    const [isThinking, setIsThinking] = useState(false);
 
     const wsRef = useRef<WebSocket | null>(null);
     const micStreamRef = useRef<MediaStream | null>(null);
@@ -175,6 +185,7 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
         micStartedRef.current = false;
         setStatus('idle');
         statusRef.current = 'idle';
+        setIsThinking(false);
     }, [teardownMic, stopAssistantPlayback]);
 
     const start = useCallback(async () => {
@@ -258,10 +269,18 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
                 attemptConnect(index + 1);
             };
 
-            ws.addEventListener('open', () => {
-                connected = true;
+            // A bolinha so fica verde quando o servidor confirmar que a sessao
+            // Gemini Live realmente comecou ('live_started' ou status
+            // equivalente) — o 'open' do WebSocket acontece bem antes disso
+            // (auth Firebase + abertura da sessao Live ainda estao por vir).
+            const markLive = () => {
+                if (statusRef.current === 'live') return;
                 setStatus('live');
                 statusRef.current = 'live';
+            };
+
+            ws.addEventListener('open', () => {
+                connected = true;
                 if (!micStartedRef.current) {
                     micStartedRef.current = true;
                     startMicCapture(ws);
@@ -273,9 +292,10 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
                 if (!connected) {
                     try { ws.close(); } catch {}
                     advanceToNextCandidate();
-                } else if (statusRef.current === 'live') {
+                } else if (statusRef.current === 'live' || statusRef.current === 'connecting') {
                     setStatus('error');
                     statusRef.current = 'error';
+                    setIsThinking(false);
                     options.onError?.('Conexão com o servidor de voz perdida.');
                 }
             });
@@ -289,6 +309,7 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
                 teardownMic();
                 micStartedRef.current = false;
                 stopAssistantPlayback();
+                setIsThinking(false);
                 setStatus(current => (current === 'error' ? current : 'idle'));
                 if (statusRef.current !== 'error') statusRef.current = 'idle';
                 if (wasLive) {
@@ -301,21 +322,39 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
                 try { payload = JSON.parse(event.data); } catch { return; }
 
                 switch (payload.type) {
+                    case 'live_started':
+                        markLive();
+                        break;
+                    case 'thinking_start':
+                        setIsThinking(true);
+                        break;
+                    case 'thinking_end':
+                        // Nao limpa o "pensando" aqui de proposito: depois da
+                        // ferramenta o modelo ainda leva um tempo gerando a
+                        // resposta falada. O estado limpa quando chega audio,
+                        // turn_complete ou interrupcao.
+                        break;
                     case 'status':
+                        if (payload.message && LIVE_CONFIRMATION_RE.test(payload.message)) markLive();
+                        if (payload.message && THINKING_STATUS_RE.test(payload.message)) setIsThinking(true);
                         options.onStatus?.(payload.message);
                         break;
                     case 'error':
                         setStatus('error');
                         statusRef.current = 'error';
+                        setIsThinking(false);
                         options.onError?.(payload.message || 'Erro na sessão de voz.');
                         break;
                     case 'interrupted':
                         // Barge-in confirmado pelo VAD do Gemini: descarta o
                         // audio ja agendado para nao falar por cima do usuario.
+                        setIsThinking(false);
                         stopAssistantPlayback();
                         break;
                     case 'audio':
                     case 'assistant_audio': {
+                        markLive();
+                        setIsThinking(false);
                         const mime = payload.mime_type || `audio/pcm;rate=${payload.sampleRate || 24000}`;
                         const rateMatch = /rate=(\d+)/.exec(mime);
                         playAudioChunk(payload.payload, rateMatch ? parseInt(rateMatch[1], 10) : (payload.sampleRate || 24000));
@@ -331,6 +370,7 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
                         assistantTranscriptRef.current = appendTranscriptFragment(assistantTranscriptRef.current, payload.text || '');
                         break;
                     case 'turn_complete': {
+                        setIsThinking(false);
                         const userText = sanitizeTranscript(userTranscriptRef.current);
                         const assistantText = sanitizeTranscript(assistantTranscriptRef.current);
                         userTranscriptRef.current = '';
@@ -364,6 +404,6 @@ export function useHermesVoiceStream(options: UseHermesVoiceStreamOptions) {
         }
     }, []);
 
-    return { status, start, stop, sendUIContext };
+    return { status, isThinking, start, stop, sendUIContext };
 }
 

@@ -43,7 +43,10 @@ _WEEKDAY_NAMES_PT = [
 TWILIO_SAMPLE_RATE = 8000
 GEMINI_SAMPLE_RATE = 24000
 SAMPLE_WIDTH_BYTES = 2
-DEFAULT_VOICE_MAX_SESSION_SECONDS = 300
+# 900s (15 min) acompanha o limite do proprio Gemini Live sem session
+# resumption. O padrao antigo de 300s derrubava a chamada aos 4 min efetivos
+# (300 - 60 de margem) em producao, parecendo uma interrupcao espontanea.
+DEFAULT_VOICE_MAX_SESSION_SECONDS = 900
 
 
 def _data_context_block() -> str:
@@ -109,8 +112,12 @@ cite uma tarefa que voce nao tem certeza absoluta que veio da resposta da
 ferramenta desta chamada especifica. Se a lista vier vazia, diga que nao ha
 tarefas — nao invente nenhuma.
 
-Sempre que decidir acionar uma ferramenta do banco de dados, voce DEVE dizer:
-"Aguarde um instante, estou verificando os dados" ANTES de executar a funcao.
+Ao acionar uma ferramenta do banco de dados, NAO anuncie que vai verificar os
+dados — NAO diga "aguarde", "um instante", "estou verificando" nem nada
+parecido. Execute a funcao imediatamente e em silencio: a interface do Hermes
+ja mostra ao usuario um indicador visual de que voce esta processando. Se a
+consulta demorar, permaneca em silencio ate ter o resultado e entao responda
+direto com a informacao.
 
 NUNCA diga que uma acao foi feita (salva, alterada, reagendada, adiada,
 concluida, registrada) sem ter chamado a ferramenta correspondente e recebido
@@ -176,8 +183,12 @@ cite uma tarefa que voce nao tem certeza absoluta que veio da resposta da
 ferramenta desta chamada especifica. Se a lista vier vazia, diga que nao ha
 tarefas — nao invente nenhuma.
 
-Sempre que decidir acionar uma ferramenta do banco de dados, voce DEVE dizer:
-"Aguarde um instante, estou verificando os dados" ANTES de executar a funcao.
+Ao acionar uma ferramenta do banco de dados, NAO anuncie que vai verificar os
+dados — NAO diga "aguarde", "um instante", "estou verificando" nem nada
+parecido. Execute a funcao imediatamente e em silencio: a interface do Hermes
+ja mostra ao usuario um indicador visual de que voce esta processando. Se a
+consulta demorar, permaneca em silencio ate ter o resultado e entao responda
+direto com a informacao.
 
 NUNCA diga que uma acao foi feita (salva, alterada, reagendada, adiada,
 concluida, registrada) sem ter chamado a ferramenta correspondente e recebido
@@ -547,6 +558,10 @@ async def browser_voice_stream(websocket: WebSocket) -> None:
                 (mcp_context + ("\n\n" + task_context if task_context else "")).strip(),
             ),
         ) as session:
+            # Evento estruturado para o frontend saber que a sessao Gemini Live
+            # esta DE FATO ativa (a bolinha so deve ficar verde a partir daqui).
+            # O status textual segue junto por compatibilidade com clients antigos.
+            await websocket.send_json({"type": "live_started"})
             await websocket.send_json(
                 {"type": "status", "message": "Sessao Gemini Live iniciada."}
             )
@@ -830,7 +845,19 @@ async def _forward_browser_audio_to_gemini(
             context_prompt = "\n\n".join(context_lines)
             logger.info("Updating Gemini Live UI context: module=%s, task=%s", active_module, selected_task.get('titulo') if selected_task else None)
             try:
-                await session.send(input=context_prompt)
+                # turn_complete=False: injeta o contexto SEM fechar um turno de
+                # usuario. session.send(input=...) fechava o turno e obrigava o
+                # modelo a responder na hora — o que cortava a fala em andamento
+                # toda vez que o usuario navegava/digitava (ou quando a propria
+                # navegacao por voz mudava a tela), parecendo uma interrupcao
+                # espontanea do modelo.
+                await session.send_client_content(
+                    turns=types.Content(
+                        role="user",
+                        parts=[types.Part(text=context_prompt)],
+                    ),
+                    turn_complete=False,
+                )
             except Exception as exc:
                 logger.warning("Falha ao enviar ui_context para session: %s", exc)
             continue
@@ -895,8 +922,11 @@ async def _forward_gemini_audio_to_browser(
     # fiquemos SEM NENHUMA mensagem por um periodo real minimo (nao so um
     # numero fixo de ciclos, que podia disparar em bem menos de 1s) antes de
     # concluir que a sessao morreu de verdade.
+    # 20s: apos uma tool call demorada (MCP/HTTP) o modelo pode levar varios
+    # segundos para abrir o proximo turno; 8s ainda matava sessoes vivas no
+    # meio de consultas longas (percebido como "a voz caiu sozinha").
     empty_since: float | None = None
-    EMPTY_STREAK_LIMIT_SECONDS = 8.0
+    EMPTY_STREAK_LIMIT_SECONDS = 20.0
     while not stop_event.is_set():
         received_any = False
         async for response in session.receive():
@@ -908,21 +938,23 @@ async def _forward_gemini_audio_to_browser(
 
             tool_call = getattr(response, "tool_call", None)
             if tool_call:
-                await websocket.send_json(
-                    {
-                        "type": "status",
-                        "message": "Gemini solicitou consulta ao Hermes.",
-                    }
-                )
-                await _handle_gemini_tool_call(
-                    session=session,
-                    tool_call=tool_call,
-                    auth_event=auth_event,
-                    mcp_tool_names=mcp_tool_names,
-                    id_token=id_token,
-                    session_task_id=session_task_id,
-                    websocket=websocket,
-                )
+                # Eventos estruturados para o indicador visual de "pensando":
+                # o modelo fica em silencio durante a consulta e a bolinha do
+                # modo voz muda de estado no lugar da fala "aguarde um instante".
+                await websocket.send_json({"type": "thinking_start"})
+                try:
+                    await _handle_gemini_tool_call(
+                        session=session,
+                        tool_call=tool_call,
+                        auth_event=auth_event,
+                        mcp_tool_names=mcp_tool_names,
+                        id_token=id_token,
+                        session_task_id=session_task_id,
+                        websocket=websocket,
+                    )
+                finally:
+                    with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+                        await websocket.send_json({"type": "thinking_end"})
                 continue
 
             input_transcript = _extract_input_transcript(response)

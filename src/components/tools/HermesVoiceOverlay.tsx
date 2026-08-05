@@ -62,14 +62,17 @@ export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, 
     sendUIContextRef.current = voiceStream.sendUIContext;
 
     useEffect(() => {
-        if (voiceStream.status === 'live' && uiContext) {
-            sendUIContextRef.current(uiContext);
-        }
+        if (voiceStream.status !== 'live' || !uiContext) return;
+        // Debounce: digitar na busca ou navegar dispara varias mudancas de
+        // contexto em sequencia; espera a tela "assentar" antes de mandar.
+        const handle = window.setTimeout(() => sendUIContextRef.current(uiContext), 600);
+        return () => window.clearTimeout(handle);
     }, [uiContext, voiceStream.status]);
 
     const isLive = voiceStream.status === 'live';
     const isConnecting = voiceStream.status === 'connecting';
     const isError = voiceStream.status === 'error';
+    const isThinking = isLive && voiceStream.isThinking;
 
     const assistantBubbleClass = isDark
         ? 'bg-slate-800/95 text-slate-100 border border-white/10'
@@ -97,16 +100,18 @@ export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, 
             )}
 
             {/* Chip de status/erro */}
-            {!isMinimized && (errorMessage || statusMessage || isConnecting) && (
+            {!isMinimized && (errorMessage || statusMessage || isConnecting || isThinking) && (
                 <div
                     className={`pointer-events-auto max-w-full truncate rounded-full px-3 py-1 text-[11px] font-medium backdrop-blur-sm ${
                         errorMessage
                             ? 'bg-rose-600/90 text-white'
-                            : isDark ? 'bg-white/10 text-slate-200' : 'bg-slate-900/80 text-white'
+                            : isThinking
+                                ? 'bg-violet-600/90 text-white'
+                                : isDark ? 'bg-white/10 text-slate-200' : 'bg-slate-900/80 text-white'
                     }`}
-                    title={errorMessage || statusMessage}
+                    title={errorMessage || (isThinking ? 'Pensando…' : statusMessage)}
                 >
-                    {errorMessage || statusMessage || 'Conectando à voz ao vivo…'}
+                    {errorMessage || (isThinking ? 'Pensando…' : statusMessage || 'Conectando à voz ao vivo…')}
                 </div>
             )}
 
@@ -134,11 +139,23 @@ export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, 
                             ? 'bg-rose-600 shadow-rose-600/40'
                             : isConnecting
                                 ? 'bg-amber-500 shadow-amber-500/40'
-                                : 'bg-emerald-600 shadow-emerald-600/40'
+                                : isThinking
+                                    ? 'bg-violet-600 shadow-violet-600/40'
+                                    : isLive
+                                        ? 'bg-emerald-600 shadow-emerald-600/40'
+                                        : 'bg-slate-500 shadow-slate-500/40'
                     }`}
                 >
+                    {/* Pensando: anel girando em violeta — o modelo esta
+                        processando (ferramenta/consulta longa) em silencio. */}
+                    {isThinking && (
+                        <>
+                            <span className="absolute inset-0 animate-ping rounded-full bg-violet-500/40" />
+                            <span className="absolute -inset-1.5 animate-spin rounded-full border-2 border-violet-300/80 border-t-transparent" style={{ animationDuration: '1.2s' }} />
+                        </>
+                    )}
                     {/* Aneis pulsantes indicando gravacao ativa */}
-                    {isLive && (
+                    {isLive && !isThinking && (
                         <>
                             <span className="absolute inset-0 animate-ping rounded-full bg-emerald-500/40" />
                             <span className="absolute -inset-1.5 animate-pulse rounded-full border-2 border-emerald-400/50" />

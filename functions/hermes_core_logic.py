@@ -988,22 +988,31 @@ def _try_register_walk_block(db, text: str) -> Optional[str]:
         settings = settings_doc.to_dict() or {}
     except Exception:
         settings = {}
+    # Mesmos padrões e paradigma de nivelamento da UI (DashboardView):
+    # abaixo do mínimo ainda não pontua; do mínimo ao ideal o nível progride
+    # continuamente (vermelho -> laranja -> amarelo -> verde); do ideal em
+    # diante é "lucro".
     minimum_setting = settings.get("walkingMinimumKm")
     ideal_setting = settings.get("walkingIdealKm")
-    minimum_km = float(minimum_setting) if minimum_setting is not None else 5.0
-    ideal_km = float(ideal_setting) if ideal_setting is not None else 10.0
+    minimum_km = float(minimum_setting) if minimum_setting is not None else 3.0
+    ideal_km = float(ideal_setting) if ideal_setting is not None else 8.0
 
     if total_km >= ideal_km:
-        progress = f"🏆 Meta ideal de {_format_km(ideal_km)} km atingida!"
+        surplus = total_km - ideal_km
+        surplus_text = f" +{_format_km(surplus)} km de lucro!" if surplus > 0 else ""
+        progress = f"🟢 Meta ideal de {_format_km(ideal_km)} km atingida!{surplus_text} 🏆"
     elif total_km >= minimum_km:
+        t = (total_km - minimum_km) / (ideal_km - minimum_km) if ideal_km > minimum_km else 1.0
+        level_emoji = "🔴" if t < 0.25 else "🟠" if t < 0.5 else "🟡" if t < 0.75 else "🟢"
         progress = (
-            f"✅ Mínimo garantido — faltam {_format_km(ideal_km - total_km)} km "
-            f"para o ideal de {_format_km(ideal_km)} km."
+            f"{level_emoji} Mínimo ok — nível {round(t * 100)}% entre o mínimo "
+            f"({_format_km(minimum_km)} km) e o ideal ({_format_km(ideal_km)} km). "
+            f"Faltam {_format_km(ideal_km - total_km)} km para o ideal."
         )
     else:
         progress = (
-            f"Faltam {_format_km(minimum_km - total_km)} km "
-            f"para o mínimo de {_format_km(minimum_km)} km."
+            f"⚪ Abaixo do mínimo — faltam {_format_km(minimum_km - total_km)} km "
+            f"para entrar na zona de pontuação (mínimo de {_format_km(minimum_km)} km)."
         )
 
     extras = []

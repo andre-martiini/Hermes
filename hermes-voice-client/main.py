@@ -8,6 +8,7 @@ Rodar com: uvicorn main:app --port 8765
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 from pathlib import Path
