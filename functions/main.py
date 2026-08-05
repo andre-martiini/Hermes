@@ -7489,11 +7489,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         elapsed = time.monotonic() - request_start_monotonic
         return max(0.0, COPILOT_SOFT_DEADLINE_SEC - elapsed)
 
-    # Ingestão muda: arquivo sem texto → prompt padrão de catalogação
-    if not prompt and drive_file_id:
+    # Ingestão muda: arquivos sem texto → prompt padrão de catalogação
+    if not prompt and (drive_files or drive_file_id):
         prompt = (
-            "Analise o arquivo anexado, identifique o que ele mostra e explique "
-            "como isso se relaciona com a ação em contexto."
+            "Analise os arquivos anexados, identifique o que eles mostram e explique "
+            "como eles se relacionam com a ação em contexto."
         )
 
     if not prompt:
@@ -10854,7 +10854,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         if _gate_formularios:
             static_tools.append(gerar_rascunho_formulario)
         if _gate_reagendamento:
-if _protocolo_ativo("sipac", "processo", "protocolo"):
+            static_tools.append(preparar_reagendamento_em_lote)
+            static_tools.append(preparar_remocao_horarios_em_lote)
+        if _protocolo_ativo("sipac", "processo", "protocolo"):
             static_tools.append(consultar_processo_sipac_copiloto)
             static_tools.append(incorporar_documento_especifico_sipac_no_rag_da_acao)
             static_tools.append(acompanhar_processo_sipac_copiloto)
@@ -10911,19 +10913,15 @@ if _protocolo_ativo("sipac", "processo", "protocolo"):
         )
         _perf_mark(perf_state, "web.chat_create")
 
-        # ─── INGESTÃO DOCUMENTAL ─────────────────────────────────────────────────
-        # Se um driveFileId foi enviado, baixa o binário, extrai metadados via
-        # Gemini File API (sem parsers locais) e grava no indice_artefatos (RAG).
-        file_context = ""
+        # ─── INGESTÃO DOCUMENTAL (MÚLTIPLOS ARQUIVOS - ATÉ 10) ───────────────────
+        file_contexts = []
         if drive_files:
-            file_context_blocks = []
-            for file_idx, df_item in enumerate(drive_files[:10]):
-                cur_drive_file_id = df_item.get('driveFileId')
-                cur_drive_file_name = df_item.get('driveFileName') or 'documento'
-                if not cur_drive_file_id:
-                    continue
-
-                _set_copilot_status(f"Processando arquivo ({file_idx + 1}/{len(drive_files)}): {cur_drive_file_name}...")
+            total_files = len(drive_files)
+            for file_idx, f_item in enumerate(drive_files, start=1):
+                drive_file_id = f_item['driveFileId']
+                drive_file_name = f_item['driveFileName']
+                file_context = ""
+                _set_copilot_status(f"Processando arquivo ({file_idx}/{total_files}): {drive_file_name}...")
                 try:
                     import io
                     import os
@@ -10936,84 +10934,332 @@ if _protocolo_ativo("sipac", "processo", "protocolo"):
 
                     # 1. Busca metadados do arquivo no Drive
                     file_meta = drive_service.files().get(
-                        fileId=cur_drive_file_id,
+                        fileId=drive_file_id,
                         fields='name,mimeType'
                     ).execute()
-                    real_file_name = file_meta.get('name', cur_drive_file_name)
+                    real_file_name = file_meta.get('name', drive_file_name)
                     real_mime_type = file_meta.get('mimeType', 'application/octet-stream')
                     is_image_file = real_mime_type.startswith('image/')
                     task_context_summary = ""
                     if task_id:
-                        from datetime import datetime as _dt
-                        now_iso = _dt.now().isoformat()
-                        pool_item = {
-                            'id': artefato_id,
-                            'tipo': 'arquivo',
-                            'valor': drive_link,
-                            'nome': titulo_doc,
-                            'drive_file_id': drive_file_id,  # Salvo explicitamente para leitura profunda on-demand
-                            'data_criacao': now_iso
-                        }
-                        diary_entry = {
-                            'data': now_iso,
-                            'nota': f"📎 [Copiloto] Arquivo '{titulo_doc}' ({natureza_doc}) carregado via Copiloto Hermes e indexado no acervo global."
-                        }
-                        db.collection('tarefas').document(task_id).update({
-                            'pool_dados': firestore.ArrayUnion([pool_item]),
-                            'acompanhamento': firestore.ArrayUnion([diary_entry])
-                        })
-                        print(f"[Copiloto] Arquivo '{titulo_doc}' vinculado à tarefa {task_id} (pool_dados + acompanhamento)")
-
-                    # 7. Monta o bloco de contexto que será injetado no prompt final
-                    file_context = (
-                        f"[CONTEXTO DO ARQUIVO ANEXADO]\n"
-                        f"Nome: {real_file_name}\n"
-                        f"Tipo MIME: {real_mime_type}\n"
-                        f"Título extraído: {titulo_doc}\n"
-                        f"Natureza: {natureza_doc}\n"
-                        f"Resumo: {resumo_doc}\n"
-                        f"Relação com a ação: {relacao_com_acao or 'Não inferida.'}\n"
-                        f"Utilidade prática: {utilidade_pratica or 'Não inferida.'}\n"
-                        f"Texto local relevante: {local_extracted_text[:2500] if local_extracted_text else 'Não aplicável.'}\n"
-                        f"OCR relevante: {ocr_doc[:2500] if ocr_doc else 'Sem texto legível relevante.'}\n"
-                        f"Descrição visual: {descricao_visual or 'Não aplicável.'}\n"
-                        f"Elementos-chave: {', '.join(elementos_chave[:8]) if elementos_chave else 'Nenhum listado.'}\n"
-                        f"Evidências observáveis: {', '.join(evidencias[:8]) if evidencias else 'Nenhuma listada.'}\n"
-                        f"Link original: {drive_link}\n"
-                        f"[/CONTEXTO DO ARQUIVO ANEXADO]"
-                    )
-
-                finally:
-                    # Limpeza obrigatória — evita acúmulo na File API do Gemini
-                    if gemini_file is not None:
                         try:
-                            client.files.delete(name=gemini_file.name)
-                            print(f"[Copiloto] Arquivo Gemini '{gemini_file.name}' deletado com sucesso.")
-                        except Exception as del_err:
-                            print(f"[Copiloto] Aviso: falha ao deletar arquivo Gemini '{gemini_file.name}': {del_err}")
+                            task_doc = db.collection('tarefas').document(task_id).get()
+                            if task_doc.exists:
+                                task_data = task_doc.to_dict() or {}
+                                plano = task_data.get('plano_acao', []) or []
+                                task_context_summary = (
+                                    f"Tarefa atual: {task_data.get('titulo', 'Sem título')}\n"
+                                    f"Área temática: {task_data.get('area_tematica', 'Não informada')}\n"
+                                    f"Descrição: {task_data.get('descricao', '')[:1200]}\n"
+                                    f"Plano atual: {' | '.join(plano[:5]) if plano else 'Não definido'}"
+                                )
+                        except Exception as task_ctx_err:
+                            print(f"[Copiloto] Aviso: falha ao montar contexto resumido da tarefa {task_id}: {task_ctx_err}")
 
-            except Exception as file_err:
-                import traceback as _tb
-                from datetime import datetime as _dt
-                err_str = str(file_err)
-                print(f"[Copiloto] Erro na ingestão documental: {err_str}")
-                print(_tb.format_exc())
+                    # 2. Baixa o binário para memória volátil
+                    request_dl = drive_service.files().get_media(fileId=drive_file_id)
+                    fh = io.BytesIO()
+                    downloader = MediaIoBaseDownload(fh, request_dl)
+                    done = False
+                    while not done:
+                        _, done = downloader.next_chunk()
+                    fh.seek(0)
+                    file_bytes = fh.read()
+                    fh.close()
+                    del fh  # libera o buffer BytesIO imediatamente (evita cópia dupla em memória)
+                    local_pdf_text = ""
+                    local_pdf_metadata = None
+                    local_docx_text = ""
+                    local_docx_metadata = None
+                    if is_pdf_mime_type(real_file_name, real_mime_type):
+                        pdf_result = extract_pdf_text_with_fallback(
+                            file_bytes,
+                            real_file_name,
+                            api_key=gemini_key,
+                            allow_gemini_fallback=False,
+                        )
+                        local_pdf_text = (pdf_result.get('text') or '').strip()
+                        local_pdf_metadata = pdf_result.get('metadata')
+                    elif is_docx_mime_type(real_file_name, real_mime_type):
+                        local_docx_text, local_docx_metadata = extract_docx_text(file_bytes)
+                    elif real_mime_type == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or real_mime_type == 'application/vnd.ms-excel' or real_file_name.lower().endswith(('.xlsx', '.xls')):
+                        import pandas as _pd
+                        import io as _io
+                        try:
+                            _df_list = _pd.read_excel(_io.BytesIO(file_bytes), sheet_name=None)
+                            _sheets_text = []
+                            for _sheet_name, _df in _df_list.items():
+                                _sheets_text.append(f"ABA: {_sheet_name}\n{_df.to_csv(index=False)}")
+                            local_docx_text = "\n\n".join(_sheets_text).strip()
+                            local_docx_metadata = {"natureza": "planilha_excel", "abas": list(_df_list.keys())}
+                        except Exception as xl_err:
+                            print(f"[Copiloto] Erro ao extrair Excel: {xl_err}")
+                    elif real_mime_type == 'application/vnd.openxmlformats-officedocument.presentationml.presentation' or real_file_name.lower().endswith('.pptx'):
+                        from pptx import Presentation as _Presentation
+                        import io as _io
+                        try:
+                            _prs = _Presentation(_io.BytesIO(file_bytes))
+                            _slides_text = []
+                            for _slide in _prs.slides:
+                                for _shape in _slide.shapes:
+                                    if hasattr(_shape, 'text') and _shape.text.strip():
+                                        _slides_text.append(_shape.text.strip())
+                            local_docx_text = '\n'.join(_slides_text).strip()
+                            local_docx_metadata = {"natureza": "apresentacao_powerpoint", "slides_count": len(_prs.slides)}
+                        except Exception as ppt_err:
+                            print(f"[Copiloto] Erro ao extrair PowerPoint: {ppt_err}")
 
-                # Telemetria estruturada — não suja o diário da tarefa
-                try:
-                    db.collection('quality_logs').add({
-                        'tipo': 'erro_ingestao_copiloto',
-                        'descricao': 'Falha ao extrair contexto de arquivo via Gemini File API',
-                        'evidencia': err_str,
-                        'arquivo_nome': drive_file_name,
-                        'task_id': task_id or None,
-                        'session_id': session_id or None,
-                        'data_criacao': _dt.now().isoformat()
-                    })
-                except Exception as log_err:
-                    print(f"[Copiloto] Falha ao gravar quality_log: {log_err}")
+                    gemini_file = None
+                    local_extracted_text = local_pdf_text or local_docx_text
+                    local_extraction_metadata = local_pdf_metadata or local_docx_metadata
+                    if is_image_file or not local_extracted_text:
+                        # 3. Salva em arquivo temporário para a File API do Gemini
+                        file_ext = os.path.splitext(real_file_name)[1] or '.bin'
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
+                            tmp.write(file_bytes)
+                            tmp_path = tmp.name
+                        del file_bytes  # libera bytes após gravar no disco; File API vai ler do tmp_path
 
-                file_context = f"⚠️ Não foi possível processar o arquivo '{drive_file_name}': {err_str}"
+                        # 4. Faz upload para a File API do Gemini
+                        gemini_file = client.files.upload(
+                            file=tmp_path,
+                            config=types.UploadFileConfig(
+                                mime_type=real_mime_type,
+                                display_name=real_file_name
+                            )
+                        )
+                        os.unlink(tmp_path)
+                    else:
+                        del file_bytes  # texto já extraído localmente; bytes brutos não são mais necessários
+
+                    # O bloco try/finally abaixo garante que o arquivo seja sempre
+                    # deletado da File API do Gemini, mesmo que a extração falhe.
+                    # Sem isso cada upload acumularia dados até estourar a cota de 2GB.
+                    try:
+                        # 5. Extrai metadados com truncamento semântico de ~8.000 tokens
+                        if is_image_file:
+                            extraction_prompt = (
+                                f"Você recebeu a imagem '{real_file_name}'. "
+                                "Analise o conteúdo visual integral e retorne EXCLUSIVAMENTE um JSON válido, "
+                                "sem markdown, sem texto extra, com esta estrutura:\n"
+                                '{"titulo": "...", "natureza": "...", "resumo": "...", '
+                                '"ocr": "...", "descricao_visual": "...", '
+                                '"elementos_chave": ["..."], "evidencias": ["..."], '
+                                '"relacao_com_acao": "...", "utilidade_pratica": "..."}\n'
+                                "Regras:\n"
+                                "- titulo: nome curto e útil do anexo.\n"
+                                "- natureza: classifique a imagem com precisão (ex: print de sistema, comprovante, gráfico, documento fotografado, quadro, planilha capturada, foto de ambiente).\n"
+                                "- resumo: resumo executivo em 3 a 5 frases.\n"
+                                "- ocr: transcreva o texto visível mais relevante. Se não houver, use string vazia.\n"
+                                "- descricao_visual: descreva objetivamente o que aparece na imagem.\n"
+                                "- elementos_chave: liste de 3 a 8 elementos centrais percebidos.\n"
+                                "- evidencias: liste fatos observáveis que sustentam sua leitura.\n"
+                                "- relacao_com_acao: explique como a imagem se conecta com a tarefa em foco. Se não houver contexto suficiente, diga isso explicitamente.\n"
+                                "- utilidade_pratica: diga como o Hermes deve usar esta imagem para apoiar a ação.\n"
+                                f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}"
+                            )
+                        elif local_extracted_text:
+                            extraction_prompt = (
+                                f"Você recebeu o texto extraído localmente do arquivo '{real_file_name}'. "
+                                "Retorne EXCLUSIVAMENTE um JSON válido, sem markdown, sem texto extra, com esta estrutura:\n"
+                                '{"titulo": "...", "natureza": "...", "resumo": "...", '
+                                '"relacao_com_acao": "...", "utilidade_pratica": "..."}\n'
+                                "Onde:\n"
+                                "- titulo: nome/título do documento\n"
+                                "- natureza: categoria (ex: Edital, Contrato, Relatório, Manual, Planilha, etc.)\n"
+                                "- resumo: resumo executivo em 3 a 5 frases sobre conteúdo e utilidade\n"
+                                "- relacao_com_acao: explique a conexão do arquivo com a tarefa atual; se não houver contexto suficiente, diga isso explicitamente\n"
+                                "- utilidade_pratica: diga como o Hermes deve usar este arquivo para apoiar a ação\n"
+                                f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}\n\n"
+                                f"METADADOS DA EXTRAÇÃO LOCAL: {json.dumps(local_extraction_metadata or {}, ensure_ascii=False)}\n\n"
+                                f"TEXTO EXTRAÍDO:\n{local_extracted_text[:120000]}"
+                            )
+                            extraction_response = client.models.generate_content(
+                                model=model_id,
+                                contents=[extraction_prompt]
+                            )
+                        else:
+                            extraction_prompt = (
+                                f"Você recebeu o arquivo '{real_file_name}'. "
+                                "Leia no máximo os primeiros 8.000 tokens de conteúdo. "
+                                "Retorne EXCLUSIVAMENTE um JSON válido, sem markdown, sem texto extra, com esta estrutura:\n"
+                                '{"titulo": "...", "natureza": "...", "resumo": "...", '
+                                '"relacao_com_acao": "...", "utilidade_pratica": "..."}\n'
+                                "Onde:\n"
+                                "- titulo: nome/título do documento\n"
+                                "- natureza: categoria (ex: Edital, Contrato, Relatório, Manual, Planilha, etc.)\n"
+                                "- resumo: resumo executivo em 3 a 5 frases sobre conteúdo e utilidade\n"
+                                "- relacao_com_acao: explique a conexão do arquivo com a tarefa atual; se não houver contexto suficiente, diga isso explicitamente\n"
+                                "- utilidade_pratica: diga como o Hermes deve usar este arquivo para apoiar a ação\n"
+                                f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}"
+                            )
+                        if is_image_file or not local_extracted_text:
+                            extraction_response = client.models.generate_content(
+                                model=model_id,
+                                contents=[
+                                    types.Content(parts=[
+                                        types.Part.from_uri(
+                                            file_uri=gemini_file.uri,
+                                            mime_type=real_mime_type
+                                        ),
+                                        types.Part(text=extraction_prompt)
+                                    ])
+                                ]
+                            )
+                        log_gemini_usage(extraction_response, model=model_id, feature="copilot_file_ingestion", db=db)
+                        extraction_text = extraction_response.text.strip()
+                        # Remove blocos de código caso o modelo os inclua mesmo instruído
+                        if extraction_text.startswith("```"):
+                            extraction_text = extraction_text.split("```")[1]
+                            if extraction_text.startswith("json"):
+                                extraction_text = extraction_text[4:]
+
+                        meta = json.loads(extraction_text)
+                        if isinstance(meta, list):
+                            meta = meta[0] if meta else {}
+                        if not isinstance(meta, dict):
+                            meta = {}
+                        titulo_doc = meta.get('titulo', real_file_name)
+                        natureza_doc = meta.get('natureza', 'Documento')
+                        resumo_doc = meta.get('resumo', '')
+                        relacao_com_acao = meta.get('relacao_com_acao', '')
+                        utilidade_pratica = meta.get('utilidade_pratica', '')
+                        ocr_doc = meta.get('ocr', '') if is_image_file else ''
+                        descricao_visual = meta.get('descricao_visual', '') if is_image_file else ''
+                        elementos_chave = meta.get('elementos_chave', []) if is_image_file else []
+                        evidencias = meta.get('evidencias', []) if is_image_file else []
+                        if not isinstance(elementos_chave, list):
+                            elementos_chave = [str(elementos_chave)]
+                        if not isinstance(evidencias, list):
+                            evidencias = [str(evidencias)]
+
+                        # 6. Vetoriza e grava no indice_artefatos
+                        from knowledge_graph import _get_embedding
+                        embed_text_parts = [
+                            titulo_doc,
+                            natureza_doc,
+                            resumo_doc,
+                            relacao_com_acao,
+                            utilidade_pratica,
+                        ]
+                        if is_image_file:
+                            embed_text_parts.extend([
+                                descricao_visual,
+                                ocr_doc,
+                                " | ".join(elementos_chave[:8]),
+                                " | ".join(evidencias[:8]),
+                            ])
+                        embed_text = " | ".join(part for part in embed_text_parts if part)
+                        embedding = _get_embedding(embed_text, gemini_key)
+                        embedding_floats = list(map(float, embedding))
+
+                        artefato_id = str(_uuid.uuid4())[:12]
+                        drive_link = f"https://drive.google.com/file/d/{drive_file_id}/view"
+
+                        # Origem bifurcada: tarefa (se task_id ativo) ou acervo global
+                        origem_doc = (
+                            {'modulo': 'tarefa', 'id_origem': task_id, 'session_id': session_id or 'direto'}
+                            if task_id
+                            else {'modulo': 'copiloto', 'id_origem': session_id or 'direto'}
+                        )
+                        db.collection('indice_artefatos').document(artefato_id).set({
+                            'titulo': titulo_doc,
+                            'trecho': resumo_doc,
+                            'texto_bruto': (local_extracted_text or ocr_doc or resumo_doc)[:500000],
+                            'fonte': natureza_doc,
+                            'embedding': Vector(embedding_floats),
+                            'tipo_arquivo': real_mime_type.split('/')[-1],
+                            'mime_type': real_mime_type,
+                            'url_drive': drive_link,
+                            'drive_file_id': drive_file_id,
+                            'data_criacao': firestore.SERVER_TIMESTAMP,
+                            'origem': origem_doc,
+                            'task_id': task_id or None,
+                            'categoria': 'Copiloto Hermes',
+                            'relacao_com_acao': relacao_com_acao,
+                            'utilidade_pratica': utilidade_pratica,
+                            'ocr': ocr_doc,
+                            'descricao_visual': descricao_visual,
+                            'elementos_chave': elementos_chave[:8],
+                            'evidencias': evidencias[:8],
+                            'texto_extraido_por': 'local_extractor' if local_extracted_text else ('gemini_ocr' if is_image_file else 'gemini_file_api'),
+                            'extraction_metadata': local_extraction_metadata if local_extraction_metadata else None,
+                        })
+                        print(f"[Copiloto] Artefato '{titulo_doc}' gravado em indice_artefatos (id={artefato_id})")
+
+                        # Dupla cidadania: vínculo físico e histórico à tarefa ativa
+                        if task_id:
+                            from datetime import datetime as _dt
+                            now_iso = _dt.now().isoformat()
+                            pool_item = {
+                                'id': artefato_id,
+                                'tipo': 'arquivo',
+                                'valor': drive_link,
+                                'nome': titulo_doc,
+                                'drive_file_id': drive_file_id,  # Salvo explicitamente para leitura profunda on-demand
+                                'data_criacao': now_iso
+                            }
+                            diary_entry = {
+                                'data': now_iso,
+                                'nota': f"📎 [Copiloto] Arquivo '{titulo_doc}' ({natureza_doc}) carregado via Copiloto Hermes e indexado no acervo global."
+                            }
+                            db.collection('tarefas').document(task_id).update({
+                                'pool_dados': firestore.ArrayUnion([pool_item]),
+                                'acompanhamento': firestore.ArrayUnion([diary_entry])
+                            })
+                            print(f"[Copiloto] Arquivo '{titulo_doc}' vinculado à tarefa {task_id} (pool_dados + acompanhamento)")
+
+                        # 7. Monta o bloco de contexto que será injetado no prompt final
+                        file_context = (
+                            f"[CONTEXTO DO ARQUIVO ANEXADO]\n"
+                            f"Nome: {real_file_name}\n"
+                            f"Tipo MIME: {real_mime_type}\n"
+                            f"Título extraído: {titulo_doc}\n"
+                            f"Natureza: {natureza_doc}\n"
+                            f"Resumo: {resumo_doc}\n"
+                            f"Relação com a ação: {relacao_com_acao or 'Não inferida.'}\n"
+                            f"Utilidade prática: {utilidade_pratica or 'Não inferida.'}\n"
+                            f"Texto local relevante: {local_extracted_text[:2500] if local_extracted_text else 'Não aplicável.'}\n"
+                            f"OCR relevante: {ocr_doc[:2500] if ocr_doc else 'Sem texto legível relevante.'}\n"
+                            f"Descrição visual: {descricao_visual or 'Não aplicável.'}\n"
+                            f"Elementos-chave: {', '.join(elementos_chave[:8]) if elementos_chave else 'Nenhum listado.'}\n"
+                            f"Evidências observáveis: {', '.join(evidencias[:8]) if evidencias else 'Nenhuma listada.'}\n"
+                            f"Link original: {drive_link}\n"
+                            f"[/CONTEXTO DO ARQUIVO ANEXADO]"
+                        )
+
+                    finally:
+                        # Limpeza obrigatória — evita acúmulo na File API do Gemini
+                        if gemini_file is not None:
+                            try:
+                                client.files.delete(name=gemini_file.name)
+                                print(f"[Copiloto] Arquivo Gemini '{gemini_file.name}' deletado com sucesso.")
+                            except Exception as del_err:
+                                print(f"[Copiloto] Aviso: falha ao deletar arquivo Gemini '{gemini_file.name}': {del_err}")
+
+                except Exception as file_err:
+                    import traceback as _tb
+                    from datetime import datetime as _dt
+                    err_str = str(file_err)
+                    print(f"[Copiloto] Erro na ingestão documental: {err_str}")
+                    print(_tb.format_exc())
+
+                    # Telemetria estruturada — não suja o diário da tarefa
+                    try:
+                        db.collection('quality_logs').add({
+                            'tipo': 'erro_ingestao_copiloto',
+                            'descricao': 'Falha ao extrair contexto de arquivo via Gemini File API',
+                            'evidencia': err_str,
+                            'arquivo_nome': drive_file_name,
+                            'task_id': task_id or None,
+                            'session_id': session_id or None,
+                            'data_criacao': _dt.now().isoformat()
+                        })
+                    except Exception as log_err:
+                        print(f"[Copiloto] Falha ao gravar quality_log: {log_err}")
+
+                    if file_context:
+                        file_contexts.append(file_context)
         # ─────────────────────────────────────────────────────────────────────────
 
         # Injeta contexto inicial se houver task_id
@@ -11031,8 +11277,8 @@ if _protocolo_ativo("sipac", "processo", "protocolo"):
             context_parts.append(memory_context)
         if session_conflict_context:
             context_parts.append(session_conflict_context)
-        if file_context:
-            context_parts.append(file_context)
+        if file_contexts:
+            context_parts.append("\n\n".join(file_contexts))
         context_parts.append(f"USUÁRIO: {prompt}")
         if matched_pop_directives:
             pop_lines = [
