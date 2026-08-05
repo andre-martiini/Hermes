@@ -100,9 +100,11 @@ export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, 
     sendUIContextRef.current = voiceStream.sendUIContext;
 
     useEffect(() => {
-        if (voiceStream.status === 'live' && uiContext) {
-            sendUIContextRef.current(uiContext);
-        }
+        if (voiceStream.status !== 'live' || !uiContext) return;
+        // Debounce: digitar na busca ou navegar dispara varias mudancas de
+        // contexto em sequencia; espera a tela "assentar" antes de mandar.
+        const handle = window.setTimeout(() => sendUIContextRef.current(uiContext), 600);
+        return () => window.clearTimeout(handle);
     }, [uiContext, voiceStream.status]);
 
     // ── Document processing pipeline ─────────────────────────────────────────
@@ -254,6 +256,7 @@ export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, 
     const isConnecting = voiceStream.status === 'connecting';
     const isError = voiceStream.status === 'error';
     const isProcessingDocs = docStatus === 'uploading' || docStatus === 'extracting' || docStatus === 'sending';
+    const isThinking = isLive && voiceStream.isThinking;
 
     const assistantBubbleClass = isDark
         ? 'bg-slate-800/95 text-slate-100 border border-white/10'
@@ -263,14 +266,14 @@ export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, 
     // Orb appearance
     const orbColor = isError
         ? 'bg-rose-600 shadow-rose-600/40'
-        : isProcessingDocs
+        : isProcessingDocs || isThinking
             ? 'bg-violet-600 shadow-violet-500/50'
             : isConnecting
                 ? 'bg-amber-500 shadow-amber-500/40'
                 : 'bg-emerald-600 shadow-emerald-600/40';
 
-    const displayStatus = isProcessingDocs ? docProgress : errorMessage || statusMessage;
-    const displayStatusType = isProcessingDocs ? 'processing' : errorMessage ? 'error' : 'info';
+    const displayStatus = isProcessingDocs ? docProgress : isThinking ? 'Pensando…' : errorMessage || statusMessage;
+    const displayStatusType = isProcessingDocs || isThinking ? 'processing' : errorMessage ? 'error' : 'info';
 
     return (
         <div className="pointer-events-none fixed inset-0 z-[650] flex items-end justify-end">
@@ -387,8 +390,16 @@ export const HermesVoiceOverlay: React.FC<HermesVoiceOverlayProps> = ({ isDark, 
                         onClick={() => setIsMinimized(prev => !prev)}
                         className={`pointer-events-auto relative flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg transition-all hover:-translate-y-0.5 active:scale-95 sm:h-16 sm:w-16 ${orbColor}`}
                     >
+                        {/* Pensando: anel girando em violeta — o modelo esta
+                            processando (ferramenta/consulta longa) em silencio. */}
+                        {isThinking && !isProcessingDocs && (
+                            <>
+                                <span className="absolute inset-0 animate-ping rounded-full bg-violet-500/40" />
+                                <span className="absolute -inset-1.5 animate-spin rounded-full border-2 border-violet-300/80 border-t-transparent" style={{ animationDuration: '1.2s' }} />
+                            </>
+                        )}
                         {/* Pulsing rings — live */}
-                        {isLive && !isProcessingDocs && (
+                        {isLive && !isProcessingDocs && !isThinking && (
                             <>
                                 <span className="absolute inset-0 animate-ping rounded-full bg-emerald-500/40" />
                                 <span className="absolute -inset-1.5 animate-pulse rounded-full border-2 border-emerald-400/50" />

@@ -8844,13 +8844,35 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     start_date = (today - timedelta(days=n - 1)).isoformat()
                     end_date = today.isoformat()
 
+                # Metas de caminhada do novo nivelamento (mínimo/ideal em km),
+                # com os mesmos padrões da UI (3 km / 8 km).
+                try:
+                    walk_settings = db.collection('health_settings').document('config').get().to_dict() or {}
+                except Exception:
+                    walk_settings = {}
+                walking_minimum_km = float(walk_settings.get('walkingMinimumKm') or 3)
+                walking_ideal_km = float(walk_settings.get('walkingIdealKm') or 8)
+
                 logs = []
                 for d in db.collection('health_exercise_logs').stream():
                     if start_date <= d.id <= end_date:
                         entry = d.to_dict() or {}
+                        # Paradigma atual: blocos de caminhada registrados no
+                        # Hermes (web/Telegram). O campo `walk` é legado (Google Fit).
+                        walk_blocks = [b for b in (entry.get("walkBlocks") or []) if isinstance(b, dict)]
+                        walk_km = sum(float(b.get("distance") or 0) for b in walk_blocks)
+                        if walk_km >= walking_ideal_km:
+                            walk_level = "meta_ideal_atingida"
+                        elif walk_km >= walking_minimum_km:
+                            walk_level = "minimo_atingido"
+                        else:
+                            walk_level = "abaixo_do_minimo"
                         logs.append({
                             "data": d.id,
-                            "walk": entry.get("walk"),
+                            "caminhada_km": round(walk_km, 2),
+                            "caminhada_blocos": walk_blocks,
+                            "caminhada_nivel": walk_level,
+                            "walk_legado_google_fit": entry.get("walk"),
                             "calories": entry.get("calories"),
                             "activeMinutes": entry.get("activeMinutes"),
                             "heartRate": entry.get("heartRate"),
@@ -8869,6 +8891,14 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
                 result = {
                     "periodo": {"inicio": start_date, "fim": end_date},
+                    "metas_caminhada": {
+                        "minimo_km": walking_minimum_km,
+                        "ideal_km": walking_ideal_km,
+                        "paradigma": (
+                            "Abaixo do mínimo não pontua; do mínimo ao ideal o nível "
+                            "progride continuamente; acima do ideal é lucro."
+                        ),
+                    },
                     "telemetria_diaria": logs,
                     "pesos_recentes": weights[:5],
                 }
@@ -13788,7 +13818,15 @@ def sync_google_contacts_internal(db, sync_ref=None, logs=None):
         return stats
         
     except Exception as e:
-        log_helper(f"[SYNC][!] Erro na sincronização de contatos do Google: {e}")
+        # Inclui o tipo da exceção e o ponto de origem: falhas de dependência
+        # (ex.: gRPC/Firestore em "'_UnaryStreamMultiCallable' object has no
+        # attribute '_retry'") acontecem fora da People API e, sem isso, a
+        # notificação culpa erroneamente o "sync de contatos do Google".
+        import traceback
+        origin = traceback.extract_tb(e.__traceback__)[-1] if e.__traceback__ else None
+        origin_text = f" (em {origin.name}:{origin.lineno})" if origin else ""
+        print(f"[SYNC][!] Traceback completo:\n{traceback.format_exc()}")
+        log_helper(f"[SYNC][!] Erro na sincronização de contatos do Google: {type(e).__name__}: {e}{origin_text}")
         return None
 
 
