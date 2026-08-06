@@ -1547,9 +1547,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     // ── Criação de sessão ─────────────────────────────────────────────────────
     const handleCreateSession = async (initialPrompt?: string) => {
         setIsLoading(true);
+        setFooterError(null);
         try {
             const sessRef = await addDoc(collection(db, 'sessoes_copiloto'), {
-                userId,
+                userId: userId || null,
                 title: initialPrompt ? initialPrompt.slice(0, 40) + '...' : isFinancialCopilot ? 'Copiloto Financeiro' : 'Nova Conversa',
                 createdAt: Timestamp.now(),
                 lastMessageAt: Timestamp.now(),
@@ -1566,6 +1567,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             return sessRef.id;
         } catch (err) {
             console.error("Erro ao criar sessão:", err);
+            setFooterError(getCopilotoErrorMessage(err));
             return null;
         } finally {
             setIsLoading(false);

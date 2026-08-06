@@ -293,6 +293,7 @@ def _run_web_copilot_engine(
     task_id: str | None = None,
     system_id: str | None = None,
     user_uid: str | None = None,
+    drive_files: list[dict] | None = None,
 ) -> dict:
     return _call_web_callable(
         function_name="askCopilotoHermes",
@@ -302,10 +303,37 @@ def _run_web_copilot_engine(
             "taskId": task_id,
             "systemId": system_id,
             "routingIndex": [],
+            "driveFiles": drive_files or [],
         },
         user_uid=user_uid,
         timeout=480,
     )
+
+
+def _upload_telegram_file_to_drive(file_bytes: bytes, file_name: str, mime_type: str) -> dict | None:
+    """Sobe um arquivo recebido no Telegram para o Google Drive, no mesmo formato
+    que o Copiloto Hermes (askCopilotoHermes) espera em driveFiles — permitindo que
+    arquivos enviados via Telegram sejam indexados no RAG e vinculados à ação
+    (pool_dados) exatamente como no upload feito pela interface web."""
+    try:
+        import io as _io
+        from googleapiclient.http import MediaIoBaseUpload
+        from main import get_drive_service
+        service = get_drive_service()
+        file_metadata = {'name': file_name}
+        media = MediaIoBaseUpload(_io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
+        uploaded = service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
+        drive_file_id = uploaded.get('id')
+        if not drive_file_id:
+            return None
+        try:
+            service.permissions().create(fileId=drive_file_id, body={'type': 'anyone', 'role': 'reader'}).execute()
+        except Exception as perm_e:
+            print(f"[Telegram] Aviso: não foi possível tornar o arquivo público no Drive: {perm_e}")
+        return {"driveFileId": drive_file_id, "driveFileName": file_name}
+    except Exception as exc:
+        print(f"[Telegram] Falha ao subir arquivo para o Drive: {exc}")
+        return None
 
 
 def _extract_task_ids_from_text(text: str) -> list[str]:
@@ -3503,6 +3531,7 @@ def _process_telegram_message(db, data: dict):
     # --- Resolve user message parts ---
     user_parts = []
     file_context_text = ""
+    telegram_drive_file = None
 
     # Audio transcription
     if audio_info and (media_bytes_b64 or media_storage_path):
@@ -3553,7 +3582,14 @@ def _process_telegram_message(db, data: dict):
                 guessed, _ = mimetypes.guess_type(fname)
                 if guessed:
                     mime = guessed
-            
+
+            # Sobe para o Drive para que o arquivo possa ser processado pelo mesmo
+            # motor (askCopilotoHermes) usado pelo Copiloto web — isso garante que o
+            # arquivo seja indexado no RAG e vinculado ao contexto/pool_dados da ação,
+            # em vez de ficar visível só durante esta troca de mensagens no Telegram.
+            if os.environ.get("TELEGRAM_USE_WEB_COPILOT", "1") != "0":
+                telegram_drive_file = _upload_telegram_file_to_drive(file_bytes, fname, mime)
+
             _GEMINI_NATIVE_MIMES = {
                 # Images
                 'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'image/heif',
@@ -3634,7 +3670,7 @@ def _process_telegram_message(db, data: dict):
         )
         return
 
-    if os.environ.get("TELEGRAM_USE_WEB_COPILOT", "1") != "0" and not file_info:
+    if os.environ.get("TELEGRAM_USE_WEB_COPILOT", "1") != "0" and (not file_info or telegram_drive_file):
         processing_msg_id = None
         try:
             _send_telegram_typing(token, chat_id)
@@ -3652,6 +3688,7 @@ def _process_telegram_message(db, data: dict):
                 session_id=copilot_session_id,
                 task_id=request_acao_id,
                 user_uid=session.get("userId"),
+                drive_files=[telegram_drive_file] if telegram_drive_file else None,
             )
             delegated_text = (delegated.get("result") or "").strip()
             if not delegated_text:

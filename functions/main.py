@@ -9125,6 +9125,20 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         "dia_do_mes": max(1, min(31, int(dia_do_mes_recorrencia))),
                     }
 
+                if artefatos_pendentes_vinculo:
+                    # Vincula à nova tarefa os arquivos que o usuário anexou nesta mesma
+                    # mensagem (antes de a tarefa existir), para que apareçam no contexto dela.
+                    doc["pool_dados"] = list(artefatos_pendentes_vinculo)
+                    doc["acompanhamento"] = [
+                        {
+                            'data': item['data_criacao'],
+                            'nota': f"📎 [Copiloto] Arquivo '{item['nome']}' ({item.get('_natureza') or 'documento'}) carregado junto com a criação desta ação."
+                        }
+                        for item in artefatos_pendentes_vinculo
+                    ]
+                    doc["pool_dados"] = [{k: v for k, v in item.items() if k != '_natureza'} for item in doc["pool_dados"]]
+                    artefatos_pendentes_vinculo.clear()
+
                 db.collection("tarefas").document(task_id).set(doc)
                 print(f"[Copiloto] Ação criada: id={task_id}, titulo='{titulo}'")
                 return f"OK|{task_id}"
@@ -10945,6 +10959,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         # ─── INGESTÃO DOCUMENTAL (MÚLTIPLOS ARQUIVOS - ATÉ 10) ───────────────────
         file_contexts = []
+        # Artefatos indexados nesta mensagem sem tarefa ainda associada (ex.: usuário
+        # está pedindo para criar a ação junto com o(s) arquivo(s)). Consumido por
+        # criar_acao_no_sistema logo após a nova tarefa ser gravada.
+        artefatos_pendentes_vinculo = []
         if drive_files:
             total_files = len(drive_files)
             for file_idx, f_item in enumerate(drive_files, start=1):
@@ -11238,6 +11256,21 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                                 'acompanhamento': firestore.ArrayUnion([diary_entry])
                             })
                             print(f"[Copiloto] Arquivo '{titulo_doc}' vinculado à tarefa {task_id} (pool_dados + acompanhamento)")
+                        else:
+                            # Sem tarefa ativa ainda (ex.: usuário está pedindo para CRIAR a ação
+                            # nesta mesma mensagem). Guarda o artefato para ser vinculado à tarefa
+                            # assim que ela for criada por criar_acao_no_sistema nesta mesma execução.
+                            from datetime import datetime as _dt
+                            now_iso = _dt.now().isoformat()
+                            artefatos_pendentes_vinculo.append({
+                                'id': artefato_id,
+                                'tipo': 'arquivo',
+                                'valor': drive_link,
+                                'nome': titulo_doc,
+                                'drive_file_id': drive_file_id,
+                                'data_criacao': now_iso,
+                                '_natureza': natureza_doc,
+                            })
 
                         # 7. Monta o bloco de contexto que será injetado no prompt final
                         file_context = (
