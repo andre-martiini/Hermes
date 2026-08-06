@@ -9,6 +9,7 @@ import base64
 from datetime import datetime, timedelta, timezone
 import math
 import time
+import random
 import threading
 import re
 import io
@@ -174,6 +175,17 @@ def _is_retryable_gemini_server_error(error: Exception) -> bool:
     status = str(getattr(error, "status", "") or "").upper()
     full_text = f"{error} {status}".upper()
     return code in {500, 502, 503} or any(token in full_text for token in ("INTERNAL", "UNAVAILABLE", "BAD_GATEWAY"))
+
+
+def _is_retryable_google_api_error(error: Exception) -> bool:
+    """Erros transitórios da API do Google (ex.: 503 "service is currently
+    unavailable") que devem ser reexecutados com backoff em vez de tratados
+    como falha definitiva da sincronização."""
+    status_code = getattr(getattr(error, "resp", None), "status", None)
+    if status_code in {429, 500, 502, 503, 504}:
+        return True
+    full_text = str(error).upper()
+    return any(token in full_text for token in ("UNAVAILABLE", "INTERNAL ERROR", "BAD GATEWAY", "RATE LIMIT", "QUOTA"))
 
 # ---------------------------------------------------------------------------
 # In-process Firestore document cache (TTL = 60 s per Cloud Function instance)
@@ -13684,24 +13696,43 @@ def sync_google_contacts_internal(db, sync_ref=None, logs=None):
         # 2. Buscar contatos do Google
         connections = []
         next_page_token = None
-        
+        MAX_CONNECTIONS_RETRIES = 5
+
         while True:
-            try:
-                results = service.people().connections().list(
-                    resourceName='people/me',
-                    pageSize=100,
-                    pageToken=next_page_token,
-                    personFields='names,emailAddresses,phoneNumbers,biographies,metadata'
-                ).execute()
-            except Exception as req_err:
-                log_helper(f"[SYNC] Erro ao chamar Google Connections API: {req_err}")
-                break
-            
+            results = None
+            req_err = None
+
+            for attempt in range(MAX_CONNECTIONS_RETRIES):
+                try:
+                    results = service.people().connections().list(
+                        resourceName='people/me',
+                        pageSize=100,
+                        pageToken=next_page_token,
+                        personFields='names,emailAddresses,phoneNumbers,biographies,metadata'
+                    ).execute()
+                    req_err = None
+                    break
+                except Exception as e:
+                    req_err = e
+                    is_last_attempt = attempt == MAX_CONNECTIONS_RETRIES - 1
+                    if is_last_attempt or not _is_retryable_google_api_error(e):
+                        break
+                    wait_s = (2 ** attempt) + random.uniform(0, 1)
+                    print(f"[SYNC] Erro temporário na Google Connections API (tentativa {attempt + 1}/{MAX_CONNECTIONS_RETRIES}): {e}. Nova tentativa em {wait_s:.1f}s.")
+                    time.sleep(wait_s)
+
+            if req_err is not None:
+                # Falha definitiva (erro não retryable ou tentativas esgotadas): a
+                # sincronização de contatos é interrompida e reportada como erro real,
+                # em vez de encerrar a paginação silenciosamente com dados parciais.
+                log_helper(f"[SYNC] Erro ao chamar Google Connections API após {MAX_CONNECTIONS_RETRIES} tentativas: {req_err}")
+                raise req_err
+
             connections.extend(results.get('connections', []))
             next_page_token = results.get('nextPageToken')
             if not next_page_token:
                 break
-                
+
         # 3. Perfis existentes do Firestore em lote para otimização em memória
         existing_profiles = []
         all_docs = db.collection('perfil_pessoas').stream()
