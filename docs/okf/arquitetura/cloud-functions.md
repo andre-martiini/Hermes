@@ -4,12 +4,12 @@ title: Mapa de Cloud Functions
 description: Cloud Functions exportadas pelo backend Python do Hermes, agrupadas por arquivo e tipo de trigger.
 resource: functions/main.py
 tags: [hermes, okf, cloud-functions, firebase, arquitetura]
-timestamp: 2026-08-01T00:00:00Z
+timestamp: 2026-08-06T00:00:00Z
 ---
 
 # Mapa de Cloud Functions
 
-O backend roda em Cloud Functions Python (gen2). Há ~79 funções exportadas em `functions/`. Tipos de trigger usados: HTTPS Callable (chamada autenticada do frontend via `httpsCallable`), Firestore trigger (on-create/on-update/on-write), Scheduler (cron), PubSub (workers assíncronos), Storage (on-finalize) e HTTP request puro (webhooks).
+O backend roda em Cloud Functions Python (gen2). Há ~81 funções exportadas em `functions/`. Tipos de trigger usados: HTTPS Callable (chamada autenticada do frontend via `httpsCallable`), Firestore trigger (on-create/on-update/on-write), Scheduler (cron), PubSub (workers assíncronos), Storage (on-finalize) e HTTP request puro (webhooks).
 
 ## `functions/main.py` (~51 funções)
 
@@ -123,6 +123,15 @@ O backend roda em Cloud Functions Python (gen2). Há ~79 funções exportadas em
 | `telegramWebhook` | HTTP request | Recebe updates do bot do Telegram |
 | `on_telegram_inbound` | Firestore create (`telegram_inbound/{id}`) | Processa mensagem recebida do Telegram |
 | `_handle_telegram_callback` | (interno, chamado por `telegramWebhook`) | Processa botões inline, inclusive `ai_notif:{id}:{useful\|dismiss}` — grava feedback em `scheduled_notifications` |
+
+## `functions/whatsapp_cloud.py`
+
+Integração via WhatsApp Cloud API (Meta) — webhook oficial, serverless (sem processo local rodando). Ver [Integração WhatsApp Cloud API](/docs/okf/integracoes/whatsapp-cloud-api.md).
+
+| Função | Trigger | O que faz |
+|---|---|---|
+| `whatsappCloudWebhook` | HTTP request | Porteiro do webhook Meta: valida assinatura (`X-Hub-Signature-256`), filtra pelo número autorizado, baixa mídia da Graph API e enfileira cada mensagem em `whatsapp_cloud_inbound` |
+| `on_whatsapp_cloud_inbound` | Firestore create (`whatsapp_cloud_inbound/{docId}`) | Só age na mensagem de fechamento de lote (`#resumo`): reivindica transacionalmente o lote pendente do remetente, transcreve áudio/vídeo e descreve imagens, resume com Gemini e responde no WhatsApp |
 
 ## `functions/ai_notification_planner.py`
 

@@ -9,6 +9,15 @@
       ]
     },
     {
+      "collectionGroup": "whatsapp_cloud_inbound",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sender", "order": "ASCENDING" },
+        { "fieldPath": "processed", "order": "ASCENDING" },
+        { "fieldPath": "wa_timestamp", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "sessoes_copiloto",
       "queryScope": "COLLECTION",
       "fields": [

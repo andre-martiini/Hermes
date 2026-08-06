@@ -84,6 +84,10 @@ from hermes_core_logic import (  # noqa: F401 — registra as Cloud Functions
     _get_allowed_chat_id,
     _send_telegram_message,
 )
+from whatsapp_cloud import (  # noqa: F401 — registra as Cloud Functions
+    whatsappCloudWebhook,
+    on_whatsapp_cloud_inbound,
+)
 from gemini_cost_controls import (
     check_and_increment_limit,
     decrement_limit,

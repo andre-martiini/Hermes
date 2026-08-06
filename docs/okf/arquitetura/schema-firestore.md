@@ -4,7 +4,7 @@ title: Schema do Firestore
 description: Coleções do Firestore usadas pelo Hermes, agrupadas por domínio, com campos principais, quem escreve em cada uma e suas relações.
 resource: types.ts
 tags: [hermes, okf, firestore, schema, arquitetura]
-timestamp: 2026-08-01T00:00:00Z
+timestamp: 2026-08-06T00:00:00Z
 ---
 
 # Schema do Firestore
@@ -134,6 +134,8 @@ Exames e consultas médicas: `titulo`, `doutor_local`, `resultados`, `data`, `ti
 | `sipac_processos` | Processos SIPAC sincronizados (scraper externo via PubSub) | trigger `on_processo_updated` |
 | `whatsapp_outbox` | Fila de mensagens WhatsApp agendadas | `schedule_whatsapp_message` (tools) |
 | `whatsapp_messages` | Mensagens capturadas pelo microsserviço WhatsApp — ver [Integração WhatsApp](/docs/okf/integracoes/whatsapp.md) | microsserviço `services/whatsapp-capture` |
+| `whatsapp_cloud_inbound` | Fila de mensagens recebidas via WhatsApp Cloud API (Meta), uma por `wa_message_id`: `sender`, `wa_timestamp` (epoch do WhatsApp, usado para ordenar o lote), `message_type`, `text`, `media_id`/`media_mime_type`/`media_filename`, `media_bytes_b64`\|`media_storage_path`, `is_batch_trigger`, `trigger_instruction`, `processed`. Ver [Integração WhatsApp Cloud API](/docs/okf/integracoes/whatsapp-cloud-api.md). Índice: `sender` + `processed` + `wa_timestamp` (ASC). | `whatsappCloudWebhook` (grava); `on_whatsapp_cloud_inbound` (marca `processed`) |
+| `whatsapp_cloud_batches` | Histórico dos lotes processados pela integração acima: `sender`, `item_count`, `transcript`, `summary`, `trigger_instruction`, `truncated` | `on_whatsapp_cloud_inbound` |
 | `system/api_keys`, `system/settings`, `system/config`, `system/sync`, `system/google_credentials`, `system/file_search`, `system/cost_controls` | Documentos de configuração e estado global, na coleção `system` | admin/setup scripts; `on_sync_request`; `start_file_indexing` |
 | `system_usage/gemini/daily/{data}` | Telemetria diária de uso/custo da API Gemini | `log_gemini_usage` (`gemini_cost_controls.py`) |
 | `system_usage/ai_planner_notifications/daily/{data}` | Contador atômico (`count`) do teto diário de `scheduled_notifications` propostas pelo planejador de IA — lido e incrementado dentro da mesma transação Firestore que cria a notificação, para não estourar o teto sob tool calls concorrentes (`ThreadPoolExecutor`) ou execuções sobrepostas do scheduler | `_reserve_and_create_notification` (`ai_notification_planner.py`) |
