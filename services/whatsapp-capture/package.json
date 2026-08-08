@@ -4,6 +4,9 @@
   "description": "WhatsApp capture service",
   "type": "module",
   "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node index.js",
     "check": "node --check index.js"
