@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { arrayUnion, collection, doc, onSnapshot, query, runTransaction, updateDoc, where } from 'firebase/firestore';
+import { arrayUnion, collection, doc, limit, onSnapshot, orderBy, query, runTransaction, updateDoc, where } from 'firebase/firestore';
 import { db } from './firebase';
 import {
     Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry,
@@ -294,6 +294,69 @@ const EmailLinkSuggestionsPanel: React.FC<{ isDark?: boolean }> = ({ isDark = fa
     );
 };
 
+// --- PAINEL DE LEITURA DO DIÁRIO PESSOAL (functions/personal_diary.py) ---
+// Só leitura — o ajuste ao texto acontece via Telegram (botão "✍️ Ajustar",
+// ver hermes_core_logic.py) para reaproveitar o mesmo fluxo de revisão que
+// alimenta o consolidador semanal de personalidade.
+interface PersonalDiaryEntry {
+    id: string;
+    data?: string;
+    texto?: string;
+    editado?: boolean;
+    sem_material?: boolean;
+}
+
+const PersonalDiaryPanel: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
+    const [entries, setEntries] = useState<PersonalDiaryEntry[]>([]);
+    const [expanded, setExpanded] = useState(false);
+
+    useEffect(() => {
+        const q = query(collection(db, 'diario_pessoal'), orderBy('data', 'desc'), limit(7));
+        return onSnapshot(q, snap => {
+            setEntries(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })));
+        });
+    }, []);
+
+    const withText = entries.filter(e => !!e.texto);
+    if (withText.length === 0) return null;
+
+    const [latest, ...older] = withText;
+
+    return (
+        <DashboardCard title="Diário Pessoal" isDark={isDark}>
+            <div className="flex flex-col gap-3">
+                <div>
+                    <div className="flex items-center justify-between mb-1">
+                        <p className={`text-[10px] font-black uppercase tracking-wider ${isDark ? 'text-white/40' : 'text-slate-400'}`}>{latest.data}</p>
+                        {latest.editado && (
+                            <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-500">Ajustado</span>
+                        )}
+                    </div>
+                    <p className={`text-xs leading-relaxed whitespace-pre-line ${isDark ? 'text-white/80' : 'text-slate-700'}`}>{latest.texto}</p>
+                </div>
+                {older.length > 0 && (
+                    <button
+                        type="button"
+                        onClick={() => setExpanded(v => !v)}
+                        className={`self-start text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}
+                    >
+                        {expanded ? 'Ocultar dias anteriores' : `Ver ${older.length} dia(s) anterior(es)`}
+                    </button>
+                )}
+                {expanded && older.map(e => (
+                    <div key={e.id} className={`pt-3 border-t ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+                        <p className={`text-[10px] font-black uppercase tracking-wider mb-1 ${isDark ? 'text-white/40' : 'text-slate-400'}`}>{e.data}</p>
+                        <p className={`text-xs leading-relaxed whitespace-pre-line ${isDark ? 'text-white/70' : 'text-slate-600'}`}>{e.texto}</p>
+                    </div>
+                ))}
+                <p className={`text-[9px] ${isDark ? 'text-white/30' : 'text-slate-400'}`}>
+                    Gerado automaticamente às 21h30. Peça um ajuste no Telegram tocando "✍️ Ajustar".
+                </p>
+            </div>
+        </DashboardCard>
+    );
+};
+
 // --- MAIN COMPONENT ---
 const DashboardView: React.FC<DashboardViewProps> = ({
     tarefas = [],
@@ -486,6 +549,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         >
 
             <EmailLinkSuggestionsPanel isDark={isDark} />
+            <PersonalDiaryPanel isDark={isDark} />
 
             <div className="flex flex-col xl:flex-row gap-6 w-full items-stretch min-h-0 xl:h-[calc(100vh-7rem)]">
 
