@@ -1,14 +1,26 @@
 """
-Vincula e-mails recebidos a ações (tarefas) em andamento/stand-by via IA,
-propondo confirmação por Telegram e registro no diário de bordo.
+Motor compartilhado de vínculo sinal↔ação: qualquer canal (e-mail, SIPAC,
+Calendar, WhatsApp, Monitor de Páginas, ...) pode propor que um evento se
+relaciona a uma ação (tarefa) em andamento/stand-by, via cartão de
+confirmação no Telegram (ou na fila web em DashboardView.tsx) que grava a
+nota no diário de bordo e opcionalmente reativa a ação.
 
-Toda sugestão passa por confirmação humana (Telegram ou fila web em
-DashboardView.tsx) antes de tocar em uma tarefa — a classificação vem de
-conteúdo controlado pelo remetente do e-mail, então não é tratada como
-sinal confiável o suficiente para agir sozinha.
+O nome do arquivo é histórico — nasceu só para e-mail (`link_emails_to_actions`,
+ainda o único produtor que analisa o sinal com IA) — mas `queue_and_maybe_send_suggestion`
+e `apply_suggestion` são genéricos e usados por todos os produtores. A coleção
+`email_action_suggestions` também manteve o nome histórico.
 
-Schema da coleção `email_action_suggestions`: docs/okf/arquitetura/schema-firestore.md
-Mapa de onde esta função é chamada: docs/okf/arquitetura/cloud-functions.md
+Toda sugestão passa por confirmação humana antes de tocar numa tarefa. Para
+o produtor de e-mail isso é especialmente importante: a classificação vem de
+conteúdo controlado pelo remetente do e-mail, então não é tratada como sinal
+confiável o suficiente para agir sozinha. Produtores com matching determinístico
+(SIPAC por número de processo, Calendar por ID do evento) não têm esse risco,
+mas mesmo assim pedem confirmação — o objetivo é registro no diário, não
+automação silenciosa.
+
+Schema da coleção: docs/okf/arquitetura/schema-firestore.md
+Mapa de onde cada produtor é chamado: docs/okf/arquitetura/cloud-functions.md
+Desenho original: docs/okf/propostas/automacoes-canais-e-diario-pessoal.md
 """
 
 import base64
@@ -213,22 +225,45 @@ def _analyze_email(client, db, sender: str, subject: str, body: str, snippet: st
     return json.loads(raw)
 
 
+_CANAL_ICONS = {"email": "📧", "whatsapp": "📱", "sipac": "📋", "calendar": "📅", "pagina": "🌐"}
+_CANAL_LABELS = {
+    "email": "E-mail",
+    "whatsapp": "Conversa de WhatsApp",
+    "sipac": "Processo SIPAC",
+    "calendar": "Reunião",
+    "pagina": "Página monitorada",
+}
+
+
+def _signal_title(data: dict) -> str:
+    return str(data.get("titulo_sinal") or data.get("subject") or "(sem título)")
+
+
+def _signal_origin(data: dict) -> str:
+    return str(data.get("origem_sinal") or data.get("sender") or "")
+
+
 def _build_suggestion_message(data: dict) -> str:
-    sender = data.get("sender") or "Desconhecido"
-    subject = data.get("subject") or "(sem assunto)"
+    canal = data.get("canal") or "email"
+    icon = _CANAL_ICONS.get(canal, "🔔")
+    label = _CANAL_LABELS.get(canal, "Sinal")
+    titulo_sinal = _signal_title(data)
+    origem_sinal = _signal_origin(data)
     task_titulo = data.get("task_titulo") or "(ação)"
     task_status = data.get("task_status") or ""
     resumo = data.get("resumo") or ""
     nota = data.get("nota_sugerida") or ""
 
-    lines = [
-        "📧 E-mail relacionado a uma ação",
-        "",
-        f"De: {sender}",
-        f"Assunto: {subject}",
-        "",
-        f"Ação: {task_titulo} ({task_status})" if task_status else f"Ação: {task_titulo}",
-    ]
+    lines = [f"{icon} {label} relacionado(a) a uma ação", ""]
+    if canal == "email":
+        lines.append(f"De: {origem_sinal or 'Desconhecido'}")
+        lines.append(f"Assunto: {titulo_sinal}")
+    else:
+        lines.append(titulo_sinal)
+        if origem_sinal:
+            lines.append(origem_sinal)
+    lines.append("")
+    lines.append(f"Ação: {task_titulo} ({task_status})" if task_status else f"Ação: {task_titulo}")
     if resumo:
         lines.append(resumo)
     if nota:
@@ -239,32 +274,57 @@ def _build_suggestion_message(data: dict) -> str:
 
 
 def _build_suggestion_keyboard(msg_id: str, reativar_sugerido: bool) -> list:
+    # O prefixo "emlink" é histórico (nasceu só para e-mail); hoje é o callback
+    # genérico de confirmação de vínculo sinal↔ação usado por todos os canais.
     top_row = [{"text": "✅ Registrar no diário", "callback_data": f"emlink:{msg_id}:ok"}]
     if reativar_sugerido:
         top_row = [{"text": "🔄 Registrar + reativar", "callback_data": f"emlink:{msg_id}:on"}] + top_row
     return [top_row, [{"text": "❌ Ignorar", "callback_data": f"emlink:{msg_id}:no"}]]
 
 
-def _send_email_suggestion_telegram(db, chat_id, msg_id: str, data: dict, send_fn) -> bool:
+def _send_suggestion_telegram(db, chat_id, msg_id: str, data: dict, send_fn) -> bool:
     text = _build_suggestion_message(data)
     keyboard = _build_suggestion_keyboard(msg_id, bool(data.get("reativar_sugerido")))
     return bool(send_fn(db, chat_id, text, keyboard))
 
 
-def _build_email_diary_note(msg_id: str, data: dict) -> str:
+# Retrocompat: nome antigo usado por chamadores já escritos antes da generalização multi-canal.
+_send_email_suggestion_telegram = _send_suggestion_telegram
+
+
+def _build_diary_note(msg_id: str, data: dict) -> str:
     """
-    Serializa a nota no mesmo formato rico `EMAIL::JSON::{...}` que o frontend
-    entende nativamente (ver src/utils/diaryEntries.ts, buildDiaryEmailNote),
-    para que o DiarioBordoUI renderize um chip em vez de texto cru.
+    Para e-mail, serializa a nota no formato rico `EMAIL::JSON::{...}` que o
+    frontend entende nativamente (ver src/utils/diaryEntries.ts, buildDiaryEmailNote),
+    para que o DiarioBordoUI renderize um chip. Para os demais canais usa texto
+    simples — estender o envelope rico a cada canal fica para quando fizer
+    sentido, não é essencial para o valor do vínculo.
     """
-    gmail_link = f"https://mail.google.com/mail/u/0/#all/{msg_id}"
-    payload = {
-        "n": str(data.get("subject") or "(sem assunto)"),
-        "v": gmail_link,
-        "s": str(data.get("sender") or ""),
-        "r": str(data.get("resumo") or "").strip(),
-    }
-    return "EMAIL::JSON::" + json.dumps(payload, ensure_ascii=False)
+    canal = data.get("canal") or "email"
+    resumo = str(data.get("resumo") or "").strip()
+
+    if canal == "email":
+        gmail_link = f"https://mail.google.com/mail/u/0/#all/{msg_id}"
+        payload = {
+            "n": _signal_title(data) or "(sem assunto)",
+            "v": gmail_link,
+            "s": _signal_origin(data),
+            "r": resumo,
+        }
+        return "EMAIL::JSON::" + json.dumps(payload, ensure_ascii=False)
+
+    icon = _CANAL_ICONS.get(canal, "🔔")
+    label = _CANAL_LABELS.get(canal, "Sinal")
+    lines = [f"[{icon} Hermes] {label}: {_signal_title(data)}"]
+    origem_sinal = _signal_origin(data)
+    if origem_sinal:
+        lines.append(origem_sinal)
+    if resumo:
+        lines.append(resumo)
+    link_externo = data.get("link_externo")
+    if link_externo:
+        lines.append(f"Link: {link_externo}")
+    return "\n".join(lines)
 
 
 def apply_suggestion(db, msg_id: str, data: dict, reactivate: bool) -> bool:
@@ -292,7 +352,7 @@ def apply_suggestion(db, msg_id: str, data: dict, reactivate: bool) -> bool:
     task_ref = db.collection("tarefas").document(task_id)
     suggestion_ref = db.collection("email_action_suggestions").document(msg_id)
     now_iso = datetime.now(timezone.utc).isoformat()
-    entry = {"data": now_iso, "nota": _build_email_diary_note(msg_id, data)}
+    entry = {"data": now_iso, "nota": _build_diary_note(msg_id, data)}
     new_status = "applied_reactivated" if reactivate else "applied"
 
     transaction = db.transaction()
@@ -319,6 +379,76 @@ def apply_suggestion(db, msg_id: str, data: dict, reactivate: bool) -> bool:
         return True
 
     return _run(transaction)
+
+
+def queue_and_maybe_send_suggestion(
+    db,
+    suggestion_id: str,
+    *,
+    canal: str,
+    task: dict,
+    titulo_sinal: str,
+    origem_sinal: str = "",
+    resumo: str = "",
+    nota_sugerida: str = "",
+    reativar_sugerido: bool = False,
+    confidence: float = 1.0,
+    chat_id=None,
+    send_fn=None,
+    extra: dict | None = None,
+) -> dict:
+    """
+    Ponto de entrada compartilhado para qualquer produtor de sinal (SIPAC,
+    Calendar, WhatsApp, Monitor de Páginas, ...) propor um vínculo sinal↔ação:
+    grava a sugestão `pending` e, se houver `chat_id`, tenta enviar o cartão
+    de confirmação imediatamente. Idempotente por `suggestion_id` — chame com
+    um ID determinístico e estável por sinal (ex.: `sipac_{notification_id}`,
+    `calendar_{google_event_id}`) para dedupe estrutural, no mesmo espírito
+    do e-mail (ID do doc = ID da mensagem do Gmail).
+
+    `task` é o dicionário de candidata no formato de `_load_candidate_tasks`
+    (precisa de ao menos `id`, `titulo`, `status`, `is_standby`).
+
+    Não escreve se já existir uma sugestão com esse ID — produtores devem
+    checar isso antes de fazer trabalho caro (embedding, chamada de IA); esta
+    função só protege contra a escrita em si.
+    """
+    suggestions_col = db.collection("email_action_suggestions")
+    doc_ref = suggestions_col.document(suggestion_id)
+    if doc_ref.get().exists:
+        return {}
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    base_doc = {
+        "canal": canal,
+        "titulo_sinal": titulo_sinal,
+        "origem_sinal": origem_sinal,
+        "task_id": task["id"],
+        "task_titulo": task.get("titulo"),
+        "task_status": task.get("status"),
+        "resumo": resumo,
+        "nota_sugerida": nota_sugerida or resumo,
+        "reativar_sugerido": bool(reativar_sugerido) and bool(task.get("is_standby")),
+        "related": True,
+        "confidence": confidence,
+        "analyzed_at": now_iso,
+        "status": "pending",
+        "telegram_sent": False,
+    }
+    if extra:
+        base_doc.update(extra)
+
+    doc_ref.set(base_doc)
+
+    if chat_id:
+        if send_fn is None:
+            from main import _send_telegram_message_raw_with_keyboard
+            send_fn = _send_telegram_message_raw_with_keyboard
+        if _send_suggestion_telegram(db, chat_id, suggestion_id, base_doc, send_fn):
+            base_doc["telegram_sent"] = True
+            doc_ref.update({"telegram_sent": True, "sent_at": now_iso})
+
+    return base_doc
 
 
 def _collect_fresh_message_ids(service, query: str, needed: int, suggestions_col) -> list[str]:
@@ -462,6 +592,9 @@ def link_emails_to_actions(db, service, sync_ref, logs):
             confidence = 0.0
 
         base_doc = {
+            "canal": "email",
+            "titulo_sinal": subject,
+            "origem_sinal": sender,
             "google_message_id": msg_id,
             "subject": subject,
             "sender": sender,

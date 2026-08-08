@@ -27,10 +27,23 @@ export const buildDiaryRichNote = (type: DiaryRichType, name: string, value: str
 };
 
 // E-mails vinculados por IA (functions/email_action_linker.py) usam campos extras
-// (remetente, resumo) além de nome/valor — ver docs/okf/propostas/vinculo-email-acao.md.
+// (remetente, resumo) além de nome/valor.
 export const buildDiaryEmailNote = (subject: string, sender: string, gmailUrl: string, resumo?: string) => {
   const payload: DiaryRichPayload = { n: subject || '', v: gmailUrl || '', s: sender || '', r: resumo || '' };
   return `EMAIL::${DIARY_JSON_PREFIX}${JSON.stringify(payload)}`;
+};
+
+// Nota de diário para vínculos sinal↔ação de canais sem envelope rico dedicado
+// (SIPAC, Calendar, WhatsApp, ...) — mesmo formato de texto que
+// functions/email_action_linker.py:_build_diary_note gera no backend, para que
+// uma sugestão decidida pela fila web (DashboardView.tsx) produza a mesma nota
+// que uma decidida via Telegram.
+export const buildDiaryGenericNote = (icon: string, label: string, titulo: string, origem: string, resumo: string, link?: string) => {
+  const lines = [`[${icon} Hermes] ${label}: ${titulo}`];
+  if (origem) lines.push(origem);
+  if (resumo) lines.push(resumo);
+  if (link) lines.push(`Link: ${link}`);
+  return lines.join('\n');
 };
 
 export const parseDiaryRichNote = (text: string) => {

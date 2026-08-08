@@ -6,7 +6,7 @@ import {
     HealthWeight, HealthSettings, ExerciseLog, WalkBlock,
     formatDateLocalISO, sumWalkBlocksKm
 } from './types';
-import { buildDiaryEmailNote } from './src/utils/diaryEntries';
+import { buildDiaryEmailNote, buildDiaryGenericNote } from './src/utils/diaryEntries';
 
 interface DashboardViewProps {
     tarefas: Tarefa[];
@@ -133,13 +133,21 @@ const getFinanceDateParts = (dateValue?: string) => {
     };
 };
 
-// --- FILA WEB DE SUGESTÕES DE VÍNCULO E-MAIL↔AÇÃO (functions/email_action_linker.py) ---
-// Complementa a confirmação via Telegram: mostra sugestões pending/expired
-// para decidir pelo navegador o que não foi respondido no Telegram a tempo.
-interface EmailActionSuggestion {
+// --- FILA WEB DE SUGESTÕES DE VÍNCULO SINAL↔AÇÃO (functions/email_action_linker.py) ---
+// Complementa a confirmação via Telegram: mostra sugestões pending/expired de
+// qualquer canal (e-mail, SIPAC, Calendar, WhatsApp, ...) para decidir pelo
+// navegador o que não foi respondido no Telegram a tempo.
+const _CANAL_ICONS: Record<string, string> = { email: '📧', whatsapp: '📱', sipac: '📋', calendar: '📅', pagina: '🌐' };
+const _CANAL_LABELS: Record<string, string> = {
+    email: 'E-mail', whatsapp: 'Conversa de WhatsApp', sipac: 'Processo SIPAC', calendar: 'Reunião', pagina: 'Página monitorada'
+};
+
+interface ActionLinkSuggestion {
     id: string;
-    subject?: string;
-    sender?: string;
+    canal?: string;
+    titulo_sinal?: string;
+    origem_sinal?: string;
+    link_externo?: string;
     resumo?: string;
     task_id?: string;
     task_titulo?: string;
@@ -151,14 +159,14 @@ interface EmailActionSuggestion {
 }
 
 const EmailLinkSuggestionsPanel: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
-    const [suggestions, setSuggestions] = useState<EmailActionSuggestion[]>([]);
+    const [suggestions, setSuggestions] = useState<ActionLinkSuggestion[]>([]);
     const [busyId, setBusyId] = useState<string | null>(null);
 
     useEffect(() => {
         const unsubscribers = (['pending', 'expired'] as const).map(status => {
             const q = query(collection(db, 'email_action_suggestions'), where('status', '==', status));
             return onSnapshot(q, snap => {
-                const items: EmailActionSuggestion[] = snap.docs.map(d => ({ id: d.id, ...(d.data() as any), status }));
+                const items: ActionLinkSuggestion[] = snap.docs.map(d => ({ id: d.id, ...(d.data() as any), status }));
                 setSuggestions(prev => [...prev.filter(s => s.status !== status), ...items]);
             });
         });
@@ -172,7 +180,7 @@ const EmailLinkSuggestionsPanel: React.FC<{ isDark?: boolean }> = ({ isDark = fa
 
     if (sorted.length === 0) return null;
 
-    const decide = async (suggestion: EmailActionSuggestion, action: 'ok' | 'on' | 'no') => {
+    const decide = async (suggestion: ActionLinkSuggestion, action: 'ok' | 'on' | 'no') => {
         setBusyId(suggestion.id);
         try {
             const nowIso = new Date().toISOString();
@@ -181,9 +189,12 @@ const EmailLinkSuggestionsPanel: React.FC<{ isDark?: boolean }> = ({ isDark = fa
             if (action === 'no') {
                 await updateDoc(suggestionRef, { status: 'dismissed', decided_at: nowIso });
             } else if (suggestion.task_id) {
-                const taskRef = doc(db, 'tarefas', suggestion.task_id);
-                const gmailUrl = `https://mail.google.com/mail/u/0/#all/${suggestion.google_message_id || suggestion.id}`;
-                const nota = buildDiaryEmailNote(suggestion.subject || '(sem assunto)', suggestion.sender || '', gmailUrl, suggestion.resumo || '');
+                const canal = suggestion.canal || 'email';
+                const titulo = suggestion.titulo_sinal || '(sem título)';
+                const origem = suggestion.origem_sinal || '';
+                const nota = canal === 'email'
+                    ? buildDiaryEmailNote(titulo, origem, `https://mail.google.com/mail/u/0/#all/${suggestion.google_message_id || suggestion.id}`, suggestion.resumo || '')
+                    : buildDiaryGenericNote(_CANAL_ICONS[canal] || '🔔', _CANAL_LABELS[canal] || 'Sinal', titulo, origem, suggestion.resumo || '', suggestion.link_externo);
                 const reactivate = action === 'on';
 
                 // Transação: só aplica se a sugestão ainda estiver "pending" (evita duplicar a
@@ -223,14 +234,16 @@ const EmailLinkSuggestionsPanel: React.FC<{ isDark?: boolean }> = ({ isDark = fa
     };
 
     return (
-        <DashboardCard title={`E-mails para vincular a ações (${sorted.length})`} isDark={isDark}>
+        <DashboardCard title={`Sinais para vincular a ações (${sorted.length})`} isDark={isDark}>
             <div className="flex flex-col gap-3">
                 {sorted.slice(0, 6).map(suggestion => (
                     <div key={suggestion.id} className={`rounded-xl border p-3 ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-100 bg-slate-50'}`}>
                         <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
-                                <p className="text-xs font-bold truncate">{suggestion.subject || '(sem assunto)'}</p>
-                                <p className={`text-[10px] truncate ${isDark ? 'text-white/50' : 'text-slate-500'}`}>{suggestion.sender}</p>
+                                <p className="text-xs font-bold truncate">
+                                    {_CANAL_ICONS[suggestion.canal || 'email'] || '🔔'} {suggestion.titulo_sinal || '(sem título)'}
+                                </p>
+                                <p className={`text-[10px] truncate ${isDark ? 'text-white/50' : 'text-slate-500'}`}>{suggestion.origem_sinal}</p>
                             </div>
                             {suggestion.status === 'expired' && (
                                 <span className="shrink-0 text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">
