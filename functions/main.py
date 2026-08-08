@@ -2619,14 +2619,43 @@ def scheduled_page_monitor(event: scheduler_fn.ScheduledEvent) -> None:
         else:
             update_payload["ultima_analise"] = analise["resumo"]
             if analise["avanca_objetivo"]:
-                sent = _send_telegram_message_raw(
-                    db,
-                    chat_id,
-                    _page_monitor_build_message(apelido, objetivo, url, analise["resumo"]),
-                )
-                update_payload["ultimo_alerta_telegram"] = now_iso if sent else None
-                update_payload["erro_telegram"] = None if sent else "send_failed_or_chat_id_missing"
-                print(f"[PageMonitor] Alerta para '{apelido}': sent={sent}.")
+                task_id = str(data.get("task_id") or "").strip()
+                linked = False
+                if task_id:
+                    try:
+                        from email_action_linker import _load_candidate_task_by_id, queue_and_maybe_send_suggestion
+                        task = _load_candidate_task_by_id(db, task_id)
+                        if task:
+                            result = queue_and_maybe_send_suggestion(
+                                db,
+                                f"pagina_{doc_snap.id}_{novo_hash[:16]}",
+                                canal="pagina",
+                                task=task,
+                                titulo_sinal=apelido,
+                                origem_sinal=url,
+                                resumo=analise["resumo"],
+                                nota_sugerida=analise["resumo"],
+                                reativar_sugerido=True,
+                                chat_id=chat_id,
+                                extra={"link_externo": url},
+                            )
+                            linked = bool(result and result.get("telegram_sent"))
+                    except Exception as exc_link:
+                        print(f"[PageMonitor] Falha ao vincular '{apelido}' à ação {task_id}: {exc_link}")
+
+                if linked:
+                    update_payload["ultimo_alerta_telegram"] = now_iso
+                    update_payload["erro_telegram"] = None
+                    print(f"[PageMonitor] Alerta de '{apelido}' vinculado à ação {task_id}.")
+                else:
+                    sent = _send_telegram_message_raw(
+                        db,
+                        chat_id,
+                        _page_monitor_build_message(apelido, objetivo, url, analise["resumo"]),
+                    )
+                    update_payload["ultimo_alerta_telegram"] = now_iso if sent else None
+                    update_payload["erro_telegram"] = None if sent else "send_failed_or_chat_id_missing"
+                    print(f"[PageMonitor] Alerta para '{apelido}': sent={sent}.")
             else:
                 print(f"[PageMonitor] Mudanca em '{apelido}' nao avancou o objetivo; sem alerta.")
 

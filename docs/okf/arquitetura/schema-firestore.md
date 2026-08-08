@@ -142,6 +142,7 @@ Exames e consultas médicas: `titulo`, `doutor_local`, `resultados`, `data`, `ti
 | `idempotency` | Deduplicação de requisições (TTL via `expires_at`) | `core/idempotency.py` |
 | `telegram_sessions` | Sessões ativas de Telegram (TTL via `expires_at`) | `core/session.py` |
 | `whitelist` | Chat IDs de Telegram autorizados | admin (`hermes_core_logic.py`) |
+| `paginas_monitoradas` | Monitor de Páginas: `url`, `apelido`, `objetivo`, `seletor_css`, `hash_atual`, `texto_atual`, `ultima_verificacao`/`ultima_mudanca`/`ultima_analise`, `ativo`, `userId`, `task_id` (opcional — se preenchido, avanço do objetivo propõe registrar no diário da ação via `queue_and_maybe_send_suggestion` em vez de alerta avulso no Telegram) | frontend (`MonitorPaginasTool.tsx`); `scheduled_page_monitor` (`main.py`) |
 | `configuracoes`, `public_configs`, `unidades` | Configurações de app e unidades organizacionais | frontend / admin |
 
 ## Convenções gerais

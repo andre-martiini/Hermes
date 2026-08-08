@@ -78,37 +78,53 @@ def _load_settings(db) -> dict:
     }
 
 
+def _build_candidate(doc_id: str, data: dict) -> dict | None:
+    if data.get("email_link_optout"):
+        return None
+    status_norm = _normalize_status(data.get("status"))
+    if not _is_candidate_status(status_norm):
+        return None
+    acompanhamento = data.get("acompanhamento") or []
+    recentes = [
+        (entry.get("nota") or "")[:200]
+        for entry in acompanhamento[-2:]
+        if isinstance(entry, dict)
+    ]
+    return {
+        "id": doc_id,
+        "titulo": (data.get("titulo") or "(sem título)").strip(),
+        "projeto": (data.get("projeto") or "").strip(),
+        "area_tematica": (data.get("area_tematica") or "").strip(),
+        "tags": data.get("tags") or [],
+        "status": data.get("status") or "",
+        "is_standby": _is_standby(status_norm),
+        "notas": (data.get("notas") or "").strip()[:300],
+        "acompanhamento_recente": recentes,
+        # Chaves de matching determinístico usadas pelos produtores sem IA
+        # (SIPAC por número de processo, Calendar por ID do evento).
+        "processo_sei": (data.get("processo_sei") or "").strip(),
+        "google_calendar_id": (data.get("google_calendar_id") or "").strip(),
+    }
+
+
 def _load_candidate_tasks(db) -> list[dict]:
     candidates = []
     for doc in db.collection("tarefas").stream():
-        data = doc.to_dict() or {}
-        if data.get("email_link_optout"):
-            continue
-        status_norm = _normalize_status(data.get("status"))
-        if not _is_candidate_status(status_norm):
-            continue
-        acompanhamento = data.get("acompanhamento") or []
-        recentes = [
-            (entry.get("nota") or "")[:200]
-            for entry in acompanhamento[-2:]
-            if isinstance(entry, dict)
-        ]
-        candidates.append({
-            "id": doc.id,
-            "titulo": (data.get("titulo") or "(sem título)").strip(),
-            "projeto": (data.get("projeto") or "").strip(),
-            "area_tematica": (data.get("area_tematica") or "").strip(),
-            "tags": data.get("tags") or [],
-            "status": data.get("status") or "",
-            "is_standby": _is_standby(status_norm),
-            "notas": (data.get("notas") or "").strip()[:300],
-            "acompanhamento_recente": recentes,
-            # Chaves de matching determinístico usadas pelos produtores sem IA
-            # (SIPAC por número de processo, Calendar por ID do evento).
-            "processo_sei": (data.get("processo_sei") or "").strip(),
-            "google_calendar_id": (data.get("google_calendar_id") or "").strip(),
-        })
+        candidate = _build_candidate(doc.id, doc.to_dict() or {})
+        if candidate:
+            candidates.append(candidate)
     return candidates
+
+
+def _load_candidate_task_by_id(db, task_id: str) -> dict | None:
+    """Busca uma única candidata por ID — usado por produtores que já sabem
+    a qual ação um sinal se refere (ex.: Monitor de Páginas com task_id salvo)."""
+    if not task_id:
+        return None
+    doc = db.collection("tarefas").document(task_id).get()
+    if not doc.exists:
+        return None
+    return _build_candidate(doc.id, doc.to_dict() or {})
 
 
 def _normalize_digits(value) -> str:
