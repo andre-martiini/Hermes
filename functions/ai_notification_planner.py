@@ -443,7 +443,27 @@ def dispatch_scheduled_whatsapp_messages(db, now) -> None:
     2. [ ❌ Cancelar ] -> Callback button para desativar agendamento.
     """
     import urllib.parse
-    from main import _resolve_default_telegram_chat_id, _send_telegram_message_raw_with_keyboard
+    from main import _cached_doc_get, _resolve_default_telegram_chat_id, _send_telegram_message_raw_with_keyboard
+
+    # Coordenação com o worker local (services/whatsapp-capture): quando o envio automático
+    # está habilitado E o worker deu sinal de vida recentemente, ele é quem reivindica e
+    # envia de verdade via claimOutboxMessage — esta função fica de fora para não roubar o
+    # doc 'pending' dele. Sem essa checagem, as duas rotinas competiam pelo mesmo doc a cada
+    # minuto e a CF quase sempre vencia, fazendo o envio automático nunca acontecer de fato.
+    try:
+        settings_doc = _cached_doc_get(db, "system", "settings")
+        auto_send_enabled = bool((settings_doc.to_dict() or {}).get("whatsapp_auto_send_enabled")) if settings_doc.exists else False
+        if auto_send_enabled:
+            worker_doc = db.collection("system").document("whatsapp_worker").get()
+            worker_data = worker_doc.to_dict() or {} if worker_doc.exists else {}
+            last_seen = worker_data.get("last_seen")
+            # `ready` reflete o estado real do client whatsapp-web.js (ver writeHeartbeat em
+            # services/whatsapp-capture/index.js) — um heartbeat recente sozinho não garante que
+            # o worker está autenticado/conectado, só que o processo está de pé.
+            if worker_data.get("ready") and last_seen and (now - last_seen) <= datetime.timedelta(minutes=10):
+                return
+    except Exception as exc:
+        print(f"[WhatsAppOutbox] Falha ao checar coordenação com o worker local: {exc}")
 
     try:
         pending = (

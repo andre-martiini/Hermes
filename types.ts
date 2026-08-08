@@ -261,6 +261,7 @@ export interface PaginaMonitorada {
     ativo: boolean;
     userId: string;
     criado_em: string;
+    task_id?: string; // se preenchido, avanço do objetivo propõe registrar no diário da ação em vez de alerta avulso
 }
 
 export interface FinanceTransaction {

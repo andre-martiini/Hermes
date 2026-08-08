@@ -39,6 +39,7 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
   const [apelido, setApelido] = useState('');
   const [objetivo, setObjetivo] = useState('');
   const [seletorCss, setSeletorCss] = useState('');
+  const [taskId, setTaskId] = useState('');
   const [erro, setErro] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
 
@@ -47,6 +48,7 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
   const [editApelido, setEditApelido] = useState('');
   const [editObjetivo, setEditObjetivo] = useState('');
   const [editSeletor, setEditSeletor] = useState('');
+  const [editTaskId, setEditTaskId] = useState('');
   const [editErro, setEditErro] = useState<string | null>(null);
 
   useEffect(() => {
@@ -83,6 +85,7 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
         apelido: apelido.trim() || new URL(url.trim()).hostname,
         objetivo: objetivo.trim(),
         seletor_css: seletorCss.trim() || null,
+        task_id: taskId.trim() || null,
         hash_atual: null,
         texto_atual: null,
         ultima_verificacao: null,
@@ -96,6 +99,7 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
       setApelido('');
       setObjetivo('');
       setSeletorCss('');
+      setTaskId('');
     } catch (e: any) {
       setErro(`Falha ao salvar: ${e?.message || e}`);
     } finally {
@@ -117,6 +121,7 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
     setEditApelido(p.apelido);
     setEditObjetivo(p.objetivo);
     setEditSeletor(p.seletor_css || '');
+    setEditTaskId(p.task_id || '');
     setEditErro(null);
   };
 
@@ -142,6 +147,7 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
       apelido: editApelido.trim() || new URL(novaUrl).hostname,
       objetivo: editObjetivo.trim(),
       seletor_css: novoSeletor,
+      task_id: editTaskId.trim() || null,
     };
     // Mudar URL ou seletor invalida o baseline — reseta para recapturar na próxima verificação.
     if (novaUrl !== p.url || novoSeletor !== (p.seletor_css || null)) {
@@ -210,6 +216,13 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
               placeholder="Seletor CSS (opcional) — restringe a região monitorada, ex.: #content"
               className={inputClass}
             />
+            <input
+              type="text"
+              value={taskId}
+              onChange={(e) => setTaskId(e.target.value)}
+              placeholder="ID da ação vinculada (opcional) — o avanço do objetivo propõe registrar no diário dela"
+              className={inputClass}
+            />
             {erro && (
               <div className="p-3 border border-rose-500/20 bg-rose-500/5 text-rose-500 text-xs font-mono font-bold">
                 {erro}
@@ -264,6 +277,13 @@ export const MonitorPaginasTool: React.FC<MonitorPaginasToolProps> = ({ onBack, 
                       value={editSeletor}
                       onChange={(e) => setEditSeletor(e.target.value)}
                       placeholder="Seletor CSS (opcional)"
+                      className={inputClass}
+                    />
+                    <input
+                      type="text"
+                      value={editTaskId}
+                      onChange={(e) => setEditTaskId(e.target.value)}
+                      placeholder="ID da ação vinculada (opcional)"
                       className={inputClass}
                     />
                     {(editUrl.trim() !== p.url || (editSeletor.trim() || null) !== (p.seletor_css || null)) && (

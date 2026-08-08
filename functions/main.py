@@ -2357,6 +2357,23 @@ def run_full_sync(trigger_reason='unspecified'):
             except Exception as e_link:
                 log_to_firestore(sync_ref, logs, f"[EMAIL-LINK][ERRO] Falha inesperada no vínculo e-mail-ação: {e_link}", True)
 
+            # Vínculo automático de reuniões encerradas a ações (matching determinístico por
+            # google_calendar_id, sem IA). Mesma proteção: nunca derruba o restante do sync.
+            try:
+                from email_action_linker import link_calendar_events_to_actions
+                link_calendar_events_to_actions(db, sync_ref, logs)
+            except Exception as e_cal_link:
+                log_to_firestore(sync_ref, logs, f"[CAL-LINK][ERRO] Falha inesperada no vínculo calendar-ação: {e_cal_link}", True)
+
+            # Triagem de conversas de WhatsApp capturadas por services/whatsapp-capture
+            # (propõe vínculo com ações + grava digests vetorizados). Desligada por padrão
+            # e sem efeito nenhum enquanto o worker local não estiver rodando/configurado.
+            try:
+                from whatsapp_ingest import triage_whatsapp_messages
+                triage_whatsapp_messages(db, sync_ref, logs)
+            except Exception as e_wa_ingest:
+                log_to_firestore(sync_ref, logs, f"[WA-INGEST][ERRO] Falha inesperada na triagem de WhatsApp: {e_wa_ingest}", True)
+
             sync_state = sync_ref.get().to_dict() or {}
             if not sync_state.get('pending_request'):
                 break
@@ -2611,14 +2628,43 @@ def scheduled_page_monitor(event: scheduler_fn.ScheduledEvent) -> None:
         else:
             update_payload["ultima_analise"] = analise["resumo"]
             if analise["avanca_objetivo"]:
-                sent = _send_telegram_message_raw(
-                    db,
-                    chat_id,
-                    _page_monitor_build_message(apelido, objetivo, url, analise["resumo"]),
-                )
-                update_payload["ultimo_alerta_telegram"] = now_iso if sent else None
-                update_payload["erro_telegram"] = None if sent else "send_failed_or_chat_id_missing"
-                print(f"[PageMonitor] Alerta para '{apelido}': sent={sent}.")
+                task_id = str(data.get("task_id") or "").strip()
+                linked = False
+                if task_id:
+                    try:
+                        from email_action_linker import _load_candidate_task_by_id, queue_and_maybe_send_suggestion
+                        task = _load_candidate_task_by_id(db, task_id)
+                        if task:
+                            result = queue_and_maybe_send_suggestion(
+                                db,
+                                f"pagina_{doc_snap.id}_{novo_hash[:16]}",
+                                canal="pagina",
+                                task=task,
+                                titulo_sinal=apelido,
+                                origem_sinal=url,
+                                resumo=analise["resumo"],
+                                nota_sugerida=analise["resumo"],
+                                reativar_sugerido=True,
+                                chat_id=chat_id,
+                                extra={"link_externo": url},
+                            )
+                            linked = bool(result and result.get("telegram_sent"))
+                    except Exception as exc_link:
+                        print(f"[PageMonitor] Falha ao vincular '{apelido}' à ação {task_id}: {exc_link}")
+
+                if linked:
+                    update_payload["ultimo_alerta_telegram"] = now_iso
+                    update_payload["erro_telegram"] = None
+                    print(f"[PageMonitor] Alerta de '{apelido}' vinculado à ação {task_id}.")
+                else:
+                    sent = _send_telegram_message_raw(
+                        db,
+                        chat_id,
+                        _page_monitor_build_message(apelido, objetivo, url, analise["resumo"]),
+                    )
+                    update_payload["ultimo_alerta_telegram"] = now_iso if sent else None
+                    update_payload["erro_telegram"] = None if sent else "send_failed_or_chat_id_missing"
+                    print(f"[PageMonitor] Alerta para '{apelido}': sent={sent}.")
             else:
                 print(f"[PageMonitor] Mudanca em '{apelido}' nao avancou o objetivo; sem alerta.")
 
@@ -2682,6 +2728,18 @@ def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
     db = get_db()
 
     updates = {}
+
+    # Notificações do scraper SIPAC (functions_node/index.js) tentam primeiro o vínculo
+    # determinístico com uma ação por número de processo; se conseguir enviar o cartão de
+    # confirmação, pula o espelhamento genérico abaixo para não duplicar o aviso.
+    if not notif.get('sent_to_telegram') and notif.get('link') == '@SipacTrackingTool':
+        try:
+            from email_action_linker import try_link_sipac_notification
+            if try_link_sipac_notification(db, event.data.reference.id, notif):
+                event.data.reference.update({'sent_to_telegram': True, 'linked_to_acao': True})
+                return
+        except Exception as exc:
+            print(f"[SIPAC-LINK] Falha ao tentar vincular notificação SIPAC a ação: {exc}")
 
     if not notif.get('sent_to_telegram') and _should_mirror_notification_to_telegram(notif):
 
@@ -5553,6 +5611,12 @@ def _format_ai_profile_for_prompt(ai_profile: dict) -> str:
     if history:
         lines.append(f"- historico_deduzido: {json.dumps(history[:5], ensure_ascii=False)}")
 
+    # Perfil de personalidade destilado semanalmente a partir do diário pessoal
+    # (functions/personal_diary.py:consolidar_personalidade) — impressões, não fatos.
+    personalidade = ai_profile.get("personalidade")
+    if personalidade:
+        lines.append(f"- personalidade (impressões, não fatos relatados): {json.dumps(personalidade, ensure_ascii=False)}")
+
     return "\n".join(lines) if lines else "(perfil sem atributos relevantes)"
 
 
@@ -7690,6 +7754,21 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "INSTRUCAO OBRIGATORIA: Informe ao usuario que nao encontrou. NAO invente titulos, "
                 "status, prazos ou qualquer dado de tarefa. NAO use RAG, acervo ou memoria para fabricar uma resposta."
             )
+
+        def buscar_conversas_whatsapp(query: str, limite: int = 5):
+            """Busca conversas de WhatsApp indexadas (digests) por similaridade semântica. Use quando o usuário perguntar sobre algo discutido no WhatsApp."""
+            from whatsapp_ingest import buscar_conversas_whatsapp as _buscar_whatsapp
+            res = _buscar_whatsapp(db, query, limite)
+            if res.get("erro"):
+                return f"⚠️ {res['erro']}"
+            resultados = res.get("resultados", [])
+            if not resultados:
+                return "Nenhuma conversa de WhatsApp indexada encontrada para esta busca."
+            linhas = []
+            for r in resultados:
+                topicos = ", ".join(r.get("topicos") or [])
+                linhas.append(f"- [{r.get('chat_name')}] {r.get('resumo')}" + (f" (tópicos: {topicos})" if topicos else ""))
+            return "\n".join(linhas)
 
         def buscar_arquivos_acervo(query: str):
             """Busca documentação, manuais e arquivos de referência no Acervo Global (FindNearest)."""
@@ -10767,6 +10846,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'buscar_e_analisar_email': buscar_e_analisar_email,
             'consultar_historico_acoes': consultar_historico_acoes,
             'buscar_arquivos_acervo': buscar_arquivos_acervo,
+            'buscar_conversas_whatsapp': buscar_conversas_whatsapp,
             'obter_contexto_tela': obter_contexto_tela,
             'pesquisar_internet': pesquisar_internet,
             'ler_pagina_web': ler_pagina_web,
@@ -10896,6 +10976,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         # conversa — menos tokens de schema e roteamento mais limpo para o modelo.
         if _protocolo_ativo("mail", "caixa de entrada", "inbox"):
             static_tools.append(buscar_e_analisar_email)
+        if _protocolo_ativo("whatsapp", "zap", "zapzap"):
+            static_tools.append(buscar_conversas_whatsapp)
         if _protocolo_ativo("imagem", "figura", "ilustra", "foto", "banner", "logo", "desenh"):
             static_tools.append(gerar_imagem)
         if _gate_relatorios:
@@ -13289,6 +13371,111 @@ def classificarAreaTematica(req: https_fn.CallableRequest) -> dict:
         print(f"Erro na classificacao tematica: {e}")
         return {"area_tematica": "Nenhuma"}
 
+
+# ---------------------------------------------------------------------------
+# Configuração das automações multi-canal (vínculo sinal↔ação, diário pessoal,
+# ingestão de WhatsApp) — únicas callables que tocam system/settings a partir
+# do frontend. O documento é bloqueado por regra de segurança para o cliente
+# (firestore.rules: match /system/{document=**} { allow read, write: if false; }),
+# então esta é a única porta de entrada; só toca os campos explicitamente
+# tratados aqui, o resto de system/settings continua editável só via Console.
+# ---------------------------------------------------------------------------
+
+def _serialize_whatsapp_worker_heartbeat(db) -> dict:
+    doc = db.collection("system").document("whatsapp_worker").get()
+    if not doc.exists:
+        return {"online": False, "last_seen": None}
+    data = doc.to_dict() or {}
+    last_seen = data.get("last_seen")
+    online = False
+    last_seen_iso = None
+    if last_seen:
+        try:
+            last_seen_iso = last_seen.isoformat()
+            online = (datetime.now(timezone.utc) - last_seen) <= timedelta(minutes=10)
+        except Exception:
+            pass
+    return {"online": online, "last_seen": last_seen_iso}
+
+
+INTERNAL_USER_EMAIL = "andre.martiini@gmail.com"
+
+
+def _require_internal_user(req: https_fn.CallableRequest) -> None:
+    """Mesma checagem de `internalUser()` em firestore.rules — essas callables
+    tocam system/settings, que é bloqueado para qualquer leitura/escrita direta
+    do cliente, então exigem o mesmo dono verificado que as regras exigem."""
+    token = (req.auth.token if req.auth else None) or {}
+    email = token.get("email") if hasattr(token, "get") else None
+    email_verified = token.get("email_verified") if hasattr(token, "get") else None
+    if not req.auth or not email_verified or email != INTERNAL_USER_EMAIL:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.PERMISSION_DENIED, message="Acesso restrito.")
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)
+def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
+    """Lê o subconjunto de system/settings das automações multi-canal."""
+    _require_internal_user(req)
+
+    db = get_db()
+    doc = db.collection("system").document("settings").get()
+    data = doc.to_dict() if doc.exists else {}
+    email_cfg = data.get("email_action_linker") or {}
+    diary_cfg = data.get("personal_diary") or {}
+    wa_cfg = data.get("whatsapp_ingest") or {}
+
+    return {
+        "email_action_linker": {"enabled": bool(email_cfg.get("enabled", False))},
+        "personal_diary": {"enabled": bool(diary_cfg.get("enabled", False))},
+        "whatsapp_ingest": {
+            "enabled": bool(wa_cfg.get("enabled", False)),
+            "chats_allowlist": list(wa_cfg.get("chats_allowlist") or []),
+        },
+        "whatsapp_auto_send_enabled": bool(data.get("whatsapp_auto_send_enabled", False)),
+        "whatsapp_worker": _serialize_whatsapp_worker_heartbeat(db),
+    }
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)
+def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
+    """Atualiza o subconjunto whitelisted de system/settings das automações
+    multi-canal. Usa merge com dicts aninhados (não field paths com ponto —
+    set(merge=True) não expande ponto em string, só update() faz isso, e
+    update() falha se o doc não existir) para não pisar em campos irmãos."""
+    _require_internal_user(req)
+
+    data = req.data or {}
+    updates: dict = {}
+
+    email_cfg = data.get("email_action_linker")
+    if isinstance(email_cfg, dict) and "enabled" in email_cfg:
+        updates["email_action_linker"] = {"enabled": bool(email_cfg["enabled"])}
+
+    diary_cfg = data.get("personal_diary")
+    if isinstance(diary_cfg, dict) and "enabled" in diary_cfg:
+        updates["personal_diary"] = {"enabled": bool(diary_cfg["enabled"])}
+
+    wa_cfg = data.get("whatsapp_ingest")
+    if isinstance(wa_cfg, dict):
+        wa_updates: dict = {}
+        if "enabled" in wa_cfg:
+            wa_updates["enabled"] = bool(wa_cfg["enabled"])
+        if "chats_allowlist" in wa_cfg and isinstance(wa_cfg["chats_allowlist"], list):
+            wa_updates["chats_allowlist"] = [str(x).strip() for x in wa_cfg["chats_allowlist"] if str(x).strip()]
+        if wa_updates:
+            updates["whatsapp_ingest"] = wa_updates
+
+    if "whatsapp_auto_send_enabled" in data:
+        updates["whatsapp_auto_send_enabled"] = bool(data["whatsapp_auto_send_enabled"])
+
+    if not updates:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="Nenhum campo valido para atualizar.")
+
+    db = get_db()
+    db.collection("system").document("settings").set(updates, merge=True)
+    return {"success": True}
+
+
 # Import daily WIP reset job
 from daily_reset_job import daily_wip_reset_and_degradation
 
@@ -13300,6 +13487,9 @@ from monthly_recurring_actions import gerar_acoes_recorrentes_mensais
 
 # Import daily AI notification planner job
 from ai_notification_planner import ai_notification_planner_daily
+
+# Import personal diary + weekly personality consolidation jobs
+from personal_diary import gerar_diario_pessoal, consolidar_personalidade
 
 
 @https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=60)

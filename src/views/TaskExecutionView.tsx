@@ -270,6 +270,7 @@ export const TaskExecutionView = ({
           await addDoc(collection(db, 'sessoes_copiloto', sessRef.id, 'mensagens'), {
             role: 'assistant',
             content: `Foco total ativado para o documento: **${focusedFile.nome}**. Estou pronto para analisar o conteúdo e ajudar você com dúvidas técnicas, resumos ou extração de informações. Como posso ser útil?`,
+            source: 'web_task_view',
             timestamp: serverTimestamp()
           });
 
@@ -569,6 +570,7 @@ export const TaskExecutionView = ({
         insightNivel: insight.nivel,
         insightAlvo: insight.alvo,
         content: insight.texto,
+        source: 'web_task_view',
         timestamp: serverTimestamp()
       });
       await setDoc(doc(db, 'sessoes_copiloto', sessionId), {

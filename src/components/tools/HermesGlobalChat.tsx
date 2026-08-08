@@ -261,6 +261,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
       addDoc(collection(db, 'sessoes_copiloto', sId, 'mensagens'), {
         role: 'user',
         content: text,
+        source: 'voice_web',
         timestamp: Timestamp.now(),
       }).catch(() => {});
     },
@@ -270,6 +271,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
       addDoc(collection(db, 'sessoes_copiloto', sId, 'mensagens'), {
         role: 'assistant',
         content: text,
+        source: 'voice_web',
         timestamp: Timestamp.now(),
       }).catch(() => {});
     },
@@ -728,6 +730,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
       await addDoc(collection(db, 'sessoes_copiloto', sessionId, 'mensagens'), {
         role: 'user',
         content: userMessageContent,
+        source: 'web_global',
         timestamp: Timestamp.now(),
       });
 
@@ -778,6 +781,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
         await addDoc(collection(db, 'sessoes_copiloto', targetSessionId, 'mensagens'), {
           role: 'assistant',
           content: `**Erro ao processar a solicitação:**\n\`${errMsg}\``,
+          source: 'web_global',
           timestamp: Timestamp.now(),
         }).catch(() => undefined);
       }

@@ -2273,6 +2273,23 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
                     _persist_callback_turn("Botão: registrar vínculo de e-mail", msg)
                     _send_telegram_message(token, chat_id, msg)
 
+    elif data.startswith("diary_edit:"):
+        diary_date = data.split("diary_edit:")[1].strip()
+        session["pending_diary_edit"] = diary_date
+        _save_session(db, chat_id, session)
+        _answer_callback_query(token, query_id, "Me conta o que ajustar.")
+        msg = f"✍️ Pode me contar o que você quer mudar no diário de {diary_date}. Sua próxima mensagem vira o ajuste."
+        _persist_callback_turn("Botão: ajustar diário pessoal", msg)
+        _send_telegram_message(token, chat_id, msg)
+
+    elif data.startswith("diary_ok:"):
+        diary_date = data.split("diary_ok:")[1].strip()
+        try:
+            db.collection("diario_pessoal").document(diary_date).update({"confirmado": True})
+        except Exception as exc:
+            print(f"[Diario] Falha ao confirmar diário {diary_date}: {exc}")
+        _answer_callback_query(token, query_id, "Combinado!")
+
     else:
 
         _answer_callback_query(token, query_id)
@@ -3278,6 +3295,22 @@ def _process_telegram_message(db, data: dict):
     if walk_reply:
         _persist_turn_to_copilot(text, walk_reply)
         _send_telegram_session_message(db, token, chat_id, walk_reply, session=session)
+        return
+
+    # --- Ajuste de diário pessoal pendente (botão "✍️ Ajustar") — a próxima mensagem
+    # livre vira o pedido de revisão, sem passar pelo roteador geral de chat. ---
+    pending_diary_date = session.get("pending_diary_edit")
+    if pending_diary_date and text and not text.startswith("/"):
+        from personal_diary import apply_diary_feedback
+        session.pop("pending_diary_edit", None)
+        _save_session(db, chat_id, session)
+        try:
+            diary_reply = apply_diary_feedback(db, pending_diary_date, text)
+        except Exception as exc:
+            print(f"[Diario] Falha ao aplicar ajuste: {exc}")
+            diary_reply = "⚠️ Não consegui ajustar o diário agora. Tente novamente mais tarde."
+        _persist_turn_to_copilot(text, diary_reply)
+        _send_telegram_session_message(db, token, chat_id, diary_reply, session=session)
         return
 
     # --- /entrar command — busca semântica de ações para travamento de contexto ---

@@ -123,6 +123,14 @@ def _format_user_profile(db) -> str:
                 f"- historico_deduzido_recente: {_clean(json.dumps(compact, ensure_ascii=False), 700)}"
             )
 
+    # Perfil de personalidade destilado semanalmente a partir do diário pessoal
+    # (functions/personal_diary.py:consolidar_personalidade) — impressões, não fatos.
+    personalidade = ai_profile.get("personalidade")
+    if personalidade:
+        lines.append(
+            f"- personalidade (impressões, não fatos relatados): {_clean(json.dumps(personalidade, ensure_ascii=False), 700)}"
+        )
+
     if len(lines) == 1:
         lines.append(f"- id: {user_doc['id']}")
     return "\n".join(lines)
