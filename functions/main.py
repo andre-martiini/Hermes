@@ -5602,6 +5602,12 @@ def _format_ai_profile_for_prompt(ai_profile: dict) -> str:
     if history:
         lines.append(f"- historico_deduzido: {json.dumps(history[:5], ensure_ascii=False)}")
 
+    # Perfil de personalidade destilado semanalmente a partir do diário pessoal
+    # (functions/personal_diary.py:consolidar_personalidade) — impressões, não fatos.
+    personalidade = ai_profile.get("personalidade")
+    if personalidade:
+        lines.append(f"- personalidade (impressões, não fatos relatados): {json.dumps(personalidade, ensure_ascii=False)}")
+
     return "\n".join(lines) if lines else "(perfil sem atributos relevantes)"
 
 
@@ -13349,6 +13355,9 @@ from monthly_recurring_actions import gerar_acoes_recorrentes_mensais
 
 # Import daily AI notification planner job
 from ai_notification_planner import ai_notification_planner_daily
+
+# Import personal diary + weekly personality consolidation jobs
+from personal_diary import gerar_diario_pessoal, consolidar_personalidade
 
 
 @https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=60)

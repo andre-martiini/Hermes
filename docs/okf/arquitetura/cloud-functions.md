@@ -103,6 +103,8 @@ O backend roda em Cloud Functions Python (gen2). Há ~79 funções exportadas em
 |---|---|---|
 | `relatorio_diario_custo_gemini` | Scheduler (20h30 BRT) | Resumo diário de custo Gemini no Telegram |
 | `consolidar_memorias_copiloto` | Scheduler (4h BRT) | Consolida memórias do Copiloto |
+| `gerar_diario_pessoal` (`personal_diary.py`) | Scheduler (21h30 BRT) | Agrega ações, saúde, finanças, agenda, conversas e pessoas do dia (`tarefas`, `health_*`, `finance_transactions`, `google_calendar_events`, `sessoes_copiloto`, `interacoes_pessoas`) e usa um modelo de linguagem para redigir o diário pessoal do dia em primeira pessoa, salvo em `diario_pessoal/{data}`; entrega no Telegram com botões "✍️ Ajustar"/"👍 Ok". Flag `system/settings.personal_diary.enabled` |
+| `consolidar_personalidade` (`personal_diary.py`) | Scheduler (domingo 22h BRT) | Destila os diários da semana (+ ajustes pedidos pelo usuário) num perfil de personalidade em `usuarios/{uid}.ai_profile.personalidade`, versionado. Mesma flag `personal_diary.enabled` |
 
 ## `functions/knowledge_graph.py` (~9 funções)
 
@@ -125,7 +127,7 @@ O backend roda em Cloud Functions Python (gen2). Há ~79 funções exportadas em
 |---|---|---|
 | `telegramWebhook` | HTTP request | Recebe updates do bot do Telegram |
 | `on_telegram_inbound` | Firestore create (`telegram_inbound/{id}`) | Processa mensagem recebida do Telegram |
-| `_handle_telegram_callback` | (interno, chamado por `telegramWebhook`) | Processa botões inline, inclusive `ai_notif:{id}:{useful\|dismiss}` (grava feedback em `scheduled_notifications`) e `emlink:{msgId}:{ok\|on\|no}` (aplica/ignora sugestão de vínculo e-mail↔ação em `email_action_suggestions`) |
+| `_handle_telegram_callback` | (interno, chamado por `telegramWebhook`) | Processa botões inline, inclusive `ai_notif:{id}:{useful\|dismiss}` (grava feedback em `scheduled_notifications`), `emlink:{id}:{ok\|on\|no}` (aplica/ignora sugestão de vínculo sinal↔ação em `email_action_suggestions`) e `diary_edit:{data}`/`diary_ok:{data}` (trava a sessão para capturar um ajuste ao diário pessoal do dia, ou confirma sem alteração) |
 
 ## `functions/ai_notification_planner.py`
 

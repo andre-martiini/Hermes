@@ -58,10 +58,13 @@ Documentos vetorizados por `process_vectorization` — uso decrescente, mantido 
 ## Copiloto e jobs de IA assíncronos
 
 ### `sessoes_copiloto` (+ subcoleção `mensagens`)
-Sessões de conversa multi-turno com o Copiloto: `userId`, `lastMessageAt`, `task_id`, `session_id`; subcoleção `sessoes_copiloto/{id}/mensagens` guarda o histórico (`ChatMessage`: role, content, timestamp). Escrito por `askCopilotoHermes`. Índice: `userId+lastMessageAt` (DESC).
+Sessões de conversa multi-turno com o Copiloto: `userId`, `lastMessageAt`, `task_id`, `session_id`, `channel` (`"telegram"` quando originada lá), `copilotScope`; subcoleção `sessoes_copiloto/{id}/mensagens` guarda o histórico (`ChatMessage`: role, content, timestamp, `source` — `telegram`\|`telegram_callback`\|`web_global`\|`web_drawer`\|`web_task_view`\|`voice_web`; ausente nos writes de `askCopilotoHermes` e em sessões antigas). Escrito por `askCopilotoHermes` e diretamente pelo frontend (`HermesGlobalChat.tsx`, `HermesCopilotoDrawer.tsx`, `TaskExecutionView.tsx`). Índice: `userId+lastMessageAt` (DESC).
 
 ### `usuarios`
-Perfis de IA por usuário (preferências, sinais aprendidos): criado por `_bootstrap_user_ai_profile`, atualizado por `_save_user_profile_signal`.
+Perfis de IA por usuário: criado por `_bootstrap_user_ai_profile`, sinais de prompt atualizados por `_save_user_profile_signal` (`ai_profile.historico_deduzido`, rolling últimos 10). Campo `ai_profile.personalidade` — traços/estilo/rotinas destilados semanalmente do diário pessoal por `consolidar_personalidade` (`personal_diary.py`), com `personalidade_historico[]` (últimas 6 versões). Lido por `_format_ai_profile_for_prompt` (copiloto web/Godmode) e `context.py:_format_user_profile` (ponte de voz) — grava uma vez, propaga para as três superfícies.
+
+### `diario_pessoal`
+Diário pessoal diário, em primeira pessoa, gerado a partir das interações do usuário em todas as superfícies do Hermes (ver `personal_diary.py`). ID do doc = `YYYY-MM-DD`. Campos: `data`, `texto`, `texto_original` (se editado), `fontes` (contagens por origem: ações, saúde, financeiro, agenda, conversas, pessoas), `gerado_em`, `modelo`, `editado`, `confirmado`, `ajustes[]` (`{pedido, em}` — cada revisão pedida pelo usuário via Telegram, insumo do consolidador de personalidade), `sem_material` (dia sem atividade registrada). Escrito por `gerar_diario_pessoal` (scheduler 21:30 BRT) e `apply_diary_feedback` (ajuste via Telegram, callback `diary_edit:{data}`/`diary_ok:{data}` em `hermes_core_logic.py`). Flag `system/settings.personal_diary.enabled`.
 
 ### `correcoes_pendentes`
 Fila de correções a aplicar em tarefas, detectadas por callables diversas; processada em lote por `processar_correcoes_pendentes` (scheduler, a cada 60 min).
