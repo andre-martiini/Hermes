@@ -455,8 +455,12 @@ def dispatch_scheduled_whatsapp_messages(db, now) -> None:
         auto_send_enabled = bool((settings_doc.to_dict() or {}).get("whatsapp_auto_send_enabled")) if settings_doc.exists else False
         if auto_send_enabled:
             worker_doc = db.collection("system").document("whatsapp_worker").get()
-            last_seen = (worker_doc.to_dict() or {}).get("last_seen") if worker_doc.exists else None
-            if last_seen and (now - last_seen) <= datetime.timedelta(minutes=10):
+            worker_data = worker_doc.to_dict() or {} if worker_doc.exists else {}
+            last_seen = worker_data.get("last_seen")
+            # `ready` reflete o estado real do client whatsapp-web.js (ver writeHeartbeat em
+            # services/whatsapp-capture/index.js) — um heartbeat recente sozinho não garante que
+            # o worker está autenticado/conectado, só que o processo está de pé.
+            if worker_data.get("ready") and last_seen and (now - last_seen) <= datetime.timedelta(minutes=10):
                 return
     except Exception as exc:
         print(f"[WhatsAppOutbox] Falha ao checar coordenação com o worker local: {exc}")

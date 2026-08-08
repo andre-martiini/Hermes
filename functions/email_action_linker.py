@@ -20,12 +20,12 @@ automação silenciosa.
 
 Schema da coleção: docs/okf/arquitetura/schema-firestore.md
 Mapa de onde cada produtor é chamado: docs/okf/arquitetura/cloud-functions.md
-Desenho original: docs/okf/propostas/automacoes-canais-e-diario-pessoal.md
 """
 
 import base64
 import json
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from gemini_cost_controls import GEMINI_LIGHT_MODEL, generate_content_logged
 
@@ -707,6 +707,14 @@ def try_link_sipac_notification(db, notification_id: str, notif: dict) -> bool:
 
 
 CALENDAR_EVENT_LOOKBACK_MINUTES = 180
+# `google_calendar_events.data_fim` é gravado cru a partir da API do Calendar (`main.py`,
+# `event['end'].get('dateTime', ...)`)  —  offset LOCAL do calendário (ex. "-03:00" no Brasil),
+# nunca normalizado para UTC. Comparar essas strings contra limites em UTC por ordem
+# lexicográfica é incorreto (às 15h UTC, um evento que terminou 11h -03:00 = 14h UTC —
+# já dentro da janela — perde na comparação de string porque "11" < "12"). Por isso a
+# pré-filtragem por string abaixo usa uma folga generosa só para manter a query barata;
+# a comparação que decide de fato usa datetimes normalizados para UTC.
+CALENDAR_QUERY_SLACK_MINUTES = 360
 
 
 def link_calendar_events_to_actions(db, sync_ref, logs):
@@ -717,21 +725,23 @@ def link_calendar_events_to_actions(db, sync_ref, logs):
     `sync_google_calendar` — sem IA, sem custo. Chamada no fim de
     `run_full_sync`, depois de `link_emails_to_actions`.
     """
-    from main import _resolve_default_telegram_chat_id, log_to_firestore
+    from main import _resolve_default_telegram_chat_id, log_to_firestore, parse_iso_datetime
 
     settings = _load_settings(db)
     if not settings["enabled"]:
         return
 
     now = datetime.now(timezone.utc)
-    window_start = (now - timedelta(minutes=CALENDAR_EVENT_LOOKBACK_MINUTES)).isoformat()
-    now_iso = now.isoformat()
+    lookback = timedelta(minutes=CALENDAR_EVENT_LOOKBACK_MINUTES)
+    slack = timedelta(minutes=CALENDAR_QUERY_SLACK_MINUTES)
+    query_window_start = (now - lookback - slack).isoformat()
+    query_window_end = (now + slack).isoformat()
 
     try:
         events = list(
             db.collection("google_calendar_events")
-            .where("data_fim", ">=", window_start)
-            .where("data_fim", "<=", now_iso)
+            .where("data_fim", ">=", query_window_start)
+            .where("data_fim", "<=", query_window_end)
             .stream()
         )
     except Exception as exc:
@@ -756,17 +766,22 @@ def link_calendar_events_to_actions(db, sync_ref, logs):
         task = candidates_by_calendar_id.get(google_id)
         if not task:
             continue
+
+        # Comparação de verdade, com fuso normalizado — corrige o pré-filtro por string acima.
+        end_dt = parse_iso_datetime(event.get("data_fim"))
+        if end_dt is None or end_dt.tzinfo is None:
+            continue  # evento "dia inteiro" (sem horário) ou data_fim ilegível — não é "reunião encerrada"
+        end_dt = end_dt.astimezone(timezone.utc)
+        if not (now - lookback <= end_dt <= now):
+            continue
+
         suggestion_id = f"calendar_{google_id}"
         if suggestions_col.document(suggestion_id).get().exists:
             continue
 
         titulo = event.get("titulo") or "(sem título)"
-        hora_fim = ""
-        try:
-            hora_fim = datetime.fromisoformat(str(event.get("data_fim"))).strftime("%H:%M")
-        except Exception:
-            pass
-        resumo = f"A reunião \"{titulo}\" terminou{f' às {hora_fim}' if hora_fim else ''}."
+        hora_fim = end_dt.astimezone(ZoneInfo("America/Sao_Paulo")).strftime("%H:%M")
+        resumo = f"A reunião \"{titulo}\" terminou às {hora_fim}."
 
         result = queue_and_maybe_send_suggestion(
             db,

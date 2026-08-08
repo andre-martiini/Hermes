@@ -13398,11 +13398,24 @@ def _serialize_whatsapp_worker_heartbeat(db) -> dict:
     return {"online": online, "last_seen": last_seen_iso}
 
 
+INTERNAL_USER_EMAIL = "andre.martiini@gmail.com"
+
+
+def _require_internal_user(req: https_fn.CallableRequest) -> None:
+    """Mesma checagem de `internalUser()` em firestore.rules — essas callables
+    tocam system/settings, que é bloqueado para qualquer leitura/escrita direta
+    do cliente, então exigem o mesmo dono verificado que as regras exigem."""
+    token = (req.auth.token if req.auth else None) or {}
+    email = token.get("email") if hasattr(token, "get") else None
+    email_verified = token.get("email_verified") if hasattr(token, "get") else None
+    if not req.auth or not email_verified or email != INTERNAL_USER_EMAIL:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.PERMISSION_DENIED, message="Acesso restrito.")
+
+
 @https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)
 def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
     """Lê o subconjunto de system/settings das automações multi-canal."""
-    if not req.auth:
-        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="Autenticacao obrigatoria.")
+    _require_internal_user(req)
 
     db = get_db()
     doc = db.collection("system").document("settings").get()
@@ -13429,8 +13442,7 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
     multi-canal. Usa merge com dicts aninhados (não field paths com ponto —
     set(merge=True) não expande ponto em string, só update() faz isso, e
     update() falha se o doc não existir) para não pisar em campos irmãos."""
-    if not req.auth:
-        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="Autenticacao obrigatoria.")
+    _require_internal_user(req)
 
     data = req.data or {}
     updates: dict = {}

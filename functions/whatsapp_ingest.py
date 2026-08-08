@@ -12,8 +12,6 @@ posterior pelo copiloto (`buscar_conversas_whatsapp`, ver main.py).
 Mensagens cruas nunca são indexadas individualmente: são ruidosas demais
 para RAG e caras demais para embeddar uma a uma — só o digest da janela é
 vetorizado, no mesmo espírito de `knowledge_nodes`/`indice_artefatos`.
-
-Ver docs/okf/propostas/automacoes-canais-e-diario-pessoal.md (eixo 2).
 """
 
 import json
@@ -182,22 +180,18 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
         return
 
     groups: dict[str, list[dict]] = {}
-    latest_ingested_at = since_ts
     for doc in docs:
         data = doc.to_dict() or {}
-        ingested_at = data.get("ingested_at")
-        if ingested_at and ingested_at > latest_ingested_at:
-            latest_ingested_at = ingested_at
         chat_id = data.get("chat_id")
         if not chat_id:
             continue
         groups.setdefault(chat_id, []).append(data)
 
-    # Avança o cursor sempre, mesmo se a análise abaixo falhar — evita reprocessar a
-    # mesma leva indefinidamente por causa de uma janela problemática isolada.
-    cursor_ref.set({"last_processed_at": latest_ingested_at}, merge=True)
-
     if not groups:
+        # Nenhuma mensagem tinha chat_id (não deveria acontecer com o worker atualizado) —
+        # seguro avançar o cursor, não há nada retido para reprocessar.
+        latest_ingested_at = max((d.to_dict() or {}).get("ingested_at") for d in docs)
+        cursor_ref.set({"last_processed_at": latest_ingested_at}, merge=True)
         return
 
     candidates = _load_candidate_tasks(db)
@@ -214,9 +208,12 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
     client = genai.Client(api_key=api_key)
     telegram_chat_id = _resolve_default_telegram_chat_id(db)
 
-    all_windows = list(groups.items())
+    # Processa as conversas mais antigas primeiro (por ingested_at mínimo do grupo) — dá
+    # prioridade de progresso a quem está parado há mais tempo, em vez de ordem arbitrária.
+    all_windows = sorted(groups.items(), key=lambda item: min(m.get("ingested_at") or since_ts for m in item[1]))
     windows = all_windows[: settings["max_windows_per_pass"]]
-    skipped = len(all_windows) - len(windows)
+    skipped_windows = all_windows[settings["max_windows_per_pass"]:]
+    skipped = len(skipped_windows)
     analyzed = 0
 
     for wa_chat_id, messages in windows:
@@ -265,6 +262,21 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
 
         if resumo:
             _save_whatsapp_digest(db, digest_id, wa_chat_id, chat_name, messages, analysis, api_key)
+
+    # Avança o cursor só até onde é seguro: se alguma janela ficou de fora por causa
+    # do teto (`skipped_windows`), o cursor não pode passar da mensagem mais antiga
+    # entre as adiadas — senão elas somem para sempre da próxima consulta por
+    # `ingested_at > cursor`. Sem adiadas, é seguro avançar até a mensagem mais
+    # recente deste lote inteiro.
+    if skipped_windows:
+        new_cursor = min(
+            m.get("ingested_at") for _, msgs in skipped_windows for m in msgs if m.get("ingested_at")
+        )
+    else:
+        new_cursor = max(
+            m.get("ingested_at") for _, msgs in windows for m in msgs if m.get("ingested_at")
+        )
+    cursor_ref.set({"last_processed_at": new_cursor}, merge=True)
 
     if analyzed or skipped:
         extra = f" {skipped} conversa(s) adiada(s) para a próxima passada (teto)." if skipped else ""
