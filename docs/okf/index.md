@@ -20,6 +20,5 @@ Este diretório é um bundle [Open Knowledge Format](https://github.com/ — ver
 - [Guias](/docs/okf/guias/index.md) — primeiros passos para rodar o sistema.
 - [UI](/docs/okf/ui/index.md) — decisões de interface.
 - [Copiloto](/docs/okf/copiloto/index.md) — documentação viva sobre arquitetura e funcionamento do Copiloto Hermes.
-- [Propostas](/docs/okf/propostas/vinculo-email-acao.md) — propostas de funcionalidade ainda não implementadas (removidas do bundle após execução, conforme `manutencao.md`).
 
 Ver [log.md](/docs/okf/log.md) para o histórico de mudanças deste bundle.

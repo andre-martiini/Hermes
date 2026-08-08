@@ -122,18 +122,7 @@ export interface Tarefa {
     estrategia_objetivo_id?: string;
     estrategia_indicador_id?: string;
     recorrencia?: RecorrenciaAcao;
-    email_trigger?: EmailTrigger;
-}
-
-export interface EmailTrigger {
-    enabled: boolean;
-    sender?: string;
-    subjectKeywords?: string;
-    bodyKeywords?: string;
-    action_to_take: 'status_to_andamento' | 'run_ai_analysis';
-    ai_instructions?: string;
-    telegram_alert: boolean;
-    last_triggered_email_id?: string;
+    email_link_optout?: boolean; // true = não sugerir vínculos de e-mail para esta ação (email_action_linker.py)
 }
 
 

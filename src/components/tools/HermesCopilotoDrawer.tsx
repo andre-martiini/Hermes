@@ -245,7 +245,7 @@ const FIELD_LABELS: Record<string, string> = {
     area_tematica: 'Área Temática',
     tipo_acao: 'Tipo de Ação',
     notas: 'Notas',
-    email_trigger: 'Gatilho de E-mail',
+    email_link_optout: 'Silenciar Vínculo de E-mail',
 };
 
 // Ferramentas de escrita/mutação — recebem estilo verde

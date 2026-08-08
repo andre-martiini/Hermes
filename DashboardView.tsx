@@ -1,10 +1,12 @@
-import React, { useMemo, useState } from 'react';
-import { arrayUnion } from 'firebase/firestore';
+import React, { useEffect, useMemo, useState } from 'react';
+import { arrayUnion, collection, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
+import { db } from './firebase';
 import {
     Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry,
     HealthWeight, HealthSettings, ExerciseLog, WalkBlock,
     formatDateLocalISO, sumWalkBlocksKm
 } from './types';
+import { buildDiaryEmailNote } from './src/utils/diaryEntries';
 
 interface DashboardViewProps {
     tarefas: Tarefa[];
@@ -129,6 +131,133 @@ const getFinanceDateParts = (dateValue?: string) => {
         month: fallbackDate.getMonth(),
         day: fallbackDate.getDate()
     };
+};
+
+// --- FILA WEB DE SUGESTÕES DE VÍNCULO E-MAIL↔AÇÃO (functions/email_action_linker.py) ---
+// Complementa a confirmação via Telegram: mostra sugestões pending/expired
+// para decidir pelo navegador o que não foi respondido no Telegram a tempo.
+interface EmailActionSuggestion {
+    id: string;
+    subject?: string;
+    sender?: string;
+    resumo?: string;
+    task_id?: string;
+    task_titulo?: string;
+    task_status?: string;
+    reativar_sugerido?: boolean;
+    status: 'pending' | 'expired';
+    google_message_id?: string;
+    analyzed_at?: string;
+}
+
+const EmailLinkSuggestionsPanel: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
+    const [suggestions, setSuggestions] = useState<EmailActionSuggestion[]>([]);
+    const [busyId, setBusyId] = useState<string | null>(null);
+
+    useEffect(() => {
+        const unsubscribers = (['pending', 'expired'] as const).map(status => {
+            const q = query(collection(db, 'email_action_suggestions'), where('status', '==', status));
+            return onSnapshot(q, snap => {
+                const items: EmailActionSuggestion[] = snap.docs.map(d => ({ id: d.id, ...(d.data() as any), status }));
+                setSuggestions(prev => [...prev.filter(s => s.status !== status), ...items]);
+            });
+        });
+        return () => unsubscribers.forEach(unsub => unsub());
+    }, []);
+
+    const sorted = useMemo(
+        () => [...suggestions].sort((a, b) => (b.analyzed_at || '').localeCompare(a.analyzed_at || '')),
+        [suggestions]
+    );
+
+    if (sorted.length === 0) return null;
+
+    const decide = async (suggestion: EmailActionSuggestion, action: 'ok' | 'on' | 'no') => {
+        setBusyId(suggestion.id);
+        try {
+            const nowIso = new Date().toISOString();
+            if (action !== 'no' && suggestion.task_id) {
+                const gmailUrl = `https://mail.google.com/mail/u/0/#all/${suggestion.google_message_id || suggestion.id}`;
+                const nota = buildDiaryEmailNote(suggestion.subject || '(sem assunto)', suggestion.sender || '', gmailUrl, suggestion.resumo || '');
+                const taskUpdates: Record<string, any> = {
+                    acompanhamento: arrayUnion({ data: nowIso, nota }),
+                    data_atualizacao: nowIso
+                };
+                if (action === 'on') {
+                    taskUpdates.status = 'em andamento';
+                    taskUpdates.data_conclusao = null;
+                }
+                await updateDoc(doc(db, 'tarefas', suggestion.task_id), taskUpdates);
+            }
+            await updateDoc(doc(db, 'email_action_suggestions', suggestion.id), {
+                status: action === 'no' ? 'dismissed' : (action === 'on' ? 'applied_reactivated' : 'applied'),
+                decided_at: nowIso,
+                ...(action !== 'no' ? { applied_at: nowIso } : {})
+            });
+        } catch (err) {
+            console.error('[EmailLinkSuggestions] Falha ao decidir sugestão:', err);
+        } finally {
+            setBusyId(null);
+        }
+    };
+
+    return (
+        <DashboardCard title={`E-mails para vincular a ações (${sorted.length})`} isDark={isDark}>
+            <div className="flex flex-col gap-3">
+                {sorted.slice(0, 6).map(suggestion => (
+                    <div key={suggestion.id} className={`rounded-xl border p-3 ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-100 bg-slate-50'}`}>
+                        <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                                <p className="text-xs font-bold truncate">{suggestion.subject || '(sem assunto)'}</p>
+                                <p className={`text-[10px] truncate ${isDark ? 'text-white/50' : 'text-slate-500'}`}>{suggestion.sender}</p>
+                            </div>
+                            {suggestion.status === 'expired' && (
+                                <span className="shrink-0 text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">
+                                    Expirado no Telegram
+                                </span>
+                            )}
+                        </div>
+                        {suggestion.task_titulo && (
+                            <p className={`mt-1 text-[10px] font-bold ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}>
+                                → {suggestion.task_titulo}{suggestion.task_status ? ` (${suggestion.task_status})` : ''}
+                            </p>
+                        )}
+                        {suggestion.resumo && (
+                            <p className={`mt-1 text-[10px] leading-snug ${isDark ? 'text-white/60' : 'text-slate-600'}`}>{suggestion.resumo}</p>
+                        )}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                disabled={busyId === suggestion.id}
+                                onClick={() => decide(suggestion, 'ok')}
+                                className="flex-1 rounded-lg bg-[#9333ea] py-1.5 text-[10px] font-bold uppercase tracking-wider text-white transition hover:bg-[#7800ce] disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                Registrar
+                            </button>
+                            {suggestion.reativar_sugerido && (
+                                <button
+                                    type="button"
+                                    disabled={busyId === suggestion.id}
+                                    onClick={() => decide(suggestion, 'on')}
+                                    className="flex-1 rounded-lg border border-[#9333ea] py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#9333ea] transition hover:bg-[#9333ea]/10 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    Registrar + Reativar
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                disabled={busyId === suggestion.id}
+                                onClick={() => decide(suggestion, 'no')}
+                                className={`rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? 'text-white/40 hover:bg-white/10' : 'text-slate-400 hover:bg-slate-200'}`}
+                            >
+                                Ignorar
+                            </button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </DashboardCard>
+    );
 };
 
 // --- MAIN COMPONENT ---
@@ -321,6 +450,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 isDark ? 'text-white' : 'text-[#151c27]'
             }`}
         >
+
+            <EmailLinkSuggestionsPanel isDark={isDark} />
 
             <div className="flex flex-col xl:flex-row gap-6 w-full items-stretch min-h-0 xl:h-[calc(100vh-7rem)]">
 

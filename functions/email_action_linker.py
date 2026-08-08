@@ -240,6 +240,25 @@ def _send_email_suggestion_telegram(db, chat_id, msg_id: str, data: dict, send_f
     return bool(send_fn(db, chat_id, text, keyboard))
 
 
+def _build_email_diary_note(msg_id: str, data: dict, auto: bool) -> str:
+    """
+    Serializa a nota no mesmo formato rico `EMAIL::JSON::{...}` que o frontend
+    entende nativamente (ver src/utils/diaryEntries.ts, buildDiaryEmailNote),
+    para que o DiarioBordoUI renderize um chip em vez de texto cru.
+    """
+    gmail_link = f"https://mail.google.com/mail/u/0/#all/{msg_id}"
+    resumo = str(data.get("resumo") or "").strip()
+    if auto:
+        resumo = (resumo + " (vínculo automático — confiança alta)").strip()
+    payload = {
+        "n": str(data.get("subject") or "(sem assunto)"),
+        "v": gmail_link,
+        "s": str(data.get("sender") or ""),
+        "r": resumo,
+    }
+    return "EMAIL::JSON::" + json.dumps(payload, ensure_ascii=False)
+
+
 def apply_suggestion(db, msg_id: str, data: dict, reactivate: bool, auto: bool = False) -> bool:
     """
     Grava a entrada no diário de bordo da ação vinculada (e opcionalmente
@@ -257,16 +276,7 @@ def apply_suggestion(db, msg_id: str, data: dict, reactivate: bool, auto: bool =
         return False
 
     now_iso = datetime.now(timezone.utc).isoformat()
-    tag = "[📧 Hermes · auto]" if auto else "[📧 Hermes]"
-    gmail_link = f"https://mail.google.com/mail/u/0/#all/{msg_id}"
-    nota_lines = [
-        f"{tag} E-mail vinculado — De: {data.get('sender') or ''}",
-        f"Assunto: {data.get('subject') or ''}",
-    ]
-    if data.get("resumo"):
-        nota_lines.append(str(data["resumo"]))
-    nota_lines.append(f"Gmail: {gmail_link}")
-    entry = {"data": now_iso, "nota": "\n".join(nota_lines)}
+    entry = {"data": now_iso, "nota": _build_email_diary_note(msg_id, data, auto)}
 
     updates = {"acompanhamento": firestore.ArrayUnion([entry]), "data_atualizacao": now_iso}
     if reactivate:
