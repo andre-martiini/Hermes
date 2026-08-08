@@ -2254,19 +2254,16 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
                 from email_action_linker import apply_suggestion
 
                 reactivate = action == "on"
+                # apply_suggestion grava a nota no diário e marca a sugestão como aplicada
+                # numa única transação Firestore (evita duplicar a nota se uma etapa falhar
+                # a meio, e recusa aplicar duas vezes a mesma sugestão numa corrida).
                 applied = apply_suggestion(db, msg_id, suggestion_data, reactivate=reactivate)
                 if not applied:
-                    _answer_callback_query(token, query_id, "Não encontrei a ação para atualizar.")
-                    msg = "⚠️ Não foi possível registrar — a ação vinculada não foi encontrada."
+                    _answer_callback_query(token, query_id, "Não foi possível registrar.")
+                    msg = "⚠️ Não foi possível registrar — a sugestão já foi decidida em outro lugar ou a ação não foi encontrada."
                     _persist_callback_turn("Botão: registrar vínculo de e-mail", msg)
                     _send_telegram_message(token, chat_id, msg)
                 else:
-                    now_iso = datetime.now(timezone.utc).isoformat()
-                    suggestion_ref.update({
-                        "status": "applied_reactivated" if reactivate else "applied",
-                        "applied_at": now_iso,
-                        "decided_at": now_iso,
-                    })
                     task_titulo = suggestion_data.get("task_titulo") or "(ação)"
                     _answer_callback_query(token, query_id, "Registrado no diário de bordo!")
                     if reactivate:

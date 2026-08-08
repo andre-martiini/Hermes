@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { arrayUnion, collection, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
+import { arrayUnion, collection, doc, onSnapshot, query, runTransaction, updateDoc, where } from 'firebase/firestore';
 import { db } from './firebase';
 import {
     Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry,
@@ -176,24 +176,45 @@ const EmailLinkSuggestionsPanel: React.FC<{ isDark?: boolean }> = ({ isDark = fa
         setBusyId(suggestion.id);
         try {
             const nowIso = new Date().toISOString();
-            if (action !== 'no' && suggestion.task_id) {
+            const suggestionRef = doc(db, 'email_action_suggestions', suggestion.id);
+
+            if (action === 'no') {
+                await updateDoc(suggestionRef, { status: 'dismissed', decided_at: nowIso });
+            } else if (suggestion.task_id) {
+                const taskRef = doc(db, 'tarefas', suggestion.task_id);
                 const gmailUrl = `https://mail.google.com/mail/u/0/#all/${suggestion.google_message_id || suggestion.id}`;
                 const nota = buildDiaryEmailNote(suggestion.subject || '(sem assunto)', suggestion.sender || '', gmailUrl, suggestion.resumo || '');
-                const taskUpdates: Record<string, any> = {
-                    acompanhamento: arrayUnion({ data: nowIso, nota }),
-                    data_atualizacao: nowIso
-                };
-                if (action === 'on') {
-                    taskUpdates.status = 'em andamento';
-                    taskUpdates.data_conclusao = null;
-                }
-                await updateDoc(doc(db, 'tarefas', suggestion.task_id), taskUpdates);
+                const reactivate = action === 'on';
+
+                // Transação: só aplica se a sugestão ainda estiver "pending" (evita duplicar a
+                // nota no diário se o Telegram e esta fila web decidirem a mesma sugestão quase
+                // ao mesmo tempo) e grava a nota + o status da sugestão atomicamente — mesma
+                // lógica de functions/email_action_linker.py:apply_suggestion.
+                await runTransaction(db, async (transaction) => {
+                    const suggestionSnap = await transaction.get(suggestionRef);
+                    if (!suggestionSnap.exists() || suggestionSnap.data().status !== 'pending') {
+                        throw new Error('Sugestão já foi decidida em outro lugar.');
+                    }
+                    const taskSnap = await transaction.get(taskRef);
+                    if (!taskSnap.exists()) {
+                        throw new Error('Ação vinculada não encontrada.');
+                    }
+                    const taskUpdates: Record<string, any> = {
+                        acompanhamento: arrayUnion({ data: nowIso, nota }),
+                        data_atualizacao: nowIso
+                    };
+                    if (reactivate) {
+                        taskUpdates.status = 'em andamento';
+                        taskUpdates.data_conclusao = null;
+                    }
+                    transaction.update(taskRef, taskUpdates);
+                    transaction.update(suggestionRef, {
+                        status: reactivate ? 'applied_reactivated' : 'applied',
+                        applied_at: nowIso,
+                        decided_at: nowIso
+                    });
+                });
             }
-            await updateDoc(doc(db, 'email_action_suggestions', suggestion.id), {
-                status: action === 'no' ? 'dismissed' : (action === 'on' ? 'applied_reactivated' : 'applied'),
-                decided_at: nowIso,
-                ...(action !== 'no' ? { applied_at: nowIso } : {})
-            });
         } catch (err) {
             console.error('[EmailLinkSuggestions] Falha ao decidir sugestão:', err);
         } finally {

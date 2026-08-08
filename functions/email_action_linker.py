@@ -2,8 +2,13 @@
 Vincula e-mails recebidos a ações (tarefas) em andamento/stand-by via IA,
 propondo confirmação por Telegram e registro no diário de bordo.
 
-Desenho completo, schema da coleção `email_action_suggestions` e plano de
-implementação: docs/okf/propostas/vinculo-email-acao.md
+Toda sugestão passa por confirmação humana (Telegram ou fila web em
+DashboardView.tsx) antes de tocar em uma tarefa — a classificação vem de
+conteúdo controlado pelo remetente do e-mail, então não é tratada como
+sinal confiável o suficiente para agir sozinha.
+
+Schema da coleção `email_action_suggestions`: docs/okf/arquitetura/schema-firestore.md
+Mapa de onde esta função é chamada: docs/okf/arquitetura/cloud-functions.md
 """
 
 import base64
@@ -18,9 +23,16 @@ DEFAULT_MIN_CONFIDENCE = 0.6
 DEFAULT_MAX_LLM_CALLS_PER_PASS = 10
 DEFAULT_MAX_SUGGESTIONS_PER_PASS = 5
 DEFAULT_LOOKBACK = "2d"
-DEFAULT_AUTO_APPLY_CONFIDENCE = 0.9
 EXPIRE_AFTER_DAYS = 7
 GMAIL_QUERY_MAX_RESULTS = 20
+GMAIL_MAX_PAGES_PER_PASS = 5
+
+# Classificações de e-mail são geradas por um LLM a partir de conteúdo controlado
+# pelo remetente (assunto/corpo do e-mail) — não são um sinal confiável o suficiente
+# para agir sem confirmação humana (um e-mail malicioso poderia tentar instruir o
+# modelo a escolher uma ação e reportar confiança alta). Por isso não existe
+# auto-aplicação: toda sugestão "related" sempre passa por confirmação manual
+# (Telegram ou fila web), independente da confiança relatada pelo modelo.
 
 # Mesma tolerância a variantes de status usada no frontend (isStandbyStatus,
 # src/utils/helpers.tsx) e no matching lexical de ações (busca_grafo.py).
@@ -51,7 +63,6 @@ def _load_settings(db) -> dict:
         "max_llm_calls_per_pass": int(cfg.get("max_llm_calls_per_pass", DEFAULT_MAX_LLM_CALLS_PER_PASS)),
         "max_suggestions_per_pass": int(cfg.get("max_suggestions_per_pass", DEFAULT_MAX_SUGGESTIONS_PER_PASS)),
         "lookback": str(cfg.get("lookback", DEFAULT_LOOKBACK)),
-        "auto_apply_confidence": float(cfg.get("auto_apply_confidence", DEFAULT_AUTO_APPLY_CONFIDENCE)),
     }
 
 
@@ -240,50 +251,107 @@ def _send_email_suggestion_telegram(db, chat_id, msg_id: str, data: dict, send_f
     return bool(send_fn(db, chat_id, text, keyboard))
 
 
-def _build_email_diary_note(msg_id: str, data: dict, auto: bool) -> str:
+def _build_email_diary_note(msg_id: str, data: dict) -> str:
     """
     Serializa a nota no mesmo formato rico `EMAIL::JSON::{...}` que o frontend
     entende nativamente (ver src/utils/diaryEntries.ts, buildDiaryEmailNote),
     para que o DiarioBordoUI renderize um chip em vez de texto cru.
     """
     gmail_link = f"https://mail.google.com/mail/u/0/#all/{msg_id}"
-    resumo = str(data.get("resumo") or "").strip()
-    if auto:
-        resumo = (resumo + " (vínculo automático — confiança alta)").strip()
     payload = {
         "n": str(data.get("subject") or "(sem assunto)"),
         "v": gmail_link,
         "s": str(data.get("sender") or ""),
-        "r": resumo,
+        "r": str(data.get("resumo") or "").strip(),
     }
     return "EMAIL::JSON::" + json.dumps(payload, ensure_ascii=False)
 
 
-def apply_suggestion(db, msg_id: str, data: dict, reactivate: bool, auto: bool = False) -> bool:
+def apply_suggestion(db, msg_id: str, data: dict, reactivate: bool) -> bool:
     """
-    Grava a entrada no diário de bordo da ação vinculada (e opcionalmente
-    reativa uma ação em stand-by). Não grava o próprio doc de sugestão —
-    isso é responsabilidade do chamador (callback do Telegram ou auto-apply).
+    Confirma a ação de um usuário sobre uma sugestão `pending` (via Telegram
+    ou fila web): grava a entrada no diário de bordo da ação vinculada (e
+    opcionalmente reativa uma ação em stand-by) e marca a sugestão como
+    aplicada — tudo dentro de uma única transação Firestore.
+
+    A atomicidade importa por dois motivos: (1) evita que uma falha parcial
+    (nota gravada na tarefa, mas a atualização do doc de sugestão falha)
+    deixe a sugestão presa em "pending" — o que faria uma nova tentativa
+    duplicar a entrada no diário, já que cada nota carrega um timestamp novo
+    e `ArrayUnion` não deduplica por conteúdo; e (2) o `get` da sugestão
+    dentro da transação recusa aplicar duas vezes a mesma sugestão em caso de
+    corrida (ex.: duplo toque no botão do Telegram, ou Telegram e fila web
+    decidindo ao mesmo tempo).
     """
     from firebase_admin import firestore
 
     task_id = data.get("task_id")
     if not task_id:
         return False
+
     task_ref = db.collection("tarefas").document(task_id)
-    task_doc = task_ref.get()
-    if not task_doc.exists:
-        return False
-
+    suggestion_ref = db.collection("email_action_suggestions").document(msg_id)
     now_iso = datetime.now(timezone.utc).isoformat()
-    entry = {"data": now_iso, "nota": _build_email_diary_note(msg_id, data, auto)}
+    entry = {"data": now_iso, "nota": _build_email_diary_note(msg_id, data)}
+    new_status = "applied_reactivated" if reactivate else "applied"
 
-    updates = {"acompanhamento": firestore.ArrayUnion([entry]), "data_atualizacao": now_iso}
-    if reactivate:
-        updates["status"] = "em andamento"
-        updates["data_conclusao"] = None
-    task_ref.update(updates)
-    return True
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def _run(transaction):
+        suggestion_snap = suggestion_ref.get(transaction=transaction)
+        if not suggestion_snap.exists or (suggestion_snap.to_dict() or {}).get("status") != "pending":
+            return False
+        task_snap = task_ref.get(transaction=transaction)
+        if not task_snap.exists:
+            return False
+
+        task_updates = {"acompanhamento": firestore.ArrayUnion([entry]), "data_atualizacao": now_iso}
+        if reactivate:
+            task_updates["status"] = "em andamento"
+            task_updates["data_conclusao"] = None
+        transaction.update(task_ref, task_updates)
+        transaction.update(suggestion_ref, {
+            "status": new_status,
+            "applied_at": now_iso,
+            "decided_at": now_iso,
+        })
+        return True
+
+    return _run(transaction)
+
+
+def _collect_fresh_message_ids(service, query: str, needed: int, suggestions_col) -> list[str]:
+    """
+    Pagina os resultados do Gmail (via `nextPageToken`) até reunir `needed`
+    mensagens que ainda não têm doc em `email_action_suggestions`, respeitando
+    um teto de páginas por passada (`GMAIL_MAX_PAGES_PER_PASS`) para não deixar
+    o custo de API do Gmail crescer sem limite numa caixa muito cheia.
+
+    Sem paginação, uma caixa com mais de `GMAIL_QUERY_MAX_RESULTS` mensagens
+    novas na janela de `lookback` nunca teria as mensagens além da primeira
+    página analisadas: a query (mais recentes primeiro) sempre traz o mesmo
+    topo, essas já têm doc de sugestão, e as mais antigas só seriam
+    alcançadas se a janela de `lookback` não as tivesse excluído antes.
+    """
+    fresh_ids: list[str] = []
+    page_token = None
+    for _ in range(GMAIL_MAX_PAGES_PER_PASS):
+        request = service.users().messages().list(
+            userId='me', q=query, maxResults=GMAIL_QUERY_MAX_RESULTS, pageToken=page_token
+        )
+        results = request.execute(num_retries=3)
+        for m_info in results.get('messages', []) or []:
+            msg_id = m_info['id']
+            if suggestions_col.document(msg_id).get().exists:
+                continue
+            fresh_ids.append(msg_id)
+            if len(fresh_ids) >= needed:
+                return fresh_ids
+        page_token = results.get('nextPageToken')
+        if not page_token:
+            break
+    return fresh_ids
 
 
 def link_emails_to_actions(db, service, sync_ref, logs):
@@ -341,14 +409,13 @@ def link_emails_to_actions(db, service, sync_ref, logs):
     # --- Etapa B: analisa e-mails novos ---
     query = f'in:inbox newer_than:{settings["lookback"]} -category:promotions -category:social'
     try:
-        results = service.users().messages().list(userId='me', q=query, maxResults=GMAIL_QUERY_MAX_RESULTS).execute(num_retries=3)
+        fresh_message_ids = _collect_fresh_message_ids(service, query, settings["max_llm_calls_per_pass"], suggestions_col)
     except Exception as exc:
         log_to_firestore(sync_ref, logs, f"[EMAIL-LINK][ERRO] Falha ao listar e-mails: {exc}", True)
         return
 
-    messages = results.get('messages', [])
-    if not messages:
-        log_to_firestore(sync_ref, logs, "[EMAIL-LINK] Nenhum e-mail recente para analisar.", True)
+    if not fresh_message_ids:
+        log_to_firestore(sync_ref, logs, "[EMAIL-LINK] Nenhum e-mail novo para analisar.", True)
         return
 
     candidates = _load_candidate_tasks(db)
@@ -367,18 +434,9 @@ def link_emails_to_actions(db, service, sync_ref, logs):
     genai = get_genai_module()
     client = genai.Client(api_key=api_key)
 
-    llm_calls = 0
     analyzed = 0
-    skipped_throttle = 0
 
-    for m_info in messages:
-        msg_id = m_info['id']
-        if suggestions_col.document(msg_id).get().exists:
-            continue
-        if llm_calls >= settings["max_llm_calls_per_pass"]:
-            skipped_throttle += 1
-            continue
-
+    for msg_id in fresh_message_ids:
         try:
             msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute(num_retries=3)
         except Exception as exc:
@@ -389,7 +447,6 @@ def link_emails_to_actions(db, service, sync_ref, logs):
         snippet = msg.get('snippet', '')
         body = _extract_email_body(msg.get('payload', {}))
 
-        llm_calls += 1
         try:
             analysis = _analyze_email(client, db, sender, subject, body, snippet, candidates_text)
         except Exception as exc:
@@ -430,31 +487,9 @@ def link_emails_to_actions(db, service, sync_ref, logs):
             "resumo": str(analysis.get("resumo") or "").strip(),
             "nota_sugerida": str(analysis.get("nota_sugerida") or "").strip(),
             "reativar_sugerido": reativar_sugerido,
+            "status": "pending",
+            "telegram_sent": False,
         })
-
-        if confidence >= settings["auto_apply_confidence"]:
-            applied = apply_suggestion(db, msg_id, base_doc, reactivate=reativar_sugerido, auto=True)
-            base_doc["status"] = ("applied_reactivated" if reativar_sugerido else "applied") if applied else "pending"
-            base_doc["telegram_sent"] = False
-            if applied:
-                base_doc["applied_at"] = now.isoformat()
-                suggestions_col.document(msg_id).set(base_doc)
-                if chat_id:
-                    icon = "🔄" if reativar_sugerido else "📧"
-                    text = (
-                        f"{icon} Hermes vinculou automaticamente um e-mail à ação "
-                        f'"{task["titulo"]}" (confiança alta) e registrou no diário de bordo.\n\n'
-                        f"De: {sender}\nAssunto: {subject}\n{base_doc['resumo']}"
-                    )
-                    if _send_telegram_message_raw_with_keyboard(db, chat_id, text, None):
-                        base_doc["telegram_sent"] = True
-                        suggestions_col.document(msg_id).update({"telegram_sent": True})
-                log_to_firestore(sync_ref, logs, f"[EMAIL-LINK] E-mail {msg_id} auto-vinculado à ação '{task['titulo']}' (confiança {confidence:.2f}).", True)
-                continue
-            # falha ao aplicar (ex.: tarefa removida entre a análise e a gravação) — cai para o fluxo de confirmação manual
-
-        base_doc["status"] = "pending"
-        base_doc["telegram_sent"] = False
         suggestions_col.document(msg_id).set(base_doc)
 
         if sent_this_pass >= settings["max_suggestions_per_pass"]:
@@ -463,6 +498,5 @@ def link_emails_to_actions(db, service, sync_ref, logs):
             suggestions_col.document(msg_id).update({"telegram_sent": True, "sent_at": now.isoformat()})
             sent_this_pass += 1
 
-    if analyzed or skipped_throttle:
-        extra = f" {skipped_throttle} adiado(s) para a próxima passada (teto de análises)." if skipped_throttle else ""
-        log_to_firestore(sync_ref, logs, f"[EMAIL-LINK] {analyzed} e-mail(is) analisado(s).{extra}", True)
+    if analyzed:
+        log_to_firestore(sync_ref, logs, f"[EMAIL-LINK] {analyzed} e-mail(is) analisado(s).", True)

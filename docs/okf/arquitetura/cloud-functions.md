@@ -21,7 +21,7 @@ O backend roda em Cloud Functions Python (gen2). Há ~79 funções exportadas em
 | `scheduled_sync` | Scheduler (30 min) | Sincronização periódica automática |
 | `on_tarefa_written` | Firestore write (`tarefas/{id}`) | Monitora mudanças de horário/prazo |
 | `on_processo_updated` | Firestore update (`tarefas/{id}`) | Detecta `processo_sei` e aciona scraper SIPAC via PubSub |
-| `link_emails_to_actions` (`email_action_linker.py`) | (interno, chamado por `run_full_sync` após `sync_boletos_gmail`) | Analisa e-mails recentes via IA, propõe vínculo com ações em andamento/stand-by por Telegram (`emlink:{msgId}:{ok\|on\|no}`) e grava em `email_action_suggestions`; confiança ≥ teto configurado aplica automaticamente. Flag `system/settings.email_action_linker.enabled` |
+| `link_emails_to_actions` (`email_action_linker.py`) | (interno, chamado por `run_full_sync` após `sync_boletos_gmail`) | Analisa e-mails recentes via IA, propõe vínculo com ações em andamento/stand-by por Telegram (`emlink:{msgId}:{ok\|on\|no}`) e grava em `email_action_suggestions`; sempre exige confirmação humana (nunca aplica sozinho — a classificação vem de conteúdo controlado pelo remetente do e-mail). Flag `system/settings.email_action_linker.enabled` |
 | `on_vectorize_requested` | PubSub (`vectorize-process`) | Processa vetorização de documentos |
 | `vectorize_process_docs_callable` | Callable | Vetoriza documentos de uma tarefa |
 | `upload_to_drive` | Callable | Upload de arquivo para o Google Drive |
