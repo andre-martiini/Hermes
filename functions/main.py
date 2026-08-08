@@ -2357,6 +2357,14 @@ def run_full_sync(trigger_reason='unspecified'):
             except Exception as e_link:
                 log_to_firestore(sync_ref, logs, f"[EMAIL-LINK][ERRO] Falha inesperada no vínculo e-mail-ação: {e_link}", True)
 
+            # Vínculo automático de reuniões encerradas a ações (matching determinístico por
+            # google_calendar_id, sem IA). Mesma proteção: nunca derruba o restante do sync.
+            try:
+                from email_action_linker import link_calendar_events_to_actions
+                link_calendar_events_to_actions(db, sync_ref, logs)
+            except Exception as e_cal_link:
+                log_to_firestore(sync_ref, logs, f"[CAL-LINK][ERRO] Falha inesperada no vínculo calendar-ação: {e_cal_link}", True)
+
             sync_state = sync_ref.get().to_dict() or {}
             if not sync_state.get('pending_request'):
                 break
@@ -2682,6 +2690,18 @@ def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
     db = get_db()
 
     updates = {}
+
+    # Notificações do scraper SIPAC (functions_node/index.js) tentam primeiro o vínculo
+    # determinístico com uma ação por número de processo; se conseguir enviar o cartão de
+    # confirmação, pula o espelhamento genérico abaixo para não duplicar o aviso.
+    if not notif.get('sent_to_telegram') and notif.get('link') == '@SipacTrackingTool':
+        try:
+            from email_action_linker import try_link_sipac_notification
+            if try_link_sipac_notification(db, event.data.reference.id, notif):
+                event.data.reference.update({'sent_to_telegram': True, 'linked_to_acao': True})
+                return
+        except Exception as exc:
+            print(f"[SIPAC-LINK] Falha ao tentar vincular notificação SIPAC a ação: {exc}")
 
     if not notif.get('sent_to_telegram') and _should_mirror_notification_to_telegram(notif):
 

@@ -722,6 +722,10 @@ exports.scheduledSipacSync = functions.runWith({
                     title: `Alteração no SIPAC: ${numeroProcesso}`,
                     message: notificationMessage,
                     assunto: assuntoLabel,
+                    // Campo explícito para on_notificacao_created (main.py) tentar o vínculo
+                    // determinístico com uma ação por tarefas.processo_sei, sem precisar
+                    // parsear o número de dentro do título.
+                    numeroProcesso: numeroProcesso,
                     type: 'info',
                     timestamp: new Date().toISOString(),
                     isRead: false,

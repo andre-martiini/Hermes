@@ -103,8 +103,16 @@ def _load_candidate_tasks(db) -> list[dict]:
             "is_standby": _is_standby(status_norm),
             "notas": (data.get("notas") or "").strip()[:300],
             "acompanhamento_recente": recentes,
+            # Chaves de matching determinístico usadas pelos produtores sem IA
+            # (SIPAC por número de processo, Calendar por ID do evento).
+            "processo_sei": (data.get("processo_sei") or "").strip(),
+            "google_calendar_id": (data.get("google_calendar_id") or "").strip(),
         })
     return candidates
+
+
+def _normalize_digits(value) -> str:
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
 
 
 def _format_candidates_for_prompt(candidates: list[dict]) -> str:
@@ -633,3 +641,131 @@ def link_emails_to_actions(db, service, sync_ref, logs):
 
     if analyzed:
         log_to_firestore(sync_ref, logs, f"[EMAIL-LINK] {analyzed} e-mail(is) analisado(s).", True)
+
+
+def try_link_sipac_notification(db, notification_id: str, notif: dict) -> bool:
+    """
+    Chamado por `on_notificacao_created` (main.py) quando o scraper SIPAC
+    (`functions_node/index.js`, `link == '@SipacTrackingTool'`) cria uma
+    notificação de mudança. Casa o número do processo com ações ativas por
+    `tarefas.processo_sei` — matching determinístico, sem IA — e propõe
+    registrar a movimentação no diário de bordo.
+
+    Retorna True se encontrou uma ação correspondente e conseguiu enviar o
+    cartão de confirmação — nesse caso o chamador pula o espelhamento
+    genérico da notificação, para não duplicar o aviso. False caso
+    contrário (sem ação correspondente, ou falha no envio), quando o
+    chamador deve cair para o espelhamento genérico como reserva.
+    """
+    from main import _resolve_default_telegram_chat_id
+
+    numero_processo = str(notif.get("numeroProcesso") or "").strip()
+    numero_digits = _normalize_digits(numero_processo)
+    if not numero_digits:
+        return False
+
+    candidates = _load_candidate_tasks(db)
+    task = next((c for c in candidates if _normalize_digits(c.get("processo_sei")) == numero_digits), None)
+    if not task:
+        return False
+
+    chat_id = _resolve_default_telegram_chat_id(db)
+    if not chat_id:
+        return False
+
+    resumo = str(notif.get("message") or "").strip()[:600]
+    result = queue_and_maybe_send_suggestion(
+        db,
+        f"sipac_{notification_id}",
+        canal="sipac",
+        task=task,
+        titulo_sinal=f"Processo {numero_processo}",
+        origem_sinal=str(notif.get("assunto") or "SIPAC"),
+        resumo=resumo,
+        nota_sugerida=resumo,
+        reativar_sugerido=True,
+        chat_id=chat_id,
+        extra={"numero_processo": numero_processo},
+    )
+    return bool(result and result.get("telegram_sent"))
+
+
+CALENDAR_EVENT_LOOKBACK_MINUTES = 180
+
+
+def link_calendar_events_to_actions(db, sync_ref, logs):
+    """
+    Propõe registrar no diário de bordo o fechamento de reuniões vinculadas
+    a uma ação. Matching determinístico por `tarefas.google_calendar_id` —
+    o mesmo campo já usado pela sincronia reversa Calendar→Hermes em
+    `sync_google_calendar` — sem IA, sem custo. Chamada no fim de
+    `run_full_sync`, depois de `link_emails_to_actions`.
+    """
+    from main import _resolve_default_telegram_chat_id, log_to_firestore
+
+    settings = _load_settings(db)
+    if not settings["enabled"]:
+        return
+
+    now = datetime.now(timezone.utc)
+    window_start = (now - timedelta(minutes=CALENDAR_EVENT_LOOKBACK_MINUTES)).isoformat()
+    now_iso = now.isoformat()
+
+    try:
+        events = list(
+            db.collection("google_calendar_events")
+            .where("data_fim", ">=", window_start)
+            .where("data_fim", "<=", now_iso)
+            .stream()
+        )
+    except Exception as exc:
+        log_to_firestore(sync_ref, logs, f"[CAL-LINK][ERRO] Falha ao consultar eventos encerrados: {exc}", True)
+        return
+    if not events:
+        return
+
+    candidates_by_calendar_id = {
+        c["google_calendar_id"]: c for c in _load_candidate_tasks(db) if c.get("google_calendar_id")
+    }
+    if not candidates_by_calendar_id:
+        return
+
+    chat_id = _resolve_default_telegram_chat_id(db)
+    suggestions_col = db.collection("email_action_suggestions")
+    linked = 0
+
+    for event_doc in events:
+        event = event_doc.to_dict() or {}
+        google_id = event.get("google_id")
+        task = candidates_by_calendar_id.get(google_id)
+        if not task:
+            continue
+        suggestion_id = f"calendar_{google_id}"
+        if suggestions_col.document(suggestion_id).get().exists:
+            continue
+
+        titulo = event.get("titulo") or "(sem título)"
+        hora_fim = ""
+        try:
+            hora_fim = datetime.fromisoformat(str(event.get("data_fim"))).strftime("%H:%M")
+        except Exception:
+            pass
+        resumo = f"A reunião \"{titulo}\" terminou{f' às {hora_fim}' if hora_fim else ''}."
+
+        result = queue_and_maybe_send_suggestion(
+            db,
+            suggestion_id,
+            canal="calendar",
+            task=task,
+            titulo_sinal=titulo,
+            origem_sinal="Google Calendar",
+            resumo=resumo,
+            nota_sugerida=resumo,
+            reativar_sugerido=True,
+            chat_id=chat_id,
+        )
+        if result:
+            linked += 1
+
+    if linked:
+        log_to_firestore(sync_ref, logs, f"[CAL-LINK] {linked} reunião(ões) encerrada(s) vinculada(s) a ações.", True)

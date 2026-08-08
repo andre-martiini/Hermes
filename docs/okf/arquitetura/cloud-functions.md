@@ -22,6 +22,8 @@ O backend roda em Cloud Functions Python (gen2). Há ~79 funções exportadas em
 | `on_tarefa_written` | Firestore write (`tarefas/{id}`) | Monitora mudanças de horário/prazo |
 | `on_processo_updated` | Firestore update (`tarefas/{id}`) | Detecta `processo_sei` e aciona scraper SIPAC via PubSub |
 | `link_emails_to_actions` (`email_action_linker.py`) | (interno, chamado por `run_full_sync` após `sync_boletos_gmail`) | Analisa e-mails recentes via IA, propõe vínculo com ações em andamento/stand-by por Telegram (`emlink:{msgId}:{ok\|on\|no}`) e grava em `email_action_suggestions`; sempre exige confirmação humana (nunca aplica sozinho — a classificação vem de conteúdo controlado pelo remetente do e-mail). Flag `system/settings.email_action_linker.enabled` |
+| `link_calendar_events_to_actions` (`email_action_linker.py`) | (interno, chamado por `run_full_sync` após `link_emails_to_actions`) | Propõe registrar no diário o fechamento de reuniões vinculadas a uma ação (`tarefas.google_calendar_id`) — matching determinístico, sem IA. Mesma flag `email_action_linker.enabled` |
+| `try_link_sipac_notification` (`email_action_linker.py`) | (interno, chamado por `on_notificacao_created` quando `link == '@SipacTrackingTool'`) | Casa `notificacoes.numeroProcesso` (gravado pelo scraper Node) com `tarefas.processo_sei` — matching determinístico, sem IA. Se enviar o cartão de confirmação, o espelhamento genérico da notificação no Telegram é pulado |
 | `on_vectorize_requested` | PubSub (`vectorize-process`) | Processa vetorização de documentos |
 | `vectorize_process_docs_callable` | Callable | Vetoriza documentos de uma tarefa |
 | `upload_to_drive` | Callable | Upload de arquivo para o Google Drive |
