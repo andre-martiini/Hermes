@@ -2365,6 +2365,15 @@ def run_full_sync(trigger_reason='unspecified'):
             except Exception as e_cal_link:
                 log_to_firestore(sync_ref, logs, f"[CAL-LINK][ERRO] Falha inesperada no vínculo calendar-ação: {e_cal_link}", True)
 
+            # Triagem de conversas de WhatsApp capturadas por services/whatsapp-capture
+            # (propõe vínculo com ações + grava digests vetorizados). Desligada por padrão
+            # e sem efeito nenhum enquanto o worker local não estiver rodando/configurado.
+            try:
+                from whatsapp_ingest import triage_whatsapp_messages
+                triage_whatsapp_messages(db, sync_ref, logs)
+            except Exception as e_wa_ingest:
+                log_to_firestore(sync_ref, logs, f"[WA-INGEST][ERRO] Falha inesperada na triagem de WhatsApp: {e_wa_ingest}", True)
+
             sync_state = sync_ref.get().to_dict() or {}
             if not sync_state.get('pending_request'):
                 break
@@ -7746,6 +7755,21 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "status, prazos ou qualquer dado de tarefa. NAO use RAG, acervo ou memoria para fabricar uma resposta."
             )
 
+        def buscar_conversas_whatsapp(query: str, limite: int = 5):
+            """Busca conversas de WhatsApp indexadas (digests) por similaridade semântica. Use quando o usuário perguntar sobre algo discutido no WhatsApp."""
+            from whatsapp_ingest import buscar_conversas_whatsapp as _buscar_whatsapp
+            res = _buscar_whatsapp(db, query, limite)
+            if res.get("erro"):
+                return f"⚠️ {res['erro']}"
+            resultados = res.get("resultados", [])
+            if not resultados:
+                return "Nenhuma conversa de WhatsApp indexada encontrada para esta busca."
+            linhas = []
+            for r in resultados:
+                topicos = ", ".join(r.get("topicos") or [])
+                linhas.append(f"- [{r.get('chat_name')}] {r.get('resumo')}" + (f" (tópicos: {topicos})" if topicos else ""))
+            return "\n".join(linhas)
+
         def buscar_arquivos_acervo(query: str):
             """Busca documentação, manuais e arquivos de referência no Acervo Global (FindNearest)."""
             from tools.busca_acervo import buscar_acervo
@@ -10822,6 +10846,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'buscar_e_analisar_email': buscar_e_analisar_email,
             'consultar_historico_acoes': consultar_historico_acoes,
             'buscar_arquivos_acervo': buscar_arquivos_acervo,
+            'buscar_conversas_whatsapp': buscar_conversas_whatsapp,
             'obter_contexto_tela': obter_contexto_tela,
             'pesquisar_internet': pesquisar_internet,
             'ler_pagina_web': ler_pagina_web,
@@ -10951,6 +10976,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         # conversa — menos tokens de schema e roteamento mais limpo para o modelo.
         if _protocolo_ativo("mail", "caixa de entrada", "inbox"):
             static_tools.append(buscar_e_analisar_email)
+        if _protocolo_ativo("whatsapp", "zap", "zapzap"):
+            static_tools.append(buscar_conversas_whatsapp)
         if _protocolo_ativo("imagem", "figura", "ilustra", "foto", "banner", "logo", "desenh"):
             static_tools.append(gerar_imagem)
         if _gate_relatorios:

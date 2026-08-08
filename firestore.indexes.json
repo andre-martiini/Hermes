@@ -64,6 +64,13 @@
       ]
     },
     {
+      "collectionGroup": "whatsapp_digests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "embedding", "vectorConfig": { "dimension": 768, "flat": {} } }
+      ]
+    },
+    {
       "collectionGroup": "knowledge_nodes",
       "queryScope": "COLLECTION",
       "fields": [
