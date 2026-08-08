@@ -2228,6 +2228,51 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
             _persist_callback_turn("Botão: ignorar mesclagem de contatos", msg)
             _send_telegram_message(token, chat_id, msg)
 
+    elif data.startswith("emlink:"):
+        parts = data.split(":")
+        msg_id = parts[1] if len(parts) > 1 else ""
+        action = parts[2] if len(parts) > 2 else ""
+        suggestion_ref = db.collection("email_action_suggestions").document(msg_id) if msg_id else None
+        suggestion_doc = suggestion_ref.get() if suggestion_ref else None
+
+        if not msg_id or action not in ("ok", "on", "no") or not suggestion_doc or not suggestion_doc.exists:
+            _answer_callback_query(token, query_id, "Sugestão não encontrada.")
+        else:
+            suggestion_data = suggestion_doc.to_dict() or {}
+            if suggestion_data.get("status") != "pending":
+                _answer_callback_query(token, query_id, "Essa sugestão já foi resolvida ou expirou.")
+            elif action == "no":
+                suggestion_ref.update({
+                    "status": "dismissed",
+                    "decided_at": datetime.now(timezone.utc).isoformat(),
+                })
+                _answer_callback_query(token, query_id, "Ok, ignorado.")
+                msg = "❌ <b>Sugestão de vínculo de e-mail ignorada.</b>"
+                _persist_callback_turn("Botão: ignorar vínculo de e-mail", msg)
+                _send_telegram_message(token, chat_id, msg)
+            else:
+                from email_action_linker import apply_suggestion
+
+                reactivate = action == "on"
+                # apply_suggestion grava a nota no diário e marca a sugestão como aplicada
+                # numa única transação Firestore (evita duplicar a nota se uma etapa falhar
+                # a meio, e recusa aplicar duas vezes a mesma sugestão numa corrida).
+                applied = apply_suggestion(db, msg_id, suggestion_data, reactivate=reactivate)
+                if not applied:
+                    _answer_callback_query(token, query_id, "Não foi possível registrar.")
+                    msg = "⚠️ Não foi possível registrar — a sugestão já foi decidida em outro lugar ou a ação não foi encontrada."
+                    _persist_callback_turn("Botão: registrar vínculo de e-mail", msg)
+                    _send_telegram_message(token, chat_id, msg)
+                else:
+                    task_titulo = suggestion_data.get("task_titulo") or "(ação)"
+                    _answer_callback_query(token, query_id, "Registrado no diário de bordo!")
+                    if reactivate:
+                        msg = f"🔄 <b>Registrado no diário e ação reativada:</b>\n{html.escape(str(task_titulo))}"
+                    else:
+                        msg = f"✅ <b>Registrado no diário de bordo:</b>\n{html.escape(str(task_titulo))}"
+                    _persist_callback_turn("Botão: registrar vínculo de e-mail", msg)
+                    _send_telegram_message(token, chat_id, msg)
+
     else:
 
         _answer_callback_query(token, query_id)

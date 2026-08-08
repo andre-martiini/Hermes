@@ -269,6 +269,27 @@ export const DiarioBordoUI = ({
       );
     }
 
+    if (richEntry?.type === 'EMAIL') {
+      const subject = richEntry.name || '(sem assunto)';
+      const sender = richEntry.sender || '';
+      const resumo = richEntry.resumo || '';
+      const gmailUrl = richEntry.value;
+      return (
+        <a href={gmailUrl} target="_blank" rel="noreferrer"
+          className={`group flex items-start gap-2 p-2 rounded-lg border transition-all ${isDark ? 'bg-white/5 border-[#e5e7eb] dark:border-white/10 hover:bg-white/10' : 'bg-indigo-50/50 border-[#e5e7eb] dark:border-white/10 hover:bg-indigo-50'}`}>
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isDark ? 'bg-white/10 text-white' : 'bg-indigo-200 text-indigo-600'}`}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className={`text-[11px] font-bold break-words leading-snug font-sans ${isDark ? 'text-white' : 'text-indigo-900'}`}>{subject}</p>
+            {sender && <p className={`text-[10px] break-all font-sans mt-0.5 ${isDark ? 'text-white/60' : 'text-indigo-700/70'}`}>{sender}</p>}
+            {resumo && <p className={`text-[10px] mt-1 leading-snug font-sans ${isDark ? 'text-white/50' : 'text-slate-600'}`}>{resumo}</p>}
+            <p className={`text-[8px] uppercase font-black tracking-widest mt-1 opacity-50 font-sans ${isDark ? 'text-white/40' : 'text-indigo-400'}`}>E-mail</p>
+          </div>
+        </a>
+      );
+    }
+
     if (richEntry?.type === 'FILE') {
       const nome = richEntry.name || 'Arquivo';
       const url = richEntry.value || '#';

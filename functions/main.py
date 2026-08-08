@@ -2349,6 +2349,14 @@ def run_full_sync(trigger_reason='unspecified'):
 
             sync_boletos_gmail(gs, sync_ref, logs)
 
+            # Vínculo automático de e-mails a ações em andamento/stand-by (via IA + confirmação Telegram).
+            # Protegido por try/except próprio: uma falha aqui nunca deve derrubar o sync financeiro/agenda.
+            try:
+                from email_action_linker import link_emails_to_actions
+                link_emails_to_actions(db, gs, sync_ref, logs)
+            except Exception as e_link:
+                log_to_firestore(sync_ref, logs, f"[EMAIL-LINK][ERRO] Falha inesperada no vínculo e-mail-ação: {e_link}", True)
+
             sync_state = sync_ref.get().to_dict() or {}
             if not sync_state.get('pending_request'):
                 break
@@ -8954,7 +8962,6 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             recorrencia_semanal: bool = False,
             dias_da_semana_recorrencia: list[int] = None,
             intervalo_semanas_recorrencia: int = None,
-            email_trigger: dict = None,
         ):
             """
             Cria uma nova ação/tarefa no sistema Hermes após confirmação explícita do usuário.
@@ -9079,19 +9086,6 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
                 now_iso = now_iso
 
-                trigger_doc = None
-                if email_trigger and isinstance(email_trigger, dict):
-                    trigger_doc = {
-                        "enabled": bool(email_trigger.get("enabled", False)),
-                        "sender": email_trigger.get("sender") or None,
-                        "subjectKeywords": email_trigger.get("subjectKeywords") or None,
-                        "bodyKeywords": email_trigger.get("bodyKeywords") or None,
-                        "action_to_take": email_trigger.get("action_to_take", "status_to_andamento"),
-                        "ai_instructions": email_trigger.get("ai_instructions") or None,
-                        "telegram_alert": bool(email_trigger.get("telegram_alert", True)),
-                        "last_triggered_email_id": None
-                    }
-
                 doc = {
                     # Campos fornecidos pelo LLM
                     "titulo": titulo.strip(),
@@ -9103,7 +9097,6 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "tags": list(tags) if tags else [],
                     "notas": notas or "",
                     "plano_acao": plano_convertido,
-                    "email_trigger": trigger_doc,
                     # Campos forçados (hidratação interna)
                     "status": "em andamento",
                     "origem": "copiloto",
@@ -9515,7 +9508,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Retorna JSON string com payload de confirmação ou string de erro.
             """
             try:
-                _ALLOWED_FIELDS = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_trigger'}
+                _ALLOWED_FIELDS = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_link_optout'}
                 today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 if 'data_limite' in (alteracoes or {}):
                     val = alteracoes['data_limite']
@@ -11943,7 +11936,7 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
             return {'status': 'invalidated', 'message': msg}
 
         # Aplica mudanças — somente campos whitelistados
-        _ALLOWED = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_trigger'}
+        _ALLOWED = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_link_optout'}
 
         def _normalizar_status_acao(valor):
             if valor is None:

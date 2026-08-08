@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Tarefa, AppSettings, PoolItem, ConhecimentoItem, Acompanhamento, ActionPlanItem,
-  ChatMessage, BaseConhecimento, formatDate, formatDateLocalISO, TaskReminder, EmailTrigger
+  ChatMessage, BaseConhecimento, formatDate, formatDateLocalISO, TaskReminder
 } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
 import { buildDiaryRichNote, ensureHttpUrl, getRenamedFileName, parseDiaryRichNote } from '../utils/diaryEntries';
@@ -286,13 +286,7 @@ export const TaskExecutionView = ({
   const [localHorarioInicio, setLocalHorarioInicio] = useState(currentTaskData.horario_inicio || '');
   const [localHorarioFim, setLocalHorarioFim] = useState(currentTaskData.horario_fim || '');
 
-  const [localEmailTriggerEnabled, setLocalEmailTriggerEnabled] = useState(currentTaskData.email_trigger?.enabled || false);
-  const [localEmailSender, setLocalEmailSender] = useState(currentTaskData.email_trigger?.sender || '');
-  const [localEmailSubjectKeywords, setLocalEmailSubjectKeywords] = useState(currentTaskData.email_trigger?.subjectKeywords || '');
-  const [localEmailBodyKeywords, setLocalEmailBodyKeywords] = useState(currentTaskData.email_trigger?.bodyKeywords || '');
-  const [localEmailActionToTake, setLocalEmailActionToTake] = useState<'status_to_andamento' | 'run_ai_analysis'>(currentTaskData.email_trigger?.action_to_take || 'status_to_andamento');
-  const [localEmailAiInstructions, setLocalEmailAiInstructions] = useState(currentTaskData.email_trigger?.ai_instructions || '');
-  const [localEmailTelegramAlert, setLocalEmailTelegramAlert] = useState(currentTaskData.email_trigger?.telegram_alert ?? true);
+  const [localEmailLinkOptout, setLocalEmailLinkOptout] = useState(currentTaskData.email_link_optout || false);
 
   useEffect(() => {
     setLocalDataLimite(currentTaskData.data_limite || '');
@@ -302,22 +296,8 @@ export const TaskExecutionView = ({
   }, [currentTaskData.data_limite, currentTaskData.prazo_final, currentTaskData.horario_inicio, currentTaskData.horario_fim]);
 
   useEffect(() => {
-    setLocalEmailTriggerEnabled(currentTaskData.email_trigger?.enabled || false);
-    setLocalEmailSender(currentTaskData.email_trigger?.sender || '');
-    setLocalEmailSubjectKeywords(currentTaskData.email_trigger?.subjectKeywords || '');
-    setLocalEmailBodyKeywords(currentTaskData.email_trigger?.bodyKeywords || '');
-    setLocalEmailActionToTake(currentTaskData.email_trigger?.action_to_take || 'status_to_andamento');
-    setLocalEmailAiInstructions(currentTaskData.email_trigger?.ai_instructions || '');
-    setLocalEmailTelegramAlert(currentTaskData.email_trigger?.telegram_alert ?? true);
-  }, [
-    currentTaskData.email_trigger?.enabled,
-    currentTaskData.email_trigger?.sender,
-    currentTaskData.email_trigger?.subjectKeywords,
-    currentTaskData.email_trigger?.bodyKeywords,
-    currentTaskData.email_trigger?.action_to_take,
-    currentTaskData.email_trigger?.ai_instructions,
-    currentTaskData.email_trigger?.telegram_alert
-  ]);
+    setLocalEmailLinkOptout(currentTaskData.email_link_optout || false);
+  }, [currentTaskData.email_link_optout]);
 
   const getTodayIso = () => {
     const d = new Date();
@@ -354,18 +334,9 @@ export const TaskExecutionView = ({
     onSave(task.id, { prazo_final: finalDate });
   };
 
-  const handleSaveTrigger = (triggerUpdates: Partial<EmailTrigger>) => {
-    const updatedTrigger: EmailTrigger = {
-      enabled: triggerUpdates.enabled !== undefined ? triggerUpdates.enabled : localEmailTriggerEnabled,
-      sender: (triggerUpdates.sender !== undefined ? triggerUpdates.sender : localEmailSender).trim() || undefined,
-      subjectKeywords: (triggerUpdates.subjectKeywords !== undefined ? triggerUpdates.subjectKeywords : localEmailSubjectKeywords).trim() || undefined,
-      bodyKeywords: (triggerUpdates.bodyKeywords !== undefined ? triggerUpdates.bodyKeywords : localEmailBodyKeywords).trim() || undefined,
-      action_to_take: triggerUpdates.action_to_take !== undefined ? triggerUpdates.action_to_take : localEmailActionToTake,
-      ai_instructions: (triggerUpdates.ai_instructions !== undefined ? triggerUpdates.ai_instructions : localEmailAiInstructions).trim() || undefined,
-      telegram_alert: triggerUpdates.telegram_alert !== undefined ? triggerUpdates.telegram_alert : localEmailTelegramAlert,
-      last_triggered_email_id: currentTaskData.email_trigger?.last_triggered_email_id || undefined
-    };
-    onSave(task.id, { email_trigger: updatedTrigger });
+  const handleToggleEmailLinkOptout = (optout: boolean) => {
+    setLocalEmailLinkOptout(optout);
+    onSave(task.id, { email_link_optout: optout });
   };
 
   const [newFollowUp, setNewFollowUp] = useState('');
@@ -2699,97 +2670,21 @@ export const TaskExecutionView = ({
                         {/* Linha separadora */}
                         <div className="border-t border-[#e5e7eb] dark:border-white/10 my-2" />
 
-                        {/* Gatilho de E-mail */}
-                        <div className="space-y-3">
+                        {/* Vínculo automático de e-mail (email_action_linker.py) */}
+                        <div className="space-y-1">
                           <label className="flex items-center gap-2 cursor-pointer select-none">
                             <input
                               type="checkbox"
-                              checked={localEmailTriggerEnabled}
-                              onChange={e => {
-                                setLocalEmailTriggerEnabled(e.target.checked);
-                                handleSaveTrigger({ enabled: e.target.checked });
-                              }}
+                              checked={localEmailLinkOptout}
+                              onChange={e => handleToggleEmailLinkOptout(e.target.checked)}
                               className="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
                             />
-                            <span className="text-[10px] font-black uppercase tracking-wider opacity-70">Gatilho de E-mail (Stand-by)</span>
+                            <span className="text-[10px] font-black uppercase tracking-wider opacity-70">Silenciar vínculo de e-mail</span>
                           </label>
-
-                          {localEmailTriggerEnabled && (
-                            <div className="space-y-3 pt-1 border-l border-slate-200 dark:border-white/10 pl-3 transition-all animate-in slide-in-from-top-1 duration-200">
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-black opacity-55 uppercase tracking-wider block">Remetente</label>
-                                <input
-                                  type="text"
-                                  value={localEmailSender}
-                                  onChange={e => setLocalEmailSender(e.target.value)}
-                                  onBlur={() => handleSaveTrigger({ sender: localEmailSender })}
-                                  placeholder="Ex: professor@ifes.edu.br (opcional)"
-                                  className={`w-full px-3 py-1.5 rounded-lg text-xs font-bold outline-none border transition-all ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10 text-slate-900'}`}
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-black opacity-55 uppercase tracking-wider block">Assunto</label>
-                                <input
-                                  type="text"
-                                  value={localEmailSubjectKeywords}
-                                  onChange={e => setLocalEmailSubjectKeywords(e.target.value)}
-                                  onBlur={() => handleSaveTrigger({ subjectKeywords: localEmailSubjectKeywords })}
-                                  placeholder="fatura, relatório (opcional)"
-                                  className={`w-full px-3 py-1.5 rounded-lg text-xs font-bold outline-none border transition-all ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10 text-slate-900'}`}
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-black opacity-55 uppercase tracking-wider block">Corpo do Texto</label>
-                                <input
-                                  type="text"
-                                  value={localEmailBodyKeywords}
-                                  onChange={e => setLocalEmailBodyKeywords(e.target.value)}
-                                  onBlur={() => handleSaveTrigger({ bodyKeywords: localEmailBodyKeywords })}
-                                  placeholder="aprovado, concluído (opcional)"
-                                  className={`w-full px-3 py-1.5 rounded-lg text-xs font-bold outline-none border transition-all ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10 text-slate-900'}`}
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-black opacity-55 uppercase tracking-wider block">Ação ao Receber</label>
-                                <select
-                                  value={localEmailActionToTake}
-                                  onChange={e => {
-                                    const val = e.target.value as any;
-                                    setLocalEmailActionToTake(val);
-                                    handleSaveTrigger({ action_to_take: val });
-                                  }}
-                                  className={`w-full px-3 py-1.5 rounded-lg text-xs font-bold outline-none border transition-all ${isDark ? 'bg-white/10 border-white/10 text-white font-sans' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10 text-slate-900 font-sans'}`}
-                                >
-                                  <option value="status_to_andamento">Mover para 'Em Andamento'</option>
-                                  <option value="run_ai_analysis">Análise de IA + Notas/Checklist</option>
-                                </select>
-                              </div>
-                              {localEmailActionToTake === 'run_ai_analysis' && (
-                                <div className="space-y-1 animate-in slide-in-from-top-1 duration-200">
-                                  <label className="text-[9px] font-black opacity-55 uppercase tracking-wider block">Instruções para a IA</label>
-                                  <textarea
-                                    value={localEmailAiInstructions}
-                                    onChange={e => setLocalEmailAiInstructions(e.target.value)}
-                                    onBlur={() => handleSaveTrigger({ ai_instructions: localEmailAiInstructions })}
-                                    placeholder="Ex: Extraia o valor aprovado do orçamento e anote nas notas..."
-                                    className={`w-full px-3 py-2 rounded-lg text-xs font-medium outline-none border transition-all min-h-[60px] resize-none ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-[#e5e7eb] dark:border-white/10 text-slate-900'}`}
-                                  />
-                                </div>
-                              )}
-                              <label className="flex items-center gap-2 cursor-pointer select-none">
-                                <input
-                                  type="checkbox"
-                                  checked={localEmailTelegramAlert}
-                                  onChange={e => {
-                                    setLocalEmailTelegramAlert(e.target.checked);
-                                    handleSaveTrigger({ telegram_alert: e.target.checked });
-                                  }}
-                                  className="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
-                                />
-                                <span className="text-[9px] font-black opacity-75 uppercase tracking-wider">Aviso no Telegram</span>
-                              </label>
-                            </div>
-                          )}
+                          <p className={`text-[10px] pl-6 ${isDark ? 'text-white/40' : 'text-slate-400'}`}>
+                            Por padrão, o Hermes verifica se e-mails recebidos têm relação com esta ação e sugere
+                            registrar no diário via Telegram. Marque para não receber essas sugestões nesta ação.
+                          </p>
                         </div>
                       </div>
                     </div>
