@@ -4098,6 +4098,31 @@ def _process_telegram_message(db, data: dict):
             if horario_inicio < current_time_str:
                 return f"ERRO|Não é possível agendar um horário anterior ao horário atual ({current_time_str}). Por favor, escolha um horário posterior."
 
+        # Idempotência: evita criar a mesma ação duas ou três vezes quando o modelo chama
+        # esta tool mais de uma vez para o mesmo pedido (lote de function calls repetido,
+        # retry) — sintoma relatado como "aparece duplicada no mesmo horário, com evento
+        # duplicado na agenda". Mesmo título+data+horário criados nos últimos 15 minutos
+        # são tratados como a mesma ação, não uma nova.
+        try:
+            _dup_threshold = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
+            _dup_query = (
+                db.collection("tarefas")
+                .where("titulo", "==", titulo.strip())
+                .where("data_limite", "==", data_limite)
+                .where("horario_inicio", "==", horario_inicio)
+                .limit(5)
+                .stream()
+            )
+            for _dup_doc in _dup_query:
+                _dup_data = _dup_doc.to_dict() or {}
+                if _dup_data.get("status") == "excluído":
+                    continue
+                if str(_dup_data.get("data_criacao") or "") >= _dup_threshold:
+                    print(f"[Core] Ação duplicada evitada: reaproveitando {_dup_doc.id} em vez de criar outra.")
+                    return f"OK|{_dup_doc.id}"
+        except Exception as _dup_err:
+            print(f"[Core] Falha na checagem de duplicidade (seguindo com a criação): {_dup_err}")
+
         task_id = str(_uuid.uuid4())[:20]
         plano_convertido = [
             {"id": str(_uuid.uuid4())[:8], "text": str(p), "completed": False}

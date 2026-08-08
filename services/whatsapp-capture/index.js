@@ -93,10 +93,25 @@ client.on('qr', (qr) => {
     console.log('Scan the QR code above to authenticate.');
 });
 
-client.on('ready', () => {
+client.on('ready', async () => {
     console.log('WhatsApp client is ready!');
     isClientReady = true;
     writeHeartbeat();
+
+    // DEBUG TEMPORÁRIO — remover depois de configurar a allowlist. Lista todas as
+    // conversas já conhecidas (nome + ID exato) para achar o ID a colocar em
+    // system/settings.whatsapp_ingest.chats_allowlist. IDs de grupo (@g.us) são
+    // opacos — não dá para deduzir de nenhum número de telefone — e mesmo IDs de
+    // contato (@c.us) podem não bater com uma concatenação simples de DDI+DDD+número.
+    try {
+        const chats = await client.getChats();
+        console.log(`[Chats] ${chats.length} conversa(s) conhecida(s):`);
+        for (const chat of chats) {
+            console.log(`  ${chat.isGroup ? '[grupo]  ' : '[contato]'} ${chat.name || '(sem nome)'} -> ${chat.id._serialized}`);
+        }
+    } catch (e) {
+        console.error('[Chats] Falha ao listar conversas:', e);
+    }
 });
 
 client.on('auth_failure', async (msg) => {
