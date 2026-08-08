@@ -2349,6 +2349,14 @@ def run_full_sync(trigger_reason='unspecified'):
 
             sync_boletos_gmail(gs, sync_ref, logs)
 
+            # Vínculo automático de e-mails a ações em andamento/stand-by (via IA + confirmação Telegram).
+            # Protegido por try/except próprio: uma falha aqui nunca deve derrubar o sync financeiro/agenda.
+            try:
+                from email_action_linker import link_emails_to_actions
+                link_emails_to_actions(db, gs, sync_ref, logs)
+            except Exception as e_link:
+                log_to_firestore(sync_ref, logs, f"[EMAIL-LINK][ERRO] Falha inesperada no vínculo e-mail-ação: {e_link}", True)
+
             sync_state = sync_ref.get().to_dict() or {}
             if not sync_state.get('pending_request'):
                 break
