@@ -649,6 +649,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 await addDoc(collection(db, 'sessoes_copiloto', currentSessionId, 'mensagens'), {
                     role: 'assistant',
                     content: `✅ Formulário criado com sucesso! Acesse aqui: [URL do Formulário](${data.responderUri})`,
+                    source: 'web_drawer',
                     timestamp: Timestamp.now()
                 });
 
@@ -692,6 +693,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             addDoc(collection(db, 'sessoes_copiloto', sId, 'mensagens'), {
                 role: 'user',
                 content: text,
+                source: 'voice_web',
                 timestamp: Timestamp.now(),
             }).catch(() => {});
         },
@@ -701,6 +703,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             addDoc(collection(db, 'sessoes_copiloto', sId, 'mensagens'), {
                 role: 'assistant',
                 content: text,
+                source: 'voice_web',
                 timestamp: Timestamp.now(),
             }).catch(() => {});
         },
@@ -1028,6 +1031,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             await addDoc(collection(db, 'sessoes_copiloto', currentSessionId, 'mensagens'), {
                 role: 'assistant',
                 content: '✅ Plano de ação atualizado com sucesso!',
+                source: 'web_drawer',
                 timestamp: Timestamp.now()
             });
 
@@ -1050,6 +1054,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             await addDoc(collection(db, 'sessoes_copiloto', currentSessionId, 'mensagens'), {
                 role: 'assistant',
                 content: '❌ Proposta de plano de ação recusada.',
+                source: 'web_drawer',
                 timestamp: Timestamp.now()
             });
 
@@ -1654,6 +1659,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             await addDoc(collection(db, 'sessoes_copiloto', sId, 'mensagens'), {
                 role: 'user',
                 content: userMessageContent,
+                source: 'web_drawer',
                 timestamp: Timestamp.now()
             });
 
@@ -1736,6 +1742,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 await addDoc(collection(db, 'sessoes_copiloto', sId2, 'mensagens'), {
                     role: 'assistant',
                     content: `⚠️ **Erro ao processar a solicitação:**\n\`${errMsg}\``,
+                    source: 'web_drawer',
                     timestamp: Timestamp.now()
                 }).catch(() => { });
             }
