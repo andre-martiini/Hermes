@@ -278,7 +278,15 @@ def _build_suggestion_message(data: dict) -> str:
     resumo = data.get("resumo") or ""
     nota = data.get("nota_sugerida") or ""
 
-    lines = [f"{icon} {label} relacionado(a) a uma ação", ""]
+    # Calendar é um caso à parte: o evento só existe porque o próprio Hermes o criou a
+    # partir do horário da própria ação (tarefas.google_calendar_id só é preenchido nesse
+    # sentido — ver link_calendar_events_to_actions) — não há incerteza nem "descoberta"
+    # de relação, é sempre a mesma ação, com certeza. A mensagem evita fingir uma
+    # correlação encontrada; só avisa que o compromisso já agendado terminou.
+    if canal == "calendar":
+        lines = [f"{icon} A reunião da ação abaixo terminou", ""]
+    else:
+        lines = [f"{icon} {label} relacionado(a) a uma ação", ""]
     if canal == "email":
         lines.append(f"De: {origem_sinal or 'Desconhecido'}")
         lines.append(f"Assunto: {titulo_sinal}")
