@@ -13371,6 +13371,99 @@ def classificarAreaTematica(req: https_fn.CallableRequest) -> dict:
         print(f"Erro na classificacao tematica: {e}")
         return {"area_tematica": "Nenhuma"}
 
+
+# ---------------------------------------------------------------------------
+# Configuração das automações multi-canal (vínculo sinal↔ação, diário pessoal,
+# ingestão de WhatsApp) — únicas callables que tocam system/settings a partir
+# do frontend. O documento é bloqueado por regra de segurança para o cliente
+# (firestore.rules: match /system/{document=**} { allow read, write: if false; }),
+# então esta é a única porta de entrada; só toca os campos explicitamente
+# tratados aqui, o resto de system/settings continua editável só via Console.
+# ---------------------------------------------------------------------------
+
+def _serialize_whatsapp_worker_heartbeat(db) -> dict:
+    doc = db.collection("system").document("whatsapp_worker").get()
+    if not doc.exists:
+        return {"online": False, "last_seen": None}
+    data = doc.to_dict() or {}
+    last_seen = data.get("last_seen")
+    online = False
+    last_seen_iso = None
+    if last_seen:
+        try:
+            last_seen_iso = last_seen.isoformat()
+            online = (datetime.now(timezone.utc) - last_seen) <= timedelta(minutes=10)
+        except Exception:
+            pass
+    return {"online": online, "last_seen": last_seen_iso}
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)
+def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
+    """Lê o subconjunto de system/settings das automações multi-canal."""
+    if not req.auth:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="Autenticacao obrigatoria.")
+
+    db = get_db()
+    doc = db.collection("system").document("settings").get()
+    data = doc.to_dict() if doc.exists else {}
+    email_cfg = data.get("email_action_linker") or {}
+    diary_cfg = data.get("personal_diary") or {}
+    wa_cfg = data.get("whatsapp_ingest") or {}
+
+    return {
+        "email_action_linker": {"enabled": bool(email_cfg.get("enabled", False))},
+        "personal_diary": {"enabled": bool(diary_cfg.get("enabled", False))},
+        "whatsapp_ingest": {
+            "enabled": bool(wa_cfg.get("enabled", False)),
+            "chats_allowlist": list(wa_cfg.get("chats_allowlist") or []),
+        },
+        "whatsapp_auto_send_enabled": bool(data.get("whatsapp_auto_send_enabled", False)),
+        "whatsapp_worker": _serialize_whatsapp_worker_heartbeat(db),
+    }
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)
+def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
+    """Atualiza o subconjunto whitelisted de system/settings das automações
+    multi-canal. Usa merge com dicts aninhados (não field paths com ponto —
+    set(merge=True) não expande ponto em string, só update() faz isso, e
+    update() falha se o doc não existir) para não pisar em campos irmãos."""
+    if not req.auth:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="Autenticacao obrigatoria.")
+
+    data = req.data or {}
+    updates: dict = {}
+
+    email_cfg = data.get("email_action_linker")
+    if isinstance(email_cfg, dict) and "enabled" in email_cfg:
+        updates["email_action_linker"] = {"enabled": bool(email_cfg["enabled"])}
+
+    diary_cfg = data.get("personal_diary")
+    if isinstance(diary_cfg, dict) and "enabled" in diary_cfg:
+        updates["personal_diary"] = {"enabled": bool(diary_cfg["enabled"])}
+
+    wa_cfg = data.get("whatsapp_ingest")
+    if isinstance(wa_cfg, dict):
+        wa_updates: dict = {}
+        if "enabled" in wa_cfg:
+            wa_updates["enabled"] = bool(wa_cfg["enabled"])
+        if "chats_allowlist" in wa_cfg and isinstance(wa_cfg["chats_allowlist"], list):
+            wa_updates["chats_allowlist"] = [str(x).strip() for x in wa_cfg["chats_allowlist"] if str(x).strip()]
+        if wa_updates:
+            updates["whatsapp_ingest"] = wa_updates
+
+    if "whatsapp_auto_send_enabled" in data:
+        updates["whatsapp_auto_send_enabled"] = bool(data["whatsapp_auto_send_enabled"])
+
+    if not updates:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="Nenhum campo valido para atualizar.")
+
+    db = get_db()
+    db.collection("system").document("settings").set(updates, merge=True)
+    return {"success": True}
+
+
 # Import daily WIP reset job
 from daily_reset_job import daily_wip_reset_and_degradation
 

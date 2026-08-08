@@ -76,6 +76,199 @@ export const HermesModal = ({ isOpen, title, message, type, onConfirm, onCancel,
     </div>
   );
 };
+// --- Aba "Automações" do SettingsModal ---
+// Único jeito do frontend enxergar/mudar o subconjunto de system/settings das
+// automações multi-canal: esse documento é bloqueado por regra de segurança
+// para o cliente (firestore.rules), então tudo passa pelas callables
+// getAutomationSettings/updateAutomationSettings (functions/main.py).
+interface AutomationSettingsData {
+  email_action_linker: { enabled: boolean };
+  personal_diary: { enabled: boolean };
+  whatsapp_ingest: { enabled: boolean; chats_allowlist: string[] };
+  whatsapp_auto_send_enabled: boolean;
+  whatsapp_worker: { online: boolean; last_seen: string | null };
+}
+
+const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkTheme }) => {
+  const [data, setData] = useState<AutomationSettingsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [allowlistText, setAllowlistText] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const fn = httpsCallable(functions, 'getAutomationSettings');
+        const res = await fn();
+        if (cancelled) return;
+        const d = res.data as AutomationSettingsData;
+        setData(d);
+        setAllowlistText((d.whatsapp_ingest?.chats_allowlist || []).join('\n'));
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || 'Falha ao carregar configurações.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const save = async (partial: Record<string, any>) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const fn = httpsCallable(functions, 'updateAutomationSettings');
+      await fn(partial);
+    } catch (e: any) {
+      setError(e?.message || 'Falha ao salvar. A alteração pode não ter sido aplicada.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggle = (key: 'email_action_linker' | 'personal_diary' | 'whatsapp_ingest') => {
+    if (!data) return;
+    const enabled = !data[key].enabled;
+    setData({ ...data, [key]: { ...data[key], enabled } });
+    save({ [key]: { enabled } });
+  };
+
+  const toggleAutoSend = () => {
+    if (!data) return;
+    const enabled = !data.whatsapp_auto_send_enabled;
+    setData({ ...data, whatsapp_auto_send_enabled: enabled });
+    save({ whatsapp_auto_send_enabled: enabled });
+  };
+
+  const saveAllowlist = () => {
+    const list = Array.from(new Set(allowlistText.split('\n').map(s => s.trim()).filter(Boolean)));
+    setAllowlistText(list.join('\n'));
+    if (data) setData({ ...data, whatsapp_ingest: { ...data.whatsapp_ingest, chats_allowlist: list } });
+    save({ whatsapp_ingest: { chats_allowlist: list } });
+  };
+
+  if (loading) {
+    return <div className="py-10 text-center text-xs font-mono text-slate-400">Carregando...</div>;
+  }
+  if (!data) {
+    return (
+      <div className="p-4 border border-rose-500/20 bg-rose-500/5 text-rose-500 text-xs font-mono rounded-lg">
+        {error || 'Não foi possível carregar as configurações.'}
+      </div>
+    );
+  }
+
+  const cardClass = `p-6 rounded-lg border space-y-4 ${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-100'}`;
+
+  const ToggleRow = ({ label, desc, enabled, onToggle }: { label: string, desc: string, enabled: boolean, onToggle: () => void }) => (
+    <div className="flex items-center justify-between gap-4">
+      <div className="min-w-0">
+        <p className={`text-xs font-bold ${isDarkTheme ? 'text-white' : 'text-slate-900'}`}>{label}</p>
+        <p className={`text-[10px] mt-0.5 leading-snug ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'}`}>{desc}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={saving}
+        aria-pressed={enabled}
+        className={`shrink-0 w-12 h-7 rounded-full transition-colors relative disabled:opacity-50 ${enabled ? 'bg-emerald-500' : (isDarkTheme ? 'bg-slate-600' : 'bg-slate-300')}`}
+      >
+        <span className={`absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-5' : ''}`} />
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
+      <h4 className={`text-[10px] font-black uppercase tracking-[0.2em] border-b pb-2 flex items-center gap-2 ${isDarkTheme ? 'text-slate-100 border-slate-800' : 'text-slate-900 border-slate-100'}`}>
+        <span className="w-2 h-2 bg-purple-500 rounded-full"></span>
+        Automações
+      </h4>
+      <p className={`text-[10px] leading-relaxed ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'}`}>
+        O Hermes pode investigar sinais de vários canais e propor, via Telegram, vincular a uma ação e registrar no diário de bordo — e gerar um diário pessoal a partir das suas interações. Tudo abaixo é opcional, desligado por padrão, e cada mudança é salva na hora.
+      </p>
+
+      {error && (
+        <div className="p-3 border border-rose-500/20 bg-rose-500/5 text-rose-500 text-[10px] font-mono font-bold rounded-lg">{error}</div>
+      )}
+
+      <div className={cardClass}>
+        <ToggleRow
+          label="Vínculo e-mail / SIPAC / Calendar ↔ ação"
+          desc="E-mails, movimentações do SIPAC e reuniões encerradas passam a propor vínculo com ações ativas ou em stand-by."
+          enabled={data.email_action_linker.enabled}
+          onToggle={() => toggle('email_action_linker')}
+        />
+      </div>
+
+      <div className={cardClass}>
+        <ToggleRow
+          label="Diário pessoal"
+          desc="Todo dia às 21h30, gera um diário em primeira pessoa a partir das suas ações, saúde, finanças, agenda e conversas — entregue no Telegram para leitura e ajuste."
+          enabled={data.personal_diary.enabled}
+          onToggle={() => toggle('personal_diary')}
+        />
+      </div>
+
+      <div className={cardClass}>
+        <ToggleRow
+          label="Triagem de conversas do WhatsApp"
+          desc="Analisa conversas capturadas pelo worker local e propõe vínculo com ações, além de indexar para busca pelo copiloto. Exige o worker rodando (services/whatsapp-capture)."
+          enabled={data.whatsapp_ingest.enabled}
+          onToggle={() => toggle('whatsapp_ingest')}
+        />
+
+        <div className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider ${data.whatsapp_worker.online ? 'text-emerald-500' : (isDarkTheme ? 'text-slate-500' : 'text-slate-400')}`}>
+          <span className={`w-2 h-2 rounded-full ${data.whatsapp_worker.online ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+          Worker local: {data.whatsapp_worker.online ? 'online' : 'offline'}
+          {data.whatsapp_worker.last_seen && (
+            <span className={`font-normal normal-case ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>
+              — últ. sinal {new Date(data.whatsapp_worker.last_seen).toLocaleString('pt-BR')}
+            </span>
+          )}
+        </div>
+
+        <div className={`space-y-1 pt-3 border-t border-dashed ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'}`}>
+          <label className={`text-[9px] font-bold uppercase tracking-wider block ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>
+            Conversas capturadas (uma por linha — ID do chat, ex.: 5527999999999@c.us ou algo@g.us)
+          </label>
+          <textarea
+            value={allowlistText}
+            onChange={(e) => setAllowlistText(e.target.value)}
+            placeholder="5527999999999@c.us"
+            rows={3}
+            className={`w-full border rounded-lg px-3 py-2 text-xs font-mono outline-none focus:ring-2 focus:ring-purple-500 ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-900'}`}
+          />
+          <p className={`text-[9px] italic ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>
+            Vazio por padrão — nenhuma conversa é capturada até ser listada aqui.
+          </p>
+          <button
+            type="button"
+            onClick={saveAllowlist}
+            disabled={saving}
+            className={`mt-1 px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all disabled:opacity-50 ${isDarkTheme ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-slate-900 text-white hover:bg-slate-700'}`}
+          >
+            Salvar lista
+          </button>
+        </div>
+
+        <div className={`pt-3 border-t border-dashed ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'}`}>
+          <ToggleRow
+            label="Envio automático pelo worker"
+            desc="Quando ligado e o worker está online, mensagens agendadas de WhatsApp são enviadas de verdade em vez de virar um link para envio manual no Telegram."
+            enabled={data.whatsapp_auto_send_enabled}
+            onToggle={toggleAutoSend}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const SettingsModal = ({
   settings,
   unidades,
@@ -97,13 +290,13 @@ export const SettingsModal = ({
   onDeleteUnidade: (id: string) => void,
   onUpdateUnidade: (id: string, updates: any) => void,
   onEmitNotification: (title: string, message: string, type: 'info' | 'warning' | 'success' | 'error') => void,
-  initialTab?: 'notifications' | 'context' | 'google',
+  initialTab?: 'notifications' | 'context' | 'google' | 'automations',
   themeMode: ThemeMode,
   onThemeModeChange: (mode: ThemeMode) => void,
   showConfirm: (title: string, message: string, onConfirm: () => void, onCancel?: () => void) => void
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
-  const [activeTab, setActiveTab] = useState<'notifications' | 'context' | 'google'>(initialTab || 'notifications');
+  const [activeTab, setActiveTab] = useState<'notifications' | 'context' | 'google' | 'automations'>(initialTab || 'notifications');
   const [newUnidadeNome, setNewUnidadeNome] = useState('');
   const [newKeywordMap, setNewKeywordMap] = useState<{ [key: string]: string }>({});
   const [newCustom, setNewCustom] = useState<Partial<CustomNotification>>({
@@ -169,6 +362,13 @@ export const SettingsModal = ({
               title="Google"
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" /></svg>
+            </button>
+            <button
+              onClick={() => setActiveTab('automations')}
+              className={`flex-1 py-4 rounded-lg flex items-center justify-center transition-all ${activeTab === 'automations' ? 'bg-slate-900 text-white border border-slate-900' : (isDarkTheme ? 'text-slate-500 hover:text-slate-300 hover:bg-slate-700/50' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50')}`}
+              title="Automações"
+            >
+              <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
             </button>
 
         </div>
@@ -677,6 +877,8 @@ export const SettingsModal = ({
                 </div>
               </div>
             </div>
+          ) : activeTab === 'automations' ? (
+            <AutomationsSettingsTab isDarkTheme={isDarkTheme} />
           ) : null}
         </div>
 
