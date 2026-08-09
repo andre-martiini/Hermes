@@ -1,7 +1,14 @@
-import { Client, LocalAuth } from 'whatsapp-web.js';
+import pkg from 'whatsapp-web.js';
+const { Client, LocalAuth } = pkg;
 import qrcode from 'qrcode-terminal';
+import qrcodeImage from 'qrcode';
 import cron from 'node-cron';
 import admin from 'firebase-admin';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const QR_IMAGE_PATH = path.join(__dirname, 'qr-code.png');
 
 // Initialize Firebase Admin (assuming default credentials in environment).
 // storageBucket precisa ser resolvível para o upload de mídia funcionar — este
@@ -91,27 +98,22 @@ async function writeHeartbeat() {
 client.on('qr', (qr) => {
     qrcode.generate(qr, { small: true });
     console.log('Scan the QR code above to authenticate.');
+    // Alguns terminais (ex.: painéis embutidos de IDE/CLI) distorcem a arte ASCII
+    // acima — largura fixa quebra o QR em linhas erradas. Como fallback, salva
+    // sempre a mesma imagem PNG para abrir e escanear diretamente.
+    qrcodeImage.toFile(QR_IMAGE_PATH, qr, { width: 400 }, (err) => {
+        if (err) {
+            console.error('[QR] Falha ao salvar imagem PNG:', err);
+        } else {
+            console.log(`[QR] Imagem salva em ${QR_IMAGE_PATH} — abra o arquivo se o QR do terminal não escanear.`);
+        }
+    });
 });
 
 client.on('ready', async () => {
     console.log('WhatsApp client is ready!');
     isClientReady = true;
     writeHeartbeat();
-
-    // DEBUG TEMPORÁRIO — remover depois de configurar a allowlist. Lista todas as
-    // conversas já conhecidas (nome + ID exato) para achar o ID a colocar em
-    // system/settings.whatsapp_ingest.chats_allowlist. IDs de grupo (@g.us) são
-    // opacos — não dá para deduzir de nenhum número de telefone — e mesmo IDs de
-    // contato (@c.us) podem não bater com uma concatenação simples de DDI+DDD+número.
-    try {
-        const chats = await client.getChats();
-        console.log(`[Chats] ${chats.length} conversa(s) conhecida(s):`);
-        for (const chat of chats) {
-            console.log(`  ${chat.isGroup ? '[grupo]  ' : '[contato]'} ${chat.name || '(sem nome)'} -> ${chat.id._serialized}`);
-        }
-    } catch (e) {
-        console.error('[Chats] Falha ao listar conversas:', e);
-    }
 });
 
 client.on('auth_failure', async (msg) => {
