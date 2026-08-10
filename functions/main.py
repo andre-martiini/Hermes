@@ -6342,6 +6342,10 @@ def _normalize_task_reminders(task: dict):
                 'reminder_at': str(reminder_at),
                 'reminder_sent': bool(reminder.get('reminder_sent')),
                 'created_at': str(reminder.get('created_at') or reminder_at),
+                # Preserva o texto do lembrete — sem isso, `check_and_send_reminders` (abaixo,
+                # linha ~3060) sempre cai no fallback genérico ao montar o lembrete do Google
+                # Tasks, mesmo quando o lembrete carrega uma mensagem específica.
+                'message': str(reminder.get('message') or '').strip(),
             })
 
     if not normalized and task.get('reminder_at'):
@@ -6350,6 +6354,7 @@ def _normalize_task_reminders(task: dict):
             'reminder_at': str(task.get('reminder_at')),
             'reminder_sent': bool(task.get('reminder_sent')),
             'created_at': str(task.get('data_atualizacao') or task.get('data_criacao') or task.get('reminder_at')),
+            'message': str(task.get('reminder_message') or '').strip(),
         })
 
     normalized.sort(key=lambda item: item.get('reminder_at') or '')

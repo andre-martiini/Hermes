@@ -2235,7 +2235,7 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         suggestion_ref = db.collection("email_action_suggestions").document(msg_id) if msg_id else None
         suggestion_doc = suggestion_ref.get() if suggestion_ref else None
 
-        if not msg_id or action not in ("ok", "on", "no") or not suggestion_doc or not suggestion_doc.exists:
+        if not msg_id or action not in ("ok", "on", "no", "mut") or not suggestion_doc or not suggestion_doc.exists:
             _answer_callback_query(token, query_id, "Sugestão não encontrada.")
         else:
             suggestion_data = suggestion_doc.to_dict() or {}
@@ -2253,11 +2253,17 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
             else:
                 from email_action_linker import apply_suggestion
 
-                reactivate = action == "on"
-                # apply_suggestion grava a nota no diário e marca a sugestão como aplicada
-                # numa única transação Firestore (evita duplicar a nota se uma etapa falhar
-                # a meio, e recusa aplicar duas vezes a mesma sugestão numa corrida).
-                applied = apply_suggestion(db, msg_id, suggestion_data, reactivate=reactivate)
+                apply_mutations = action == "mut"
+                # "mut" (botão "Registrar + aplicar mudanças") também reativa quando a
+                # sugestão já indicava isso — evita exigir duas confirmações separadas
+                # quando registrar, reativar e aplicar as mutações fazem sentido juntos.
+                reactivate = action == "on" or (apply_mutations and bool(suggestion_data.get("reativar_sugerido")))
+                # apply_suggestion grava a nota no diário, opcionalmente aplica as
+                # mutações propostas (plano de ação/prazo/lembrete) e marca a sugestão
+                # como aplicada numa única transação Firestore (evita duplicar a nota se
+                # uma etapa falhar a meio, e recusa aplicar duas vezes a mesma sugestão
+                # numa corrida).
+                applied = apply_suggestion(db, msg_id, suggestion_data, reactivate=reactivate, apply_mutations=apply_mutations)
                 if not applied:
                     _answer_callback_query(token, query_id, "Não foi possível registrar.")
                     msg = "⚠️ Não foi possível registrar — a sugestão já foi decidida em outro lugar ou a ação não foi encontrada."
@@ -2266,7 +2272,9 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
                 else:
                     task_titulo = suggestion_data.get("task_titulo") or "(ação)"
                     _answer_callback_query(token, query_id, "Registrado no diário de bordo!")
-                    if reactivate:
+                    if apply_mutations:
+                        msg = f"📋 <b>Registrado no diário e ação atualizada:</b>\n{html.escape(str(task_titulo))}"
+                    elif reactivate:
                         msg = f"🔄 <b>Registrado no diário e ação reativada:</b>\n{html.escape(str(task_titulo))}"
                     else:
                         msg = f"✅ <b>Registrado no diário de bordo:</b>\n{html.escape(str(task_titulo))}"
