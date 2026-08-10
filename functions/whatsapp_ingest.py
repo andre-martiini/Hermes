@@ -15,7 +15,9 @@ vetorizado, no mesmo espírito de `knowledge_nodes`/`indice_artefatos`.
 """
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from gemini_cost_controls import GEMINI_LIGHT_MODEL, generate_content_logged
 
@@ -30,6 +32,78 @@ MIN_WINDOW_TEXT_CHARS = 20
 DIGEST_COLLECTION = "whatsapp_digests"
 DIGEST_EMBEDDING_FIELD = "embedding"
 DIGEST_EMBEDDING_DIM = 768
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _valid_date(value) -> str | None:
+    s = str(value or "").strip()
+    return s if _DATE_RE.match(s) else None
+
+
+def _sanitize_itens_de_acao(raw) -> list[dict]:
+    out = []
+    for item in (raw or [])[:8]:
+        if not isinstance(item, dict):
+            continue
+        descricao = str(item.get("descricao") or "").strip()
+        if not descricao:
+            continue
+        out.append({
+            "descricao": descricao[:300],
+            "responsavel": str(item.get("responsavel") or "").strip()[:80],
+            "prazo": _valid_date(item.get("prazo")),
+        })
+    return out
+
+
+def _sanitize_decisoes(raw) -> list[str]:
+    return [str(d).strip()[:300] for d in (raw or [])[:8] if str(d).strip()]
+
+
+def _sanitize_datas_mencionadas(raw) -> list[dict]:
+    out = []
+    for item in (raw or [])[:8]:
+        if not isinstance(item, dict):
+            continue
+        data = _valid_date(item.get("data"))
+        if not data:
+            continue
+        out.append({"data": data, "contexto": str(item.get("contexto") or "").strip()[:200]})
+    return out
+
+
+def _sanitize_mutacoes_propostas(raw) -> dict | None:
+    """
+    Converte o `mutacoes_propostas` bruto do modelo (pode vir mal formado ou
+    com placeholders) num dict pronto para virar `email_action_suggestions.mutacoes_propostas`
+    — mesmo formato que `email_action_linker.py:apply_suggestion` sabe aplicar
+    (novas etapas no `plano_acao`, ajuste de `data_limite`, lembrete). Retorna
+    None quando não há nenhuma mutação de fato (evita oferecer um botão de
+    "aplicar mudanças" vazio).
+    """
+    if not isinstance(raw, dict):
+        return None
+    novas_etapas = [str(e).strip()[:300] for e in (raw.get("novas_etapas") or [])[:6] if str(e).strip()]
+    nova_data_limite = _valid_date(raw.get("nova_data_limite"))
+    lembrete_raw = raw.get("lembrete_sugerido")
+    lembrete_sugerido = None
+    if isinstance(lembrete_raw, dict):
+        data = _valid_date(lembrete_raw.get("data"))
+        texto = str(lembrete_raw.get("texto") or "").strip()[:200]
+        if data and texto:
+            lembrete_sugerido = {"data": data, "texto": texto}
+    if not novas_etapas and not nova_data_limite and not lembrete_sugerido:
+        return None
+    return {
+        "novas_etapas": novas_etapas,
+        "nova_data_limite": nova_data_limite,
+        "lembrete_sugerido": lembrete_sugerido,
+    }
+
+
+def _ts_to_iso(ts) -> str:
+    return ts.isoformat() if hasattr(ts, "isoformat") else str(ts or "")
 
 
 def _load_settings(db) -> dict:
@@ -53,9 +127,10 @@ def _build_triage_prompt(chat_name: str, messages: list[dict], candidates_text: 
             conteudo = f"[{m.get('message_type') or 'mídia'}]"
         lines.append(f"{quem}: {conteudo[:500]}")
     conversa = "\n".join(lines)
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d")
 
     return f"""Você é o Hermes, assistente pessoal, analisando uma janela de mensagens do WhatsApp
-da conversa "{chat_name}".
+da conversa "{chat_name}". Hoje é {hoje}.
 
 AÇÕES ATIVAS DO USUÁRIO:
 {candidates_text or "(nenhuma ação ativa no momento)"}
@@ -70,7 +145,20 @@ Classifique esta janela de conversa e responda APENAS com um JSON no formato exa
   "topicos": ["até 4 palavras/expressões-chave"],
   "task_id": "id de uma das ações acima, ou null",
   "confidence": 0.0 a 1.0,
-  "reativar_sugerido": true|false
+  "reativar_sugerido": true|false,
+  "nota_sugerida": "nota curta e objetiva para o diário de bordo da ação (vazio se relevancia != acao)",
+  "itens_de_acao": [
+    {{"descricao": "o que precisa ser feito", "responsavel": "eu" | "contato" | "nome citado", "prazo": "YYYY-MM-DD ou null"}}
+  ],
+  "decisoes": ["pontos acordados/definidos na conversa — compromissos, valores, responsabilidades (ponto de auditoria)"],
+  "datas_mencionadas": [
+    {{"data": "YYYY-MM-DD", "contexto": "o que essa data significa"}}
+  ],
+  "mutacoes_propostas": {{
+    "novas_etapas": ["etapas concretas a acrescentar ao plano de ação da ação vinculada, se houver"],
+    "nova_data_limite": "YYYY-MM-DD ou null — só quando a conversa deixa claro um novo prazo para a ação inteira",
+    "lembrete_sugerido": {{"data": "YYYY-MM-DD", "texto": "o que lembrar"}} ou null
+  }}
 }}
 
 Regras:
@@ -79,6 +167,9 @@ Regras:
 - "conhecimento": relevante para lembrar depois, mas sem ação específica vinculada.
 - "task_id" deve ser exatamente um dos IDs listados acima, ou null.
 - "reativar_sugerido" só pode ser true se a ação correspondente estiver com status "stand-by".
+- "itens_de_acao", "decisoes" e "datas_mencionadas" ficam vazios ([]) quando a conversa não traz nada desse tipo — não invente.
+- "mutacoes_propostas" só é preenchido quando "task_id" não é null e a conversa realmente justifica a mudança; caso contrário use novas_etapas=[], nova_data_limite=null, lembrete_sugerido=null.
+- Datas relativas ("amanhã", "sexta", "semana que vem") devem ser convertidas para YYYY-MM-DD com base em hoje ({hoje}).
 """
 
 
@@ -114,7 +205,16 @@ def _save_whatsapp_digest(db, digest_id: str, wa_chat_id: str, chat_name: str, m
 
     resumo = str(analysis.get("resumo") or "").strip()
     topicos = [str(t) for t in (analysis.get("topicos") or []) if str(t).strip()]
-    texto_fonte = f"{chat_name}\n{resumo}\n" + " ".join(topicos)
+    itens_de_acao = _sanitize_itens_de_acao(analysis.get("itens_de_acao"))
+    decisoes = _sanitize_decisoes(analysis.get("decisoes"))
+    datas_mencionadas = _sanitize_datas_mencionadas(analysis.get("datas_mencionadas"))
+
+    texto_fonte_parts = [chat_name, resumo, " ".join(topicos)]
+    if itens_de_acao:
+        texto_fonte_parts.append(" ".join(i["descricao"] for i in itens_de_acao))
+    if decisoes:
+        texto_fonte_parts.append(" ".join(decisoes))
+    texto_fonte = "\n".join(p for p in texto_fonte_parts if p)
 
     doc = {
         "chat_id": wa_chat_id,
@@ -126,6 +226,13 @@ def _save_whatsapp_digest(db, digest_id: str, wa_chat_id: str, chat_name: str, m
         "inicio": messages[0].get("timestamp"),
         "fim": messages[-1].get("timestamp"),
         "criado_em": datetime.now(timezone.utc).isoformat(),
+        # Elementos executivos extraídos pela mesma chamada de triagem (ver
+        # _build_triage_prompt) — o que transforma o digest de "resumo vago"
+        # em algo com relevância funcional: itens de ação, pontos de decisão
+        # (auditoria) e datas citadas na conversa.
+        "itens_de_acao": itens_de_acao,
+        "decisoes": decisoes,
+        "datas_mencionadas": datas_mencionadas,
     }
 
     try:
@@ -236,6 +343,7 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
             continue
 
         resumo = str(analysis.get("resumo") or "").strip()
+        nota_sugerida = str(analysis.get("nota_sugerida") or "").strip() or resumo
         task_id = analysis.get("task_id")
         try:
             confidence = max(0.0, min(1.0, float(analysis.get("confidence") or 0.0)))
@@ -246,6 +354,29 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
 
         if relevancia == "acao" and task_id in candidates_by_id and confidence >= settings["min_confidence"] and resumo:
             task = candidates_by_id[task_id]
+            itens_de_acao = _sanitize_itens_de_acao(analysis.get("itens_de_acao"))
+            decisoes = _sanitize_decisoes(analysis.get("decisoes"))
+            datas_mencionadas = _sanitize_datas_mencionadas(analysis.get("datas_mencionadas"))
+            mutacoes_propostas = _sanitize_mutacoes_propostas(analysis.get("mutacoes_propostas"))
+
+            # Elementos executivos extras (itens de ação, decisões, mutações propostas)
+            # viajam via `extra` para o doc de sugestão — o motor compartilhado só
+            # persiste e repassa, quem interpreta é o cartão do Telegram/fila web e
+            # `apply_suggestion` (functions/email_action_linker.py).
+            extra: dict = {
+                "n_mensagens": len(messages),
+                "periodo_inicio": _ts_to_iso(messages[0].get("timestamp")),
+                "periodo_fim": _ts_to_iso(messages[-1].get("timestamp")),
+            }
+            if itens_de_acao:
+                extra["itens_de_acao"] = itens_de_acao
+            if decisoes:
+                extra["decisoes"] = decisoes
+            if datas_mencionadas:
+                extra["datas_mencionadas"] = datas_mencionadas
+            if mutacoes_propostas:
+                extra["mutacoes_propostas"] = mutacoes_propostas
+
             queue_and_maybe_send_suggestion(
                 db,
                 f"whatsapp_{digest_id}",
@@ -254,10 +385,11 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
                 titulo_sinal=chat_name,
                 origem_sinal=f"{len(messages)} mensagem(ns)",
                 resumo=resumo,
-                nota_sugerida=resumo,
+                nota_sugerida=nota_sugerida,
                 reativar_sugerido=bool(analysis.get("reativar_sugerido")),
                 confidence=confidence,
                 chat_id=telegram_chat_id,
+                extra=extra,
             )
 
         if resumo:
@@ -335,6 +467,8 @@ def buscar_conversas_whatsapp(db, query: str, limite: int = 5) -> dict:
                 "chat_name": data.get("chat_name"),
                 "resumo": data.get("resumo"),
                 "topicos": data.get("topicos") or [],
+                "itens_de_acao": data.get("itens_de_acao") or [],
+                "decisoes": data.get("decisoes") or [],
                 "inicio": str(data.get("inicio") or ""),
                 "fim": str(data.get("fim") or ""),
             })

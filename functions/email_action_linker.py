@@ -24,6 +24,7 @@ Mapa de onde cada produtor é chamado: docs/okf/arquitetura/cloud-functions.md
 
 import base64
 import json
+import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -298,6 +299,40 @@ def _build_suggestion_message(data: dict) -> str:
     lines.append(f"Ação: {task_titulo} ({task_status})" if task_status else f"Ação: {task_titulo}")
     if resumo:
         lines.append(resumo)
+
+    # Elementos executivos extraídos pelo produtor (hoje só WhatsApp, ver
+    # whatsapp_ingest.py) — o que torna o cartão de confirmação acionável em
+    # vez de um resumo solto: itens de ação, pontos de decisão (auditoria) e
+    # a mudança concreta que será aplicada na ação se confirmada.
+    itens_de_acao = data.get("itens_de_acao") or []
+    if itens_de_acao:
+        lines.append("")
+        lines.append("📌 Itens de ação:")
+        for item in itens_de_acao[:5]:
+            desc = item.get("descricao") if isinstance(item, dict) else str(item)
+            resp = item.get("responsavel") if isinstance(item, dict) else None
+            prazo = item.get("prazo") if isinstance(item, dict) else None
+            bit = f"• {desc}"
+            extras = [x for x in (resp, f"prazo {prazo}" if prazo else None) if x]
+            if extras:
+                bit += f" ({', '.join(extras)})"
+            lines.append(bit)
+
+    decisoes = data.get("decisoes") or []
+    if decisoes:
+        lines.append("")
+        lines.append("🧭 Decisões / pontos de auditoria:")
+        for d in decisoes[:5]:
+            lines.append(f"• {d}")
+
+    mutacoes = data.get("mutacoes_propostas") or {}
+    mutacoes_desc = _describe_mutations(mutacoes)
+    if mutacoes_desc:
+        lines.append("")
+        lines.append("🛠️ Mudança sugerida na ação:")
+        for m in mutacoes_desc:
+            lines.append(f"• {m}")
+
     if nota:
         lines.append("")
         lines.append("Nota proposta para o diário:")
@@ -305,18 +340,47 @@ def _build_suggestion_message(data: dict) -> str:
     return "\n".join(lines)
 
 
-def _build_suggestion_keyboard(msg_id: str, reativar_sugerido: bool) -> list:
+def _describe_mutations(mutacoes: dict | None) -> list[str]:
+    """Traduz `mutacoes_propostas` em frases curtas para o cartão de confirmação
+    e para registrar no diário o que de fato foi aplicado (ver apply_suggestion)."""
+    if not mutacoes:
+        return []
+    out = []
+    novas_etapas = mutacoes.get("novas_etapas") or []
+    if novas_etapas:
+        out.append(f"+{len(novas_etapas)} etapa(s) no plano de ação")
+    nova_data_limite = mutacoes.get("nova_data_limite")
+    if nova_data_limite:
+        out.append(f"Prazo ajustado para {nova_data_limite}")
+    lembrete = mutacoes.get("lembrete_sugerido") or {}
+    if lembrete.get("data"):
+        out.append(f"Lembrete criado para {lembrete['data']}")
+    return out
+
+
+def _build_suggestion_keyboard(msg_id: str, reativar_sugerido: bool, tem_mutacoes: bool = False) -> list:
     # O prefixo "emlink" é histórico (nasceu só para e-mail); hoje é o callback
     # genérico de confirmação de vínculo sinal↔ação usado por todos os canais.
     top_row = [{"text": "✅ Registrar no diário", "callback_data": f"emlink:{msg_id}:ok"}]
     if reativar_sugerido:
         top_row = [{"text": "🔄 Registrar + reativar", "callback_data": f"emlink:{msg_id}:on"}] + top_row
-    return [top_row, [{"text": "❌ Ignorar", "callback_data": f"emlink:{msg_id}:no"}]]
+    rows = [top_row]
+    if tem_mutacoes:
+        # "mut" registra a nota E aplica as mutações propostas (novas etapas no plano,
+        # ajuste de prazo, lembrete) — e também reativa se `reativar_sugerido` for true,
+        # para não obrigar duas confirmações separadas quando ambas fazem sentido juntas.
+        rows.append([{"text": "📋 Registrar + aplicar mudanças", "callback_data": f"emlink:{msg_id}:mut"}])
+    rows.append([{"text": "❌ Ignorar", "callback_data": f"emlink:{msg_id}:no"}])
+    return rows
 
 
 def _send_suggestion_telegram(db, chat_id, msg_id: str, data: dict, send_fn) -> bool:
     text = _build_suggestion_message(data)
-    keyboard = _build_suggestion_keyboard(msg_id, bool(data.get("reativar_sugerido")))
+    keyboard = _build_suggestion_keyboard(
+        msg_id,
+        bool(data.get("reativar_sugerido")),
+        bool(data.get("mutacoes_propostas")),
+    )
     return bool(send_fn(db, chat_id, text, keyboard))
 
 
@@ -324,13 +388,18 @@ def _send_suggestion_telegram(db, chat_id, msg_id: str, data: dict, send_fn) -> 
 _send_email_suggestion_telegram = _send_suggestion_telegram
 
 
-def _build_diary_note(msg_id: str, data: dict) -> str:
+def _build_diary_note(msg_id: str, data: dict, mutacoes_aplicadas: list[str] | None = None) -> str:
     """
-    Para e-mail, serializa a nota no formato rico `EMAIL::JSON::{...}` que o
-    frontend entende nativamente (ver src/utils/diaryEntries.ts, buildDiaryEmailNote),
-    para que o DiarioBordoUI renderize um chip. Para os demais canais usa texto
-    simples — estender o envelope rico a cada canal fica para quando fizer
-    sentido, não é essencial para o valor do vínculo.
+    Para e-mail e WhatsApp, serializa a nota no formato rico `TIPO::JSON::{...}`
+    que o frontend entende nativamente (ver src/utils/diaryEntries.ts) para que
+    o DiarioBordoUI renderize um chip. Para os demais canais usa texto simples —
+    estender o envelope rico a cada canal fica para quando fizer sentido, não é
+    essencial para o valor do vínculo.
+
+    `mutacoes_aplicadas` (frases de _describe_mutations) documenta no próprio
+    registro do diário o que de fato mudou na ação, quando `apply_suggestion`
+    aplicou as mutações propostas — sem isso a auditoria da mudança ficaria só
+    no doc de sugestão, que não é visível na tela da ação.
     """
     canal = data.get("canal") or "email"
     resumo = str(data.get("resumo") or "").strip()
@@ -345,6 +414,20 @@ def _build_diary_note(msg_id: str, data: dict) -> str:
         }
         return "EMAIL::JSON::" + json.dumps(payload, ensure_ascii=False)
 
+    if canal == "whatsapp":
+        payload = {
+            "n": _signal_title(data) or "(conversa)",
+            "v": "",
+            "s": _signal_origin(data),
+            "r": resumo,
+            "itens": data.get("itens_de_acao") or [],
+            "decisoes": data.get("decisoes") or [],
+            "periodo_inicio": data.get("periodo_inicio") or "",
+            "periodo_fim": data.get("periodo_fim") or "",
+            "mutacoes_aplicadas": mutacoes_aplicadas or [],
+        }
+        return "WHATSAPP::JSON::" + json.dumps(payload, ensure_ascii=False)
+
     icon = _CANAL_ICONS.get(canal, "🔔")
     label = _CANAL_LABELS.get(canal, "Sinal")
     lines = [f"[{icon} Hermes] {label}: {_signal_title(data)}"]
@@ -356,15 +439,27 @@ def _build_diary_note(msg_id: str, data: dict) -> str:
     link_externo = data.get("link_externo")
     if link_externo:
         lines.append(f"Link: {link_externo}")
+    if mutacoes_aplicadas:
+        lines.append("")
+        lines.append("Alterações aplicadas na ação:")
+        for m in mutacoes_aplicadas:
+            lines.append(f"• {m}")
     return "\n".join(lines)
 
 
-def apply_suggestion(db, msg_id: str, data: dict, reactivate: bool) -> bool:
+def apply_suggestion(db, msg_id: str, data: dict, reactivate: bool, apply_mutations: bool = False) -> bool:
     """
     Confirma a ação de um usuário sobre uma sugestão `pending` (via Telegram
-    ou fila web): grava a entrada no diário de bordo da ação vinculada (e
-    opcionalmente reativa uma ação em stand-by) e marca a sugestão como
-    aplicada — tudo dentro de uma única transação Firestore.
+    ou fila web): grava a entrada no diário de bordo da ação vinculada,
+    opcionalmente reativa uma ação em stand-by e, se `apply_mutations` (botão
+    "Registrar + aplicar mudanças"), aplica as `mutacoes_propostas` extraídas
+    na triagem — novas etapas em `plano_acao`, ajuste de `data_limite` e/ou um
+    novo lembrete — tudo dentro de uma única transação Firestore. Marca a
+    sugestão como aplicada.
+
+    `apply_mutations` só tem efeito quando a sugestão de fato carrega
+    `mutacoes_propostas` (hoje só o produtor de WhatsApp gera isso); para os
+    demais canais o parâmetro é um no-op silencioso.
 
     A atomicidade importa por dois motivos: (1) evita que uma falha parcial
     (nota gravada na tarefa, mas a atualização do doc de sugestão falha)
@@ -376,6 +471,7 @@ def apply_suggestion(db, msg_id: str, data: dict, reactivate: bool) -> bool:
     decidindo ao mesmo tempo).
     """
     from firebase_admin import firestore
+    from main import _normalize_task_reminders, _build_task_reminder_state_payload
 
     task_id = data.get("task_id")
     if not task_id:
@@ -384,7 +480,8 @@ def apply_suggestion(db, msg_id: str, data: dict, reactivate: bool) -> bool:
     task_ref = db.collection("tarefas").document(task_id)
     suggestion_ref = db.collection("email_action_suggestions").document(msg_id)
     now_iso = datetime.now(timezone.utc).isoformat()
-    entry = {"data": now_iso, "nota": _build_diary_note(msg_id, data)}
+    mutacoes = data.get("mutacoes_propostas") if apply_mutations else None
+    entry = {"data": now_iso, "nota": _build_diary_note(msg_id, data, _describe_mutations(mutacoes))}
     new_status = "applied_reactivated" if reactivate else "applied"
 
     transaction = db.transaction()
@@ -399,6 +496,31 @@ def apply_suggestion(db, msg_id: str, data: dict, reactivate: bool) -> bool:
             return False
 
         task_updates = {"acompanhamento": firestore.ArrayUnion([entry]), "data_atualizacao": now_iso}
+
+        if mutacoes:
+            task_data = task_snap.to_dict() or {}
+            novas_etapas = mutacoes.get("novas_etapas") or []
+            if novas_etapas:
+                plano_atual = task_data.get("plano_acao") or []
+                novos_itens = [{"id": str(uuid.uuid4())[:8], "text": texto, "completed": False} for texto in novas_etapas]
+                task_updates["plano_acao"] = [*plano_atual, *novos_itens]
+
+            nova_data_limite = mutacoes.get("nova_data_limite")
+            if nova_data_limite:
+                task_updates["data_limite"] = nova_data_limite
+
+            lembrete = mutacoes.get("lembrete_sugerido") or {}
+            if lembrete.get("data"):
+                reminders = _normalize_task_reminders(task_data)
+                reminders.append({
+                    "id": str(uuid.uuid4())[:12],
+                    "reminder_at": f"{lembrete['data']}T09:00:00",
+                    "reminder_sent": False,
+                    "created_at": now_iso,
+                    "message": str(lembrete.get("texto") or ""),
+                })
+                task_updates.update(_build_task_reminder_state_payload(reminders))
+
         if reactivate:
             task_updates["status"] = "em andamento"
             task_updates["data_conclusao"] = None

@@ -290,6 +290,62 @@ export const DiarioBordoUI = ({
       );
     }
 
+    if (richEntry?.type === 'WHATSAPP') {
+      const chatName = richEntry.name || '(conversa)';
+      const origem = richEntry.sender || '';
+      const resumo = richEntry.resumo || '';
+      const itens = richEntry.itens || [];
+      const decisoes = richEntry.decisoes || [];
+      const mutacoesAplicadas = richEntry.mutacoesAplicadas || [];
+      return (
+        <div className={`flex flex-col gap-1.5 p-2 rounded-lg border ${isDark ? 'bg-white/5 border-[#e5e7eb] dark:border-white/10' : 'bg-green-50/50 border-[#e5e7eb] dark:border-white/10'}`}>
+          <div className="flex items-start gap-2">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isDark ? 'bg-white/10 text-white' : 'bg-green-200 text-green-700'}`}>
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.022-.014-.503-.245-.583-.273-.08-.027-.138-.04-.197.048-.058.088-.227.288-.278.346-.05.058-.1.066-.188.022-.088-.044-.372-.137-.708-.437-.26-.231-.437-.515-.487-.603-.05-.088-.005-.135.039-.179.04-.04.088-.103.131-.154.044-.051.059-.088.088-.146.03-.058.015-.11-.008-.154-.022-.044-.197-.474-.27-.65-.072-.172-.143-.149-.197-.151l-.168-.002c-.058 0-.154.022-.234.11-.08.088-.307.3-.307.732 0 .432.315.849.359.907.044.058.62 1.04 1.502 1.42.21.09.372.143.5.184.21.067.4.057.55.035.168-.024.503-.205.574-.403.072-.198.072-.367.051-.403-.021-.037-.08-.058-.168-.102z" /><path d="M12 2C6.477 2 2 6.477 2 12c0 1.891.524 3.66 1.434 5.168L2 22l4.958-1.412A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 01-4.07-1.112l-.292-.174-3.024.863.878-2.946-.19-.302A7.957 7.957 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z" /></svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className={`text-[11px] font-bold break-words leading-snug font-sans ${isDark ? 'text-white' : 'text-green-900'}`}>{chatName}</p>
+              {origem && <p className={`text-[10px] font-sans mt-0.5 ${isDark ? 'text-white/60' : 'text-green-700/70'}`}>{origem}</p>}
+              {resumo && <p className={`text-[10px] mt-1 leading-snug font-sans ${isDark ? 'text-white/50' : 'text-slate-600'}`}>{resumo}</p>}
+              <p className={`text-[8px] uppercase font-black tracking-widest mt-1 opacity-50 font-sans ${isDark ? 'text-white/40' : 'text-green-500'}`}>WhatsApp</p>
+            </div>
+          </div>
+          {itens.length > 0 && (
+            <div className="pl-1">
+              <p className={`text-[8px] uppercase font-black tracking-widest opacity-60 font-sans ${isDark ? 'text-white/50' : 'text-green-700'}`}>Itens de ação</p>
+              <ul className="mt-0.5 space-y-0.5">
+                {itens.map((item, idx) => (
+                  <li key={idx} className={`text-[10px] font-sans leading-snug ${isDark ? 'text-white/70' : 'text-slate-700'}`}>
+                    • {item.descricao}{item.responsavel ? ` — ${item.responsavel}` : ''}{item.prazo ? ` (prazo ${item.prazo})` : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {decisoes.length > 0 && (
+            <div className="pl-1">
+              <p className={`text-[8px] uppercase font-black tracking-widest opacity-60 font-sans ${isDark ? 'text-white/50' : 'text-green-700'}`}>Decisões</p>
+              <ul className="mt-0.5 space-y-0.5">
+                {decisoes.map((d, idx) => (
+                  <li key={idx} className={`text-[10px] font-sans leading-snug ${isDark ? 'text-white/70' : 'text-slate-700'}`}>• {d}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {mutacoesAplicadas.length > 0 && (
+            <div className={`pl-1.5 py-1 rounded ${isDark ? 'bg-indigo-500/10' : 'bg-indigo-50'}`}>
+              <p className={`text-[8px] uppercase font-black tracking-widest ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}>Alterações aplicadas na ação</p>
+              <ul className="mt-0.5 space-y-0.5">
+                {mutacoesAplicadas.map((m, idx) => (
+                  <li key={idx} className={`text-[10px] font-sans leading-snug ${isDark ? 'text-indigo-200' : 'text-indigo-700'}`}>• {m}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     if (richEntry?.type === 'FILE') {
       const nome = richEntry.name || 'Arquivo';
       const url = richEntry.value || '#';

@@ -6,7 +6,7 @@ import {
     HealthWeight, HealthSettings, ExerciseLog, WalkBlock,
     formatDateLocalISO, sumWalkBlocksKm
 } from './types';
-import { buildDiaryEmailNote, buildDiaryGenericNote } from './src/utils/diaryEntries';
+import { buildDiaryEmailNote, buildDiaryGenericNote, buildDiaryWhatsappNote, DiaryWhatsappActionItem } from './src/utils/diaryEntries';
 
 interface DashboardViewProps {
     tarefas: Tarefa[];
@@ -142,6 +142,12 @@ const _CANAL_LABELS: Record<string, string> = {
     email: 'E-mail', whatsapp: 'Conversa de WhatsApp', sipac: 'Processo SIPAC', calendar: 'Reunião', pagina: 'Página monitorada'
 };
 
+interface ActionLinkMutations {
+    novas_etapas?: string[];
+    nova_data_limite?: string | null;
+    lembrete_sugerido?: { data: string; texto: string } | null;
+}
+
 interface ActionLinkSuggestion {
     id: string;
     canal?: string;
@@ -156,7 +162,50 @@ interface ActionLinkSuggestion {
     status: 'pending' | 'expired';
     google_message_id?: string;
     analyzed_at?: string;
+    // Elementos executivos extraídos pela triagem de WhatsApp (functions/whatsapp_ingest.py) —
+    // itens de ação, decisões/pontos de auditoria e a mutação de ação proposta (plano/prazo/lembrete).
+    itens_de_acao?: DiaryWhatsappActionItem[];
+    decisoes?: string[];
+    periodo_inicio?: string;
+    periodo_fim?: string;
+    mutacoes_propostas?: ActionLinkMutations;
 }
+
+// Mesma tradução usada no backend (functions/email_action_linker.py:_describe_mutations) —
+// mantém o texto do que será/foi aplicado consistente entre o cartão do Telegram e a fila web.
+const describeMutations = (mutacoes?: ActionLinkMutations): string[] => {
+    if (!mutacoes) return [];
+    const out: string[] = [];
+    if (mutacoes.novas_etapas && mutacoes.novas_etapas.length > 0) out.push(`+${mutacoes.novas_etapas.length} etapa(s) no plano de ação`);
+    if (mutacoes.nova_data_limite) out.push(`Prazo ajustado para ${mutacoes.nova_data_limite}`);
+    if (mutacoes.lembrete_sugerido?.data) out.push(`Lembrete criado para ${mutacoes.lembrete_sugerido.data}`);
+    return out;
+};
+
+// Mesma normalização usada no backend (functions/main.py:_normalize_task_reminders) — precisa
+// ser reproduzida aqui porque a aplicação da mutação roda numa transação client-side.
+const normalizeTaskReminders = (task: any): Array<{ id: string; reminder_at: string; reminder_sent: boolean; created_at: string; message: string }> => {
+    const raw = Array.isArray(task?.reminders) ? task.reminders : [];
+    const normalized = raw
+        .filter((r: any) => r && r.reminder_at)
+        .map((r: any, idx: number) => ({
+            id: String(r.id || `legacy-${idx}`),
+            reminder_at: String(r.reminder_at),
+            reminder_sent: Boolean(r.reminder_sent),
+            created_at: String(r.created_at || r.reminder_at),
+            message: String(r.message || '')
+        }));
+    if (normalized.length === 0 && task?.reminder_at) {
+        normalized.push({
+            id: 'legacy-reminder',
+            reminder_at: String(task.reminder_at),
+            reminder_sent: Boolean(task.reminder_sent),
+            created_at: String(task.data_atualizacao || task.data_criacao || task.reminder_at),
+            message: ''
+        });
+    }
+    return normalized;
+};
 
 const EmailLinkSuggestionsPanel: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
     const [suggestions, setSuggestions] = useState<ActionLinkSuggestion[]>([]);
@@ -180,7 +229,7 @@ const EmailLinkSuggestionsPanel: React.FC<{ isDark?: boolean }> = ({ isDark = fa
 
     if (sorted.length === 0) return null;
 
-    const decide = async (suggestion: ActionLinkSuggestion, action: 'ok' | 'on' | 'no') => {
+    const decide = async (suggestion: ActionLinkSuggestion, action: 'ok' | 'on' | 'no' | 'mut') => {
         setBusyId(suggestion.id);
         try {
             const nowIso = new Date().toISOString();
@@ -192,10 +241,17 @@ const EmailLinkSuggestionsPanel: React.FC<{ isDark?: boolean }> = ({ isDark = fa
                 const canal = suggestion.canal || 'email';
                 const titulo = suggestion.titulo_sinal || '(sem título)';
                 const origem = suggestion.origem_sinal || '';
+                // "mut" registra a nota E aplica as mutações propostas (novas etapas no plano,
+                // ajuste de prazo, lembrete) — e também reativa se `reativar_sugerido` já indicava
+                // isso, mesma regra do botão equivalente no Telegram (hermes_core_logic.py).
+                const applyMutations = action === 'mut';
+                const reactivate = action === 'on' || (applyMutations && !!suggestion.reativar_sugerido);
+                const mutacoesAplicadas = applyMutations ? describeMutations(suggestion.mutacoes_propostas) : [];
                 const nota = canal === 'email'
                     ? buildDiaryEmailNote(titulo, origem, `https://mail.google.com/mail/u/0/#all/${suggestion.google_message_id || suggestion.id}`, suggestion.resumo || '')
-                    : buildDiaryGenericNote(_CANAL_ICONS[canal] || '🔔', _CANAL_LABELS[canal] || 'Sinal', titulo, origem, suggestion.resumo || '', suggestion.link_externo);
-                const reactivate = action === 'on';
+                    : canal === 'whatsapp'
+                        ? buildDiaryWhatsappNote(titulo, origem, suggestion.resumo || '', suggestion.itens_de_acao || [], suggestion.decisoes || [], suggestion.periodo_inicio, suggestion.periodo_fim, mutacoesAplicadas)
+                        : buildDiaryGenericNote(_CANAL_ICONS[canal] || '🔔', _CANAL_LABELS[canal] || 'Sinal', titulo, origem, suggestion.resumo || '', suggestion.link_externo);
                 const taskRef = doc(db, 'tarefas', suggestion.task_id);
 
                 // Transação: só aplica se a sugestão ainda estiver "pending" (evita duplicar a
@@ -215,6 +271,39 @@ const EmailLinkSuggestionsPanel: React.FC<{ isDark?: boolean }> = ({ isDark = fa
                         acompanhamento: arrayUnion({ data: nowIso, nota }),
                         data_atualizacao: nowIso
                     };
+
+                    if (applyMutations && suggestion.mutacoes_propostas) {
+                        const taskData = taskSnap.data() as any;
+                        const mutacoes = suggestion.mutacoes_propostas;
+                        if (mutacoes.novas_etapas && mutacoes.novas_etapas.length > 0) {
+                            const planoAtual = Array.isArray(taskData.plano_acao) ? taskData.plano_acao : [];
+                            const novosItens = mutacoes.novas_etapas.map(texto => ({
+                                id: Math.random().toString(36).substring(2, 9),
+                                text: texto,
+                                completed: false
+                            }));
+                            taskUpdates.plano_acao = [...planoAtual, ...novosItens];
+                        }
+                        if (mutacoes.nova_data_limite) {
+                            taskUpdates.data_limite = mutacoes.nova_data_limite;
+                        }
+                        if (mutacoes.lembrete_sugerido?.data) {
+                            const reminders = normalizeTaskReminders(taskData);
+                            reminders.push({
+                                id: Math.random().toString(36).substring(2, 12),
+                                reminder_at: `${mutacoes.lembrete_sugerido.data}T09:00:00`,
+                                reminder_sent: false,
+                                created_at: nowIso,
+                                message: mutacoes.lembrete_sugerido.texto || ''
+                            });
+                            const ordered = [...reminders].sort((a, b) => (a.reminder_at || '').localeCompare(b.reminder_at || ''));
+                            const nextPending = ordered.find(r => !r.reminder_sent);
+                            taskUpdates.reminders = ordered;
+                            taskUpdates.reminder_at = nextPending ? nextPending.reminder_at : null;
+                            taskUpdates.reminder_sent = nextPending ? Boolean(nextPending.reminder_sent) : true;
+                        }
+                    }
+
                     if (reactivate) {
                         taskUpdates.status = 'em andamento';
                         taskUpdates.data_conclusao = null;
@@ -260,6 +349,38 @@ const EmailLinkSuggestionsPanel: React.FC<{ isDark?: boolean }> = ({ isDark = fa
                         {suggestion.resumo && (
                             <p className={`mt-1 text-[10px] leading-snug ${isDark ? 'text-white/60' : 'text-slate-600'}`}>{suggestion.resumo}</p>
                         )}
+                        {suggestion.itens_de_acao && suggestion.itens_de_acao.length > 0 && (
+                            <div className="mt-1.5">
+                                <p className={`text-[8px] uppercase font-black tracking-widest opacity-60 ${isDark ? 'text-white/50' : 'text-slate-500'}`}>Itens de ação</p>
+                                <ul className="mt-0.5 space-y-0.5">
+                                    {suggestion.itens_de_acao.map((item, idx) => (
+                                        <li key={idx} className={`text-[10px] leading-snug ${isDark ? 'text-white/70' : 'text-slate-700'}`}>
+                                            • {item.descricao}{item.responsavel ? ` — ${item.responsavel}` : ''}{item.prazo ? ` (prazo ${item.prazo})` : ''}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                        {suggestion.decisoes && suggestion.decisoes.length > 0 && (
+                            <div className="mt-1.5">
+                                <p className={`text-[8px] uppercase font-black tracking-widest opacity-60 ${isDark ? 'text-white/50' : 'text-slate-500'}`}>Decisões</p>
+                                <ul className="mt-0.5 space-y-0.5">
+                                    {suggestion.decisoes.map((d, idx) => (
+                                        <li key={idx} className={`text-[10px] leading-snug ${isDark ? 'text-white/70' : 'text-slate-700'}`}>• {d}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                        {describeMutations(suggestion.mutacoes_propostas).length > 0 && (
+                            <div className={`mt-1.5 rounded px-1.5 py-1 ${isDark ? 'bg-indigo-500/10' : 'bg-indigo-50'}`}>
+                                <p className={`text-[8px] uppercase font-black tracking-widest ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}>Mudança sugerida na ação</p>
+                                <ul className="mt-0.5 space-y-0.5">
+                                    {describeMutations(suggestion.mutacoes_propostas).map((m, idx) => (
+                                        <li key={idx} className={`text-[10px] leading-snug ${isDark ? 'text-indigo-200' : 'text-indigo-700'}`}>• {m}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
                         <div className="mt-2 flex flex-wrap gap-2">
                             <button
                                 type="button"
@@ -269,6 +390,16 @@ const EmailLinkSuggestionsPanel: React.FC<{ isDark?: boolean }> = ({ isDark = fa
                             >
                                 Registrar
                             </button>
+                            {suggestion.mutacoes_propostas && describeMutations(suggestion.mutacoes_propostas).length > 0 && (
+                                <button
+                                    type="button"
+                                    disabled={busyId === suggestion.id}
+                                    onClick={() => decide(suggestion, 'mut')}
+                                    className="flex-1 rounded-lg border border-indigo-500 py-1.5 text-[10px] font-bold uppercase tracking-wider text-indigo-500 transition hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    Registrar + aplicar mudanças
+                                </button>
+                            )}
                             {suggestion.reativar_sugerido && (
                                 <button
                                     type="button"
