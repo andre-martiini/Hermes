@@ -196,6 +196,7 @@ const EmailLinkSuggestionsPanel: React.FC<{ isDark?: boolean }> = ({ isDark = fa
                     ? buildDiaryEmailNote(titulo, origem, `https://mail.google.com/mail/u/0/#all/${suggestion.google_message_id || suggestion.id}`, suggestion.resumo || '')
                     : buildDiaryGenericNote(_CANAL_ICONS[canal] || '🔔', _CANAL_LABELS[canal] || 'Sinal', titulo, origem, suggestion.resumo || '', suggestion.link_externo);
                 const reactivate = action === 'on';
+                const taskRef = doc(db, 'tarefas', suggestion.task_id);
 
                 // Transação: só aplica se a sugestão ainda estiver "pending" (evita duplicar a
                 // nota no diário se o Telegram e esta fila web decidirem a mesma sugestão quase

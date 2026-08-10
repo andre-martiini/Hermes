@@ -21,11 +21,11 @@ interface HealthViewProps {
     exams: HealthExam[];
     onAddExam: (exam: Omit<HealthExam, 'id' | 'data_criacao' | 'pool_dados'>, files: File[]) => Promise<void>;
     onDeleteExam: (id: string) => void;
-    onUpdateExam: (id: string, updates: Partial<HealthExam>) => void;
+    onUpdateExam: (id: string, updates: Partial<HealthExam>, newFiles?: File[]) => Promise<void>;
     isDark?: boolean;
 }
 
-type IconName = 'scale' | 'chevron' | 'heart' | 'calendar' | 'file' | 'plus' | 'trash' | 'walk';
+type IconName = 'scale' | 'chevron' | 'heart' | 'calendar' | 'file' | 'plus' | 'trash' | 'walk' | 'edit';
 type NumericTrendPoint = { id: string; label: string; value: number; marker?: boolean };
 type PainTrendPoint = { id: string; label: string; morning?: number; evening?: number; crisis?: boolean };
 
@@ -81,6 +81,8 @@ const Icon = ({ name, className = 'h-4 w-4' }: { name: IconName; className?: str
             return <svg {...common}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>;
         case 'walk':
             return <svg {...common}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 19h9.5a3.5 3.5 0 000-7h-5a3.5 3.5 0 010-7H19" /><circle cx="5" cy="19" r="1.4" fill="currentColor" stroke="none" /><circle cx="19" cy="5" r="1.4" fill="currentColor" stroke="none" /></svg>;
+        case 'edit':
+            return <svg {...common}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 4H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2v-5" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>;
         default:
             return null;
     }
@@ -97,6 +99,25 @@ const formatShortDate = (value: string) => {
 };
 
 const formatKm = (value: number) => value.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+
+const URL_REGEX = /(https?:\/\/[^\s]+)/g;
+
+const renderTextWithLinks = (text: string): React.ReactNode[] =>
+    text.split(URL_REGEX).map((part, index) =>
+        /^https?:\/\//.test(part) ? (
+            <a
+                key={index}
+                href={part}
+                target="_blank"
+                rel="noreferrer"
+                className="break-all text-primary-container underline hover:opacity-80"
+            >
+                {part}
+            </a>
+        ) : (
+            part
+        )
+    );
 
 const MetricCard = ({
     label,
@@ -396,7 +417,7 @@ const WalkDailyChart = ({
 
 const HealthView: React.FC<HealthViewProps> = ({
     weights, settings, onUpdateSettings, onAddWeight, onDeleteWeight,
-    exerciseLogs, onSaveExerciseLog, exams, onAddExam, onDeleteExam,
+    exerciseLogs, onSaveExerciseLog, exams, onAddExam, onDeleteExam, onUpdateExam,
     telegramReminders, onSaveTelegramReminder, onDeleteTelegramReminder,
     isDark = false
 }) => {
@@ -414,6 +435,14 @@ const HealthView: React.FC<HealthViewProps> = ({
     const [examResultados, setExamResultados] = useState<string>('');
     const [examFiles, setExamFiles] = useState<File[]>([]);
     const [isSavingExam, setIsSavingExam] = useState<boolean>(false);
+    const [editingExamId, setEditingExamId] = useState<string | null>(null);
+    const [editTitulo, setEditTitulo] = useState<string>('');
+    const [editTipo, setEditTipo] = useState<'exame' | 'consulta'>('exame');
+    const [editData, setEditData] = useState<string>('');
+    const [editDoutorLocal, setEditDoutorLocal] = useState<string>('');
+    const [editResultados, setEditResultados] = useState<string>('');
+    const [editFiles, setEditFiles] = useState<File[]>([]);
+    const [isSavingEditExam, setIsSavingEditExam] = useState<boolean>(false);
 
     const sortedWeights = useMemo(() => [...weights].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [weights]);
     const currentWeight = sortedWeights[0]?.weight || 0;
@@ -542,6 +571,46 @@ const HealthView: React.FC<HealthViewProps> = ({
             console.error('Falha ao adicionar registro de saude:', err);
         } finally {
             setIsSavingExam(false);
+        }
+    };
+
+    const startEditExam = (exam: HealthExam) => {
+        setEditingExamId(exam.id);
+        setEditTitulo(exam.titulo);
+        setEditTipo(exam.tipo);
+        setEditData(exam.data);
+        setEditDoutorLocal(exam.doutor_local || '');
+        setEditResultados(exam.resultados || '');
+        setEditFiles([]);
+    };
+
+    const cancelEditExam = () => {
+        setEditingExamId(null);
+        setEditFiles([]);
+    };
+
+    const handleSaveEditExam = async () => {
+        const titulo = editTitulo.trim();
+        if (!editingExamId || !titulo || !editData || isSavingEditExam) return;
+        setIsSavingEditExam(true);
+        try {
+            await onUpdateExam(
+                editingExamId,
+                {
+                    titulo,
+                    tipo: editTipo,
+                    data: editData,
+                    doutor_local: editDoutorLocal.trim() || undefined,
+                    resultados: editResultados.trim() || undefined,
+                },
+                editFiles
+            );
+            setEditingExamId(null);
+            setEditFiles([]);
+        } catch (err) {
+            console.error('Falha ao atualizar registro de saude:', err);
+        } finally {
+            setIsSavingEditExam(false);
         }
     };
 
@@ -1002,34 +1071,114 @@ const HealthView: React.FC<HealthViewProps> = ({
                             <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                                 {sortedExams.map(exam => (
                                     <article key={exam.id} className="rounded-2xl border border-border-subtle bg-background p-5">
-                                        <div className="flex items-start justify-between gap-3">
-                                            <span className="rounded-full bg-surface-container-low px-2.5 py-1 text-[10px] font-semibold uppercase text-on-surface-variant">{exam.tipo}</span>
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-xs font-semibold text-on-surface-variant">{formatDate(exam.data)}</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => onDeleteExam(exam.id)}
-                                                    className="rounded-lg p-1.5 text-on-surface-variant transition hover:bg-error-container hover:text-on-error-container"
-                                                    aria-label="Remover registro"
-                                                >
-                                                    <Icon name="trash" className="h-4 w-4" />
-                                                </button>
+                                        {editingExamId === exam.id ? (
+                                            <div className="flex flex-col gap-3">
+                                                <span className="w-fit rounded-full bg-surface-container-low px-2.5 py-1 text-[10px] font-semibold uppercase text-on-surface-variant">Editando</span>
+                                                <label className="block">
+                                                    <span className={labelClasses}>Titulo</span>
+                                                    <input type="text" value={editTitulo} onChange={e => setEditTitulo(e.target.value)} className={inputClasses} />
+                                                </label>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <label className="block">
+                                                        <span className={labelClasses}>Tipo</span>
+                                                        <select value={editTipo} onChange={e => setEditTipo(e.target.value as 'exame' | 'consulta')} className={inputClasses}>
+                                                            <option value="exame">Exame</option>
+                                                            <option value="consulta">Consulta</option>
+                                                        </select>
+                                                    </label>
+                                                    <label className="block">
+                                                        <span className={labelClasses}>Data</span>
+                                                        <input type="date" value={editData} onChange={e => setEditData(e.target.value)} className={inputClasses} />
+                                                    </label>
+                                                </div>
+                                                <label className="block">
+                                                    <span className={labelClasses}>Doutor(a) / Local</span>
+                                                    <input type="text" value={editDoutorLocal} onChange={e => setEditDoutorLocal(e.target.value)} placeholder="Opcional" className={inputClasses} />
+                                                </label>
+                                                <label className="block">
+                                                    <span className={labelClasses}>Resultados / notas</span>
+                                                    <textarea value={editResultados} onChange={e => setEditResultados(e.target.value)} placeholder="Opcional" className={`${inputClasses} min-h-[64px]`} />
+                                                </label>
+                                                {exam.pool_dados && exam.pool_dados.length > 0 && (
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {exam.pool_dados.map(file => (
+                                                            <span key={file.id} title={file.nome || 'Arquivo'} className="inline-flex max-w-[160px] items-center gap-1.5 rounded-lg border border-border-standard bg-white px-2 py-1 text-[10px] font-semibold text-on-surface-variant">
+                                                                <Icon name="file" className="h-3 w-3 shrink-0" />
+                                                                <span className="min-w-0 truncate">{file.nome || 'Arquivo'}</span>
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                <label className="block">
+                                                    <span className={labelClasses}>Anexar mais arquivos</span>
+                                                    <input
+                                                        type="file"
+                                                        multiple
+                                                        onChange={e => setEditFiles(e.target.files ? Array.from(e.target.files) : [])}
+                                                        className={`${inputClasses} file:mr-3 file:rounded-lg file:border-0 file:bg-primary-container file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white`}
+                                                    />
+                                                    {editFiles.length > 0 && (
+                                                        <p className="mt-1 text-xs font-medium text-on-surface-variant">{editFiles.length} arquivo(s) selecionado(s)</p>
+                                                    )}
+                                                </label>
+                                                <div className="mt-1 flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleSaveEditExam}
+                                                        disabled={!editTitulo.trim() || !editData || isSavingEditExam}
+                                                        className="flex-1 rounded-xl bg-primary-container px-4 py-2 text-sm font-bold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                                                    >
+                                                        {isSavingEditExam ? 'Salvando...' : 'Salvar'}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={cancelEditExam}
+                                                        className="rounded-xl border border-border-standard px-4 py-2 text-sm font-semibold text-on-surface-variant transition hover:bg-surface-container-low"
+                                                    >
+                                                        Cancelar
+                                                    </button>
+                                                </div>
                                             </div>
-                                        </div>
-                                        <h4 className="mt-4 text-base font-bold text-on-surface">{exam.titulo}</h4>
-                                        <p className="mt-1 text-sm text-on-surface-variant">{exam.doutor_local || 'Local nao informado'}</p>
-                                        {exam.resultados && (
-                                            <p className="mt-2 text-sm text-on-surface-variant">{exam.resultados}</p>
-                                        )}
-                                        {exam.pool_dados && exam.pool_dados.length > 0 && (
-                                            <div className="mt-4 flex flex-wrap gap-2">
-                                                {exam.pool_dados.map(file => (
-                                                    <a key={file.id} href={file.valor} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-border-standard bg-white px-3 py-2 text-xs font-semibold text-on-surface-variant transition hover:border-primary-container hover:text-primary-container">
-                                                        <Icon name="file" className="h-4 w-4" />
-                                                        {file.nome || 'Arquivo'}
-                                                    </a>
-                                                ))}
-                                            </div>
+                                        ) : (
+                                            <>
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <span className="rounded-full bg-surface-container-low px-2.5 py-1 text-[10px] font-semibold uppercase text-on-surface-variant">{exam.tipo}</span>
+                                                    <div className="flex items-center gap-1">
+                                                        <span className="text-xs font-semibold text-on-surface-variant">{formatDate(exam.data)}</span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => startEditExam(exam)}
+                                                            className="rounded-lg p-1.5 text-on-surface-variant transition hover:bg-surface-container-low hover:text-primary-container"
+                                                            aria-label="Editar registro"
+                                                        >
+                                                            <Icon name="edit" className="h-4 w-4" />
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => onDeleteExam(exam.id)}
+                                                            className="rounded-lg p-1.5 text-on-surface-variant transition hover:bg-error-container hover:text-on-error-container"
+                                                            aria-label="Remover registro"
+                                                        >
+                                                            <Icon name="trash" className="h-4 w-4" />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <h4 className="mt-4 text-base font-bold text-on-surface">{exam.titulo}</h4>
+                                                <p className="mt-1 text-sm text-on-surface-variant">{exam.doutor_local || 'Local nao informado'}</p>
+                                                {exam.resultados && (
+                                                    <p className="mt-2 whitespace-pre-wrap text-sm text-on-surface-variant">{renderTextWithLinks(exam.resultados)}</p>
+                                                )}
+                                                {exam.pool_dados && exam.pool_dados.length > 0 && (
+                                                    <div className="mt-4 flex flex-wrap gap-2">
+                                                        {exam.pool_dados.map(file => (
+                                                            <a key={file.id} href={file.valor} target="_blank" rel="noreferrer" title={file.nome || 'Arquivo'} className="inline-flex max-w-[160px] items-center gap-2 rounded-lg border border-border-standard bg-white px-3 py-2 text-xs font-semibold text-on-surface-variant transition hover:border-primary-container hover:text-primary-container">
+                                                                <Icon name="file" className="h-4 w-4 shrink-0" />
+                                                                <span className="min-w-0 truncate">{file.nome || 'Arquivo'}</span>
+                                                            </a>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </>
                                         )}
                                     </article>
                                 ))}

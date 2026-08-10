@@ -5848,9 +5848,56 @@ const App: React.FC = () => {
                         showToast("Registro removido.", "info");
                       });
                     }}
-                    onUpdateExam={async (id, updates) => {
-                      await updateDoc(doc(db, 'exames', id), updates);
-                      showToast("Registro atualizado.", "success");
+                    onUpdateExam={async (id, updates, newFiles) => {
+                      const finalUpdates: Partial<HealthExam> = { ...updates };
+                      let attachFailed = false;
+                      if (newFiles && newFiles.length > 0) {
+                        if (!appSettings.googleDriveFolderId) {
+                          attachFailed = true;
+                          console.error('[onUpdateExam] googleDriveFolderId não configurado em appSettings — upload abortado.');
+                          showToast("Pasta do Google Drive não configurada — o arquivo não foi anexado.", "error");
+                        } else {
+                          try {
+                            showToast("Enviando arquivos para o Drive...", "info");
+                            const newPoolItems: PoolItem[] = [];
+                            for (const file of newFiles) {
+                              const item = await handleFileUploadToDrive(file);
+                              if (item) {
+                                newPoolItems.push(item);
+                              } else {
+                                console.error('[onUpdateExam] handleFileUploadToDrive retornou null para', file.name);
+                              }
+                            }
+                            if (newPoolItems.length > 0) {
+                              const existing = exams.find(e => e.id === id);
+                              finalUpdates.pool_dados = [...(existing?.pool_dados || []), ...newPoolItems];
+                              for (const item of newPoolItems) {
+                                const knowledgeItem: ConhecimentoItem = {
+                                  id: item.id,
+                                  titulo: item.nome || 'Sem título',
+                                  tipo_arquivo: item.tipo === 'link' ? 'link' : (item.nome?.split('.').pop()?.toLowerCase() || 'unknown'),
+                                  url_drive: item.valor,
+                                  tamanho: 0,
+                                  data_criacao: item.data_criacao,
+                                  origem: { modulo: 'saude', id_origem: id },
+                                  categoria: 'Saúde'
+                                };
+                                await setDoc(doc(db, 'conhecimento', item.id), knowledgeItem);
+                              }
+                            }
+                            if (newPoolItems.length < newFiles.length) attachFailed = true;
+                          } catch (e) {
+                            console.error('[onUpdateExam] Falha ao anexar arquivo:', e);
+                            attachFailed = true;
+                            showToast("Erro no upload de um ou mais arquivos.", "error");
+                          }
+                        }
+                      }
+                      await updateDoc(doc(db, 'exames', id), finalUpdates);
+                      showToast(
+                        attachFailed ? "Registro atualizado, mas o arquivo não foi anexado." : "Registro atualizado.",
+                        attachFailed ? "error" : "success"
+                      );
                     }}
                     isDark={isDarkTheme}
                   />
