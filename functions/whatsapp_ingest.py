@@ -38,7 +38,16 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 def _valid_date(value) -> str | None:
     s = str(value or "").strip()
-    return s if _DATE_RE.match(s) else None
+    if not _DATE_RE.match(s):
+        return None
+    try:
+        # O regex só garante o formato — datas com forma correta mas inválidas no
+        # calendário (ex.: "2026-02-31", alucinação comum de LLM) passariam direto
+        # para `data_limite`/`reminder_at` sem essa checagem.
+        datetime.strptime(s, "%Y-%m-%d")
+    except ValueError:
+        return None
+    return s
 
 
 def _sanitize_itens_de_acao(raw) -> list[dict]:
