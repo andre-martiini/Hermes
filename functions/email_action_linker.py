@@ -776,6 +776,11 @@ def link_emails_to_actions(db, service, sync_ref, logs):
             "reativar_sugerido": reativar_sugerido,
             "status": "pending",
             "telegram_sent": False,
+            # Corpo do e-mail já limpo/truncado (mesmo texto usado no prompt de análise,
+            # ver _extract_email_body) — permite que um pedido personalizado do usuário na
+            # fila web (DashboardView.tsx) tenha acesso a detalhes concretos (números de
+            # processo, valores, datas) que o `resumo` da IA pode ter condensado.
+            "texto_original": body,
         })
         suggestions_col.document(msg_id).set(base_doc)
 

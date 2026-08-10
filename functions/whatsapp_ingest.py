@@ -127,15 +127,22 @@ def _load_settings(db) -> dict:
     }
 
 
-def _build_triage_prompt(chat_name: str, messages: list[dict], candidates_text: str) -> str:
+def _format_conversation_text(messages: list[dict], limit: int = 40) -> str:
+    """Formata a janela de mensagens como transcript "Quem: conteúdo" — usado tanto no
+    prompt de análise quanto para persistir o texto original da conversa na sugestão
+    (ver `texto_original` em `triage_whatsapp_messages`)."""
     lines = []
-    for m in messages[-40:]:
+    for m in messages[-limit:]:
         quem = "Eu" if m.get("from_me") else (m.get("author_name") or "Contato")
         conteudo = str(m.get("content") or "").strip()
         if not conteudo:
             conteudo = f"[{m.get('message_type') or 'mídia'}]"
         lines.append(f"{quem}: {conteudo[:500]}")
-    conversa = "\n".join(lines)
+    return "\n".join(lines)
+
+
+def _build_triage_prompt(chat_name: str, messages: list[dict], candidates_text: str) -> str:
+    conversa = _format_conversation_text(messages)
     hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d")
 
     return f"""Você é o Hermes, assistente pessoal, analisando uma janela de mensagens do WhatsApp
@@ -376,6 +383,10 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
                 "n_mensagens": len(messages),
                 "periodo_inicio": _ts_to_iso(messages[0].get("timestamp")),
                 "periodo_fim": _ts_to_iso(messages[-1].get("timestamp")),
+                # Transcript bruto da janela (mesmo texto usado no prompt de análise) —
+                # permite que um pedido personalizado do usuário na fila web tenha acesso
+                # ao que foi realmente dito, não só ao `resumo` condensado pela IA.
+                "texto_original": _format_conversation_text(messages),
             }
             if itens_de_acao:
                 extra["itens_de_acao"] = itens_de_acao

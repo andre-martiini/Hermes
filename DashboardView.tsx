@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { arrayUnion, collection, doc, limit, onSnapshot, orderBy, query, runTransaction, updateDoc, where } from 'firebase/firestore';
+import { arrayUnion, collection, doc, onSnapshot, query, runTransaction, updateDoc, where } from 'firebase/firestore';
 import { db } from './firebase';
 import {
     Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry,
@@ -23,7 +23,9 @@ interface DashboardViewProps {
     unidades: { id: string, nome: string }[];
     currentMonth: number;
     currentYear: number;
-    onNavigate: (view: 'gallery' | 'finance' | 'saude') => void;
+    onNavigate: (view: 'gallery' | 'finance' | 'saude' | 'diario') => void;
+    onOpenTask?: (taskId: string) => void;
+    onAskCopiloto?: (prompt: string) => void;
 }
 
 // --- CARD COMPONENT (Hermes Corporate Modern Design) ---
@@ -169,6 +171,11 @@ interface ActionLinkSuggestion {
     periodo_inicio?: string;
     periodo_fim?: string;
     mutacoes_propostas?: ActionLinkMutations;
+    // Texto bruto por trás do resumo — corpo do e-mail limpo (email_action_linker.py)
+    // ou transcript da janela de WhatsApp (whatsapp_ingest.py) — usado para dar ao
+    // pedido de ação personalizada acesso a detalhes que o resumo pode ter condensado.
+    texto_original?: string;
+    numero_processo?: string;
 }
 
 // Mesma tradução usada no backend (functions/email_action_linker.py:_describe_mutations) —
@@ -207,9 +214,33 @@ const normalizeTaskReminders = (task: any): Array<{ id: string; reminder_at: str
     return normalized;
 };
 
-const EmailLinkSuggestionsPanel: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
+// Formata o instante em que o sinal foi analisado (analyzed_at) de forma relativa
+// ao dia atual — "Hoje/Ontem, HH:MM" para os casos mais comuns, senão "dd/mm, HH:MM".
+const formatSuggestionTimestamp = (iso?: string): string => {
+    if (!iso) return '';
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return '';
+
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const time = date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    if (date.toDateString() === now.toDateString()) return `Hoje, ${time}`;
+    if (date.toDateString() === yesterday.toDateString()) return `Ontem, ${time}`;
+    return `${date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}, ${time}`;
+};
+
+const EmailLinkSuggestionsPanel: React.FC<{
+    isDark?: boolean;
+    onOpenTask?: (taskId: string) => void;
+    onAskCopiloto?: (prompt: string) => void;
+}> = ({ isDark = false, onOpenTask, onAskCopiloto }) => {
     const [suggestions, setSuggestions] = useState<ActionLinkSuggestion[]>([]);
     const [busyId, setBusyId] = useState<string | null>(null);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+    const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
 
     useEffect(() => {
         const unsubscribers = (['pending', 'expired'] as const).map(status => {
@@ -323,169 +354,317 @@ const EmailLinkSuggestionsPanel: React.FC<{ isDark?: boolean }> = ({ isDark = fa
         }
     };
 
-    return (
-        <DashboardCard title={`Sinais para vincular a ações (${sorted.length})`} isDark={isDark}>
-            <div className="flex flex-col gap-3">
-                {sorted.slice(0, 6).map(suggestion => (
-                    <div key={suggestion.id} className={`rounded-xl border p-3 ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-100 bg-slate-50'}`}>
-                        <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                                <p className="text-xs font-bold truncate">
-                                    {_CANAL_ICONS[suggestion.canal || 'email'] || '🔔'} {suggestion.titulo_sinal || '(sem título)'}
-                                </p>
-                                <p className={`text-[10px] truncate ${isDark ? 'text-white/50' : 'text-slate-500'}`}>{suggestion.origem_sinal}</p>
-                            </div>
-                            {suggestion.status === 'expired' && (
-                                <span className="shrink-0 text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">
-                                    Expirado no Telegram
-                                </span>
-                            )}
-                        </div>
-                        {suggestion.task_titulo && (
-                            <p className={`mt-1 text-[10px] font-bold ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}>
-                                → {suggestion.task_titulo}{suggestion.task_status ? ` (${suggestion.task_status})` : ''}
-                            </p>
-                        )}
-                        {suggestion.resumo && (
-                            <p className={`mt-1 text-[10px] leading-snug ${isDark ? 'text-white/60' : 'text-slate-600'}`}>{suggestion.resumo}</p>
-                        )}
-                        {suggestion.itens_de_acao && suggestion.itens_de_acao.length > 0 && (
-                            <div className="mt-1.5">
-                                <p className={`text-[8px] uppercase font-black tracking-widest opacity-60 ${isDark ? 'text-white/50' : 'text-slate-500'}`}>Itens de ação</p>
-                                <ul className="mt-0.5 space-y-0.5">
-                                    {suggestion.itens_de_acao.map((item, idx) => (
-                                        <li key={idx} className={`text-[10px] leading-snug ${isDark ? 'text-white/70' : 'text-slate-700'}`}>
-                                            • {item.descricao}{item.responsavel ? ` — ${item.responsavel}` : ''}{item.prazo ? ` (prazo ${item.prazo})` : ''}
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
-                        {suggestion.decisoes && suggestion.decisoes.length > 0 && (
-                            <div className="mt-1.5">
-                                <p className={`text-[8px] uppercase font-black tracking-widest opacity-60 ${isDark ? 'text-white/50' : 'text-slate-500'}`}>Decisões</p>
-                                <ul className="mt-0.5 space-y-0.5">
-                                    {suggestion.decisoes.map((d, idx) => (
-                                        <li key={idx} className={`text-[10px] leading-snug ${isDark ? 'text-white/70' : 'text-slate-700'}`}>• {d}</li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
-                        {describeMutations(suggestion.mutacoes_propostas).length > 0 && (
-                            <div className={`mt-1.5 rounded px-1.5 py-1 ${isDark ? 'bg-indigo-500/10' : 'bg-indigo-50'}`}>
-                                <p className={`text-[8px] uppercase font-black tracking-widest ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}>Mudança sugerida na ação</p>
-                                <ul className="mt-0.5 space-y-0.5">
-                                    {describeMutations(suggestion.mutacoes_propostas).map((m, idx) => (
-                                        <li key={idx} className={`text-[10px] leading-snug ${isDark ? 'text-indigo-200' : 'text-indigo-700'}`}>• {m}</li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
-                        <div className="mt-2 flex flex-wrap gap-2">
-                            <button
-                                type="button"
-                                disabled={busyId === suggestion.id}
-                                onClick={() => decide(suggestion, 'ok')}
-                                className="flex-1 rounded-lg bg-[#9333ea] py-1.5 text-[10px] font-bold uppercase tracking-wider text-white transition hover:bg-[#7800ce] disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                Registrar
-                            </button>
-                            {suggestion.mutacoes_propostas && describeMutations(suggestion.mutacoes_propostas).length > 0 && (
-                                <button
-                                    type="button"
-                                    disabled={busyId === suggestion.id}
-                                    onClick={() => decide(suggestion, 'mut')}
-                                    className="flex-1 rounded-lg border border-indigo-500 py-1.5 text-[10px] font-bold uppercase tracking-wider text-indigo-500 transition hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                    Registrar + aplicar mudanças
-                                </button>
-                            )}
-                            {suggestion.reativar_sugerido && (
-                                <button
-                                    type="button"
-                                    disabled={busyId === suggestion.id}
-                                    onClick={() => decide(suggestion, 'on')}
-                                    className="flex-1 rounded-lg border border-[#9333ea] py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#9333ea] transition hover:bg-[#9333ea]/10 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                    Registrar + Reativar
-                                </button>
-                            )}
-                            <button
-                                type="button"
-                                disabled={busyId === suggestion.id}
-                                onClick={() => decide(suggestion, 'no')}
-                                className={`rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? 'text-white/40 hover:bg-white/10' : 'text-slate-400 hover:bg-slate-200'}`}
-                            >
-                                Ignorar
-                            </button>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </DashboardCard>
-    );
-};
-
-// --- PAINEL DE LEITURA DO DIÁRIO PESSOAL (functions/personal_diary.py) ---
-// Só leitura — o ajuste ao texto acontece via Telegram (botão "✍️ Ajustar",
-// ver hermes_core_logic.py) para reaproveitar o mesmo fluxo de revisão que
-// alimenta o consolidador semanal de personalidade.
-interface PersonalDiaryEntry {
-    id: string;
-    data?: string;
-    texto?: string;
-    editado?: boolean;
-    sem_material?: boolean;
-}
-
-const PersonalDiaryPanel: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
-    const [entries, setEntries] = useState<PersonalDiaryEntry[]>([]);
-    const [expanded, setExpanded] = useState(false);
-
-    useEffect(() => {
-        const q = query(collection(db, 'diario_pessoal'), orderBy('data', 'desc'), limit(7));
-        return onSnapshot(q, snap => {
-            setEntries(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })));
+    const toggleExpanded = (id: string) => {
+        setExpandedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
         });
-    }, []);
+    };
 
-    const withText = entries.filter(e => !!e.texto);
-    if (withText.length === 0) return null;
+    // Monta o contexto completo do sinal (canal, resumo, itens de ação, decisões, ação
+    // vinculada) + o pedido livre do usuário, para o Copiloto Hermes executar via chat —
+    // reaproveita as mesmas ferramentas (registrar_no_diario, editar_plano_acao, ...)
+    // já disponíveis para o copiloto tradicional (functions/main.py:askCopilotoHermes).
+    const buildCustomActionPrompt = (suggestion: ActionLinkSuggestion, instrucao: string): string => {
+        const linhas: string[] = [];
+        linhas.push(`[SINAL RECEBIDO — ${_CANAL_LABELS[suggestion.canal || 'email'] || 'Sinal'}]`);
+        linhas.push(`Título: ${suggestion.titulo_sinal || '(sem título)'}`);
+        if (suggestion.origem_sinal) linhas.push(`Origem: ${suggestion.origem_sinal}`);
+        linhas.push(`Recebido: ${formatSuggestionTimestamp(suggestion.analyzed_at)}`);
+        if (suggestion.numero_processo) linhas.push(`Número do processo SIPAC: ${suggestion.numero_processo}`);
+        if (suggestion.resumo) linhas.push(`Resumo: ${suggestion.resumo}`);
+        if (suggestion.itens_de_acao && suggestion.itens_de_acao.length > 0) {
+            linhas.push('Itens de ação identificados:');
+            suggestion.itens_de_acao.forEach(item => {
+                linhas.push(`- ${item.descricao}${item.responsavel ? ` (${item.responsavel})` : ''}${item.prazo ? ` — prazo ${item.prazo}` : ''}`);
+            });
+        }
+        if (suggestion.decisoes && suggestion.decisoes.length > 0) {
+            linhas.push('Decisões registradas na conversa:');
+            suggestion.decisoes.forEach(d => linhas.push(`- ${d}`));
+        }
+        linhas.push(
+            suggestion.task_id
+                ? `Ação vinculada: "${suggestion.task_titulo}" (ID: ${suggestion.task_id})`
+                : 'Nenhuma ação vinculada a este sinal ainda.'
+        );
+        if (suggestion.texto_original) {
+            linhas.push('');
+            linhas.push('Mensagem original completa:');
+            linhas.push(suggestion.texto_original);
+        }
+        linhas.push('');
+        linhas.push(`Pedido do usuário: ${instrucao.trim()}`);
+        return linhas.join('\n');
+    };
 
-    const [latest, ...older] = withText;
+    const handleCustomAction = (suggestion: ActionLinkSuggestion) => {
+        const instrucao = (customInputs[suggestion.id] || '').trim();
+        if (!instrucao || !onAskCopiloto) return;
+        onAskCopiloto(buildCustomActionPrompt(suggestion, instrucao));
+        setCustomInputs(prev => ({ ...prev, [suggestion.id]: '' }));
+        setIsModalOpen(false);
+    };
+
+    const expiredCount = sorted.filter(s => s.status === 'expired').length;
 
     return (
-        <DashboardCard title="Diário Pessoal" isDark={isDark}>
-            <div className="flex flex-col gap-3">
-                <div>
-                    <div className="flex items-center justify-between mb-1">
-                        <p className={`text-[10px] font-black uppercase tracking-wider ${isDark ? 'text-white/40' : 'text-slate-400'}`}>{latest.data}</p>
-                        {latest.editado && (
-                            <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-500">Ajustado</span>
-                        )}
-                    </div>
-                    <p className={`text-xs leading-relaxed whitespace-pre-line ${isDark ? 'text-white/80' : 'text-slate-700'}`}>{latest.texto}</p>
+        <>
+            <DashboardCard
+                title={`Sinais para vincular a ações (${sorted.length})`}
+                isDark={isDark}
+                onRedirect={() => setIsModalOpen(true)}
+            >
+                <div className="flex flex-col gap-2">
+                    {sorted.slice(0, 3).map(suggestion => (
+                        <div key={suggestion.id} className="flex items-center gap-2 min-w-0">
+                            <span className="shrink-0 text-sm">{_CANAL_ICONS[suggestion.canal || 'email'] || '🔔'}</span>
+                            <span className={`text-xs font-semibold truncate flex-1 ${isDark ? 'text-white/80' : 'text-slate-700'}`}>
+                                {suggestion.titulo_sinal || '(sem título)'}
+                            </span>
+                            <span className={`shrink-0 text-[10px] font-mono ${isDark ? 'text-white/40' : 'text-slate-400'}`}>
+                                {formatSuggestionTimestamp(suggestion.analyzed_at)}
+                            </span>
+                        </div>
+                    ))}
+                    {sorted.length > 3 && (
+                        <p className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}>
+                            + {sorted.length - 3} outro(s) sinal(is) pendente(s)
+                        </p>
+                    )}
+                    <p className={`text-[9px] mt-1 ${isDark ? 'text-white/30' : 'text-slate-400'}`}>
+                        {expiredCount > 0 ? `${expiredCount} expirado(s) no Telegram — ` : ''}Toque para revisar e decidir.
+                    </p>
                 </div>
-                {older.length > 0 && (
-                    <button
-                        type="button"
-                        onClick={() => setExpanded(v => !v)}
-                        className={`self-start text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}
+            </DashboardCard>
+
+            {isModalOpen && (
+                <div
+                    className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
+                    onClick={() => setIsModalOpen(false)}
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className={`w-full max-w-3xl max-h-[92vh] flex flex-col rounded-2xl shadow-2xl animate-in zoom-in-95 ${
+                            isDark ? 'bg-[#151c27] border border-[#2a313d] text-white' : 'bg-white text-[#151c27]'
+                        }`}
                     >
-                        {expanded ? 'Ocultar dias anteriores' : `Ver ${older.length} dia(s) anterior(es)`}
-                    </button>
-                )}
-                {expanded && older.map(e => (
-                    <div key={e.id} className={`pt-3 border-t ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
-                        <p className={`text-[10px] font-black uppercase tracking-wider mb-1 ${isDark ? 'text-white/40' : 'text-slate-400'}`}>{e.data}</p>
-                        <p className={`text-xs leading-relaxed whitespace-pre-line ${isDark ? 'text-white/70' : 'text-slate-600'}`}>{e.texto}</p>
+                        <div className={`flex items-center justify-between px-7 py-5 border-b shrink-0 ${isDark ? 'border-[#2a313d]' : 'border-slate-100'}`}>
+                            <h3 className="text-base font-bold uppercase tracking-wider">
+                                Sinais para vincular a ações ({sorted.length})
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={() => setIsModalOpen(false)}
+                                aria-label="Fechar"
+                                className={`p-2 rounded-lg transition ${isDark ? 'text-slate-400 hover:bg-white/5' : 'text-slate-400 hover:bg-slate-100'}`}
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div className="flex-1 min-h-0 overflow-y-auto px-7 py-5 flex flex-col gap-3">
+                            {sorted.map(suggestion => {
+                                const isExpanded = expandedIds.has(suggestion.id);
+                                const mutacoesDescritas = describeMutations(suggestion.mutacoes_propostas);
+                                return (
+                                    <div key={suggestion.id} className={`shrink-0 rounded-2xl border overflow-hidden ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-50'}`}>
+                                        <button
+                                            type="button"
+                                            onClick={() => toggleExpanded(suggestion.id)}
+                                            aria-expanded={isExpanded}
+                                            className={`w-full flex items-start gap-3 p-4 text-left transition ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-100'}`}
+                                        >
+                                            <span className="shrink-0 text-2xl leading-none mt-0.5">{_CANAL_ICONS[suggestion.canal || 'email'] || '🔔'}</span>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-sm font-bold truncate">{suggestion.titulo_sinal || '(sem título)'}</p>
+                                                <p className={`mt-0.5 text-xs truncate ${isDark ? 'text-white/50' : 'text-slate-500'}`}>
+                                                    {_CANAL_LABELS[suggestion.canal || 'email'] || 'Sinal'} · {suggestion.origem_sinal}
+                                                </p>
+                                                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                                    <span className={`text-[11px] font-mono font-semibold ${isDark ? 'text-white/40' : 'text-slate-400'}`}>
+                                                        {formatSuggestionTimestamp(suggestion.analyzed_at)}
+                                                    </span>
+                                                    {suggestion.status === 'expired' && (
+                                                        <span className="text-[10px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">
+                                                            Expirado no Telegram
+                                                        </span>
+                                                    )}
+                                                    {suggestion.task_titulo && (
+                                                        <span className={`text-[10px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded ${isDark ? 'bg-indigo-500/15 text-indigo-300' : 'bg-indigo-50 text-indigo-600'}`}>
+                                                            → ação vinculada
+                                                        </span>
+                                                    )}
+                                                    {mutacoesDescritas.length > 0 && (
+                                                        <span className="text-[10px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-600">
+                                                            Ajuste sugerido
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <svg
+                                                className={`w-5 h-5 shrink-0 mt-1 transition-transform ${isDark ? 'text-white/40' : 'text-slate-400'} ${isExpanded ? 'rotate-180' : ''}`}
+                                                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                            >
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+                                            </svg>
+                                        </button>
+
+                                        {isExpanded && (
+                                            <div className={`px-4 pb-4 border-t ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
+                                                {suggestion.task_titulo && (
+                                                    <div className={`mt-3 rounded-xl px-3 py-2.5 ${isDark ? 'bg-indigo-500/10' : 'bg-indigo-50'}`}>
+                                                        <p className={`text-[11px] font-black uppercase tracking-wider ${isDark ? 'text-indigo-300/70' : 'text-indigo-400'}`}>
+                                                            Ação vinculada
+                                                        </p>
+                                                        {suggestion.task_id ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => onOpenTask?.(suggestion.task_id as string)}
+                                                                className={`mt-0.5 text-sm font-bold underline underline-offset-2 decoration-dotted text-left ${isDark ? 'text-indigo-300 hover:text-indigo-200' : 'text-indigo-600 hover:text-indigo-700'}`}
+                                                            >
+                                                                {suggestion.task_titulo}{suggestion.task_status ? ` · ${suggestion.task_status}` : ''}
+                                                            </button>
+                                                        ) : (
+                                                            <p className={`mt-0.5 text-sm font-bold ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}>
+                                                                {suggestion.task_titulo}{suggestion.task_status ? ` · ${suggestion.task_status}` : ''}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                )}
+                                                {suggestion.resumo && (
+                                                    <div className="mt-3">
+                                                        <p className={`text-[11px] font-black uppercase tracking-wider ${isDark ? 'text-white/30' : 'text-slate-400'}`}>
+                                                            Resumo do sinal
+                                                        </p>
+                                                        <p className={`mt-1 text-sm leading-relaxed ${isDark ? 'text-white/70' : 'text-slate-600'}`}>{suggestion.resumo}</p>
+                                                    </div>
+                                                )}
+                                                {suggestion.numero_processo && (
+                                                    <p className={`mt-2 text-xs font-mono ${isDark ? 'text-white/50' : 'text-slate-500'}`}>
+                                                        Processo SIPAC: <span className="font-bold">{suggestion.numero_processo}</span>
+                                                    </p>
+                                                )}
+                                                {suggestion.texto_original && (
+                                                    <div className="mt-3">
+                                                        <p className={`text-[11px] font-black uppercase tracking-wider ${isDark ? 'text-white/30' : 'text-slate-400'}`}>
+                                                            Mensagem original
+                                                        </p>
+                                                        <div className={`mt-1 max-h-48 overflow-y-auto rounded-lg border px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${isDark ? 'border-white/10 bg-black/20 text-white/60' : 'border-slate-200 bg-white text-slate-600'}`}>
+                                                            {suggestion.texto_original}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {suggestion.itens_de_acao && suggestion.itens_de_acao.length > 0 && (
+                                                    <div className="mt-3">
+                                                        <p className={`text-[11px] font-black uppercase tracking-wider ${isDark ? 'text-white/30' : 'text-slate-400'}`}>Itens de ação</p>
+                                                        <ul className="mt-1 space-y-1">
+                                                            {suggestion.itens_de_acao.map((item, idx) => (
+                                                                <li key={idx} className={`text-sm leading-relaxed ${isDark ? 'text-white/70' : 'text-slate-700'}`}>
+                                                                    • {item.descricao}{item.responsavel ? ` — ${item.responsavel}` : ''}{item.prazo ? ` (prazo ${item.prazo})` : ''}
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    </div>
+                                                )}
+                                                {suggestion.decisoes && suggestion.decisoes.length > 0 && (
+                                                    <div className="mt-3">
+                                                        <p className={`text-[11px] font-black uppercase tracking-wider ${isDark ? 'text-white/30' : 'text-slate-400'}`}>Decisões</p>
+                                                        <ul className="mt-1 space-y-1">
+                                                            {suggestion.decisoes.map((d, idx) => (
+                                                                <li key={idx} className={`text-sm leading-relaxed ${isDark ? 'text-white/70' : 'text-slate-700'}`}>• {d}</li>
+                                                            ))}
+                                                        </ul>
+                                                    </div>
+                                                )}
+                                                {mutacoesDescritas.length > 0 && (
+                                                    <div className={`mt-3 rounded-xl px-3 py-2.5 ${isDark ? 'bg-indigo-500/10' : 'bg-indigo-50'}`}>
+                                                        <p className={`text-[11px] font-black uppercase tracking-wider ${isDark ? 'text-indigo-300/70' : 'text-indigo-400'}`}>
+                                                            Ajuste proposto na ação
+                                                        </p>
+                                                        <ul className="mt-1 space-y-1">
+                                                            {mutacoesDescritas.map((m, idx) => (
+                                                                <li key={idx} className={`text-sm leading-relaxed ${isDark ? 'text-indigo-200' : 'text-indigo-700'}`}>• {m}</li>
+                                                            ))}
+                                                        </ul>
+                                                    </div>
+                                                )}
+
+                                                {onAskCopiloto && (
+                                                    <div className="mt-3">
+                                                        <p className={`text-[11px] font-black uppercase tracking-wider ${isDark ? 'text-white/30' : 'text-slate-400'}`}>
+                                                            Ação personalizada com IA
+                                                        </p>
+                                                        <textarea
+                                                            value={customInputs[suggestion.id] || ''}
+                                                            onChange={(e) => setCustomInputs(prev => ({ ...prev, [suggestion.id]: e.target.value }))}
+                                                            placeholder='Ex: "Registre esse número de SIPAC no diário e acompanhe esse processo."'
+                                                            rows={2}
+                                                            className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none transition focus:ring-2 focus:ring-[#9333ea] resize-none ${
+                                                                isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/30' : 'bg-white border-slate-200 text-slate-800 placeholder:text-slate-400'
+                                                            }`}
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            disabled={!(customInputs[suggestion.id] || '').trim()}
+                                                            onClick={() => handleCustomAction(suggestion)}
+                                                            className="mt-1.5 rounded-lg border border-[#9333ea] px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-[#9333ea] transition hover:bg-[#9333ea]/10 disabled:cursor-not-allowed disabled:opacity-40"
+                                                        >
+                                                            Pedir ao Hermes
+                                                        </button>
+                                                    </div>
+                                                )}
+
+                                                <div className="mt-4 flex flex-wrap gap-2">
+                                                    <button
+                                                        type="button"
+                                                        disabled={busyId === suggestion.id}
+                                                        onClick={() => decide(suggestion, 'ok')}
+                                                        className="flex-1 rounded-lg bg-[#9333ea] py-2 text-xs font-bold uppercase tracking-wider text-white transition hover:bg-[#7800ce] disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        Registrar
+                                                    </button>
+                                                    {mutacoesDescritas.length > 0 && (
+                                                        <button
+                                                            type="button"
+                                                            disabled={busyId === suggestion.id}
+                                                            onClick={() => decide(suggestion, 'mut')}
+                                                            className="flex-1 rounded-lg border border-indigo-500 py-2 text-xs font-bold uppercase tracking-wider text-indigo-500 transition hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                                                        >
+                                                            Registrar + aplicar mudanças
+                                                        </button>
+                                                    )}
+                                                    {suggestion.reativar_sugerido && (
+                                                        <button
+                                                            type="button"
+                                                            disabled={busyId === suggestion.id}
+                                                            onClick={() => decide(suggestion, 'on')}
+                                                            className="flex-1 rounded-lg border border-[#9333ea] py-2 text-xs font-bold uppercase tracking-wider text-[#9333ea] transition hover:bg-[#9333ea]/10 disabled:cursor-not-allowed disabled:opacity-50"
+                                                        >
+                                                            Registrar + Reativar
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        disabled={busyId === suggestion.id}
+                                                        onClick={() => decide(suggestion, 'no')}
+                                                        className={`rounded-lg px-4 py-2 text-xs font-bold uppercase tracking-wider transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? 'text-white/40 hover:bg-white/10' : 'text-slate-400 hover:bg-slate-200'}`}
+                                                    >
+                                                        Ignorar
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
                     </div>
-                ))}
-                <p className={`text-[9px] ${isDark ? 'text-white/30' : 'text-slate-400'}`}>
-                    Gerado automaticamente às 21h30. Peça um ajuste no Telegram tocando "✍️ Ajustar".
-                </p>
-            </div>
-        </DashboardCard>
+                </div>
+            )}
+        </>
     );
 };
 
@@ -504,7 +683,9 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     onAddHealthWeight,
     currentMonth = new Date().getMonth(),
     currentYear = new Date().getFullYear(),
-    onNavigate
+    onNavigate,
+    onOpenTask,
+    onAskCopiloto
 }) => {
     const [isFinanceVisible, setIsFinanceVisible] = useState(false);
 
@@ -680,8 +861,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             }`}
         >
 
-            <EmailLinkSuggestionsPanel isDark={isDark} />
-            <PersonalDiaryPanel isDark={isDark} />
+            <EmailLinkSuggestionsPanel isDark={isDark} onOpenTask={onOpenTask} onAskCopiloto={onAskCopiloto} />
 
             <div className="flex flex-col xl:flex-row gap-6 w-full items-stretch min-h-0 xl:h-[calc(100vh-7rem)]">
 

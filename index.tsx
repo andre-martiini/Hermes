@@ -28,6 +28,7 @@ import ProjectsView from './ProjectsView';
 import RAGBasesView from './src/views/RAGBasesView';
 import { ServicesView } from './src/views/ServicesView';
 import ContactsView from './ContactsView';
+import PersonalDiaryView from './PersonalDiaryView';
 import { INTERNAL_NAVIGATION_EVENT } from './src/utils/internalNavigation';
 // Importações dos módulos extraídos pelo split.js
 import {
@@ -1709,7 +1710,7 @@ const App: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [completedLimit, setCompletedLimit] = useState(10);
   const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude' | 'servicos' | 'estrategia'>('dashboard');
-  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'finance' | 'saude' | 'ferramentas' | 'knowledge' | 'services' | 'rag-bases' | 'concluidas' | 'strategy' | 'godmode'>('dashboard');
+  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'finance' | 'saude' | 'ferramentas' | 'knowledge' | 'services' | 'rag-bases' | 'concluidas' | 'strategy' | 'godmode' | 'contacts' | 'diario'>('dashboard');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
   const [isSidebarRetracted, setIsSidebarRetracted] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
@@ -1821,11 +1822,12 @@ const App: React.FC = () => {
       }
     }
   }, [tarefas.length > 0]);
-  const handleDashboardNavigate = (view: 'gallery' | 'finance' | 'saude') => {
+  const handleDashboardNavigate = (view: 'gallery' | 'finance' | 'saude' | 'diario') => {
     setViewMode(view);
     if (view === 'gallery') setActiveModule('acoes');
     else if (view === 'finance') setActiveModule('financeiro');
     else if (view === 'saude') setActiveModule('saude');
+    else if (view === 'diario') setActiveModule('acoes');
   };
   // Sync state changes with history to enable back button
   useEffect(() => {
@@ -4594,6 +4596,7 @@ const App: React.FC = () => {
                 { id: 'contacts', label: 'Contatos', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>, active: viewMode === 'contacts', onClick: () => { setActiveModule('acoes'); setViewMode('contacts'); } },
                 { id: 'conhecimento', label: 'Conhecimento', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>, active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
                 { id: 'rag-bases', label: 'Áreas Temáticas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>, active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
+                { id: 'diario', label: 'Diário', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>, active: viewMode === 'diario', onClick: () => { setActiveModule('acoes'); setViewMode('diario'); } },
               ].map(item => (
                 <button
                   key={item.id}
@@ -4882,6 +4885,7 @@ const App: React.FC = () => {
                           {viewMode === 'services' ? 'Serviços' :
                             viewMode === 'rag-bases' ? 'Áreas Temáticas' :
                               viewMode === 'knowledge' ? 'Conhecimento' :
+                                viewMode === 'diario' ? 'Diário Pessoal' :
                                 viewMode === 'ferramentas' ? 'Ferramentas' :
                                   viewMode === 'godmode' ? 'Godmode' :
                                   activeModule === 'dashboard' ? 'Dashboard' :
@@ -4892,7 +4896,7 @@ const App: React.FC = () => {
                         </h1>
                       </div>
                     </div>
-                    {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
+                    {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'diario' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
                       <nav className={`flex flex-wrap items-center gap-1`}>
                         <button
                           onClick={() => {
@@ -5149,6 +5153,7 @@ const App: React.FC = () => {
                       { label: 'Contatos', active: viewMode === 'contacts', onClick: () => { setActiveModule('acoes'); setViewMode('contacts'); } },
                       { label: 'Conhecimento', active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
                       { label: 'Áreas Temáticas', active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
+                      { label: 'Diário', active: viewMode === 'diario', onClick: () => { setActiveModule('acoes'); setViewMode('diario'); } },
                     ].map((item, idx) => (
                       <button
                         key={idx}
@@ -5238,6 +5243,13 @@ const App: React.FC = () => {
                         currentMonth={currentMonth}
                         currentYear={currentYear}
                         onNavigate={handleDashboardNavigate}
+                        onOpenTask={handleCopilotoOpenTask}
+                        onAskCopiloto={(prompt) => {
+                          setCopilotoMode('default');
+                          setCopilotoAutoStartMic(false);
+                          setCopilotoInitialPrompt(prompt);
+                          setIsCopilotoOpen(true);
+                        }}
                       />
                     </div>
                   </>
@@ -5903,6 +5915,8 @@ const App: React.FC = () => {
                   />
                 ) : viewMode === 'contacts' ? (
                   <ContactsView isDark={isDarkTheme} />
+                ) : viewMode === 'diario' ? (
+                  <PersonalDiaryView isDark={isDarkTheme} />
                 ) : viewMode === 'ferramentas' ? (
                   <FerramentasView
                     ideas={brainstormIdeas}
