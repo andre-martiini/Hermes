@@ -897,6 +897,11 @@ def link_calendar_events_to_actions(db, sync_ref, logs):
 
     for event_doc in events:
         event = event_doc.to_dict() or {}
+        # Eventos que o próprio Hermes criou na agenda (ver 'criado_pelo_hermes' em
+        # sync_google_calendar, main.py) não viram sinal: o sistema já sabe dessa ação
+        # porque foi ele quem agendou — sinalizar de volta seria redundante.
+        if event.get("criado_pelo_hermes"):
+            continue
         google_id = event.get("google_id")
         task = candidates_by_calendar_id.get(google_id)
         if not task:

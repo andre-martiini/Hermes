@@ -741,6 +741,21 @@ def _delete_telegram_message(token: str, chat_id: str | int, message_id: int):
         pass
 
 
+def _clear_telegram_inline_keyboard(token: str, chat_id: str | int, message_id: int):
+    """Remove o teclado inline (botões) de uma mensagem já respondida, para que um duplo
+    toque acidental (ou um reenvio de webhook do Telegram) não reexecute o callback."""
+    if not message_id:
+        return
+    try:
+        _requests.post(
+            f"https://api.telegram.org/bot{token}/editMessageReplyMarkup",
+            json={"chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": []}},
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
 def _send_telegram_typing(token: str, chat_id: str | int):
     _send_telegram_chat_action(token, chat_id, "typing")
 
@@ -2012,19 +2027,45 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
 
     elif data == "confirm_acao":
         _answer_callback_query(token, query_id, "Processando registro...")
+        # Remove o teclado inline imediatamente para que um duplo toque acidental não
+        # reenvie o mesmo callback_query enquanto esta chamada ainda está em andamento.
+        _clear_telegram_inline_keyboard(token, chat_id, message.get("message_id"))
         pending = session.get("pending_confirmations", {}).get("acao")
         if not pending:
             response_text = "⚠️ Nenhuma ação pendente de confirmação encontrada ou o prazo expirou."
             _persist_callback_turn("Botão: confirmar registro de ação", response_text)
             _send_telegram_message(token, chat_id, response_text)
             return https_fn.Response("OK", status=200)
-            
+
+        # Reivindicação atômica (título, data, horário) — evita criar a mesma ação mais de
+        # uma vez quando o Telegram reenvia o mesmo callback_query (timeout de webhook) ou
+        # o usuário toca duas vezes antes do teclado acima ser removido. Ver bug de eventos
+        # duplicados na agenda / claim_action_dedup_slot em main.py.
+        from main import claim_action_dedup_slot, store_action_dedup_result, release_action_dedup_slot
+        _dedup_status, _dedup_task_id = claim_action_dedup_slot(
+            db, pending.get("titulo"), pending.get("data_limite"), pending.get("horario_inicio")
+        )
+        if _dedup_status == "duplicate":
+            response_text = f"✅ Essa ação já havia sido registrada.\nID: <code>{_dedup_task_id}</code>\nTítulo: {pending.get('titulo')}"
+            _persist_callback_turn("Botão: confirmar registro de ação", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+            session.get("pending_confirmations", {}).pop("acao", None)
+            if session.get("_pending_confirm_type") == "acao":
+                session.pop("_pending_confirm_type", None)
+            _save_session(db, chat_id, session)
+            return https_fn.Response("OK", status=200)
+        if _dedup_status == "pending":
+            response_text = "⏳ Essa ação já está sendo registrada por outra chamada. Verifique a lista de ações em alguns segundos."
+            _persist_callback_turn("Botão: confirmar registro de ação", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+            return https_fn.Response("OK", status=200)
+
         # Executa a criação (lógica de criar_acao_no_sistema)
         try:
             import uuid as _uuid
             now_iso = datetime.now(timezone.utc).isoformat()
             task_id = str(_uuid.uuid4())[:20]
-            
+
             # Reuso da lógica de reagendamento se houver horários
             try:
                 from main import get_calendar_service, get_target_calendar_id
@@ -2039,7 +2080,7 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
                 {"id": str(_uuid.uuid4())[:8], "text": str(p), "completed": False}
                 for p in (pending.get("plano_acao") or []) if str(p).strip()
             ]
-            
+
             doc = {
                 "id": task_id,
                 "titulo": pending["titulo"].strip(),
@@ -2060,7 +2101,8 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
                 "sync_status": "new",
             }
             db.collection("tarefas").document(task_id).set(doc)
-            
+            store_action_dedup_result(db, pending.get("titulo"), pending.get("data_limite"), pending.get("horario_inicio"), task_id)
+
             # Limpa pendência
             session.get("pending_confirmations", {}).pop("acao", None)
             if session.get("_pending_confirm_type") == "acao":
@@ -2071,6 +2113,7 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
             _persist_callback_turn("Botão: confirmar registro de ação", response_text)
             _send_telegram_message(token, chat_id, response_text)
         except Exception as e:
+            release_action_dedup_slot(db, pending.get("titulo"), pending.get("data_limite"), pending.get("horario_inicio"))
             response_text = f"❌ Erro ao registrar ação: {e}"
             _persist_callback_turn("Botão: confirmar registro de ação", response_text)
             _send_telegram_message(token, chat_id, response_text)
@@ -4106,30 +4149,17 @@ def _process_telegram_message(db, data: dict):
             if horario_inicio < current_time_str:
                 return f"ERRO|Não é possível agendar um horário anterior ao horário atual ({current_time_str}). Por favor, escolha um horário posterior."
 
-        # Idempotência: evita criar a mesma ação duas ou três vezes quando o modelo chama
-        # esta tool mais de uma vez para o mesmo pedido (lote de function calls repetido,
-        # retry) — sintoma relatado como "aparece duplicada no mesmo horário, com evento
-        # duplicado na agenda". Mesmo título+data+horário criados nos últimos 15 minutos
-        # são tratados como a mesma ação, não uma nova.
-        try:
-            _dup_threshold = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
-            _dup_query = (
-                db.collection("tarefas")
-                .where("titulo", "==", titulo.strip())
-                .where("data_limite", "==", data_limite)
-                .where("horario_inicio", "==", horario_inicio)
-                .limit(5)
-                .stream()
-            )
-            for _dup_doc in _dup_query:
-                _dup_data = _dup_doc.to_dict() or {}
-                if _dup_data.get("status") == "excluído":
-                    continue
-                if str(_dup_data.get("data_criacao") or "") >= _dup_threshold:
-                    print(f"[Core] Ação duplicada evitada: reaproveitando {_dup_doc.id} em vez de criar outra.")
-                    return f"OK|{_dup_doc.id}"
-        except Exception as _dup_err:
-            print(f"[Core] Falha na checagem de duplicidade (seguindo com a criação): {_dup_err}")
+        # Idempotência: reivindica atomicamente a chave (título, data, horário) para evitar
+        # criar a mesma ação duas ou três vezes quando o modelo chama esta tool mais de uma
+        # vez para o mesmo pedido (retry, lote de function calls repetido) — sintoma relatado
+        # como "aparece duplicada no mesmo horário, com evento duplicado na agenda".
+        from main import claim_action_dedup_slot, store_action_dedup_result
+        _dedup_status, _dedup_task_id = claim_action_dedup_slot(db, titulo, data_limite, horario_inicio)
+        if _dedup_status == "duplicate":
+            print(f"[Core] Ação duplicada evitada: reaproveitando {_dedup_task_id} em vez de criar outra.")
+            return f"OK|{_dedup_task_id}"
+        if _dedup_status == "pending":
+            return "ERRO|Esta ação já está sendo registrada por outra chamada. Aguarde alguns segundos e verifique a lista de ações antes de tentar de novo."
 
         task_id = str(_uuid.uuid4())[:20]
         plano_convertido = [
@@ -4183,8 +4213,11 @@ def _process_telegram_message(db, data: dict):
             }
         try:
             db.collection("tarefas").document(task_id).set(doc)
+            store_action_dedup_result(db, titulo, data_limite, horario_inicio, task_id)
             return f"OK|{task_id}"
         except Exception as e:
+            from main import release_action_dedup_slot
+            release_action_dedup_slot(db, titulo, data_limite, horario_inicio)
             return f"ERRO|{e}"
 
     def reagendar_acoes_em_lote(

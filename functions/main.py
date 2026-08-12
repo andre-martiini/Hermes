@@ -753,6 +753,88 @@ def release_sync_lock(db, owner_id):
 
 
 
+def claim_action_dedup_slot(db, titulo, data_limite, horario_inicio, ttl_minutes=15):
+    """Reivindica atomicamente a chave (título, data, horário) de uma nova ação para evitar
+    duplicatas quando a criação é chamada mais de uma vez para o mesmo pedido (retry do
+    modelo, reenvio de webhook do Telegram, duplo toque no botão de confirmação) — sintoma
+    relatado como "aparece duplicada no mesmo horário, com evento duplicado na agenda".
+    Ao contrário de uma consulta seguida de escrita (sujeita a corrida), usa create() como
+    exclusão mútua atômica no nível do documento, no mesmo espírito de acquire_sync_lock.
+
+    Retorna (status, task_id):
+      ("proceed", None)     — nenhuma reivindicação concorrente; prossiga com a criação e
+                               chame store_action_dedup_result(...) depois de criar a ação.
+      ("duplicate", task_id) — outra chamada já concluiu a criação; reaproveite esse ID.
+      ("pending", None)      — outra chamada está criando a mesma ação agora; não crie outra.
+    """
+    import hashlib
+
+    key_raw = f"{(titulo or '').strip().lower()}|{data_limite}|{horario_inicio}"
+    key = "aclock_" + hashlib.sha1(key_raw.encode("utf-8")).hexdigest()[:24]
+    claim_ref = db.collection("action_creation_claims").document(key)
+    now = datetime.now(timezone.utc)
+
+    def _try_create():
+        claim_ref.create({"claimed_at": now.isoformat(), "task_id": None})
+
+    try:
+        _try_create()
+        return "proceed", None
+    except Exception:
+        pass
+
+    try:
+        existing = claim_ref.get()
+        if not existing.exists:
+            _try_create()
+            return "proceed", None
+
+        data = existing.to_dict() or {}
+        claimed_at = parse_iso_datetime(data.get("claimed_at"))
+        if not claimed_at or (now - claimed_at) >= timedelta(minutes=ttl_minutes):
+            claim_ref.delete()
+            _try_create()
+            return "proceed", None
+
+        task_id = data.get("task_id")
+        if task_id:
+            return "duplicate", task_id
+
+        for _ in range(3):
+            time.sleep(0.4)
+            task_id = (claim_ref.get().to_dict() or {}).get("task_id")
+            if task_id:
+                return "duplicate", task_id
+
+        return "pending", None
+    except Exception:
+        return "proceed", None
+
+
+def store_action_dedup_result(db, titulo, data_limite, horario_inicio, task_id):
+    import hashlib
+
+    key_raw = f"{(titulo or '').strip().lower()}|{data_limite}|{horario_inicio}"
+    key = "aclock_" + hashlib.sha1(key_raw.encode("utf-8")).hexdigest()[:24]
+    try:
+        db.collection("action_creation_claims").document(key).set({"task_id": task_id}, merge=True)
+    except Exception:
+        pass
+
+
+def release_action_dedup_slot(db, titulo, data_limite, horario_inicio):
+    """Libera a reivindicação de claim_action_dedup_slot quando a criação falhou, para que
+    uma nova tentativa não fique bloqueada como "pending" até o TTL expirar."""
+    import hashlib
+
+    key_raw = f"{(titulo or '').strip().lower()}|{data_limite}|{horario_inicio}"
+    key = "aclock_" + hashlib.sha1(key_raw.encode("utf-8")).hexdigest()[:24]
+    try:
+        db.collection("action_creation_claims").document(key).delete()
+    except Exception:
+        pass
+
+
 def emit_notification_backend(title, message, n_type='info', link=None):
 
     from datetime import datetime
@@ -1484,6 +1566,12 @@ def sync_google_calendar(service, sync_ref, logs):
 
                 end = event['end'].get('dateTime', event['end'].get('date'))
 
+                # Eventos criados pelo próprio Hermes (ver build_task_calendar_event_id /
+                # sync_google_tasks_push) levam extendedProperties.private.hermes_task_id.
+                # Guardamos essa marca para que produtores de sinal (ex.: link_calendar_events_to_actions)
+                # possam ignorá-los — sinalizar de volta um evento que o próprio Hermes criou é redundante.
+                hermes_task_id = ((event.get('extendedProperties') or {}).get('private') or {}).get('hermes_task_id')
+
                 db.collection('google_calendar_events').document(doc_id).set({
 
                     'google_id': event_id,
@@ -1495,6 +1583,8 @@ def sync_google_calendar(service, sync_ref, logs):
                     'data_inicio': start,
 
                     'data_fim': end,
+
+                    'criado_pelo_hermes': bool(hermes_task_id),
 
                     'last_sync': datetime.now().isoformat()
 
@@ -9113,30 +9203,17 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     if horario_inicio < current_time_str:
                         return f"ERRO|Não é possível agendar um horário anterior ao horário atual ({current_time_str}). Por favor, escolha um horário posterior."
 
-                # Idempotência: evita criar a mesma ação duas ou três vezes quando o modelo
-                # chama esta tool mais de uma vez para o mesmo pedido (lote de function calls
-                # repetido, retry) — sintoma relatado como "aparece duplicada no mesmo horário,
-                # com evento duplicado na agenda". Mesmo título+data+horário criados nos
-                # últimos 15 minutos são tratados como a mesma ação, não uma nova.
-                try:
-                    _dup_threshold = (_dt.now(_tz.utc) - timedelta(minutes=15)).isoformat()
-                    _dup_query = (
-                        db.collection("tarefas")
-                        .where("titulo", "==", titulo.strip())
-                        .where("data_limite", "==", data_limite)
-                        .where("horario_inicio", "==", horario_inicio)
-                        .limit(5)
-                        .stream()
-                    )
-                    for _dup_doc in _dup_query:
-                        _dup_data = _dup_doc.to_dict() or {}
-                        if _dup_data.get("status") == "excluído":
-                            continue
-                        if str(_dup_data.get("data_criacao") or "") >= _dup_threshold:
-                            print(f"[Copiloto] Ação duplicada evitada: reaproveitando {_dup_doc.id} em vez de criar outra.")
-                            return f"OK|{_dup_doc.id}"
-                except Exception as _dup_err:
-                    print(f"[Copiloto] Falha na checagem de duplicidade (seguindo com a criação): {_dup_err}")
+                # Idempotência: reivindica atomicamente a chave (título, data, horário) para
+                # evitar criar a mesma ação duas ou três vezes quando o modelo chama esta tool
+                # mais de uma vez para o mesmo pedido (lote de function calls repetido, retry)
+                # — sintoma relatado como "aparece duplicada no mesmo horário, com evento
+                # duplicado na agenda". Ver claim_action_dedup_slot para o mecanismo atômico.
+                _dedup_status, _dedup_task_id = claim_action_dedup_slot(db, titulo, data_limite, horario_inicio)
+                if _dedup_status == "duplicate":
+                    print(f"[Copiloto] Ação duplicada evitada: reaproveitando {_dedup_task_id} em vez de criar outra.")
+                    return f"OK|{_dedup_task_id}"
+                if _dedup_status == "pending":
+                    return "ERRO|Esta ação já está sendo registrada por outra chamada. Aguarde alguns segundos e verifique a lista de ações antes de tentar de novo."
 
                 task_id = str(_uuid.uuid4())[:20]
 
@@ -9254,11 +9331,13 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     artefatos_pendentes_vinculo.clear()
 
                 db.collection("tarefas").document(task_id).set(doc)
+                store_action_dedup_result(db, titulo, data_limite, horario_inicio, task_id)
                 print(f"[Copiloto] Ação criada: id={task_id}, titulo='{titulo}'")
                 return f"OK|{task_id}"
 
             except Exception as _ce:
                 print(f"[Copiloto] Erro ao criar ação: {_ce}")
+                release_action_dedup_slot(db, titulo, data_limite, horario_inicio)
                 return f"ERRO|{str(_ce)}"
 
         def editar_plano_acao(
