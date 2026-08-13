@@ -182,6 +182,19 @@ interface HermesGlobalChatProps {
   onOpenTool?: (tool: string, id: string) => void;
   initialPrompt?: string | null;
   onInitialPromptConsumed?: () => void;
+  /** Contexto ao vivo (ex.: transcrição de reunião) injetado no prompt de cada mensagem enviada. */
+  liveContextProvider?: () => string | null;
+  /** Modo compacto: sem histórico/troca de sessão, sem menu de POPs, sem botão de minimizar — uma conversa única e contínua. */
+  historyEnabled?: boolean;
+  showToolsMenu?: boolean;
+  showMinimizeButton?: boolean;
+  /** Quando false, reabrir o painel (isOpen true→true após toggle) não zera a conversa em andamento. */
+  resetSessionOnOpen?: boolean;
+  headerTitle?: string;
+  headerSubtitle?: string;
+  emptyStateTitle?: string;
+  emptyStateDescription?: string;
+  composerPlaceholder?: string;
 }
 
 const getCopilotoErrorMessage = (err: any) => {
@@ -226,6 +239,16 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   onOpenTool,
   initialPrompt,
   onInitialPromptConsumed,
+  liveContextProvider,
+  historyEnabled = true,
+  showToolsMenu = true,
+  showMinimizeButton = true,
+  resetSessionOnOpen = true,
+  headerTitle,
+  headerSubtitle,
+  emptyStateTitle,
+  emptyStateDescription,
+  composerPlaceholder,
 }) => {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -397,6 +420,9 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
+    // Em modo de conversa única (resetSessionOnOpen=false) recolher/reabrir o painel
+    // não deve zerar uma sessão já em andamento — só a primeira abertura (sessão ainda nula) inicializa.
+    if (!resetSessionOnOpen && currentSessionIdRef.current) return;
     setIsComposingNewSession(true);
     setCurrentSessionId(null);
     setMessages([]);
@@ -748,6 +774,8 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
       await touchSession(sessionId, sessionUpdates);
 
       const pastePrefix = pasteToSend ? `[CONTEXTO COLADO]\n${pasteToSend.text}\n[/CONTEXTO]\n\n` : '';
+      const liveContext = liveContextProvider?.() || '';
+      const liveContextPrefix = liveContext ? `[CONTEXTO DA REUNIÃO]\n${liveContext}\n[/CONTEXTO]\n\n` : '';
       await addDoc(collection(db, 'copilot_jobs'), {
         userId,
         sessionId,
@@ -757,7 +785,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
         updatedAt: Timestamp.now(),
         payload: {
           sessionId,
-          prompt: pastePrefix + (text.trim() || (hasFiles || hasPaste ? '' : text)),
+          prompt: liveContextPrefix + pastePrefix + (text.trim() || (hasFiles || hasPaste ? '' : text)),
           taskId: null,
           systemId: null,
           driveFileId: driveFiles.length > 0 ? driveFiles[0].driveFileId : null,
@@ -1005,6 +1033,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
         </div>
       )}
 
+      {historyEnabled && (
       <aside className={`${showMobileHistory ? 'fixed inset-0 z-[820] flex' : showHistory ? 'hidden md:flex' : 'hidden'} md:relative md:z-auto md:w-[300px] lg:w-[340px] shrink-0 flex-col border-r ${sidebarClass}`}>
         <div className={`flex h-16 shrink-0 items-center justify-between border-b px-4 ${isDark ? 'border-white/10' : 'border-[#e5e7eb]'}`}>
           <div className="flex min-w-0 items-center gap-3">
@@ -1102,10 +1131,12 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
           )}
         </div>
       </aside>
+      )}
 
       <main className={`flex min-w-[min(420px,100%)] flex-1 flex-col border-l-0 ${panelClass}`}>
         <header className={`flex h-16 shrink-0 items-center justify-between border-b px-4 md:px-6 ${isDark ? 'border-white/10' : 'border-[#e5e7eb]'}`}>
           <div className="flex min-w-0 items-center gap-3">
+            {historyEnabled && (
             <button
               type="button"
               onClick={() => {
@@ -1125,15 +1156,17 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
             </button>
+            )}
             <div className={`hidden h-9 w-9 items-center justify-center border p-1.5 md:flex rounded-lg ${isDark ? 'border-white/10 bg-white' : 'border-[#e5e7eb] bg-white'}`}>
               <img src="/logo.png" alt="Hermes" className="h-full w-full object-contain" />
             </div>
             <div className="min-w-0">
-              <h2 className={`truncate font-sans text-sm font-bold uppercase tracking-wider ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Copiloto Hermes</h2>
-              <p className={`truncate font-sans text-[9px] font-semibold uppercase tracking-wider ${mutedClass}`}>Chat {modeLabel} · {currentSessionId ? 'conversa ativa' : 'nova conversa'}</p>
+              <h2 className={`truncate font-sans text-sm font-bold uppercase tracking-wider ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{headerTitle ?? 'Copiloto Hermes'}</h2>
+              <p className={`truncate font-sans text-[9px] font-semibold uppercase tracking-wider ${mutedClass}`}>{headerSubtitle ?? `Chat ${modeLabel} · ${currentSessionId ? 'conversa ativa' : 'nova conversa'}`}</p>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {historyEnabled && (
             <button
               type="button"
               onClick={startNewConversation}
@@ -1143,6 +1176,8 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
             >
               Nova conversa
             </button>
+            )}
+            {showMinimizeButton && (
             <button
               type="button"
               onClick={() => setIsMinimized(true)}
@@ -1154,6 +1189,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 12h14" /></svg>
             </button>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -1176,10 +1212,10 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                   </div>
                   <div>
                     <p className={`font-sans text-[10px] font-bold uppercase tracking-wider ${mutedClass}`}>{copilotMode === 'estrategia' ? 'Copiloto de estratégia' : 'Copiloto global'}</p>
-                    <h3 className={`mt-1 text-2xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Como posso ajudar?</h3>
+                    <h3 className={`mt-1 text-2xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>{emptyStateTitle ?? 'Como posso ajudar?'}</h3>
                   </div>
                 </div>
-                <p className={`max-w-xl text-sm font-medium leading-relaxed ${textSoftClass}`}>{copilotMode === 'estrategia' ? 'Foco nos seus objetivos, pilares, diretrizes, indicadores e marcos. Posso analisar coerência de longo prazo e criar, alterar ou excluir itens da sua estratégia.' : 'Pronto para conversar.'}</p>
+                <p className={`max-w-xl text-sm font-medium leading-relaxed ${textSoftClass}`}>{emptyStateDescription ?? (copilotMode === 'estrategia' ? 'Foco nos seus objetivos, pilares, diretrizes, indicadores e marcos. Posso analisar coerência de longo prazo e criar, alterar ou excluir itens da sua estratégia.' : 'Pronto para conversar.')}</p>
               </div>
             ) : (
               <div className="space-y-8">
@@ -1365,6 +1401,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
               <button type="button" disabled={isBlocked} onClick={() => fileInputRef.current?.click()} title="Anexar arquivos (até 10)" className={`flex h-10 w-10 shrink-0 items-center justify-center transition-all ${hoverClass} disabled:opacity-30`}>
                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 5v14m-7-7h14" /></svg>
               </button>
+              {showToolsMenu && (
               <div className="relative shrink-0" ref={toolMenuRef}>
                 <button type="button" disabled={isBlocked} onClick={() => setShowTools((prev) => !prev)} title="POPs Cadastrados" className={`flex h-10 w-10 items-center justify-center transition-all ${showTools ? (isDark ? 'bg-white/10' : 'bg-slate-100') : hoverClass} disabled:opacity-30`}>
                   <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="5" cy="5" r="1.8" /><circle cx="12" cy="5" r="1.8" /><circle cx="19" cy="5" r="1.8" /><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /><circle cx="5" cy="19" r="1.8" /><circle cx="12" cy="19" r="1.8" /><circle cx="19" cy="19" r="1.8" /></svg>
@@ -1397,6 +1434,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                   </div>
                 )}
               </div>
+              )}
               <textarea
                 ref={textareaRef}
                 rows={1}
@@ -1410,7 +1448,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                   }
                 }}
                 disabled={isBlocked}
-                placeholder={voiceStream.status === 'live' ? `🔊 ${voiceStreamStatusMessage || 'Conversa ao vivo — pode falar'}` : voiceStream.status === 'connecting' ? '🔊 Conectando à voz ao vivo…' : isRecording ? 'Gravando... clique no microfone para parar' : isProcessingMic || isTranscribing ? 'Transcrevendo áudio...' : attachedFile || pastedContext ? 'Pergunte sobre o contexto anexado...' : copilotMode === 'estrategia' ? 'Converse sobre seus objetivos e diretrizes...' : 'Mensagem para o Hermes'}
+                placeholder={voiceStream.status === 'live' ? `🔊 ${voiceStreamStatusMessage || 'Conversa ao vivo — pode falar'}` : voiceStream.status === 'connecting' ? '🔊 Conectando à voz ao vivo…' : isRecording ? 'Gravando... clique no microfone para parar' : isProcessingMic || isTranscribing ? 'Transcrevendo áudio...' : attachedFile || pastedContext ? 'Pergunte sobre o contexto anexado...' : copilotMode === 'estrategia' ? 'Converse sobre seus objetivos e diretrizes...' : (composerPlaceholder ?? 'Mensagem para o Hermes')}
                 className={`min-h-10 flex-1 resize-none overflow-y-hidden bg-transparent px-2 py-2.5 text-sm font-medium leading-5 outline-none disabled:opacity-40 ${isDark ? 'text-slate-100 placeholder:text-slate-600' : 'text-slate-900 placeholder:text-slate-400'}`}
               />
               <button

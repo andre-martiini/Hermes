@@ -118,7 +118,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   }
 
   if (activeTool === 'meeting_transcription') {
-    return <MeetingTranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} />;
+    return <MeetingTranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} isDark={isDark} />;
   }
 
 
@@ -229,7 +229,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
         id: 'meeting_transcription',
         code: 'ID-006',
         title: 'Reuniões em Tempo Real',
-        desc: 'Transcreva com áudio duplo e chat IA.',
+        desc: 'Transcrição ao vivo com o Copiloto Hermes integrado.',
         dotColor: 'bg-indigo-500',
         iconClasses: isDark ? 'text-indigo-400 group-hover:bg-indigo-600' : 'text-indigo-600 group-hover:bg-indigo-600',
         lineColor: 'group-hover:bg-indigo-500',
