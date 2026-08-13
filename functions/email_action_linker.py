@@ -496,9 +496,9 @@ def apply_suggestion(db, msg_id: str, data: dict, reactivate: bool, apply_mutati
             return False
 
         task_updates = {"acompanhamento": firestore.ArrayUnion([entry]), "data_atualizacao": now_iso}
+        task_data = task_snap.to_dict() or {}
 
         if mutacoes:
-            task_data = task_snap.to_dict() or {}
             novas_etapas = mutacoes.get("novas_etapas") or []
             if novas_etapas:
                 plano_atual = task_data.get("plano_acao") or []
@@ -524,6 +524,15 @@ def apply_suggestion(db, msg_id: str, data: dict, reactivate: bool, apply_mutati
         if reactivate:
             task_updates["status"] = "em andamento"
             task_updates["data_conclusao"] = None
+            # Toda ação "em andamento" precisa necessariamente de uma data (mesma regra
+            # aplicada no frontend por applyStandbyDateRules, src/utils/helpers.tsx) —
+            # sem isso a reativação automática via sinal (e-mail/WhatsApp) deixava a
+            # ação em limbo: status ativo mas sem data, fora do fluxo de Hoje/Amanhã.
+            data_atual = task_updates.get("data_limite") or task_data.get("data_limite")
+            if not data_atual or data_atual in ("-", "0000-00-00"):
+                hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d")
+                task_updates["data_limite"] = hoje
+                task_updates["data_inicio"] = hoje
         transaction.update(task_ref, task_updates)
         transaction.update(suggestion_ref, {
             "status": new_status,

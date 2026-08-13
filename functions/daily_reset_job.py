@@ -32,9 +32,11 @@ def daily_wip_reset_and_degradation(event: scheduler_fn.ScheduledEvent):
     sla_breach_count = 0
     degraded_count = 0
     critical_count = 0
+    missing_date_count = 0
 
     for task_doc in active_tasks:
         task_data = task_doc.to_dict()
+        status = task_data.get("status")
         due_date = task_data.get("data_limite", "")
         start_date = task_data.get("data_inicio", "")
         lane = task_data.get("execution_lane", "avanco")
@@ -42,37 +44,54 @@ def daily_wip_reset_and_degradation(event: scheduler_fn.ScheduledEvent):
         is_overdue = (due_date and due_date not in ["-", "0000-00-00"] and due_date < today_str) or \
                      (start_date and start_date not in ["-", "0000-00-00"] and start_date < today_str)
 
-        if not is_overdue:
+        # "em andamento" precisa necessariamente de uma data — stand-by é a exceção
+        # (ausência de data ali é o estado esperado, ver applyStandbyDateRules no
+        # frontend). Sem esta rede de segurança, ações reativadas sem data por algum
+        # caminho de escrita (ex.: ajuste automático de sinal de e-mail/WhatsApp)
+        # ficam em limbo indefinidamente: status ativo, mas fora do fluxo Hoje/Amanhã.
+        is_missing_date = status == "em andamento" and (
+            due_date in ("", "-", "0000-00-00") or start_date in ("", "-", "0000-00-00")
+        )
+
+        if not is_overdue and not is_missing_date:
             continue
 
         updates = {
             "data_limite": today_str,
             "data_inicio": today_str,
-            "auto_data_atualizada": True,
             "data_atualizacao": datetime.datetime.now(datetime.timezone.utc).isoformat()
         }
 
-        if lane == "aguardando_terceiro":
-            title = task_data.get("titulo", "")
-            if not title.startswith("[COBRAR]"):
-                title = f"[COBRAR] {title}"
-            updates["titulo"] = title
-            updates["execution_lane"] = "avanco"
-            sla_breach_count += 1
+        if is_overdue:
+            updates["auto_data_atualizada"] = True
+            if lane == "aguardando_terceiro":
+                title = task_data.get("titulo", "")
+                if not title.startswith("[COBRAR]"):
+                    title = f"[COBRAR] {title}"
+                updates["titulo"] = title
+                updates["execution_lane"] = "avanco"
+                sla_breach_count += 1
+            else:
+                if status == "em andamento":
+                    degraded_count += 1
+                    curr_deg = task_data.get("degradation_count", 0) + 1
+                    updates["degradation_count"] = curr_deg
+                    if curr_deg >= 3:
+                        critical_count += 1
+                auto_advanced_count += 1
         else:
-            if task_data.get("status") == "em andamento":
-                degraded_count += 1
-                curr_deg = task_data.get("degradation_count", 0) + 1
-                updates["degradation_count"] = curr_deg
-                if curr_deg >= 3:
-                    critical_count += 1
-            auto_advanced_count += 1
+            # Só preenchendo uma data ausente — não é um atraso, não entra na
+            # contagem de degradação/SLA.
+            missing_date_count += 1
 
         batch.update(task_doc.reference, updates)
 
-    if auto_advanced_count > 0 or sla_breach_count > 0:
+    if auto_advanced_count > 0 or sla_breach_count > 0 or missing_date_count > 0:
         batch.commit()
-        print(f"[Midnight Reset] Committed. Advanced: {auto_advanced_count}, SLA Breaches: {sla_breach_count}.")
+        print(
+            f"[Midnight Reset] Committed. Advanced: {auto_advanced_count}, "
+            f"SLA Breaches: {sla_breach_count}, Missing dates filled: {missing_date_count}."
+        )
 
         summary = f"🕛 <b>Virada do Dia ({today_str}):</b>\n\n"
         if auto_advanced_count > 0:
@@ -82,6 +101,9 @@ def daily_wip_reset_and_degradation(event: scheduler_fn.ScheduledEvent):
 
         if sla_breach_count > 0:
             summary += f"📞 {sla_breach_count} ação(ões) estouraram o SLA de espera e viraram [COBRAR].\n"
+
+        if missing_date_count > 0:
+            summary += f"🗓️ {missing_date_count} ação(ões) em andamento sem data foram ajustadas para hoje.\n"
 
         summary += "\nAbra o painel e puxe suas tarefas de foco do dia."
 
