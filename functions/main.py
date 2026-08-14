@@ -13585,6 +13585,90 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
     return {"success": True}
 
 
+_WHATSAPP_CHATS_SCAN_LIMIT = 1000  # teto de mensagens recentes escaneadas para descobrir chats distintos
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)
+def listWhatsappChats(req: https_fn.CallableRequest) -> dict:
+    """Lista os chats de WhatsApp "conhecidos" para o seletor de vínculo em
+    TaskExecutionView.tsx: une a allowlist (system/settings.whatsapp_ingest.chats_allowlist,
+    bloqueada para leitura direta do cliente) com chat_id/chat_name/is_group distintos
+    já capturados em whatsapp_messages (mensagens mais recentes primeiro, teto de
+    _WHATSAPP_CHATS_SCAN_LIMIT docs). MVP: não existe registro de "todos os chats do
+    WhatsApp do usuário" — só aparecem aqui chats já na allowlist e/ou já vistos em
+    whatsapp_messages (ver services/whatsapp-capture/index.js). O seletor no frontend
+    complementa isso com uma entrada manual de chat_id para o caso de um chat ainda
+    não monitorado."""
+    _require_internal_user(req)
+    db = get_db()
+
+    settings_doc = db.collection("system").document("settings").get()
+    settings_data = settings_doc.to_dict() if settings_doc.exists else {}
+    allowlist = [
+        str(x).strip() for x in (settings_data.get("whatsapp_ingest") or {}).get("chats_allowlist") or []
+        if str(x).strip()
+    ]
+
+    chats: dict[str, dict] = {}
+    for chat_id in allowlist:
+        chats[chat_id] = {"chat_id": chat_id, "chat_name": chat_id, "is_group": chat_id.endswith("@g.us"), "_captured": False}
+
+    docs = (
+        db.collection("whatsapp_messages")
+        .order_by("ingested_at", direction=firestore.Query.DESCENDING)
+        .limit(_WHATSAPP_CHATS_SCAN_LIMIT)
+        .stream()
+    )
+    for doc in docs:
+        data = doc.to_dict() or {}
+        chat_id = str(data.get("chat_id") or "").strip()
+        if not chat_id or (chat_id in chats and chats[chat_id]["_captured"]):
+            continue  # já vimos um doc mais recente (streaming desc) para este chat_id
+        chats[chat_id] = {
+            "chat_id": chat_id,
+            "chat_name": str(data.get("chat_name") or chat_id).strip() or chat_id,
+            "is_group": bool(data.get("is_group")),
+            "_captured": True,
+        }
+
+    result = sorted(chats.values(), key=lambda c: c["chat_name"].lower())
+    for c in result:
+        c.pop("_captured", None)
+    return {"chats": result}
+
+
+@firestore_fn.on_document_created(
+    document="whatsapp_consolidacoes/{jobId}",
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=540,
+)
+def on_whatsapp_consolidacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):
+    """Processa um job de consolidação da Caixa de Entrada WhatsApp (o frontend cria
+    o doc via addDoc — o write é o RPC, mesmo padrão de copilot_jobs). Núcleo em
+    whatsapp_consolidation.py; aqui só o guard de idempotência e o error handling."""
+    snap = event.data
+    if snap is None or not snap.exists:
+        return
+
+    db = get_db()
+    job_ref = snap.reference
+    job = snap.to_dict() or {}
+    if job.get("status") != "queued":
+        return  # retry do trigger ou doc criado já processado — não reprocessa
+
+    from whatsapp_consolidation import process_consolidation_job
+    try:
+        process_consolidation_job(db, job_ref, job)
+    except Exception as exc:
+        print(f"[WA-CONSOL] Job {job_ref.id} falhou: {exc}")
+        job_ref.set({
+            "status": "error",
+            "error": str(exc)[:500],
+            "progress": None,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+
+
 # Import daily WIP reset job
 from daily_reset_job import daily_wip_reset_and_degradation
 

@@ -216,8 +216,8 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
 
       <div className={cardClass}>
         <ToggleRow
-          label="Triagem de conversas do WhatsApp"
-          desc="Analisa conversas capturadas pelo worker local e propõe vínculo com ações, além de indexar para busca pelo copiloto. Exige o worker rodando (services/whatsapp-capture)."
+          label="Triagem automática do WhatsApp (legado)"
+          desc="Análise automática de conversas com proposta de vínculo — substituída pela Caixa de Entrada WhatsApp (consolidação manual); mantenha desligado. A captura pelo worker e a lista de conversas abaixo continuam ativas e alimentam a Caixa de Entrada."
           enabled={data.whatsapp_ingest.enabled}
           onToggle={() => toggle('whatsapp_ingest')}
         />

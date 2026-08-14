@@ -102,9 +102,16 @@ def _build_candidate(doc_id: str, data: dict) -> dict | None:
         "notas": (data.get("notas") or "").strip()[:300],
         "acompanhamento_recente": recentes,
         # Chaves de matching determinístico usadas pelos produtores sem IA
-        # (SIPAC por número de processo, Calendar por ID do evento).
+        # (SIPAC por número de processo, Calendar por ID do evento) e pela
+        # pré-filtragem de candidatos do WhatsApp por chat vinculado manualmente
+        # (ver whatsapp_ingest.py:triage_whatsapp_messages).
         "processo_sei": (data.get("processo_sei") or "").strip(),
         "google_calendar_id": (data.get("google_calendar_id") or "").strip(),
+        "whatsapp_chat_ids": [
+            str(v.get("chat_id") or "").strip()
+            for v in (data.get("whatsapp_vinculos") or [])
+            if isinstance(v, dict) and str(v.get("chat_id") or "").strip()
+        ],
     }
 
 

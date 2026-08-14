@@ -68,6 +68,75 @@ export interface RecorrenciaAcao {
     ultima_geracao?: string; // "YYYY-MM" (mensal) ou "YYYY-MM-DD" (semanal) da última instância gerada
 }
 
+export interface WhatsappVinculo {
+    chat_id: string;      // "5527999999999@c.us" ou "...@g.us" — mesma chave de whatsapp_messages.chat_id
+    chat_name: string;    // nome no momento do vínculo (snapshot)
+    is_group: boolean;
+    data_vinculo: string; // ISO date, mesmo padrão de PoolItem.data_criacao
+}
+
+// Doc da coleção whatsapp_messages (escrito por services/whatsapp-capture/index.js;
+// transcription_text/transcription_model e consolidation_ids são preenchidos depois
+// pelo job de consolidação — functions/whatsapp_consolidation.py).
+export interface WhatsappMessageDoc {
+    id: string;              // `{chat_id}_{wa_message_id}` — idempotente
+    wa_message_id: string;
+    chat_id: string;
+    chat_name: string;
+    is_group: boolean;
+    author_name: string;
+    from_me: boolean;
+    timestamp: any;          // Firestore Timestamp (quando a mensagem foi enviada)
+    ingested_at: any;        // Firestore Timestamp (quando o worker gravou)
+    message_type: string;    // 'chat' | 'ptt' | 'audio' | 'image' | ...
+    content: string;
+    links?: string[];
+    media?: { mimeType: string; sizeBytes: number; storage_path?: string } | null;
+    transcription_text?: string | null;
+    transcription_model?: string | null;
+    consolidation_ids?: string[]; // jobs de consolidação que incluíram esta mensagem
+}
+
+export interface WhatsappConsolidacaoItemAcao {
+    descricao: string;
+    responsavel?: string;
+    prazo?: string | null;
+}
+
+// Doc da coleção whatsapp_consolidacoes — job assíncrono de consolidação da Caixa de
+// Entrada WhatsApp (WhatsappInboxView.tsx cria via addDoc; o trigger
+// on_whatsapp_consolidacao_created processa e escreve progresso/resultado).
+export interface WhatsappConsolidacao {
+    id: string;
+    // Requisição (frontend)
+    chat_id: string;
+    chat_name: string;
+    is_group: boolean;
+    message_ids: string[];   // doc IDs de whatsapp_messages, máx. 200
+    requested_at: any;       // Firestore Timestamp (serverTimestamp)
+    // Ciclo de vida (backend)
+    status: 'queued' | 'processing' | 'completed' | 'error';
+    progress?: string;       // ex.: "Transcrevendo áudio 2/5"
+    error?: string | null;
+    updated_at?: any;
+    // Resultado (backend, no completed)
+    transcript_literal?: string; // montado por código, nunca pela IA
+    resumo?: string;
+    itens_de_acao?: WhatsappConsolidacaoItemAcao[];
+    decisoes?: string[];
+    periodo_inicio?: string; // ISO
+    periodo_fim?: string;    // ISO
+    n_mensagens?: number;
+    n_audios_transcritos?: number;
+    n_audios_ignorados?: number;
+    attachments?: { message_id: string; mimeType: string; storage_path?: string }[];
+    digest_id?: string;      // doc gravado em whatsapp_digests (consol_*)
+    // Associação (frontend, ao anexar a uma ação)
+    task_id?: string | null;
+    task_titulo?: string | null;
+    applied_at?: string | null; // ISO
+}
+
 export interface Tarefa {
     id: string;
     titulo: string;
@@ -93,6 +162,7 @@ export interface Tarefa {
     chat_gemini_url?: string;
     chat_history?: ChatMessage[];
     processo_sei?: string;
+    whatsapp_vinculos?: WhatsappVinculo[]; // contatos/grupos de WhatsApp vinculados manualmente — matching determinístico usado por whatsapp_ingest.py (ver email_action_linker.py:_build_candidate)
     sync_status?: 'new' | 'updated' | 'synced' | 'pendente' | 'processando' | 'concluido' | 'erro' | null;
     last_sync_date?: string;
     horario_inicio?: string; // format "HH:mm"

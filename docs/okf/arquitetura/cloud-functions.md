@@ -4,14 +4,14 @@ title: Mapa de Cloud Functions
 description: Cloud Functions exportadas pelo backend Python do Hermes, agrupadas por arquivo e tipo de trigger.
 resource: functions/main.py
 tags: [hermes, okf, cloud-functions, firebase, arquitetura]
-timestamp: 2026-08-01T00:00:00Z
+timestamp: 2026-08-14T00:00:00-03:00
 ---
 
 # Mapa de Cloud Functions
 
-O backend roda em Cloud Functions Python (gen2). Há ~79 funções exportadas em `functions/`. Tipos de trigger usados: HTTPS Callable (chamada autenticada do frontend via `httpsCallable`), Firestore trigger (on-create/on-update/on-write), Scheduler (cron), PubSub (workers assíncronos), Storage (on-finalize) e HTTP request puro (webhooks).
+O backend roda em Cloud Functions Python (gen2). Há ~80 funções exportadas em `functions/`. Tipos de trigger usados: HTTPS Callable (chamada autenticada do frontend via `httpsCallable`), Firestore trigger (on-create/on-update/on-write), Scheduler (cron), PubSub (workers assíncronos), Storage (on-finalize) e HTTP request puro (webhooks).
 
-## `functions/main.py` (~51 funções)
+## `functions/main.py` (~52 funções)
 
 ### Sincronização e dados
 | Função | Trigger | O que faz |
@@ -24,8 +24,10 @@ O backend roda em Cloud Functions Python (gen2). Há ~79 funções exportadas em
 | `link_emails_to_actions` (`email_action_linker.py`) | (interno, chamado por `run_full_sync` após `sync_boletos_gmail`) | Analisa e-mails recentes via IA, propõe vínculo com ações em andamento/stand-by por Telegram (`emlink:{msgId}:{ok\|on\|mut\|no}`) e grava em `email_action_suggestions`; sempre exige confirmação humana (nunca aplica sozinho — a classificação vem de conteúdo controlado pelo remetente do e-mail). Flag `system/settings.email_action_linker.enabled` |
 | `link_calendar_events_to_actions` (`email_action_linker.py`) | (interno, chamado por `run_full_sync` após `link_emails_to_actions`) | Propõe registrar no diário o fechamento de reuniões vinculadas a uma ação (`tarefas.google_calendar_id`) — matching determinístico, sem IA. Mesma flag `email_action_linker.enabled` |
 | `try_link_sipac_notification` (`email_action_linker.py`) | (interno, chamado por `on_notificacao_created` quando `link == '@SipacTrackingTool'`) | Casa `notificacoes.numeroProcesso` (gravado pelo scraper Node) com `tarefas.processo_sei` — matching determinístico, sem IA. Se enviar o cartão de confirmação, o espelhamento genérico da notificação no Telegram é pulado |
-| `triage_whatsapp_messages` (`whatsapp_ingest.py`) | (interno, chamado por `run_full_sync` após `link_calendar_events_to_actions`) | Agrupa mensagens novas de `whatsapp_messages` por conversa, classifica cada janela via IA (`acao`\|`conhecimento`\|`ruido`) extraindo itens de ação, decisões/pontos de auditoria, datas citadas e (quando cabível) uma mutação proposta para a ação vinculada (novas etapas no `plano_acao`, ajuste de prazo, lembrete); propõe o vínculo (canal `whatsapp`, `emlink:{id}:{ok\|on\|mut\|no}`) e grava digest vetorizado em `whatsapp_digests`. Flag `system/settings.whatsapp_ingest.enabled` |
+| `triage_whatsapp_messages` (`whatsapp_ingest.py`) | (interno, chamado por `run_full_sync` após `link_calendar_events_to_actions`) | **Legado, dormente desde 2026-08-14** (flag `system/settings.whatsapp_ingest.enabled = false`) — substituída pela consolidação manual da Caixa de Entrada (`on_whatsapp_consolidacao_created`). Quando ligada: agrupa mensagens novas de `whatsapp_messages` por conversa, classifica cada janela via IA (`acao`\|`conhecimento`\|`ruido`), propõe o vínculo (canal `whatsapp`, `emlink:{id}:{ok\|on\|mut\|no}`) e grava digest vetorizado em `whatsapp_digests`; conversas vinculadas manualmente (`tarefas.whatsapp_vinculos`) restringem as candidatas do prompt |
 | `getAutomationSettings` / `updateAutomationSettings` | Callable | Única porta de entrada do frontend para o subconjunto de `system/settings` das automações multi-canal (`email_action_linker`, `personal_diary`, `whatsapp_ingest`, `whatsapp_auto_send_enabled`) — o documento `system/*` é bloqueado por regra de segurança para o cliente. UI: aba "Automações" em `SettingsModal` (`src/components/modals/Modals.tsx`) |
+| `listWhatsappChats` | Callable | Lista chats de WhatsApp "conhecidos" (união de `system/settings.whatsapp_ingest.chats_allowlist` com `chat_id`/`chat_name`/`is_group` distintos das mensagens mais recentes de `whatsapp_messages`) — usado pelo seletor de vínculo manual em `TaskExecutionView.tsx` e pela lista de conversas da Caixa de Entrada (`WhatsappInboxView.tsx`). Não é um registro completo de todos os chats do WhatsApp do usuário — só aparecem chats já monitorados |
+| `on_whatsapp_consolidacao_created` | Firestore create (`whatsapp_consolidacoes/{jobId}`) | Job de consolidação da Caixa de Entrada WhatsApp (GB_1, 540s; núcleo em `whatsapp_consolidation.py`): transcreve áudios da seleção (Groq/Whisper com fallback Gemini, cacheando em `whatsapp_messages.transcription_text`), monta transcript literal por código, sintetiza resumo/itens de ação/decisões (1 chamada Gemini restrita ao transcript), grava digest curado `consol_*` em `whatsapp_digests` e marca as mensagens (`consolidation_ids`). Progresso/resultado empurrados por campos no próprio doc do job (padrão `copilot_jobs`) |
 | `on_vectorize_requested` | PubSub (`vectorize-process`) | Processa vetorização de documentos |
 | `vectorize_process_docs_callable` | Callable | Vetoriza documentos de uma tarefa |
 | `upload_to_drive` | Callable | Upload de arquivo para o Google Drive |

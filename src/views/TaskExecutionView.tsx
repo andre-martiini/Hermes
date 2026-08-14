@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Tarefa, AppSettings, PoolItem, ConhecimentoItem, Acompanhamento, ActionPlanItem,
-  ChatMessage, BaseConhecimento, formatDate, formatDateLocalISO, TaskReminder
+  ChatMessage, BaseConhecimento, formatDate, formatDateLocalISO, TaskReminder, WhatsappVinculo
 } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
 import { buildDiaryRichNote, ensureHttpUrl, getRenamedFileName, parseDiaryRichNote } from '../utils/diaryEntries';
@@ -16,6 +16,15 @@ import { setDoc, doc, addDoc, collection, serverTimestamp, query, where, orderBy
 import { DiarioBordoUI } from './DiarioBordoUI';
 import { SpeedDialMenu } from '../components/ui/SpeedDialMenu';
 import { HermesCopilotoDrawer } from '../components/tools/HermesCopilotoDrawer';
+
+// Formato de retorno da callable listWhatsappChats (main.py) — forma efêmera de fio,
+// não persistida, por isso não vive em types.ts (mesmo padrão de AutomationSettingsData
+// em src/components/modals/Modals.tsx).
+interface WhatsappChatOption {
+  chat_id: string;
+  chat_name: string;
+  is_group: boolean;
+}
 
 const DocumentViewer = ({ file, onClose, isDark }: {
   file: { url: string; nome: string; tipo: 'link' | 'file' | 'image'; driveFileId?: string };
@@ -289,6 +298,19 @@ export const TaskExecutionView = ({
 
   const [localEmailLinkOptout, setLocalEmailLinkOptout] = useState(currentTaskData.email_link_optout || false);
 
+  // Vínculo com contatos/grupos de WhatsApp (picker modal). currentTaskData.whatsapp_vinculos
+  // é a fonte da verdade para exibição (mesmo padrão de currentTaskData.pool_dados, sem
+  // espelho local); só a seleção dentro do modal é estado local, semeada ao abrir.
+  const [isWhatsappLinkModalOpen, setIsWhatsappLinkModalOpen] = useState(false);
+  const [whatsappChatOptions, setWhatsappChatOptions] = useState<WhatsappChatOption[]>([]);
+  const [isLoadingWhatsappChats, setIsLoadingWhatsappChats] = useState(false);
+  const [whatsappChatsError, setWhatsappChatsError] = useState<string | null>(null);
+  const [whatsappChatSearch, setWhatsappChatSearch] = useState('');
+  const [whatsappChatTypeFilter, setWhatsappChatTypeFilter] = useState<'all' | 'contact' | 'group'>('all');
+  const [selectedWhatsappChatIds, setSelectedWhatsappChatIds] = useState<Set<string>>(new Set());
+  const [manualChatId, setManualChatId] = useState('');
+  const [manualChatName, setManualChatName] = useState('');
+
   useEffect(() => {
     setLocalDataLimite(currentTaskData.data_limite || '');
     setLocalPrazoFinal(currentTaskData.prazo_final || '');
@@ -338,6 +360,195 @@ export const TaskExecutionView = ({
   const handleToggleEmailLinkOptout = (optout: boolean) => {
     setLocalEmailLinkOptout(optout);
     onSave(task.id, { email_link_optout: optout });
+  };
+
+  const handleOpenWhatsappLinkModal = async () => {
+    setSelectedWhatsappChatIds(new Set((currentTaskData.whatsapp_vinculos || []).map(v => v.chat_id)));
+    setWhatsappChatSearch('');
+    setWhatsappChatTypeFilter('all');
+    setManualChatId('');
+    setManualChatName('');
+    setIsWhatsappLinkModalOpen(true);
+    setIsLoadingWhatsappChats(true);
+    setWhatsappChatsError(null);
+    try {
+      const fn = httpsCallable(functions, 'listWhatsappChats');
+      const res = await fn();
+      setWhatsappChatOptions((res.data as { chats: WhatsappChatOption[] }).chats || []);
+    } catch (e: any) {
+      setWhatsappChatsError(e?.message || 'Falha ao carregar conversas do WhatsApp.');
+    } finally {
+      setIsLoadingWhatsappChats(false);
+    }
+  };
+
+  const handleToggleWhatsappChatSelection = (chatId: string) => {
+    setSelectedWhatsappChatIds(prev => {
+      const next = new Set(prev);
+      if (next.has(chatId)) next.delete(chatId); else next.add(chatId);
+      return next;
+    });
+  };
+
+  const handleAddManualWhatsappChat = () => {
+    const chatId = manualChatId.trim();
+    if (!chatId.endsWith('@c.us') && !chatId.endsWith('@g.us')) {
+      showToast('ID inválido. Deve terminar em "@c.us" (contato) ou "@g.us" (grupo).', 'error');
+      return;
+    }
+    const isGroup = chatId.endsWith('@g.us');
+    setWhatsappChatOptions(prev => prev.some(o => o.chat_id === chatId)
+      ? prev
+      : [...prev, { chat_id: chatId, chat_name: manualChatName.trim() || chatId, is_group: isGroup }]);
+    setSelectedWhatsappChatIds(prev => new Set(prev).add(chatId));
+    setManualChatId('');
+    setManualChatName('');
+  };
+
+  const handleSaveWhatsappLinks = () => {
+    const previousById = new Map((currentTaskData.whatsapp_vinculos || []).map(v => [v.chat_id, v]));
+    const optionsById = new Map(whatsappChatOptions.map(o => [o.chat_id, o]));
+    const nowIso = new Date().toISOString();
+
+    const next: WhatsappVinculo[] = Array.from(selectedWhatsappChatIds).map(chatId => {
+      const already = previousById.get(chatId);
+      if (already) return already; // preserva chat_name/is_group/data_vinculo originais
+      const opt = optionsById.get(chatId);
+      return { chat_id: chatId, chat_name: opt?.chat_name || chatId, is_group: opt?.is_group || false, data_vinculo: nowIso };
+    });
+
+    onSave(task.id, { whatsapp_vinculos: next });
+    setIsWhatsappLinkModalOpen(false);
+    showToast('Vínculos de WhatsApp atualizados.', 'success');
+  };
+
+  const handleRemoveWhatsappVinculo = (chatId: string) => {
+    onSave(task.id, { whatsapp_vinculos: (currentTaskData.whatsapp_vinculos || []).filter(v => v.chat_id !== chatId) });
+  };
+
+  const renderWhatsappLinkModal = () => {
+    const search = whatsappChatSearch.trim().toLowerCase();
+    const filteredChats = whatsappChatOptions.filter(c => {
+      if (search && !c.chat_name.toLowerCase().includes(search) && !c.chat_id.toLowerCase().includes(search)) return false;
+      if (whatsappChatTypeFilter === 'contact') return !c.is_group;
+      if (whatsappChatTypeFilter === 'group') return c.is_group;
+      return true;
+    });
+    const counts = {
+      all: whatsappChatOptions.length,
+      contact: whatsappChatOptions.filter(c => !c.is_group).length,
+      group: whatsappChatOptions.filter(c => c.is_group).length,
+    };
+
+    return (
+      <div className="fixed inset-0 z-[320] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+        <div className={`w-full max-w-lg max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border ${isDark ? 'bg-[#0b0c16] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+
+          {/* Header */}
+          <div className={`shrink-0 px-5 py-4 border-b flex items-center justify-between ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+            <h3 className="text-base font-black tracking-tight font-sans flex items-center gap-2">
+              <span className="text-lg">💬</span> Vincular WhatsApp
+            </h3>
+            <button onClick={() => setIsWhatsappLinkModalOpen(false)} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+
+          {/* Busca + filtro */}
+          <div className={`shrink-0 px-5 py-3 border-b space-y-2 ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+            <input
+              type="text"
+              value={whatsappChatSearch}
+              onChange={e => setWhatsappChatSearch(e.target.value)}
+              placeholder="Buscar contato ou grupo..."
+              className={`w-full px-3 py-2 rounded-xl border text-xs outline-none focus:ring-1 focus:ring-green-500 font-sans transition-all ${isDark ? 'bg-white/10 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-[#e5e7eb] text-slate-900 placeholder:text-slate-400'}`}
+            />
+            <div className="flex items-center gap-1.5">
+              {([['all', `Todos (${counts.all})`], ['contact', `Contatos (${counts.contact})`], ['group', `Grupos (${counts.group})`]] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setWhatsappChatTypeFilter(key)}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${whatsappChatTypeFilter === key
+                    ? (isDark ? 'bg-green-500/20 text-green-300' : 'bg-green-100 text-green-700')
+                    : (isDark ? 'text-white/50 hover:bg-white/5' : 'text-slate-500 hover:bg-slate-100')}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Lista */}
+          <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1 min-h-[120px]">
+            {isLoadingWhatsappChats ? (
+              <p className="text-xs text-center py-6 opacity-60 font-sans">Carregando conversas...</p>
+            ) : whatsappChatsError ? (
+              <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 text-rose-500 text-xs px-3 py-2 font-sans">{whatsappChatsError}</div>
+            ) : filteredChats.length === 0 && whatsappChatOptions.length === 0 ? (
+              <div className="text-center py-6 space-y-2">
+                <p className="text-xs opacity-60 font-sans">Nenhuma conversa monitorada ainda.</p>
+                <p className="text-[10px] opacity-40 font-sans">Adicione o chat na allowlist em Configurações → Automações, ou cole o ID manualmente abaixo.</p>
+                <button onClick={onOpenSettings} className={`mt-1 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider border transition-all ${isDark ? 'border-white/20 hover:bg-white/10' : 'border-slate-200 hover:bg-slate-100'}`}>
+                  Abrir Configurações
+                </button>
+              </div>
+            ) : filteredChats.length === 0 ? (
+              <p className="text-xs text-center py-6 opacity-60 font-sans">Nenhum resultado para essa busca.</p>
+            ) : (
+              filteredChats.map(chat => (
+                <label key={chat.chat_id} className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer select-none transition-colors ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}>
+                  <input
+                    type="checkbox"
+                    checked={selectedWhatsappChatIds.has(chat.chat_id)}
+                    onChange={() => handleToggleWhatsappChatSelection(chat.chat_id)}
+                    className="w-4 h-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
+                  />
+                  <span>{chat.is_group ? '👥' : '👤'}</span>
+                  <span className="text-xs font-bold font-sans truncate">{chat.chat_name}</span>
+                </label>
+              ))
+            )}
+          </div>
+
+          {/* Entrada manual */}
+          <div className={`shrink-0 px-5 py-3 border-t space-y-2 ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+            <span className="text-[10px] font-black uppercase tracking-wider opacity-50">Adicionar manualmente</span>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={manualChatId}
+                onChange={e => setManualChatId(e.target.value)}
+                placeholder="ID (ex: 5527999999999@c.us)"
+                className={`flex-1 min-w-0 px-2.5 py-1.5 rounded-lg border text-[11px] outline-none focus:ring-1 focus:ring-green-500 font-sans transition-all ${isDark ? 'bg-white/10 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-[#e5e7eb] text-slate-900 placeholder:text-slate-400'}`}
+              />
+              <input
+                type="text"
+                value={manualChatName}
+                onChange={e => setManualChatName(e.target.value)}
+                placeholder="Nome (opcional)"
+                className={`w-28 shrink-0 px-2.5 py-1.5 rounded-lg border text-[11px] outline-none focus:ring-1 focus:ring-green-500 font-sans transition-all ${isDark ? 'bg-white/10 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-[#e5e7eb] text-slate-900 placeholder:text-slate-400'}`}
+              />
+              <button onClick={handleAddManualWhatsappChat} className={`shrink-0 px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider border transition-all ${isDark ? 'border-white/20 hover:bg-white/10' : 'border-slate-200 hover:bg-slate-100'}`}>
+                Adicionar
+              </button>
+            </div>
+            <p className={`text-[10px] ${isDark ? 'text-white/40' : 'text-slate-400'}`}>
+              Esse chat também precisa estar na allowlist de captura (Configurações → Automações) para que as mensagens sejam detectadas.
+            </p>
+          </div>
+
+          {/* Footer */}
+          <div className={`shrink-0 px-5 py-3 border-t flex items-center justify-end gap-2 ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+            <button onClick={() => setIsWhatsappLinkModalOpen(false)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isDark ? 'text-white/60 hover:bg-white/10' : 'text-slate-500 hover:bg-slate-100'}`}>
+              Cancelar
+            </button>
+            <button onClick={handleSaveWhatsappLinks} className="px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-green-600 hover:bg-green-700 transition-all">
+              Salvar vínculos
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const [newFollowUp, setNewFollowUp] = useState('');
@@ -2688,6 +2899,37 @@ export const TaskExecutionView = ({
                             registrar no diário via Telegram. Marque para não receber essas sugestões nesta ação.
                           </p>
                         </div>
+
+                        {/* Linha separadora */}
+                        <div className="border-t border-[#e5e7eb] dark:border-white/10 my-2" />
+
+                        {/* Vínculo manual com contatos/grupos de WhatsApp (whatsapp_ingest.py) */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-black uppercase tracking-wider opacity-70">WhatsApp vinculado</span>
+                            <button
+                              onClick={handleOpenWhatsappLinkModal}
+                              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-all border ${isDark ? 'bg-green-500/10 border-green-500/30 text-green-300 hover:bg-green-500/20' : 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100'}`}
+                            >
+                              + Vincular
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {(currentTaskData.whatsapp_vinculos || []).length === 0 ? (
+                              <span className="text-[10px] text-slate-400 font-medium italic font-sans">Nenhum contato/grupo vinculado.</span>
+                            ) : (
+                              (currentTaskData.whatsapp_vinculos || []).map(v => (
+                                <span key={v.chat_id} className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold border font-sans ${isDark ? 'bg-green-500/10 text-green-300 border-green-500/20' : 'bg-green-50 text-green-700 border-green-100'}`}>
+                                  {v.is_group ? '👥' : '👤'} {v.chat_name}
+                                  <button onClick={() => handleRemoveWhatsappVinculo(v.chat_id)} className="text-green-500/70 hover:text-rose-500 scale-125 ml-1 transition-colors">&times;</button>
+                                </span>
+                              ))
+                            )}
+                          </div>
+                          <p className={`text-[10px] ${isDark ? 'text-white/40' : 'text-slate-400'}`}>
+                            Mensagens desses contatos/grupos são associadas a esta ação de forma mais confiável na triagem de WhatsApp.
+                          </p>
+                        </div>
                       </div>
                     </div>
 
@@ -3391,6 +3633,7 @@ export const TaskExecutionView = ({
           PANEL DE CONTEXTO MODAL (LARGE & QUALIFIED)
       ══════════════════════════════════════════════════════════ */}
       {isContextModalOpen && renderContextModal()}
+      {isWhatsappLinkModalOpen && renderWhatsappLinkModal()}
 
       {/* ══════════════════════════════════════════════════════════
           MODAL SYSTEM (link / contact / edit / delete / upload / reminder)

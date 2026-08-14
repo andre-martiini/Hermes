@@ -29,6 +29,7 @@ import RAGBasesView from './src/views/RAGBasesView';
 import { ServicesView } from './src/views/ServicesView';
 import ContactsView from './ContactsView';
 import PersonalDiaryView from './PersonalDiaryView';
+import WhatsappInboxView from './WhatsappInboxView';
 import { INTERNAL_NAVIGATION_EVENT } from './src/utils/internalNavigation';
 // Importações dos módulos extraídos pelo split.js
 import {
@@ -1710,7 +1711,7 @@ const App: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [completedLimit, setCompletedLimit] = useState(10);
   const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude' | 'servicos' | 'estrategia'>('dashboard');
-  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'finance' | 'saude' | 'ferramentas' | 'knowledge' | 'services' | 'rag-bases' | 'concluidas' | 'strategy' | 'godmode' | 'contacts' | 'diario'>('dashboard');
+  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'finance' | 'saude' | 'ferramentas' | 'knowledge' | 'services' | 'rag-bases' | 'concluidas' | 'strategy' | 'godmode' | 'contacts' | 'diario' | 'whatsapp'>('dashboard');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
   const [isSidebarRetracted, setIsSidebarRetracted] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
@@ -4600,6 +4601,7 @@ const App: React.FC = () => {
                 { id: 'conhecimento', label: 'Conhecimento', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>, active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
                 { id: 'rag-bases', label: 'Áreas Temáticas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>, active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
                 { id: 'diario', label: 'Diário', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>, active: viewMode === 'diario', onClick: () => { setActiveModule('acoes'); setViewMode('diario'); } },
+                { id: 'whatsapp', label: 'WhatsApp', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>, active: viewMode === 'whatsapp', onClick: () => { setActiveModule('acoes'); setViewMode('whatsapp'); } },
               ].map(item => (
                 <button
                   key={item.id}
@@ -4776,7 +4778,7 @@ const App: React.FC = () => {
                       onCreateAction={() => setIsCreateModalOpen(true)}
                       isDark={isDarkTheme}
                     />
-                    {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && (
+                    {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && viewMode !== 'whatsapp' && (
                       <button
                         onClick={() => setIsCreateModalOpen(true)}
                         className="bg-slate-900 text-white p-1.5 rounded-lg md:rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
@@ -4889,6 +4891,7 @@ const App: React.FC = () => {
                             viewMode === 'rag-bases' ? 'Áreas Temáticas' :
                               viewMode === 'knowledge' ? 'Conhecimento' :
                                 viewMode === 'diario' ? 'Diário Pessoal' :
+                                viewMode === 'whatsapp' ? 'Caixa de Entrada WhatsApp' :
                                 viewMode === 'ferramentas' ? 'Ferramentas' :
                                   viewMode === 'godmode' ? 'Godmode' :
                                   activeModule === 'dashboard' ? 'Dashboard' :
@@ -4899,7 +4902,7 @@ const App: React.FC = () => {
                         </h1>
                       </div>
                     </div>
-                    {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'diario' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
+                    {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'diario' && viewMode !== 'whatsapp' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
                       <nav className={`flex flex-wrap items-center gap-1`}>
                         <button
                           onClick={() => {
@@ -5020,7 +5023,7 @@ const App: React.FC = () => {
                     </div>
                   )}
                   {/* Standard Action Buttons (Search, Sync, Create) */}
-                  {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && (
+                  {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && viewMode !== 'whatsapp' && (
                     <div className="ml-auto flex items-center justify-end gap-3">
                       {activeModule !== 'dashboard' && (
                         <div className={`hidden lg:flex h-10 items-center border rounded-lg px-4 w-72 xl:w-80 group focus-within:ring-1 focus-within:ring-primary-tactile transition-all ${inputSurfaceClass} border-[#e5e7eb] dark:border-slate-800`}>
@@ -5157,6 +5160,7 @@ const App: React.FC = () => {
                       { label: 'Conhecimento', active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
                       { label: 'Áreas Temáticas', active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
                       { label: 'Diário', active: viewMode === 'diario', onClick: () => { setActiveModule('acoes'); setViewMode('diario'); } },
+                      { label: 'WhatsApp', active: viewMode === 'whatsapp', onClick: () => { setActiveModule('acoes'); setViewMode('whatsapp'); } },
                     ].map((item, idx) => (
                       <button
                         key={idx}
@@ -5920,6 +5924,8 @@ const App: React.FC = () => {
                   <ContactsView isDark={isDarkTheme} />
                 ) : viewMode === 'diario' ? (
                   <PersonalDiaryView isDark={isDarkTheme} />
+                ) : viewMode === 'whatsapp' ? (
+                  <WhatsappInboxView tarefas={tarefas} isDark={isDarkTheme} />
                 ) : viewMode === 'ferramentas' ? (
                   <FerramentasView
                     ideas={brainstormIdeas}

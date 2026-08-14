@@ -321,6 +321,19 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
     candidates_text = _format_candidates_for_prompt(candidates)
     candidates_by_id = {c["id"]: c for c in candidates}
 
+    # Pré-filtro determinístico por vínculo manual (tarefas.whatsapp_vinculos, ver
+    # TaskExecutionView.tsx e _build_candidate em email_action_linker.py): quando o
+    # usuário já vinculou esta conversa a uma ou mais ações, a janela usa só essas
+    # ações como candidatas no prompt em vez da lista global — mesmo espírito de
+    # link_calendar_events_to_actions, mas aqui a IA continua decidindo relevância
+    # (uma conversa vinculada pode ter conversa fiada que não é sobre a ação) e,
+    # com mais de uma ação vinculada ao mesmo chat, qual delas. Chats sem vínculo
+    # (a maioria, hoje) seguem exatamente como antes: candidatos = todas as ações.
+    candidates_by_chat_id: dict[str, list[dict]] = {}
+    for c in candidates:
+        for chat_id in c.get("whatsapp_chat_ids") or []:
+            candidates_by_chat_id.setdefault(chat_id, []).append(c)
+
     keys_doc = _cached_doc_get(db, "system", "api_keys")
     api_key = keys_doc.to_dict().get("gemini_api_key") if keys_doc.exists else None
     if not api_key:
@@ -347,8 +360,19 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
         messages.sort(key=lambda m: m.get("timestamp") or 0)
         chat_name = messages[-1].get("chat_name") or wa_chat_id
 
+        # Ações vinculadas manualmente a este chat — se vazio (sem vínculo, ou o
+        # vínculo aponta só para ações que saíram da lista de candidatas, ex.:
+        # concluídas/opt-out), cai para a lista global de sempre.
+        linked_candidates = candidates_by_chat_id.get(wa_chat_id) or []
+        if linked_candidates:
+            window_candidates_text = _format_candidates_for_prompt(linked_candidates)
+            window_candidates_by_id = {c["id"]: c for c in linked_candidates}
+        else:
+            window_candidates_text = candidates_text
+            window_candidates_by_id = candidates_by_id
+
         try:
-            analysis = _analyze_whatsapp_window(client, db, chat_name, messages, candidates_text)
+            analysis = _analyze_whatsapp_window(client, db, chat_name, messages, window_candidates_text)
         except Exception as exc:
             log_to_firestore(sync_ref, logs, f"[WA-INGEST][!] Falha na análise da conversa '{chat_name}': {exc}", True)
             continue
@@ -366,10 +390,17 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
         except Exception:
             confidence = 0.0
 
+        # Só uma ação vinculada a este chat, e a IA marcou "acao" mas não devolveu
+        # exatamente esse id (null, ou alucinação fora da lista estreita) — a
+        # identidade do vínculo já é determinística, então confiamos nela em vez
+        # de descartar a sugestão por causa da escolha de id da IA.
+        if len(linked_candidates) == 1 and relevancia == "acao" and task_id not in window_candidates_by_id:
+            task_id = linked_candidates[0]["id"]
+
         digest_id = _window_digest_id(wa_chat_id, messages)
 
-        if relevancia == "acao" and task_id in candidates_by_id and confidence >= settings["min_confidence"] and resumo:
-            task = candidates_by_id[task_id]
+        if relevancia == "acao" and task_id in window_candidates_by_id and confidence >= settings["min_confidence"] and resumo:
+            task = window_candidates_by_id[task_id]
             itens_de_acao = _sanitize_itens_de_acao(analysis.get("itens_de_acao"))
             decisoes = _sanitize_decisoes(analysis.get("decisoes"))
             datas_mencionadas = _sanitize_datas_mencionadas(analysis.get("datas_mencionadas"))
