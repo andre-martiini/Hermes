@@ -13753,12 +13753,20 @@ def listWhatsappChats(req: https_fn.CallableRequest) -> dict:
         if cid in registry_chats:
             is_group = registry_chats[cid]["is_group"]
 
-        # Precedência de nome: ID < mensagem capturada < registro whatsapp_chats
+        # Precedência de nome inteligente:
+        # 1. Registro salvo pelo worker (whatsapp_chats) se tiver nome real
+        # 2. Mensagem capturada (whatsapp_messages) se tiver nome real
+        # 3. ID cru como fallback
         name = cid
-        if cid in captured_chats and captured_chats[cid]["chat_name"]:
-            name = captured_chats[cid]["chat_name"]
-        if cid in registry_chats and registry_chats[cid]["chat_name"] and registry_chats[cid]["chat_name"] != cid:
-            name = registry_chats[cid]["chat_name"]
+        if cid in registry_chats and registry_chats[cid].get("chat_name"):
+            reg_n = str(registry_chats[cid]["chat_name"]).strip()
+            if reg_n and reg_n != cid and not reg_n.endswith("@g.us") and not reg_n.endswith("@lid") and not reg_n.endswith("@c.us"):
+                name = reg_n
+
+        if name == cid and cid in captured_chats and captured_chats[cid].get("chat_name"):
+            cap_n = str(captured_chats[cid]["chat_name"]).strip()
+            if cap_n and cap_n != cid and not cap_n.endswith("@g.us") and not cap_n.endswith("@lid") and not cap_n.endswith("@c.us"):
+                name = cap_n
 
         # Timestamp de última atividade: mensagens capturadas > registro whatsapp_chats
         last_ts = None
