@@ -1073,14 +1073,16 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                             }`}>
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Massa Corporal (média 7d)</span>
+                                        <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">
+                                            Massa Corporal {weightHeadline?.isAverage ? '(média 7d)' : ''}
+                                        </span>
                                         <div className="text-lg font-bold font-mono mt-0.5 flex items-baseline gap-1">
-                                            {weightHeadline ? weightHeadline.displayValue.toFixed(1) : '--'}
+                                            {weightHeadline?.isAverage ? weightHeadline.displayValue.toFixed(1) : '—'}
                                             <span className="text-[10px] text-slate-400 font-sans">KG</span>
                                         </div>
                                         {weightHeadline && (
                                             <div className="text-[9px] text-slate-400 font-mono mt-0.5">
-                                                Último: {weightHeadline.latestRaw.toFixed(1)} kg
+                                                Último registro: {weightHeadline.latestRaw.toFixed(1)} kg
                                             </div>
                                         )}
                                     </div>

@@ -215,6 +215,17 @@ const formatShortDate = (value: string) => {
 
 const formatKm = (value: number) => value.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
 
+const MONTH_ABBR_PT = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
+// Projeção de data com faixa de incerteza — nunca um dia exato, que sugeriria uma
+// precisão que a regressão nao tem.
+const formatApproxMonth = (dateStr: string): string => {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const dayNum = day || 1;
+    const part = dayNum <= 10 ? 'início' : dayNum <= 20 ? 'meados' : 'fim';
+    return `${part} de ${MONTH_ABBR_PT[(month || 1) - 1]}/${year}`;
+};
+
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
 
 const renderTextWithLinks = (text: string): React.ReactNode[] =>
@@ -1238,13 +1249,17 @@ const HealthView: React.FC<HealthViewProps> = ({
         }));
     }, [lastMAPoint, ritmoAlvoKgSemana]);
 
-    const recentTrendRegression = useMemo(() => {
-        if (!lastMAPoint) return null;
+    const MIN_TREND_POINTS = 14;
+    const recentWeightPoints = useMemo(() => {
+        if (!lastMAPoint) return [];
         const cutoff = addDays(lastMAPoint.date, -28);
-        const recent = weightMASeries.filter(p => p.date >= cutoff);
-        if (recent.length < 2) return null;
-        return linearRegression(recent.map(p => ({ x: daysSinceEpoch(p.date), y: p.value })));
+        return weightMASeries.filter(p => p.date >= cutoff);
     }, [weightMASeries, lastMAPoint]);
+
+    const recentTrendRegression = useMemo(() => {
+        if (recentWeightPoints.length < MIN_TREND_POINTS) return null;
+        return linearRegression(recentWeightPoints.map(p => ({ x: daysSinceEpoch(p.date), y: p.value })));
+    }, [recentWeightPoints]);
 
     const trendSlopePerDay = recentTrendRegression?.slope ?? 0;
     const trendIsDecreasing = trendSlopePerDay < -0.001;
@@ -1308,17 +1323,15 @@ const HealthView: React.FC<HealthViewProps> = ({
         return rows;
     }, [dailyPainSeries, exerciseLogs]);
 
+    const MAX_PROJECTION_DAYS = 548; // ~18 meses — além disso a extrapolação linear deixa de ser confiável
     const milestoneDates = useMemo(() => {
         if (!lastMAPoint) return [];
-        return marcos.map(target => ({
-            target,
-            dateStr: trendIsDecreasing
-                ? (() => {
-                    const days = daysToReachTarget(lastMAPoint.value, trendSlopePerDay, target);
-                    return days !== null ? addDays(lastMAPoint.date, days) : null;
-                })()
-                : null,
-        }));
+        return marcos.map(target => {
+            if (!trendIsDecreasing) return { target, dateStr: null as string | null };
+            const days = daysToReachTarget(lastMAPoint.value, trendSlopePerDay, target);
+            if (days === null || days > MAX_PROJECTION_DAYS) return { target, dateStr: null as string | null };
+            return { target, dateStr: addDays(lastMAPoint.date, days) };
+        });
     }, [marcos, lastMAPoint, trendSlopePerDay, trendIsDecreasing]);
     const painTrendPoints = useMemo<PainTrendPoint[]>(() =>
         [...exerciseLogs]
@@ -1721,8 +1734,8 @@ const HealthView: React.FC<HealthViewProps> = ({
 
                     <div className="grid grid-cols-1 gap-4 sm:max-w-2xl sm:grid-cols-2">
                         <MetricCard
-                            label="Peso atual"
-                            value={weightHeadline ? weightHeadline.displayValue.toFixed(1) : '--'}
+                            label={weightHeadline?.isAverage ? 'Peso atual (média 7d)' : 'Peso atual'}
+                            value={weightHeadline?.isAverage ? weightHeadline.displayValue.toFixed(1) : '—'}
                             unit="kg"
                             helper={weightHeadline ? (
                                 <>
@@ -1732,7 +1745,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                             : 'Ainda sem média de 7 dias atrás para comparar')
                                         : `Faltam ${4 - weightHeadline.windowCount} registro(s) na semana para calcular a média de 7 dias`}
                                     <br />
-                                    <span className="opacity-70">Último: {weightHeadline.latestRaw.toFixed(1)} kg em {formatShortDate(weightHeadline.latestRawDate)}</span>
+                                    <span className="opacity-70">Último registro: {weightHeadline.latestRaw.toFixed(1)} kg em {formatShortDate(weightHeadline.latestRawDate)}</span>
                                 </>
                             ) : 'Nenhum registro de peso ainda.'}
                             icon="scale"
@@ -2453,7 +2466,11 @@ const HealthView: React.FC<HealthViewProps> = ({
                                         Distância até a meta: {targetDelta > 0 ? '+' : ''}{targetDelta.toFixed(1)} kg.
                                     </p>
                                 )}
-                                {!trendIsDecreasing && weightMASeries.length >= 4 && (
+                                {recentWeightPoints.length < MIN_TREND_POINTS ? (
+                                    <p className="mt-2 text-xs font-semibold text-on-surface-variant">
+                                        Faltam registros recentes para projetar uma tendência — {recentWeightPoints.length} de {MIN_TREND_POINTS} pesagens necessárias nas últimas 4 semanas.
+                                    </p>
+                                ) : !trendIsDecreasing && (
                                     <p className="mt-2 text-xs font-semibold text-on-surface-variant">
                                         Sem tendência de queda nas últimas 4 semanas — os marcos abaixo não têm data estimada.
                                     </p>
@@ -2464,7 +2481,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                             <div key={target} className="rounded-xl border border-border-subtle bg-background p-3">
                                                 <span className={labelClasses}>{target} kg</span>
                                                 <div className="mt-1 text-sm font-bold text-on-surface">
-                                                    {dateStr ? formatDate(dateStr) : 'Sem tendência de queda'}
+                                                    {dateStr ? formatApproxMonth(dateStr) : 'Sem tendência de queda'}
                                                 </div>
                                             </div>
                                         ))}
