@@ -53,7 +53,7 @@ const DEFAULT_HEALTH_REMINDERS: HealthTelegramReminder[] = [
         message: 'André, lembre de comer devagar no almoço. Ritmo baixo também é estratégia.',
         time: '11:45',
         enabled: true,
-        daysOfWeek: [1, 2, 3, 4, 5],
+        daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
         category: 'nutrition',
         telegramOnly: true,
     },
@@ -224,6 +224,18 @@ const formatApproxMonth = (dateStr: string): string => {
     const dayNum = day || 1;
     const part = dayNum <= 10 ? 'início' : dayNum <= 20 ? 'meados' : 'fim';
     return `${part} de ${MONTH_ABBR_PT[(month || 1) - 1]}/${year}`;
+};
+
+const WEEKDAY_LABELS = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+const WEEKDAY_NAMES = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+
+const formatCadence = (daysOfWeek: number[] | undefined, time: string): string => {
+    const days = daysOfWeek && daysOfWeek.length ? [...daysOfWeek].sort() : [0, 1, 2, 3, 4, 5, 6];
+    if (days.length === 7) return `Todos os dias às ${time}`;
+    if (days.length === 1) return `${WEEKDAY_NAMES[days[0]].replace(/^./, c => c.toUpperCase())} às ${time}`;
+    const names = days.map(d => WEEKDAY_NAMES[d].slice(0, 3).replace(/^./, c => c.toUpperCase()));
+    const last = names.pop();
+    return `${names.join(', ')} e ${last} às ${time}`;
 };
 
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
@@ -2881,6 +2893,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                 <div className="min-w-0">
                                                     <p className="text-sm font-bold text-on-surface">{reminder.title}</p>
                                                     <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">{reminder.message}</p>
+                                                    <p className="mt-1 text-xs font-semibold text-primary-container">{formatCadence(reminder.daysOfWeek, reminder.time)}</p>
                                                 </div>
                                                 <button
                                                     type="button"
@@ -2889,6 +2902,27 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                 >
                                                     {reminder.enabled ? 'Ativo' : 'Pausado'}
                                                 </button>
+                                            </div>
+                                            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                                                {WEEKDAY_LABELS.map((label, day) => {
+                                                    const days = reminder.daysOfWeek && reminder.daysOfWeek.length ? reminder.daysOfWeek : [0, 1, 2, 3, 4, 5, 6];
+                                                    const active = days.includes(day);
+                                                    return (
+                                                        <button
+                                                            key={day}
+                                                            type="button"
+                                                            title={WEEKDAY_NAMES[day]}
+                                                            onClick={() => {
+                                                                const next = active ? days.filter(d => d !== day) : [...days, day];
+                                                                if (next.length === 0) return;
+                                                                onSaveTelegramReminder({ ...reminder, daysOfWeek: next.sort() });
+                                                            }}
+                                                            className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold transition ${active ? 'bg-primary-container text-white' : 'bg-white text-on-surface-variant border border-border-standard'}`}
+                                                        >
+                                                            {label}
+                                                        </button>
+                                                    );
+                                                })}
                                             </div>
                                             <div className="mt-3 flex items-center justify-between gap-3">
                                                 <input

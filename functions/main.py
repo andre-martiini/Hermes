@@ -3027,7 +3027,7 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
             "message": "André, lembre de comer devagar no almoço. Ritmo baixo também é estratégia.",
             "time": "11:45",
             "enabled": True,
-            "daysOfWeek": [1, 2, 3, 4, 5],
+            "daysOfWeek": [0, 1, 2, 3, 4, 5, 6],
             "category": "nutrition",
         },
         {

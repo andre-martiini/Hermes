@@ -1739,6 +1739,18 @@ _HEALTH_RADICULAR_LOCATIONS = [
     ("joelho", "Joelho"), ("panturrilha", "Panturrilha"), ("tornozelo", "Tornozelo"), ("pe", "Pé"),
 ]
 
+_HEALTH_THERAPY_MODALITIES = [
+    ("pilates", "Pilates"), ("fisioterapia", "Fisioterapia"), ("rpg", "RPG"),
+    ("acupuntura", "Acupuntura"), ("nenhuma", "Nenhuma"),
+]
+
+_HEALTH_TRIGGER_TYPES = [
+    ("espirro_crise_alergica", "Espirro/crise alérgica"), ("viagem_longa_sentado", "Viagem longa sentado"),
+    ("dia_muito_sentado", "Dia muito sentado"), ("torcao_no_sono", "Torção no sono"),
+    ("carga_assimetrica", "Carga assimétrica"), ("estresse", "Estresse"), ("outro", "Outro"),
+    ("nenhum", "Nenhum"),
+]
+
 _HEALTH_RED_FLAG_MESSAGE = (
     "⚠️ <b>Sinais de alerta no registro de hoje</b>\n\n"
     "Isto não é um diagnóstico — é uma lista de sinais que, se presentes, indicam buscar "
@@ -1883,13 +1895,155 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
             current_strength["done"] = done
             doc_ref.set({"strength": current_strength, "entrySource": _health_entry_source_after_telegram(current_data)}, merge=True)
             _answer_callback_query(token, query_id, "Treino registrado" if done else "Ok, sem treino hoje")
-            response_text = f"✅ Check-in lombar completo para {strength_date}. Treino de força: <b>{'sim' if done else 'não'}</b>."
+            response_text = f"✅ Treino de força: <b>{'sim' if done else 'não'}</b>. Fez alguma terapia hoje?"
             _persist_callback_turn(f"Treino de força: {'sim' if done else 'não'}", response_text)
-            _send_telegram_message(token, chat_id, response_text)
+            therapy_keyboard = [
+                [{"text": label, "callback_data": f"health_therapy:{strength_date}:{value}"}]
+                for value, label in _HEALTH_THERAPY_MODALITIES
+            ]
+            _send_telegram_message_with_keyboard(token, chat_id, response_text, therapy_keyboard)
         except Exception as exc:
             print(f"[HealthCheckin] Falha ao registrar treino: {exc}")
             _answer_callback_query(token, query_id, "Não consegui registrar.")
             _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar o treino. Tente novamente.")
+
+    elif data.startswith("health_therapy:"):
+        parts = data.split(":")
+        therapy_date = parts[1] if len(parts) > 1 else ""
+        therapy_value = parts[2] if len(parts) > 2 else ""
+        valid_therapies = {value for value, _ in _HEALTH_THERAPY_MODALITIES}
+        try:
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", therapy_date) or therapy_value not in valid_therapies:
+                raise ValueError("dados inválidos")
+            doc_ref = db.collection("health_exercise_logs").document(therapy_date)
+            current = doc_ref.get()
+            current_data = (current.to_dict() or {}) if current.exists else {}
+            therapy_list = [] if therapy_value == "nenhuma" else [therapy_value]
+            doc_ref.set({"therapy": therapy_list, "entrySource": _health_entry_source_after_telegram(current_data)}, merge=True)
+            therapy_label = dict(_HEALTH_THERAPY_MODALITIES).get(therapy_value, therapy_value)
+            _answer_callback_query(token, query_id, f"Terapia: {therapy_label}")
+            response_text = f"✅ Terapia: <b>{therapy_label}</b>. Como foi a alimentação hoje?"
+            _persist_callback_turn(f"Modalidade terapêutica: {therapy_label}", response_text)
+            diet_keyboard = [[
+                {"text": "Sim", "callback_data": f"health_diet:{therapy_date}:sim"},
+                {"text": "Parcial", "callback_data": f"health_diet:{therapy_date}:parcial"},
+                {"text": "Não", "callback_data": f"health_diet:{therapy_date}:nao"},
+            ]]
+            _send_telegram_message_with_keyboard(token, chat_id, response_text, diet_keyboard)
+        except Exception as exc:
+            print(f"[HealthCheckin] Falha ao registrar terapia: {exc}")
+            _answer_callback_query(token, query_id, "Não consegui registrar.")
+            _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar a terapia. Tente novamente.")
+
+    elif data.startswith("health_diet:"):
+        parts = data.split(":")
+        diet_date = parts[1] if len(parts) > 1 else ""
+        diet_value = parts[2] if len(parts) > 2 else ""
+        try:
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", diet_date) or diet_value not in ("sim", "parcial", "nao"):
+                raise ValueError("dados inválidos")
+            doc_ref = db.collection("health_exercise_logs").document(diet_date)
+            current = doc_ref.get()
+            current_data = (current.to_dict() or {}) if current.exists else {}
+            current_nutrition = current_data.get("nutrition") or {}
+            current_nutrition["plan"] = diet_value
+            doc_ref.set({"nutrition": current_nutrition, "entrySource": _health_entry_source_after_telegram(current_data)}, merge=True)
+            _answer_callback_query(token, query_id, f"Cardápio: {diet_value}")
+            response_text = "✅ Alimentação registrada. Bateu a proteína hoje?"
+            _persist_callback_turn(f"Aderência alimentar: {diet_value}", response_text)
+            protein_keyboard = [[
+                {"text": "Sim", "callback_data": f"health_protein:{diet_date}:sim"},
+                {"text": "Não", "callback_data": f"health_protein:{diet_date}:nao"},
+            ]]
+            _send_telegram_message_with_keyboard(token, chat_id, response_text, protein_keyboard)
+        except Exception as exc:
+            print(f"[HealthCheckin] Falha ao registrar alimentação: {exc}")
+            _answer_callback_query(token, query_id, "Não consegui registrar.")
+            _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar a alimentação. Tente novamente.")
+
+    elif data.startswith("health_protein:"):
+        parts = data.split(":")
+        protein_date = parts[1] if len(parts) > 1 else ""
+        protein_value = parts[2] if len(parts) > 2 else ""
+        try:
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", protein_date) or protein_value not in ("sim", "nao"):
+                raise ValueError("dados inválidos")
+            doc_ref = db.collection("health_exercise_logs").document(protein_date)
+            current = doc_ref.get()
+            current_data = (current.to_dict() or {}) if current.exists else {}
+            current_nutrition = current_data.get("nutrition") or {}
+            current_nutrition["proteinTarget"] = protein_value == "sim"
+            doc_ref.set({"nutrition": current_nutrition, "entrySource": _health_entry_source_after_telegram(current_data)}, merge=True)
+            _answer_callback_query(token, query_id, "Registrado")
+            response_text = "✅ Proteína registrada. Medicação de hoje foi igual a de ontem?"
+            _persist_callback_turn(f"Proteína batida: {protein_value}", response_text)
+            meds_keyboard = [[
+                {"text": "Igual a ontem", "callback_data": f"health_meds:{protein_date}:same"},
+                {"text": "Nada hoje", "callback_data": f"health_meds:{protein_date}:clear"},
+            ]]
+            _send_telegram_message_with_keyboard(token, chat_id, response_text, meds_keyboard)
+        except Exception as exc:
+            print(f"[HealthCheckin] Falha ao registrar proteína: {exc}")
+            _answer_callback_query(token, query_id, "Não consegui registrar.")
+            _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar a proteína. Tente novamente.")
+
+    elif data.startswith("health_meds:"):
+        parts = data.split(":")
+        meds_date = parts[1] if len(parts) > 1 else ""
+        meds_action = parts[2] if len(parts) > 2 else ""
+        try:
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", meds_date) or meds_action not in ("same", "clear"):
+                raise ValueError("dados inválidos")
+            doc_ref = db.collection("health_exercise_logs").document(meds_date)
+            current = doc_ref.get()
+            current_data = (current.to_dict() or {}) if current.exists else {}
+            if meds_action == "same":
+                yesterday = (datetime.strptime(meds_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+                yesterday_doc = db.collection("health_exercise_logs").document(yesterday).get()
+                yesterday_meds = (yesterday_doc.to_dict() or {}).get("meds") if yesterday_doc.exists else None
+                new_meds = yesterday_meds or {"pregabalina": False, "dipirona": 0, "adorlan": 0, "fexofenadina": False}
+                meds_summary = "igual a ontem"
+            else:
+                new_meds = {"pregabalina": False, "dipirona": 0, "adorlan": 0, "fexofenadina": False}
+                meds_summary = "nada hoje"
+            doc_ref.set({"meds": new_meds, "entrySource": _health_entry_source_after_telegram(current_data)}, merge=True)
+            _answer_callback_query(token, query_id, "Medicação registrada")
+            response_text = f"✅ Medicação: <b>{meds_summary}</b>. Algum evento ou gatilho hoje?"
+            _persist_callback_turn(f"Medicação: {meds_summary}", response_text)
+            trigger_keyboard = [
+                [{"text": label, "callback_data": f"health_trigger:{meds_date}:{value}"}]
+                for value, label in _HEALTH_TRIGGER_TYPES
+            ]
+            _send_telegram_message_with_keyboard(token, chat_id, response_text, trigger_keyboard)
+        except Exception as exc:
+            print(f"[HealthCheckin] Falha ao registrar medicação: {exc}")
+            _answer_callback_query(token, query_id, "Não consegui registrar.")
+            _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar a medicação. Tente novamente. Edite pelo painel se preferir.")
+
+    elif data.startswith("health_trigger:"):
+        parts = data.split(":")
+        trigger_date = parts[1] if len(parts) > 1 else ""
+        trigger_value = parts[2] if len(parts) > 2 else ""
+        valid_triggers = {value for value, _ in _HEALTH_TRIGGER_TYPES}
+        try:
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", trigger_date) or trigger_value not in valid_triggers:
+                raise ValueError("dados inválidos")
+            doc_ref = db.collection("health_exercise_logs").document(trigger_date)
+            current = doc_ref.get()
+            current_data = (current.to_dict() or {}) if current.exists else {}
+            trigger_types = [] if trigger_value == "nenhum" else [trigger_value]
+            current_triggers = current_data.get("triggers") or {}
+            current_triggers["types"] = trigger_types
+            doc_ref.set({"triggers": current_triggers, "entrySource": _health_entry_source_after_telegram(current_data)}, merge=True)
+            trigger_label = dict(_HEALTH_TRIGGER_TYPES).get(trigger_value, trigger_value)
+            _answer_callback_query(token, query_id, "Registrado")
+            response_text = f"✅ Check-in lombar completo para {trigger_date}. Gatilho: <b>{trigger_label}</b>.\n\nPara adicionar uma observação, use o painel."
+            _persist_callback_turn(f"Evento/gatilho: {trigger_label}", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+        except Exception as exc:
+            print(f"[HealthCheckin] Falha ao registrar gatilho: {exc}")
+            _answer_callback_query(token, query_id, "Não consegui registrar.")
+            _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar o gatilho. Tente novamente.")
 
     elif data.startswith("ai_notif:"):
         parts = data.split(":")
