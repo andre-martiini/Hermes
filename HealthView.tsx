@@ -3339,11 +3339,21 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                 {exam.resultados && (
                                                     <p className="mt-2 whitespace-pre-wrap text-sm text-on-surface-variant">{renderTextWithLinks(exam.resultados)}</p>
                                                 )}
-                                                {exam.proximaReavaliacao && (
-                                                    <p className="mt-2 text-xs font-semibold text-on-surface-variant">
-                                                        Próxima reavaliação: {formatDate(exam.proximaReavaliacao)}
-                                                    </p>
-                                                )}
+                                                {exam.proximaReavaliacao && (() => {
+                                                    const daysUntil = daysSinceEpoch(exam.proximaReavaliacao) - daysSinceEpoch(formatDateLocalISO(new Date()));
+                                                    const tone = daysUntil < 0 ? 'error' : daysUntil <= 30 ? 'amber' : 'neutral';
+                                                    const daysLabel = daysUntil < 0
+                                                        ? `atrasada há ${Math.abs(daysUntil)} dia${Math.abs(daysUntil) === 1 ? '' : 's'}`
+                                                        : daysUntil === 0
+                                                            ? 'hoje'
+                                                            : `em ${daysUntil} dia${daysUntil === 1 ? '' : 's'}`;
+                                                    const toneClasses = tone === 'error' ? 'bg-error-container text-on-error-container' : tone === 'amber' ? 'bg-amber-100 text-amber-700' : 'bg-surface-container-low text-on-surface-variant';
+                                                    return (
+                                                        <p className={`mt-2 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${toneClasses}`}>
+                                                            Próxima reavaliação {daysLabel} ({formatDate(exam.proximaReavaliacao)})
+                                                        </p>
+                                                    );
+                                                })()}
                                                 {exam.tags && exam.tags.length > 0 && (
                                                     <div className="mt-2 flex flex-wrap gap-1.5">
                                                         {exam.tags.map(tag => (
