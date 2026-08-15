@@ -454,10 +454,37 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
         }
     };
 
-    // Mensagens em ordem cronológica (mais antiga primeiro) para exibição estilo chat.
+    // Mensagens em ordem cronológica (mais antiga primeiro) para exibição estilo chat,
+    // com deduplicação inteligente para mesclar mensagens do worker em tempo real com histórico .txt.
     const messages: WhatsappMessageDoc[] = useMemo(() => {
         const all = [...olderDocs.slice().reverse(), ...liveDocs.slice().reverse()];
-        return all.map(d => ({ id: d.id, ...(d.data() as any) })) as WhatsappMessageDoc[];
+        const docsList = all.map(d => ({ id: d.id, ...(d.data() as any) })) as WhatsappMessageDoc[];
+
+        const seenIds = new Set<string>();
+        const seenSignatures = new Set<string>();
+        const deduplicated: WhatsappMessageDoc[] = [];
+
+        for (const msg of docsList) {
+            if (seenIds.has(msg.id)) continue;
+            seenIds.add(msg.id);
+
+            const tsDate = tsToDate(msg.timestamp);
+            const minuteKey = tsDate ? Math.floor(tsDate.getTime() / 60000) : 0;
+            const contentKey = (msg.content || '').trim().slice(0, 100);
+            const authorKey = (msg.author_name || '').trim().toLowerCase();
+            const sig = `${msg.chat_id}_${authorKey}_${minuteKey}_${contentKey}`;
+
+            // Se for duplicata de mesmo autor, minuto e conteúdo entre worker e .txt, mantém a primeira
+            if (contentKey && seenSignatures.has(sig)) {
+                continue;
+            }
+            if (contentKey) {
+                seenSignatures.add(sig);
+            }
+            deduplicated.push(msg);
+        }
+
+        return deduplicated;
     }, [liveDocs, olderDocs]);
 
     // Auto-scroll para as mensagens mais recentes (fim da lista)
