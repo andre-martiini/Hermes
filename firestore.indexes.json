@@ -9,6 +9,14 @@
       ]
     },
     {
+      "collectionGroup": "health_events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "sessoes_copiloto",
       "queryScope": "COLLECTION",
       "fields": [

@@ -1343,7 +1343,7 @@ const HealthView: React.FC<HealthViewProps> = ({
     const eventsForIntegrated = useMemo(() => {
         const manual = events
             .filter(e => !integratedRangeStart || e.date >= integratedRangeStart)
-            .map(e => ({ ...e, source: 'manual' as const }));
+            .map(e => ({ ...e, source: e.source ?? 'manual' as const }));
         // Todo registro do arquivo médico com data vira automaticamente um marcador —
         // derivado aqui na leitura, não duplicado no Firestore, para nunca ficar
         // dessincronizado se o exame for editado ou removido.
@@ -2363,10 +2363,12 @@ const HealthView: React.FC<HealthViewProps> = ({
                                         <span key={event.id} className="inline-flex items-center gap-1.5 rounded-full border border-border-standard bg-white px-2.5 py-1 text-[10px] font-semibold text-on-surface-variant">
                                             <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-surface-container-low text-[9px] font-bold text-on-surface">{i + 1}</span>
                                             {formatShortDate(event.date)} · {event.label}
-                                            {event.source === 'manual' ? (
-                                                <button type="button" onClick={() => onDeleteEvent(event.id)} className="text-on-surface-variant/60 hover:text-error" aria-label="Remover evento">×</button>
-                                            ) : (
+                                            {event.source === 'exam' ? (
                                                 <span className="text-on-surface-variant/50" title="Vem do arquivo médico">📎</span>
+                                            ) : event.source === 'calendar' ? (
+                                                <span className="text-on-surface-variant/50" title="Vem da Google Agenda">📅</span>
+                                            ) : (
+                                                <button type="button" onClick={() => onDeleteEvent(event.id)} className="text-on-surface-variant/60 hover:text-error" aria-label="Remover evento">×</button>
                                             )}
                                         </span>
                                     ))}

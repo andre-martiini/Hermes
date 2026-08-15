@@ -654,6 +654,8 @@ export interface HealthEvent {
     type: HealthEventType;
     label: string;
     endDate?: string;
+    source?: 'manual' | 'calendar' | 'exam';
+    externalId?: string;
 }
 
 export const HEALTH_EVENT_TYPES: { value: HealthEventType; label: string }[] = [
