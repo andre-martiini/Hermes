@@ -172,6 +172,11 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
     const [importError, setImportError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+    // Auto-scroll e refs da timeline
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const messagesContainerRef = useRef<HTMLDivElement>(null);
+    const shouldAutoScrollRef = useRef(true);
+
     const selectedChat = useMemo(() => chats.find(c => c.chat_id === selectedChatId) || null, [chats, selectedChatId]);
 
     const resetImportModal = () => {
@@ -357,6 +362,7 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
         setThirdColumnTab('copilot');
         setTimelineError(null);
         setMediaUrls({});
+        shouldAutoScrollRef.current = true;
         if (!selectedChatId) return;
 
         setIsLoadingMessages(true);
@@ -414,8 +420,13 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
         return () => unsubscribe();
     }, [activeJobId]);
 
-    const loadMore = async () => {
+    const handleLoadMore = async () => {
         if (isLoadingMore || !selectedChatId) return;
+        shouldAutoScrollRef.current = false;
+        const container = messagesContainerRef.current;
+        const prevScrollHeight = container ? container.scrollHeight : 0;
+        const prevScrollTop = container ? container.scrollTop : 0;
+
         const cursor = olderDocs.length > 0 ? olderDocs[olderDocs.length - 1] : liveDocs[liveDocs.length - 1];
         if (!cursor) return;
         setIsLoadingMore(true);
@@ -430,6 +441,14 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
             const snap = await getDocs(q);
             setOlderDocs(prev => [...prev, ...snap.docs]);
             setHasMore(snap.docs.length === PAGE_SIZE);
+
+            // Preserva a posição visual do scroll após carregar mensagens anteriores no topo
+            requestAnimationFrame(() => {
+                if (container) {
+                    const newScrollHeight = container.scrollHeight;
+                    container.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+                }
+            });
         } finally {
             setIsLoadingMore(false);
         }
@@ -440,6 +459,15 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
         const all = [...olderDocs.slice().reverse(), ...liveDocs.slice().reverse()];
         return all.map(d => ({ id: d.id, ...(d.data() as any) })) as WhatsappMessageDoc[];
     }, [liveDocs, olderDocs]);
+
+    // Auto-scroll para as mensagens mais recentes (fim da lista)
+    useEffect(() => {
+        if (messages.length > 0 && shouldAutoScrollRef.current) {
+            requestAnimationFrame(() => {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+            });
+        }
+    }, [messages, selectedChatId]);
 
     // Refs para o Copiloto embutido: liveContextProvider precisa ser estável (useCallback com
     // deps vazias, mesmo padrão do MeetingTranscriptionTool) e ler sempre o valor mais recente
@@ -939,7 +967,15 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
             </div>
 
             {/* Mensagens */}
-            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1.5">
+            <div
+                ref={messagesContainerRef}
+                onScroll={(e) => {
+                    const el = e.currentTarget;
+                    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+                    shouldAutoScrollRef.current = isAtBottom;
+                }}
+                className="flex-1 overflow-y-auto px-4 py-3 space-y-1.5"
+            >
                 {isLoadingMessages ? (
                     <p className={`text-xs font-mono ${mutedCls}`}>Carregando mensagens...</p>
                 ) : timelineError ? (
@@ -950,7 +986,7 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
                     <>
                         {hasMore && (
                             <button
-                                onClick={loadMore}
+                                onClick={handleLoadMore}
                                 disabled={isLoadingMore}
                                 className={`mx-auto block rounded-lg border px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition disabled:opacity-50 ${isDark ? 'border-white/10 text-white/60 hover:bg-white/5' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}
                             >
@@ -958,6 +994,7 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
                             </button>
                         )}
                         {messages.map((m, i) => renderMessageBubble(m, i > 0 ? messages[i - 1] : null))}
+                        <div ref={messagesEndRef} className="h-0 w-0" />
                     </>
                 )}
             </div>
@@ -1172,10 +1209,10 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
     };
 
     return (
-        <div className={`p-4 lg:p-8 ${isDark ? 'bg-[#0f1724]' : ''}`}>
-            <div className="flex gap-4 h-[calc(100vh-140px)] min-h-[420px]">
+        <div className={`p-2 sm:p-3 ${isDark ? 'bg-[#0f1724]' : ''}`}>
+            <div className="flex gap-2.5 sm:gap-3 h-[calc(100vh-76px)] min-h-[500px]">
                 {/* Lista de chats: escondida no mobile quando um chat está aberto */}
-                <div className={`w-full md:w-72 shrink-0 ${selectedChatId ? 'hidden md:flex md:flex-col' : 'flex flex-col'}`}>
+                <div className={`w-full md:w-80 shrink-0 ${selectedChatId ? 'hidden md:flex md:flex-col' : 'flex flex-col'}`}>
                     {renderChatList()}
                 </div>
 
