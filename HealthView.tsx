@@ -1241,7 +1241,7 @@ const HealthView: React.FC<HealthViewProps> = ({
     isDark = false
 }) => {
     const [selectedDate, setSelectedDate] = useState<string>(formatDateLocalISO(new Date()));
-    const [activeTab, setActiveTab] = useState<'telemetry' | 'archive'>('telemetry');
+    const [activeTab, setActiveTab] = useState<'overview' | 'records' | 'charts' | 'reminders' | 'archive'>('overview');
     const [weightInput, setWeightInput] = useState<string>('');
     const [waistInput, setWaistInput] = useState<string>('');
     const [editingWeightId, setEditingWeightId] = useState<string | null>(null);
@@ -2181,15 +2181,18 @@ const HealthView: React.FC<HealthViewProps> = ({
                             </p>
                         </div>
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                            <div className="flex rounded-xl border border-border-standard bg-background p-1">
+                            <div className="flex flex-wrap rounded-xl border border-border-standard bg-background p-1">
                                 {[
-                                    { id: 'telemetry', label: 'Telemetria' },
+                                    { id: 'overview', label: 'Visão geral' },
+                                    { id: 'records', label: 'Registros' },
+                                    { id: 'charts', label: 'Gráficos' },
+                                    { id: 'reminders', label: 'Lembretes' },
                                     { id: 'archive', label: 'Arquivo médico' },
                                 ].map(tab => (
                                     <button
                                         key={tab.id}
                                         type="button"
-                                        onClick={() => setActiveTab(tab.id as 'telemetry' | 'archive')}
+                                        onClick={() => setActiveTab(tab.id as typeof activeTab)}
                                         className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
                                             activeTab === tab.id
                                                 ? 'bg-primary-container text-white shadow-card'
@@ -2247,8 +2250,7 @@ const HealthView: React.FC<HealthViewProps> = ({
             </div>
 
             <main className="mx-auto max-w-[1440px] px-6 py-6 lg:px-8">
-                {activeTab === 'telemetry' ? (
-                    <>
+                {activeTab !== 'archive' && (
                     <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-primary-container/30 bg-white p-5 shadow-card sm:flex-row sm:items-center sm:justify-between">
                         <div>
                             <p className={labelClasses}>Check-in guiado</p>
@@ -2263,6 +2265,9 @@ const HealthView: React.FC<HealthViewProps> = ({
                             </button>
                         </div>
                     </div>
+                )}
+                {activeTab === 'overview' && (
+                    <>
                     {latestWeeklySummary && (
                         <div className="mb-6 rounded-2xl border border-border-subtle bg-white p-5 shadow-card">
                             <p className={labelClasses}>Resumo semanal · {formatShortDate(latestWeeklySummary.weekStart)} a {formatShortDate(latestWeeklySummary.weekEnd)}</p>
@@ -2388,7 +2393,10 @@ const HealthView: React.FC<HealthViewProps> = ({
                             )}
                         </div>
                     </HealthSection>
-                    <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+                    </>
+                )}
+                {activeTab === 'records' && (
+                    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
                         <div className="space-y-6">
                             <HealthSection title="Registro de peso" eyebrow="Entrada manual">
                                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr]">
@@ -2937,7 +2945,11 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     </div>
                                 </div>
                             </HealthSection>
-
+                        </div>
+                    </div>
+                )}
+                {activeTab === 'charts' && (
+                        <div className="space-y-6">
                             <HealthSection title="Evolução do sintoma radicular" eyebrow="Centralização vs. periferalização">
                                 <RadicularTimelineChart points={radicularSeries} isDark={isDark} />
                                 <p className="mt-3 text-xs font-semibold leading-relaxed text-on-surface-variant">
@@ -3010,7 +3022,9 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     </div>
                                 )}
                             </HealthSection>
-
+                        </div>
+                )}
+                {activeTab === 'reminders' && (
                             <HealthSection title="Lembretes Telegram" eyebrow="Intervenções leves">
                                 <div className="space-y-3">
                                     {activeReminders.map(reminder => (
@@ -3090,13 +3104,26 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     </button>
                                 </div>
                             </HealthSection>
-                        </div>
-                    </div>
-                    </>
-                ) : (
+                )}
+                {activeTab === 'archive' && (
                     <HealthSection title="Arquivo médico" eyebrow="Exames e consultas">
-                        <div className="rounded-2xl border border-border-subtle bg-background p-5">
-                            <p className={`${labelClasses} mb-3`}>Novo registro</p>
+                        <div className="flex justify-end">
+                            <button
+                                type="button"
+                                onClick={() => setIsAddExamOpen(true)}
+                                className="flex items-center gap-2 rounded-xl bg-primary-container px-4 py-2.5 text-sm font-bold text-white transition hover:opacity-90"
+                            >
+                                <Icon name="plus" className="h-4 w-4" />
+                                Adicionar registro
+                            </button>
+                        </div>
+                        {isAddExamOpen && (
+                        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 py-10" onClick={() => setIsAddExamOpen(false)}>
+                        <div className="w-full max-w-3xl rounded-2xl border border-border-subtle bg-white p-5 shadow-card" onClick={e => e.stopPropagation()}>
+                            <div className="mb-3 flex items-center justify-between">
+                                <p className={labelClasses}>Novo registro</p>
+                                <button type="button" onClick={() => setIsAddExamOpen(false)} aria-label="Fechar" className="rounded-lg px-2 py-1 text-sm font-bold text-on-surface-variant transition hover:bg-surface-container-low">✕</button>
+                            </div>
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <label className="block">
                                     <span className={labelClasses}>Título</span>
@@ -3218,6 +3245,8 @@ const HealthView: React.FC<HealthViewProps> = ({
                                 {isSavingExam ? 'Salvando...' : 'Adicionar registro'}
                             </button>
                         </div>
+                        </div>
+                        )}
 
                         {sortedExams.length > 0 ? (
                             <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">

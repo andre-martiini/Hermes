@@ -91,7 +91,10 @@ describe('HealthView', () => {
         }).not.toThrow();
 
         expect(screen.getByText('Painel de saúde')).toBeDefined();
-        expect(screen.getByText('Telemetria')).toBeDefined();
+        expect(screen.getByText('Visão geral')).toBeDefined();
+        expect(screen.getByText('Registros')).toBeDefined();
+        expect(screen.getByText('Gráficos')).toBeDefined();
+        expect(screen.getByText('Lembretes')).toBeDefined();
         expect(screen.getByText('Arquivo médico')).toBeDefined();
     });
 
@@ -119,9 +122,9 @@ describe('HealthView', () => {
         fireEvent.click(archiveTabButtons[0]);
         expect(screen.getByText('Ressonância Magnética Coluna Lombar')).toBeDefined();
 
-        // Switch back to telemetry
-        const telemetryTabButtons = screen.getAllByRole('button', { name: 'Telemetria' });
-        fireEvent.click(telemetryTabButtons[0]);
+        // Switch back to overview
+        const overviewTabButtons = screen.getAllByRole('button', { name: 'Visão geral' });
+        fireEvent.click(overviewTabButtons[0]);
 
         // Open report
         const reportButton = screen.getByRole('button', { name: /Gerar relatório para consulta/i });
