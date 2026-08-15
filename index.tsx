@@ -3622,6 +3622,15 @@ const App: React.FC = () => {
     await addDoc(collection(db, 'health_weights'), { weight, date });
     showToast("Peso registrado com sucesso!", "success");
   };
+  const handleUpdateHealthWeight = async (id: string, weight: number, date: string) => {
+    try {
+      await updateDoc(doc(db, 'health_weights', id), { weight, date });
+      showToast("Registro de peso atualizado.", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao atualizar registro.", "error");
+    }
+  };
   const handleDeleteHealthWeight = async (id: string) => {
     try {
       await deleteDoc(doc(db, 'health_weights', id));
@@ -5782,6 +5791,7 @@ const App: React.FC = () => {
                     settings={healthSettings}
                     onUpdateSettings={handleUpdateHealthSettings}
                     onAddWeight={handleAddHealthWeight}
+                    onUpdateWeight={handleUpdateHealthWeight}
                     onDeleteWeight={handleDeleteHealthWeight}
                     waist={healthWaist}
                     onAddWaist={handleAddHealthWaist}

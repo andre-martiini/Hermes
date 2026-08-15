@@ -18,6 +18,7 @@ interface HealthViewProps {
     settings: HealthSettings;
     onUpdateSettings: (settings: HealthSettings) => void;
     onAddWeight: (weight: number, date: string) => void;
+    onUpdateWeight: (id: string, weight: number, date: string) => void;
     onDeleteWeight: (id: string) => void;
     waist: HealthWaist[];
     onAddWaist: (cm: number, date: string) => void;
@@ -394,8 +395,10 @@ const WeightTrendChart = ({
 
     if (points.length < 2) {
         return (
-            <div className="flex h-[280px] items-center justify-center rounded-2xl border border-dashed border-border-standard bg-background text-sm font-semibold text-on-surface-variant">
-                Ainda não há registros suficientes para tendência.
+            <div className="flex h-[280px] items-center justify-center rounded-2xl border border-dashed border-border-standard bg-background p-4 text-center text-sm font-semibold text-on-surface-variant">
+                {points.length === 0
+                    ? 'Ainda não há registros de peso — adicione o primeiro em "Registro de peso".'
+                    : `Falta pelo menos mais 1 registro de peso para montar o gráfico de tendência (há ${points.length} até agora).`}
             </div>
         );
     }
@@ -525,8 +528,10 @@ const PainTrendChart = ({ points, isDark = false }: { points: PainTrendPoint[]; 
 
     if (visiblePoints.length < 2) {
         return (
-            <div className="flex h-[240px] items-center justify-center rounded-2xl border border-dashed border-border-standard bg-background text-sm font-semibold text-on-surface-variant">
-                Ainda não há histórico suficiente de dor para montar o gráfico.
+            <div className="flex h-[240px] items-center justify-center rounded-2xl border border-dashed border-border-standard bg-background p-4 text-center text-sm font-semibold text-on-surface-variant">
+                {visiblePoints.length === 0
+                    ? 'Ainda não há registros de dor — preencha "Dor lombar" no registro diário ou responda o check-in do Telegram.'
+                    : `Falta pelo menos mais 1 registro de dor para montar o gráfico (há ${visiblePoints.length} até agora).`}
             </div>
         );
     }
@@ -1038,7 +1043,7 @@ const RadicularTimelineChart = ({
 };
 
 const HealthView: React.FC<HealthViewProps> = ({
-    weights, settings, onUpdateSettings, onAddWeight, onDeleteWeight,
+    weights, settings, onUpdateSettings, onAddWeight, onUpdateWeight, onDeleteWeight,
     waist, onAddWaist, onDeleteWaist,
     events, onAddEvent, onDeleteEvent, latestWeeklySummary,
     exerciseLogs, onSaveExerciseLog, exams, onAddExam, onDeleteExam, onUpdateExam,
@@ -1049,6 +1054,14 @@ const HealthView: React.FC<HealthViewProps> = ({
     const [activeTab, setActiveTab] = useState<'telemetry' | 'archive'>('telemetry');
     const [weightInput, setWeightInput] = useState<string>('');
     const [waistInput, setWaistInput] = useState<string>('');
+    const [editingWeightId, setEditingWeightId] = useState<string | null>(null);
+    const [editWeightValue, setEditWeightValue] = useState<string>('');
+    const [editWeightDate, setEditWeightDate] = useState<string>('');
+    const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
+    const [editBlockDistance, setEditBlockDistance] = useState<string>('');
+    const [editBlockMinutes, setEditBlockMinutes] = useState<string>('');
+    const [editBlockSteps, setEditBlockSteps] = useState<string>('');
+    const [editBlockCalories, setEditBlockCalories] = useState<string>('');
     const [integratedRangeDays, setIntegratedRangeDays] = useState<number | null>(90);
     const [isReportOpen, setIsReportOpen] = useState<boolean>(false);
     const [eventDate, setEventDate] = useState<string>(formatDateLocalISO(new Date()));
@@ -1368,6 +1381,50 @@ const HealthView: React.FC<HealthViewProps> = ({
         const block = selectedWalkBlocks.find(b => b.id === id);
         if (!block) return;
         await onSaveExerciseLog(selectedDate, { walkBlocks: arrayRemove(block) } as unknown as Partial<ExerciseLog>);
+    };
+
+    const startEditWeight = (weight: HealthWeight) => {
+        setEditingWeightId(weight.id);
+        setEditWeightValue(String(weight.weight));
+        setEditWeightDate(weight.date);
+    };
+    const cancelEditWeight = () => setEditingWeightId(null);
+    const saveEditWeight = () => {
+        if (!editingWeightId) return;
+        const value = parseFloat(editWeightValue.replace(',', '.'));
+        if (!isNaN(value) && value >= 30 && value <= 250 && editWeightDate) {
+            onUpdateWeight(editingWeightId, value, editWeightDate);
+            setEditingWeightId(null);
+        }
+    };
+
+    const startEditBlock = (block: WalkBlock) => {
+        setEditingBlockId(block.id);
+        setEditBlockDistance(String(block.distance));
+        setEditBlockMinutes(block.minutes ? String(block.minutes) : '');
+        setEditBlockSteps(block.steps ? String(block.steps) : '');
+        setEditBlockCalories(block.calories ? String(block.calories) : '');
+    };
+    const cancelEditBlock = () => setEditingBlockId(null);
+    const saveEditBlock = async () => {
+        if (!editingBlockId) return;
+        const distance = parsePositiveNumber(editBlockDistance);
+        if (!distance || distance > 50) return;
+        const minutes = parsePositiveNumber(editBlockMinutes);
+        const steps = parsePositiveNumber(editBlockSteps);
+        const calories = parsePositiveNumber(editBlockCalories);
+        const updatedBlocks = selectedWalkBlocks.map(b => b.id === editingBlockId
+            ? {
+                ...b,
+                distance,
+                minutes: minutes ? Math.round(minutes) : undefined,
+                steps: steps ? Math.round(steps) : undefined,
+                calories: calories ? Math.round(calories) : undefined,
+            }
+            : b
+        );
+        await onSaveExerciseLog(selectedDate, { walkBlocks: updatedBlocks });
+        setEditingBlockId(null);
     };
 
     const handleAddWeight = () => {
@@ -1873,20 +1930,50 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     {sortedWeights.length > 0 ? (
                                         <div className="max-h-[240px] space-y-2 overflow-y-auto">
                                             {sortedWeights.slice(0, 20).map(weight => (
-                                                <div key={weight.id} className="flex items-center justify-between gap-3 rounded-xl border border-border-subtle bg-white px-4 py-2.5">
-                                                    <div className="flex items-baseline gap-2">
-                                                        <span className="text-sm font-bold text-on-surface">{weight.weight.toFixed(1)} kg</span>
-                                                        <span className="text-xs font-medium text-on-surface-variant">{formatDate(weight.date)}</span>
+                                                editingWeightId === weight.id ? (
+                                                    <div key={weight.id} className="flex items-center gap-2 rounded-xl border border-primary-container bg-white px-3 py-2">
+                                                        <input
+                                                            type="text"
+                                                            inputMode="decimal"
+                                                            value={editWeightValue}
+                                                            onChange={e => setEditWeightValue(e.target.value)}
+                                                            className="w-16 rounded-lg border border-border-standard px-2 py-1 text-sm font-bold"
+                                                        />
+                                                        <input
+                                                            type="date"
+                                                            value={editWeightDate}
+                                                            onChange={e => setEditWeightDate(e.target.value)}
+                                                            className="rounded-lg border border-border-standard px-2 py-1 text-xs"
+                                                        />
+                                                        <button type="button" onClick={saveEditWeight} className="ml-auto rounded-lg bg-primary-container px-2.5 py-1 text-xs font-bold text-white">Salvar</button>
+                                                        <button type="button" onClick={cancelEditWeight} className="text-xs font-semibold text-on-surface-variant">Cancelar</button>
                                                     </div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => onDeleteWeight(weight.id)}
-                                                        className="rounded-lg p-1.5 text-on-surface-variant transition hover:bg-error-container hover:text-on-error-container"
-                                                        aria-label="Remover registro"
-                                                    >
-                                                        <Icon name="trash" className="h-4 w-4" />
-                                                    </button>
-                                                </div>
+                                                ) : (
+                                                    <div key={weight.id} className="flex items-center justify-between gap-3 rounded-xl border border-border-subtle bg-white px-4 py-2.5">
+                                                        <div className="flex items-baseline gap-2">
+                                                            <span className="text-sm font-bold text-on-surface">{weight.weight.toFixed(1)} kg</span>
+                                                            <span className="text-xs font-medium text-on-surface-variant">{formatDate(weight.date)}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-1">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => startEditWeight(weight)}
+                                                                className="rounded-lg p-1.5 text-on-surface-variant transition hover:bg-surface-container-low hover:text-primary-container"
+                                                                aria-label="Editar registro"
+                                                            >
+                                                                <Icon name="edit" className="h-4 w-4" />
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => onDeleteWeight(weight.id)}
+                                                                className="rounded-lg p-1.5 text-on-surface-variant transition hover:bg-error-container hover:text-on-error-container"
+                                                                aria-label="Remover registro"
+                                                            >
+                                                                <Icon name="trash" className="h-4 w-4" />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )
                                             ))}
                                         </div>
                                     ) : (
@@ -2005,27 +2092,48 @@ const HealthView: React.FC<HealthViewProps> = ({
                                         {selectedWalkBlocks.length > 0 ? (
                                             <div className="mt-3 max-h-[220px] space-y-2 overflow-y-auto">
                                                 {selectedWalkBlocks.map(block => (
-                                                    <div key={block.id} className="flex items-center justify-between gap-3 rounded-xl border border-border-subtle bg-white px-4 py-2.5">
-                                                        <div className="flex min-w-0 items-baseline gap-2">
-                                                            <span className="text-sm font-bold text-on-surface">{formatKm(block.distance)} km</span>
-                                                            <span className="truncate text-xs font-medium text-on-surface-variant">
-                                                                {[
-                                                                    block.time,
-                                                                    block.minutes ? `${block.minutes} min` : null,
-                                                                    block.steps ? `${block.steps} passos` : null,
-                                                                    block.calories ? `${block.calories} kcal` : null,
-                                                                ].filter(Boolean).join(' · ')}
-                                                            </span>
+                                                    editingBlockId === block.id ? (
+                                                        <div key={block.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-primary-container bg-white px-3 py-2">
+                                                            <input type="text" inputMode="decimal" value={editBlockDistance} onChange={e => setEditBlockDistance(e.target.value)} placeholder="km" className="w-16 rounded-lg border border-border-standard px-2 py-1 text-xs" />
+                                                            <input type="text" inputMode="decimal" value={editBlockMinutes} onChange={e => setEditBlockMinutes(e.target.value)} placeholder="min" className="w-14 rounded-lg border border-border-standard px-2 py-1 text-xs" />
+                                                            <input type="text" inputMode="decimal" value={editBlockSteps} onChange={e => setEditBlockSteps(e.target.value)} placeholder="passos" className="w-16 rounded-lg border border-border-standard px-2 py-1 text-xs" />
+                                                            <input type="text" inputMode="decimal" value={editBlockCalories} onChange={e => setEditBlockCalories(e.target.value)} placeholder="kcal" className="w-16 rounded-lg border border-border-standard px-2 py-1 text-xs" />
+                                                            <button type="button" onClick={saveEditBlock} className="ml-auto rounded-lg bg-primary-container px-2.5 py-1 text-xs font-bold text-white">Salvar</button>
+                                                            <button type="button" onClick={cancelEditBlock} className="text-xs font-semibold text-on-surface-variant">Cancelar</button>
                                                         </div>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleDeleteWalkBlock(block.id)}
-                                                            className="rounded-lg p-1.5 text-on-surface-variant transition hover:bg-error-container hover:text-on-error-container"
-                                                            aria-label="Remover bloco"
-                                                        >
-                                                            <Icon name="trash" className="h-4 w-4" />
-                                                        </button>
-                                                    </div>
+                                                    ) : (
+                                                        <div key={block.id} className="flex items-center justify-between gap-3 rounded-xl border border-border-subtle bg-white px-4 py-2.5">
+                                                            <div className="flex min-w-0 items-baseline gap-2">
+                                                                <span className="text-sm font-bold text-on-surface">{formatKm(block.distance)} km</span>
+                                                                <span className="truncate text-xs font-medium text-on-surface-variant">
+                                                                    {[
+                                                                        block.time,
+                                                                        block.minutes ? `${block.minutes} min` : null,
+                                                                        block.steps ? `${block.steps} passos` : null,
+                                                                        block.calories ? `${block.calories} kcal` : null,
+                                                                    ].filter(Boolean).join(' · ')}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center gap-1">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => startEditBlock(block)}
+                                                                    className="rounded-lg p-1.5 text-on-surface-variant transition hover:bg-surface-container-low hover:text-primary-container"
+                                                                    aria-label="Editar bloco"
+                                                                >
+                                                                    <Icon name="edit" className="h-4 w-4" />
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleDeleteWalkBlock(block.id)}
+                                                                    className="rounded-lg p-1.5 text-on-surface-variant transition hover:bg-error-container hover:text-on-error-container"
+                                                                    aria-label="Remover bloco"
+                                                                >
+                                                                    <Icon name="trash" className="h-4 w-4" />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    )
                                                 ))}
                                             </div>
                                         ) : (
