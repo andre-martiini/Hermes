@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { arrayUnion, arrayRemove } from 'firebase/firestore';
 import {
     HealthWeight, HealthSettings, ExerciseLog,
@@ -377,6 +377,17 @@ const chartPalette = (isDark: boolean) => ({
     trajectory: isDark ? '#a78bfa' : '#7c3aed',
     trendLine: isDark ? '#fb923c' : '#c2410c',
 });
+
+function nearestByTime<T>(items: T[], getTime: (item: T) => number, targetTime: number): T | null {
+    if (!items.length) return null;
+    let best = items[0];
+    let bestDiff = Math.abs(getTime(items[0]) - targetTime);
+    for (const item of items) {
+        const diff = Math.abs(getTime(item) - targetTime);
+        if (diff < bestDiff) { best = item; bestDiff = diff; }
+    }
+    return best;
+}
 
 const WeightTrendChart = ({
     points,
@@ -763,17 +774,6 @@ const WalkDailyChart = ({
     );
 };
 
-function nearestByTime<T>(items: T[], getTime: (item: T) => number, targetTime: number): T | null {
-    if (!items.length) return null;
-    let best = items[0];
-    let bestDiff = Math.abs(getTime(items[0]) - targetTime);
-    for (const item of items) {
-        const diff = Math.abs(getTime(item) - targetTime);
-        if (diff < bestDiff) { best = item; bestDiff = diff; }
-    }
-    return best;
-}
-
 const IntegratedTrendChart = ({
     weightPoints,
     painWeekly,
@@ -1107,6 +1107,18 @@ const HealthView: React.FC<HealthViewProps> = ({
 
     const sortedWaist = useMemo(() => [...waist].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [waist]);
 
+    const sortedExams = useMemo(
+        () => [...exams].sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime()),
+        [exams]
+    );
+
+    const radicularSeries = useMemo(() => {
+        return exerciseLogs
+            .filter(l => l.radicular && l.radicular.location !== 'nenhum')
+            .map(l => ({ date: l.id, location: l.radicular!.location, side: l.radicular!.side, intensity: l.radicular!.intensity }))
+            .sort((a, b) => a.date.localeCompare(b.date));
+    }, [exerciseLogs]);
+
     const integratedRangeStart = useMemo(
         () => (integratedRangeDays === null ? null : addDays(formatDateLocalISO(new Date()), -integratedRangeDays)),
         [integratedRangeDays]
@@ -1256,13 +1268,6 @@ const HealthView: React.FC<HealthViewProps> = ({
         if (trendIsDecreasing && trendPoints.length > 1) lines.push({ key: 'trend', label: 'tendência real', color: 'trendLine', points: trendPoints });
         return lines;
     }, [trajectoryPoints, trendPoints, trendIsDecreasing]);
-
-    const radicularSeries = useMemo(() => {
-        return exerciseLogs
-            .filter(l => l.radicular && l.radicular.location !== 'nenhum')
-            .map(l => ({ date: l.id, location: l.radicular!.location, side: l.radicular!.side, intensity: l.radicular!.intensity }))
-            .sort((a, b) => a.date.localeCompare(b.date));
-    }, [exerciseLogs]);
 
     const dailyPainSeries = useMemo(() => {
         return exerciseLogs
@@ -1467,11 +1472,6 @@ const HealthView: React.FC<HealthViewProps> = ({
         const current: NonNullable<ExerciseLog['meds']> = todayLog.meds || { pregabalina: false, dipirona: 0, adorlan: 0, fexofenadina: false };
         onSaveExerciseLog(selectedDate, { meds: { ...current, ...patch } });
     };
-
-    const sortedExams = useMemo(
-        () => [...exams].sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime()),
-        [exams]
-    );
 
     const handleAddExam = async () => {
         const titulo = examTitulo.trim();
