@@ -1019,7 +1019,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                                                     ? 'bg-[#10b981]/30 group-hover:bg-[#10b981]'
                                                                     : isDark ? 'bg-white/10' : 'bg-slate-200'
                                                             }`}
-                                                            title={`${String(item.day).padStart(2, '0')} ${item.monthName}: R$ ${item.amount.toFixed(2)}`}
+                                                            title={`${String(item.day).padStart(2, '0')} ${item.monthName}: R$ ${item.amount.toFixed(2).replace('.', ',')}`}
                                                         />
                                                     </div>
                                                 );
@@ -1077,12 +1077,12 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                             Massa Corporal {weightHeadline?.isAverage ? '(média 7d)' : ''}
                                         </span>
                                         <div className="text-lg font-bold font-mono mt-0.5 flex items-baseline gap-1">
-                                            {weightHeadline?.isAverage ? weightHeadline.displayValue.toFixed(1) : '—'}
+                                            {weightHeadline?.isAverage ? weightHeadline.displayValue.toFixed(1).replace('.', ',') : '—'}
                                             <span className="text-[10px] text-slate-400 font-sans">KG</span>
                                         </div>
                                         {weightHeadline && (
                                             <div className="text-[9px] text-slate-400 font-mono mt-0.5">
-                                                Último registro: {weightHeadline.latestRaw.toFixed(1)} kg
+                                                Último registro: {weightHeadline.latestRaw.toFixed(1).replace('.', ',')} kg
                                             </div>
                                         )}
                                     </div>
@@ -1093,7 +1093,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                             (weightHeadline?.deltaVsWeekAgo ?? 0) > 0 ? 'text-amber-500' : (weightHeadline?.deltaVsWeekAgo ?? 0) < 0 ? 'text-emerald-500' : 'text-slate-400'
                                         }`}>
                                             {weightHeadline?.deltaVsWeekAgo !== null && weightHeadline?.deltaVsWeekAgo !== undefined
-                                                ? `${weightHeadline.deltaVsWeekAgo > 0 ? '+' : ''}${weightHeadline.deltaVsWeekAgo.toFixed(1)} kg`
+                                                ? `${weightHeadline.deltaVsWeekAgo > 0 ? '+' : ''}${weightHeadline.deltaVsWeekAgo.toFixed(1).replace('.', ',')} kg`
                                                 : weightHeadline && !weightHeadline.isAverage
                                                     ? `Faltam ${4 - weightHeadline.windowCount} reg.`
                                                     : 'Estável'}
@@ -1119,10 +1119,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 {targetWeight > 0 && (
                                     <div className="pt-2 border-t border-slate-200/40 dark:border-white/5 flex flex-col gap-1.5">
                                         <div className="flex items-center justify-between text-[9px] font-mono">
-                                            <span className="text-slate-400 font-bold uppercase">Meta: {targetWeight.toFixed(1)} kg</span>
+                                            <span className="text-slate-400 font-bold uppercase">Meta: {targetWeight.toFixed(1).replace('.', ',')} kg</span>
                                             <span className="font-bold text-[#9333ea] dark:text-[#ddb8ff]">
                                                 {targetDelta !== null ? (
-                                                    targetDelta > 0 ? `+${targetDelta.toFixed(1)} kg até a meta` : targetDelta < 0 ? `${Math.abs(targetDelta).toFixed(1)} kg abaixo` : 'Na meta!'
+                                                    targetDelta > 0 ? `+${targetDelta.toFixed(1).replace('.', ',')} kg até a meta` : targetDelta < 0 ? `${Math.abs(targetDelta).toFixed(1).replace('.', ',')} kg abaixo` : 'Na meta!'
                                                 ) : ''}
                                             </span>
                                         </div>
@@ -1149,7 +1149,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
                                 <div className="flex items-center justify-between">
                                     <div className="text-lg font-bold font-mono flex items-baseline gap-1">
-                                        {todayWalkKm.toFixed(1)}
+                                        {todayWalkKm.toFixed(1).replace('.', ',')}
                                         <span className="text-[10px] text-slate-400 font-sans">KM</span>
                                     </div>
                                     <button
@@ -1271,7 +1271,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                     >
                         <h3 className="text-sm font-bold uppercase tracking-wider">Registrar caminhada</h3>
                         <p className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                            Distância do bloco em km. Soma automaticamente ao total de hoje ({todayWalkKm.toFixed(1)} km).
+                            Distância do bloco em km. Soma automaticamente ao total de hoje ({todayWalkKm.toFixed(1).replace('.', ',')} km).
                         </p>
                         <input
                             type="text"
@@ -1337,7 +1337,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                     >
                         <h3 className="text-sm font-bold uppercase tracking-wider">Registrar peso</h3>
                         <p className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                            Peso atual em quilos{currentWeight > 0 ? ` (último registro: ${currentWeight.toFixed(1)} kg)` : ''}.
+                            Peso atual em quilos{currentWeight > 0 ? ` (último registro: ${currentWeight.toFixed(1).replace('.', ',')} kg)` : ''}.
                         </p>
                         <input
                             type="text"

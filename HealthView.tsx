@@ -3,7 +3,7 @@ import { arrayUnion, arrayRemove } from 'firebase/firestore';
 import {
     HealthWeight, HealthSettings, ExerciseLog,
     ExerciseSettings, formatDate, formatDateLocalISO,
-    HealthExam, HealthTelegramReminder, WalkBlock, sumWalkBlocksKm,
+    HealthExam, HealthExamTipo, HEALTH_EXAM_TYPES, HealthTelegramReminder, WalkBlock, sumWalkBlocksKm,
     HealthWaist, RadicularLocation, RadicularSide, TherapyModality, TriggerType,
     RADICULAR_LOCATIONS, THERAPY_MODALITIES, TRIGGER_TYPES,
     HealthEvent, HealthEventType, HEALTH_EVENT_TYPES, HealthWeeklySummary
@@ -155,7 +155,7 @@ function ChipGroup<T extends string>({
         }
     };
     return (
-        <div className={layout === 'stack' ? 'flex flex-col gap-1.5' : 'flex flex-wrap gap-1.5'}>
+        <div className={layout === 'stack' ? 'flex flex-col items-stretch gap-1 sm:items-start' : 'flex flex-wrap gap-1.5'}>
             {options.map(opt => {
                 const isSelected = selectedValues.includes(opt.value);
                 return (
@@ -176,6 +176,41 @@ function ChipGroup<T extends string>({
         </div>
     );
 }
+
+// Toggle com trilha de switch visível (bolinha desliza) — em vez de rótulo + a palavra
+// "Não" em texto puro, que não sinaliza que é clicável.
+const ToggleTile = ({
+    label,
+    active,
+    onClick,
+    activeTone = 'primary',
+}: {
+    label: string;
+    active: boolean;
+    onClick: () => void;
+    activeTone?: 'primary' | 'error' | 'tertiary';
+}) => {
+    const toneClasses = {
+        primary: 'border-primary-container bg-primary-container text-white',
+        error: 'border-error bg-error-container text-on-error-container',
+        tertiary: 'border-tertiary-container bg-tertiary-container text-on-tertiary-container',
+    }[activeTone];
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className={`rounded-xl border p-3 text-left transition ${active ? toneClasses : 'border-border-subtle bg-background text-on-surface'}`}
+        >
+            <span className={`${labelClasses} ${active ? 'opacity-80' : ''}`}>{label}</span>
+            <div className="mt-2 flex items-center gap-2">
+                <span className={`flex h-5 w-9 shrink-0 items-center rounded-full border p-0.5 transition ${active ? 'justify-end border-white/40 bg-white/20' : 'justify-start border-border-standard bg-white'}`}>
+                    <span className={`h-3.5 w-3.5 rounded-full transition ${active ? 'bg-white' : 'bg-on-surface-variant/50'}`} />
+                </span>
+                <span className="text-sm font-bold">{active ? 'Sim' : 'Não'}</span>
+            </div>
+        </button>
+    );
+};
 
 const Icon = ({ name, className = 'h-4 w-4' }: { name: IconName; className?: string }) => {
     const common = { className, fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' };
@@ -492,7 +527,7 @@ const WeightTrendChart = ({
             <div className="relative rounded-2xl border border-border-subtle bg-background p-4">
                 <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(false)} />
                 <p className={`${labelClasses} mb-2`}>Tendência de peso</p>
-                <ChartDataTable columns={['Data', 'Peso — média 7d (kg)']} rows={points.map(p => [formatShortDate(p.date), p.value.toFixed(1)])} />
+                <ChartDataTable columns={['Data', 'Peso — média 7d (kg)']} rows={points.map(p => [formatShortDate(p.date), p.value.toFixed(1).replace('.', ',')])} />
             </div>
         );
     }
@@ -502,7 +537,7 @@ const WeightTrendChart = ({
             <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(true)} />
             {hovered && hoverX !== null && (
                 <ChartTooltip leftPercent={(hoverX / width) * 100}>
-                    {formatShortDate(hovered.date)}: {hovered.value.toFixed(1)} kg
+                    {formatShortDate(hovered.date)}: {hovered.value.toFixed(1).replace('.', ',')} kg
                 </ChartTooltip>
             )}
             <svg
@@ -931,9 +966,9 @@ const IntegratedTrendChart = ({
                     columns={['Semana', 'Peso méd. 7d (kg)', 'Dor média', 'Km na semana']}
                     rows={weekStarts.map(ws => [
                         formatShortDate(ws),
-                        nearestByTime(weightPoints, p => parseLocalDate(p.date).getTime(), parseLocalDate(ws).getTime())?.value.toFixed(1) ?? '-',
-                        painWeekly.find(b => b.weekStart === ws)?.average.toFixed(1) ?? '-',
-                        kmWeekly.find(b => b.weekStart === ws)?.sum.toFixed(1) ?? '-',
+                        nearestByTime(weightPoints, p => parseLocalDate(p.date).getTime(), parseLocalDate(ws).getTime())?.value.toFixed(1).replace('.', ',') ?? '-',
+                        painWeekly.find(b => b.weekStart === ws)?.average.toFixed(1).replace('.', ',') ?? '-',
+                        kmWeekly.find(b => b.weekStart === ws)?.sum.toFixed(1).replace('.', ',') ?? '-',
                     ])}
                 />
             </div>
@@ -946,9 +981,9 @@ const IntegratedTrendChart = ({
             {hoverTime !== null && hoverX !== null && (
                 <ChartTooltip leftPercent={(hoverX / width) * 100}>
                     <div>{hoverDateLabel}</div>
-                    {hoverWeight && <div>Peso (méd. 7d): {hoverWeight.value.toFixed(1)} kg</div>}
-                    {hoverPain && <div>Dor média sem.: {hoverPain.average.toFixed(1)}</div>}
-                    {hoverKm && <div>Km na semana: {hoverKm.sum.toFixed(1)} km</div>}
+                    {hoverWeight && <div>Peso (méd. 7d): {hoverWeight.value.toFixed(1).replace('.', ',')} kg</div>}
+                    {hoverPain && <div>Dor média sem.: {hoverPain.average.toFixed(1).replace('.', ',')}</div>}
+                    {hoverKm && <div>Km na semana: {hoverKm.sum.toFixed(1).replace('.', ',')} km</div>}
                 </ChartTooltip>
             )}
             <div
@@ -967,13 +1002,13 @@ const IntegratedTrendChart = ({
                     {/* Painel 1 — Peso */}
                     <text x={padLeft} y={weightHeaderY + 11} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="start">PESO — MÉDIA 7D</text>
                     <text x={padLeft + plotWidth} y={weightHeaderY + 11} fontSize="11" fontWeight="700" fill={palette.line} textAnchor="end">
-                        {weightPoints.length ? `${weightPoints[weightPoints.length - 1].value.toFixed(1)} kg` : '—'}
+                        {weightPoints.length ? `${weightPoints[weightPoints.length - 1].value.toFixed(1).replace('.', ',')} kg` : '—'}
                     </text>
                     <rect x={padLeft} y={weightPlotY} width={plotWidth} height={weightH} fill={palette.bg} stroke={palette.grid} strokeWidth="1" rx="10" />
                     {weightTicks.map((tick, i) => (
                         <g key={i}>
                             <line x1={padLeft} x2={padLeft + plotWidth} y1={yForWeight(tick)} y2={yForWeight(tick)} stroke={palette.grid} strokeWidth="1" />
-                            <text x={padLeft - 6} y={yForWeight(tick) + 3} fontSize="9" fill={palette.text} textAnchor="end">{tick.toFixed(1)}</text>
+                            <text x={padLeft - 6} y={yForWeight(tick) + 3} fontSize="9" fill={palette.text} textAnchor="end">{tick.toFixed(1).replace('.', ',')}</text>
                         </g>
                     ))}
                     {weightPoints.length >= 2 && <polyline points={weightPath} fill="none" stroke={palette.line} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
@@ -986,7 +1021,7 @@ const IntegratedTrendChart = ({
                     {/* Painel 2 — Dor */}
                     <text x={padLeft} y={painHeaderY + 11} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="start">DOR MÉDIA SEMANAL (0–10)</text>
                     <text x={padLeft + plotWidth} y={painHeaderY + 11} fontSize="11" fontWeight="700" fill={palette.amber} textAnchor="end">
-                        {painWeekly.length ? painWeekly[painWeekly.length - 1].average.toFixed(1) : '—'}
+                        {painWeekly.length ? painWeekly[painWeekly.length - 1].average.toFixed(1).replace('.', ',') : '—'}
                     </text>
                     <rect x={padLeft} y={painPlotY} width={plotWidth} height={painH} fill={palette.bg} stroke={palette.grid} strokeWidth="1" rx="10" />
                     {painTicks.map(tick => (
@@ -1005,13 +1040,13 @@ const IntegratedTrendChart = ({
                     {/* Painel 3 — Km */}
                     <text x={padLeft} y={kmHeaderY + 11} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="start">KM CAMINHADOS POR SEMANA</text>
                     <text x={padLeft + plotWidth} y={kmHeaderY + 11} fontSize="11" fontWeight="700" fill={palette.emerald} textAnchor="end">
-                        {kmWeekly.length ? `${kmWeekly[kmWeekly.length - 1].sum.toFixed(1)} km` : '—'}
+                        {kmWeekly.length ? `${kmWeekly[kmWeekly.length - 1].sum.toFixed(1).replace('.', ',')} km` : '—'}
                     </text>
                     <rect x={padLeft} y={kmPlotY} width={plotWidth} height={kmH} fill={palette.bg} stroke={palette.grid} strokeWidth="1" rx="10" />
                     {kmTicks.map((tick, i) => (
                         <g key={i}>
                             <line x1={padLeft} x2={padLeft + plotWidth} y1={yForKm(tick)} y2={yForKm(tick)} stroke={palette.grid} strokeWidth="1" />
-                            <text x={padLeft - 6} y={yForKm(tick) + 3} fontSize="9" fill={palette.text} textAnchor="end">{tick.toFixed(0)}</text>
+                            <text x={padLeft - 6} y={yForKm(tick) + 3} fontSize="9" fill={palette.text} textAnchor="end">{tick.toFixed(0).replace('.', ',')}</text>
                         </g>
                     ))}
                     {kmWeekly.length > 0 ? kmWeekly.map(b => {
@@ -1193,7 +1228,7 @@ const HealthView: React.FC<HealthViewProps> = ({
     const [walkStepsInput, setWalkStepsInput] = useState<string>('');
     const [walkCaloriesInput, setWalkCaloriesInput] = useState<string>('');
     const [examTitulo, setExamTitulo] = useState<string>('');
-    const [examTipo, setExamTipo] = useState<'exame' | 'consulta'>('exame');
+    const [examTipo, setExamTipo] = useState<HealthExamTipo>('exame');
     const [examData, setExamData] = useState<string>(formatDateLocalISO(new Date()));
     const [examDoutorLocal, setExamDoutorLocal] = useState<string>('');
     const [examResultados, setExamResultados] = useState<string>('');
@@ -1206,7 +1241,7 @@ const HealthView: React.FC<HealthViewProps> = ({
     const [isSavingExam, setIsSavingExam] = useState<boolean>(false);
     const [editingExamId, setEditingExamId] = useState<string | null>(null);
     const [editTitulo, setEditTitulo] = useState<string>('');
-    const [editTipo, setEditTipo] = useState<'exame' | 'consulta'>('exame');
+    const [editTipo, setEditTipo] = useState<HealthExamTipo>('exame');
     const [editData, setEditData] = useState<string>('');
     const [editDoutorLocal, setEditDoutorLocal] = useState<string>('');
     const [editResultados, setEditResultados] = useState<string>('');
@@ -1408,7 +1443,7 @@ const HealthView: React.FC<HealthViewProps> = ({
             const withValues: number[] = [];
             const withoutValues: number[] = [];
             dailyPainSeries.forEach(({ log, pain }) => (predicate(log) ? withValues : withoutValues).push(pain));
-            return compareGroups(withValues, withoutValues, 5);
+            return compareGroups(withValues, withoutValues, 8);
         };
 
         const rows: { key: string; label: string; comparison: GroupComparison }[] = [
@@ -1417,7 +1452,7 @@ const HealthView: React.FC<HealthViewProps> = ({
             { key: 'fisioterapia', label: 'fisioterapia', comparison: withWithoutSplit(l => !!l.therapy?.includes('fisioterapia')) },
             { key: 'walk6km', label: 'caminhada acima de 6 km', comparison: withWithoutSplit(l => sumWalkBlocksKm(l) > 6) },
             { key: 'pregabalina', label: 'uso de pregabalina', comparison: withWithoutSplit(l => !!l.meds?.pregabalina) },
-            { key: 'wokeInPain', label: 'acordar com dor', comparison: withWithoutSplit(l => !!l.sleepQuality?.wokeInPain) },
+            { key: 'wokeInPain', label: 'despertar com dor', comparison: withWithoutSplit(l => !!l.sleepQuality?.wokeInPain) },
         ];
 
         TRIGGER_TYPES.forEach(trigger => {
@@ -2042,10 +2077,10 @@ const HealthView: React.FC<HealthViewProps> = ({
                         <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Aderência ao tratamento</h2>
                         <table className="mt-2 w-full text-left text-xs text-black">
                             <tbody>
-                                <tr><td className="py-1 pr-4 font-semibold">Dor média (manhã+noite)</td><td>{adherenceInPeriod.avgPain !== null ? adherenceInPeriod.avgPain.toFixed(1) : '-'}</td></tr>
+                                <tr><td className="py-1 pr-4 font-semibold">Dor média (manhã+noite)</td><td>{adherenceInPeriod.avgPain !== null ? adherenceInPeriod.avgPain.toFixed(1).replace('.', ',') : '-'}</td></tr>
                                 <tr><td className="py-1 pr-4 font-semibold">Cardápio seguido</td><td>{adherenceInPeriod.dietDays} de {adherenceInPeriod.totalDays} dias</td></tr>
                                 <tr><td className="py-1 pr-4 font-semibold">Treino de força</td><td>{adherenceInPeriod.strengthSessions} sessões</td></tr>
-                                <tr><td className="py-1 pr-4 font-semibold">Caminhada total</td><td>{adherenceInPeriod.kmTotal.toFixed(1)} km</td></tr>
+                                <tr><td className="py-1 pr-4 font-semibold">Caminhada total</td><td>{adherenceInPeriod.kmTotal.toFixed(1).replace('.', ',')} km</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -2057,7 +2092,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                         <ul className="mt-2 space-y-1 text-xs text-black">
                             {examsInReportPeriod.map(exam => (
                                 <li key={exam.id}>
-                                    <strong>{formatDate(exam.data)}</strong> — {exam.titulo} ({exam.tipo}){exam.doutor_local ? ` · ${exam.doutor_local}` : ''}
+                                    <strong>{formatDate(exam.data)}</strong> — {exam.titulo} ({HEALTH_EXAM_TYPES.find(t => t.value === exam.tipo)?.label || exam.tipo}){exam.doutor_local ? ` · ${exam.doutor_local}` : ''}
                                 </li>
                             ))}
                         </ul>
@@ -2116,17 +2151,17 @@ const HealthView: React.FC<HealthViewProps> = ({
                     <div className="grid grid-cols-1 gap-4 sm:max-w-2xl sm:grid-cols-2">
                         <MetricCard
                             label={weightHeadline?.isAverage ? 'Peso atual (média 7d)' : 'Peso atual'}
-                            value={weightHeadline?.isAverage ? weightHeadline.displayValue.toFixed(1) : '—'}
+                            value={weightHeadline?.isAverage ? weightHeadline.displayValue.toFixed(1).replace('.', ',') : '—'}
                             unit="kg"
                             helper={weightHeadline ? (
                                 <>
                                     {weightHeadline.isAverage
                                         ? (weightHeadline.deltaVsWeekAgo !== null
-                                            ? `${weightHeadline.deltaVsWeekAgo > 0 ? '+' : ''}${weightHeadline.deltaVsWeekAgo.toFixed(1)} kg vs. média de 7 dias atrás`
+                                            ? `${weightHeadline.deltaVsWeekAgo > 0 ? '+' : ''}${weightHeadline.deltaVsWeekAgo.toFixed(1).replace('.', ',')} kg vs. média de 7 dias atrás`
                                             : 'Ainda sem média de 7 dias atrás para comparar')
                                         : `Faltam ${4 - weightHeadline.windowCount} registro(s) na semana para calcular a média de 7 dias`}
                                     <br />
-                                    <span className="opacity-70">Último registro: {weightHeadline.latestRaw.toFixed(1)} kg em {formatShortDate(weightHeadline.latestRawDate)}</span>
+                                    <span className="opacity-70">Último registro: {weightHeadline.latestRaw.toFixed(1).replace('.', ',')} kg em {formatShortDate(weightHeadline.latestRawDate)}</span>
                                 </>
                             ) : 'Nenhum registro de peso ainda.'}
                             icon="scale"
@@ -2171,27 +2206,27 @@ const HealthView: React.FC<HealthViewProps> = ({
                                 <div>
                                     <p className="text-[10px] font-semibold uppercase text-on-surface-variant">Peso médio</p>
                                     <p className="text-sm font-bold text-on-surface">
-                                        {latestWeeklySummary.avgWeight !== null ? `${latestWeeklySummary.avgWeight.toFixed(1)} kg` : '—'}
+                                        {latestWeeklySummary.avgWeight !== null ? `${latestWeeklySummary.avgWeight.toFixed(1).replace('.', ',')} kg` : '—'}
                                         {latestWeeklySummary.weightDelta !== null && (
                                             <span className="ml-1 text-xs font-semibold text-on-surface-variant">
-                                                ({latestWeeklySummary.weightDelta > 0 ? '+' : ''}{latestWeeklySummary.weightDelta.toFixed(1)})
+                                                ({latestWeeklySummary.weightDelta > 0 ? '+' : ''}{latestWeeklySummary.weightDelta.toFixed(1).replace('.', ',')})
                                             </span>
                                         )}
                                     </p>
                                 </div>
                                 <div>
                                     <p className="text-[10px] font-semibold uppercase text-on-surface-variant">Cintura</p>
-                                    <p className="text-sm font-bold text-on-surface">{latestWeeklySummary.waistCm !== null ? `${latestWeeklySummary.waistCm.toFixed(1)} cm` : '—'}</p>
+                                    <p className="text-sm font-bold text-on-surface">{latestWeeklySummary.waistCm !== null ? `${latestWeeklySummary.waistCm.toFixed(1).replace('.', ',')} cm` : '—'}</p>
                                 </div>
                                 <div>
                                     <p className="text-[10px] font-semibold uppercase text-on-surface-variant">Dor manhã/noite</p>
                                     <p className="text-sm font-bold text-on-surface">
-                                        {latestWeeklySummary.avgPainMorning?.toFixed(1) ?? '-'} / {latestWeeklySummary.avgPainEvening?.toFixed(1) ?? '-'}
+                                        {latestWeeklySummary.avgPainMorning?.toFixed(1).replace('.', ',') ?? '-'} / {latestWeeklySummary.avgPainEvening?.toFixed(1).replace('.', ',') ?? '-'}
                                     </p>
                                 </div>
                                 <div>
                                     <p className="text-[10px] font-semibold uppercase text-on-surface-variant">Km caminhados</p>
-                                    <p className="text-sm font-bold text-on-surface">{latestWeeklySummary.kmTotal.toFixed(1)} km</p>
+                                    <p className="text-sm font-bold text-on-surface">{latestWeeklySummary.kmTotal.toFixed(1).replace('.', ',')} km</p>
                                 </div>
                                 <div>
                                     <p className="text-[10px] font-semibold uppercase text-on-surface-variant">Força</p>
@@ -2328,7 +2363,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                         </label>
                                         {targetDelta !== null && (
                                             <p className="mt-3 text-xs font-semibold text-on-surface-variant">
-                                                Distância até a meta: {targetDelta > 0 ? '+' : ''}{targetDelta.toFixed(1)} kg
+                                                Distância até a meta: {targetDelta > 0 ? '+' : ''}{targetDelta.toFixed(1).replace('.', ',')} kg
                                             </p>
                                         )}
                                     </div>
@@ -2360,7 +2395,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                 ) : (
                                                     <div key={weight.id} className="flex items-center justify-between gap-3 rounded-xl border border-border-subtle bg-white px-4 py-2.5">
                                                         <div className="flex items-baseline gap-2">
-                                                            <span className="text-sm font-bold text-on-surface">{weight.weight.toFixed(1)} kg</span>
+                                                            <span className="text-sm font-bold text-on-surface">{weight.weight.toFixed(1).replace('.', ',')} kg</span>
                                                             <span className="text-xs font-medium text-on-surface-variant">{formatDate(weight.date)}</span>
                                                         </div>
                                                         <div className="flex items-center gap-1">
@@ -2420,7 +2455,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                         {sortedWaist.slice(0, 8).map(entry => (
                                             <div key={entry.id} className="flex items-center justify-between gap-3 rounded-xl border border-border-subtle bg-white px-4 py-2.5">
                                                 <div className="flex items-baseline gap-2">
-                                                    <span className="text-sm font-bold text-on-surface">{entry.cm.toFixed(1)} cm</span>
+                                                    <span className="text-sm font-bold text-on-surface">{entry.cm.toFixed(1).replace('.', ',')} cm</span>
                                                     <span className="text-xs font-medium text-on-surface-variant">{formatDate(entry.date)}</span>
                                                 </div>
                                                 <button
@@ -2596,71 +2631,83 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     )}
                                     <div>
                                         <p className={`${labelClasses} mb-2`}>Dor lombar</p>
-                                        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                                            <label className="rounded-xl border border-border-subtle bg-background p-4">
-                                                <span className={labelClasses}>Manhã</span>
-                                                <input type="number" min="0" max="10" value={todayLog.pain?.morning ?? ''} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, morning: Math.min(10, Math.max(0, parseInt(e.target.value) || 0)) } })} className={inputClasses} />
-                                            </label>
-                                            <label className="rounded-xl border border-border-subtle bg-background p-4">
-                                                <span className={labelClasses}>Noite</span>
-                                                <input type="number" min="0" max="10" value={todayLog.pain?.evening ?? ''} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, evening: Math.min(10, Math.max(0, parseInt(e.target.value) || 0)) } })} className={inputClasses} />
-                                            </label>
-                                            <button type="button" onClick={() => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, sciatica: !todayLog.pain?.sciatica } })} className={`rounded-xl border p-4 text-left transition ${todayLog.pain?.sciatica ? 'border-tertiary-container bg-tertiary-container text-on-tertiary-container' : 'border-border-subtle bg-background text-on-surface'}`}>
-                                                <span className={labelClasses}>Ciática</span>
-                                                <div className="mt-2 text-sm font-bold">{todayLog.pain?.sciatica ? 'Sim' : 'Não'}</div>
-                                            </button>
-                                            <button type="button" onClick={() => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, crisis: !todayLog.pain?.crisis } })} className={`rounded-xl border p-4 text-left transition ${todayLog.pain?.crisis ? 'border-error bg-error-container text-on-error-container' : 'border-border-subtle bg-background text-on-surface'}`}>
-                                                <span className={labelClasses}>Crise</span>
-                                                <div className="mt-2 text-sm font-bold">{todayLog.pain?.crisis ? 'Sim' : 'Não'}</div>
-                                            </button>
+                                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                            <div className="rounded-xl border border-border-subtle bg-background p-4">
+                                                <div className="flex items-baseline justify-between">
+                                                    <span className={labelClasses}>Manhã</span>
+                                                    <span className="text-sm font-bold text-on-surface">{todayLog.pain?.morning ?? 0}/10</span>
+                                                </div>
+                                                <input type="range" min="0" max="10" value={todayLog.pain?.morning ?? 0} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, morning: parseInt(e.target.value) } })} className="mt-2 w-full accent-primary-container" />
+                                            </div>
+                                            <div className="rounded-xl border border-border-subtle bg-background p-4">
+                                                <div className="flex items-baseline justify-between">
+                                                    <span className={labelClasses}>Noite</span>
+                                                    <span className="text-sm font-bold text-on-surface">{todayLog.pain?.evening ?? 0}/10</span>
+                                                </div>
+                                                <input type="range" min="0" max="10" value={todayLog.pain?.evening ?? 0} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, evening: parseInt(e.target.value) } })} className="mt-2 w-full accent-primary-container" />
+                                            </div>
+                                        </div>
+                                        <div className="mt-3 grid grid-cols-2 gap-3">
+                                            <ToggleTile
+                                                label="Ciática"
+                                                active={!!todayLog.pain?.sciatica}
+                                                activeTone="tertiary"
+                                                onClick={() => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, sciatica: !todayLog.pain?.sciatica } })}
+                                            />
+                                            <ToggleTile
+                                                label="Crise"
+                                                active={!!todayLog.pain?.crisis}
+                                                activeTone="error"
+                                                onClick={() => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, crisis: !todayLog.pain?.crisis } })}
+                                            />
                                         </div>
                                     </div>
 
                                     <div>
                                         <p className={`${labelClasses} mb-2`}>Sintoma radicular (perna) — do quadril ao pé</p>
-                                        <ChipGroup
-                                            options={RADICULAR_LOCATIONS}
-                                            value={todayLog.radicular?.location}
-                                            onChange={(location: RadicularLocation) => updateRadicular({ location })}
-                                            layout="stack"
-                                            deselectable={false}
-                                        />
-                                        {todayLog.radicular && todayLog.radicular.location !== 'nenhum' && (
-                                            <div className="mt-3 space-y-3 rounded-xl border border-border-subtle bg-background p-4">
-                                                <div>
-                                                    <span className={labelClasses}>Lado</span>
-                                                    <div className="mt-1.5">
-                                                        <ChipGroup
-                                                            options={[{ value: 'direito', label: 'Direito' }, { value: 'esquerdo', label: 'Esquerdo' }, { value: 'ambos', label: 'Ambos' }]}
-                                                            value={todayLog.radicular.side}
-                                                            onChange={(side: RadicularSide) => updateRadicular({ side })}
+                                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-[220px_1fr]">
+                                            <ChipGroup
+                                                options={RADICULAR_LOCATIONS}
+                                                value={todayLog.radicular?.location}
+                                                onChange={(location: RadicularLocation) => updateRadicular({ location })}
+                                                layout="stack"
+                                                deselectable={false}
+                                            />
+                                            {todayLog.radicular && todayLog.radicular.location !== 'nenhum' && (
+                                                <div className="space-y-3 rounded-xl border border-border-subtle bg-background p-4">
+                                                    <div>
+                                                        <span className={labelClasses}>Lado</span>
+                                                        <div className="mt-1.5">
+                                                            <ChipGroup
+                                                                options={[{ value: 'direito', label: 'Direito' }, { value: 'esquerdo', label: 'Esquerdo' }, { value: 'ambos', label: 'Ambos' }]}
+                                                                value={todayLog.radicular.side}
+                                                                onChange={(side: RadicularSide) => updateRadicular({ side })}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <div className="flex items-baseline justify-between">
+                                                            <span className={labelClasses}>Intensidade</span>
+                                                            <span className="text-sm font-bold text-on-surface">{todayLog.radicular.intensity ?? 0}/10</span>
+                                                        </div>
+                                                        <input
+                                                            type="range"
+                                                            min="0"
+                                                            max="10"
+                                                            value={todayLog.radicular.intensity ?? 0}
+                                                            onChange={e => updateRadicular({ intensity: parseInt(e.target.value) })}
+                                                            className="mt-1 w-full accent-primary-container"
                                                         />
                                                     </div>
-                                                </div>
-                                                <div>
-                                                    <div className="flex items-baseline justify-between">
-                                                        <span className={labelClasses}>Intensidade</span>
-                                                        <span className="text-sm font-bold text-on-surface">{todayLog.radicular.intensity ?? 0}/10</span>
-                                                    </div>
-                                                    <input
-                                                        type="range"
-                                                        min="0"
-                                                        max="10"
-                                                        value={todayLog.radicular.intensity ?? 0}
-                                                        onChange={e => updateRadicular({ intensity: parseInt(e.target.value) })}
-                                                        className="mt-1 w-full accent-primary-container"
+                                                    <ToggleTile
+                                                        label="Fraqueza para levantar a ponta do pé"
+                                                        active={!!todayLog.radicular?.motorWeakness}
+                                                        activeTone="error"
+                                                        onClick={() => updateRadicular({ motorWeakness: !todayLog.radicular?.motorWeakness })}
                                                     />
                                                 </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => updateRadicular({ motorWeakness: !todayLog.radicular?.motorWeakness })}
-                                                    className={`w-full rounded-xl border p-3 text-left transition ${todayLog.radicular?.motorWeakness ? 'border-error bg-error-container text-on-error-container' : 'border-border-subtle bg-white text-on-surface'}`}
-                                                >
-                                                    <span className={labelClasses}>Fraqueza para levantar a ponta do pé</span>
-                                                    <div className="mt-1 text-sm font-bold">{todayLog.radicular?.motorWeakness ? 'Sim' : 'Não'}</div>
-                                                </button>
-                                            </div>
-                                        )}
+                                            )}
+                                        </div>
                                     </div>
 
                                     <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
@@ -2725,8 +2772,9 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                 <button
                                                     type="button"
                                                     onClick={() => updateSleepQuality({ wokeInPain: !todayLog.sleepQuality?.wokeInPain })}
-                                                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${todayLog.sleepQuality?.wokeInPain ? 'border-error bg-error-container text-on-error-container' : 'border-border-standard bg-white text-on-surface-variant'}`}
+                                                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${todayLog.sleepQuality?.wokeInPain ? 'border-error bg-error-container text-on-error-container' : 'border-border-standard bg-white text-on-surface-variant'}`}
                                                 >
+                                                    <span className={`h-2 w-2 rounded-full ${todayLog.sleepQuality?.wokeInPain ? 'bg-error' : 'border border-on-surface-variant/50'}`} />
                                                     Acordou com dor {todayLog.sleepQuality?.wokeInPain ? 'Sim' : 'Não'}
                                                 </button>
                                                 <ChipGroup
@@ -2747,7 +2795,12 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                 className={`rounded-xl border p-3 text-left transition ${todayLog.meds?.pregabalina ? 'border-primary-container bg-primary-container text-white' : 'border-border-subtle bg-background text-on-surface'}`}
                                             >
                                                 <span className={`${labelClasses} ${todayLog.meds?.pregabalina ? 'text-white/80' : ''}`}>Pregabalina</span>
-                                                <div className="mt-1 text-sm font-bold">{todayLog.meds?.pregabalina ? 'Tomou' : 'Não tomou'}</div>
+                                                <div className="mt-2 flex items-center gap-2">
+                                                    <span className={`flex h-5 w-9 shrink-0 items-center rounded-full border p-0.5 transition ${todayLog.meds?.pregabalina ? 'justify-end border-white/40 bg-white/20' : 'justify-start border-border-standard bg-white'}`}>
+                                                        <span className={`h-3.5 w-3.5 rounded-full transition ${todayLog.meds?.pregabalina ? 'bg-white' : 'bg-on-surface-variant/50'}`} />
+                                                    </span>
+                                                    <span className="text-sm font-bold">{todayLog.meds?.pregabalina ? 'Tomou' : 'Não tomou'}</span>
+                                                </div>
                                             </button>
                                             <div className="rounded-xl border border-border-subtle bg-background p-3">
                                                 <span className={labelClasses}>Dipirona</span>
@@ -2771,7 +2824,12 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                 className={`rounded-xl border p-3 text-left transition ${todayLog.meds?.fexofenadina ? 'border-primary-container bg-primary-container text-white' : 'border-border-subtle bg-background text-on-surface'}`}
                                             >
                                                 <span className={`${labelClasses} ${todayLog.meds?.fexofenadina ? 'text-white/80' : ''}`}>Fexofenadina</span>
-                                                <div className="mt-1 text-sm font-bold">{todayLog.meds?.fexofenadina ? 'Tomou' : 'Não tomou'}</div>
+                                                <div className="mt-2 flex items-center gap-2">
+                                                    <span className={`flex h-5 w-9 shrink-0 items-center rounded-full border p-0.5 transition ${todayLog.meds?.fexofenadina ? 'justify-end border-white/40 bg-white/20' : 'justify-start border-border-standard bg-white'}`}>
+                                                        <span className={`h-3.5 w-3.5 rounded-full transition ${todayLog.meds?.fexofenadina ? 'bg-white' : 'bg-on-surface-variant/50'}`} />
+                                                    </span>
+                                                    <span className="text-sm font-bold">{todayLog.meds?.fexofenadina ? 'Tomou' : 'Não tomou'}</span>
+                                                </div>
                                             </button>
                                         </div>
                                         <input
@@ -2834,13 +2892,13 @@ const HealthView: React.FC<HealthViewProps> = ({
                                             <div key={row.key} className="rounded-xl border border-border-subtle bg-background p-3 text-sm">
                                                 {row.comparison.suppressed ? (
                                                     <p className="text-on-surface-variant">
-                                                        Dor com <strong className="text-on-surface">{row.label}</strong>: dados insuficientes ainda
-                                                        <span className="text-xs"> ({row.comparison.withN} vs. {row.comparison.withoutN} dias — mínimo 5 em cada grupo)</span>
+                                                        Dor nos dias em que houve <strong className="text-on-surface">{row.label}</strong>: dados insuficientes
+                                                        <span className="text-xs"> ({row.comparison.withN} vs. {row.comparison.withoutN} dias — mínimo 8 em cada grupo)</span>
                                                     </p>
                                                 ) : (
                                                     <p className="text-on-surface-variant">
-                                                        Dor média em dias <strong className="text-on-surface">com</strong> {row.label}: <strong className="text-on-surface">{row.comparison.withAvg?.toFixed(1)}</strong>
-                                                        {' · '}<strong className="text-on-surface">sem</strong>: <strong className="text-on-surface">{row.comparison.withoutAvg?.toFixed(1)}</strong>
+                                                        Dor média nos dias em que houve <strong className="text-on-surface">{row.label}</strong>: <strong className="text-on-surface">{row.comparison.withAvg?.toFixed(1).replace('.', ',')}</strong>
+                                                        {' · '}nos demais dias: <strong className="text-on-surface">{row.comparison.withoutAvg?.toFixed(1).replace('.', ',')}</strong>
                                                         <span className="text-xs"> ({row.comparison.withN} vs. {row.comparison.withoutN} dias)</span>
                                                     </p>
                                                 )}
@@ -2859,7 +2917,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                 <WeightTrendChart points={weightTrendPoints} targetWeight={settings.targetWeight} projectionLines={weightProjectionLines} isDark={isDark} />
                                 {targetDelta !== null && (
                                     <p className="mt-3 text-xs font-semibold text-on-surface-variant">
-                                        Distância até a meta: {targetDelta > 0 ? '+' : ''}{targetDelta.toFixed(1)} kg.
+                                        Distância até a meta: {targetDelta > 0 ? '+' : ''}{targetDelta.toFixed(1).replace('.', ',')} kg.
                                     </p>
                                 )}
                                 {recentWeightPoints.length < MIN_TREND_POINTS ? (
@@ -2984,11 +3042,10 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     <span className={labelClasses}>Tipo</span>
                                     <select
                                         value={examTipo}
-                                        onChange={e => setExamTipo(e.target.value as 'exame' | 'consulta')}
+                                        onChange={e => setExamTipo(e.target.value as HealthExamTipo)}
                                         className={inputClasses}
                                     >
-                                        <option value="exame">Exame</option>
-                                        <option value="consulta">Consulta</option>
+                                        {HEALTH_EXAM_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                                     </select>
                                 </label>
                                 <label className="block">
@@ -3106,9 +3163,8 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <label className="block">
                                                         <span className={labelClasses}>Tipo</span>
-                                                        <select value={editTipo} onChange={e => setEditTipo(e.target.value as 'exame' | 'consulta')} className={inputClasses}>
-                                                            <option value="exame">Exame</option>
-                                                            <option value="consulta">Consulta</option>
+                                                        <select value={editTipo} onChange={e => setEditTipo(e.target.value as HealthExamTipo)} className={inputClasses}>
+                                                            {HEALTH_EXAM_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                                                         </select>
                                                     </label>
                                                     <label className="block">
@@ -3191,7 +3247,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                         ) : (
                                             <>
                                                 <div className="flex items-start justify-between gap-3">
-                                                    <span className="rounded-full bg-surface-container-low px-2.5 py-1 text-[10px] font-semibold uppercase text-on-surface-variant">{exam.tipo}</span>
+                                                    <span className="rounded-full bg-surface-container-low px-2.5 py-1 text-[10px] font-semibold uppercase text-on-surface-variant">{HEALTH_EXAM_TYPES.find(t => t.value === exam.tipo)?.label || exam.tipo}</span>
                                                     <div className="flex items-center gap-1">
                                                         <span className="text-xs font-semibold text-on-surface-variant">{formatDate(exam.data)}</span>
                                                         <button

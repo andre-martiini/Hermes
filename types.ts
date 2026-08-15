@@ -691,11 +691,24 @@ export interface HealthTelegramReminder {
     data_atualizacao?: string;
 }
 
+export type HealthExamTipo = 'exame' | 'consulta' | 'cirurgia' | 'prescricao' | 'encaminhamento' | 'laudo_imagem' | 'atestado' | 'outro';
+
+export const HEALTH_EXAM_TYPES: { value: HealthExamTipo; label: string }[] = [
+    { value: 'exame', label: 'Exame' },
+    { value: 'consulta', label: 'Consulta' },
+    { value: 'cirurgia', label: 'Cirurgia' },
+    { value: 'prescricao', label: 'Prescrição' },
+    { value: 'encaminhamento', label: 'Encaminhamento' },
+    { value: 'laudo_imagem', label: 'Laudo de imagem' },
+    { value: 'atestado', label: 'Atestado' },
+    { value: 'outro', label: 'Outro' },
+];
+
 export interface HealthExam {
     id: string;
     titulo: string;
     data: string;
-    tipo: 'exame' | 'consulta';
+    tipo: HealthExamTipo;
     doutor_local?: string;
     resultados?: string;
     pool_dados?: PoolItem[];
@@ -934,6 +947,7 @@ export interface PerfilPessoa {
     origem?: 'manual' | 'google_contacts' | 'extracao_ia';
     google_contact_id?: string;
     google_etag?: string;
+    whatsapp_chat_id?: string;
     observacoes?: string;
     resumo_ia?: string;
     avatar_color?: string;
@@ -949,7 +963,8 @@ export interface InteracaoPessoa {
     tarefa_id?: string;
     reuniao_id?: string;
     sessao_copiloto_id?: string;
-    tipo: 'mencao_tarefa' | 'mencao_diario' | 'reuniao' | 'manual' | 'mencao_copiloto';
+    consolidacao_id?: string;
+    tipo: 'mencao_tarefa' | 'mencao_diario' | 'reuniao' | 'manual' | 'mencao_copiloto' | 'whatsapp';
     data: string;
     descricao: string;
     link_origem?: string;
