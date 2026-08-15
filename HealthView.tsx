@@ -1,9 +1,11 @@
-import React, { useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { arrayUnion, arrayRemove } from 'firebase/firestore';
 import {
     HealthWeight, HealthSettings, ExerciseLog,
     ExerciseSettings, formatDate, formatDateLocalISO,
-    HealthExam, HealthTelegramReminder, WalkBlock, sumWalkBlocksKm
+    HealthExam, HealthTelegramReminder, WalkBlock, sumWalkBlocksKm,
+    HealthWaist, RadicularLocation, RadicularSide, TherapyModality, TriggerType,
+    RADICULAR_LOCATIONS, THERAPY_MODALITIES, TRIGGER_TYPES
 } from './types';
 
 interface HealthViewProps {
@@ -12,6 +14,9 @@ interface HealthViewProps {
     onUpdateSettings: (settings: HealthSettings) => void;
     onAddWeight: (weight: number, date: string) => void;
     onDeleteWeight: (id: string) => void;
+    waist: HealthWaist[];
+    onAddWaist: (cm: number, date: string) => void;
+    onDeleteWaist: (id: string) => void;
     exerciseLogs: ExerciseLog[];
     exerciseSettings: ExerciseSettings;
     onSaveExerciseLog: (date: string, data: Partial<ExerciseLog>) => Promise<void>;
@@ -32,8 +37,8 @@ type PainTrendPoint = { id: string; label: string; morning?: number; evening?: n
 const DEFAULT_HEALTH_REMINDERS: HealthTelegramReminder[] = [
     {
         id: 'lunch_slow',
-        title: 'Almoco com calma',
-        message: 'Andre, lembre de comer devagar no almoco. Ritmo baixo tambem e estrategia.',
+        title: 'Almoço com calma',
+        message: 'André, lembre de comer devagar no almoço. Ritmo baixo também é estratégia.',
         time: '11:45',
         enabled: true,
         daysOfWeek: [1, 2, 3, 4, 5],
@@ -43,7 +48,7 @@ const DEFAULT_HEALTH_REMINDERS: HealthTelegramReminder[] = [
     {
         id: 'food_window',
         title: 'Janela alimentar',
-        message: 'Andre, ultima janela alimentar chegando. Se for comer, mantenha leve.',
+        message: 'André, última janela alimentar chegando. Se for comer, mantenha leve.',
         time: '17:30',
         enabled: true,
         daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
@@ -53,7 +58,7 @@ const DEFAULT_HEALTH_REMINDERS: HealthTelegramReminder[] = [
     {
         id: 'pain_checkin',
         title: 'Check-in lombar',
-        message: 'Andre, check-in rapido: como ficou sua lombar hoje?',
+        message: 'André, check-in rápido: como ficou sua lombar hoje?',
         time: '21:30',
         enabled: true,
         daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
@@ -61,6 +66,54 @@ const DEFAULT_HEALTH_REMINDERS: HealthTelegramReminder[] = [
         telegramOnly: true,
     },
 ];
+
+function ChipGroup<T extends string>({
+    options,
+    value,
+    onChange,
+    multi = false,
+    layout = 'wrap',
+    deselectable = true,
+}: {
+    options: { value: T; label: string }[];
+    value: T | T[] | undefined;
+    onChange: (next: any) => void;
+    multi?: boolean;
+    layout?: 'wrap' | 'stack';
+    deselectable?: boolean;
+}) {
+    const selectedValues: T[] = multi ? (Array.isArray(value) ? value : []) : value !== undefined ? [value as T] : [];
+    const handleClick = (opt: T) => {
+        if (multi) {
+            const next = selectedValues.includes(opt) ? selectedValues.filter(v => v !== opt) : [...selectedValues, opt];
+            onChange(next);
+        } else {
+            if (!deselectable && value === opt) return;
+            onChange(value === opt ? undefined : opt);
+        }
+    };
+    return (
+        <div className={layout === 'stack' ? 'flex flex-col gap-1.5' : 'flex flex-wrap gap-1.5'}>
+            {options.map(opt => {
+                const isSelected = selectedValues.includes(opt.value);
+                return (
+                    <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => handleClick(opt.value)}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                            isSelected
+                                ? 'border-primary-container bg-primary-container text-white'
+                                : 'border-border-standard bg-white text-on-surface-variant hover:border-primary-container hover:text-primary-container'
+                        } ${layout === 'stack' ? 'text-left' : ''}`}
+                    >
+                        {opt.label}
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
 
 const Icon = ({ name, className = 'h-4 w-4' }: { name: IconName; className?: string }) => {
     const common = { className, fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' };
@@ -198,7 +251,7 @@ const WeightTrendChart = ({
     if (points.length < 2) {
         return (
             <div className="flex h-[280px] items-center justify-center rounded-2xl border border-dashed border-border-standard bg-background text-sm font-semibold text-on-surface-variant">
-                Ainda nao ha registros suficientes para tendencia.
+                Ainda não há registros suficientes para tendência.
             </div>
         );
     }
@@ -222,7 +275,7 @@ const WeightTrendChart = ({
 
     return (
         <div className="rounded-2xl border border-border-subtle bg-background p-4">
-            <svg viewBox={`0 0 ${width} ${height}`} className="h-[280px] w-full overflow-visible" role="img" aria-label="Grafico de tendencia de peso">
+            <svg viewBox={`0 0 ${width} ${height}`} className="h-[280px] w-full overflow-visible" role="img" aria-label="Gráfico de tendência de peso">
                 <rect x="0" y="0" width={width} height={height} rx="16" fill="#f8fafc" />
                 {yTicks.map(tick => (
                     <g key={tick}>
@@ -258,7 +311,7 @@ const PainTrendChart = ({ points }: { points: PainTrendPoint[] }) => {
     if (visiblePoints.length < 2) {
         return (
             <div className="flex h-[240px] items-center justify-center rounded-2xl border border-dashed border-border-standard bg-background text-sm font-semibold text-on-surface-variant">
-                Ainda nao ha historico suficiente de dor para montar o grafico.
+                Ainda não há histórico suficiente de dor para montar o gráfico.
             </div>
         );
     }
@@ -279,11 +332,11 @@ const PainTrendChart = ({ points }: { points: PainTrendPoint[] }) => {
     return (
         <div className="rounded-2xl border border-border-subtle bg-background p-4">
             <div className="mb-3 flex flex-wrap items-center gap-4 text-xs font-semibold text-on-surface-variant">
-                <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" />Manha</span>
+                <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" />Manhã</span>
                 <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-rose-600" />Noite / Telegram</span>
                 <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-on-surface" />Crise</span>
             </div>
-            <svg viewBox={`0 0 ${width} ${height}`} className="h-[240px] w-full overflow-visible" role="img" aria-label="Grafico de dor lombar">
+            <svg viewBox={`0 0 ${width} ${height}`} className="h-[240px] w-full overflow-visible" role="img" aria-label="Gráfico de dor lombar">
                 <rect x="0" y="0" width={width} height={height} rx="16" fill="#f8fafc" />
                 {[10, 7, 5, 3, 0].map(tick => (
                     <g key={tick}>
@@ -298,7 +351,7 @@ const PainTrendChart = ({ points }: { points: PainTrendPoint[] }) => {
                         {point.morning !== undefined && <circle cx={xFor(index)} cy={yFor(point.morning)} r="5" fill="#ffffff" stroke="#f59e0b" strokeWidth="3" />}
                         {point.evening !== undefined && <circle cx={xFor(index)} cy={yFor(point.evening)} r="6" fill="#ffffff" stroke="#e11d48" strokeWidth="3" />}
                         {point.crisis && <circle cx={xFor(index)} cy={yFor(Math.max(point.morning ?? 0, point.evening ?? 0, 1))} r="9" fill="none" stroke="#151c27" strokeWidth="2" strokeDasharray="3 3" />}
-                        <title>{`${point.label}: manha ${point.morning ?? '-'}, noite ${point.evening ?? '-'}${point.crisis ? ', crise' : ''}`}</title>
+                        <title>{`${point.label}: manhã ${point.morning ?? '-'}, noite ${point.evening ?? '-'}${point.crisis ? ', crise' : ''}`}</title>
                     </g>
                 ))}
                 {visiblePoints.map((point, index) => (
@@ -337,7 +390,7 @@ const WalkGoalBar = ({
                         : metMinimum ? 'bg-amber-100 text-amber-700'
                             : 'bg-slate-100 text-slate-500'
                 }`}>
-                    {metIdeal ? 'Meta ideal atingida' : metMinimum ? 'Minimo atingido' : `Faltam ${formatKm(minimumKm - doneKm)} km p/ minimo`}
+                    {metIdeal ? 'Meta ideal atingida' : metMinimum ? 'Mínimo atingido' : `Faltam ${formatKm(minimumKm - doneKm)} km p/ mínimo`}
                 </span>
             </div>
             <div className="relative mt-3 h-3 w-full overflow-hidden rounded-full bg-surface-container-low">
@@ -345,11 +398,11 @@ const WalkGoalBar = ({
                     style={{ width: `${percent}%` }}
                     className={`h-full rounded-full transition-all duration-500 ${metIdeal ? 'bg-emerald-500' : metMinimum ? 'bg-amber-500' : 'bg-primary-container'}`}
                 />
-                <div style={{ left: `${minPercent}%` }} className="absolute top-0 h-full w-0.5 bg-on-surface/40" title={`Minimo: ${formatKm(minimumKm)} km`} />
+                <div style={{ left: `${minPercent}%` }} className="absolute top-0 h-full w-0.5 bg-on-surface/40" title={`Mínimo: ${formatKm(minimumKm)} km`} />
             </div>
             <div className="mt-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.05em] text-on-surface-variant">
                 <span>0 km</span>
-                <span>Minimo {formatKm(minimumKm)} km</span>
+                <span>Mínimo {formatKm(minimumKm)} km</span>
                 <span>Ideal {formatKm(idealKm)} km</span>
             </div>
         </div>
@@ -368,7 +421,7 @@ const WalkDailyChart = ({
     if (!days.some(day => day.km > 0)) {
         return (
             <div className="flex h-[220px] items-center justify-center rounded-2xl border border-dashed border-border-standard bg-background text-sm font-semibold text-on-surface-variant">
-                Ainda nao ha caminhadas registradas nos ultimos dias.
+                Ainda não há caminhadas registradas nos últimos dias.
             </div>
         );
     }
@@ -385,7 +438,7 @@ const WalkDailyChart = ({
 
     return (
         <div className="rounded-2xl border border-border-subtle bg-background p-4">
-            <svg viewBox={`0 0 ${width} ${height}`} className="h-[220px] w-full overflow-visible" role="img" aria-label="Grafico de caminhadas diarias">
+            <svg viewBox={`0 0 ${width} ${height}`} className="h-[220px] w-full overflow-visible" role="img" aria-label="Gráfico de caminhadas diárias">
                 <rect x="0" y="0" width={width} height={height} rx="16" fill="#f8fafc" />
                 {[maxKm, maxKm / 2, 0].map(tick => (
                     <g key={tick}>
@@ -394,7 +447,7 @@ const WalkDailyChart = ({
                     </g>
                 ))}
                 <line x1={pad.left} x2={width - pad.right} y1={yFor(minimumKm)} y2={yFor(minimumKm)} stroke="#f59e0b" strokeWidth="2" strokeDasharray="6 6" />
-                <text x={width - pad.right} y={yFor(minimumKm) - 6} textAnchor="end" fontSize="11" fontWeight="700" fill="#b45309">minimo</text>
+                <text x={width - pad.right} y={yFor(minimumKm) - 6} textAnchor="end" fontSize="11" fontWeight="700" fill="#b45309">mínimo</text>
                 <line x1={pad.left} x2={width - pad.right} y1={yFor(idealKm)} y2={yFor(idealKm)} stroke="#10b981" strokeWidth="2" strokeDasharray="6 6" />
                 <text x={width - pad.right} y={yFor(idealKm) - 6} textAnchor="end" fontSize="11" fontWeight="700" fill="#047857">ideal</text>
                 {days.map((day, index) => {
@@ -417,6 +470,7 @@ const WalkDailyChart = ({
 
 const HealthView: React.FC<HealthViewProps> = ({
     weights, settings, onUpdateSettings, onAddWeight, onDeleteWeight,
+    waist, onAddWaist, onDeleteWaist,
     exerciseLogs, onSaveExerciseLog, exams, onAddExam, onDeleteExam, onUpdateExam,
     telegramReminders, onSaveTelegramReminder, onDeleteTelegramReminder,
     isDark = false
@@ -424,6 +478,7 @@ const HealthView: React.FC<HealthViewProps> = ({
     const [selectedDate, setSelectedDate] = useState<string>(formatDateLocalISO(new Date()));
     const [activeTab, setActiveTab] = useState<'telemetry' | 'archive'>('telemetry');
     const [weightInput, setWeightInput] = useState<string>('');
+    const [waistInput, setWaistInput] = useState<string>('');
     const [walkDistanceInput, setWalkDistanceInput] = useState<string>('');
     const [walkMinutesInput, setWalkMinutesInput] = useState<string>('');
     const [walkStepsInput, setWalkStepsInput] = useState<string>('');
@@ -450,8 +505,21 @@ const HealthView: React.FC<HealthViewProps> = ({
     const weightDelta = currentWeight - previousWeight;
     const targetDelta = settings.targetWeight && currentWeight ? currentWeight - settings.targetWeight : null;
 
+    const sortedWaist = useMemo(() => [...waist].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [waist]);
+
     const todayLog = useMemo(() => exerciseLogs.find(l => l.id === selectedDate) || { id: selectedDate }, [exerciseLogs, selectedDate]);
     const selectedDateLabel = formatDate(selectedDate);
+    const previousMedsLog = useMemo(
+        () => [...exerciseLogs].filter(log => log.id < selectedDate && log.meds).sort((a, b) => b.id.localeCompare(a.id))[0],
+        [exerciseLogs, selectedDate]
+    );
+
+    useEffect(() => {
+        if (!todayLog.meds && previousMedsLog?.meds) {
+            onSaveExerciseLog(selectedDate, { meds: previousMedsLog.meds });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedDate, todayLog.meds, previousMedsLog]);
     const weightTrendPoints = useMemo<NumericTrendPoint[]>(() =>
         [...weights]
             .sort((a, b) => a.date.localeCompare(b.date))
@@ -533,10 +601,43 @@ const HealthView: React.FC<HealthViewProps> = ({
 
     const handleAddWeight = () => {
         const value = parseFloat(weightInput.replace(',', '.'));
-        if (!isNaN(value) && value > 0) {
+        if (!isNaN(value) && value >= 30 && value <= 250) {
             onAddWeight(value, selectedDate);
             setWeightInput('');
         }
+    };
+
+    const handleAddWaist = () => {
+        const value = parseFloat(waistInput.replace(',', '.'));
+        if (!isNaN(value) && value >= 50 && value <= 200) {
+            onAddWaist(value, selectedDate);
+            setWaistInput('');
+        }
+    };
+
+    const updateRadicular = (patch: Partial<NonNullable<ExerciseLog['radicular']>>) => {
+        const current: NonNullable<ExerciseLog['radicular']> = todayLog.radicular || { location: 'nenhum' };
+        onSaveExerciseLog(selectedDate, { radicular: { ...current, ...patch } });
+    };
+
+    const updateStrength = (patch: Partial<NonNullable<ExerciseLog['strength']>>) => {
+        const current: NonNullable<ExerciseLog['strength']> = todayLog.strength || { done: false };
+        onSaveExerciseLog(selectedDate, { strength: { ...current, ...patch } });
+    };
+
+    const updateNutrition = (patch: Partial<NonNullable<ExerciseLog['nutrition']>>) => {
+        const current: NonNullable<ExerciseLog['nutrition']> = todayLog.nutrition || { plan: 'nao', proteinTarget: false };
+        onSaveExerciseLog(selectedDate, { nutrition: { ...current, ...patch } });
+    };
+
+    const updateSleepQuality = (patch: Partial<NonNullable<ExerciseLog['sleepQuality']>>) => {
+        const current: NonNullable<ExerciseLog['sleepQuality']> = todayLog.sleepQuality || { wokeInPain: false };
+        onSaveExerciseLog(selectedDate, { sleepQuality: { ...current, ...patch } });
+    };
+
+    const updateMeds = (patch: Partial<NonNullable<ExerciseLog['meds']>>) => {
+        const current: NonNullable<ExerciseLog['meds']> = todayLog.meds || { pregabalina: false, dipirona: 0, adorlan: 0, fexofenadina: false };
+        onSaveExerciseLog(selectedDate, { meds: { ...current, ...patch } });
     };
 
     const sortedExams = useMemo(
@@ -569,7 +670,7 @@ const HealthView: React.FC<HealthViewProps> = ({
             setExamResultados('');
             setExamFiles([]);
         } catch (err) {
-            console.error('Falha ao adicionar registro de saude:', err);
+            console.error('Falha ao adicionar registro de saúde:', err);
         } finally {
             setIsSavingExam(false);
         }
@@ -611,7 +712,7 @@ const HealthView: React.FC<HealthViewProps> = ({
             setEditingExamId(null);
             setEditFiles([]);
         } catch (err) {
-            console.error('Falha ao atualizar registro de saude:', err);
+            console.error('Falha ao atualizar registro de saúde:', err);
         } finally {
             setIsSavingEditExam(false);
         }
@@ -631,17 +732,17 @@ const HealthView: React.FC<HealthViewProps> = ({
                 <div className="mx-auto flex max-w-[1440px] flex-col gap-5 px-6 py-6 lg:px-8">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                         <div>
-                            <p className={labelClasses}>Saude integrada</p>
-                            <h2 className="mt-1 text-2xl font-bold tracking-tight text-on-surface">Painel de saude</h2>
+                            <p className={labelClasses}>Saúde integrada</p>
+                            <h2 className="mt-1 text-2xl font-bold tracking-tight text-on-surface">Painel de saúde</h2>
                             <p className="mt-2 max-w-3xl text-sm leading-relaxed text-on-surface-variant">
-                                Registro manual de peso, acompanhamento de dor lombar e arquivo medico em um painel de acompanhamento continuo.
+                                Registro manual de peso, acompanhamento de dor lombar e arquivo médico em um painel de acompanhamento contínuo.
                             </p>
                         </div>
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                             <div className="flex rounded-xl border border-border-standard bg-background p-1">
                                 {[
                                     { id: 'telemetry', label: 'Telemetria' },
-                                    { id: 'archive', label: 'Arquivo medico' },
+                                    { id: 'archive', label: 'Arquivo médico' },
                                 ].map(tab => (
                                     <button
                                         key={tab.id}
@@ -674,7 +775,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                             label="Peso atual"
                             value={currentWeight ? currentWeight.toFixed(1) : '--'}
                             unit="kg"
-                            helper={weightDelta !== 0 ? `${weightDelta > 0 ? '+' : ''}${weightDelta.toFixed(1)} kg desde o registro anterior` : 'Sem variacao no ultimo registro'}
+                            helper={weightDelta !== 0 ? `${weightDelta > 0 ? '+' : ''}${weightDelta.toFixed(1)} kg desde o registro anterior` : 'Sem variação no último registro'}
                             icon="scale"
                         />
                         <MetricCard
@@ -684,8 +785,8 @@ const HealthView: React.FC<HealthViewProps> = ({
                             helper={todayWalkKm >= walkingIdealKm
                                 ? 'Meta ideal atingida!'
                                 : todayWalkKm >= walkingMinimumKm
-                                    ? `Minimo ok — faltam ${formatKm(walkingIdealKm - todayWalkKm)} km para o ideal`
-                                    : `Faltam ${formatKm(walkingMinimumKm - todayWalkKm)} km para o minimo de ${formatKm(walkingMinimumKm)} km`}
+                                    ? `Mínimo ok — faltam ${formatKm(walkingIdealKm - todayWalkKm)} km para o ideal`
+                                    : `Faltam ${formatKm(walkingMinimumKm - todayWalkKm)} km para o mínimo de ${formatKm(walkingMinimumKm)} km`}
                             icon="walk"
                             tone="text-emerald-600"
                         />
@@ -738,7 +839,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                         </label>
                                         {targetDelta !== null && (
                                             <p className="mt-3 text-xs font-semibold text-on-surface-variant">
-                                                Distancia ate a meta: {targetDelta > 0 ? '+' : ''}{targetDelta.toFixed(1)} kg
+                                                Distância até a meta: {targetDelta > 0 ? '+' : ''}{targetDelta.toFixed(1)} kg
                                             </p>
                                         )}
                                     </div>
@@ -770,16 +871,64 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     )}
                                 </div>
                             </HealthSection>
+
+                            <HealthSection title="Circunferência de cintura" eyebrow="Registro semanal">
+                                <p className="text-xs font-medium text-on-surface-variant">Meça na altura do umbigo, sempre no mesmo dia da semana.</p>
+                                <div className="mt-3 flex items-end gap-2">
+                                    <label className="block flex-1">
+                                        <span className={labelClasses}>Cintura (cm)</span>
+                                        <input
+                                            type="text"
+                                            inputMode="decimal"
+                                            value={waistInput}
+                                            onChange={e => setWaistInput(e.target.value)}
+                                            onKeyDown={e => { if (e.key === 'Enter') handleAddWaist(); }}
+                                            placeholder="Ex: 98"
+                                            className={inputClasses}
+                                        />
+                                    </label>
+                                    <button
+                                        type="button"
+                                        onClick={handleAddWaist}
+                                        className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-primary-container px-4 py-2.5 text-sm font-bold text-white transition hover:opacity-90"
+                                    >
+                                        <Icon name="plus" className="h-4 w-4" />
+                                        Registrar
+                                    </button>
+                                </div>
+                                {sortedWaist.length > 0 ? (
+                                    <div className="mt-4 max-h-[160px] space-y-2 overflow-y-auto">
+                                        {sortedWaist.slice(0, 8).map(entry => (
+                                            <div key={entry.id} className="flex items-center justify-between gap-3 rounded-xl border border-border-subtle bg-white px-4 py-2.5">
+                                                <div className="flex items-baseline gap-2">
+                                                    <span className="text-sm font-bold text-on-surface">{entry.cm.toFixed(1)} cm</span>
+                                                    <span className="text-xs font-medium text-on-surface-variant">{formatDate(entry.date)}</span>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onDeleteWaist(entry.id)}
+                                                    className="rounded-lg p-1.5 text-on-surface-variant transition hover:bg-error-container hover:text-on-error-container"
+                                                    aria-label="Remover registro"
+                                                >
+                                                    <Icon name="trash" className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="mt-4 text-xs font-semibold text-on-surface-variant">Nenhum registro de cintura ainda.</p>
+                                )}
+                            </HealthSection>
                         </div>
 
                         <div className="space-y-6">
-                            <HealthSection title="Caminhada na esteira" eyebrow="Meta diaria de distancia">
+                            <HealthSection title="Caminhada na esteira" eyebrow="Meta diária de distância">
                                 <WalkGoalBar doneKm={selectedWalkKm} minimumKm={walkingMinimumKm} idealKm={walkingIdealKm} />
 
                                 <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr]">
                                     <div className="rounded-2xl border border-border-subtle bg-background p-5">
                                         <label className="block">
-                                            <span className={labelClasses}>Distancia do bloco (km)</span>
+                                            <span className={labelClasses}>Distância do bloco (km)</span>
                                             <input
                                                 type="text"
                                                 inputMode="decimal"
@@ -817,7 +966,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                             </label>
                                         </div>
                                         <p className="mt-2 text-xs font-medium text-on-surface-variant">
-                                            So a distancia e obrigatoria. Data do registro: {selectedDateLabel}
+                                            Só a distância é obrigatória. Data do registro: {selectedDateLabel}
                                         </p>
                                         <button
                                             type="button"
@@ -861,7 +1010,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                         )}
                                         <div className="mt-4 grid grid-cols-2 gap-2">
                                             <label className="block">
-                                                <span className={labelClasses}>Meta minima (km)</span>
+                                                <span className={labelClasses}>Meta mínima (km)</span>
                                                 <input
                                                     type="number"
                                                     step="0.5"
@@ -887,55 +1036,248 @@ const HealthView: React.FC<HealthViewProps> = ({
                                 </div>
 
                                 <div className="mt-5">
-                                    <p className={`${labelClasses} mb-2`}>Ultimos 14 dias</p>
+                                    <p className={`${labelClasses} mb-2`}>Últimos 14 dias</p>
                                     <WalkDailyChart days={walkChartDays} minimumKm={walkingMinimumKm} idealKm={walkingIdealKm} />
                                 </div>
                             </HealthSection>
 
-                            <HealthSection title="Dor lombar" eyebrow="Sinal clinico diario">
-                                <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-                                    <label className="rounded-xl border border-border-subtle bg-background p-4">
-                                        <span className={labelClasses}>Manha</span>
-                                        <input type="number" min="0" max="10" value={todayLog.pain?.morning ?? ''} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, morning: parseInt(e.target.value) || 0 } })} className={inputClasses} />
-                                    </label>
-                                    <label className="rounded-xl border border-border-subtle bg-background p-4">
-                                        <span className={labelClasses}>Noite</span>
-                                        <input type="number" min="0" max="10" value={todayLog.pain?.evening ?? ''} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, evening: parseInt(e.target.value) || 0 } })} className={inputClasses} />
-                                    </label>
-                                    <button type="button" onClick={() => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, sciatica: !todayLog.pain?.sciatica } })} className={`rounded-xl border p-4 text-left transition ${todayLog.pain?.sciatica ? 'border-tertiary-container bg-tertiary-fixed text-on-tertiary-fixed' : 'border-border-subtle bg-background text-on-surface'}`}>
-                                        <span className={labelClasses}>Ciatica</span>
-                                        <div className="mt-2 text-sm font-bold">{todayLog.pain?.sciatica ? 'Sim' : 'Nao'}</div>
-                                    </button>
-                                    <button type="button" onClick={() => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, crisis: !todayLog.pain?.crisis } })} className={`rounded-xl border p-4 text-left transition ${todayLog.pain?.crisis ? 'border-error bg-error-container text-on-error-container' : 'border-border-subtle bg-background text-on-surface'}`}>
-                                        <span className={labelClasses}>Crise</span>
-                                        <div className="mt-2 text-sm font-bold">{todayLog.pain?.crisis ? 'Sim' : 'Nao'}</div>
-                                    </button>
+                            <HealthSection title="Registro diário" eyebrow="Sinal clínico e hábitos">
+                                <div className="space-y-5">
+                                    <div>
+                                        <p className={`${labelClasses} mb-2`}>Dor lombar</p>
+                                        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                                            <label className="rounded-xl border border-border-subtle bg-background p-4">
+                                                <span className={labelClasses}>Manhã</span>
+                                                <input type="number" min="0" max="10" value={todayLog.pain?.morning ?? ''} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, morning: Math.min(10, Math.max(0, parseInt(e.target.value) || 0)) } })} className={inputClasses} />
+                                            </label>
+                                            <label className="rounded-xl border border-border-subtle bg-background p-4">
+                                                <span className={labelClasses}>Noite</span>
+                                                <input type="number" min="0" max="10" value={todayLog.pain?.evening ?? ''} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, evening: Math.min(10, Math.max(0, parseInt(e.target.value) || 0)) } })} className={inputClasses} />
+                                            </label>
+                                            <button type="button" onClick={() => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, sciatica: !todayLog.pain?.sciatica } })} className={`rounded-xl border p-4 text-left transition ${todayLog.pain?.sciatica ? 'border-tertiary-container bg-tertiary-fixed text-on-tertiary-fixed' : 'border-border-subtle bg-background text-on-surface'}`}>
+                                                <span className={labelClasses}>Ciática</span>
+                                                <div className="mt-2 text-sm font-bold">{todayLog.pain?.sciatica ? 'Sim' : 'Não'}</div>
+                                            </button>
+                                            <button type="button" onClick={() => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, crisis: !todayLog.pain?.crisis } })} className={`rounded-xl border p-4 text-left transition ${todayLog.pain?.crisis ? 'border-error bg-error-container text-on-error-container' : 'border-border-subtle bg-background text-on-surface'}`}>
+                                                <span className={labelClasses}>Crise</span>
+                                                <div className="mt-2 text-sm font-bold">{todayLog.pain?.crisis ? 'Sim' : 'Não'}</div>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <p className={`${labelClasses} mb-2`}>Sintoma radicular (perna) — do quadril ao pé</p>
+                                        <ChipGroup
+                                            options={RADICULAR_LOCATIONS}
+                                            value={todayLog.radicular?.location}
+                                            onChange={(location: RadicularLocation) => updateRadicular({ location })}
+                                            layout="stack"
+                                            deselectable={false}
+                                        />
+                                        {todayLog.radicular && todayLog.radicular.location !== 'nenhum' && (
+                                            <div className="mt-3 space-y-3 rounded-xl border border-border-subtle bg-background p-4">
+                                                <div>
+                                                    <span className={labelClasses}>Lado</span>
+                                                    <div className="mt-1.5">
+                                                        <ChipGroup
+                                                            options={[{ value: 'direito', label: 'Direito' }, { value: 'esquerdo', label: 'Esquerdo' }, { value: 'ambos', label: 'Ambos' }]}
+                                                            value={todayLog.radicular.side}
+                                                            onChange={(side: RadicularSide) => updateRadicular({ side })}
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <div className="flex items-baseline justify-between">
+                                                        <span className={labelClasses}>Intensidade</span>
+                                                        <span className="text-sm font-bold text-on-surface">{todayLog.radicular.intensity ?? 0}/10</span>
+                                                    </div>
+                                                    <input
+                                                        type="range"
+                                                        min="0"
+                                                        max="10"
+                                                        value={todayLog.radicular.intensity ?? 0}
+                                                        onChange={e => updateRadicular({ intensity: parseInt(e.target.value) })}
+                                                        className="mt-1 w-full accent-primary-container"
+                                                    />
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => updateRadicular({ motorWeakness: !todayLog.radicular?.motorWeakness })}
+                                                    className={`w-full rounded-xl border p-3 text-left transition ${todayLog.radicular?.motorWeakness ? 'border-error bg-error-container text-on-error-container' : 'border-border-subtle bg-white text-on-surface'}`}
+                                                >
+                                                    <span className={labelClasses}>Fraqueza para levantar a ponta do pé</span>
+                                                    <div className="mt-1 text-sm font-bold">{todayLog.radicular?.motorWeakness ? 'Sim' : 'Não'}</div>
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                                        <div>
+                                            <p className={`${labelClasses} mb-2`}>Treino de força</p>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => updateStrength({ done: !todayLog.strength?.done })}
+                                                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${todayLog.strength?.done ? 'border-primary-container bg-primary-container text-white' : 'border-border-standard bg-white text-on-surface-variant'}`}
+                                                >
+                                                    {todayLog.strength?.done ? 'Feito' : 'Não feito'}
+                                                </button>
+                                                {todayLog.strength?.done && (
+                                                    <>
+                                                        <ChipGroup
+                                                            options={[{ value: 'A', label: 'Bloco A' }, { value: 'B', label: 'Bloco B' }]}
+                                                            value={todayLog.strength?.block || undefined}
+                                                            onChange={(block: 'A' | 'B') => updateStrength({ block })}
+                                                            deselectable={false}
+                                                        />
+                                                        <ChipGroup
+                                                            options={[15, 30, 45, 60].map(m => ({ value: String(m), label: `${m} min` }))}
+                                                            value={todayLog.strength?.minutes ? String(todayLog.strength.minutes) : undefined}
+                                                            onChange={(value: string) => updateStrength({ minutes: parseInt(value) })}
+                                                        />
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <p className={`${labelClasses} mb-2`}>Modalidade terapêutica</p>
+                                            <ChipGroup
+                                                options={THERAPY_MODALITIES}
+                                                value={todayLog.therapy || []}
+                                                onChange={(next: TherapyModality[]) => onSaveExerciseLog(selectedDate, { therapy: next })}
+                                                multi
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <p className={`${labelClasses} mb-2`}>Aderência alimentar</p>
+                                            <ChipGroup
+                                                options={[{ value: 'sim', label: 'Sim' }, { value: 'parcial', label: 'Parcial' }, { value: 'nao', label: 'Não' }]}
+                                                value={todayLog.nutrition?.plan}
+                                                onChange={(plan: 'sim' | 'parcial' | 'nao') => updateNutrition({ plan })}
+                                                deselectable={false}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => updateNutrition({ proteinTarget: !todayLog.nutrition?.proteinTarget })}
+                                                className={`mt-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${todayLog.nutrition?.proteinTarget ? 'border-primary-container bg-primary-container text-white' : 'border-border-standard bg-white text-on-surface-variant'}`}
+                                            >
+                                                Proteína batida {todayLog.nutrition?.proteinTarget ? '✓' : ''}
+                                            </button>
+                                        </div>
+
+                                        <div>
+                                            <p className={`${labelClasses} mb-2`}>Sono</p>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => updateSleepQuality({ wokeInPain: !todayLog.sleepQuality?.wokeInPain })}
+                                                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${todayLog.sleepQuality?.wokeInPain ? 'border-error bg-error-container text-on-error-container' : 'border-border-standard bg-white text-on-surface-variant'}`}
+                                                >
+                                                    Acordou com dor {todayLog.sleepQuality?.wokeInPain ? 'Sim' : 'Não'}
+                                                </button>
+                                                <ChipGroup
+                                                    options={[1, 2, 3, 4, 5].map(q => ({ value: String(q), label: String(q) }))}
+                                                    value={todayLog.sleepQuality?.quality ? String(todayLog.sleepQuality.quality) : undefined}
+                                                    onChange={(value: string) => updateSleepQuality({ quality: parseInt(value) })}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <p className={`${labelClasses} mb-2`}>Medicação do dia</p>
+                                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                            <button
+                                                type="button"
+                                                onClick={() => updateMeds({ pregabalina: !todayLog.meds?.pregabalina })}
+                                                className={`rounded-xl border p-3 text-left transition ${todayLog.meds?.pregabalina ? 'border-primary-container bg-primary-container text-white' : 'border-border-subtle bg-background text-on-surface'}`}
+                                            >
+                                                <span className={`${labelClasses} ${todayLog.meds?.pregabalina ? 'text-white/80' : ''}`}>Pregabalina</span>
+                                                <div className="mt-1 text-sm font-bold">{todayLog.meds?.pregabalina ? 'Tomou' : 'Não tomou'}</div>
+                                            </button>
+                                            <div className="rounded-xl border border-border-subtle bg-background p-3">
+                                                <span className={labelClasses}>Dipirona</span>
+                                                <div className="mt-1 flex items-center justify-between gap-2">
+                                                    <button type="button" onClick={() => updateMeds({ dipirona: Math.max(0, (todayLog.meds?.dipirona || 0) - 1) })} className="h-7 w-7 rounded-lg border border-border-standard text-sm font-bold text-on-surface-variant">−</button>
+                                                    <span className="text-sm font-bold text-on-surface">{todayLog.meds?.dipirona || 0}</span>
+                                                    <button type="button" onClick={() => updateMeds({ dipirona: (todayLog.meds?.dipirona || 0) + 1 })} className="h-7 w-7 rounded-lg border border-border-standard text-sm font-bold text-on-surface-variant">+</button>
+                                                </div>
+                                            </div>
+                                            <div className="rounded-xl border border-border-subtle bg-background p-3">
+                                                <span className={labelClasses}>Adorlan</span>
+                                                <div className="mt-1 flex items-center justify-between gap-2">
+                                                    <button type="button" onClick={() => updateMeds({ adorlan: Math.max(0, (todayLog.meds?.adorlan || 0) - 1) })} className="h-7 w-7 rounded-lg border border-border-standard text-sm font-bold text-on-surface-variant">−</button>
+                                                    <span className="text-sm font-bold text-on-surface">{todayLog.meds?.adorlan || 0}</span>
+                                                    <button type="button" onClick={() => updateMeds({ adorlan: (todayLog.meds?.adorlan || 0) + 1 })} className="h-7 w-7 rounded-lg border border-border-standard text-sm font-bold text-on-surface-variant">+</button>
+                                                </div>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => updateMeds({ fexofenadina: !todayLog.meds?.fexofenadina })}
+                                                className={`rounded-xl border p-3 text-left transition ${todayLog.meds?.fexofenadina ? 'border-primary-container bg-primary-container text-white' : 'border-border-subtle bg-background text-on-surface'}`}
+                                            >
+                                                <span className={`${labelClasses} ${todayLog.meds?.fexofenadina ? 'text-white/80' : ''}`}>Fexofenadina</span>
+                                                <div className="mt-1 text-sm font-bold">{todayLog.meds?.fexofenadina ? 'Tomou' : 'Não tomou'}</div>
+                                            </button>
+                                        </div>
+                                        <input
+                                            type="text"
+                                            value={todayLog.meds?.outros || ''}
+                                            onChange={e => updateMeds({ outros: e.target.value })}
+                                            placeholder="Outros medicamentos (opcional)"
+                                            className={`${inputClasses} mt-2`}
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <p className={`${labelClasses} mb-2`}>Evento / gatilho</p>
+                                        <ChipGroup
+                                            options={TRIGGER_TYPES}
+                                            value={todayLog.triggers?.types || []}
+                                            onChange={(next: TriggerType[]) => onSaveExerciseLog(selectedDate, { triggers: { types: next, note: todayLog.triggers?.note } })}
+                                            multi
+                                        />
+                                        <input
+                                            type="text"
+                                            value={todayLog.triggers?.note || ''}
+                                            onChange={e => onSaveExerciseLog(selectedDate, { triggers: { types: todayLog.triggers?.types || [], note: e.target.value } })}
+                                            placeholder="Descreva o gatilho (opcional)"
+                                            className={`${inputClasses} mt-2`}
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <span className={labelClasses}>Observação do dia</span>
+                                        <textarea
+                                            value={todayLog.note || ''}
+                                            onChange={e => onSaveExerciseLog(selectedDate, { note: e.target.value })}
+                                            placeholder="Nota curta opcional"
+                                            className="mt-1 min-h-[72px] w-full rounded-xl border border-border-standard bg-background p-3 text-sm text-on-surface outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container"
+                                        />
+                                    </div>
                                 </div>
-                                <textarea
-                                    value={todayLog.pain?.notes || ''}
-                                    onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, notes: e.target.value } })}
-                                    placeholder="Nota curta opcional"
-                                    className="mt-4 min-h-[88px] w-full rounded-xl border border-border-standard bg-background p-3 text-sm text-on-surface outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container"
-                                />
                             </HealthSection>
 
-                            <HealthSection title="Tendencia de dor lombar" eyebrow="Historico do Telegram e painel">
+                            <HealthSection title="Tendência de dor lombar" eyebrow="Histórico do Telegram e painel">
                                 <PainTrendChart points={painTrendPoints} />
                                 <p className="mt-3 text-xs font-semibold leading-relaxed text-on-surface-variant">
-                                    Os pontos de noite incluem respostas do check-in no Telegram. Registros manuais feitos no painel aparecem junto no mesmo historico.
+                                    Os pontos de noite incluem respostas do check-in no Telegram. Registros manuais feitos no painel aparecem junto no mesmo histórico.
                                 </p>
                             </HealthSection>
 
-                            <HealthSection title="Tendencia de peso" eyebrow="Biometria historica">
+                            <HealthSection title="Tendência de peso" eyebrow="Biometria histórica">
                                 <WeightTrendChart points={weightTrendPoints} targetWeight={settings.targetWeight} />
                                 {targetDelta !== null && (
                                     <p className="mt-3 text-xs font-semibold text-on-surface-variant">
-                                        Distancia ate a meta: {targetDelta > 0 ? '+' : ''}{targetDelta.toFixed(1)} kg.
+                                        Distância até a meta: {targetDelta > 0 ? '+' : ''}{targetDelta.toFixed(1)} kg.
                                     </p>
                                 )}
                             </HealthSection>
 
-                            <HealthSection title="Lembretes Telegram" eyebrow="Intervencoes leves">
+                            <HealthSection title="Lembretes Telegram" eyebrow="Intervenções leves">
                                 <div className="space-y-3">
                                     {activeReminders.map(reminder => (
                                         <div key={reminder.id} className="rounded-xl border border-border-subtle bg-background p-4">
@@ -976,7 +1318,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                         onClick={() => onSaveTelegramReminder({
                                             id: `custom_${Date.now()}`,
                                             title: 'Novo lembrete',
-                                            message: 'Andre, lembrete de saude configurado no Hermes.',
+                                            message: 'André, lembrete de saúde configurado no Hermes.',
                                             time: '08:00',
                                             enabled: true,
                                             daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
@@ -993,12 +1335,12 @@ const HealthView: React.FC<HealthViewProps> = ({
                         </div>
                     </div>
                 ) : (
-                    <HealthSection title="Arquivo medico" eyebrow="Exames e consultas">
+                    <HealthSection title="Arquivo médico" eyebrow="Exames e consultas">
                         <div className="rounded-2xl border border-border-subtle bg-background p-5">
                             <p className={`${labelClasses} mb-3`}>Novo registro</p>
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <label className="block">
-                                    <span className={labelClasses}>Titulo</span>
+                                    <span className={labelClasses}>Título</span>
                                     <input
                                         type="text"
                                         value={examTitulo}
@@ -1078,7 +1420,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                             <div className="flex flex-col gap-3">
                                                 <span className="w-fit rounded-full bg-surface-container-low px-2.5 py-1 text-[10px] font-semibold uppercase text-on-surface-variant">Editando</span>
                                                 <label className="block">
-                                                    <span className={labelClasses}>Titulo</span>
+                                                    <span className={labelClasses}>Título</span>
                                                     <input type="text" value={editTitulo} onChange={e => setEditTitulo(e.target.value)} className={inputClasses} />
                                                 </label>
                                                 <div className="grid grid-cols-2 gap-3">
@@ -1167,7 +1509,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                     </div>
                                                 </div>
                                                 <h4 className="mt-4 text-base font-bold text-on-surface">{exam.titulo}</h4>
-                                                <p className="mt-1 text-sm text-on-surface-variant">{exam.doutor_local || 'Local nao informado'}</p>
+                                                <p className="mt-1 text-sm text-on-surface-variant">{exam.doutor_local || 'Local não informado'}</p>
                                                 {exam.resultados && (
                                                     <p className="mt-2 whitespace-pre-wrap text-sm text-on-surface-variant">{renderTextWithLinks(exam.resultados)}</p>
                                                 )}

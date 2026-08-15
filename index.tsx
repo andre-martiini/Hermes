@@ -4,8 +4,8 @@ import {
   Tarefa, Status, EntregaInstitucional, AtividadeRealizada,
   Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento,
   BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings,
-  FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight,
-  HealthSettings, ExerciseLog, ExerciseSettings, PullupPhase, HermesNotification, AppSettings,
+  FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight, HealthWaist,
+  HealthSettings, ExerciseLog, ExerciseSettings, HermesNotification, AppSettings,
   formatDate, formatDateLocalISO,
   GoogleCalendarEvent,
   PoolItem, CustomNotification, HealthExam, ConhecimentoItem, UndoAction, HermesModalProps,
@@ -1012,6 +1012,7 @@ const App: React.FC = () => {
   });
   // Health State
   const [healthWeights, setHealthWeights] = useState<HealthWeight[]>([]);
+  const [healthWaist, setHealthWaist] = useState<HealthWaist[]>([]);
   const [healthSettings, setHealthSettings] = useState<HealthSettings>({ targetWeight: 0 });
   const [exerciseLogs, setExerciseLogs] = useState<ExerciseLog[]>([]);
   const [exerciseSettings, setExerciseSettings] = useState<ExerciseSettings>({});
@@ -1266,6 +1267,9 @@ const App: React.FC = () => {
     const unsubHealthWeights = onSnapshot(collection(db, 'health_weights'), (snapshot) => {
       setHealthWeights(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HealthWeight)));
     }, handleSnapshotError('health_weights'));
+    const unsubHealthWaist = onSnapshot(collection(db, 'health_waist'), (snapshot) => {
+      setHealthWaist(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HealthWaist)));
+    }, handleSnapshotError('health_waist'));
     const unsubHealthSettings = onSnapshot(doc(db, 'health_settings', 'config'), (doc) => {
       if (doc.exists()) setHealthSettings(doc.data() as HealthSettings);
     }, handleSnapshotError('health_settings/config'));
@@ -1302,6 +1306,7 @@ const App: React.FC = () => {
       unsubShopping();
       unsubProjects();
       unsubHealthWeights();
+      unsubHealthWaist();
       unsubHealthSettings();
       unsubExerciseLogs();
       unsubExerciseSettings();
@@ -3600,7 +3605,7 @@ const App: React.FC = () => {
   };
   // Health Handlers
   const handleUpdateHealthSettings = async (settings: HealthSettings) => {
-    await setDoc(doc(db, 'health_settings', 'config'), settings);
+    await setDoc(doc(db, 'health_settings', 'config'), settings, { merge: true });
     showToast("Meta de peso atualizada!", "success");
   };
   const handleAddHealthWeight = async (weight: number, date: string) => {
@@ -3611,6 +3616,19 @@ const App: React.FC = () => {
     try {
       await deleteDoc(doc(db, 'health_weights', id));
       showToast("Registro de peso removido.", "info");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao remover registro.", "error");
+    }
+  };
+  const handleAddHealthWaist = async (cm: number, date: string) => {
+    await addDoc(collection(db, 'health_waist'), { cm, date });
+    showToast("Cintura registrada com sucesso!", "success");
+  };
+  const handleDeleteHealthWaist = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'health_waist', id));
+      showToast("Registro de cintura removido.", "info");
     } catch (err) {
       console.error(err);
       showToast("Erro ao remover registro.", "error");
@@ -3661,86 +3679,8 @@ const App: React.FC = () => {
     showToast("Lembrete removido.", "info");
   };
   const handleSaveExerciseLog = async (date: string, data: Partial<ExerciseLog>) => {
-    // Save the log
     await setDoc(doc(db, 'health_exercise_logs', date), data, { merge: true });
-    // Recalculate goals from last 5 sessions
-    const allLogs = [...exerciseLogs.filter(l => l.id !== date), { id: date, ...data }]
-      .sort((a, b) => b.id.localeCompare(a.id));
-    const newSettings: ExerciseSettings = { ...exerciseSettings };
-    // --- Push-ups adaptive goal ---
-    if (data.pushups !== undefined) {
-      const pushupSessions = allLogs.filter(l => l.pushups !== undefined).slice(0, 5);
-      if (pushupSessions.length === 0) {
-        newSettings.pushups = { activeGoal: data.pushups.done, floor: 1 };
-      } else {
-        const currentGoal = newSettings.pushups?.activeGoal ?? data.pushups.goal;
-        const floor = newSettings.pushups?.floor ?? 1;
-        if (pushupSessions.length === 1) {
-          // First log â€” baseline
-          newSettings.pushups = { activeGoal: data.pushups.done, floor: 1 };
-        } else {
-          const hitRate = pushupSessions.filter(l => l.pushups!.done >= l.pushups!.goal).length / pushupSessions.length;
-          let nextGoal = currentGoal;
-          if (hitRate >= 0.8) nextGoal = currentGoal + 2;
-          else if (hitRate < 0.5) nextGoal = Math.max(floor, currentGoal - 2);
-          newSettings.pushups = { activeGoal: nextGoal, floor };
-        }
-      }
-    }
-    // --- Pull-ups phase progression ---
-    if (data.pullups !== undefined) {
-      const pullupSessions = allLogs.filter(l => l.pullups !== undefined).slice(0, 5);
-      const currentPhase: PullupPhase = newSettings.pullups?.phase ?? 'dead_hang';
-      const currentGoal = newSettings.pullups?.activeGoal ?? data.pullups.goal;
-      const floor = newSettings.pullups?.floor ?? 1;
-      let consecutiveGateMet = newSettings.pullups?.consecutiveGateMet ?? 0;
-      if (pullupSessions.length <= 1) {
-        // First log â€” baseline for phase 1
-        newSettings.pullups = { activeGoal: data.pullups.done || 10, phase: 'dead_hang', consecutiveGateMet: 0, floor: 1 };
-      } else {
-        const latestLog = pullupSessions[0];
-        const done = latestLog.pullups!.done;
-        const goal = latestLog.pullups!.goal;
-        // Phase gate thresholds
-        const phaseGates: Record<PullupPhase, number> = {
-          dead_hang: 30,  // seconds
-          negative: 5,    // reps
-          assisted: 8,    // reps
-          full: 999,      // no gate â€” uses adaptive algo
-        };
-        const phaseNextGoalIncrement: Record<PullupPhase, number> = {
-          dead_hang: 5, negative: 1, assisted: 1, full: 1
-        };
-        const gateValue = phaseGates[currentPhase];
-        const metGate = done >= gateValue;
-        if (currentPhase === 'full') {
-          // Adaptive algorithm for full pull-ups (same as push-ups but smaller increments)
-          const hitRate = pullupSessions.filter(l => l.pullups!.done >= l.pullups!.goal).length / pullupSessions.length;
-          let nextGoal = currentGoal;
-          if (hitRate >= 0.8) nextGoal = currentGoal + 1;
-          else if (hitRate < 0.5) nextGoal = Math.max(floor, currentGoal - 1);
-          newSettings.pullups = { activeGoal: nextGoal, phase: 'full', consecutiveGateMet: 0, floor };
-        } else {
-          if (metGate) {
-            consecutiveGateMet = Math.min(consecutiveGateMet + 1, 2);
-          } else {
-            consecutiveGateMet = 0;
-          }
-          const phaseOrder: PullupPhase[] = ['dead_hang', 'negative', 'assisted', 'full'];
-          const currentPhaseIdx = phaseOrder.indexOf(currentPhase);
-          let nextPhase: PullupPhase = currentPhase;
-          let nextGoal = Math.min(currentGoal + (metGate ? phaseNextGoalIncrement[currentPhase] : 0), gateValue);
-          if (consecutiveGateMet >= 2) {
-            // Advance to next phase
-            nextPhase = phaseOrder[Math.min(currentPhaseIdx + 1, phaseOrder.length - 1)];
-            nextGoal = nextPhase === 'full' ? 1 : (nextPhase === 'assisted' ? 3 : nextPhase === 'negative' ? 3 : 10);
-            consecutiveGateMet = 0;
-          }
-          newSettings.pullups = { activeGoal: nextGoal, phase: nextPhase, consecutiveGateMet, floor };
-        }
-      }
-    }
-    await setDoc(doc(db, 'health_exercise_settings', 'config'), newSettings, { merge: true });
+    const hasExerciseData = data.walkBlocks !== undefined || data.strength !== undefined;
     if (hasExerciseData) showToast("Exercício registrado!", "success");
   };
   const handleMarkNotificationRead = (id: string) => {
@@ -5820,6 +5760,9 @@ const App: React.FC = () => {
                     onUpdateSettings={handleUpdateHealthSettings}
                     onAddWeight={handleAddHealthWeight}
                     onDeleteWeight={handleDeleteHealthWeight}
+                    waist={healthWaist}
+                    onAddWaist={handleAddHealthWaist}
+                    onDeleteWaist={handleDeleteHealthWaist}
                     exerciseLogs={exerciseLogs}
                     exerciseSettings={exerciseSettings}
                     onSaveExerciseLog={handleSaveExerciseLog}

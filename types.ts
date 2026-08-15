@@ -518,8 +518,89 @@ export interface ExerciseLog {
         sciatica?: boolean;
         crisis?: boolean;
         notes?: string;
+        telegram_checked_at?: string;
     };
+    radicular?: RadicularSymptom;
+    strength?: StrengthTraining;
+    therapy?: TherapyModality[];
+    nutrition?: NutritionAdherence;
+    sleepQuality?: SleepQuality;
+    meds?: DailyMedication;
+    triggers?: DailyTriggers;
+    note?: string;
+    entrySource?: DailyEntrySource;
 }
+
+export type RadicularLocation = 'nenhum' | 'gluteo' | 'quadril' | 'coxa' | 'joelho' | 'panturrilha' | 'tornozelo' | 'pe';
+export type RadicularSide = 'direito' | 'esquerdo' | 'ambos';
+export type TherapyModality = 'pilates' | 'fisioterapia' | 'rpg' | 'acupuntura' | 'nenhuma';
+export type TriggerType = 'espirro_crise_alergica' | 'viagem_longa_sentado' | 'dia_muito_sentado' | 'torcao_no_sono' | 'carga_assimetrica' | 'estresse' | 'outro';
+export type DailyEntrySource = 'painel' | 'telegram' | 'ambos';
+
+export interface RadicularSymptom {
+    location: RadicularLocation;
+    side?: RadicularSide;
+    intensity?: number; // 0-10
+    motorWeakness?: boolean; // sinal vermelho: fraqueza para levantar a ponta do pe
+}
+
+export interface StrengthTraining {
+    done: boolean;
+    block?: 'A' | 'B' | null;
+    minutes?: number;
+}
+
+export interface NutritionAdherence {
+    plan: 'sim' | 'parcial' | 'nao';
+    proteinTarget: boolean;
+}
+
+export interface SleepQuality {
+    wokeInPain: boolean;
+    quality?: number; // 1-5
+}
+
+export interface DailyMedication {
+    pregabalina: boolean;
+    dipirona: number;
+    adorlan: number;
+    fexofenadina: boolean;
+    outros?: string;
+}
+
+export interface DailyTriggers {
+    types: TriggerType[];
+    note?: string;
+}
+
+export const RADICULAR_LOCATIONS: { value: RadicularLocation; label: string }[] = [
+    { value: 'nenhum', label: 'Nenhum' },
+    { value: 'gluteo', label: 'Glúteo' },
+    { value: 'quadril', label: 'Quadril' },
+    { value: 'coxa', label: 'Coxa' },
+    { value: 'joelho', label: 'Joelho' },
+    { value: 'panturrilha', label: 'Panturrilha' },
+    { value: 'tornozelo', label: 'Tornozelo' },
+    { value: 'pe', label: 'Pé' },
+];
+
+export const THERAPY_MODALITIES: { value: TherapyModality; label: string }[] = [
+    { value: 'pilates', label: 'Pilates' },
+    { value: 'fisioterapia', label: 'Fisioterapia' },
+    { value: 'rpg', label: 'RPG' },
+    { value: 'acupuntura', label: 'Acupuntura' },
+    { value: 'nenhuma', label: 'Nenhuma' },
+];
+
+export const TRIGGER_TYPES: { value: TriggerType; label: string }[] = [
+    { value: 'espirro_crise_alergica', label: 'Espirro / crise alérgica' },
+    { value: 'viagem_longa_sentado', label: 'Viagem longa sentado' },
+    { value: 'dia_muito_sentado', label: 'Dia muito sentado' },
+    { value: 'torcao_no_sono', label: 'Torção no sono' },
+    { value: 'carga_assimetrica', label: 'Carga assimétrica' },
+    { value: 'estresse', label: 'Estresse' },
+    { value: 'outro', label: 'Outro' },
+];
 
 export interface ExerciseSettings {
     pushups?: {
@@ -540,6 +621,12 @@ export interface HealthWeight {
     weight: number;
     fatPercentage?: number;
     muscleMass?: number;
+}
+
+export interface HealthWaist {
+    id: string;
+    date: string;
+    cm: number;
 }
 
 export interface HealthSettings {
