@@ -5128,7 +5128,7 @@ def _health_red_flag_active(data: dict) -> bool:
     return False
 
 
-@firestore_fn.on_document_written(document="health_exercise_logs/{date}", retry=False)
+@firestore_fn.on_document_written(document="health_exercise_logs/{date}")
 def on_health_log_red_flag(event: Event[Change[DocumentSnapshot]]) -> None:
     """Envia o alerta de sinais de alerta assim que um registro diário (painel ou
     Telegram) passa a atender a uma das condições de risco.
