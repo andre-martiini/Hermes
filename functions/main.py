@@ -78,6 +78,7 @@ from knowledge_graph import (  # noqa: F401 — registra as Cloud Functions
 from hermes_core_logic import (  # noqa: F401 — registra as Cloud Functions
     telegramWebhook,
     on_telegram_inbound,
+    on_health_log_red_flag,
     carregar_areas_tematicas_validas,
     normalizar_area_tematica,
     _get_telegram_token,
@@ -3016,6 +3017,9 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
 
 
     # 2. Lembretes de saude enviados somente pelo Telegram.
+    # Mantenha esta lista em sincronia com DEFAULT_HEALTH_REMINDERS em HealthView.tsx
+    # (mesmos id/title/message/time/daysOfWeek/category) — nao ha fonte unica entre
+    # Python e TypeScript, entao qualquer mudanca aqui precisa ser replicada la.
     default_health_reminders = [
         {
             "id": "lunch_slow",
@@ -3043,6 +3047,51 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
             "enabled": True,
             "daysOfWeek": [0, 1, 2, 3, 4, 5, 6],
             "category": "pain",
+        },
+        {
+            "id": "strength_training",
+            "title": "Treino de força",
+            "message": "André, hoje é dia de treino de força (bloco A ou B).",
+            "time": "07:00",
+            "enabled": True,
+            "daysOfWeek": [1, 3, 5],
+            "category": "spine",
+        },
+        {
+            "id": "daily_weighin",
+            "title": "Pesagem diária",
+            "message": "André, pese-se ao acordar, antes do café.",
+            "time": "06:30",
+            "enabled": True,
+            "daysOfWeek": [0, 1, 2, 3, 4, 5, 6],
+            "category": "custom",
+        },
+        {
+            "id": "waist_saturday",
+            "title": "Cintura da semana",
+            "message": "André, meça a circunferência de cintura na altura do umbigo.",
+            "time": "07:00",
+            "enabled": True,
+            "daysOfWeek": [6],
+            "category": "custom",
+        },
+        {
+            "id": "batch_cooking_sunday",
+            "title": "Batch cooking",
+            "message": "André, hora de preparar as refeições da semana.",
+            "time": "10:00",
+            "enabled": True,
+            "daysOfWeek": [0],
+            "category": "nutrition",
+        },
+        {
+            "id": "fexofenadina_reminder",
+            "title": "Fexofenadina",
+            "message": "André, tome a fexofenadina com água — longe de suco e de antiácido, que reduzem a absorção em 30–40%.",
+            "time": "08:00",
+            "enabled": True,
+            "daysOfWeek": [0, 1, 2, 3, 4, 5, 6],
+            "category": "custom",
         },
     ]
 

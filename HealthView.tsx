@@ -42,6 +42,9 @@ interface HealthViewProps {
 type IconName = 'scale' | 'chevron' | 'heart' | 'calendar' | 'file' | 'plus' | 'trash' | 'walk' | 'edit';
 type PainTrendPoint = { id: string; label: string; morning?: number; evening?: number; crisis?: boolean };
 
+// Mantenha esta lista em sincronia com default_health_reminders em functions/main.py
+// (mesmos id/title/message/time/daysOfWeek/category) — nao ha fonte unica entre
+// TypeScript e Python, entao qualquer mudanca aqui precisa ser replicada la.
 const DEFAULT_HEALTH_REMINDERS: HealthTelegramReminder[] = [
     {
         id: 'lunch_slow',
@@ -71,6 +74,56 @@ const DEFAULT_HEALTH_REMINDERS: HealthTelegramReminder[] = [
         enabled: true,
         daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
         category: 'pain',
+        telegramOnly: true,
+    },
+    {
+        id: 'strength_training',
+        title: 'Treino de força',
+        message: 'André, hoje é dia de treino de força (bloco A ou B).',
+        time: '07:00',
+        enabled: true,
+        daysOfWeek: [1, 3, 5],
+        category: 'spine',
+        telegramOnly: true,
+    },
+    {
+        id: 'daily_weighin',
+        title: 'Pesagem diária',
+        message: 'André, pese-se ao acordar, antes do café.',
+        time: '06:30',
+        enabled: true,
+        daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+        category: 'custom',
+        telegramOnly: true,
+    },
+    {
+        id: 'waist_saturday',
+        title: 'Cintura da semana',
+        message: 'André, meça a circunferência de cintura na altura do umbigo.',
+        time: '07:00',
+        enabled: true,
+        daysOfWeek: [6],
+        category: 'custom',
+        telegramOnly: true,
+    },
+    {
+        id: 'batch_cooking_sunday',
+        title: 'Batch cooking',
+        message: 'André, hora de preparar as refeições da semana.',
+        time: '10:00',
+        enabled: true,
+        daysOfWeek: [0],
+        category: 'nutrition',
+        telegramOnly: true,
+    },
+    {
+        id: 'fexofenadina_reminder',
+        title: 'Fexofenadina',
+        message: 'André, tome a fexofenadina com água — longe de suco e de antiácido, que reduzem a absorção em 30–40%.',
+        time: '08:00',
+        enabled: true,
+        daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+        category: 'custom',
         telegramOnly: true,
     },
 ];
@@ -887,6 +940,103 @@ const IntegratedTrendChart = ({
     );
 };
 
+const RADICULAR_CATEGORIES: RadicularLocation[] = ['gluteo', 'quadril', 'coxa', 'joelho', 'panturrilha', 'tornozelo', 'pe'];
+
+const RadicularTimelineChart = ({
+    points,
+    isDark = false,
+}: {
+    points: { date: string; location: RadicularLocation; side?: RadicularSide; intensity?: number }[];
+    isDark?: boolean;
+}) => {
+    const [showTable, setShowTable] = useState(false);
+    const palette = chartPalette(isDark);
+
+    if (points.length < 1) {
+        return (
+            <div className="flex h-[200px] items-center justify-center rounded-2xl border border-dashed border-border-standard bg-background text-sm font-semibold text-on-surface-variant">
+                Ainda não há registros de sintoma radicular neste período.
+            </div>
+        );
+    }
+
+    const width = 720;
+    const height = 220;
+    const pad = { top: 16, right: 18, bottom: 30, left: 90 };
+    const plotWidth = width - pad.left - pad.right;
+    const plotHeight = height - pad.top - pad.bottom;
+
+    const minDate = points[0].date;
+    const maxDate = points[points.length - 1].date;
+    const minTime = parseLocalDate(minDate).getTime();
+    const maxTime = Math.max(parseLocalDate(maxDate).getTime(), minTime + 1);
+    const totalSpan = Math.max(1, maxTime - minTime);
+    const xForDate = (d: string) => pad.left + ((parseLocalDate(d).getTime() - minTime) / totalSpan) * plotWidth;
+    const yForLocation = (loc: RadicularLocation) => {
+        const idx = Math.max(0, RADICULAR_CATEGORIES.indexOf(loc));
+        return pad.top + plotHeight - (idx / (RADICULAR_CATEGORIES.length - 1)) * plotHeight;
+    };
+    const sideColor = (side?: RadicularSide) =>
+        side === 'direito' ? palette.line : side === 'esquerdo' ? palette.amber : side === 'ambos' ? palette.trajectory : palette.text;
+    const linePath = points.map(p => `${xForDate(p.date)},${yForLocation(p.location)}`).join(' ');
+
+    if (showTable) {
+        return (
+            <div className="relative rounded-2xl border border-border-subtle bg-background p-4">
+                <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(false)} />
+                <p className={`${labelClasses} mb-2`}>Evolução do sintoma radicular</p>
+                <ChartDataTable
+                    columns={['Data', 'Local', 'Lado', 'Intensidade']}
+                    rows={points.map(p => [
+                        formatShortDate(p.date),
+                        RADICULAR_LOCATIONS.find(l => l.value === p.location)?.label || p.location,
+                        p.side || '-',
+                        p.intensity ?? '-',
+                    ])}
+                />
+            </div>
+        );
+    }
+
+    return (
+        <div className="relative rounded-2xl border border-border-subtle bg-background p-4">
+            <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(true)} />
+            <svg viewBox={`0 0 ${width} ${height}`} className="h-[220px] w-full overflow-visible" role="img" aria-label="Evolução do sintoma radicular ao longo do tempo">
+                <rect x="0" y="0" width={width} height={height} rx="16" fill={palette.bg} />
+                {RADICULAR_CATEGORIES.map(cat => (
+                    <g key={cat}>
+                        <line x1={pad.left} x2={width - pad.right} y1={yForLocation(cat)} y2={yForLocation(cat)} stroke={palette.grid} strokeWidth="1" />
+                        <text x={pad.left - 8} y={yForLocation(cat) + 3} textAnchor="end" fontSize="10" fontWeight="600" fill={palette.text}>
+                            {RADICULAR_LOCATIONS.find(l => l.value === cat)?.label}
+                        </text>
+                    </g>
+                ))}
+                <polyline points={linePath} fill="none" stroke={palette.text} strokeOpacity="0.25" strokeWidth="1.5" />
+                {points.map((p, i) => (
+                    <circle
+                        key={`${p.date}-${i}`}
+                        cx={xForDate(p.date)}
+                        cy={yForLocation(p.location)}
+                        r={3 + (p.intensity ?? 0) * 0.5}
+                        fill={sideColor(p.side)}
+                        stroke={palette.point}
+                        strokeWidth="1.5"
+                    >
+                        <title>{`${formatShortDate(p.date)}: ${RADICULAR_LOCATIONS.find(l => l.value === p.location)?.label}${p.side ? ` (${p.side})` : ''}${p.intensity !== undefined ? ` — intensidade ${p.intensity}/10` : ''}`}</title>
+                    </circle>
+                ))}
+                <text x={xForDate(minDate)} y={height - 10} textAnchor="start" fontSize="10" fontWeight="700" fill={palette.text}>{formatShortDate(minDate)}</text>
+                <text x={xForDate(maxDate)} y={height - 10} textAnchor="end" fontSize="10" fontWeight="700" fill={palette.text}>{formatShortDate(maxDate)}</text>
+            </svg>
+            <div className="mt-2 flex flex-wrap gap-3 text-[10px] font-semibold text-on-surface-variant">
+                <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: palette.line }} />Direito</span>
+                <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: palette.amber }} />Esquerdo</span>
+                <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: palette.trajectory }} />Ambos</span>
+            </div>
+        </div>
+    );
+};
+
 const HealthView: React.FC<HealthViewProps> = ({
     weights, settings, onUpdateSettings, onAddWeight, onDeleteWeight,
     waist, onAddWaist, onDeleteWaist,
@@ -900,6 +1050,7 @@ const HealthView: React.FC<HealthViewProps> = ({
     const [weightInput, setWeightInput] = useState<string>('');
     const [waistInput, setWaistInput] = useState<string>('');
     const [integratedRangeDays, setIntegratedRangeDays] = useState<number | null>(90);
+    const [isReportOpen, setIsReportOpen] = useState<boolean>(false);
     const [eventDate, setEventDate] = useState<string>(formatDateLocalISO(new Date()));
     const [eventType, setEventType] = useState<HealthEventType>('fisioterapia');
     const [eventLabel, setEventLabel] = useState<string>('');
@@ -962,6 +1113,41 @@ const HealthView: React.FC<HealthViewProps> = ({
         [events, integratedRangeStart]
     );
 
+    const logsInReportPeriod = useMemo(
+        () => exerciseLogs.filter(l => !integratedRangeStart || l.id >= integratedRangeStart),
+        [exerciseLogs, integratedRangeStart]
+    );
+    const radicularSeriesInPeriod = useMemo(
+        () => radicularSeries.filter(p => !integratedRangeStart || p.date >= integratedRangeStart),
+        [radicularSeries, integratedRangeStart]
+    );
+    const examsInReportPeriod = useMemo(
+        () => sortedExams.filter(e => !integratedRangeStart || e.data >= integratedRangeStart),
+        [sortedExams, integratedRangeStart]
+    );
+    const medUsageInPeriod = useMemo(() => {
+        let pregabalinaDays = 0, fexofenadinaDays = 0, dipironaTotal = 0, adorlanTotal = 0;
+        const outrosSet = new Set<string>();
+        logsInReportPeriod.forEach(l => {
+            const meds = l.meds;
+            if (!meds) return;
+            if (meds.pregabalina) pregabalinaDays++;
+            if (meds.fexofenadina) fexofenadinaDays++;
+            dipironaTotal += meds.dipirona || 0;
+            adorlanTotal += meds.adorlan || 0;
+            if (meds.outros) outrosSet.add(meds.outros);
+        });
+        return { pregabalinaDays, fexofenadinaDays, dipironaTotal, adorlanTotal, outros: [...outrosSet], totalDays: logsInReportPeriod.length };
+    }, [logsInReportPeriod]);
+    const adherenceInPeriod = useMemo(() => {
+        const dietDays = logsInReportPeriod.filter(l => l.nutrition?.plan === 'sim').length;
+        const strengthSessions = logsInReportPeriod.filter(l => l.strength?.done).length;
+        const kmTotal = logsInReportPeriod.reduce((s, l) => s + sumWalkBlocksKm(l), 0);
+        const painValues = logsInReportPeriod.flatMap(l => [l.pain?.morning, l.pain?.evening].filter((v): v is number => v !== undefined));
+        const avgPain = painValues.length ? painValues.reduce((s, v) => s + v, 0) / painValues.length : null;
+        return { dietDays, strengthSessions, kmTotal, avgPain, totalDays: logsInReportPeriod.length };
+    }, [logsInReportPeriod]);
+
     const handleAddEvent = async () => {
         const label = eventLabel.trim();
         if (!label || !eventDate) return;
@@ -971,6 +1157,12 @@ const HealthView: React.FC<HealthViewProps> = ({
 
     const todayLog = useMemo(() => exerciseLogs.find(l => l.id === selectedDate) || { id: selectedDate }, [exerciseLogs, selectedDate]);
     const selectedDateLabel = formatDate(selectedDate);
+    const isRedFlagActive = Boolean(
+        todayLog.radicular?.location === 'pe' ||
+        todayLog.radicular?.motorWeakness === true ||
+        (todayLog.pain?.morning ?? 0) >= 9 ||
+        (todayLog.pain?.evening ?? 0) >= 9
+    );
     const previousMedsLog = useMemo(
         () => [...exerciseLogs].filter(log => log.id < selectedDate && log.meds).sort((a, b) => b.id.localeCompare(a.id))[0],
         [exerciseLogs, selectedDate]
@@ -1033,6 +1225,13 @@ const HealthView: React.FC<HealthViewProps> = ({
         if (trendIsDecreasing && trendPoints.length > 1) lines.push({ key: 'trend', label: 'tendência real', color: 'trendLine', points: trendPoints });
         return lines;
     }, [trajectoryPoints, trendPoints, trendIsDecreasing]);
+
+    const radicularSeries = useMemo(() => {
+        return exerciseLogs
+            .filter(l => l.radicular && l.radicular.location !== 'nenhum')
+            .map(l => ({ date: l.id, location: l.radicular!.location, side: l.radicular!.side, intensity: l.radicular!.intensity }))
+            .sort((a, b) => a.date.localeCompare(b.date));
+    }, [exerciseLogs]);
 
     const dailyPainSeries = useMemo(() => {
         return exerciseLogs
@@ -1280,6 +1479,107 @@ const HealthView: React.FC<HealthViewProps> = ({
         return [...byId.values()].sort((a, b) => a.time.localeCompare(b.time));
     }, [telegramReminders]);
 
+    if (isReportOpen) {
+        const periodStartLabel = formatDate(integratedRangeStart || (exerciseLogs[0]?.id ?? selectedDate));
+        const periodEndLabel = formatDate(formatDateLocalISO(new Date()));
+        return (
+            <div id="health-consult-report" className="min-h-screen bg-white p-8 text-black">
+                <style>{`
+                    @media print {
+                        body * { visibility: hidden; }
+                        #health-consult-report, #health-consult-report * { visibility: visible; }
+                        #health-consult-report { position: absolute; left: 0; top: 0; width: 100%; padding: 12px; }
+                        .no-print { display: none !important; }
+                    }
+                `}</style>
+                <div className="no-print mb-6 flex items-center justify-between">
+                    <button
+                        type="button"
+                        onClick={() => setIsReportOpen(false)}
+                        className="rounded-lg border border-border-standard px-4 py-2 text-sm font-semibold text-on-surface-variant"
+                    >
+                        ← Voltar ao painel
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => window.print()}
+                        className="rounded-lg bg-primary-container px-4 py-2 text-sm font-bold text-white"
+                    >
+                        Imprimir / salvar PDF
+                    </button>
+                </div>
+
+                <h1 className="text-xl font-bold text-black">Relatório de acompanhamento — coluna lombar</h1>
+                <p className="mt-1 text-sm text-slate-600">
+                    Período: {periodStartLabel} a {periodEndLabel} · Gerado em {periodEndLabel}
+                </p>
+
+                <section className="mt-6">
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Peso, dor e caminhada</h2>
+                    <div className="mt-2">
+                        <IntegratedTrendChart
+                            weightPoints={weightForIntegrated}
+                            painWeekly={painWeeklyForIntegrated}
+                            kmWeekly={kmWeeklyForIntegrated}
+                            events={eventsForIntegrated}
+                            isDark={false}
+                        />
+                    </div>
+                </section>
+
+                <section className="mt-6">
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Evolução do sintoma radicular</h2>
+                    <div className="mt-2">
+                        <RadicularTimelineChart points={radicularSeriesInPeriod} isDark={false} />
+                    </div>
+                </section>
+
+                <section className="mt-6 grid grid-cols-2 gap-6">
+                    <div>
+                        <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Medicação no período</h2>
+                        <table className="mt-2 w-full text-left text-xs text-black">
+                            <tbody>
+                                <tr><td className="py-1 pr-4 font-semibold">Pregabalina</td><td>{medUsageInPeriod.pregabalinaDays} de {medUsageInPeriod.totalDays} dias</td></tr>
+                                <tr><td className="py-1 pr-4 font-semibold">Dipirona</td><td>{medUsageInPeriod.dipironaTotal} comprimido(s) no total</td></tr>
+                                <tr><td className="py-1 pr-4 font-semibold">Adorlan</td><td>{medUsageInPeriod.adorlanTotal} comprimido(s) no total</td></tr>
+                                <tr><td className="py-1 pr-4 font-semibold">Fexofenadina</td><td>{medUsageInPeriod.fexofenadinaDays} de {medUsageInPeriod.totalDays} dias</td></tr>
+                                {medUsageInPeriod.outros.length > 0 && (
+                                    <tr><td className="py-1 pr-4 font-semibold">Outros</td><td>{medUsageInPeriod.outros.join('; ')}</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div>
+                        <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Aderência ao tratamento</h2>
+                        <table className="mt-2 w-full text-left text-xs text-black">
+                            <tbody>
+                                <tr><td className="py-1 pr-4 font-semibold">Dor média (manhã+noite)</td><td>{adherenceInPeriod.avgPain !== null ? adherenceInPeriod.avgPain.toFixed(1) : '-'}</td></tr>
+                                <tr><td className="py-1 pr-4 font-semibold">Cardápio seguido</td><td>{adherenceInPeriod.dietDays} de {adherenceInPeriod.totalDays} dias</td></tr>
+                                <tr><td className="py-1 pr-4 font-semibold">Treino de força</td><td>{adherenceInPeriod.strengthSessions} sessões</td></tr>
+                                <tr><td className="py-1 pr-4 font-semibold">Caminhada total</td><td>{adherenceInPeriod.kmTotal.toFixed(1)} km</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section className="mt-6">
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Documentos do arquivo médico no período</h2>
+                    {examsInReportPeriod.length > 0 ? (
+                        <ul className="mt-2 space-y-1 text-xs text-black">
+                            {examsInReportPeriod.map(exam => (
+                                <li key={exam.id}>
+                                    <strong>{formatDate(exam.data)}</strong> — {exam.titulo} ({exam.tipo}){exam.doutor_local ? ` · ${exam.doutor_local}` : ''}
+                                </li>
+                            ))}
+                        </ul>
+                    ) : (
+                        <p className="mt-2 text-xs text-slate-500">Nenhum documento no período selecionado.</p>
+                    )}
+                </section>
+            </div>
+        );
+    }
+
     return (
         <div className={`health-view min-h-screen bg-background pb-20 ${isDark ? 'health-view-dark' : ''}`}>
             <div className="border-b border-border-subtle bg-white">
@@ -1422,6 +1722,14 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     </button>
                                 ))}
                             </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsReportOpen(true)}
+                                className="flex items-center gap-2 rounded-xl border border-border-standard bg-white px-3 py-2 text-xs font-semibold text-on-surface-variant transition hover:border-primary-container hover:text-primary-container"
+                            >
+                                <Icon name="file" className="h-4 w-4" />
+                                Gerar relatório para consulta
+                            </button>
                         </div>
                         <IntegratedTrendChart
                             weightPoints={weightForIntegrated}
@@ -1716,6 +2024,17 @@ const HealthView: React.FC<HealthViewProps> = ({
 
                             <HealthSection title="Registro diário" eyebrow="Sinal clínico e hábitos">
                                 <div className="space-y-5">
+                                    {isRedFlagActive && (
+                                        <div className="rounded-xl border border-error bg-error-container p-4 text-on-error-container">
+                                            <p className="text-sm font-bold">⚠️ Sinais de alerta no registro deste dia</p>
+                                            <p className="mt-1 text-xs leading-relaxed">
+                                                Isto não é um diagnóstico — é uma lista de sinais que, se presentes, indicam buscar atendimento
+                                                médico o quanto antes: dormência na região da sela (períneo), alteração no controle de urina ou
+                                                fezes, fraqueza progressiva para levantar a ponta do pé, ou sintomas nas duas pernas ao mesmo
+                                                tempo. Se notar qualquer um desses, procure atendimento.
+                                            </p>
+                                        </div>
+                                    )}
                                     <div>
                                         <p className={`${labelClasses} mb-2`}>Dor lombar</p>
                                         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -1932,6 +2251,14 @@ const HealthView: React.FC<HealthViewProps> = ({
                                         />
                                     </div>
                                 </div>
+                            </HealthSection>
+
+                            <HealthSection title="Evolução do sintoma radicular" eyebrow="Centralização vs. periferalização">
+                                <RadicularTimelineChart points={radicularSeries} isDark={isDark} />
+                                <p className="mt-3 text-xs font-semibold leading-relaxed text-on-surface-variant">
+                                    Sintoma subindo em direção à lombar (do pé para o quadril) tende a indicar melhora; descendo em
+                                    direção ao pé tende a indicar piora.
+                                </p>
                             </HealthSection>
 
                             <HealthSection title="Tendência de dor lombar" eyebrow="Histórico do Telegram e painel">

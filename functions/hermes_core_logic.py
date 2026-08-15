@@ -1733,6 +1733,27 @@ _CONFIRM_WHATSAPP_KEYBOARD = [
     ]
 ]
 
+# Check-in noturno de saude (3 toques): dor -> local do sintoma na perna -> treino de forca.
+_HEALTH_RADICULAR_LOCATIONS = [
+    ("nenhum", "Nenhum"), ("gluteo", "Glúteo"), ("quadril", "Quadril"), ("coxa", "Coxa"),
+    ("joelho", "Joelho"), ("panturrilha", "Panturrilha"), ("tornozelo", "Tornozelo"), ("pe", "Pé"),
+]
+
+_HEALTH_RED_FLAG_MESSAGE = (
+    "⚠️ <b>Sinais de alerta no registro de hoje</b>\n\n"
+    "Isto não é um diagnóstico — é uma lista de sinais que, se presentes, indicam buscar "
+    "atendimento médico o quanto antes:\n"
+    "• Dormência na região da sela (períneo)\n"
+    "• Alteração no controle de urina ou fezes\n"
+    "• Fraqueza progressiva para levantar a ponta do pé\n"
+    "• Sintomas nas duas pernas ao mesmo tempo\n\n"
+    "Se notar qualquer um desses, procure atendimento."
+)
+
+
+def _health_entry_source_after_telegram(current_data: dict) -> str:
+    """'ambos' se o painel ja tocou o registro do dia; senao 'telegram'."""
+    return "ambos" if current_data.get("entrySource") == "painel" else "telegram"
 
 
 def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn.Response":
@@ -1797,18 +1818,78 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
                 raise ValueError("data inválida")
             doc_ref = db.collection("health_exercise_logs").document(pain_date)
             current = doc_ref.get()
-            current_pain = ((current.to_dict() or {}).get("pain") or {}) if current.exists else {}
+            current_data = (current.to_dict() or {}) if current.exists else {}
+            current_pain = current_data.get("pain") or {}
             current_pain["evening"] = pain_score
             current_pain["telegram_checked_at"] = datetime.now(timezone.utc).isoformat()
-            doc_ref.set({"pain": current_pain}, merge=True)
+            doc_ref.set({"pain": current_pain, "entrySource": _health_entry_source_after_telegram(current_data)}, merge=True)
             _answer_callback_query(token, query_id, f"Dor registrada: {pain_score}/10")
-            response_text = f"✅ Check-in lombar registrado: <b>{pain_score}/10</b> em {pain_date}."
+            response_text = f"✅ Dor registrada: <b>{pain_score}/10</b> em {pain_date}. Onde você sente o sintoma na perna?"
             _persist_callback_turn(f"Check-in lombar: {pain_score}/10", response_text)
-            _send_telegram_message(token, chat_id, response_text)
+            radicular_keyboard = [
+                [{"text": label, "callback_data": f"health_radic:{pain_date}:{value}"}]
+                for value, label in _HEALTH_RADICULAR_LOCATIONS
+            ]
+            _send_telegram_message_with_keyboard(token, chat_id, response_text, radicular_keyboard)
+            # O alerta de sinal vermelho (dor >= 9) e disparado pelo trigger
+            # on_health_log_red_flag ao ver a escrita acima, nao aqui.
         except Exception as exc:
             print(f"[HealthCheckin] Falha ao registrar dor: {exc}")
             _answer_callback_query(token, query_id, "Não consegui registrar.")
             _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar esse check-in lombar. Tente responder novamente.")
+
+    elif data.startswith("health_radic:"):
+        parts = data.split(":")
+        radic_date = parts[1] if len(parts) > 1 else ""
+        radic_location = parts[2] if len(parts) > 2 else ""
+        valid_locations = {value for value, _ in _HEALTH_RADICULAR_LOCATIONS}
+        try:
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", radic_date) or radic_location not in valid_locations:
+                raise ValueError("dados inválidos")
+            doc_ref = db.collection("health_exercise_logs").document(radic_date)
+            current = doc_ref.get()
+            current_data = (current.to_dict() or {}) if current.exists else {}
+            current_radicular = current_data.get("radicular") or {}
+            current_radicular["location"] = radic_location
+            doc_ref.set({"radicular": current_radicular, "entrySource": _health_entry_source_after_telegram(current_data)}, merge=True)
+            location_label = dict(_HEALTH_RADICULAR_LOCATIONS).get(radic_location, radic_location)
+            _answer_callback_query(token, query_id, f"Sintoma: {location_label}")
+            response_text = f"✅ Sintoma na perna: <b>{location_label}</b>. Treino de força hoje?"
+            _persist_callback_turn(f"Sintoma radicular: {location_label}", response_text)
+            strength_keyboard = [[
+                {"text": "Sim", "callback_data": f"health_strength:{radic_date}:sim"},
+                {"text": "Não", "callback_data": f"health_strength:{radic_date}:nao"},
+            ]]
+            _send_telegram_message_with_keyboard(token, chat_id, response_text, strength_keyboard)
+            # O alerta de sinal vermelho (local == "pe") e disparado pelo trigger
+            # on_health_log_red_flag ao ver a escrita acima, nao aqui.
+        except Exception as exc:
+            print(f"[HealthCheckin] Falha ao registrar sintoma radicular: {exc}")
+            _answer_callback_query(token, query_id, "Não consegui registrar.")
+            _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar o sintoma. Tente novamente.")
+
+    elif data.startswith("health_strength:"):
+        parts = data.split(":")
+        strength_date = parts[1] if len(parts) > 1 else ""
+        strength_raw = parts[2] if len(parts) > 2 else ""
+        try:
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", strength_date) or strength_raw not in ("sim", "nao"):
+                raise ValueError("dados inválidos")
+            done = strength_raw == "sim"
+            doc_ref = db.collection("health_exercise_logs").document(strength_date)
+            current = doc_ref.get()
+            current_data = (current.to_dict() or {}) if current.exists else {}
+            current_strength = current_data.get("strength") or {}
+            current_strength["done"] = done
+            doc_ref.set({"strength": current_strength, "entrySource": _health_entry_source_after_telegram(current_data)}, merge=True)
+            _answer_callback_query(token, query_id, "Treino registrado" if done else "Ok, sem treino hoje")
+            response_text = f"✅ Check-in lombar completo para {strength_date}. Treino de força: <b>{'sim' if done else 'não'}</b>."
+            _persist_callback_turn(f"Treino de força: {'sim' if done else 'não'}", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+        except Exception as exc:
+            print(f"[HealthCheckin] Falha ao registrar treino: {exc}")
+            _answer_callback_query(token, query_id, "Não consegui registrar.")
+            _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar o treino. Tente novamente.")
 
     elif data.startswith("ai_notif:"):
         parts = data.split(":")
@@ -4879,6 +4960,48 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
     db.collection("telegram_inbound").document(f"{chat_id}_{message_id}").set(payload)
 
     return https_fn.Response("OK", status=200)
+
+
+def _health_red_flag_active(data: dict) -> bool:
+    radicular = data.get("radicular") or {}
+    pain = data.get("pain") or {}
+    if radicular.get("location") == "pe":
+        return True
+    if radicular.get("motorWeakness") is True:
+        return True
+    if (pain.get("morning") or 0) >= 9 or (pain.get("evening") or 0) >= 9:
+        return True
+    return False
+
+
+@firestore_fn.on_document_written(document="health_exercise_logs/{date}")
+def on_health_log_red_flag(event: Event[Change[DocumentSnapshot]]) -> None:
+    """Envia o alerta de sinais de alerta assim que um registro diário (painel ou
+    Telegram) passa a atender a uma das condições de risco. Deduplica por dia via
+    `redFlagAlertedAt` — só reenvia se o registro tinha sido "limpo" e voltou a
+    disparar a condição."""
+    if not event.data or not event.data.after or not event.data.after.exists:
+        return
+    after = event.data.after.to_dict() or {}
+    before = event.data.before.to_dict() if event.data.before and event.data.before.exists else {}
+
+    now_active = _health_red_flag_active(after)
+    was_active = _health_red_flag_active(before)
+    if not now_active or (now_active and was_active):
+        return
+
+    db = _get_db()
+    chat_id = _get_allowed_chat_id()
+    if not chat_id:
+        keys = _cached_doc_get(db, "system", "api_keys").to_dict() or {}
+        chat_id = keys.get("telegram_chat_id") or keys.get("allowed_telegram_chat_id")
+    if not chat_id:
+        print("[HealthRedFlag] Nenhum chat_id do Telegram configurado.")
+        return
+
+    token = _get_telegram_token(db)
+    _send_telegram_message(token, chat_id, _HEALTH_RED_FLAG_MESSAGE)
+    event.data.after.reference.set({"redFlagAlertedAt": datetime.now(timezone.utc).isoformat()}, merge=True)
 
 
 @firestore_fn.on_document_created(
