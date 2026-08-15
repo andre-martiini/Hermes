@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot, Root } from 'react-dom/client';
+import { flushSync } from 'react-dom';
 import {
   Tarefa, Status, EntregaInstitucional, AtividadeRealizada,
   Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento,
@@ -1729,6 +1730,16 @@ const App: React.FC = () => {
   const [completedLimit, setCompletedLimit] = useState(10);
   const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude' | 'servicos' | 'estrategia'>('dashboard');
   const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'finance' | 'saude' | 'ferramentas' | 'knowledge' | 'services' | 'rag-bases' | 'concluidas' | 'strategy' | 'godmode' | 'contacts' | 'diario' | 'whatsapp'>('dashboard');
+  // Navegação de módulo (sidebar/menu mobile): activeModule e viewMode precisam mudar juntos.
+  // flushSync força um commit síncrono único para os dois, em vez de duas chamadas de setState
+  // separadas que dependem do agrupamento automático do React — elimina qualquer janela onde
+  // um dos dois estados aparente "atrasar" em relação ao outro (achado A15).
+  const navigateToModule = (module: typeof activeModule, view: typeof viewMode) => {
+    flushSync(() => {
+      setActiveModule(module);
+      setViewMode(view);
+    });
+  };
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
   const [isSidebarRetracted, setIsSidebarRetracted] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
@@ -4567,18 +4578,18 @@ const App: React.FC = () => {
             </div>
             <nav className="flex flex-col gap-1.5">
               {[
-                { id: 'dashboard', label: 'Dashboard', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>, active: viewMode === 'dashboard', onClick: () => { setActiveModule('dashboard'); setViewMode('dashboard'); } },
-                { id: 'acoes', label: 'Ações', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>, active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'pgc' || viewMode === 'licitacoes' || viewMode === 'assistencia' || viewMode === 'concluidas'), onClick: () => { setActiveModule('acoes'); setViewMode('gallery'); } },
-                { id: 'servicos', label: 'Serviços', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>, active: activeModule === 'servicos' && viewMode === 'services', onClick: () => { setActiveModule('servicos'); setViewMode('services'); } },
-                { id: 'finance', label: 'Financeiro', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>, active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
-                { id: 'saude', label: 'Saúde', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>, active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
-                { id: 'strategy', label: 'Estratégia', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 6.75V15m6-6v8.25M4.5 19.5h15M6 19.5V4.5h12v15" /></svg>, active: activeModule === 'estrategia' && viewMode === 'strategy', onClick: () => { setActiveModule('estrategia'); setViewMode('strategy'); } },
-                { id: 'godmode', label: 'Godmode', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>, active: viewMode === 'godmode', onClick: () => { setActiveModule('estrategia'); setViewMode('godmode'); } },
-                { id: 'contacts', label: 'Contatos', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>, active: viewMode === 'contacts', onClick: () => { setActiveModule('acoes'); setViewMode('contacts'); } },
-                { id: 'conhecimento', label: 'Conhecimento', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>, active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
-                { id: 'rag-bases', label: 'Áreas Temáticas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>, active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
-                { id: 'diario', label: 'Diário', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>, active: viewMode === 'diario', onClick: () => { setActiveModule('acoes'); setViewMode('diario'); } },
-                { id: 'whatsapp', label: 'WhatsApp', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>, active: viewMode === 'whatsapp', onClick: () => { setActiveModule('acoes'); setViewMode('whatsapp'); } },
+                { id: 'dashboard', label: 'Dashboard', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>, active: viewMode === 'dashboard', onClick: () => navigateToModule('dashboard', 'dashboard') },
+                { id: 'acoes', label: 'Ações', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>, active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'pgc' || viewMode === 'licitacoes' || viewMode === 'assistencia' || viewMode === 'concluidas'), onClick: () => navigateToModule('acoes', 'gallery') },
+                { id: 'servicos', label: 'Serviços', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>, active: activeModule === 'servicos' && viewMode === 'services', onClick: () => navigateToModule('servicos', 'services') },
+                { id: 'finance', label: 'Financeiro', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>, active: activeModule === 'financeiro', onClick: () => navigateToModule('financeiro', 'finance') },
+                { id: 'saude', label: 'Saúde', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>, active: activeModule === 'saude', onClick: () => navigateToModule('saude', 'saude') },
+                { id: 'strategy', label: 'Estratégia', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 6.75V15m6-6v8.25M4.5 19.5h15M6 19.5V4.5h12v15" /></svg>, active: activeModule === 'estrategia' && viewMode === 'strategy', onClick: () => navigateToModule('estrategia', 'strategy') },
+                { id: 'godmode', label: 'Godmode', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>, active: viewMode === 'godmode', onClick: () => navigateToModule('estrategia', 'godmode') },
+                { id: 'contacts', label: 'Contatos', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>, active: viewMode === 'contacts', onClick: () => navigateToModule('acoes', 'contacts') },
+                { id: 'conhecimento', label: 'Conhecimento', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>, active: viewMode === 'knowledge', onClick: () => navigateToModule('acoes', 'knowledge') },
+                { id: 'rag-bases', label: 'Áreas Temáticas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>, active: viewMode === 'rag-bases', onClick: () => navigateToModule('acoes', 'rag-bases') },
+                { id: 'diario', label: 'Diário', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>, active: viewMode === 'diario', onClick: () => navigateToModule('acoes', 'diario') },
+                { id: 'whatsapp', label: 'WhatsApp', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>, active: viewMode === 'whatsapp', onClick: () => navigateToModule('acoes', 'whatsapp') },
               ].map(item => (
                 <button
                   key={item.id}
@@ -5125,19 +5136,19 @@ const App: React.FC = () => {
                 <div className={`md:hidden border-t animate-in slide-in-from-top-4 duration-300 ${isDarkTheme ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
                   <nav className="flex flex-col p-4 gap-2">
                     {[
-                      { label: 'Dashboard', active: viewMode === 'dashboard', onClick: () => { setActiveModule('dashboard'); setViewMode('dashboard'); } },
-                      { label: 'Ações', active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia' || viewMode === 'concluidas'), onClick: () => { setActiveModule('acoes'); setViewMode('gallery'); } },
-                      { label: 'Serviços', active: activeModule === 'servicos' && viewMode === 'services', onClick: () => { setActiveModule('servicos'); setViewMode('services'); } },
-                      { label: 'PGD', active: activeModule === 'acoes' && viewMode === 'pgc', onClick: () => { setActiveModule('acoes'); setViewMode('pgc'); } },
-                      { label: 'Financeiro', active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
-                      { label: 'Saúde', active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
-                      { label: 'Estratégia', active: activeModule === 'estrategia' && viewMode === 'strategy', onClick: () => { setActiveModule('estrategia'); setViewMode('strategy'); } },
-                      { label: 'Godmode', active: viewMode === 'godmode', onClick: () => { setActiveModule('estrategia'); setViewMode('godmode'); } },
-                      { label: 'Contatos', active: viewMode === 'contacts', onClick: () => { setActiveModule('acoes'); setViewMode('contacts'); } },
-                      { label: 'Conhecimento', active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
-                      { label: 'Áreas Temáticas', active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
-                      { label: 'Diário', active: viewMode === 'diario', onClick: () => { setActiveModule('acoes'); setViewMode('diario'); } },
-                      { label: 'WhatsApp', active: viewMode === 'whatsapp', onClick: () => { setActiveModule('acoes'); setViewMode('whatsapp'); } },
+                      { label: 'Dashboard', active: viewMode === 'dashboard', onClick: () => navigateToModule('dashboard', 'dashboard') },
+                      { label: 'Ações', active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia' || viewMode === 'concluidas'), onClick: () => navigateToModule('acoes', 'gallery') },
+                      { label: 'Serviços', active: activeModule === 'servicos' && viewMode === 'services', onClick: () => navigateToModule('servicos', 'services') },
+                      { label: 'PGD', active: activeModule === 'acoes' && viewMode === 'pgc', onClick: () => navigateToModule('acoes', 'pgc') },
+                      { label: 'Financeiro', active: activeModule === 'financeiro', onClick: () => navigateToModule('financeiro', 'finance') },
+                      { label: 'Saúde', active: activeModule === 'saude', onClick: () => navigateToModule('saude', 'saude') },
+                      { label: 'Estratégia', active: activeModule === 'estrategia' && viewMode === 'strategy', onClick: () => navigateToModule('estrategia', 'strategy') },
+                      { label: 'Godmode', active: viewMode === 'godmode', onClick: () => navigateToModule('estrategia', 'godmode') },
+                      { label: 'Contatos', active: viewMode === 'contacts', onClick: () => navigateToModule('acoes', 'contacts') },
+                      { label: 'Conhecimento', active: viewMode === 'knowledge', onClick: () => navigateToModule('acoes', 'knowledge') },
+                      { label: 'Áreas Temáticas', active: viewMode === 'rag-bases', onClick: () => navigateToModule('acoes', 'rag-bases') },
+                      { label: 'Diário', active: viewMode === 'diario', onClick: () => navigateToModule('acoes', 'diario') },
+                      { label: 'WhatsApp', active: viewMode === 'whatsapp', onClick: () => navigateToModule('acoes', 'whatsapp') },
                     ].map((item, idx) => (
                       <button
                         key={idx}
@@ -5183,9 +5194,9 @@ const App: React.FC = () => {
                 </div>
               )}
             </header>
-            <div className={`w-full ${viewMode === 'dashboard' ? 'px-0 py-0' : 'px-0 md:px-8 py-6'}`}>
+            <div className={`w-full ${(viewMode === 'dashboard' || viewMode === 'whatsapp') ? 'px-0 py-0' : 'px-0 md:px-8 py-6'}`}>
               {/* Painel de Estatísticas e Filtros - APENAS NA VISÃO GERAL */}
-              <main className={(viewMode === 'dashboard' || viewMode === 'godmode') ? '' : 'mb-20'}>
+              <main className={(viewMode === 'dashboard' || viewMode === 'godmode' || viewMode === 'whatsapp') ? '' : 'mb-20'}>
                 {viewMode === 'dashboard' ? (
                   <>
                     {/* Mobile: Atalhos Inteligentes */}

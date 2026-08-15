@@ -1210,7 +1210,7 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
 
     return (
         <div className={`p-2 sm:p-3 ${isDark ? 'bg-[#0f1724]' : ''}`}>
-            <div className="flex gap-2.5 sm:gap-3 h-[calc(100vh-76px)] min-h-[500px]">
+            <div className="flex gap-2.5 sm:gap-3 h-[calc(100vh-88px)] min-h-[500px]">
                 {/* Lista de chats: escondida no mobile quando um chat está aberto */}
                 <div className={`w-full md:w-80 shrink-0 ${selectedChatId ? 'hidden md:flex md:flex-col' : 'flex flex-col'}`}>
                     {renderChatList()}
