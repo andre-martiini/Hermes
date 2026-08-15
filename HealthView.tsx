@@ -554,8 +554,9 @@ const HealthView: React.FC<HealthViewProps> = ({
                     titulo,
                     tipo: examTipo,
                     data: examData,
-                    doutor_local: examDoutorLocal.trim() || undefined,
-                    resultados: examResultados.trim() || undefined,
+                    // '' e não undefined — o Firestore rejeita addDoc/updateDoc com campo undefined
+                    doutor_local: examDoutorLocal.trim(),
+                    resultados: examResultados.trim(),
                 },
                 examFiles
             );
@@ -600,8 +601,10 @@ const HealthView: React.FC<HealthViewProps> = ({
                     titulo,
                     tipo: editTipo,
                     data: editData,
-                    doutor_local: editDoutorLocal.trim() || undefined,
-                    resultados: editResultados.trim() || undefined,
+                    // '' e não undefined — permite limpar o campo na edição e evita o erro de
+                    // "Unsupported field value: undefined" do Firestore
+                    doutor_local: editDoutorLocal.trim(),
+                    resultados: editResultados.trim(),
                 },
                 editFiles
             );
