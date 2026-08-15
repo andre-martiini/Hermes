@@ -5,8 +5,13 @@ import {
     ExerciseSettings, formatDate, formatDateLocalISO,
     HealthExam, HealthTelegramReminder, WalkBlock, sumWalkBlocksKm,
     HealthWaist, RadicularLocation, RadicularSide, TherapyModality, TriggerType,
-    RADICULAR_LOCATIONS, THERAPY_MODALITIES, TRIGGER_TYPES
+    RADICULAR_LOCATIONS, THERAPY_MODALITIES, TRIGGER_TYPES,
+    HealthEvent, HealthEventType, HEALTH_EVENT_TYPES, HealthWeeklySummary
 } from './types';
+import {
+    computeWeightHeadline, movingAverage, weeklyAggregate, parseLocalDate, formatLocalISO, addDays,
+    linearRegression, daysSinceEpoch, daysToReachTarget, compareGroups, GroupComparison, WeeklyBucket
+} from './src/utils/healthAnalytics';
 
 interface HealthViewProps {
     weights: HealthWeight[];
@@ -17,6 +22,10 @@ interface HealthViewProps {
     waist: HealthWaist[];
     onAddWaist: (cm: number, date: string) => void;
     onDeleteWaist: (id: string) => void;
+    events: HealthEvent[];
+    onAddEvent: (event: Omit<HealthEvent, 'id'>) => Promise<void>;
+    onDeleteEvent: (id: string) => void;
+    latestWeeklySummary?: HealthWeeklySummary;
     exerciseLogs: ExerciseLog[];
     exerciseSettings: ExerciseSettings;
     onSaveExerciseLog: (date: string, data: Partial<ExerciseLog>) => Promise<void>;
@@ -31,7 +40,6 @@ interface HealthViewProps {
 }
 
 type IconName = 'scale' | 'chevron' | 'heart' | 'calendar' | 'file' | 'plus' | 'trash' | 'walk' | 'edit';
-type NumericTrendPoint = { id: string; label: string; value: number; marker?: boolean };
 type PainTrendPoint = { id: string; label: string; morning?: number; evening?: number; crisis?: boolean };
 
 const DEFAULT_HEALTH_REMINDERS: HealthTelegramReminder[] = [
@@ -183,7 +191,7 @@ const MetricCard = ({
     label: string;
     value: string | number;
     unit?: string;
-    helper?: string;
+    helper?: React.ReactNode;
     icon: IconName;
     tone?: string;
 }) => (
@@ -241,13 +249,96 @@ const HealthSection = ({
     );
 };
 
+function useChartHover(count: number) {
+    const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+    const updateFromClientX = (clientX: number, svg: SVGSVGElement, padLeft: number, plotWidth: number) => {
+        if (count < 2) return;
+        const rect = svg.getBoundingClientRect();
+        if (rect.width === 0) return;
+        const viewBoxWidth = svg.viewBox.baseVal.width || rect.width;
+        const scaleX = viewBoxWidth / rect.width;
+        const xInSvg = (clientX - rect.left) * scaleX;
+        const ratio = (xInSvg - padLeft) / plotWidth;
+        const index = Math.round(ratio * (count - 1));
+        setHoveredIndex(Math.max(0, Math.min(count - 1, index)));
+    };
+    const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>, padLeft: number, plotWidth: number) =>
+        updateFromClientX(e.clientX, e.currentTarget, padLeft, plotWidth);
+    const handleTouchMove = (e: React.TouchEvent<SVGSVGElement>, padLeft: number, plotWidth: number) => {
+        const touch = e.touches[0];
+        if (touch) updateFromClientX(touch.clientX, e.currentTarget, padLeft, plotWidth);
+    };
+    const handleLeave = () => setHoveredIndex(null);
+    return { hoveredIndex, handleMouseMove, handleTouchMove, handleLeave };
+}
+
+const ChartTooltip = ({ leftPercent, children }: { leftPercent: number; children: React.ReactNode }) => (
+    <div
+        className="pointer-events-none absolute top-2 z-10 max-w-[220px] -translate-x-1/2 whitespace-nowrap rounded-lg bg-on-surface px-2.5 py-1.5 text-[11px] font-semibold text-background shadow-lg"
+        style={{ left: `${Math.min(92, Math.max(8, leftPercent))}%` }}
+    >
+        {children}
+    </div>
+);
+
+const ChartTableToggle = ({ showTable, onToggle }: { showTable: boolean; onToggle: () => void }) => (
+    <button
+        type="button"
+        onClick={onToggle}
+        className="absolute right-4 top-4 z-10 rounded-full border border-border-standard bg-white px-2.5 py-1 text-[10px] font-semibold text-on-surface-variant transition hover:border-primary-container hover:text-primary-container"
+    >
+        {showTable ? 'Ver gráfico' : 'Ver tabela'}
+    </button>
+);
+
+const ChartDataTable = ({ columns, rows }: { columns: string[]; rows: (string | number)[][] }) => (
+    <div className="max-h-[280px] overflow-auto rounded-xl border border-border-subtle">
+        <table className="w-full text-left text-xs">
+            <thead className="sticky top-0 bg-background">
+                <tr>{columns.map(c => <th key={c} className="whitespace-nowrap px-3 py-2 font-semibold text-on-surface-variant">{c}</th>)}</tr>
+            </thead>
+            <tbody>
+                {rows.map((row, i) => (
+                    <tr key={i} className="border-t border-border-subtle">
+                        {row.map((cell, j) => <td key={j} className="whitespace-nowrap px-3 py-2 text-on-surface">{cell}</td>)}
+                    </tr>
+                ))}
+            </tbody>
+        </table>
+    </div>
+);
+
+const chartPalette = (isDark: boolean) => ({
+    bg: isDark ? '#171e2b' : '#f8fafc',
+    grid: isDark ? '#2c3547' : '#d8dee8',
+    text: isDark ? '#c3cadb' : '#4d4354',
+    line: isDark ? '#60a5fa' : '#2563eb',
+    point: isDark ? '#171e2b' : '#ffffff',
+    target: isDark ? '#34d399' : '#10b981',
+    targetText: isDark ? '#6ee7b7' : '#047857',
+    amber: isDark ? '#fbbf24' : '#f59e0b',
+    amberText: isDark ? '#fcd34d' : '#b45309',
+    rose: isDark ? '#fb7185' : '#e11d48',
+    emerald: isDark ? '#34d399' : '#10b981',
+    trajectory: isDark ? '#a78bfa' : '#7c3aed',
+    trendLine: isDark ? '#fb923c' : '#c2410c',
+});
+
 const WeightTrendChart = ({
     points,
     targetWeight,
+    projectionLines = [],
+    isDark = false,
 }: {
-    points: NumericTrendPoint[];
+    points: { date: string; value: number }[];
     targetWeight?: number;
+    projectionLines?: { key: string; label: string; color: 'trajectory' | 'trendLine'; points: { date: string; value: number }[] }[];
+    isDark?: boolean;
 }) => {
+    const [showTable, setShowTable] = useState(false);
+    const [hoverTime, setHoverTime] = useState<number | null>(null);
+    const palette = chartPalette(isDark);
+
     if (points.length < 2) {
         return (
             <div className="flex h-[280px] items-center justify-center rounded-2xl border border-dashed border-border-standard bg-background text-sm font-semibold text-on-surface-variant">
@@ -259,55 +350,126 @@ const WeightTrendChart = ({
     const width = 720;
     const height = 260;
     const pad = { top: 26, right: 18, bottom: 42, left: 46 };
-    const values = [...points.map(point => point.value), ...(targetWeight ? [targetWeight] : [])];
-    const rawMin = Math.min(...values);
-    const rawMax = Math.max(...values);
+    const plotWidth = width - pad.left - pad.right;
+    const plotHeight = height - pad.top - pad.bottom;
+
+    const allDates = [...points.map(p => p.date), ...projectionLines.flatMap(l => l.points.map(p => p.date))];
+    const minDate = allDates.reduce((a, b) => (a < b ? a : b));
+    const maxDate = allDates.reduce((a, b) => (a > b ? a : b));
+    const minTime = parseLocalDate(minDate).getTime();
+    const maxTime = Math.max(parseLocalDate(maxDate).getTime(), minTime + 1);
+    const totalSpan = Math.max(1, maxTime - minTime);
+    const xForDate = (d: string) => pad.left + ((parseLocalDate(d).getTime() - minTime) / totalSpan) * plotWidth;
+
+    const allValues = [...points.map(p => p.value), ...(targetWeight ? [targetWeight] : []), ...projectionLines.flatMap(l => l.points.map(p => p.value))];
+    const rawMin = Math.min(...allValues);
+    const rawMax = Math.max(...allValues);
     const min = Math.floor(rawMin - 1);
     const max = Math.ceil(rawMax + 1);
     const range = Math.max(1, max - min);
-    const plotWidth = width - pad.left - pad.right;
-    const plotHeight = height - pad.top - pad.bottom;
-    const xFor = (index: number) => pad.left + (points.length === 1 ? plotWidth / 2 : (index / (points.length - 1)) * plotWidth);
     const yFor = (value: number) => pad.top + ((max - value) / range) * plotHeight;
-    const path = points.map((point, index) => `${xFor(index)},${yFor(point.value)}`).join(' ');
+    const path = points.map(p => `${xForDate(p.date)},${yFor(p.value)}`).join(' ');
     const targetY = targetWeight ? yFor(targetWeight) : null;
     const yTicks = [max, Math.round((max + min) / 2), min];
 
+    const handleMove = (e: React.MouseEvent<SVGSVGElement>) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        if (rect.width === 0) return;
+        const ratio = (e.clientX - rect.left) / rect.width;
+        const xInSvg = ratio * width;
+        const timeRatio = (xInSvg - pad.left) / plotWidth;
+        setHoverTime(minTime + Math.max(0, Math.min(1, timeRatio)) * totalSpan);
+    };
+    const handleTouch = (e: React.TouchEvent<SVGSVGElement>) => {
+        const touch = e.touches[0];
+        if (!touch) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        if (rect.width === 0) return;
+        const ratio = (touch.clientX - rect.left) / rect.width;
+        const xInSvg = ratio * width;
+        const timeRatio = (xInSvg - pad.left) / plotWidth;
+        setHoverTime(minTime + Math.max(0, Math.min(1, timeRatio)) * totalSpan);
+    };
+    const handleLeave = () => setHoverTime(null);
+    const hovered = hoverTime !== null ? nearestByTime(points, p => parseLocalDate(p.date).getTime(), hoverTime) : null;
+    const hoverX = hoverTime !== null ? xForDate(formatLocalISO(new Date(hoverTime))) : null;
+
+    if (showTable) {
+        return (
+            <div className="relative rounded-2xl border border-border-subtle bg-background p-4">
+                <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(false)} />
+                <p className={`${labelClasses} mb-2`}>Tendência de peso</p>
+                <ChartDataTable columns={['Data', 'Peso — média 7d (kg)']} rows={points.map(p => [formatShortDate(p.date), p.value.toFixed(1)])} />
+            </div>
+        );
+    }
+
     return (
-        <div className="rounded-2xl border border-border-subtle bg-background p-4">
-            <svg viewBox={`0 0 ${width} ${height}`} className="h-[280px] w-full overflow-visible" role="img" aria-label="Gráfico de tendência de peso">
-                <rect x="0" y="0" width={width} height={height} rx="16" fill="#f8fafc" />
+        <div className="relative rounded-2xl border border-border-subtle bg-background p-4">
+            <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(true)} />
+            {hovered && hoverX !== null && (
+                <ChartTooltip leftPercent={(hoverX / width) * 100}>
+                    {formatShortDate(hovered.date)}: {hovered.value.toFixed(1)} kg
+                </ChartTooltip>
+            )}
+            <svg
+                viewBox={`0 0 ${width} ${height}`}
+                className="h-[280px] w-full touch-none overflow-visible"
+                role="img"
+                aria-label="Gráfico de tendência de peso"
+                onMouseMove={handleMove}
+                onTouchMove={handleTouch}
+                onMouseLeave={handleLeave}
+                onTouchEnd={handleLeave}
+            >
+                <rect x="0" y="0" width={width} height={height} rx="16" fill={palette.bg} />
                 {yTicks.map(tick => (
                     <g key={tick}>
-                        <line x1={pad.left} x2={width - pad.right} y1={yFor(tick)} y2={yFor(tick)} stroke="#d8dee8" strokeWidth="1" />
-                        <text x={pad.left - 10} y={yFor(tick) + 4} textAnchor="end" fontSize="12" fontWeight="600" fill="#4d4354">{tick} kg</text>
+                        <line x1={pad.left} x2={width - pad.right} y1={yFor(tick)} y2={yFor(tick)} stroke={palette.grid} strokeWidth="1" />
+                        <text x={pad.left - 10} y={yFor(tick) + 4} textAnchor="end" fontSize="12" fontWeight="600" fill={palette.text}>{tick} kg</text>
                     </g>
                 ))}
                 {targetY !== null && (
                     <g>
-                        <line x1={pad.left} x2={width - pad.right} y1={targetY} y2={targetY} stroke="#10b981" strokeWidth="2" strokeDasharray="6 6" />
-                        <text x={width - pad.right} y={targetY - 8} textAnchor="end" fontSize="12" fontWeight="700" fill="#047857">meta</text>
+                        <line x1={pad.left} x2={width - pad.right} y1={targetY} y2={targetY} stroke={palette.target} strokeWidth="2" strokeDasharray="6 6" />
+                        <text x={width - pad.right} y={targetY - 8} textAnchor="end" fontSize="12" fontWeight="700" fill={palette.targetText}>meta</text>
                     </g>
                 )}
-                <polyline points={path} fill="none" stroke="#2563eb" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-                {points.map((point, index) => (
-                    <g key={point.id}>
-                        <circle cx={xFor(index)} cy={yFor(point.value)} r="6" fill="#ffffff" stroke="#2563eb" strokeWidth="3" />
-                        <title>{`${point.label}: ${point.value.toFixed(1)} kg`}</title>
+                {hoverX !== null && (
+                    <line x1={hoverX} x2={hoverX} y1={pad.top} y2={height - pad.bottom} stroke={palette.text} strokeOpacity="0.3" strokeWidth="1.5" />
+                )}
+                {projectionLines.map(line => (
+                    <g key={line.key}>
+                        <polyline
+                            points={line.points.map(p => `${xForDate(p.date)},${yFor(p.value)}`).join(' ')}
+                            fill="none"
+                            stroke={palette[line.color]}
+                            strokeWidth="2"
+                            strokeDasharray="5 5"
+                            strokeLinecap="round"
+                        />
+                        <text x={xForDate(line.points[line.points.length - 1].date)} y={yFor(line.points[line.points.length - 1].value) - 6} textAnchor="end" fontSize="10" fontWeight="700" fill={palette[line.color]}>{line.label}</text>
                     </g>
                 ))}
-                {points.map((point, index) => (
-                    index === 0 || index === points.length - 1 || index % Math.ceil(points.length / 5) === 0 ? (
-                        <text key={`label-${point.id}`} x={xFor(index)} y={height - 16} textAnchor="middle" fontSize="11" fontWeight="700" fill="#4d4354">{point.label}</text>
-                    ) : null
+                <polyline points={path} fill="none" stroke={palette.line} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                {points.map(point => (
+                    <g key={point.date}>
+                        <circle cx={xForDate(point.date)} cy={yFor(point.value)} r={hovered?.date === point.date ? 6 : 4} fill={palette.point} stroke={palette.line} strokeWidth="2.5" />
+                    </g>
                 ))}
+                <text x={xForDate(points[0].date)} y={height - 16} textAnchor="start" fontSize="11" fontWeight="700" fill={palette.text}>{formatShortDate(points[0].date)}</text>
+                <text x={xForDate(points[points.length - 1].date)} y={height - 16} textAnchor="end" fontSize="11" fontWeight="700" fill={palette.text}>{formatShortDate(points[points.length - 1].date)}</text>
             </svg>
         </div>
     );
 };
 
-const PainTrendChart = ({ points }: { points: PainTrendPoint[] }) => {
+const PainTrendChart = ({ points, isDark = false }: { points: PainTrendPoint[]; isDark?: boolean }) => {
     const visiblePoints = points.filter(point => point.morning !== undefined || point.evening !== undefined);
+    const [showTable, setShowTable] = useState(false);
+    const { hoveredIndex, handleMouseMove, handleTouchMove, handleLeave } = useChartHover(visiblePoints.length);
+    const palette = chartPalette(isDark);
+
     if (visiblePoints.length < 2) {
         return (
             <div className="flex h-[240px] items-center justify-center rounded-2xl border border-dashed border-border-standard bg-background text-sm font-semibold text-on-surface-variant">
@@ -328,35 +490,66 @@ const PainTrendChart = ({ points }: { points: PainTrendPoint[] }) => {
             .map((point, index) => point[key] !== undefined ? `${xFor(index)},${yFor(point[key]!)}` : '')
             .filter(Boolean)
             .join(' ');
+    const hovered = hoveredIndex !== null ? visiblePoints[hoveredIndex] : null;
+
+    if (showTable) {
+        return (
+            <div className="relative rounded-2xl border border-border-subtle bg-background p-4">
+                <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(false)} />
+                <p className={`${labelClasses} mb-2`}>Tendência de dor lombar</p>
+                <ChartDataTable
+                    columns={['Data', 'Manhã', 'Noite', 'Crise']}
+                    rows={visiblePoints.map(p => [p.label, p.morning ?? '-', p.evening ?? '-', p.crisis ? 'Sim' : 'Não'])}
+                />
+            </div>
+        );
+    }
 
     return (
-        <div className="rounded-2xl border border-border-subtle bg-background p-4">
+        <div className="relative rounded-2xl border border-border-subtle bg-background p-4">
+            <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(true)} />
+            {hovered && (
+                <ChartTooltip leftPercent={(xFor(hoveredIndex!) / width) * 100}>
+                    {hovered.label}: manhã {hovered.morning ?? '-'}, noite {hovered.evening ?? '-'}{hovered.crisis ? ', crise' : ''}
+                </ChartTooltip>
+            )}
             <div className="mb-3 flex flex-wrap items-center gap-4 text-xs font-semibold text-on-surface-variant">
                 <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" />Manhã</span>
                 <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-rose-600" />Noite / Telegram</span>
                 <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-on-surface" />Crise</span>
             </div>
-            <svg viewBox={`0 0 ${width} ${height}`} className="h-[240px] w-full overflow-visible" role="img" aria-label="Gráfico de dor lombar">
-                <rect x="0" y="0" width={width} height={height} rx="16" fill="#f8fafc" />
+            <svg
+                viewBox={`0 0 ${width} ${height}`}
+                className="h-[240px] w-full touch-none overflow-visible"
+                role="img"
+                aria-label="Gráfico de dor lombar"
+                onMouseMove={e => handleMouseMove(e, pad.left, plotWidth)}
+                onTouchMove={e => handleTouchMove(e, pad.left, plotWidth)}
+                onMouseLeave={handleLeave}
+                onTouchEnd={handleLeave}
+            >
+                <rect x="0" y="0" width={width} height={height} rx="16" fill={palette.bg} />
                 {[10, 7, 5, 3, 0].map(tick => (
                     <g key={tick}>
-                        <line x1={pad.left} x2={width - pad.right} y1={yFor(tick)} y2={yFor(tick)} stroke="#d8dee8" strokeWidth="1" />
-                        <text x={pad.left - 10} y={yFor(tick) + 4} textAnchor="end" fontSize="12" fontWeight="700" fill="#4d4354">{tick}</text>
+                        <line x1={pad.left} x2={width - pad.right} y1={yFor(tick)} y2={yFor(tick)} stroke={palette.grid} strokeWidth="1" />
+                        <text x={pad.left - 10} y={yFor(tick) + 4} textAnchor="end" fontSize="12" fontWeight="700" fill={palette.text}>{tick}</text>
                     </g>
                 ))}
-                {lineFor('morning') && <polyline points={lineFor('morning')} fill="none" stroke="#f59e0b" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
-                {lineFor('evening') && <polyline points={lineFor('evening')} fill="none" stroke="#e11d48" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />}
+                {hoveredIndex !== null && (
+                    <line x1={xFor(hoveredIndex)} x2={xFor(hoveredIndex)} y1={pad.top} y2={height - pad.bottom} stroke={palette.text} strokeOpacity="0.3" strokeWidth="1.5" />
+                )}
+                {lineFor('morning') && <polyline points={lineFor('morning')} fill="none" stroke={palette.amber} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
+                {lineFor('evening') && <polyline points={lineFor('evening')} fill="none" stroke={palette.rose} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />}
                 {visiblePoints.map((point, index) => (
                     <g key={point.id}>
-                        {point.morning !== undefined && <circle cx={xFor(index)} cy={yFor(point.morning)} r="5" fill="#ffffff" stroke="#f59e0b" strokeWidth="3" />}
-                        {point.evening !== undefined && <circle cx={xFor(index)} cy={yFor(point.evening)} r="6" fill="#ffffff" stroke="#e11d48" strokeWidth="3" />}
-                        {point.crisis && <circle cx={xFor(index)} cy={yFor(Math.max(point.morning ?? 0, point.evening ?? 0, 1))} r="9" fill="none" stroke="#151c27" strokeWidth="2" strokeDasharray="3 3" />}
-                        <title>{`${point.label}: manhã ${point.morning ?? '-'}, noite ${point.evening ?? '-'}${point.crisis ? ', crise' : ''}`}</title>
+                        {point.morning !== undefined && <circle cx={xFor(index)} cy={yFor(point.morning)} r={hoveredIndex === index ? 7 : 5} fill={palette.point} stroke={palette.amber} strokeWidth="3" />}
+                        {point.evening !== undefined && <circle cx={xFor(index)} cy={yFor(point.evening)} r={hoveredIndex === index ? 8 : 6} fill={palette.point} stroke={palette.rose} strokeWidth="3" />}
+                        {point.crisis && <circle cx={xFor(index)} cy={yFor(Math.max(point.morning ?? 0, point.evening ?? 0, 1))} r="9" fill="none" stroke={palette.text} strokeWidth="2" strokeDasharray="3 3" />}
                     </g>
                 ))}
                 {visiblePoints.map((point, index) => (
                     index === 0 || index === visiblePoints.length - 1 || index % Math.ceil(visiblePoints.length / 5) === 0 ? (
-                        <text key={`label-${point.id}`} x={xFor(index)} y={height - 16} textAnchor="middle" fontSize="11" fontWeight="700" fill="#4d4354">{point.label}</text>
+                        <text key={`label-${point.id}`} x={xFor(index)} y={height - 16} textAnchor="middle" fontSize="11" fontWeight="700" fill={palette.text}>{point.label}</text>
                     ) : null
                 ))}
             </svg>
@@ -413,11 +606,17 @@ const WalkDailyChart = ({
     days,
     minimumKm,
     idealKm,
+    isDark = false,
 }: {
     days: { id: string; label: string; km: number }[];
     minimumKm: number;
     idealKm: number;
+    isDark?: boolean;
 }) => {
+    const [showTable, setShowTable] = useState(false);
+    const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+    const palette = chartPalette(isDark);
+
     if (!days.some(day => day.km > 0)) {
         return (
             <div className="flex h-[220px] items-center justify-center rounded-2xl border border-dashed border-border-standard bg-background text-sm font-semibold text-on-surface-variant">
@@ -435,31 +634,69 @@ const WalkDailyChart = ({
     const yFor = (value: number) => pad.top + ((maxKm - value) / maxKm) * plotHeight;
     const slot = plotWidth / days.length;
     const barWidth = Math.min(34, slot * 0.6);
+    const hovered = hoveredIndex !== null ? days[hoveredIndex] : null;
+
+    const updateHoverFromClientX = (clientX: number, svg: SVGSVGElement) => {
+        const rect = svg.getBoundingClientRect();
+        if (rect.width === 0) return;
+        const viewBoxWidth = svg.viewBox.baseVal.width || rect.width;
+        const scaleX = viewBoxWidth / rect.width;
+        const xInSvg = (clientX - rect.left) * scaleX;
+        const index = Math.floor((xInSvg - pad.left) / slot);
+        setHoveredIndex(Math.max(0, Math.min(days.length - 1, index)));
+    };
+
+    if (showTable) {
+        return (
+            <div className="relative rounded-2xl border border-border-subtle bg-background p-4">
+                <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(false)} />
+                <p className={`${labelClasses} mb-2`}>Caminhadas diárias</p>
+                <ChartDataTable columns={['Data', 'Km']} rows={days.map(d => [d.label, formatKm(d.km)])} />
+            </div>
+        );
+    }
 
     return (
-        <div className="rounded-2xl border border-border-subtle bg-background p-4">
-            <svg viewBox={`0 0 ${width} ${height}`} className="h-[220px] w-full overflow-visible" role="img" aria-label="Gráfico de caminhadas diárias">
-                <rect x="0" y="0" width={width} height={height} rx="16" fill="#f8fafc" />
+        <div className="relative rounded-2xl border border-border-subtle bg-background p-4">
+            <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(true)} />
+            {hovered && (
+                <ChartTooltip leftPercent={((pad.left + hoveredIndex! * slot + slot / 2) / width) * 100}>
+                    {hovered.label}: {formatKm(hovered.km)} km
+                </ChartTooltip>
+            )}
+            <svg
+                viewBox={`0 0 ${width} ${height}`}
+                className="h-[220px] w-full touch-none overflow-visible"
+                role="img"
+                aria-label="Gráfico de caminhadas diárias"
+                onMouseMove={e => updateHoverFromClientX(e.clientX, e.currentTarget)}
+                onTouchMove={e => { const t = e.touches[0]; if (t) updateHoverFromClientX(t.clientX, e.currentTarget); }}
+                onMouseLeave={() => setHoveredIndex(null)}
+                onTouchEnd={() => setHoveredIndex(null)}
+            >
+                <rect x="0" y="0" width={width} height={height} rx="16" fill={palette.bg} />
                 {[maxKm, maxKm / 2, 0].map(tick => (
                     <g key={tick}>
-                        <line x1={pad.left} x2={width - pad.right} y1={yFor(tick)} y2={yFor(tick)} stroke="#d8dee8" strokeWidth="1" />
-                        <text x={pad.left - 8} y={yFor(tick) + 4} textAnchor="end" fontSize="11" fontWeight="600" fill="#4d4354">{formatKm(tick)}</text>
+                        <line x1={pad.left} x2={width - pad.right} y1={yFor(tick)} y2={yFor(tick)} stroke={palette.grid} strokeWidth="1" />
+                        <text x={pad.left - 8} y={yFor(tick) + 4} textAnchor="end" fontSize="11" fontWeight="600" fill={palette.text}>{formatKm(tick)}</text>
                     </g>
                 ))}
-                <line x1={pad.left} x2={width - pad.right} y1={yFor(minimumKm)} y2={yFor(minimumKm)} stroke="#f59e0b" strokeWidth="2" strokeDasharray="6 6" />
-                <text x={width - pad.right} y={yFor(minimumKm) - 6} textAnchor="end" fontSize="11" fontWeight="700" fill="#b45309">mínimo</text>
-                <line x1={pad.left} x2={width - pad.right} y1={yFor(idealKm)} y2={yFor(idealKm)} stroke="#10b981" strokeWidth="2" strokeDasharray="6 6" />
-                <text x={width - pad.right} y={yFor(idealKm) - 6} textAnchor="end" fontSize="11" fontWeight="700" fill="#047857">ideal</text>
+                <line x1={pad.left} x2={width - pad.right} y1={yFor(minimumKm)} y2={yFor(minimumKm)} stroke={palette.amber} strokeWidth="2" strokeDasharray="6 6" />
+                <text x={width - pad.right} y={yFor(minimumKm) - 6} textAnchor="end" fontSize="11" fontWeight="700" fill={palette.amberText}>mínimo</text>
+                <line x1={pad.left} x2={width - pad.right} y1={yFor(idealKm)} y2={yFor(idealKm)} stroke={palette.target} strokeWidth="2" strokeDasharray="6 6" />
+                <text x={width - pad.right} y={yFor(idealKm) - 6} textAnchor="end" fontSize="11" fontWeight="700" fill={palette.targetText}>ideal</text>
+                {hoveredIndex !== null && (
+                    <rect x={pad.left + hoveredIndex * slot} y={pad.top} width={slot} height={plotHeight} fill={palette.text} opacity="0.06" />
+                )}
                 {days.map((day, index) => {
                     const x = pad.left + index * slot + (slot - barWidth) / 2;
                     const y = yFor(day.km);
                     const barHeight = Math.max(0, pad.top + plotHeight - y);
-                    const color = day.km >= idealKm ? '#10b981' : day.km >= minimumKm ? '#f59e0b' : '#2563eb';
+                    const color = day.km >= idealKm ? palette.emerald : day.km >= minimumKm ? palette.amber : palette.line;
                     return (
                         <g key={day.id}>
-                            {day.km > 0 && <rect x={x} y={y} width={barWidth} height={barHeight} rx="5" fill={color} />}
-                            <title>{`${day.label}: ${formatKm(day.km)} km`}</title>
-                            <text x={x + barWidth / 2} y={height - 14} textAnchor="middle" fontSize="10" fontWeight="700" fill="#4d4354">{day.label}</text>
+                            {day.km > 0 && <rect x={x} y={y} width={barWidth} height={barHeight} rx="5" fill={color} opacity={hoveredIndex === index ? 1 : 0.9} />}
+                            <text x={x + barWidth / 2} y={height - 14} textAnchor="middle" fontSize="10" fontWeight="700" fill={palette.text}>{day.label}</text>
                         </g>
                     );
                 })}
@@ -468,9 +705,192 @@ const WalkDailyChart = ({
     );
 };
 
+function nearestByTime<T>(items: T[], getTime: (item: T) => number, targetTime: number): T | null {
+    if (!items.length) return null;
+    let best = items[0];
+    let bestDiff = Math.abs(getTime(items[0]) - targetTime);
+    for (const item of items) {
+        const diff = Math.abs(getTime(item) - targetTime);
+        if (diff < bestDiff) { best = item; bestDiff = diff; }
+    }
+    return best;
+}
+
+const IntegratedTrendChart = ({
+    weightPoints,
+    painWeekly,
+    kmWeekly,
+    events,
+    isDark = false,
+}: {
+    weightPoints: { date: string; value: number }[];
+    painWeekly: WeeklyBucket[];
+    kmWeekly: WeeklyBucket[];
+    events: HealthEvent[];
+    isDark?: boolean;
+}) => {
+    const [showTable, setShowTable] = useState(false);
+    const [hoverTime, setHoverTime] = useState<number | null>(null);
+    const palette = chartPalette(isDark);
+
+    const allDates = [
+        ...weightPoints.map(p => p.date),
+        ...painWeekly.map(b => b.weekStart),
+        ...kmWeekly.map(b => b.weekStart),
+        ...events.map(e => e.date),
+    ];
+
+    if (allDates.length < 2) {
+        return (
+            <div className="flex h-[260px] items-center justify-center rounded-2xl border border-dashed border-border-standard bg-background p-4 text-center text-sm font-semibold text-on-surface-variant">
+                Faltam registros de peso, dor ou caminhada neste período para montar o gráfico integrado.
+            </div>
+        );
+    }
+
+    const todayStr = formatLocalISO(new Date());
+    const minDate = allDates.reduce((a, b) => (a < b ? a : b));
+    const maxDate = [...allDates, todayStr].reduce((a, b) => (a > b ? a : b));
+    const minTime = parseLocalDate(minDate).getTime();
+    const maxTime = parseLocalDate(maxDate).getTime();
+    const totalSpan = Math.max(1, maxTime - minTime);
+
+    const width = 720;
+    const panelH = 92;
+    const panelGap = 22;
+    const padTop = 10;
+    const padBottom = 26;
+    const padLeft = 46;
+    const padRight = 18;
+    const plotWidth = width - padLeft - padRight;
+    const panelTops = [padTop, padTop + panelH + panelGap, padTop + 2 * (panelH + panelGap)];
+    const totalHeight = padTop + panelH * 3 + panelGap * 2 + padBottom;
+
+    const xForTime = (t: number) => padLeft + ((t - minTime) / totalSpan) * plotWidth;
+    const xForDate = (d: string) => xForTime(parseLocalDate(d).getTime());
+
+    // Painel 1: peso (media movel de 7 dias)
+    const weightValues = weightPoints.map(p => p.value);
+    const weightMin = weightValues.length ? Math.floor(Math.min(...weightValues) - 0.5) : 0;
+    const weightMax = weightValues.length ? Math.ceil(Math.max(...weightValues) + 0.5) : 1;
+    const weightRange = Math.max(0.5, weightMax - weightMin);
+    const yForWeight = (v: number) => panelTops[0] + ((weightMax - v) / weightRange) * panelH;
+    const weightPath = weightPoints.map(p => `${xForDate(p.date)},${yForWeight(p.value)}`).join(' ');
+
+    // Painel 2: dor media semanal (escala fixa 0-10)
+    const yForPain = (v: number) => panelTops[1] + ((10 - v) / 10) * panelH;
+    const painPath = painWeekly.map(b => `${xForDate(b.weekStart)},${yForPain(b.average)}`).join(' ');
+
+    // Painel 3: km caminhados por semana (barras)
+    const maxKmWeek = Math.max(1, ...kmWeekly.map(b => b.sum));
+    const yForKm = (v: number) => panelTops[2] + panelH - (v / maxKmWeek) * panelH;
+    const kmBarWidth = Math.min(24, (plotWidth / Math.max(1, kmWeekly.length)) * 0.6);
+
+    const updateHoverFromClientX = (clientX: number, containerRect: DOMRect) => {
+        if (containerRect.width === 0) return;
+        const ratioX = (clientX - containerRect.left) / containerRect.width;
+        const xInSvg = ratioX * width;
+        const ratio = (xInSvg - padLeft) / plotWidth;
+        const time = minTime + Math.max(0, Math.min(1, ratio)) * totalSpan;
+        setHoverTime(time);
+    };
+    const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => updateHoverFromClientX(e.clientX, e.currentTarget.getBoundingClientRect());
+    const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+        const touch = e.touches[0];
+        if (touch) updateHoverFromClientX(touch.clientX, e.currentTarget.getBoundingClientRect());
+    };
+    const handleLeave = () => setHoverTime(null);
+
+    const hoverWeight = hoverTime !== null ? nearestByTime(weightPoints, p => parseLocalDate(p.date).getTime(), hoverTime) : null;
+    const hoverPain = hoverTime !== null ? nearestByTime(painWeekly, b => parseLocalDate(b.weekStart).getTime(), hoverTime) : null;
+    const hoverKm = hoverTime !== null ? nearestByTime(kmWeekly, b => parseLocalDate(b.weekStart).getTime(), hoverTime) : null;
+    const hoverDateLabel = hoverTime !== null ? formatShortDate(formatLocalISO(new Date(hoverTime))) : null;
+    const hoverX = hoverTime !== null ? xForTime(hoverTime) : null;
+
+    if (showTable) {
+        const weekStarts = [...new Set([...painWeekly.map(b => b.weekStart), ...kmWeekly.map(b => b.weekStart)])].sort();
+        return (
+            <div className="relative rounded-2xl border border-border-subtle bg-background p-4">
+                <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(false)} />
+                <p className={`${labelClasses} mb-2`}>Gráfico integrado — por semana</p>
+                <ChartDataTable
+                    columns={['Semana', 'Dor média', 'Km na semana']}
+                    rows={weekStarts.map(ws => [
+                        formatShortDate(ws),
+                        painWeekly.find(b => b.weekStart === ws)?.average.toFixed(1) ?? '-',
+                        kmWeekly.find(b => b.weekStart === ws)?.sum.toFixed(1) ?? '-',
+                    ])}
+                />
+            </div>
+        );
+    }
+
+    return (
+        <div className="relative rounded-2xl border border-border-subtle bg-background p-4">
+            <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(true)} />
+            {hoverTime !== null && hoverX !== null && (
+                <ChartTooltip leftPercent={(hoverX / width) * 100}>
+                    <div>{hoverDateLabel}</div>
+                    {hoverWeight && <div>Peso (méd. 7d): {hoverWeight.value.toFixed(1)} kg</div>}
+                    {hoverPain && <div>Dor média sem.: {hoverPain.average.toFixed(1)}</div>}
+                    {hoverKm && <div>Km na semana: {hoverKm.sum.toFixed(1)} km</div>}
+                </ChartTooltip>
+            )}
+            <div
+                className="touch-none"
+                onMouseMove={handleMouseMove}
+                onMouseLeave={handleLeave}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleLeave}
+            >
+                <svg viewBox={`0 0 ${width} ${totalHeight}`} className="w-full overflow-visible" role="img" aria-label="Gráfico integrado de peso, dor e caminhada">
+                    {events.map(event => (
+                        <g key={event.id}>
+                            <line x1={xForDate(event.date)} x2={xForDate(event.date)} y1={padTop} y2={totalHeight - padBottom} stroke={palette.text} strokeOpacity="0.35" strokeWidth="1.5" strokeDasharray="4 4" />
+                            <circle cx={xForDate(event.date)} cy={padTop} r="3" fill={palette.text} opacity="0.6" />
+                            <title>{`${event.label} — ${formatShortDate(event.date)}`}</title>
+                        </g>
+                    ))}
+                    {hoverX !== null && (
+                        <line x1={hoverX} x2={hoverX} y1={padTop} y2={totalHeight - padBottom} stroke={palette.line} strokeOpacity="0.4" strokeWidth="1.5" />
+                    )}
+
+                    <text x={padLeft} y={panelTops[0] - 2} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="start">PESO — MÉDIA 7D (KG)</text>
+                    <rect x={padLeft} y={panelTops[0]} width={plotWidth} height={panelH} fill={palette.bg} rx="8" />
+                    {weightPoints.length >= 2 && <polyline points={weightPath} fill="none" stroke={palette.line} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
+                    <text x={padLeft - 6} y={panelTops[0] + 8} fontSize="9" fill={palette.text} textAnchor="end">{weightMax}</text>
+                    <text x={padLeft - 6} y={panelTops[0] + panelH} fontSize="9" fill={palette.text} textAnchor="end">{weightMin}</text>
+
+                    <text x={padLeft} y={panelTops[1] - 2} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="start">DOR MÉDIA SEMANAL (0–10)</text>
+                    <rect x={padLeft} y={panelTops[1]} width={plotWidth} height={panelH} fill={palette.bg} rx="8" />
+                    {painWeekly.length >= 2 && <polyline points={painPath} fill="none" stroke={palette.rose} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
+                    {painWeekly.map(b => <circle key={b.weekStart} cx={xForDate(b.weekStart)} cy={yForPain(b.average)} r="3.5" fill={palette.point} stroke={palette.rose} strokeWidth="2" />)}
+                    <text x={padLeft - 6} y={panelTops[1] + 8} fontSize="9" fill={palette.text} textAnchor="end">10</text>
+                    <text x={padLeft - 6} y={panelTops[1] + panelH} fontSize="9" fill={palette.text} textAnchor="end">0</text>
+
+                    <text x={padLeft} y={panelTops[2] - 2} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="start">KM CAMINHADOS POR SEMANA</text>
+                    <rect x={padLeft} y={panelTops[2]} width={plotWidth} height={panelH} fill={palette.bg} rx="8" />
+                    {kmWeekly.map(b => {
+                        const x = xForDate(b.weekStart) - kmBarWidth / 2;
+                        const y = yForKm(b.sum);
+                        const h = Math.max(0, panelTops[2] + panelH - y);
+                        return <rect key={b.weekStart} x={x} y={y} width={kmBarWidth} height={h} rx="3" fill={palette.emerald} />;
+                    })}
+                    <text x={padLeft - 6} y={panelTops[2] + 8} fontSize="9" fill={palette.text} textAnchor="end">{maxKmWeek.toFixed(0)}</text>
+                    <text x={padLeft - 6} y={panelTops[2] + panelH} fontSize="9" fill={palette.text} textAnchor="end">0</text>
+
+                    <text x={padLeft} y={totalHeight - 8} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="start">{formatShortDate(minDate)}</text>
+                    <text x={width - padRight} y={totalHeight - 8} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="end">{formatShortDate(maxDate)}</text>
+                </svg>
+            </div>
+        </div>
+    );
+};
+
 const HealthView: React.FC<HealthViewProps> = ({
     weights, settings, onUpdateSettings, onAddWeight, onDeleteWeight,
     waist, onAddWaist, onDeleteWaist,
+    events, onAddEvent, onDeleteEvent, latestWeeklySummary,
     exerciseLogs, onSaveExerciseLog, exams, onAddExam, onDeleteExam, onUpdateExam,
     telegramReminders, onSaveTelegramReminder, onDeleteTelegramReminder,
     isDark = false
@@ -479,6 +899,10 @@ const HealthView: React.FC<HealthViewProps> = ({
     const [activeTab, setActiveTab] = useState<'telemetry' | 'archive'>('telemetry');
     const [weightInput, setWeightInput] = useState<string>('');
     const [waistInput, setWaistInput] = useState<string>('');
+    const [integratedRangeDays, setIntegratedRangeDays] = useState<number | null>(90);
+    const [eventDate, setEventDate] = useState<string>(formatDateLocalISO(new Date()));
+    const [eventType, setEventType] = useState<HealthEventType>('fisioterapia');
+    const [eventLabel, setEventLabel] = useState<string>('');
     const [walkDistanceInput, setWalkDistanceInput] = useState<string>('');
     const [walkMinutesInput, setWalkMinutesInput] = useState<string>('');
     const [walkStepsInput, setWalkStepsInput] = useState<string>('');
@@ -501,11 +925,49 @@ const HealthView: React.FC<HealthViewProps> = ({
 
     const sortedWeights = useMemo(() => [...weights].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [weights]);
     const currentWeight = sortedWeights[0]?.weight || 0;
-    const previousWeight = sortedWeights[1]?.weight || currentWeight;
-    const weightDelta = currentWeight - previousWeight;
     const targetDelta = settings.targetWeight && currentWeight ? currentWeight - settings.targetWeight : null;
+    const weightHeadline = useMemo(
+        () => computeWeightHeadline(weights.map(w => ({ date: w.date, value: w.weight }))),
+        [weights]
+    );
 
     const sortedWaist = useMemo(() => [...waist].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [waist]);
+
+    const integratedRangeStart = useMemo(
+        () => (integratedRangeDays === null ? null : addDays(formatDateLocalISO(new Date()), -integratedRangeDays)),
+        [integratedRangeDays]
+    );
+    const weightForIntegrated = useMemo(() => {
+        const filtered = weights.filter(w => !integratedRangeStart || w.date >= integratedRangeStart);
+        return movingAverage(filtered.map(w => ({ date: w.date, value: w.weight })), 7).map(p => ({ date: p.date, value: p.average as number }));
+    }, [weights, integratedRangeStart]);
+    const painWeeklyForIntegrated = useMemo(() => {
+        const dailyPain = exerciseLogs
+            .filter(l => (!integratedRangeStart || l.id >= integratedRangeStart) && (l.pain?.morning !== undefined || l.pain?.evening !== undefined))
+            .map(l => {
+                const vals = [l.pain?.morning, l.pain?.evening].filter((v): v is number => v !== undefined);
+                return { date: l.id, value: vals.reduce((s, v) => s + v, 0) / vals.length };
+            });
+        return weeklyAggregate(dailyPain);
+    }, [exerciseLogs, integratedRangeStart]);
+    const kmWeeklyForIntegrated = useMemo(() => {
+        const dailyKm = exerciseLogs
+            .filter(l => !integratedRangeStart || l.id >= integratedRangeStart)
+            .map(l => ({ date: l.id, value: sumWalkBlocksKm(l) }))
+            .filter(p => p.value > 0);
+        return weeklyAggregate(dailyKm);
+    }, [exerciseLogs, integratedRangeStart]);
+    const eventsForIntegrated = useMemo(
+        () => [...events].filter(e => !integratedRangeStart || e.date >= integratedRangeStart).sort((a, b) => a.date.localeCompare(b.date)),
+        [events, integratedRangeStart]
+    );
+
+    const handleAddEvent = async () => {
+        const label = eventLabel.trim();
+        if (!label || !eventDate) return;
+        await onAddEvent({ date: eventDate, type: eventType, label });
+        setEventLabel('');
+    };
 
     const todayLog = useMemo(() => exerciseLogs.find(l => l.id === selectedDate) || { id: selectedDate }, [exerciseLogs, selectedDate]);
     const selectedDateLabel = formatDate(selectedDate);
@@ -520,17 +982,109 @@ const HealthView: React.FC<HealthViewProps> = ({
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedDate, todayLog.meds, previousMedsLog]);
-    const weightTrendPoints = useMemo<NumericTrendPoint[]>(() =>
-        [...weights]
-            .sort((a, b) => a.date.localeCompare(b.date))
-            .slice(-20)
-            .map(weight => ({
-                id: weight.id,
-                label: formatShortDate(weight.date),
-                value: weight.weight,
-            })),
-        [weights]
-    );
+    const weightMASeries = useMemo(() => {
+        const sorted = [...weights].sort((a, b) => a.date.localeCompare(b.date));
+        return movingAverage(sorted.map(w => ({ date: w.date, value: w.weight })), 7)
+            .map(p => ({ date: p.date, value: p.average as number }));
+    }, [weights]);
+    const weightTrendPoints = useMemo(() => weightMASeries.slice(-60), [weightMASeries]);
+
+    const ritmoAlvoKgSemana = settings.ritmoAlvoKgSemana ?? 0.6;
+    const marcos = useMemo(() => (settings.marcos && settings.marcos.length ? settings.marcos : [92, 85.5, 80]), [settings.marcos]);
+    const lastMAPoint = weightMASeries[weightMASeries.length - 1] || null;
+
+    const trajectoryPoints = useMemo(() => {
+        if (!lastMAPoint) return [];
+        const slopePerDay = -ritmoAlvoKgSemana / 7;
+        const weeks = 16;
+        return Array.from({ length: weeks + 1 }, (_, w) => ({
+            date: addDays(lastMAPoint.date, w * 7),
+            value: lastMAPoint.value + slopePerDay * w * 7,
+        }));
+    }, [lastMAPoint, ritmoAlvoKgSemana]);
+
+    const recentTrendRegression = useMemo(() => {
+        if (!lastMAPoint) return null;
+        const cutoff = addDays(lastMAPoint.date, -28);
+        const recent = weightMASeries.filter(p => p.date >= cutoff);
+        if (recent.length < 2) return null;
+        return linearRegression(recent.map(p => ({ x: daysSinceEpoch(p.date), y: p.value })));
+    }, [weightMASeries, lastMAPoint]);
+
+    const trendSlopePerDay = recentTrendRegression?.slope ?? 0;
+    const trendIsDecreasing = trendSlopePerDay < -0.001;
+
+    const trendPoints = useMemo(() => {
+        if (!lastMAPoint || !recentTrendRegression) return [];
+        const weeks = 16;
+        const startDay = daysSinceEpoch(lastMAPoint.date);
+        return Array.from({ length: weeks + 1 }, (_, w) => {
+            const day = startDay + w * 7;
+            return {
+                date: addDays(lastMAPoint.date, w * 7),
+                value: recentTrendRegression.intercept + recentTrendRegression.slope * day,
+            };
+        });
+    }, [lastMAPoint, recentTrendRegression]);
+
+    const weightProjectionLines = useMemo(() => {
+        const lines: { key: string; label: string; color: 'trajectory' | 'trendLine'; points: { date: string; value: number }[] }[] = [];
+        if (trajectoryPoints.length > 1) lines.push({ key: 'trajectory', label: 'trajetória alvo', color: 'trajectory', points: trajectoryPoints });
+        if (trendIsDecreasing && trendPoints.length > 1) lines.push({ key: 'trend', label: 'tendência real', color: 'trendLine', points: trendPoints });
+        return lines;
+    }, [trajectoryPoints, trendPoints, trendIsDecreasing]);
+
+    const dailyPainSeries = useMemo(() => {
+        return exerciseLogs
+            .filter(l => l.pain?.morning !== undefined || l.pain?.evening !== undefined)
+            .map(l => {
+                const vals = [l.pain?.morning, l.pain?.evening].filter((v): v is number => v !== undefined);
+                return { log: l, pain: vals.reduce((s, v) => s + v, 0) / vals.length };
+            });
+    }, [exerciseLogs]);
+
+    const correlationRows = useMemo(() => {
+        const withWithoutSplit = (predicate: (log: ExerciseLog) => boolean): GroupComparison => {
+            const withValues: number[] = [];
+            const withoutValues: number[] = [];
+            dailyPainSeries.forEach(({ log, pain }) => (predicate(log) ? withValues : withoutValues).push(pain));
+            return compareGroups(withValues, withoutValues, 5);
+        };
+
+        const rows: { key: string; label: string; comparison: GroupComparison }[] = [
+            { key: 'strength', label: 'treino de força', comparison: withWithoutSplit(l => !!l.strength?.done) },
+            { key: 'pilates', label: 'pilates', comparison: withWithoutSplit(l => !!l.therapy?.includes('pilates')) },
+            { key: 'fisioterapia', label: 'fisioterapia', comparison: withWithoutSplit(l => !!l.therapy?.includes('fisioterapia')) },
+            { key: 'walk6km', label: 'caminhada acima de 6 km', comparison: withWithoutSplit(l => sumWalkBlocksKm(l) > 6) },
+            { key: 'pregabalina', label: 'uso de pregabalina', comparison: withWithoutSplit(l => !!l.meds?.pregabalina) },
+            { key: 'wokeInPain', label: 'acordar com dor', comparison: withWithoutSplit(l => !!l.sleepQuality?.wokeInPain) },
+        ];
+
+        TRIGGER_TYPES.forEach(trigger => {
+            if (exerciseLogs.some(l => l.triggers?.types?.includes(trigger.value))) {
+                rows.push({
+                    key: `trigger_${trigger.value}`,
+                    label: `gatilho "${trigger.label.toLowerCase()}"`,
+                    comparison: withWithoutSplit(l => !!l.triggers?.types?.includes(trigger.value)),
+                });
+            }
+        });
+
+        return rows;
+    }, [dailyPainSeries, exerciseLogs]);
+
+    const milestoneDates = useMemo(() => {
+        if (!lastMAPoint) return [];
+        return marcos.map(target => ({
+            target,
+            dateStr: trendIsDecreasing
+                ? (() => {
+                    const days = daysToReachTarget(lastMAPoint.value, trendSlopePerDay, target);
+                    return days !== null ? addDays(lastMAPoint.date, days) : null;
+                })()
+                : null,
+        }));
+    }, [marcos, lastMAPoint, trendSlopePerDay, trendIsDecreasing]);
     const painTrendPoints = useMemo<PainTrendPoint[]>(() =>
         [...exerciseLogs]
             .filter(log => log.pain?.morning !== undefined || log.pain?.evening !== undefined)
@@ -773,9 +1327,19 @@ const HealthView: React.FC<HealthViewProps> = ({
                     <div className="grid grid-cols-1 gap-4 sm:max-w-2xl sm:grid-cols-2">
                         <MetricCard
                             label="Peso atual"
-                            value={currentWeight ? currentWeight.toFixed(1) : '--'}
+                            value={weightHeadline ? weightHeadline.displayValue.toFixed(1) : '--'}
                             unit="kg"
-                            helper={weightDelta !== 0 ? `${weightDelta > 0 ? '+' : ''}${weightDelta.toFixed(1)} kg desde o registro anterior` : 'Sem variação no último registro'}
+                            helper={weightHeadline ? (
+                                <>
+                                    {weightHeadline.isAverage
+                                        ? (weightHeadline.deltaVsWeekAgo !== null
+                                            ? `${weightHeadline.deltaVsWeekAgo > 0 ? '+' : ''}${weightHeadline.deltaVsWeekAgo.toFixed(1)} kg vs. média de 7 dias atrás`
+                                            : 'Ainda sem média de 7 dias atrás para comparar')
+                                        : `Faltam ${4 - weightHeadline.windowCount} registro(s) na semana para calcular a média de 7 dias`}
+                                    <br />
+                                    <span className="opacity-70">Último: {weightHeadline.latestRaw.toFixed(1)} kg em {formatShortDate(weightHeadline.latestRawDate)}</span>
+                                </>
+                            ) : 'Nenhum registro de peso ainda.'}
                             icon="scale"
                         />
                         <MetricCard
@@ -796,7 +1360,116 @@ const HealthView: React.FC<HealthViewProps> = ({
 
             <main className="mx-auto max-w-[1440px] px-6 py-6 lg:px-8">
                 {activeTab === 'telemetry' ? (
-                    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+                    <>
+                    {latestWeeklySummary && (
+                        <div className="mb-6 rounded-2xl border border-border-subtle bg-white p-5 shadow-card">
+                            <p className={labelClasses}>Resumo semanal · {formatShortDate(latestWeeklySummary.weekStart)} a {formatShortDate(latestWeeklySummary.weekEnd)}</p>
+                            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+                                <div>
+                                    <p className="text-[10px] font-semibold uppercase text-on-surface-variant">Peso médio</p>
+                                    <p className="text-sm font-bold text-on-surface">
+                                        {latestWeeklySummary.avgWeight !== null ? `${latestWeeklySummary.avgWeight.toFixed(1)} kg` : '—'}
+                                        {latestWeeklySummary.weightDelta !== null && (
+                                            <span className="ml-1 text-xs font-semibold text-on-surface-variant">
+                                                ({latestWeeklySummary.weightDelta > 0 ? '+' : ''}{latestWeeklySummary.weightDelta.toFixed(1)})
+                                            </span>
+                                        )}
+                                    </p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] font-semibold uppercase text-on-surface-variant">Cintura</p>
+                                    <p className="text-sm font-bold text-on-surface">{latestWeeklySummary.waistCm !== null ? `${latestWeeklySummary.waistCm.toFixed(1)} cm` : '—'}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] font-semibold uppercase text-on-surface-variant">Dor manhã/noite</p>
+                                    <p className="text-sm font-bold text-on-surface">
+                                        {latestWeeklySummary.avgPainMorning?.toFixed(1) ?? '-'} / {latestWeeklySummary.avgPainEvening?.toFixed(1) ?? '-'}
+                                    </p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] font-semibold uppercase text-on-surface-variant">Km caminhados</p>
+                                    <p className="text-sm font-bold text-on-surface">{latestWeeklySummary.kmTotal.toFixed(1)} km</p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] font-semibold uppercase text-on-surface-variant">Força</p>
+                                    <p className="text-sm font-bold text-on-surface">{latestWeeklySummary.strengthSessions}/{latestWeeklySummary.strengthGoal}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] font-semibold uppercase text-on-surface-variant">Cardápio seguido</p>
+                                    <p className="text-sm font-bold text-on-surface">{latestWeeklySummary.dietDays} dias</p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] font-semibold uppercase text-on-surface-variant">Eventos</p>
+                                    <p className="text-sm font-bold text-on-surface">{latestWeeklySummary.events.length}</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    <HealthSection title="Gráfico integrado" eyebrow="Peso, dor e caminhada juntos">
+                        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                            <p className="max-w-xl text-xs font-medium leading-relaxed text-on-surface-variant">
+                                Três painéis empilhados com o mesmo eixo de tempo — nunca em um único gráfico de eixo duplo, para não sugerir correlações falsas.
+                            </p>
+                            <div className="flex rounded-xl border border-border-standard bg-white p-1">
+                                {[{ v: 30, l: '30d' }, { v: 90, l: '90d' }, { v: 180, l: '180d' }, { v: null as number | null, l: 'Tudo' }].map(opt => (
+                                    <button
+                                        key={opt.l}
+                                        type="button"
+                                        onClick={() => setIntegratedRangeDays(opt.v)}
+                                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${integratedRangeDays === opt.v ? 'bg-primary-container text-white' : 'text-on-surface-variant hover:text-primary-container'}`}
+                                    >
+                                        {opt.l}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <IntegratedTrendChart
+                            weightPoints={weightForIntegrated}
+                            painWeekly={painWeeklyForIntegrated}
+                            kmWeekly={kmWeeklyForIntegrated}
+                            events={eventsForIntegrated}
+                            isDark={isDark}
+                        />
+                        <div className="mt-5 rounded-2xl border border-border-subtle bg-background p-4">
+                            <p className={`${labelClasses} mb-3`}>Marcador de evento</p>
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[140px_180px_1fr_auto]">
+                                <label className="block">
+                                    <span className={labelClasses}>Data</span>
+                                    <input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} className={inputClasses} />
+                                </label>
+                                <label className="block">
+                                    <span className={labelClasses}>Tipo</span>
+                                    <select value={eventType} onChange={e => setEventType(e.target.value as HealthEventType)} className={inputClasses}>
+                                        {HEALTH_EVENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                    </select>
+                                </label>
+                                <label className="block">
+                                    <span className={labelClasses}>Rótulo</span>
+                                    <input type="text" value={eventLabel} onChange={e => setEventLabel(e.target.value)} placeholder="Ex: Início da fisioterapia" className={inputClasses} />
+                                </label>
+                                <button
+                                    type="button"
+                                    onClick={handleAddEvent}
+                                    disabled={!eventLabel.trim()}
+                                    className="mt-5 flex items-center justify-center gap-2 rounded-xl bg-primary-container px-4 py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                    <Icon name="plus" className="h-4 w-4" />
+                                    Adicionar
+                                </button>
+                            </div>
+                            {eventsForIntegrated.length > 0 && (
+                                <div className="mt-4 flex flex-wrap gap-2">
+                                    {eventsForIntegrated.map(event => (
+                                        <span key={event.id} className="inline-flex items-center gap-1.5 rounded-full border border-border-standard bg-white px-2.5 py-1 text-[10px] font-semibold text-on-surface-variant">
+                                            {formatShortDate(event.date)} · {event.label}
+                                            <button type="button" onClick={() => onDeleteEvent(event.id)} className="text-on-surface-variant/60 hover:text-error" aria-label="Remover evento">×</button>
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </HealthSection>
+                    <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
                         <div className="space-y-6">
                             <HealthSection title="Registro de peso" eyebrow="Entrada manual">
                                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr]">
@@ -1037,7 +1710,7 @@ const HealthView: React.FC<HealthViewProps> = ({
 
                                 <div className="mt-5">
                                     <p className={`${labelClasses} mb-2`}>Últimos 14 dias</p>
-                                    <WalkDailyChart days={walkChartDays} minimumKm={walkingMinimumKm} idealKm={walkingIdealKm} />
+                                    <WalkDailyChart days={walkChartDays} minimumKm={walkingMinimumKm} idealKm={walkingIdealKm} isDark={isDark} />
                                 </div>
                             </HealthSection>
 
@@ -1262,18 +1935,63 @@ const HealthView: React.FC<HealthViewProps> = ({
                             </HealthSection>
 
                             <HealthSection title="Tendência de dor lombar" eyebrow="Histórico do Telegram e painel">
-                                <PainTrendChart points={painTrendPoints} />
+                                <PainTrendChart points={painTrendPoints} isDark={isDark} />
                                 <p className="mt-3 text-xs font-semibold leading-relaxed text-on-surface-variant">
                                     Os pontos de noite incluem respostas do check-in no Telegram. Registros manuais feitos no painel aparecem junto no mesmo histórico.
                                 </p>
                             </HealthSection>
 
+                            <HealthSection title="O que anda junto" eyebrow="Painel de correlação">
+                                {correlationRows.length > 0 ? (
+                                    <div className="space-y-2">
+                                        {correlationRows.map(row => (
+                                            <div key={row.key} className="rounded-xl border border-border-subtle bg-background p-3 text-sm">
+                                                {row.comparison.suppressed ? (
+                                                    <p className="text-on-surface-variant">
+                                                        Dor com <strong className="text-on-surface">{row.label}</strong>: dados insuficientes ainda
+                                                        <span className="text-xs"> ({row.comparison.withN} vs. {row.comparison.withoutN} dias — mínimo 5 em cada grupo)</span>
+                                                    </p>
+                                                ) : (
+                                                    <p className="text-on-surface-variant">
+                                                        Dor média em dias <strong className="text-on-surface">com</strong> {row.label}: <strong className="text-on-surface">{row.comparison.withAvg?.toFixed(1)}</strong>
+                                                        {' · '}<strong className="text-on-surface">sem</strong>: <strong className="text-on-surface">{row.comparison.withoutAvg?.toFixed(1)}</strong>
+                                                        <span className="text-xs"> ({row.comparison.withN} vs. {row.comparison.withoutN} dias)</span>
+                                                    </p>
+                                                )}
+                                            </div>
+                                        ))}
+                                        <p className="pt-1 text-xs font-semibold italic text-on-surface-variant">Associação não é causa.</p>
+                                    </div>
+                                ) : (
+                                    <p className="text-xs font-semibold text-on-surface-variant">
+                                        Ainda não há registros de dor suficientes para calcular comparações.
+                                    </p>
+                                )}
+                            </HealthSection>
+
                             <HealthSection title="Tendência de peso" eyebrow="Biometria histórica">
-                                <WeightTrendChart points={weightTrendPoints} targetWeight={settings.targetWeight} />
+                                <WeightTrendChart points={weightTrendPoints} targetWeight={settings.targetWeight} projectionLines={weightProjectionLines} isDark={isDark} />
                                 {targetDelta !== null && (
                                     <p className="mt-3 text-xs font-semibold text-on-surface-variant">
                                         Distância até a meta: {targetDelta > 0 ? '+' : ''}{targetDelta.toFixed(1)} kg.
                                     </p>
+                                )}
+                                {!trendIsDecreasing && weightMASeries.length >= 4 && (
+                                    <p className="mt-2 text-xs font-semibold text-on-surface-variant">
+                                        Sem tendência de queda nas últimas 4 semanas — os marcos abaixo não têm data estimada.
+                                    </p>
+                                )}
+                                {milestoneDates.length > 0 && (
+                                    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                        {milestoneDates.map(({ target, dateStr }) => (
+                                            <div key={target} className="rounded-xl border border-border-subtle bg-background p-3">
+                                                <span className={labelClasses}>{target} kg</span>
+                                                <div className="mt-1 text-sm font-bold text-on-surface">
+                                                    {dateStr ? formatDate(dateStr) : 'Sem tendência de queda'}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
                                 )}
                             </HealthSection>
 
@@ -1334,6 +2052,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                             </HealthSection>
                         </div>
                     </div>
+                    </>
                 ) : (
                     <HealthSection title="Arquivo médico" eyebrow="Exames e consultas">
                         <div className="rounded-2xl border border-border-subtle bg-background p-5">

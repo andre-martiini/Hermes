@@ -4,7 +4,7 @@ import {
   Tarefa, Status, EntregaInstitucional, AtividadeRealizada,
   Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento,
   BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings,
-  FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight, HealthWaist,
+  FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight, HealthWaist, HealthEvent, HealthWeeklySummary,
   HealthSettings, ExerciseLog, ExerciseSettings, HermesNotification, AppSettings,
   formatDate, formatDateLocalISO,
   GoogleCalendarEvent,
@@ -1013,6 +1013,8 @@ const App: React.FC = () => {
   // Health State
   const [healthWeights, setHealthWeights] = useState<HealthWeight[]>([]);
   const [healthWaist, setHealthWaist] = useState<HealthWaist[]>([]);
+  const [healthEvents, setHealthEvents] = useState<HealthEvent[]>([]);
+  const [healthWeeklySummaries, setHealthWeeklySummaries] = useState<HealthWeeklySummary[]>([]);
   const [healthSettings, setHealthSettings] = useState<HealthSettings>({ targetWeight: 0 });
   const [exerciseLogs, setExerciseLogs] = useState<ExerciseLog[]>([]);
   const [exerciseSettings, setExerciseSettings] = useState<ExerciseSettings>({});
@@ -1270,6 +1272,12 @@ const App: React.FC = () => {
     const unsubHealthWaist = onSnapshot(collection(db, 'health_waist'), (snapshot) => {
       setHealthWaist(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HealthWaist)));
     }, handleSnapshotError('health_waist'));
+    const unsubHealthEvents = onSnapshot(collection(db, 'health_events'), (snapshot) => {
+      setHealthEvents(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HealthEvent)));
+    }, handleSnapshotError('health_events'));
+    const unsubHealthWeeklySummaries = onSnapshot(collection(db, 'health_weekly_summaries'), (snapshot) => {
+      setHealthWeeklySummaries(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HealthWeeklySummary)));
+    }, handleSnapshotError('health_weekly_summaries'));
     const unsubHealthSettings = onSnapshot(doc(db, 'health_settings', 'config'), (doc) => {
       if (doc.exists()) setHealthSettings(doc.data() as HealthSettings);
     }, handleSnapshotError('health_settings/config'));
@@ -1307,6 +1315,8 @@ const App: React.FC = () => {
       unsubProjects();
       unsubHealthWeights();
       unsubHealthWaist();
+      unsubHealthEvents();
+      unsubHealthWeeklySummaries();
       unsubHealthSettings();
       unsubExerciseLogs();
       unsubExerciseSettings();
@@ -3634,6 +3644,19 @@ const App: React.FC = () => {
       showToast("Erro ao remover registro.", "error");
     }
   };
+  const handleAddHealthEvent = async (event: Omit<HealthEvent, 'id'>) => {
+    await addDoc(collection(db, 'health_events'), event);
+    showToast("Evento adicionado à linha do tempo.", "success");
+  };
+  const handleDeleteHealthEvent = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'health_events', id));
+      showToast("Evento removido.", "info");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao remover evento.", "error");
+    }
+  };
   const handleUpdateFinanceGoal = async (goal: FinanceGoal) => {
     try {
       await updateDoc(doc(db, 'finance_goals', goal.id), goal as any);
@@ -5763,6 +5786,10 @@ const App: React.FC = () => {
                     waist={healthWaist}
                     onAddWaist={handleAddHealthWaist}
                     onDeleteWaist={handleDeleteHealthWaist}
+                    events={healthEvents}
+                    onAddEvent={handleAddHealthEvent}
+                    onDeleteEvent={handleDeleteHealthEvent}
+                    latestWeeklySummary={[...healthWeeklySummaries].sort((a, b) => b.id.localeCompare(a.id))[0]}
                     exerciseLogs={exerciseLogs}
                     exerciseSettings={exerciseSettings}
                     onSaveExerciseLog={handleSaveExerciseLog}

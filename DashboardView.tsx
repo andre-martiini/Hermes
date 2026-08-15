@@ -7,6 +7,7 @@ import {
     formatDateLocalISO, sumWalkBlocksKm
 } from './types';
 import { buildDiaryEmailNote, buildDiaryGenericNote, buildDiaryWhatsappNote, DiaryWhatsappActionItem } from './src/utils/diaryEntries';
+import { computeWeightHeadline } from './src/utils/healthAnalytics';
 
 interface DashboardViewProps {
     tarefas: Tarefa[];
@@ -764,8 +765,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     // --- HEALTH LOGIC ---
     const sortedWeights = useMemo(() => [...healthWeights].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [healthWeights]);
     const currentWeight = sortedWeights[0]?.weight || 0;
-    const previousWeight = sortedWeights[1]?.weight || currentWeight;
-    const weightDelta = previousWeight > 0 && currentWeight > 0 ? currentWeight - previousWeight : 0;
+    const weightHeadline = useMemo(
+        () => computeWeightHeadline(healthWeights.map(w => ({ date: w.date, value: w.weight }))),
+        [healthWeights]
+    );
 
     const targetWeight = healthSettings?.targetWeight || 0;
     const targetDelta = (targetWeight > 0 && currentWeight > 0) ? currentWeight - targetWeight : null;
@@ -1070,21 +1073,28 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                             }`}>
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Massa Corporal</span>
+                                        <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Massa Corporal (média 7d)</span>
                                         <div className="text-lg font-bold font-mono mt-0.5 flex items-baseline gap-1">
-                                            {currentWeight > 0 ? currentWeight.toFixed(1) : '--'}
+                                            {weightHeadline ? weightHeadline.displayValue.toFixed(1) : '--'}
                                             <span className="text-[10px] text-slate-400 font-sans">KG</span>
                                         </div>
+                                        {weightHeadline && (
+                                            <div className="text-[9px] text-slate-400 font-mono mt-0.5">
+                                                Último: {weightHeadline.latestRaw.toFixed(1)} kg
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div className="text-right">
-                                        <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Variação</span>
+                                        <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Variação (7d)</span>
                                         <div className={`text-xs font-bold font-mono mt-0.5 ${
-                                            weightDelta > 0 ? 'text-amber-500' : weightDelta < 0 ? 'text-emerald-500' : 'text-slate-400'
+                                            (weightHeadline?.deltaVsWeekAgo ?? 0) > 0 ? 'text-amber-500' : (weightHeadline?.deltaVsWeekAgo ?? 0) < 0 ? 'text-emerald-500' : 'text-slate-400'
                                         }`}>
-                                            {currentWeight > 0 && previousWeight > 0 && currentWeight !== previousWeight
-                                                ? `${weightDelta > 0 ? '+' : ''}${weightDelta.toFixed(1)} kg`
-                                                : 'Estável'}
+                                            {weightHeadline?.deltaVsWeekAgo !== null && weightHeadline?.deltaVsWeekAgo !== undefined
+                                                ? `${weightHeadline.deltaVsWeekAgo > 0 ? '+' : ''}${weightHeadline.deltaVsWeekAgo.toFixed(1)} kg`
+                                                : weightHeadline && !weightHeadline.isAverage
+                                                    ? `Faltam ${4 - weightHeadline.windowCount} reg.`
+                                                    : 'Estável'}
                                         </div>
                                     </div>
                                 </div>

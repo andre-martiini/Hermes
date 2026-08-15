@@ -629,12 +629,51 @@ export interface HealthWaist {
     cm: number;
 }
 
+export interface HealthWeeklySummary {
+    id: string; // = weekEnd (YYYY-MM-DD)
+    weekStart: string;
+    weekEnd: string;
+    avgWeight: number | null;
+    weightDelta: number | null;
+    waistCm: number | null;
+    avgPainMorning: number | null;
+    avgPainEvening: number | null;
+    kmTotal: number;
+    strengthSessions: number;
+    strengthGoal: number;
+    dietDays: number;
+    daysWithLog: number;
+    events: { date: string; label: string; type: string }[];
+}
+
+export type HealthEventType = 'fisioterapia' | 'viagem' | 'medicacao_inicio' | 'medicacao_fim' | 'modalidade_terapeutica' | 'consulta_medica' | 'outro';
+
+export interface HealthEvent {
+    id: string;
+    date: string;
+    type: HealthEventType;
+    label: string;
+    endDate?: string;
+}
+
+export const HEALTH_EVENT_TYPES: { value: HealthEventType; label: string }[] = [
+    { value: 'fisioterapia', label: 'Fisioterapia' },
+    { value: 'viagem', label: 'Viagem' },
+    { value: 'medicacao_inicio', label: 'Início de medicação' },
+    { value: 'medicacao_fim', label: 'Fim de medicação' },
+    { value: 'modalidade_terapeutica', label: 'Troca de modalidade' },
+    { value: 'consulta_medica', label: 'Consulta médica' },
+    { value: 'outro', label: 'Outro' },
+];
+
 export interface HealthSettings {
     targetWeight: number;
     walkingMinimumMinutes?: number;
     walkingIdealMinutes?: number;
     walkingMinimumKm?: number;
     walkingIdealKm?: number;
+    ritmoAlvoKgSemana?: number; // trajetoria alvo de perda de peso, kg/semana
+    marcos?: number[]; // marcos de peso (kg) para projecao de data estimada
 }
 
 export interface HealthTelegramReminder {
