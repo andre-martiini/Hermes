@@ -101,7 +101,7 @@ const DEFAULT_HEALTH_REMINDERS: HealthTelegramReminder[] = [
         id: 'waist_saturday',
         title: 'Cintura da semana',
         message: 'André, meça a circunferência de cintura na altura do umbigo.',
-        time: '07:00',
+        time: '08:00',
         enabled: true,
         daysOfWeek: [6],
         category: 'custom',
@@ -949,25 +949,11 @@ const IntegratedTrendChart = ({
 
     const sortedEvents = [...events].sort((a, b) => a.date.localeCompare(b.date));
 
-    // Empacotamento por linha (evita colisão de rótulos): cada evento entra na primeira
-    // linha cujo último rótulo já não invade o espaço do novo; sem linha livre, usa a de
-    // menor sobreposição. Substitui a antiga alternância por paridade de índice (i % 2).
-    const EVENT_ROWS = 2;
-    const rowLastRight: number[] = new Array(EVENT_ROWS).fill(-Infinity);
-    const eventLayout = sortedEvents.map(event => {
-        const x = xForDate(event.date);
-        const label = event.label.length > 13 ? `${event.label.slice(0, 12)}…` : event.label;
-        const labelHalfWidth = Math.max(10, label.length * 3);
-        let row = 0;
-        let bestSlack = -Infinity;
-        for (let r = 0; r < EVENT_ROWS; r++) {
-            const slack = (x - labelHalfWidth) - rowLastRight[r];
-            if (slack >= 0) { row = r; bestSlack = slack; break; }
-            if (slack > bestSlack) { bestSlack = slack; row = r; }
-        }
-        rowLastRight[row] = x + labelHalfWidth;
-        return { event, x, row, label };
-    });
+    // Pinos numerados em vez de rótulo de texto no SVG: com eventos próximos no tempo,
+    // qualquer rótulo textual — mesmo truncado e empacotado por linha — fica ilegível.
+    // O número mapeia 1:1 com os chips de legenda abaixo do gráfico (mesma ordem
+    // cronológica), que já trazem data e nome completo. Título completo também no hover.
+    const eventLayout = sortedEvents.map((event, i) => ({ event, x: xForDate(event.date), number: i + 1 }));
 
     const updateHoverFromClientX = (clientX: number, clientY: number, containerRect: DOMRect) => {
         if (containerRect.width === 0) return;
@@ -1111,14 +1097,14 @@ const IntegratedTrendChart = ({
                     ))}
 
                     {/* Trilha de eventos — desenhada por cima dos painéis, nunca embaixo */}
-                    {eventLayout.map(({ event, x, row, label }) => {
-                        const pinY = eventTrackTop + 6 + row * 11;
+                    {eventLayout.map(({ event, x, number }) => {
+                        const pinY = eventTrackTop + 12;
                         return (
                             <g key={event.id}>
                                 <line x1={x} x2={x} y1={weightPlotY} y2={gridBottomY} stroke={palette.text} strokeOpacity="0.2" strokeWidth="1.25" strokeDasharray="3 3" />
-                                <circle cx={x} cy={pinY} r="3" fill={palette.text} opacity="0.75" />
-                                <text x={x} y={pinY - 5} fontSize="8" fontWeight="700" fill={palette.text} textAnchor="middle" opacity="0.85">{label}</text>
-                                <title>{`${event.label} — ${formatShortDate(event.date)}`}</title>
+                                <circle cx={x} cy={pinY} r="7" fill={palette.bg} stroke={palette.text} strokeWidth="1.25" opacity="0.9" />
+                                <text x={x} y={pinY + 3} fontSize="8" fontWeight="700" fill={palette.text} textAnchor="middle">{number}</text>
+                                <title>{`${number}. ${event.label} — ${formatShortDate(event.date)}`}</title>
                             </g>
                         );
                     })}
@@ -1803,7 +1789,7 @@ const HealthView: React.FC<HealthViewProps> = ({
             render: () => (
                 <div>
                     <p className="text-4xl font-bold text-center text-on-surface">{todayLog.pain?.morning ?? '—'}<span className="text-base font-semibold text-on-surface-variant">/10</span></p>
-                    <input type="range" min="0" max="10" value={todayLog.pain?.morning ?? 5} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, morning: parseInt(e.target.value) } })} className="mt-4 w-full accent-primary-container" />
+                    <input type="range" min="0" max="10" value={todayLog.pain?.morning ?? 0} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, morning: parseInt(e.target.value) } })} className={`mt-4 w-full accent-primary-container ${todayLog.pain?.morning === undefined ? 'opacity-40' : ''}`} />
                     {todayLog.pain?.morning === undefined && <p className="mt-2 text-center text-xs font-semibold text-on-surface-variant">Arraste o slider para responder</p>}
                 </div>
             ),
@@ -1841,7 +1827,7 @@ const HealthView: React.FC<HealthViewProps> = ({
             render: () => (
                 <div>
                     <p className="text-4xl font-bold text-center text-on-surface">{todayLog.pain?.evening ?? '—'}<span className="text-base font-semibold text-on-surface-variant">/10</span></p>
-                    <input type="range" min="0" max="10" value={todayLog.pain?.evening ?? 5} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, evening: parseInt(e.target.value) } })} className="mt-4 w-full accent-primary-container" />
+                    <input type="range" min="0" max="10" value={todayLog.pain?.evening ?? 0} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, evening: parseInt(e.target.value) } })} className={`mt-4 w-full accent-primary-container ${todayLog.pain?.evening === undefined ? 'opacity-40' : ''}`} />
                     {todayLog.pain?.evening === undefined && <p className="mt-2 text-center text-xs font-semibold text-on-surface-variant">Arraste o slider para responder</p>}
                 </div>
             ),
@@ -2372,8 +2358,10 @@ const HealthView: React.FC<HealthViewProps> = ({
                             </div>
                             {eventsForIntegrated.length > 0 && (
                                 <div className="mt-4 flex flex-wrap gap-2">
-                                    {eventsForIntegrated.map(event => (
+                                    <p className="w-full text-[10px] font-medium text-on-surface-variant">Legenda dos pinos numerados do gráfico acima:</p>
+                                    {eventsForIntegrated.map((event, i) => (
                                         <span key={event.id} className="inline-flex items-center gap-1.5 rounded-full border border-border-standard bg-white px-2.5 py-1 text-[10px] font-semibold text-on-surface-variant">
+                                            <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-surface-container-low text-[9px] font-bold text-on-surface">{i + 1}</span>
                                             {formatShortDate(event.date)} · {event.label}
                                             {event.source === 'manual' ? (
                                                 <button type="button" onClick={() => onDeleteEvent(event.id)} className="text-on-surface-variant/60 hover:text-error" aria-label="Remover evento">×</button>
@@ -2701,14 +2689,14 @@ const HealthView: React.FC<HealthViewProps> = ({
                                             <div className="rounded-xl border border-border-subtle bg-background p-4">
                                                 <div className="flex items-baseline justify-between">
                                                     <span className={labelClasses}>Manhã</span>
-                                                    <span className="text-sm font-bold text-on-surface">{todayLog.pain?.morning ?? 0}/10</span>
+                                                    <span className="text-sm font-bold text-on-surface">{todayLog.pain?.morning ?? '—'}/10</span>
                                                 </div>
                                                 <input type="range" min="0" max="10" value={todayLog.pain?.morning ?? 0} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, morning: parseInt(e.target.value) } })} className="mt-2 w-full accent-primary-container" />
                                             </div>
                                             <div className="rounded-xl border border-border-subtle bg-background p-4">
                                                 <div className="flex items-baseline justify-between">
                                                     <span className={labelClasses}>Noite</span>
-                                                    <span className="text-sm font-bold text-on-surface">{todayLog.pain?.evening ?? 0}/10</span>
+                                                    <span className="text-sm font-bold text-on-surface">{todayLog.pain?.evening ?? '—'}/10</span>
                                                 </div>
                                                 <input type="range" min="0" max="10" value={todayLog.pain?.evening ?? 0} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, evening: parseInt(e.target.value) } })} className="mt-2 w-full accent-primary-container" />
                                             </div>

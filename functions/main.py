@@ -3070,7 +3070,7 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
             "id": "waist_saturday",
             "title": "Cintura da semana",
             "message": "André, meça a circunferência de cintura na altura do umbigo.",
-            "time": "07:00",
+            "time": "08:00",
             "enabled": True,
             "daysOfWeek": [6],
             "category": "custom",
