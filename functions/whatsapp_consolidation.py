@@ -280,6 +280,30 @@ def process_consolidation_job(db, job_ref, job: dict) -> None:
         batch.set(ref, {"consolidation_ids": gcf.ArrayUnion([job_id])}, merge=True)
     batch.commit()
 
+    # 5.1. Vínculo best-effort com perfil_pessoas (interacoes_pessoas)
+    if chat_id.endswith("@c.us"):
+        try:
+            person_docs = list(db.collection("perfil_pessoas").where("whatsapp_chat_id", "==", chat_id).limit(2).stream())
+            if len(person_docs) == 1:
+                person_id = person_docs[0].id
+                last_msg_ts = _ts_to_iso(messages[-1].get("timestamp")) or datetime.now(timezone.utc).isoformat()
+                now_iso = datetime.now(timezone.utc).isoformat()
+                interacao_data = {
+                    "pessoa_id": person_id,
+                    "tipo": "whatsapp",
+                    "data": last_msg_ts,
+                    "descricao": resumo,
+                    "consolidacao_id": job_id,
+                    "link_origem": "/whatsapp",
+                    "data_criacao": now_iso,
+                }
+                db.collection("interacoes_pessoas").document().set(interacao_data)
+                print(f"[WA-CONSOL] Interacao registrada para pessoa {person_id} (chat {chat_id}).")
+            elif len(person_docs) >= 2:
+                print(f"[WA-CONSOL] Aviso: múltiplos contatos com o mesmo whatsapp_chat_id={chat_id}. Vínculo automático ignorado.")
+        except Exception as person_err:
+            print(f"[WA-CONSOL] Falha ao registrar interacao em perfil_pessoas: {person_err}")
+
     # 6. Resultado final.
     attachments = [
         {"message_id": m["id"], "mimeType": (m.get("media") or {}).get("mimeType") or "",

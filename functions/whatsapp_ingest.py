@@ -515,6 +515,7 @@ def buscar_conversas_whatsapp(db, query: str, limite: int = 5) -> dict:
         for doc in docs:
             data = doc.to_dict() or {}
             resultados.append({
+                "chat_id": str(data.get("chat_id") or ""),
                 "chat_name": data.get("chat_name"),
                 "resumo": data.get("resumo"),
                 "topicos": data.get("topicos") or [],

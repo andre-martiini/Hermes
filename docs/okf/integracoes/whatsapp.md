@@ -33,6 +33,14 @@ Por privacidade, o worker **não captura nenhuma conversa até ser configurado e
 - `disconnected`/`auth_failure` disparam um alerta no Telegram (mesmo bot/chat do resto do Hermes) e o worker tenta reconectar automaticamente, exceto em `LOGOUT` (aí é preciso reescanear o QR).
 - Heartbeat a cada 5 min em `system/whatsapp_worker.last_seen` — usado pela Cloud Function de despacho de WhatsApp (§4) para saber se o worker está de pé.
 
+### Registro de chats (`whatsapp_chats`)
+
+- O worker mantém um registro de todos os chats da conta no Firestore em `whatsapp_chats` (`chat_id`, `chat_name`, `is_group`, `last_activity_ts`, `last_synced_at`), populado via `client.getChats()`.
+- **Cadência**: disparado 60s após o evento `ready` (quando o WhatsApp Web termina de hidratar os chats) e periodicamente a cada 6h no cron do heartbeat.
+- **Merge-only**: as escritas usam `db.batch()` em blocos de 450 com `merge: true` e **nunca deletam** documentos (falhas de hidratação parciais não apagam chats já conhecidos). Não dispara chamadas de rede adicionais como `groupMetadata.update()`.
+- **Precedência de nomes**: nos seletores e listagens (`listWhatsappChats`), a precedência de exibição é ID cru (allowlist) < nome em mensagem capturada < nome no registro `whatsapp_chats` (título mais atualizado).
+- **Parâmetro `include_all`**: a callable `listWhatsappChats` aceita `include_all: bool`. Por padrão (`false`), retorna apenas conversas monitoradas (allowlist ∪ capturadas). Com `true`, retorna todo o registro, marcando `monitored: false` nas conversas fora da captura.
+
 ## 2. Armazenamento no Firebase
 
 - Coleção Firestore: `whatsapp_messages`
@@ -44,14 +52,25 @@ Por privacidade, o worker **não captura nenhuma conversa até ser configurado e
 ## 3. Caixa de Entrada e consolidação manual
 
 - View: `WhatsappInboxView.tsx` (raiz do repo), registrada em `index.tsx` (`viewMode === 'whatsapp'`). Lista os chats monitorados (callable `listWhatsappChats`), mostra a timeline paginada de cada conversa (página 1 viva via `onSnapshot`, anteriores sob demanda — precedente `PersonalDiaryView`), com player de áudio e imagens carregados sob demanda do Storage.
+- Header com chip do contato e **Toggle de Captura**: em conversas 1:1 (@c.us), o cabeçalho exibe o contato vinculado (`perfil_pessoas.whatsapp_chat_id`), com avatar, nome e botão "Ver contato ↗" para abrir diretamente seu perfil no módulo de Contatos. O cabeçalho inclui também um botão interativo **`[● Captura Ativa]` / `[○ Ativar Captura]`** que adiciona/remove o chat de `system/settings.whatsapp_ingest.chats_allowlist` (callable `toggleWhatsappChatMonitored`), permitindo ligar ou desligar a captura contínua de qualquer conversa com 1 clique.
+- **Carregamento manual de histórico (`.txt`)**: botão **"Carregar Histórico"** no cabeçalho do chat permite importar arquivos `.txt` exportados nativamente pelo WhatsApp (Android/iOS). O parser (`src/utils/whatsappExportParser.ts`) extrai data/hora, autor, mensagens com múltiplas linhas, links e identifica mensagens enviadas pelo usuário (`from_me = true`), gravando diretamente no Firestore em lotes de 450 com IDs determinísticos e idempotentes (sem duplicação).
 - O usuário seleciona mensagens (máx. 200) e dispara uma **consolidação**: `addDoc` em `whatsapp_consolidacoes` (o write é o RPC — padrão `copilot_jobs`) → trigger `on_whatsapp_consolidacao_created` (main.py, GB_1, 540s) → `functions/whatsapp_consolidation.py:process_consolidation_job`.
 - O job: transcreve os áudios (helper `_transcribe_audio_bytes` de `hermes_core_logic.py` — Groq Whisper com fallback Gemini), **cacheando cada transcrição de volta em `whatsapp_messages.transcription_text`**; monta o **transcript literal por código** (nunca pela IA — garantia anti-alucinação); faz UMA chamada de síntese (`GEMINI_BALANCED_MODEL`, feature `whatsapp_consolidation.synthesis`) restrita ao transcript, gerando `resumo`/`itens_de_acao`/`decisoes`; grava um digest vetorizado `consol_{job_id}` em `whatsapp_digests` (mantém `buscar_conversas_whatsapp` do copiloto vivo com dados curados); marca as mensagens com `consolidation_ids`. Progresso e resultado são empurrados por campos no doc do job.
+- **Timeline do Contato**: em chats 1:1, a consolidação gera automaticamente um registro em `interacoes_pessoas` (tipo `whatsapp`, `consolidacao_id`, link `/whatsapp`), alimentando o histórico do contato, o resumo IA (`generate_contact_summary`) e o diário pessoal.
 - Áudios sem mídia capturada (worker sem `FIREBASE_STORAGE_BUCKET`) viram `[áudio não capturado]`; >24MB ou formato não suportado são pulados com nota; falha transitória de transcrição não é cacheada (retry funciona).
 - **Associação a ação**: no painel do relatório, ações com o chat vinculado (`tarefas.whatsapp_vinculos` — ver abaixo) aparecem pré-sugeridas; um typeahead cobre as demais. Associar grava a nota rica `WHATSAPP::JSON::` no `acompanhamento` da ação (chip verde do `DiarioBordoUI.tsx`) e marca o job com `task_id`/`applied_at`.
 
+### Vínculo com contatos (`perfil_pessoas` ↔ WhatsApp)
+
+- Campo `whatsapp_chat_id` em `perfil_pessoas` (ex: `5527999999999@c.us` — apenas chats 1:1, nunca grupos).
+- **Vínculo automático (`linkWhatsappContacts`)**: matching determinístico por últimos 8 dígitos do telefone (`last-8`, módulo `functions/phone_utils.py`). Vincula apenas quando houver relação estrita 1:1 (1 pessoa ↔ 1 chat @c.us). Casos com colisão em qualquer dos lados são classificados como ambíguos e reportados sem alteração.
+- **Edição manual**: formulário de contato em `ContactsView.tsx` permite preenchimento ou desvinculação manual, validando o sufixo `@c.us` e bloqueando IDs de grupo (`@g.us`).
+- **Copiloto & Ferramentas**: a ferramenta `buscar_contato` expõe `whatsapp_chat_id` e `telefone`; a ferramenta `buscar_conversas_whatsapp` retorna `chat_id`, permitindo encadeamento natural de consultas sobre o histórico e contato.
+
 ### Vínculo manual (contato/grupo → ação) — pré-sugestão de destino
 
-- Botão "Vincular WhatsApp" em `TaskExecutionView.tsx` (seção "Agendamento") abre um seletor de chats conhecidos — busca via `listWhatsappChats` mais um campo de entrada manual de `chat_id` para um chat ainda não monitorado. Seleção multi-contato/grupo, gravada em `tarefas.whatsapp_vinculos[]` (`{chat_id, chat_name, is_group, data_vinculo}`).
+- Botão "Vincular WhatsApp" em `TaskExecutionView.tsx` (seção "Agendamento") abre um seletor de chats conhecidos — busca via `listWhatsappChats({ include_all: true })` mais um campo de entrada manual de `chat_id` para um chat ainda não monitorado. Seleção multi-contato/grupo, gravada em `tarefas.whatsapp_vinculos[]` (`{chat_id, chat_name, is_group, data_vinculo}`).
+- Chats fora da allowlist de captura aparecem sinalizados com a badge `fora da captura`.
 - Vincular **não** substitui a allowlist de captura (§1) — se o chat não estiver na allowlist, nenhuma mensagem chega a `whatsapp_messages` e o vínculo fica sem efeito prático.
 - Com a triagem automática desligada, o papel principal do vínculo é ser **pré-sugestão de destino** na Caixa de Entrada: consolidações de um chat vinculado oferecem a(s) ação(ões) vinculada(s) no topo do seletor de associação. (O pré-filtro determinístico que o vínculo exercia na triagem permanece no código, dormente — ver abaixo.)
 
@@ -81,5 +100,4 @@ Por privacidade, o worker **não captura nenhuma conversa até ser configurado e
 
 - Automação não-oficial (`whatsapp-web.js`) — sujeita a bloqueio/quebra pelo WhatsApp; sem SLA.
 - Só captura mensagens recebidas enquanto o processo está rodando — sem backfill de histórico anterior.
-- Transcrição de áudio (`ptt`/`audio`) ainda não implementada — mensagens de voz entram na triagem só pelo texto (vazio) e tipo.
 - Upload de mídia ao Storage depende de `FIREBASE_STORAGE_BUCKET` estar configurado no ambiente do worker; sem isso, mídia é capturada só como metadata.

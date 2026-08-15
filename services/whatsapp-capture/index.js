@@ -30,6 +30,10 @@ const client = new Client({
 
 let isClientReady = false;
 let isProcessingOutbox = false;
+let isSyncingChats = false;
+let lastChatsSyncMs = 0;
+const CHATS_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
+const CHATS_READY_DELAY_MS = 60_000; // 60s
 
 // --- Configuração ao vivo (system/settings.whatsapp_ingest / whatsapp_auto_send_enabled) ---
 // Por padrão a allowlist é vazia — o worker não captura NADA até o usuário habilitar
@@ -95,6 +99,78 @@ async function writeHeartbeat() {
     }
 }
 
+async function syncChatRegistry() {
+    if (!isClientReady) {
+        console.log('[Chats] Pulando sincronização: cliente WhatsApp não está pronto.');
+        return;
+    }
+    if (isSyncingChats) {
+        console.log('[Chats] Pulando sincronização: outra sincronização já está em andamento.');
+        return;
+    }
+
+    isSyncingChats = true;
+    try {
+        console.log('[Chats] Sincronizando registro de chats do WhatsApp...');
+        const rawChats = await client.getChats();
+        if (!Array.isArray(rawChats)) {
+            console.warn('[Chats] client.getChats() não retornou array.');
+            return;
+        }
+
+        const BATCH_SIZE = 450;
+        let batch = db.batch();
+        let countInBatch = 0;
+        let totalSaved = 0;
+
+        for (const chat of rawChats) {
+            try {
+                const chatId = chat.id?._serialized || (typeof chat.id === 'string' ? chat.id : null);
+                if (!chatId) continue;
+
+                const isGroup = !!chat.isGroup;
+                const chatName = chat.name || chatId;
+                let lastActivityTs = null;
+                if (chat.timestamp) {
+                    lastActivityTs = admin.firestore.Timestamp.fromDate(new Date(chat.timestamp * 1000));
+                }
+
+                const docRef = db.collection('whatsapp_chats').doc(chatId);
+                const data = {
+                    chat_id: chatId,
+                    chat_name: chatName,
+                    is_group: isGroup,
+                    last_activity_ts: lastActivityTs,
+                    last_synced_at: admin.firestore.FieldValue.serverTimestamp(),
+                };
+
+                batch.set(docRef, data, { merge: true });
+                countInBatch++;
+                totalSaved++;
+
+                if (countInBatch >= BATCH_SIZE) {
+                    await batch.commit();
+                    batch = db.batch();
+                    countInBatch = 0;
+                }
+            } catch (itemErr) {
+                console.error('[Chats] Falha ao processar chat individual:', itemErr);
+            }
+        }
+
+        if (countInBatch > 0) {
+            await batch.commit();
+        }
+
+        lastChatsSyncMs = Date.now();
+        console.log(`[Chats] Registro sincronizado: ${totalSaved} chat(s) salvos/atualizados.`);
+    } catch (err) {
+        console.error('[Chats] Erro ao sincronizar registro de chats:', err);
+    } finally {
+        isSyncingChats = false;
+    }
+}
+
 client.on('qr', (qr) => {
     qrcode.generate(qr, { small: true });
     console.log('Scan the QR code above to authenticate.');
@@ -114,6 +190,7 @@ client.on('ready', async () => {
     console.log('WhatsApp client is ready!');
     isClientReady = true;
     writeHeartbeat();
+    setTimeout(syncChatRegistry, CHATS_READY_DELAY_MS);
 });
 
 client.on('auth_failure', async (msg) => {
@@ -142,17 +219,55 @@ client.on('disconnected', async (reason) => {
 // outro lado da conversa nunca era capturado.
 async function handleMessage(message) {
     try {
-        const chat = await message.getChat();
-        const chatId = chat.id._serialized;
+        let chat = null;
+        let chatId = null;
+        let isGroup = false;
+
+        try {
+            chat = await message.getChat();
+            if (chat && chat.id) {
+                chatId = chat.id._serialized;
+                isGroup = !!chat.isGroup;
+            }
+        } catch (chatErr) {
+            console.warn('[Message] Falha ao obter chat via getChat():', chatErr.message || chatErr);
+        }
+
+        // Fallback para chatId se getChat() falhar
+        if (!chatId) {
+            const rawTarget = message.fromMe ? message.to : message.from;
+            if (rawTarget) {
+                chatId = typeof rawTarget === 'object' && rawTarget._serialized ? rawTarget._serialized : String(rawTarget);
+            }
+            if (chatId) {
+                isGroup = chatId.endsWith('@g.us');
+            }
+        }
+
+        if (!chatId) {
+            console.warn('[Message] Não foi possível determinar o chatId da mensagem:', message.id?.id);
+            return;
+        }
 
         if (!allowlistLoaded || !chatsAllowlist.has(chatId)) {
             return;
         }
 
-        const contact = await message.getContact();
-        const authorName = message.fromMe
-            ? 'Eu'
-            : (contact.name || contact.pushname || contact.number || 'Desconhecido');
+        let authorName = 'Desconhecido';
+        if (message.fromMe) {
+            authorName = 'Eu';
+        } else {
+            try {
+                const contact = await message.getContact();
+                if (contact) {
+                    authorName = contact.name || contact.pushname || contact.number || 'Desconhecido';
+                }
+            } catch (contactErr) {
+                authorName = message._data?.notifyName || message.author || message.from || 'Desconhecido';
+            }
+        }
+
+        const chatTitle = chat?.name || (isGroup ? 'Grupo' : authorName);
 
         const msgData = {
             // ID idempotente: chat + ID nativo da mensagem — antes misturava o
@@ -161,8 +276,8 @@ async function handleMessage(message) {
             id: `${chatId}_${message.id.id}`,
             wa_message_id: message.id.id,
             chat_id: chatId,
-            chat_name: chat.name || (chat.isGroup ? 'Grupo' : authorName),
-            is_group: !!chat.isGroup,
+            chat_name: chatTitle,
+            is_group: isGroup,
             author_name: authorName,
             from_me: !!message.fromMe,
             timestamp: admin.firestore.Timestamp.fromDate(new Date(message.timestamp * 1000)),
@@ -207,7 +322,12 @@ client.on('message_create', handleMessage);
 
 client.initialize();
 
-cron.schedule('*/5 * * * *', writeHeartbeat);
+cron.schedule('*/5 * * * *', async () => {
+    await writeHeartbeat();
+    if (isClientReady && (Date.now() - lastChatsSyncMs >= CHATS_SYNC_INTERVAL_MS)) {
+        syncChatRegistry().catch((e) => console.error('[Chats] Falha no cron de sincronização de chats:', e));
+    }
+});
 
 async function claimOutboxMessage(doc) {
     const lockId = `${process.pid}-${Date.now()}-${doc.id}`;

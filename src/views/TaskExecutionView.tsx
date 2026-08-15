@@ -24,6 +24,7 @@ interface WhatsappChatOption {
   chat_id: string;
   chat_name: string;
   is_group: boolean;
+  monitored?: boolean;
 }
 
 const DocumentViewer = ({ file, onClose, isDark }: {
@@ -373,7 +374,7 @@ export const TaskExecutionView = ({
     setWhatsappChatsError(null);
     try {
       const fn = httpsCallable(functions, 'listWhatsappChats');
-      const res = await fn();
+      const res = await fn({ include_all: true });
       setWhatsappChatOptions((res.data as { chats: WhatsappChatOption[] }).chats || []);
     } catch (e: any) {
       setWhatsappChatsError(e?.message || 'Falha ao carregar conversas do WhatsApp.');
@@ -504,7 +505,14 @@ export const TaskExecutionView = ({
                     className="w-4 h-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
                   />
                   <span>{chat.is_group ? '👥' : '👤'}</span>
-                  <span className="text-xs font-bold font-sans truncate">{chat.chat_name}</span>
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                    <span className="text-xs font-bold font-sans truncate">{chat.chat_name}</span>
+                    {chat.monitored === false && (
+                      <span className={`shrink-0 px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wider ${isDark ? 'bg-amber-500/20 text-amber-300' : 'bg-amber-100 text-amber-800'}`}>
+                        fora da captura
+                      </span>
+                    )}
+                  </div>
                 </label>
               ))
             )}

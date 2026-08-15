@@ -7911,7 +7911,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             linhas = []
             for r in resultados:
                 topicos = ", ".join(r.get("topicos") or [])
-                linhas.append(f"- [{r.get('chat_name')}] {r.get('resumo')}" + (f" (tópicos: {topicos})" if topicos else ""))
+                chat_id_info = f" (chat_id: {r.get('chat_id')})" if r.get("chat_id") else ""
+                linhas.append(f"- [{r.get('chat_name')}]{chat_id_info} {r.get('resumo')}" + (f" (tópicos: {topicos})" if topicos else ""))
             return "\n".join(linhas)
 
         def buscar_arquivos_acervo(query: str):
@@ -10014,7 +10015,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 return f"ERRO|{str(_re)}"
 
         def buscar_contato(termo: str, limite: int = 5):
-            """Busca contatos por nome, email ou tag em perfil_pessoas."""
+            """Busca contatos por nome, email ou tag em perfil_pessoas. Retorna dados do contato incluindo telefone e whatsapp_chat_id (para vincular com conversas do WhatsApp)."""
             try:
                 termo_lower = (termo or "").strip().lower()
                 if not termo_lower:
@@ -10040,6 +10041,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                             'pessoa_id': d.id,
                             'nome': pdata.get('nome', ''),
                             'email': pdata.get('email', ''),
+                            'telefone': pdata.get('telefone', ''),
+                            'whatsapp_chat_id': pdata.get('whatsapp_chat_id', ''),
                             'tags': pdata.get('tags', []),
                             'score': score,
                         })
@@ -13634,34 +13637,70 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
     return {"success": True}
 
 
+@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)
+def toggleWhatsappChatMonitored(req: https_fn.CallableRequest) -> dict:
+    """Adiciona ou remove um chat da allowlist de captura ao vivo do WhatsApp (system/settings.whatsapp_ingest.chats_allowlist)."""
+    _require_internal_user(req)
+    req_data = req.data if isinstance(req.data, dict) else {}
+    chat_id = str(req_data.get("chat_id") or "").strip()
+    if not chat_id:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="chat_id obrigatório.")
+
+    monitored = bool(req_data.get("monitored"))
+    db = get_db()
+    settings_ref = db.collection("system").document("settings")
+    doc_snap = settings_ref.get()
+    settings_data = doc_snap.to_dict() if doc_snap.exists else {}
+    wa_cfg = settings_data.get("whatsapp_ingest") or {}
+    allowlist = [str(x).strip() for x in (wa_cfg.get("chats_allowlist") or []) if str(x).strip()]
+
+    if monitored:
+        if chat_id not in allowlist:
+            allowlist.append(chat_id)
+    else:
+        allowlist = [x for x in allowlist if x != chat_id]
+
+    settings_ref.set({"whatsapp_ingest": {"chats_allowlist": allowlist}}, merge=True)
+    return {"success": True, "chat_id": chat_id, "monitored": monitored, "allowlist": allowlist}
+
+
 _WHATSAPP_CHATS_SCAN_LIMIT = 1000  # teto de mensagens recentes escaneadas para descobrir chats distintos
+_WHATSAPP_CHATS_REGISTRY_LIMIT = 3000  # teto de chats lidos do registro whatsapp_chats
 
 
 @https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)
 def listWhatsappChats(req: https_fn.CallableRequest) -> dict:
-    """Lista os chats de WhatsApp "conhecidos" para o seletor de vínculo em
-    TaskExecutionView.tsx: une a allowlist (system/settings.whatsapp_ingest.chats_allowlist,
-    bloqueada para leitura direta do cliente) com chat_id/chat_name/is_group distintos
-    já capturados em whatsapp_messages (mensagens mais recentes primeiro, teto de
-    _WHATSAPP_CHATS_SCAN_LIMIT docs). MVP: não existe registro de "todos os chats do
-    WhatsApp do usuário" — só aparecem aqui chats já na allowlist e/ou já vistos em
-    whatsapp_messages (ver services/whatsapp-capture/index.js). O seletor no frontend
-    complementa isso com uma entrada manual de chat_id para o caso de um chat ainda
-    não monitorado."""
+    """Lista os chats de WhatsApp conhecidos/registrados para o seletor de vínculo em
+    TaskExecutionView.tsx e para a Caixa de Entrada (WhatsappInboxView.tsx).
+    
+    Fontes de dados (composição e precedência):
+    1. Allowlist em system/settings.whatsapp_ingest.chats_allowlist
+    2. Mensagens capturadas recentemente em whatsapp_messages
+    3. Registro de chats salvo pelo worker em whatsapp_chats
+    
+    Precedência de nomes:
+    ID cru (allowlist) < nome em mensagem capturada < nome no registro whatsapp_chats
+    
+    Parâmetros:
+    - include_all (bool, default False): se False, retorna apenas conversas monitoradas
+      (allowlist ∪ capturadas). Se True, inclui o registro completo de chats, marcando
+      monitored=False nas que não estão monitoradas.
+    """
     _require_internal_user(req)
     db = get_db()
+    req_data = req.data if isinstance(req.data, dict) else {}
+    include_all = bool(req_data.get("include_all"))
 
+    # 1. Allowlist
     settings_doc = db.collection("system").document("settings").get()
     settings_data = settings_doc.to_dict() if settings_doc.exists else {}
-    allowlist = [
+    allowlist = {
         str(x).strip() for x in (settings_data.get("whatsapp_ingest") or {}).get("chats_allowlist") or []
         if str(x).strip()
-    ]
+    }
 
-    chats: dict[str, dict] = {}
-    for chat_id in allowlist:
-        chats[chat_id] = {"chat_id": chat_id, "chat_name": chat_id, "is_group": chat_id.endswith("@g.us"), "_captured": False}
-
+    # 2. Mensagens capturadas recentemente
+    captured_chats: dict[str, dict] = {}
     docs = (
         db.collection("whatsapp_messages")
         .order_by("ingested_at", direction=firestore.Query.DESCENDING)
@@ -13671,18 +13710,74 @@ def listWhatsappChats(req: https_fn.CallableRequest) -> dict:
     for doc in docs:
         data = doc.to_dict() or {}
         chat_id = str(data.get("chat_id") or "").strip()
-        if not chat_id or (chat_id in chats and chats[chat_id]["_captured"]):
-            continue  # já vimos um doc mais recente (streaming desc) para este chat_id
-        chats[chat_id] = {
-            "chat_id": chat_id,
-            "chat_name": str(data.get("chat_name") or chat_id).strip() or chat_id,
+        if not chat_id or chat_id in captured_chats:
+            continue  # já capturamos o doc mais recente (streaming desc)
+        ts = data.get("timestamp")
+        ts_iso = ts.isoformat() if hasattr(ts, "isoformat") else (str(ts) if ts else None)
+        captured_chats[chat_id] = {
+            "chat_name": str(data.get("chat_name") or "").strip(),
             "is_group": bool(data.get("is_group")),
-            "_captured": True,
+            "last_activity_ts": ts_iso,
         }
 
-    result = sorted(chats.values(), key=lambda c: c["chat_name"].lower())
-    for c in result:
-        c.pop("_captured", None)
+    # 3. Registro salvo pelo worker
+    registry_chats: dict[str, dict] = {}
+    reg_docs = db.collection("whatsapp_chats").limit(_WHATSAPP_CHATS_REGISTRY_LIMIT).stream()
+    for doc in reg_docs:
+        data = doc.to_dict() or {}
+        chat_id = str(data.get("chat_id") or doc.id).strip()
+        if not chat_id:
+            continue
+        ts = data.get("last_activity_ts")
+        ts_iso = ts.isoformat() if hasattr(ts, "isoformat") else (str(ts) if ts else None)
+        registry_chats[chat_id] = {
+            "chat_name": str(data.get("chat_name") or "").strip(),
+            "is_group": bool(data.get("is_group")),
+            "last_activity_ts": ts_iso,
+        }
+
+    # Determina o conjunto de IDs a incluir
+    if include_all:
+        target_ids = allowlist | set(captured_chats.keys()) | set(registry_chats.keys())
+    else:
+        target_ids = allowlist | set(captured_chats.keys())
+
+    chats: dict[str, dict] = {}
+    for cid in target_ids:
+        is_monitored = (cid in allowlist) or (cid in captured_chats)
+
+        # Grupo
+        is_group = cid.endswith("@g.us")
+        if cid in captured_chats:
+            is_group = captured_chats[cid]["is_group"]
+        if cid in registry_chats:
+            is_group = registry_chats[cid]["is_group"]
+
+        # Precedência de nome: ID < mensagem capturada < registro whatsapp_chats
+        name = cid
+        if cid in captured_chats and captured_chats[cid]["chat_name"]:
+            name = captured_chats[cid]["chat_name"]
+        if cid in registry_chats and registry_chats[cid]["chat_name"] and registry_chats[cid]["chat_name"] != cid:
+            name = registry_chats[cid]["chat_name"]
+
+        # Timestamp de última atividade: mensagens capturadas > registro whatsapp_chats
+        last_ts = None
+        if cid in captured_chats and captured_chats[cid].get("last_activity_ts"):
+            last_ts = captured_chats[cid]["last_activity_ts"]
+        elif cid in registry_chats and registry_chats[cid].get("last_activity_ts"):
+            last_ts = registry_chats[cid]["last_activity_ts"]
+
+        chats[cid] = {
+            "chat_id": cid,
+            "chat_name": name or cid,
+            "is_group": is_group,
+            "monitored": is_monitored,
+            "last_activity_ts": last_ts,
+        }
+
+    # Ordenação estável: mais recentes primeiro (last_activity_ts DESC), com desempate por nome ASC
+    result = sorted(chats.values(), key=lambda c: (c.get("chat_name") or "").lower())
+    result = sorted(result, key=lambda c: c.get("last_activity_ts") or "", reverse=True)
     return {"chats": result}
 
 
@@ -14487,6 +14582,130 @@ def merge_contacts(req: https_fn.CallableRequest):
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message=f"Erro ao mesclar contatos: {str(e)}"
         )
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=60)
+def linkWhatsappContacts(req: https_fn.CallableRequest) -> dict:
+    """Cruza contatos em `perfil_pessoas` com o registro de chats do WhatsApp (`whatsapp_chats`
+    com fallback para allowlist) usando matching determinístico por últimos 8 dígitos do telefone
+    (last-8).
+    
+    Regra de ouro de segurança: vincula APENAS quando houver correspondência 1-para-1 exata
+    (1 pessoa ↔ 1 chat @c.us). Se qualquer um dos lados tiver 2 ou mais ocorrências para o
+    mesmo last-8, o vínculo é considerado ambíguo e pulado com relatório.
+    """
+    _require_internal_user(req)
+    db = get_db()
+    from collections import defaultdict
+    from phone_utils import last8, chat_id_last8
+
+    # 1. Carrega chats individuais (@c.us) do registro whatsapp_chats (e allowlist como fallback)
+    chats_by_last8: dict[str, list[dict]] = defaultdict(list)
+    seen_chat_ids: set[str] = set()
+
+    for doc in db.collection("whatsapp_chats").limit(3000).stream():
+        d = doc.to_dict() or {}
+        cid = str(d.get("chat_id") or doc.id).strip()
+        if not cid.endswith("@c.us"):
+            continue
+        seen_chat_ids.add(cid)
+        l8 = chat_id_last8(cid)
+        if l8:
+            chats_by_last8[l8].append({
+                "chat_id": cid,
+                "chat_name": str(d.get("chat_name") or cid).strip() or cid,
+            })
+
+    # Fallback allowlist para chats ainda não persistidos no registro
+    settings_doc = db.collection("system").document("settings").get()
+    settings_data = settings_doc.to_dict() if settings_doc.exists else {}
+    allowlist = [
+        str(x).strip() for x in (settings_data.get("whatsapp_ingest") or {}).get("chats_allowlist") or []
+        if str(x).strip()
+    ]
+    for cid in allowlist:
+        if cid.endswith("@c.us") and cid not in seen_chat_ids:
+            seen_chat_ids.add(cid)
+            l8 = chat_id_last8(cid)
+            if l8:
+                chats_by_last8[l8].append({
+                    "chat_id": cid,
+                    "chat_name": cid,
+                })
+
+    # 2. Carrega contatos em perfil_pessoas
+    people_by_last8: dict[str, list[dict]] = defaultdict(list)
+    sem_telefone = 0
+    ja_vinculados = 0
+
+    for doc in db.collection("perfil_pessoas").limit(2000).stream():
+        pdata = doc.to_dict() or {}
+        tel = pdata.get("telefone") or pdata.get("celular") or pdata.get("whatsapp") or ""
+        l8 = last8(tel)
+        if not l8:
+            sem_telefone += 1
+            continue
+        people_by_last8[l8].append({
+            "id": doc.id,
+            "nome": str(pdata.get("nome") or "Sem nome").strip(),
+            "telefone": str(tel).strip(),
+            "whatsapp_chat_id": pdata.get("whatsapp_chat_id"),
+        })
+
+    # 3. Matching determinístico (1-para-1 estrito)
+    vinculados = []
+    ambiguos = []
+    sem_match = 0
+    batch = db.batch()
+    batch_count = 0
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    for l8, people_list in people_by_last8.items():
+        chat_list = chats_by_last8.get(l8, [])
+        if len(people_list) == 1 and len(chat_list) == 1:
+            person = people_list[0]
+            chat = chat_list[0]
+            if person.get("whatsapp_chat_id") == chat["chat_id"]:
+                ja_vinculados += 1
+            else:
+                doc_ref = db.collection("perfil_pessoas").document(person["id"])
+                batch.update(doc_ref, {
+                    "whatsapp_chat_id": chat["chat_id"],
+                    "data_atualizacao": now_iso,
+                })
+                batch_count += 1
+                vinculados.append({
+                    "pessoa_id": person["id"],
+                    "nome": person["nome"],
+                    "chat_id": chat["chat_id"],
+                    "chat_name": chat["chat_name"],
+                    "last8": l8,
+                })
+                if batch_count >= 450:
+                    batch.commit()
+                    batch = db.batch()
+                    batch_count = 0
+        elif len(chat_list) > 0 and (len(people_list) > 1 or len(chat_list) > 1):
+            ambiguos.append({
+                "last8": l8,
+                "pessoas": [{"id": p["id"], "nome": p["nome"]} for p in people_list],
+                "chats": [{"chat_id": c["chat_id"], "chat_name": c["chat_name"]} for c in chat_list],
+            })
+        else:
+            sem_match += len(people_list)
+
+    if batch_count > 0:
+        batch.commit()
+
+    return {
+        "success": True,
+        "vinculados": vinculados,
+        "ambiguos": ambiguos,
+        "sem_match": sem_match,
+        "sem_telefone": sem_telefone,
+        "ja_vinculados": ja_vinculados,
+        "total_contatos_avaliados": len(vinculados) + len(ambiguos) + sem_match + sem_telefone + ja_vinculados,
+    }
 
 
 @storage_fn.on_object_finalized(

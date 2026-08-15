@@ -27,6 +27,13 @@ service firebase.storage {
       allow update: if false;
     }
 
+    // Mídias do WhatsApp capturadas pelo worker local (áudios, imagens, documentos, figurinhas).
+    // Leitura permitida para usuário autenticado do Hermes. Escrita apenas via Admin SDK (worker).
+    match /whatsapp_media/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
     // Demais caminhos: sem acesso direto pelo cliente (backend usa Admin SDK e ignora regras).
     match /{allPaths=**} {
       allow read, write: if false;

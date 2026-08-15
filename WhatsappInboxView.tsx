@@ -1,25 +1,29 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    QueryDocumentSnapshot, addDoc, arrayUnion, collection, doc, getDocs, limit,
-    onSnapshot, orderBy, query, serverTimestamp, startAfter, updateDoc, where
+    QueryDocumentSnapshot, Timestamp, addDoc, arrayUnion, collection, doc, getDocs, limit,
+    onSnapshot, orderBy, query, serverTimestamp, startAfter, updateDoc, where, writeBatch
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 import { db, functions, storage } from './firebase';
-import { Tarefa, WhatsappConsolidacao, WhatsappMessageDoc } from './types';
+import { PerfilPessoa, Tarefa, WhatsappConsolidacao, WhatsappMessageDoc } from './types';
 import { buildDiaryWhatsappNote } from './src/utils/diaryEntries';
 import { HermesGlobalChat } from './src/components/tools/HermesGlobalChat';
+import { parseWhatsappExportTxt } from './src/utils/whatsappExportParser';
 
 interface WhatsappChatOption {
     chat_id: string;
     chat_name: string;
     is_group: boolean;
+    monitored?: boolean;
+    last_activity_ts?: string | null;
 }
 
 interface WhatsappInboxViewProps {
     tarefas: Tarefa[];
     userId: string;
     isDark?: boolean;
+    onOpenContact?: (id: string) => void;
 }
 
 const PAGE_SIZE = 30;
@@ -47,13 +51,36 @@ const fmtShortDate = (iso?: string): string => {
     return isNaN(d.getTime()) ? '' : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 };
 
-const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, isDark = false }) => {
+const formatLastActivity = (iso?: string | null): string => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    if (isToday) {
+        return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    }
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    if (d.toDateString() === yesterday.toDateString()) {
+        return 'Ontem';
+    }
+    if (d.getFullYear() === now.getFullYear()) {
+        return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    }
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+};
+
+const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, isDark = false, onOpenContact }) => {
     // Lista de chats
     const [chats, setChats] = useState<WhatsappChatOption[]>([]);
     const [isLoadingChats, setIsLoadingChats] = useState(true);
     const [chatsError, setChatsError] = useState<string | null>(null);
     const [chatSearch, setChatSearch] = useState('');
+    const [chatFilterTab, setChatFilterTab] = useState<'all' | 'monitored' | 'groups' | 'direct'>('all');
+    const [visibleChatsCount, setVisibleChatsCount] = useState(25);
     const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+    const [linkedPerson, setLinkedPerson] = useState<PerfilPessoa | null>(null);
 
     // Indicador de mensagem nova (bolinha verde): timestamp (ms) da última mensagem por chat,
     // comparado a "última vez que o usuário abriu esse chat" (persistido no localStorage —
@@ -79,6 +106,27 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
         try { localStorage.setItem(LAST_SEEN_KEY_PREFIX + chatId, String(ts)); } catch { /* ignora */ }
         forceUnreadRerender(v => v + 1);
     };
+
+    // Indicador de mensagem nova (bolinha verde): timestamp (ms) da última mensagem por chat monitorado.
+    useEffect(() => {
+        const activeChats = chats.filter(c => c.monitored !== false);
+        if (activeChats.length === 0) return;
+        const unsubs = activeChats.map(chat => {
+            const q = query(
+                collection(db, 'whatsapp_messages'),
+                where('chat_id', '==', chat.chat_id),
+                orderBy('timestamp', 'desc'),
+                limit(1)
+            );
+            return onSnapshot(q, snap => {
+                const d = tsToDate(snap.docs[0]?.data()?.timestamp);
+                if (!d) return;
+                const ms = d.getTime();
+                setLastMessageAt(prev => (prev[chat.chat_id] === ms ? prev : { ...prev, [chat.chat_id]: ms }));
+            }, () => { /* sem permissão/índice ainda construindo — sem bolinha, sem quebrar a lista */ });
+        });
+        return () => unsubs.forEach(u => u());
+    }, [chats]);
 
     // Timeline (página 1 viva + páginas antigas sob demanda — precedente PersonalDiaryView)
     const [liveDocs, setLiveDocs] = useState<QueryDocumentSnapshot[]>([]);
@@ -111,7 +159,144 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
     const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
     const [loadingMedia, setLoadingMedia] = useState<Set<string>>(new Set());
 
+    // Toggle de captura ativa/inativa
+    const [isTogglingMonitored, setIsTogglingMonitored] = useState(false);
+
+    // Importar histórico (.txt)
+    const [showImportModal, setShowImportModal] = useState(false);
+    const [importFile, setImportFile] = useState<File | null>(null);
+    const [importUserName, setImportUserName] = useState('André Martini');
+    const [isImporting, setIsImporting] = useState(false);
+    const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
+    const [importResult, setImportResult] = useState<{ count: number; startDate?: string; endDate?: string } | null>(null);
+    const [importError, setImportError] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
     const selectedChat = useMemo(() => chats.find(c => c.chat_id === selectedChatId) || null, [chats, selectedChatId]);
+
+    const resetImportModal = () => {
+        setShowImportModal(false);
+        setImportFile(null);
+        setIsImporting(false);
+        setImportProgress(null);
+        setImportResult(null);
+        setImportError(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            setImportFile(file);
+            setImportError(null);
+            setImportResult(null);
+        }
+    };
+
+    const handleStartImport = async () => {
+        if (!importFile || !selectedChat) {
+            setImportError('Selecione um arquivo .txt de exportação do WhatsApp.');
+            return;
+        }
+
+        setIsImporting(true);
+        setImportError(null);
+        setImportProgress({ current: 0, total: 0 });
+
+        try {
+            const rawText = await importFile.text();
+            const parsed = parseWhatsappExportTxt(
+                rawText,
+                selectedChat.chat_id,
+                selectedChat.chat_name,
+                selectedChat.is_group,
+                importUserName
+            );
+
+            if (parsed.length === 0) {
+                setImportError('Nenhuma mensagem válida foi encontrada no arquivo. Verifique se é um arquivo .txt de exportação do WhatsApp.');
+                setIsImporting(false);
+                return;
+            }
+
+            setImportProgress({ current: 0, total: parsed.length });
+
+            const BATCH_SIZE = 450;
+            let batch = writeBatch(db);
+            let inBatch = 0;
+            let totalSaved = 0;
+
+            let minDate: Date | null = null;
+            let maxDate: Date | null = null;
+
+            for (let i = 0; i < parsed.length; i++) {
+                const msg = parsed[i];
+                if (!minDate || msg.timestamp < minDate) minDate = msg.timestamp;
+                if (!maxDate || msg.timestamp > maxDate) maxDate = msg.timestamp;
+
+                const docRef = doc(db, 'whatsapp_messages', msg.id);
+                const payload = {
+                    ...msg,
+                    timestamp: Timestamp.fromDate(msg.timestamp),
+                    ingested_at: serverTimestamp()
+                };
+
+                batch.set(docRef, payload, { merge: true });
+                inBatch++;
+                totalSaved++;
+
+                if (inBatch >= BATCH_SIZE) {
+                    await batch.commit();
+                    batch = writeBatch(db);
+                    inBatch = 0;
+                    setImportProgress({ current: totalSaved, total: parsed.length });
+                }
+            }
+
+            if (inBatch > 0) {
+                await batch.commit();
+            }
+
+            // Atualiza last_activity_ts no chat
+            if (maxDate) {
+                try {
+                    await updateDoc(doc(db, 'whatsapp_chats', selectedChat.chat_id), {
+                        last_activity_ts: Timestamp.fromDate(maxDate),
+                        last_synced_at: serverTimestamp()
+                    });
+                } catch {
+                    // Chat pode não existir ainda em whatsapp_chats
+                }
+            }
+
+            setImportResult({
+                count: totalSaved,
+                startDate: minDate ? minDate.toLocaleDateString('pt-BR') : undefined,
+                endDate: maxDate ? maxDate.toLocaleDateString('pt-BR') : undefined
+            });
+        } catch (err: any) {
+            console.error('[Import WhatsApp] Erro na importação:', err);
+            setImportError(`Erro ao importar: ${err?.message || err}`);
+        } finally {
+            setIsImporting(false);
+        }
+    };
+
+    const handleToggleMonitored = async (chatId: string, currentMonitored: boolean) => {
+        const nextMonitored = !currentMonitored;
+        setChats(prev => prev.map(c => c.chat_id === chatId ? { ...c, monitored: nextMonitored } : c));
+        setIsTogglingMonitored(true);
+        try {
+            const fn = httpsCallable(functions, 'toggleWhatsappChatMonitored');
+            await fn({ chat_id: chatId, monitored: nextMonitored });
+        } catch (err: any) {
+            console.error('[WhatsappInbox] Erro ao alterar monitoramento do chat:', err);
+            setChats(prev => prev.map(c => c.chat_id === chatId ? { ...c, monitored: currentMonitored } : c));
+            alert(`Erro ao alterar captura do chat: ${err?.message || err}`);
+        } finally {
+            setIsTogglingMonitored(false);
+        }
+    };
 
     // ── Chats ────────────────────────────────────────────────────────────────
     useEffect(() => {
@@ -121,7 +306,7 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
             setChatsError(null);
             try {
                 const fn = httpsCallable(functions, 'listWhatsappChats');
-                const res = await fn();
+                const res = await fn({ include_all: true });
                 if (cancelled) return;
                 setChats(((res.data as { chats: WhatsappChatOption[] }).chats || []));
             } catch (e: any) {
@@ -133,27 +318,35 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
         return () => { cancelled = true; };
     }, []);
 
-    // Última mensagem de cada chat (ao vivo) — alimenta a bolinha de "mensagem nova". Usa o
-    // mesmo índice composto (chat_id+timestamp) já criado para a timeline, então não precisa
-    // de nenhum índice novo.
+    // Busca contato vinculado em perfil_pessoas quando um chat 1:1 é selecionado
     useEffect(() => {
-        if (chats.length === 0) return;
-        const unsubs = chats.map(chat => {
-            const q = query(
-                collection(db, 'whatsapp_messages'),
-                where('chat_id', '==', chat.chat_id),
-                orderBy('timestamp', 'desc'),
-                limit(1)
-            );
-            return onSnapshot(q, snap => {
-                const d = tsToDate(snap.docs[0]?.data()?.timestamp);
-                if (!d) return;
-                const ms = d.getTime();
-                setLastMessageAt(prev => (prev[chat.chat_id] === ms ? prev : { ...prev, [chat.chat_id]: ms }));
-            }, () => { /* sem permissão/índice ainda construindo — sem bolinha, sem quebrar a lista */ });
-        });
-        return () => unsubs.forEach(u => u());
-    }, [chats]);
+        if (!selectedChatId || selectedChatId.endsWith('@g.us')) {
+            setLinkedPerson(null);
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            try {
+                const q = query(
+                    collection(db, 'perfil_pessoas'),
+                    where('whatsapp_chat_id', '==', selectedChatId),
+                    limit(1)
+                );
+                const snap = await getDocs(q);
+                if (cancelled) return;
+                if (!snap.empty) {
+                    const docSnap = snap.docs[0];
+                    setLinkedPerson({ id: docSnap.id, ...docSnap.data() } as PerfilPessoa);
+                } else {
+                    setLinkedPerson(null);
+                }
+            } catch (e) {
+                console.error('[WhatsappInbox] Falha ao buscar contato vinculado:', e);
+                if (!cancelled) setLinkedPerson(null);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [selectedChatId]);
 
     // ── Timeline do chat selecionado ─────────────────────────────────────────
     useEffect(() => {
@@ -378,24 +571,92 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
         }
     };
 
+    // Reset de paginação ao trocar filtro ou termo de busca
+    useEffect(() => {
+        setVisibleChatsCount(25);
+    }, [chatSearch, chatFilterTab]);
+
     const filteredChats = useMemo(() => {
+        let list = chats;
+        if (chatFilterTab === 'monitored') {
+            list = list.filter(c => c.monitored !== false);
+        } else if (chatFilterTab === 'groups') {
+            list = list.filter(c => c.is_group);
+        } else if (chatFilterTab === 'direct') {
+            list = list.filter(c => !c.is_group);
+        }
         const s = chatSearch.trim().toLowerCase();
-        if (!s) return chats;
-        return chats.filter(c => c.chat_name.toLowerCase().includes(s) || c.chat_id.toLowerCase().includes(s));
-    }, [chats, chatSearch]);
+        if (!s) return list;
+        return list.filter(c => c.chat_name.toLowerCase().includes(s) || c.chat_id.toLowerCase().includes(s));
+    }, [chats, chatSearch, chatFilterTab]);
+
+    const visibleChats = useMemo(() => {
+        return filteredChats.slice(0, visibleChatsCount);
+    }, [filteredChats, visibleChatsCount]);
 
     const cardCls = isDark ? 'border-white/10 bg-white/5' : 'border-slate-100 bg-white shadow-sm';
     const mutedCls = isDark ? 'text-white/40' : 'text-slate-400';
 
+    const monitoredCount = useMemo(() => chats.filter(c => c.monitored !== false).length, [chats]);
+    const groupCount = useMemo(() => chats.filter(c => c.is_group).length, [chats]);
+    const directCount = useMemo(() => chats.filter(c => !c.is_group).length, [chats]);
+
     // ── Render ───────────────────────────────────────────────────────────────
     const renderChatList = () => (
         <div className={`flex flex-col rounded-2xl border overflow-hidden ${cardCls}`}>
-            <div className={`shrink-0 p-3 border-b ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+            <div className={`shrink-0 p-3 border-b space-y-2.5 ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+                {/* Abas / Filtros rápidos */}
+                <div className={`flex rounded-lg p-0.5 border gap-0.5 ${isDark ? 'bg-slate-900 border-white/10' : 'bg-slate-100 border-slate-200'}`}>
+                    <button
+                        onClick={() => setChatFilterTab('all')}
+                        className={`flex-1 py-1 text-[9px] font-bold rounded uppercase tracking-wider transition-all ${
+                            chatFilterTab === 'all'
+                                ? (isDark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white text-slate-800 shadow-xs')
+                                : mutedCls
+                        }`}
+                        title="Todas as conversas"
+                    >
+                        Todos ({chats.length})
+                    </button>
+                    <button
+                        onClick={() => setChatFilterTab('monitored')}
+                        className={`flex-1 py-1 text-[9px] font-bold rounded uppercase tracking-wider transition-all ${
+                            chatFilterTab === 'monitored'
+                                ? (isDark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white text-slate-800 shadow-xs')
+                                : mutedCls
+                        }`}
+                        title="Conversas na allowlist de captura contínua"
+                    >
+                        Ativos ({monitoredCount})
+                    </button>
+                    <button
+                        onClick={() => setChatFilterTab('direct')}
+                        className={`flex-1 py-1 text-[9px] font-bold rounded uppercase tracking-wider transition-all ${
+                            chatFilterTab === 'direct'
+                                ? (isDark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white text-slate-800 shadow-xs')
+                                : mutedCls
+                        }`}
+                        title="Contatos individuais"
+                    >
+                        1:1 ({directCount})
+                    </button>
+                    <button
+                        onClick={() => setChatFilterTab('groups')}
+                        className={`flex-1 py-1 text-[9px] font-bold rounded uppercase tracking-wider transition-all ${
+                            chatFilterTab === 'groups'
+                                ? (isDark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white text-slate-800 shadow-xs')
+                                : mutedCls
+                        }`}
+                        title="Grupos"
+                    >
+                        Grupos ({groupCount})
+                    </button>
+                </div>
                 <input
                     type="text"
                     value={chatSearch}
                     onChange={e => setChatSearch(e.target.value)}
-                    placeholder="Buscar conversa..."
+                    placeholder="Buscar conversa ou contato..."
                     className={`w-full px-3 py-2 rounded-xl border text-xs outline-none focus:ring-1 focus:ring-green-500 font-sans ${isDark ? 'bg-white/10 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400'}`}
                 />
             </div>
@@ -406,30 +667,89 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
                     <p className="p-4 text-xs text-rose-500">{chatsError}</p>
                 ) : filteredChats.length === 0 ? (
                     <div className="p-4 space-y-1">
-                        <p className={`text-xs font-bold ${isDark ? 'text-white/70' : 'text-slate-600'}`}>Nenhuma conversa monitorada.</p>
-                        <p className={`text-[10px] ${mutedCls}`}>Adicione chats na allowlist em Configurações → Automações.</p>
+                        <p className={`text-xs font-bold ${isDark ? 'text-white/70' : 'text-slate-600'}`}>Nenhuma conversa encontrada.</p>
+                        <p className={`text-[10px] ${mutedCls}`}>Tente outro termo na busca acima.</p>
                     </div>
                 ) : (
-                    filteredChats.map(chat => {
-                        const unread = chat.chat_id !== selectedChatId
-                            && !!lastMessageAt[chat.chat_id]
-                            && lastMessageAt[chat.chat_id] > getLastSeen(chat.chat_id);
-                        return (
-                            <button
-                                key={chat.chat_id}
-                                onClick={() => setSelectedChatId(chat.chat_id)}
-                                className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${selectedChatId === chat.chat_id
-                                    ? (isDark ? 'bg-green-500/15' : 'bg-green-50')
-                                    : (isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50')}`}
-                            >
-                                <span className="text-base shrink-0">{chat.is_group ? '👥' : '👤'}</span>
-                                <span className={`text-xs font-bold truncate font-sans flex-1 ${isDark ? 'text-white/90' : 'text-slate-800'}`}>{chat.chat_name}</span>
-                                {unread && (
-                                    <span className="shrink-0 w-2 h-2 rounded-full bg-green-500" title="Mensagem nova" />
-                                )}
-                            </button>
-                        );
-                    })
+                    <>
+                        {visibleChats.map(chat => {
+                            const unread = chat.chat_id !== selectedChatId
+                                && !!lastMessageAt[chat.chat_id]
+                                && lastMessageAt[chat.chat_id] > getLastSeen(chat.chat_id);
+                            const lastTimeStr = formatLastActivity(chat.last_activity_ts);
+
+                            return (
+                                <button
+                                    key={chat.chat_id}
+                                    onClick={() => setSelectedChatId(chat.chat_id)}
+                                    className={`w-full flex items-start gap-2.5 px-3 py-2.5 text-left transition-colors border-b last:border-b-0 ${
+                                        selectedChatId === chat.chat_id
+                                            ? (isDark ? 'bg-green-500/15 border-green-500/20' : 'bg-green-50 border-green-100')
+                                            : (isDark ? 'border-white/5 hover:bg-white/5' : 'border-slate-100 hover:bg-slate-50')
+                                    }`}
+                                >
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm shrink-0 mt-0.5 ${
+                                        chat.is_group
+                                            ? (isDark ? 'bg-indigo-500/20 text-indigo-300' : 'bg-indigo-100 text-indigo-700')
+                                            : (isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600')
+                                    }`}>
+                                        {chat.is_group ? '👥' : '👤'}
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex items-center justify-between gap-1">
+                                            <span className={`text-xs font-bold truncate font-sans ${isDark ? 'text-white/90' : 'text-slate-800'}`}>
+                                                {chat.chat_name}
+                                            </span>
+                                            {lastTimeStr && (
+                                                <span className={`text-[10px] font-mono shrink-0 ${unread ? 'text-green-500 font-bold' : mutedCls}`}>
+                                                    {lastTimeStr}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center justify-between gap-1 mt-0.5">
+                                            <div className="flex items-center gap-1">
+                                                {chat.monitored !== false ? (
+                                                    <span className={`px-1 py-0.2 rounded text-[8px] font-bold uppercase tracking-wider ${isDark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>
+                                                        ativa
+                                                    </span>
+                                                ) : (
+                                                    <span className={`px-1 py-0.2 rounded text-[8px] font-semibold uppercase tracking-wider ${isDark ? 'bg-white/10 text-white/40' : 'bg-slate-100 text-slate-400'}`}>
+                                                        histórico
+                                                    </span>
+                                                )}
+                                                {chat.is_group && (
+                                                    <span className={`px-1 py-0.2 rounded text-[8px] font-semibold uppercase tracking-wider ${isDark ? 'bg-indigo-500/20 text-indigo-300' : 'bg-indigo-50 text-indigo-700'}`}>
+                                                        grupo
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {unread && (
+                                                <span className="shrink-0 w-2 h-2 rounded-full bg-green-500" title="Mensagem nova" />
+                                            )}
+                                        </div>
+                                    </div>
+                                </button>
+                            );
+                        })}
+
+                        {filteredChats.length > visibleChatsCount && (
+                            <div className={`p-3 text-center border-t ${isDark ? 'border-white/10 bg-white/2' : 'border-slate-100 bg-slate-50'}`}>
+                                <button
+                                    onClick={() => setVisibleChatsCount(prev => Math.min(prev + 25, filteredChats.length))}
+                                    className={`w-full py-1.5 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wider border transition-all ${
+                                        isDark
+                                            ? 'border-white/15 text-white/80 hover:bg-white/10'
+                                            : 'border-slate-200 text-slate-700 hover:bg-slate-100'
+                                    }`}
+                                >
+                                    Carregar mais ({Math.min(25, filteredChats.length - visibleChatsCount)} restantes)
+                                </button>
+                                <p className={`text-[9px] mt-1.5 font-mono ${mutedCls}`}>
+                                    Exibindo {visibleChats.length} de {filteredChats.length} conversas
+                                </p>
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
         </div>
@@ -523,12 +843,76 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
         <div className={`flex-1 flex flex-col rounded-2xl border overflow-hidden ${cardCls}`}>
             {/* Header do chat */}
             <div className={`shrink-0 px-4 py-3 border-b flex items-center justify-between gap-2 ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
-                <div className="flex items-center gap-2 min-w-0">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
                     <button onClick={() => setSelectedChatId(null)} className={`md:hidden text-xs font-bold ${mutedCls}`}>←</button>
                     <span className="text-base">{selectedChat?.is_group ? '👥' : '👤'}</span>
                     <span className={`text-sm font-black truncate ${isDark ? 'text-white' : 'text-slate-800'}`}>{selectedChat?.chat_name}</span>
+                    {selectedChat && (
+                        <button
+                            onClick={() => handleToggleMonitored(selectedChat.chat_id, selectedChat.monitored !== false)}
+                            disabled={isTogglingMonitored}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all shrink-0 ${
+                                selectedChat.monitored !== false
+                                    ? (isDark
+                                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-rose-500/15 hover:border-rose-500/30 hover:text-rose-300'
+                                        : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-700')
+                                    : (isDark
+                                        ? 'bg-white/5 border-white/15 text-white/60 hover:bg-emerald-500/15 hover:border-emerald-500/30 hover:text-emerald-300'
+                                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700')
+                            }`}
+                            title={
+                                selectedChat.monitored !== false
+                                    ? 'Captura contínua ATIVADA pelo worker local. Clique para desativar.'
+                                    : 'Captura contínua DESATIVADA. Clique para ATIVAR captura de novas mensagens pelo worker.'
+                            }
+                        >
+                            <span className={`w-1.5 h-1.5 rounded-full ${selectedChat.monitored !== false ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                            <span>{selectedChat.monitored !== false ? 'Captura Ativa' : 'Ativar Captura'}</span>
+                        </button>
+                    )}
+                    {linkedPerson && (
+                        <div className="flex items-center gap-1.5 ml-2 pl-2 border-l border-slate-200 dark:border-white/10 shrink-0">
+                            <div
+                                className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black text-white shrink-0"
+                                style={{ backgroundColor: linkedPerson.avatar_color || '#6366f1' }}
+                            >
+                                {linkedPerson.avatar_initials || linkedPerson.nome?.substring(0, 2).toUpperCase() || '👤'}
+                            </div>
+                            <span className={`text-xs font-bold truncate max-w-[120px] ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                                {linkedPerson.nome}
+                            </span>
+                            {onOpenContact && (
+                                <button
+                                    onClick={() => onOpenContact(linkedPerson.id)}
+                                    className="text-[10px] font-bold text-indigo-500 hover:text-indigo-400 hover:underline flex items-center gap-0.5"
+                                    title="Abrir perfil em Contatos"
+                                >
+                                    Ver contato ↗
+                                </button>
+                            )}
+                        </div>
+                    )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                    <button
+                        onClick={() => {
+                            setImportFile(null);
+                            setImportError(null);
+                            setImportResult(null);
+                            setShowImportModal(true);
+                        }}
+                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${
+                            isDark
+                                ? 'border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10'
+                                : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+                        }`}
+                        title="Importar histórico de mensagens a partir de arquivo .txt exportado do WhatsApp"
+                    >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                        Carregar Histórico
+                    </button>
                     {isCopilotCollapsed && (
                         <button
                             onClick={() => setIsCopilotCollapsed(false)}
@@ -806,6 +1190,160 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
                     </div>
                 )}
             </div>
+
+            {/* Modal de Importação de Histórico (.txt) */}
+            {showImportModal && (
+                <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={() => !isImporting && resetImportModal()} />
+                    <div className={`w-full max-w-lg rounded-2xl border shadow-xl p-6 relative z-10 space-y-4 font-sans ${
+                        isDark ? 'bg-slate-950 border-white/10 text-white' : 'bg-white border-slate-200 text-slate-800'
+                    }`}>
+                        <div className="flex items-center justify-between border-b pb-3 border-slate-100 dark:border-white/10">
+                            <div>
+                                <h3 className="text-sm font-black flex items-center gap-2">
+                                    <span>📥</span> Carregar Histórico do WhatsApp
+                                </h3>
+                                <p className={`text-[11px] font-medium mt-0.5 ${mutedCls}`}>
+                                    Conversa: <strong className={isDark ? 'text-white' : 'text-slate-900'}>{selectedChat?.chat_name}</strong>
+                                </p>
+                            </div>
+                            {!isImporting && (
+                                <button onClick={resetImportModal} className={`text-base font-bold ${mutedCls} hover:text-rose-500`}>
+                                    &times;
+                                </button>
+                            )}
+                        </div>
+
+                        {importResult ? (
+                            <div className="space-y-4 text-center py-4">
+                                <div className="w-12 h-12 rounded-full bg-emerald-500/15 text-emerald-500 mx-auto flex items-center justify-center text-xl font-black">
+                                    ✓
+                                </div>
+                                <div>
+                                    <h4 className="text-base font-black text-emerald-500">Histórico Importado com Sucesso!</h4>
+                                    <p className={`text-xs mt-1 ${mutedCls}`}>
+                                        <strong>{importResult.count.toLocaleString('pt-BR')}</strong> mensagens foram carregadas e salvas na conversa.
+                                    </p>
+                                    {importResult.startDate && importResult.endDate && (
+                                        <p className={`text-[11px] font-mono mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                            Período: {importResult.startDate} até {importResult.endDate}
+                                        </p>
+                                    )}
+                                </div>
+                                <button
+                                    onClick={resetImportModal}
+                                    className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold uppercase tracking-wider transition-all"
+                                >
+                                    Concluir e Ver Mensagens
+                                </button>
+                            </div>
+                        ) : isImporting ? (
+                            <div className="space-y-4 py-6 text-center">
+                                <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto" />
+                                <div>
+                                    <h4 className="text-sm font-black">Gravando Mensagens no Firestore...</h4>
+                                    {importProgress && importProgress.total > 0 && (
+                                        <div className="mt-3 space-y-2">
+                                            <div className="w-full bg-slate-200 dark:bg-white/10 rounded-full h-2 overflow-hidden">
+                                                <div
+                                                    className="bg-emerald-500 h-2 rounded-full transition-all duration-200"
+                                                    style={{ width: `${Math.round((importProgress.current / importProgress.total) * 100)}%` }}
+                                                />
+                                            </div>
+                                            <p className={`text-xs font-mono ${mutedCls}`}>
+                                                {importProgress.current.toLocaleString('pt-BR')} / {importProgress.total.toLocaleString('pt-BR')} ({Math.round((importProgress.current / importProgress.total) * 100)}%)
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                                <p className={`text-[11px] ${mutedCls}`}>
+                                    Lotes de 450 mensagens com verificação de idempotência (sem duplicações).
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                <div
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
+                                        importFile
+                                            ? (isDark ? 'border-emerald-500/50 bg-emerald-950/20' : 'border-emerald-400 bg-emerald-50/50')
+                                            : (isDark ? 'border-white/20 hover:border-white/40 hover:bg-white/5' : 'border-slate-300 hover:border-slate-400 hover:bg-slate-50')
+                                    }`}
+                                >
+                                    <input
+                                        type="file"
+                                        ref={fileInputRef}
+                                        onChange={handleFileChange}
+                                        accept=".txt,text/plain"
+                                        className="hidden"
+                                    />
+                                    {importFile ? (
+                                        <div className="space-y-1">
+                                            <span className="text-2xl">📄</span>
+                                            <p className="text-xs font-bold truncate max-w-xs mx-auto">{importFile.name}</p>
+                                            <p className={`text-[10px] ${mutedCls}`}>
+                                                {(importFile.size / (1024 * 1024)).toFixed(2)} MB • Clique para trocar
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-1">
+                                            <span className="text-2xl">📂</span>
+                                            <p className="text-xs font-bold">Clique para selecionar o arquivo .txt</p>
+                                            <p className={`text-[10px] ${mutedCls}`}>
+                                                Exporte a conversa no WhatsApp (sem mídia) e selecione o .txt gerado.
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div>
+                                    <label className={`text-[10px] font-bold uppercase tracking-wider block mb-1 ${mutedCls}`}>
+                                        Seu nome no WhatsApp (para identificar suas mensagens como "Eu")
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={importUserName}
+                                        onChange={e => setImportUserName(e.target.value)}
+                                        placeholder="Ex: André Martini"
+                                        className={`w-full px-3 py-2 rounded-lg border text-xs font-bold outline-none ${
+                                            isDark ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-emerald-500'
+                                        }`}
+                                    />
+                                    <p className={`text-[10px] mt-1 ${mutedCls}`}>
+                                        Mensagens com esse remetente serão marcadas com balão verde à direita ("Eu").
+                                    </p>
+                                </div>
+
+                                {importError && (
+                                    <div className={`p-3 rounded-lg text-xs font-bold border ${isDark ? 'bg-rose-950/30 border-rose-500/40 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
+                                        {importError}
+                                    </div>
+                                )}
+
+                                <div className="flex gap-2 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={resetImportModal}
+                                        className={`flex-1 py-2 rounded-xl border text-xs font-bold uppercase tracking-wider transition ${
+                                            isDark ? 'border-white/10 hover:bg-white/5 text-white/70' : 'border-slate-200 hover:bg-slate-100 text-slate-700'
+                                        }`}
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleStartImport}
+                                        disabled={!importFile}
+                                        className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold uppercase tracking-wider transition shadow-sm"
+                                    >
+                                        Carregar Histórico
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

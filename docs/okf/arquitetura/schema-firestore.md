@@ -78,7 +78,7 @@ Logs de qualidade/feedback de respostas geradas pelo sistema.
 ## Pessoas, projetos e bolsistas
 
 ### `perfil_pessoas`
-Contatos, bolsistas e colaboradores: `nome`, `email`, `telefone`, `cpf`/`rg`, `dados_bancarios`, `lattes`, `origem` (`manual`\|`google_contacts`\|`extracao_ia`), `google_contact_id`, `resumo_ia`. Escrito pelo frontend, por `sync_google_contacts`, `generate_contact_summary`, e por extratores de menções em tarefas (`knowledge_graph.py`).
+Contatos, bolsistas e colaboradores: `nome`, `email`, `telefone`, `whatsapp_chat_id` (ID de chat 1:1 `@c.us`), `cpf`/`rg`, `dados_bancarios`, `lattes`, `origem` (`manual`\|`google_contacts`\|`extracao_ia`), `google_contact_id`, `resumo_ia`. Escrito pelo frontend, por `sync_google_contacts`, `linkWhatsappContacts`, `generate_contact_summary`, e por extratores de menções em tarefas (`knowledge_graph.py`).
 
 ### `vinculos_projeto`
 Vínculo de bolsista/colaborador a um projeto: `pessoa_id`, `projeto_id`, `tipo_bolsa_id`, `percentual_recebimento`, `funcao`, `status`, `documentos`, `valor_bolsa_mensal_atual`. Relações: → `perfil_pessoas`, → `projetos`, → `tipo_bolsas`.
@@ -90,7 +90,7 @@ Projeto/departamento com orçamento (`orcamento`: custeio, capital, bolsas) e to
 Catálogo de modalidades de bolsa: `nome_modalidade`, `valor_integral`, `valor_parcial`.
 
 ### `interacoes_pessoas`
-Histórico de interações por pessoa: `pessoa_id`, `tipo` (`mencao_tarefa`\|`mencao_diario`\|`reuniao`\|`manual`\|`mencao_copiloto`), `data`, `descricao`. Escrito por extratores de menções (`on_tarefa_written_extract_people`) e pelo Copiloto.
+Histórico de interações por pessoa: `pessoa_id`, `tipo` (`mencao_tarefa`\|`mencao_diario`\|`reuniao`\|`manual`\|`mencao_copiloto`\|`whatsapp`), `data`, `descricao`, `consolidacao_id` (se tipo `whatsapp`). Escrito por extratores de menções (`on_tarefa_written_extract_people`), pelo Copiloto e pela consolidação da Caixa de Entrada WhatsApp (`whatsapp_consolidation.py`).
 
 ## Financeiro
 
@@ -138,6 +138,7 @@ Exames e consultas médicas: `titulo`, `doutor_local`, `resultados`, `data`, `ti
 | `google_calendar_events` | Eventos do Google Calendar sincronizados | `sync_google_calendar`, `run_full_sync` |
 | `sipac_processos` | Processos SIPAC sincronizados (scraper externo via PubSub) | trigger `on_processo_updated` |
 | `whatsapp_outbox` | Fila de mensagens WhatsApp agendadas — coordenação de quem envia (worker local vs. card Telegram) via `system/settings.whatsapp_auto_send_enabled` + heartbeat | `schedule_whatsapp_message` (tools); consumida por `services/whatsapp-capture` (cron) ou `dispatch_scheduled_whatsapp_messages` |
+| `whatsapp_chats` | Registro de todos os chats da conta WhatsApp (`chat_id`, `chat_name`, `is_group`, `last_activity_ts`, `last_synced_at`) — populado a cada 6h e 60s pós-ready pelo worker local; base para nomes de chat e matching com contatos | microsserviço `services/whatsapp-capture`; lido por `listWhatsappChats` e `linkWhatsappContacts` |
 | `whatsapp_messages` | Mensagens capturadas pelo microsserviço WhatsApp, só das conversas em `system/settings.whatsapp_ingest.chats_allowlist` — ver [Integração WhatsApp](/docs/okf/integracoes/whatsapp.md). `transcription_text`/`transcription_model` são cache de transcrição do job de consolidação; `consolidation_ids[]` marca mensagens já consolidadas. Índice composto `chat_id`+`timestamp` (timeline da Caixa de Entrada) | microsserviço `services/whatsapp-capture`; `whatsapp_consolidation.py` (cache/marcação); lida por `WhatsappInboxView.tsx` |
 | `whatsapp_consolidacoes` | Jobs de consolidação da Caixa de Entrada WhatsApp — requisição (`chat_id`, `message_ids[]` máx. 200), ciclo de vida (`status` queued→processing→completed/error, `progress`), resultado (`transcript_literal` montado por código, `resumo`, `itens_de_acao[]`, `decisoes[]`, `periodo_*`, contadores, `attachments[]`, `digest_id`) e associação (`task_id`, `task_titulo`, `applied_at`). Índice composto `chat_id`+`requested_at` | `WhatsappInboxView.tsx` (addDoc = RPC, padrão `copilot_jobs`); trigger `on_whatsapp_consolidacao_created` |
 | `whatsapp_digests` | Digests vetorizados de conversas do WhatsApp (nunca mensagem a mensagem) — `chat_id`, `chat_name`, `resumo`, `topicos[]`, `relevancia`, `itens_de_acao[]`, `decisoes[]`, `datas_mencionadas[]`, `embedding` (Vector 768). Produtor atual: job de consolidação (IDs `consol_*`, relevancia `consolidacao`); a triagem automática (IDs `{chat_id}_{ts}`) está dormente | `whatsapp_consolidation.py`; `whatsapp_ingest.py:triage_whatsapp_messages` (legado); lida por `whatsapp_ingest.py:buscar_conversas_whatsapp` (tool do copiloto) |

@@ -72,9 +72,15 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
         nome: '',
         email: '',
         telefone: '',
+        whatsapp_chat_id: '',
         observacoes: '',
         tags: []
     });
+
+    // WhatsApp Link States
+    const [isLinkingWhatsapp, setIsLinkingWhatsapp] = useState<boolean>(false);
+    const [whatsappLinkReport, setWhatsappLinkReport] = useState<any>(null);
+    const [showWhatsappLinkModal, setShowWhatsappLinkModal] = useState<boolean>(false);
 
     // Theme Class helper
     const themeClass = {
@@ -149,6 +155,30 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
             setShowSyncModal(false);
         } finally {
             setIsSyncing(false);
+        }
+    };
+
+    // Trigger WhatsApp link
+    const handleLinkWhatsapp = async () => {
+        setIsLinkingWhatsapp(true);
+        setWhatsappLinkReport(null);
+        setShowWhatsappLinkModal(true);
+        try {
+            const linkFn = httpsCallable(functions, 'linkWhatsappContacts');
+            const result = await linkFn();
+            const resData = result.data as any;
+            if (resData.success) {
+                setWhatsappLinkReport(resData);
+            } else {
+                alert("Erro ao vincular contatos com WhatsApp.");
+                setShowWhatsappLinkModal(false);
+            }
+        } catch (err: any) {
+            console.error(err);
+            alert(`Erro ao vincular contatos com WhatsApp: ${err.message || err}`);
+            setShowWhatsappLinkModal(false);
+        } finally {
+            setIsLinkingWhatsapp(false);
         }
     };
     
@@ -430,10 +460,23 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
             avatarColor = colors[hashVal % colors.length];
         }
 
-        const payload = {
+        const rawWaChatId = (formState.whatsapp_chat_id || '').trim();
+        if (rawWaChatId) {
+            if (rawWaChatId.endsWith('@g.us')) {
+                alert('ID de WhatsApp inválido. Grupos (@g.us) não podem ser vinculados a um contato individual — use um chat individual (@c.us).');
+                return;
+            }
+            if (!rawWaChatId.endsWith('@c.us')) {
+                alert('ID de WhatsApp inválido. Deve terminar com "@c.us" (ex: 5527999999999@c.us).');
+                return;
+            }
+        }
+
+        const payload: any = {
             nome: formState.nome,
             email: formState.email || '',
             telefone: formState.telefone || '',
+            whatsapp_chat_id: rawWaChatId || null,
             observacoes: formState.observacoes || '',
             tags: formState.tags || ['Contato'],
             origem: formState.origem || 'manual',
@@ -454,7 +497,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
             }
             setIsModalOpen(false);
             setEditingContact(null);
-            setFormState({ nome: '', email: '', telefone: '', observacoes: '', tags: [] });
+            setFormState({ nome: '', email: '', telefone: '', whatsapp_chat_id: '', observacoes: '', tags: [] });
         } catch (err) {
             console.error(err);
             alert('Erro ao salvar contato.');
@@ -483,6 +526,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
             nome: '',
             email: '',
             telefone: '',
+            whatsapp_chat_id: '',
             observacoes: '',
             tags: ['Contato'],
             origem: 'manual'
@@ -497,6 +541,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
             nome: contact.nome,
             email: contact.email || '',
             telefone: contact.telefone || '',
+            whatsapp_chat_id: contact.whatsapp_chat_id || '',
             observacoes: contact.observacoes || '',
             tags: contact.tags || [],
             origem: contact.origem || 'manual',
@@ -563,6 +608,15 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                 {detectedProposalsCount}
                             </span>
                         )}
+                    </button>
+                    <button
+                        onClick={handleLinkWhatsapp}
+                        className={`px-4 py-2 border rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-2 font-sans ${
+                            isDark ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/60' : 'bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100'
+                        }`}
+                    >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                        Vincular WhatsApp
                     </button>
                     <button
                         onClick={handleGoogleSync}
@@ -770,6 +824,12 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                         <span className={`font-black ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{selectedContact.telefone}</span>
                                     </div>
                                 )}
+                                {selectedContact.whatsapp_chat_id && (
+                                    <div className="flex justify-between items-center">
+                                        <span className={`font-bold uppercase tracking-widest text-[9px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>WhatsApp</span>
+                                        <span className={`font-mono font-black text-[11px] ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{selectedContact.whatsapp_chat_id}</span>
+                                    </div>
+                                )}
                                 {selectedContact.cpf && (
                                     <div className="flex justify-between">
                                         <span className={`font-bold uppercase tracking-widest text-[9px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>CPF</span>
@@ -869,16 +929,39 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                             });
                                             return (
                                                 <div key={item.id || idx} className="relative">
-                                                    <div className={`absolute -left-[23px] top-[3px] w-3 h-3 rounded-lg border-[3px] ${item.tipo === 'mencao_copiloto' ? 'bg-blue-400 border-slate-900' : isDark ? 'bg-indigo-400 border-slate-900' : 'bg-indigo-600 border-white'}`} />
+                                                    <div className={`absolute -left-[23px] top-[3px] w-3 h-3 rounded-lg border-[3px] ${
+                                                        item.tipo === 'whatsapp'
+                                                            ? 'bg-emerald-400 border-slate-900'
+                                                            : item.tipo === 'mencao_copiloto'
+                                                            ? 'bg-blue-400 border-slate-900'
+                                                            : isDark
+                                                            ? 'bg-indigo-400 border-slate-900'
+                                                            : 'bg-indigo-600 border-white'
+                                                    }`} />
                                                     <div>
                                                         <div className="flex items-center justify-between gap-2">
                                                             <div className="flex items-center gap-2">
                                                                 <span className={`text-[9px] font-sans font-bold uppercase tracking-wider ${isDark ? 'text-indigo-450' : 'text-indigo-600'}`}>{formattedDate}</span>
+                                                                {item.tipo === 'whatsapp' && (
+                                                                    <span className="text-[8px] bg-emerald-500/10 text-emerald-500 px-1.5 py-0.5 rounded-lg font-bold uppercase tracking-wider">WhatsApp</span>
+                                                                )}
                                                                 {item.tipo === 'mencao_copiloto' && (
                                                                     <span className="text-[8px] bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded-lg font-bold uppercase tracking-wider">IA</span>
                                                                 )}
                                                             </div>
                                                             <div className="flex items-center gap-2">
+                                                                {item.tipo === 'whatsapp' && (
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            navigateWithinApp('/whatsapp');
+                                                                        }}
+                                                                        className={`text-[9px] font-bold uppercase tracking-wider flex items-center gap-1 ${
+                                                                            isDark ? 'text-emerald-400 hover:text-emerald-300' : 'text-emerald-600 hover:text-emerald-800 hover:underline'
+                                                                        }`}
+                                                                    >
+                                                                        Conversa ↗
+                                                                    </button>
+                                                                )}
                                                                 {item.sessao_copiloto_id && (
                                                                      <button
                                                                         onClick={() => {
@@ -973,6 +1056,90 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                 </div>
             )}
 
+            {/* WhatsApp Link Modal */}
+            {showWhatsappLinkModal && (
+                <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={() => !isLinkingWhatsapp && setShowWhatsappLinkModal(false)}></div>
+                    <div className={`w-full max-w-md rounded-2xl border shadow-lg p-6 relative z-10 text-center space-y-4 font-sans ${
+                        isDark ? 'bg-slate-950 border-[#e5e7eb] dark:border-white/10 text-white' : 'bg-white border-slate-200 text-slate-800'
+                    }`}>
+                        {isLinkingWhatsapp ? (
+                            <>
+                                <div className="flex justify-center py-6">
+                                    <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-lg animate-spin"></div>
+                                </div>
+                                <h4 className="text-sm font-black">Vinculando Contatos com WhatsApp...</h4>
+                                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                    Cruzando números de telefone (last-8) com o registro de chats do WhatsApp. Aguarde um instante.
+                                </p>
+                            </>
+                        ) : (
+                            <>
+                                <div className="flex justify-center text-emerald-500 py-2">
+                                    <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                </div>
+                                <h4 className="text-base font-black">Vínculo com WhatsApp Concluído!</h4>
+                                {whatsappLinkReport && (
+                                    <div className="space-y-3 text-left">
+                                        <div className={`grid grid-cols-2 gap-2 p-3 rounded-lg text-xs font-bold border ${
+                                            isDark ? 'bg-slate-950 border-slate-850 text-slate-450' : 'bg-slate-50 border-slate-100 text-slate-600'
+                                        }`}>
+                                            <div>
+                                                <span className="text-[9px] uppercase tracking-widest opacity-60 block">Novos Vínculos</span>
+                                                <span className="text-base font-black text-emerald-500">{whatsappLinkReport.vinculados?.length || 0}</span>
+                                            </div>
+                                            <div>
+                                                <span className="text-[9px] uppercase tracking-widest opacity-60 block">Já Vinculados</span>
+                                                <span className="text-base font-black text-indigo-400">{whatsappLinkReport.ja_vinculados || 0}</span>
+                                            </div>
+                                            <div>
+                                                <span className="text-[9px] uppercase tracking-widest opacity-60 block">Sem Match</span>
+                                                <span className="text-sm font-black text-slate-400">{whatsappLinkReport.sem_match || 0}</span>
+                                            </div>
+                                            <div>
+                                                <span className="text-[9px] uppercase tracking-widest opacity-60 block">Sem Telefone</span>
+                                                <span className="text-sm font-black text-slate-400">{whatsappLinkReport.sem_telefone || 0}</span>
+                                            </div>
+                                        </div>
+
+                                        {whatsappLinkReport.vinculados?.length > 0 && (
+                                            <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
+                                                <span className="text-[10px] font-black uppercase text-emerald-500">Contatos Vinculados:</span>
+                                                {whatsappLinkReport.vinculados.map((v: any) => (
+                                                    <div key={v.pessoa_id} className={`p-2 rounded border text-[11px] flex justify-between items-center ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                                        <span className="font-bold truncate">{v.nome}</span>
+                                                        <span className="font-mono text-[10px] text-emerald-500 shrink-0 ml-2">{v.chat_id}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        {whatsappLinkReport.ambiguos?.length > 0 && (
+                                            <div className="max-h-32 overflow-y-auto space-y-1 pr-1">
+                                                <span className="text-[10px] font-black uppercase text-amber-500">Casos Ambíguos ({whatsappLinkReport.ambiguos.length}):</span>
+                                                {whatsappLinkReport.ambiguos.map((a: any, idx: number) => (
+                                                    <div key={idx} className={`p-2 rounded border text-[10px] ${isDark ? 'bg-amber-950/20 border-amber-500/30 text-amber-300' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+                                                        <span className="font-bold">...{a.last8}:</span> {a.pessoas?.map((p: any) => p.nome).join(', ')} ↔ {a.chats?.map((c: any) => c.chat_name).join(', ')}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                <button
+                                    onClick={() => setShowWhatsappLinkModal(false)}
+                                    className={`w-full mt-4 py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border ${
+                                        isDark ? 'bg-white text-slate-900 border-white hover:bg-slate-100' : 'bg-slate-900 text-white border-slate-900 hover:bg-slate-800'
+                                    }`}
+                                >
+                                    Fechar
+                                </button>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {/* Manual Add/Edit Modal */}
             {isModalOpen && (
                 <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
@@ -1021,6 +1188,18 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                         placeholder="(27) 99999-9999"
                                     />
                                 </div>
+                            </div>
+                            <div>
+                                <label className={`text-[10px] font-bold uppercase tracking-wider ml-1 ${isDark ? 'text-slate-555' : 'text-slate-400'}`}>WhatsApp Chat ID (@c.us)</label>
+                                <input
+                                    type="text"
+                                    value={formState.whatsapp_chat_id || ''}
+                                    onChange={e => setFormState({...formState, whatsapp_chat_id: e.target.value})}
+                                    className={`w-full mt-1 p-3 rounded-lg border outline-none font-mono font-bold text-xs ${
+                                        isDark ? 'bg-slate-950 border-slate-800 text-white focus:border-white' : 'bg-white border-slate-200 text-slate-700 focus:border-slate-900'
+                                    }`}
+                                    placeholder="5527999999999@c.us (deixe vazio para desvincular)"
+                                />
                             </div>
                             <div>
                                 <label className={`text-[10px] font-bold uppercase tracking-wider ml-1 ${isDark ? 'text-slate-555' : 'text-slate-400'}`}>Observações</label>

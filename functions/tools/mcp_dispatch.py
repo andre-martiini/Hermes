@@ -133,6 +133,8 @@ def _buscar_contato(args: dict) -> dict:
                 "pessoa_id": doc.id,
                 "nome": data.get("nome", ""),
                 "email": data.get("email", ""),
+                "telefone": data.get("telefone", ""),
+                "whatsapp_chat_id": data.get("whatsapp_chat_id", ""),
                 "tags": data.get("tags", []),
                 "score": score,
             })
