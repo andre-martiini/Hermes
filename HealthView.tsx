@@ -201,7 +201,7 @@ const ToggleTile = ({
             onClick={onClick}
             className={`rounded-xl border p-3 text-left transition ${active ? toneClasses : 'border-border-subtle bg-background text-on-surface'}`}
         >
-            <span className={`${labelClasses} ${active ? 'opacity-80' : ''}`}>{label}</span>
+            <span className={`text-[10px] font-semibold uppercase tracking-[0.05em] ${active ? 'text-current opacity-80' : 'text-on-surface-variant'}`}>{label}</span>
             <div className="mt-2 flex items-center gap-2">
                 <span className={`flex h-5 w-9 shrink-0 items-center rounded-full border p-0.5 transition ${active ? 'justify-end border-white/40 bg-white/20' : 'justify-start border-border-standard bg-white'}`}>
                     <span className={`h-3.5 w-3.5 rounded-full transition ${active ? 'bg-white' : 'bg-on-surface-variant/50'}`} />
@@ -363,7 +363,8 @@ const HealthSection = ({
 
 function useChartHover(count: number) {
     const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-    const updateFromClientX = (clientX: number, svg: SVGSVGElement, padLeft: number, plotWidth: number) => {
+    const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
+    const updateFromClientX = (clientX: number, clientY: number, svg: SVGSVGElement, padLeft: number, plotWidth: number) => {
         if (count < 2) return;
         const rect = svg.getBoundingClientRect();
         if (rect.width === 0) return;
@@ -373,25 +374,32 @@ function useChartHover(count: number) {
         const ratio = (xInSvg - padLeft) / plotWidth;
         const index = Math.round(ratio * (count - 1));
         setHoveredIndex(Math.max(0, Math.min(count - 1, index)));
+        setHoverPos({ x: clientX, y: clientY });
     };
     const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>, padLeft: number, plotWidth: number) =>
-        updateFromClientX(e.clientX, e.currentTarget, padLeft, plotWidth);
+        updateFromClientX(e.clientX, e.clientY, e.currentTarget, padLeft, plotWidth);
     const handleTouchMove = (e: React.TouchEvent<SVGSVGElement>, padLeft: number, plotWidth: number) => {
         const touch = e.touches[0];
-        if (touch) updateFromClientX(touch.clientX, e.currentTarget, padLeft, plotWidth);
+        if (touch) updateFromClientX(touch.clientX, touch.clientY, e.currentTarget, padLeft, plotWidth);
     };
-    const handleLeave = () => setHoveredIndex(null);
-    return { hoveredIndex, handleMouseMove, handleTouchMove, handleLeave };
+    const handleLeave = () => { setHoveredIndex(null); setHoverPos(null); };
+    return { hoveredIndex, hoverPos, handleMouseMove, handleTouchMove, handleLeave };
 }
 
-const ChartTooltip = ({ leftPercent, children }: { leftPercent: number; children: React.ReactNode }) => (
-    <div
-        className="pointer-events-none absolute top-2 z-10 max-w-[220px] -translate-x-1/2 whitespace-nowrap rounded-lg bg-on-surface px-2.5 py-1.5 text-[11px] font-semibold text-background shadow-lg"
-        style={{ left: `${Math.min(92, Math.max(8, leftPercent))}%` }}
-    >
-        {children}
-    </div>
-);
+const ChartTooltip = ({ x, y, children }: { x: number; y: number; children: React.ReactNode }) => {
+    const vw = typeof window !== 'undefined' ? window.innerWidth : x + 118;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : y + 40;
+    const clampedX = Math.min(Math.max(x, 118), Math.max(118, vw - 118));
+    const clampedY = Math.min(Math.max(y, 12), vh - 12);
+    return (
+        <div
+            className="pointer-events-none fixed z-30 max-w-[220px] -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-lg bg-on-surface px-2.5 py-1.5 text-[11px] font-semibold text-background shadow-lg"
+            style={{ left: clampedX, top: clampedY }}
+        >
+            {children}
+        </div>
+    );
+};
 
 const ChartTableToggle = ({ showTable, onToggle }: { showTable: boolean; onToggle: () => void }) => (
     <button
@@ -463,6 +471,7 @@ const WeightTrendChart = ({
 }) => {
     const [showTable, setShowTable] = useState(false);
     const [hoverTime, setHoverTime] = useState<number | null>(null);
+    const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
     const palette = chartPalette(isDark);
 
     if (points.length < 2) {
@@ -507,6 +516,7 @@ const WeightTrendChart = ({
         const xInSvg = ratio * width;
         const timeRatio = (xInSvg - pad.left) / plotWidth;
         setHoverTime(minTime + Math.max(0, Math.min(1, timeRatio)) * totalSpan);
+        setHoverPos({ x: e.clientX, y: e.clientY });
     };
     const handleTouch = (e: React.TouchEvent<SVGSVGElement>) => {
         const touch = e.touches[0];
@@ -517,8 +527,9 @@ const WeightTrendChart = ({
         const xInSvg = ratio * width;
         const timeRatio = (xInSvg - pad.left) / plotWidth;
         setHoverTime(minTime + Math.max(0, Math.min(1, timeRatio)) * totalSpan);
+        setHoverPos({ x: touch.clientX, y: touch.clientY });
     };
-    const handleLeave = () => setHoverTime(null);
+    const handleLeave = () => { setHoverTime(null); setHoverPos(null); };
     const hovered = hoverTime !== null ? nearestByTime(points, p => parseLocalDate(p.date).getTime(), hoverTime) : null;
     const hoverX = hoverTime !== null ? xForDate(formatLocalISO(new Date(hoverTime))) : null;
 
@@ -535,8 +546,8 @@ const WeightTrendChart = ({
     return (
         <div className="relative rounded-2xl border border-border-subtle bg-background p-4">
             <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(true)} />
-            {hovered && hoverX !== null && (
-                <ChartTooltip leftPercent={(hoverX / width) * 100}>
+            {hovered && hoverPos && (
+                <ChartTooltip x={hoverPos.x} y={hoverPos.y - 12}>
                     {formatShortDate(hovered.date)}: {hovered.value.toFixed(1).replace('.', ',')} kg
                 </ChartTooltip>
             )}
@@ -595,7 +606,7 @@ const WeightTrendChart = ({
 const PainTrendChart = ({ points, isDark = false }: { points: PainTrendPoint[]; isDark?: boolean }) => {
     const visiblePoints = points.filter(point => point.morning !== undefined || point.evening !== undefined);
     const [showTable, setShowTable] = useState(false);
-    const { hoveredIndex, handleMouseMove, handleTouchMove, handleLeave } = useChartHover(visiblePoints.length);
+    const { hoveredIndex, hoverPos, handleMouseMove, handleTouchMove, handleLeave } = useChartHover(visiblePoints.length);
     const palette = chartPalette(isDark);
 
     if (visiblePoints.length < 2) {
@@ -638,8 +649,8 @@ const PainTrendChart = ({ points, isDark = false }: { points: PainTrendPoint[]; 
     return (
         <div className="relative rounded-2xl border border-border-subtle bg-background p-4">
             <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(true)} />
-            {hovered && (
-                <ChartTooltip leftPercent={(xFor(hoveredIndex!) / width) * 100}>
+            {hovered && hoverPos && (
+                <ChartTooltip x={hoverPos.x} y={hoverPos.y - 12}>
                     {hovered.label}: manhã {hovered.morning ?? '-'}, noite {hovered.evening ?? '-'}{hovered.crisis ? ', crise' : ''}
                 </ChartTooltip>
             )}
@@ -745,6 +756,7 @@ const WalkDailyChart = ({
 }) => {
     const [showTable, setShowTable] = useState(false);
     const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+    const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
     const palette = chartPalette(isDark);
 
     if (!days.some(day => day.km > 0)) {
@@ -766,7 +778,7 @@ const WalkDailyChart = ({
     const barWidth = Math.min(34, slot * 0.6);
     const hovered = hoveredIndex !== null ? days[hoveredIndex] : null;
 
-    const updateHoverFromClientX = (clientX: number, svg: SVGSVGElement) => {
+    const updateHoverFromClientX = (clientX: number, clientY: number, svg: SVGSVGElement) => {
         const rect = svg.getBoundingClientRect();
         if (rect.width === 0) return;
         const viewBoxWidth = svg.viewBox.baseVal.width || rect.width;
@@ -774,6 +786,7 @@ const WalkDailyChart = ({
         const xInSvg = (clientX - rect.left) * scaleX;
         const index = Math.floor((xInSvg - pad.left) / slot);
         setHoveredIndex(Math.max(0, Math.min(days.length - 1, index)));
+        setHoverPos({ x: clientX, y: clientY });
     };
 
     if (showTable) {
@@ -789,8 +802,8 @@ const WalkDailyChart = ({
     return (
         <div className="relative rounded-2xl border border-border-subtle bg-background p-4">
             <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(true)} />
-            {hovered && (
-                <ChartTooltip leftPercent={((pad.left + hoveredIndex! * slot + slot / 2) / width) * 100}>
+            {hovered && hoverPos && (
+                <ChartTooltip x={hoverPos.x} y={hoverPos.y - 12}>
                     {hovered.label}: {formatKm(hovered.km)} km
                 </ChartTooltip>
             )}
@@ -799,10 +812,10 @@ const WalkDailyChart = ({
                 className="h-[220px] w-full touch-none overflow-visible"
                 role="img"
                 aria-label="Gráfico de caminhadas diárias"
-                onMouseMove={e => updateHoverFromClientX(e.clientX, e.currentTarget)}
-                onTouchMove={e => { const t = e.touches[0]; if (t) updateHoverFromClientX(t.clientX, e.currentTarget); }}
-                onMouseLeave={() => setHoveredIndex(null)}
-                onTouchEnd={() => setHoveredIndex(null)}
+                onMouseMove={e => updateHoverFromClientX(e.clientX, e.clientY, e.currentTarget)}
+                onTouchMove={e => { const t = e.touches[0]; if (t) updateHoverFromClientX(t.clientX, t.clientY, e.currentTarget); }}
+                onMouseLeave={() => { setHoveredIndex(null); setHoverPos(null); }}
+                onTouchEnd={() => { setHoveredIndex(null); setHoverPos(null); }}
             >
                 <rect x="0" y="0" width={width} height={height} rx="16" fill={palette.bg} />
                 {[maxKm, maxKm / 2, 0].map(tick => (
@@ -846,7 +859,7 @@ const IntegratedTrendChart = ({
     targetWeight,
     isDark = false,
 }: {
-    weightPoints: { date: string; value: number }[];
+    weightPoints: { date: string; value: number; count?: number }[];
     painWeekly: WeeklyBucket[];
     kmWeekly: WeeklyBucket[];
     events: HealthEvent[];
@@ -855,6 +868,7 @@ const IntegratedTrendChart = ({
 }) => {
     const [showTable, setShowTable] = useState(false);
     const [hoverTime, setHoverTime] = useState<number | null>(null);
+    const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
     const palette = chartPalette(isDark);
 
     const allDates = [
@@ -935,20 +949,41 @@ const IntegratedTrendChart = ({
 
     const sortedEvents = [...events].sort((a, b) => a.date.localeCompare(b.date));
 
-    const updateHoverFromClientX = (clientX: number, containerRect: DOMRect) => {
+    // Empacotamento por linha (evita colisão de rótulos): cada evento entra na primeira
+    // linha cujo último rótulo já não invade o espaço do novo; sem linha livre, usa a de
+    // menor sobreposição. Substitui a antiga alternância por paridade de índice (i % 2).
+    const EVENT_ROWS = 2;
+    const rowLastRight: number[] = new Array(EVENT_ROWS).fill(-Infinity);
+    const eventLayout = sortedEvents.map(event => {
+        const x = xForDate(event.date);
+        const label = event.label.length > 13 ? `${event.label.slice(0, 12)}…` : event.label;
+        const labelHalfWidth = Math.max(10, label.length * 3);
+        let row = 0;
+        let bestSlack = -Infinity;
+        for (let r = 0; r < EVENT_ROWS; r++) {
+            const slack = (x - labelHalfWidth) - rowLastRight[r];
+            if (slack >= 0) { row = r; bestSlack = slack; break; }
+            if (slack > bestSlack) { bestSlack = slack; row = r; }
+        }
+        rowLastRight[row] = x + labelHalfWidth;
+        return { event, x, row, label };
+    });
+
+    const updateHoverFromClientX = (clientX: number, clientY: number, containerRect: DOMRect) => {
         if (containerRect.width === 0) return;
         const ratioX = (clientX - containerRect.left) / containerRect.width;
         const xInSvg = ratioX * width;
         const ratio = (xInSvg - padLeft) / plotWidth;
         const time = minTime + Math.max(0, Math.min(1, ratio)) * totalSpan;
         setHoverTime(time);
+        setHoverPos({ x: clientX, y: clientY });
     };
-    const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => updateHoverFromClientX(e.clientX, e.currentTarget.getBoundingClientRect());
+    const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => updateHoverFromClientX(e.clientX, e.clientY, e.currentTarget.getBoundingClientRect());
     const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
         const touch = e.touches[0];
-        if (touch) updateHoverFromClientX(touch.clientX, e.currentTarget.getBoundingClientRect());
+        if (touch) updateHoverFromClientX(touch.clientX, touch.clientY, e.currentTarget.getBoundingClientRect());
     };
-    const handleLeave = () => setHoverTime(null);
+    const handleLeave = () => { setHoverTime(null); setHoverPos(null); };
 
     const hoverWeight = hoverTime !== null ? nearestByTime(weightPoints, p => parseLocalDate(p.date).getTime(), hoverTime) : null;
     const hoverPain = hoverTime !== null ? nearestByTime(painWeekly, b => parseLocalDate(b.weekStart).getTime(), hoverTime) : null;
@@ -978,8 +1013,8 @@ const IntegratedTrendChart = ({
     return (
         <div className="relative rounded-2xl border border-border-subtle bg-background p-4">
             <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(true)} />
-            {hoverTime !== null && hoverX !== null && (
-                <ChartTooltip leftPercent={(hoverX / width) * 100}>
+            {hoverTime !== null && hoverPos && (
+                <ChartTooltip x={hoverPos.x} y={hoverPos.y - 12}>
                     <div>{hoverDateLabel}</div>
                     {hoverWeight && <div>Peso (méd. 7d): {hoverWeight.value.toFixed(1).replace('.', ',')} kg</div>}
                     {hoverPain && <div>Dor média sem.: {hoverPain.average.toFixed(1).replace('.', ',')}</div>}
@@ -1000,7 +1035,9 @@ const IntegratedTrendChart = ({
                     ))}
 
                     {/* Painel 1 — Peso */}
-                    <text x={padLeft} y={weightHeaderY + 11} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="start">PESO — MÉDIA 7D</text>
+                    <text x={padLeft} y={weightHeaderY + 11} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="start">
+                        {weightPoints.length && (weightPoints[weightPoints.length - 1].count ?? 4) >= 4 ? 'PESO — MÉDIA 7D' : 'PESO — ÚLTIMO REGISTRO'}
+                    </text>
                     <text x={padLeft + plotWidth} y={weightHeaderY + 11} fontSize="11" fontWeight="700" fill={palette.line} textAnchor="end">
                         {weightPoints.length ? `${weightPoints[weightPoints.length - 1].value.toFixed(1).replace('.', ',')} kg` : '—'}
                     </text>
@@ -1074,11 +1111,8 @@ const IntegratedTrendChart = ({
                     ))}
 
                     {/* Trilha de eventos — desenhada por cima dos painéis, nunca embaixo */}
-                    {sortedEvents.map((event, i) => {
-                        const x = xForDate(event.date);
-                        const row = i % 2;
+                    {eventLayout.map(({ event, x, row, label }) => {
                         const pinY = eventTrackTop + 6 + row * 11;
-                        const label = event.label.length > 13 ? `${event.label.slice(0, 12)}…` : event.label;
                         return (
                             <g key={event.id}>
                                 <line x1={x} x2={x} y1={weightPlotY} y2={gridBottomY} stroke={palette.text} strokeOpacity="0.2" strokeWidth="1.25" strokeDasharray="3 3" />
@@ -1184,8 +1218,14 @@ const RadicularTimelineChart = ({
                         <title>{`${formatShortDate(p.date)}: ${RADICULAR_LOCATIONS.find(l => l.value === p.location)?.label}${p.side ? ` (${p.side})` : ''}${p.intensity !== undefined ? ` — intensidade ${p.intensity}/10` : ''}`}</title>
                     </circle>
                 ))}
-                <text x={xForDate(minDate)} y={height - 10} textAnchor="start" fontSize="10" fontWeight="700" fill={palette.text}>{formatShortDate(minDate)}</text>
-                <text x={xForDate(maxDate)} y={height - 10} textAnchor="end" fontSize="10" fontWeight="700" fill={palette.text}>{formatShortDate(maxDate)}</text>
+                {minDate === maxDate ? (
+                    <text x={xForDate(minDate)} y={height - 10} textAnchor="middle" fontSize="10" fontWeight="700" fill={palette.text}>{formatShortDate(minDate)}</text>
+                ) : (
+                    <>
+                        <text x={xForDate(minDate)} y={height - 10} textAnchor="start" fontSize="10" fontWeight="700" fill={palette.text}>{formatShortDate(minDate)}</text>
+                        <text x={xForDate(maxDate)} y={height - 10} textAnchor="end" fontSize="10" fontWeight="700" fill={palette.text}>{formatShortDate(maxDate)}</text>
+                    </>
+                )}
             </svg>
             <div className="mt-2 flex flex-wrap gap-3 text-[10px] font-semibold text-on-surface-variant">
                 <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: palette.line }} />Direito</span>
@@ -1281,7 +1321,7 @@ const HealthView: React.FC<HealthViewProps> = ({
     );
     const weightForIntegrated = useMemo(() => {
         const filtered = weights.filter(w => !integratedRangeStart || w.date >= integratedRangeStart);
-        return movingAverage(filtered.map(w => ({ date: w.date, value: w.weight })), 7).map(p => ({ date: p.date, value: p.average as number }));
+        return movingAverage(filtered.map(w => ({ date: w.date, value: w.weight })), 7).map(p => ({ date: p.date, value: p.average as number, count: p.count }));
     }, [weights, integratedRangeStart]);
     const painWeeklyForIntegrated = useMemo(() => {
         const dailyPain = exerciseLogs
@@ -1295,9 +1335,24 @@ const HealthView: React.FC<HealthViewProps> = ({
     const kmWeeklyForIntegrated = useMemo(() => {
         const dailyKm = exerciseLogs
             .filter(l => !integratedRangeStart || l.id >= integratedRangeStart)
-            .map(l => ({ date: l.id, value: sumWalkBlocksKm(l) }))
-            .filter(p => p.value > 0);
-        return weeklyAggregate(dailyKm);
+            .map(l => ({ date: l.id, value: sumWalkBlocksKm(l) }));
+        const aggregated = weeklyAggregate(dailyKm);
+        if (dailyKm.length === 0) return aggregated;
+        // Preenche semanas sem nenhum registro com 0 km, em vez de omiti-las — evita que o
+        // painel de km fique com grandes lacunas quando há poucas caminhadas na janela.
+        const rangeStartDate = integratedRangeStart ?? dailyKm.reduce((min, p) => (p.date < min ? p.date : min), dailyKm[0].date);
+        const byWeek = new Map(aggregated.map(b => [b.weekStart, b]));
+        const cursor = parseLocalDate(rangeStartDate);
+        const cursorDay = cursor.getDay();
+        cursor.setDate(cursor.getDate() + (cursorDay === 0 ? -6 : 1 - cursorDay));
+        const end = new Date();
+        const filled: WeeklyBucket[] = [];
+        while (cursor <= end) {
+            const weekStart = formatLocalISO(cursor);
+            filled.push(byWeek.get(weekStart) ?? { weekStart, values: [], sum: 0, average: 0, count: 0 });
+            cursor.setDate(cursor.getDate() + 7);
+        }
+        return filled;
     }, [exerciseLogs, integratedRangeStart]);
     const eventsForIntegrated = useMemo(() => {
         const manual = events
@@ -1747,8 +1802,9 @@ const HealthView: React.FC<HealthViewProps> = ({
             answered: () => todayLog.pain?.morning !== undefined,
             render: () => (
                 <div>
-                    <p className="text-4xl font-bold text-center text-on-surface">{todayLog.pain?.morning ?? 0}<span className="text-base font-semibold text-on-surface-variant">/10</span></p>
-                    <input type="range" min="0" max="10" value={todayLog.pain?.morning ?? 0} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, morning: parseInt(e.target.value) } })} className="mt-4 w-full accent-primary-container" />
+                    <p className="text-4xl font-bold text-center text-on-surface">{todayLog.pain?.morning ?? '—'}<span className="text-base font-semibold text-on-surface-variant">/10</span></p>
+                    <input type="range" min="0" max="10" value={todayLog.pain?.morning ?? 5} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, morning: parseInt(e.target.value) } })} className="mt-4 w-full accent-primary-container" />
+                    {todayLog.pain?.morning === undefined && <p className="mt-2 text-center text-xs font-semibold text-on-surface-variant">Arraste o slider para responder</p>}
                 </div>
             ),
         },
@@ -1784,8 +1840,9 @@ const HealthView: React.FC<HealthViewProps> = ({
             answered: () => todayLog.pain?.evening !== undefined,
             render: () => (
                 <div>
-                    <p className="text-4xl font-bold text-center text-on-surface">{todayLog.pain?.evening ?? 0}<span className="text-base font-semibold text-on-surface-variant">/10</span></p>
-                    <input type="range" min="0" max="10" value={todayLog.pain?.evening ?? 0} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, evening: parseInt(e.target.value) } })} className="mt-4 w-full accent-primary-container" />
+                    <p className="text-4xl font-bold text-center text-on-surface">{todayLog.pain?.evening ?? '—'}<span className="text-base font-semibold text-on-surface-variant">/10</span></p>
+                    <input type="range" min="0" max="10" value={todayLog.pain?.evening ?? 5} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, evening: parseInt(e.target.value) } })} className="mt-4 w-full accent-primary-container" />
+                    {todayLog.pain?.evening === undefined && <p className="mt-2 text-center text-xs font-semibold text-on-surface-variant">Arraste o slider para responder</p>}
                 </div>
             ),
         },
@@ -1958,10 +2015,14 @@ const HealthView: React.FC<HealthViewProps> = ({
         const clampedStep = Math.min(guidedStep, visibleSteps.length - 1);
         const step = visibleSteps[clampedStep];
         const isLast = clampedStep === visibleSteps.length - 1;
-        const isOptionalStep = step?.id === 'night_trigger' || step?.id === 'night_note';
+        const isAnswered = step ? step.answered() : true;
 
         const closeGuided = () => { setGuidedMode(null); setGuidedStep(0); };
         const goNext = () => {
+            if (isLast) { closeGuided(); return; }
+            setGuidedStep(clampedStep + 1);
+        };
+        const skipStep = () => {
             if (isLast) { closeGuided(); return; }
             setGuidedStep(clampedStep + 1);
         };
@@ -1970,29 +2031,34 @@ const HealthView: React.FC<HealthViewProps> = ({
         return (
             <div className="fixed inset-0 z-50 flex flex-col bg-background">
                 <div className="border-b border-border-subtle bg-white px-6 py-4">
-                    <div className="mx-auto flex max-w-lg items-center justify-between">
+                    <div className="mx-auto flex max-w-[600px] items-center justify-between">
                         <button type="button" onClick={closeGuided} className="text-xs font-semibold text-on-surface-variant hover:text-primary-container">Fechar</button>
                         <span className="text-xs font-semibold text-on-surface-variant">{clampedStep + 1} de {visibleSteps.length}</span>
                     </div>
-                    <div className="mx-auto mt-3 h-1.5 max-w-lg overflow-hidden rounded-full bg-surface-container-low">
+                    <div className="mx-auto mt-3 h-1.5 max-w-[600px] overflow-hidden rounded-full bg-surface-container-low">
                         <div className="h-full rounded-full bg-primary-container transition-all duration-300" style={{ width: `${((clampedStep + 1) / visibleSteps.length) * 100}%` }} />
                     </div>
                 </div>
-                <div className="flex flex-1 items-center justify-center overflow-y-auto px-6 py-8">
-                    <div className="w-full max-w-lg">
+                <div className="flex flex-1 justify-center overflow-y-auto px-6 py-10">
+                    <div className="h-fit w-full max-w-[600px] pt-[8vh]">
                         <p className={labelClasses}>{guidedMode === 'morning' ? 'Check-in da manhã' : 'Check-in da noite'}</p>
                         <h2 className="mt-1 text-xl font-bold text-on-surface">{step ? guidedStepLabels[step.id] : ''}</h2>
                         <div className="mt-6">{step?.render()}</div>
                     </div>
                 </div>
                 <div className="border-t border-border-subtle bg-white px-6 py-4">
-                    <div className="mx-auto flex max-w-lg items-center justify-between gap-3">
+                    <div className="mx-auto flex max-w-[600px] items-center justify-between gap-3">
                         <button type="button" onClick={goBack} disabled={clampedStep === 0} className="rounded-xl border border-border-standard px-4 py-2.5 text-sm font-semibold text-on-surface-variant transition disabled:cursor-not-allowed disabled:opacity-30">Voltar</button>
                         <div className="flex items-center gap-2">
-                            {isOptionalStep && !isLast && (
-                                <button type="button" onClick={() => setGuidedStep(clampedStep + 1)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-on-surface-variant">Pular</button>
+                            {!isLast && (
+                                <button type="button" onClick={skipStep} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-on-surface-variant">Pular</button>
                             )}
-                            <button type="button" onClick={goNext} className="rounded-xl bg-primary-container px-6 py-2.5 text-sm font-bold text-white transition hover:opacity-90">
+                            <button
+                                type="button"
+                                onClick={goNext}
+                                disabled={!isAnswered}
+                                className="rounded-xl bg-primary-container px-6 py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
                                 {isLast ? 'Concluir' : 'Continuar'}
                             </button>
                         </div>
@@ -2970,6 +3036,8 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                             key={day}
                                                             type="button"
                                                             title={WEEKDAY_NAMES[day]}
+                                                            aria-label={`${WEEKDAY_NAMES[day]} — ${active ? 'ativo' : 'inativo'}`}
+                                                            aria-pressed={active}
                                                             onClick={() => {
                                                                 const next = active ? days.filter(d => d !== day) : [...days, day];
                                                                 if (next.length === 0) return;
