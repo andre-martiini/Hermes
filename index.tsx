@@ -5925,7 +5925,7 @@ const App: React.FC = () => {
                 ) : viewMode === 'diario' ? (
                   <PersonalDiaryView isDark={isDarkTheme} />
                 ) : viewMode === 'whatsapp' ? (
-                  <WhatsappInboxView tarefas={tarefas} isDark={isDarkTheme} />
+                  <WhatsappInboxView tarefas={tarefas} userId={user?.uid || ''} isDark={isDarkTheme} />
                 ) : viewMode === 'ferramentas' ? (
                   <FerramentasView
                     ideas={brainstormIdeas}

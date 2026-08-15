@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     QueryDocumentSnapshot, addDoc, arrayUnion, collection, doc, getDocs, limit,
     onSnapshot, orderBy, query, serverTimestamp, startAfter, updateDoc, where
@@ -8,6 +8,7 @@ import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 import { db, functions, storage } from './firebase';
 import { Tarefa, WhatsappConsolidacao, WhatsappMessageDoc } from './types';
 import { buildDiaryWhatsappNote } from './src/utils/diaryEntries';
+import { HermesGlobalChat } from './src/components/tools/HermesGlobalChat';
 
 interface WhatsappChatOption {
     chat_id: string;
@@ -17,6 +18,7 @@ interface WhatsappChatOption {
 
 interface WhatsappInboxViewProps {
     tarefas: Tarefa[];
+    userId: string;
     isDark?: boolean;
 }
 
@@ -24,6 +26,8 @@ const PAGE_SIZE = 30;
 const MAX_SELECTION = 200; // mesmo cap validado no backend (whatsapp_consolidation.py)
 const AUDIO_TYPES = new Set(['ptt', 'audio']);
 const IMAGE_TYPES = new Set(['image', 'sticker']);
+const LIVE_CONTEXT_MAX_CHARS = 9000; // mesmo teto usado pelo Copiloto embutido de Reuniões
+const LAST_SEEN_KEY_PREFIX = 'hermes_whatsapp_last_seen:';
 
 const tsToDate = (ts: any): Date | null => (ts && typeof ts.toDate === 'function' ? ts.toDate() : null);
 
@@ -43,13 +47,38 @@ const fmtShortDate = (iso?: string): string => {
     return isNaN(d.getTime()) ? '' : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 };
 
-const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, isDark = false }) => {
+const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, isDark = false }) => {
     // Lista de chats
     const [chats, setChats] = useState<WhatsappChatOption[]>([]);
     const [isLoadingChats, setIsLoadingChats] = useState(true);
     const [chatsError, setChatsError] = useState<string | null>(null);
     const [chatSearch, setChatSearch] = useState('');
     const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+
+    // Indicador de mensagem nova (bolinha verde): timestamp (ms) da última mensagem por chat,
+    // comparado a "última vez que o usuário abriu esse chat" (persistido no localStorage —
+    // app de usuário único, não precisa de estado compartilhado no Firestore para isso).
+    const [lastMessageAt, setLastMessageAt] = useState<Record<string, number>>({});
+    const lastSeenRef = useRef<Record<string, number>>({});
+    const [, forceUnreadRerender] = useState(0);
+
+    const getLastSeen = (chatId: string): number => {
+        if (lastSeenRef.current[chatId] !== undefined) return lastSeenRef.current[chatId];
+        let val = 0;
+        try {
+            const raw = localStorage.getItem(LAST_SEEN_KEY_PREFIX + chatId);
+            val = raw ? parseInt(raw, 10) || 0 : 0;
+        } catch { /* localStorage indisponível — trata como nunca visto */ }
+        lastSeenRef.current[chatId] = val;
+        return val;
+    };
+
+    const markSeen = (chatId: string, ts: number) => {
+        if (lastSeenRef.current[chatId] === ts) return;
+        lastSeenRef.current[chatId] = ts;
+        try { localStorage.setItem(LAST_SEEN_KEY_PREFIX + chatId, String(ts)); } catch { /* ignora */ }
+        forceUnreadRerender(v => v + 1);
+    };
 
     // Timeline (página 1 viva + páginas antigas sob demanda — precedente PersonalDiaryView)
     const [liveDocs, setLiveDocs] = useState<QueryDocumentSnapshot[]>([]);
@@ -67,6 +96,11 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, isDark =
     const [activeJob, setActiveJob] = useState<WhatsappConsolidacao | null>(null);
     const [pastJobs, setPastJobs] = useState<WhatsappConsolidacao[]>([]);
     const [showTranscript, setShowTranscript] = useState(false);
+
+    // Terceira coluna: Copiloto Hermes (contexto = mensagens carregadas do chat aberto) ou
+    // o relatório da consolidação ativa — abas dentro do mesmo painel, não colunas extras.
+    const [isCopilotCollapsed, setIsCopilotCollapsed] = useState(false);
+    const [thirdColumnTab, setThirdColumnTab] = useState<'copilot' | 'report'>('copilot');
 
     // Associação a ação
     const [taskSearch, setTaskSearch] = useState('');
@@ -99,12 +133,35 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, isDark =
         return () => { cancelled = true; };
     }, []);
 
+    // Última mensagem de cada chat (ao vivo) — alimenta a bolinha de "mensagem nova". Usa o
+    // mesmo índice composto (chat_id+timestamp) já criado para a timeline, então não precisa
+    // de nenhum índice novo.
+    useEffect(() => {
+        if (chats.length === 0) return;
+        const unsubs = chats.map(chat => {
+            const q = query(
+                collection(db, 'whatsapp_messages'),
+                where('chat_id', '==', chat.chat_id),
+                orderBy('timestamp', 'desc'),
+                limit(1)
+            );
+            return onSnapshot(q, snap => {
+                const d = tsToDate(snap.docs[0]?.data()?.timestamp);
+                if (!d) return;
+                const ms = d.getTime();
+                setLastMessageAt(prev => (prev[chat.chat_id] === ms ? prev : { ...prev, [chat.chat_id]: ms }));
+            }, () => { /* sem permissão/índice ainda construindo — sem bolinha, sem quebrar a lista */ });
+        });
+        return () => unsubs.forEach(u => u());
+    }, [chats]);
+
     // ── Timeline do chat selecionado ─────────────────────────────────────────
     useEffect(() => {
         setLiveDocs([]);
         setOlderDocs([]);
         setSelection(new Set());
         setActiveJobId(null);
+        setThirdColumnTab('copilot');
         setTimelineError(null);
         setMediaUrls({});
         if (!selectedChatId) return;
@@ -126,6 +183,14 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, isDark =
         });
         return () => unsubscribe();
     }, [selectedChatId]);
+
+    // Marca o chat aberto como "visto" até a mensagem mais recente conhecida — some a bolinha
+    // ao entrar na conversa e some de novo automaticamente se chegar mensagem nova depois.
+    useEffect(() => {
+        if (!selectedChatId) return;
+        const latest = lastMessageAt[selectedChatId];
+        if (latest) markSeen(selectedChatId, latest);
+    }, [selectedChatId, lastMessageAt[selectedChatId || '']]);
 
     // Histórico de consolidações do chat
     useEffect(() => {
@@ -183,6 +248,34 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, isDark =
         return all.map(d => ({ id: d.id, ...(d.data() as any) })) as WhatsappMessageDoc[];
     }, [liveDocs, olderDocs]);
 
+    // Refs para o Copiloto embutido: liveContextProvider precisa ser estável (useCallback com
+    // deps vazias, mesmo padrão do MeetingTranscriptionTool) e ler sempre o valor mais recente
+    // via ref — não pode depender de `messages`/`selectedChat` diretamente, porque essa função
+    // não remonta quando o chat muda (só o HermesGlobalChat remonta, via `key`).
+    const messagesRef = useRef<WhatsappMessageDoc[]>([]);
+    useEffect(() => { messagesRef.current = messages; }, [messages]);
+    const selectedChatRef = useRef<WhatsappChatOption | null>(null);
+    useEffect(() => { selectedChatRef.current = selectedChat; }, [selectedChat]);
+
+    const liveContextProvider = useCallback((): string | null => {
+        const msgs = messagesRef.current;
+        if (msgs.length === 0) return null;
+        const chatName = selectedChatRef.current?.chat_name || '';
+        const header = `Conversa do WhatsApp com "${chatName}". Mensagens já carregadas nesta tela (Você = usuário; demais nomes = contato/grupo):`;
+        const lines = msgs.map(m => {
+            const d = tsToDate(m.timestamp);
+            const time = d ? d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '?';
+            const author = m.from_me ? 'Você' : (m.author_name || 'Contato');
+            const text = m.transcription_text || m.content || `[${m.message_type}]`;
+            return `[${time}] ${author}: ${text}`;
+        });
+        let body = lines.join('\n');
+        if (body.length > LIVE_CONTEXT_MAX_CHARS) {
+            body = `(...mensagens mais antigas omitidas por tamanho...)\n${body.slice(body.length - LIVE_CONTEXT_MAX_CHARS)}`;
+        }
+        return `${header}\n${body}`;
+    }, []);
+
     const toggleSelect = (id: string) => {
         setSelection(prev => {
             const next = new Set(prev);
@@ -215,6 +308,12 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, isDark =
         }
     };
 
+    const openJob = (jobId: string) => {
+        setActiveJobId(jobId);
+        setThirdColumnTab('report');
+        setIsCopilotCollapsed(false);
+    };
+
     const startConsolidation = async () => {
         if (!selectedChat || selection.size === 0) return;
         const refDoc = await addDoc(collection(db, 'whatsapp_consolidacoes'), {
@@ -226,7 +325,7 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, isDark =
             requested_at: serverTimestamp(),
         });
         setSelection(new Set());
-        setActiveJobId(refDoc.id);
+        openJob(refDoc.id);
     };
 
     // Pré-sugestões: ações com este chat vinculado (tarefas.whatsapp_vinculos).
@@ -311,18 +410,26 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, isDark =
                         <p className={`text-[10px] ${mutedCls}`}>Adicione chats na allowlist em Configurações → Automações.</p>
                     </div>
                 ) : (
-                    filteredChats.map(chat => (
-                        <button
-                            key={chat.chat_id}
-                            onClick={() => setSelectedChatId(chat.chat_id)}
-                            className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${selectedChatId === chat.chat_id
-                                ? (isDark ? 'bg-green-500/15' : 'bg-green-50')
-                                : (isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50')}`}
-                        >
-                            <span className="text-base shrink-0">{chat.is_group ? '👥' : '👤'}</span>
-                            <span className={`text-xs font-bold truncate font-sans ${isDark ? 'text-white/90' : 'text-slate-800'}`}>{chat.chat_name}</span>
-                        </button>
-                    ))
+                    filteredChats.map(chat => {
+                        const unread = chat.chat_id !== selectedChatId
+                            && !!lastMessageAt[chat.chat_id]
+                            && lastMessageAt[chat.chat_id] > getLastSeen(chat.chat_id);
+                        return (
+                            <button
+                                key={chat.chat_id}
+                                onClick={() => setSelectedChatId(chat.chat_id)}
+                                className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${selectedChatId === chat.chat_id
+                                    ? (isDark ? 'bg-green-500/15' : 'bg-green-50')
+                                    : (isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50')}`}
+                            >
+                                <span className="text-base shrink-0">{chat.is_group ? '👥' : '👤'}</span>
+                                <span className={`text-xs font-bold truncate font-sans flex-1 ${isDark ? 'text-white/90' : 'text-slate-800'}`}>{chat.chat_name}</span>
+                                {unread && (
+                                    <span className="shrink-0 w-2 h-2 rounded-full bg-green-500" title="Mensagem nova" />
+                                )}
+                            </button>
+                        );
+                    })
                 )}
             </div>
         </div>
@@ -422,10 +529,18 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, isDark =
                     <span className={`text-sm font-black truncate ${isDark ? 'text-white' : 'text-slate-800'}`}>{selectedChat?.chat_name}</span>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                    {isCopilotCollapsed && (
+                        <button
+                            onClick={() => setIsCopilotCollapsed(false)}
+                            className={`hidden lg:flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border ${isDark ? 'border-indigo-500/30 text-indigo-300 hover:bg-indigo-500/10' : 'border-indigo-200 text-indigo-700 hover:bg-indigo-50'}`}
+                        >
+                            <img src="/logo.png" alt="" className="h-3.5 w-3.5 object-contain" /> Copiloto
+                        </button>
+                    )}
                     {pastJobs.length > 0 && (
                         <select
                             value=""
-                            onChange={e => { if (e.target.value) setActiveJobId(e.target.value); }}
+                            onChange={e => { if (e.target.value) openJob(e.target.value); }}
                             className={`text-[10px] font-bold rounded-lg border px-1.5 py-1 max-w-[140px] ${isDark ? 'bg-white/10 border-white/10 text-white/70' : 'bg-slate-50 border-slate-200 text-slate-600'}`}
                         >
                             <option value="">Consolidações ({pastJobs.length})</option>
@@ -485,149 +600,196 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, isDark =
         </div>
     );
 
-    const renderReportPanel = () => {
-        if (!activeJob) return null;
+    const renderReportBody = () => {
+        if (!activeJob) {
+            return <p className={`p-4 text-xs ${mutedCls}`}>Nenhuma consolidação selecionada.</p>;
+        }
         const isDone = activeJob.status === 'completed';
         const isError = activeJob.status === 'error';
         const alreadyApplied = !!activeJob.task_id;
 
         return (
-            <div className={`w-full lg:w-[26rem] shrink-0 flex flex-col rounded-2xl border overflow-hidden ${cardCls}`}>
-                <div className={`shrink-0 px-4 py-3 border-b flex items-center justify-between ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
-                    <span className={`text-xs font-black uppercase tracking-wider ${isDark ? 'text-white/80' : 'text-slate-700'}`}>Relatório de consolidação</span>
-                    <button onClick={() => setActiveJobId(null)} className={`text-sm font-bold ${mutedCls} hover:text-rose-500`}>&times;</button>
-                </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 text-xs font-sans">
+                {!isDone && !isError && (
+                    <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full border-2 border-green-500 border-t-transparent animate-spin" />
+                        <span className={isDark ? 'text-white/70' : 'text-slate-600'}>{activeJob.progress || 'Na fila...'}</span>
+                    </div>
+                )}
+                {isError && (
+                    <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 text-rose-500 px-3 py-2">
+                        {activeJob.error || 'Falha na consolidação.'}
+                    </div>
+                )}
 
-                <div className="flex-1 overflow-y-auto p-4 space-y-3 text-xs font-sans">
-                    {!isDone && !isError && (
-                        <div className="flex items-center gap-2">
-                            <span className="w-3 h-3 rounded-full border-2 border-green-500 border-t-transparent animate-spin" />
-                            <span className={isDark ? 'text-white/70' : 'text-slate-600'}>{activeJob.progress || 'Na fila...'}</span>
+                {isDone && (
+                    <>
+                        <div>
+                            <p className={`text-[10px] font-black uppercase tracking-wider mb-1 ${mutedCls}`}>
+                                Síntese (IA) · {activeJob.n_mensagens} msg · {activeJob.n_audios_transcritos || 0} áudio(s) transcrito(s)
+                                {(activeJob.n_audios_ignorados || 0) > 0 ? ` · ${activeJob.n_audios_ignorados} ignorado(s)` : ''}
+                            </p>
+                            <p className={`leading-relaxed ${isDark ? 'text-white/85' : 'text-slate-700'}`}>{activeJob.resumo || '(sem resumo)'}</p>
                         </div>
-                    )}
-                    {isError && (
-                        <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 text-rose-500 px-3 py-2">
-                            {activeJob.error || 'Falha na consolidação.'}
-                        </div>
-                    )}
 
-                    {isDone && (
-                        <>
+                        {(activeJob.itens_de_acao || []).length > 0 && (
                             <div>
-                                <p className={`text-[10px] font-black uppercase tracking-wider mb-1 ${mutedCls}`}>
-                                    Síntese (IA) · {activeJob.n_mensagens} msg · {activeJob.n_audios_transcritos || 0} áudio(s) transcrito(s)
-                                    {(activeJob.n_audios_ignorados || 0) > 0 ? ` · ${activeJob.n_audios_ignorados} ignorado(s)` : ''}
+                                <p className={`text-[10px] font-black uppercase tracking-wider mb-1 ${mutedCls}`}>Itens de ação</p>
+                                <ul className="space-y-1">
+                                    {(activeJob.itens_de_acao || []).map((it, i) => (
+                                        <li key={i} className={isDark ? 'text-white/80' : 'text-slate-700'}>
+                                            • {it.descricao}{it.responsavel ? ` — ${it.responsavel}` : ''}{it.prazo ? ` (prazo ${it.prazo})` : ''}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+
+                        {(activeJob.decisoes || []).length > 0 && (
+                            <div>
+                                <p className={`text-[10px] font-black uppercase tracking-wider mb-1 ${mutedCls}`}>Decisões</p>
+                                <ul className="space-y-1">
+                                    {(activeJob.decisoes || []).map((d, i) => (
+                                        <li key={i} className={isDark ? 'text-white/80' : 'text-slate-700'}>• {d}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+
+                        {(activeJob.attachments || []).length > 0 && (
+                            <p className={`text-[10px] ${mutedCls}`}>{(activeJob.attachments || []).length} anexo(s) na seleção (visíveis na timeline).</p>
+                        )}
+
+                        <div>
+                            <button onClick={() => setShowTranscript(s => !s)} className={`text-[10px] font-bold underline ${mutedCls}`}>
+                                {showTranscript ? 'Ocultar transcript literal' : 'Ver transcript literal'}
+                            </button>
+                            {showTranscript && (
+                                <pre className={`mt-2 p-2 rounded-lg text-[10px] leading-relaxed whitespace-pre-wrap break-words border ${isDark ? 'bg-black/30 border-white/10 text-white/70' : 'bg-slate-50 border-slate-150 text-slate-600'}`}>
+                                    {activeJob.transcript_literal}
+                                </pre>
+                            )}
+                        </div>
+
+                        {/* Associação a ação */}
+                        <div className={`pt-3 border-t space-y-2 ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+                            {alreadyApplied ? (
+                                <p className={`text-[11px] font-bold ${isDark ? 'text-green-300' : 'text-green-700'}`}>
+                                    ✓ Registrada no diário de: {activeJob.task_titulo}
                                 </p>
-                                <p className={`leading-relaxed ${isDark ? 'text-white/85' : 'text-slate-700'}`}>{activeJob.resumo || '(sem resumo)'}</p>
-                            </div>
-
-                            {(activeJob.itens_de_acao || []).length > 0 && (
-                                <div>
-                                    <p className={`text-[10px] font-black uppercase tracking-wider mb-1 ${mutedCls}`}>Itens de ação</p>
-                                    <ul className="space-y-1">
-                                        {(activeJob.itens_de_acao || []).map((it, i) => (
-                                            <li key={i} className={isDark ? 'text-white/80' : 'text-slate-700'}>
-                                                • {it.descricao}{it.responsavel ? ` — ${it.responsavel}` : ''}{it.prazo ? ` (prazo ${it.prazo})` : ''}
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
+                            ) : (
+                                <>
+                                    <p className={`text-[10px] font-black uppercase tracking-wider ${mutedCls}`}>Registrar no diário de uma ação</p>
+                                    {suggestedTasks.length > 0 && (
+                                        <div className="space-y-1">
+                                            {suggestedTasks.map(t => (
+                                                <button
+                                                    key={t.id}
+                                                    onClick={() => associateToTask(t)}
+                                                    disabled={isAssociating}
+                                                    className={`w-full text-left px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition-colors disabled:opacity-50 ${isDark ? 'border-green-500/30 bg-green-500/10 text-green-300 hover:bg-green-500/20' : 'border-green-200 bg-green-50 text-green-700 hover:bg-green-100'}`}
+                                                >
+                                                    ⭐ {t.titulo}
+                                                    <span className={`block text-[9px] font-medium ${mutedCls}`}>vinculada a esta conversa</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <input
+                                        type="text"
+                                        value={taskSearch}
+                                        onChange={e => setTaskSearch(e.target.value)}
+                                        placeholder="Buscar outra ação..."
+                                        className={`w-full px-2.5 py-1.5 rounded-lg border text-[11px] outline-none focus:ring-1 focus:ring-green-500 ${isDark ? 'bg-white/10 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400'}`}
+                                    />
+                                    {searchedTasks.length > 0 && (
+                                        <div className={`rounded-lg border max-h-40 overflow-y-auto ${isDark ? 'border-white/10' : 'border-slate-150'}`}>
+                                            {searchedTasks.map(t => (
+                                                <button
+                                                    key={t.id}
+                                                    onClick={() => associateToTask(t)}
+                                                    disabled={isAssociating}
+                                                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-colors disabled:opacity-50 ${isDark ? 'text-white/80 hover:bg-white/5' : 'text-slate-700 hover:bg-slate-50'}`}
+                                                >
+                                                    {t.titulo}
+                                                    <span className={`ml-1.5 text-[9px] uppercase font-bold ${t.status === 'em andamento' ? 'text-green-500' : 'text-amber-500'}`}>{t.status}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {associationError && <p className="text-[10px] text-rose-500">{associationError}</p>}
+                                    {isAssociating && <p className={`text-[10px] ${mutedCls}`}>Registrando...</p>}
+                                </>
                             )}
+                        </div>
+                    </>
+                )}
+            </div>
+        );
+    };
 
-                            {(activeJob.decisoes || []).length > 0 && (
-                                <div>
-                                    <p className={`text-[10px] font-black uppercase tracking-wider mb-1 ${mutedCls}`}>Decisões</p>
-                                    <ul className="space-y-1">
-                                        {(activeJob.decisoes || []).map((d, i) => (
-                                            <li key={i} className={isDark ? 'text-white/80' : 'text-slate-700'}>• {d}</li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
+    // Terceira coluna: Copiloto Hermes (padrão) ou Relatório da consolidação ativa, em abas —
+    // mesma "coluna do Copiloto" do split view de Reuniões (MeetingTranscriptionTool.tsx),
+    // com liveContextProvider trocado pelas mensagens do WhatsApp em vez da transcrição ao vivo.
+    const renderThirdColumn = () => {
+        if (isCopilotCollapsed) return null; // botão de reabrir já fica no header da timeline
 
-                            {(activeJob.attachments || []).length > 0 && (
-                                <p className={`text-[10px] ${mutedCls}`}>{(activeJob.attachments || []).length} anexo(s) na seleção (visíveis na timeline).</p>
-                            )}
-
-                            <div>
-                                <button onClick={() => setShowTranscript(s => !s)} className={`text-[10px] font-bold underline ${mutedCls}`}>
-                                    {showTranscript ? 'Ocultar transcript literal' : 'Ver transcript literal'}
-                                </button>
-                                {showTranscript && (
-                                    <pre className={`mt-2 p-2 rounded-lg text-[10px] leading-relaxed whitespace-pre-wrap break-words border ${isDark ? 'bg-black/30 border-white/10 text-white/70' : 'bg-slate-50 border-slate-150 text-slate-600'}`}>
-                                        {activeJob.transcript_literal}
-                                    </pre>
-                                )}
-                            </div>
-
-                            {/* Associação a ação */}
-                            <div className={`pt-3 border-t space-y-2 ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
-                                {alreadyApplied ? (
-                                    <p className={`text-[11px] font-bold ${isDark ? 'text-green-300' : 'text-green-700'}`}>
-                                        ✓ Registrada no diário de: {activeJob.task_titulo}
-                                    </p>
-                                ) : (
-                                    <>
-                                        <p className={`text-[10px] font-black uppercase tracking-wider ${mutedCls}`}>Registrar no diário de uma ação</p>
-                                        {suggestedTasks.length > 0 && (
-                                            <div className="space-y-1">
-                                                {suggestedTasks.map(t => (
-                                                    <button
-                                                        key={t.id}
-                                                        onClick={() => associateToTask(t)}
-                                                        disabled={isAssociating}
-                                                        className={`w-full text-left px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition-colors disabled:opacity-50 ${isDark ? 'border-green-500/30 bg-green-500/10 text-green-300 hover:bg-green-500/20' : 'border-green-200 bg-green-50 text-green-700 hover:bg-green-100'}`}
-                                                    >
-                                                        ⭐ {t.titulo}
-                                                        <span className={`block text-[9px] font-medium ${mutedCls}`}>vinculada a esta conversa</span>
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        )}
-                                        <input
-                                            type="text"
-                                            value={taskSearch}
-                                            onChange={e => setTaskSearch(e.target.value)}
-                                            placeholder="Buscar outra ação..."
-                                            className={`w-full px-2.5 py-1.5 rounded-lg border text-[11px] outline-none focus:ring-1 focus:ring-green-500 ${isDark ? 'bg-white/10 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400'}`}
-                                        />
-                                        {searchedTasks.length > 0 && (
-                                            <div className={`rounded-lg border max-h-40 overflow-y-auto ${isDark ? 'border-white/10' : 'border-slate-150'}`}>
-                                                {searchedTasks.map(t => (
-                                                    <button
-                                                        key={t.id}
-                                                        onClick={() => associateToTask(t)}
-                                                        disabled={isAssociating}
-                                                        className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-colors disabled:opacity-50 ${isDark ? 'text-white/80 hover:bg-white/5' : 'text-slate-700 hover:bg-slate-50'}`}
-                                                    >
-                                                        {t.titulo}
-                                                        <span className={`ml-1.5 text-[9px] uppercase font-bold ${t.status === 'em andamento' ? 'text-green-500' : 'text-amber-500'}`}>{t.status}</span>
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        )}
-                                        {associationError && <p className="text-[10px] text-rose-500">{associationError}</p>}
-                                        {isAssociating && <p className={`text-[10px] ${mutedCls}`}>Registrando...</p>}
-                                    </>
-                                )}
-                            </div>
-                        </>
-                    )}
+        return (
+            <div className={`hidden lg:flex w-[26rem] shrink-0 flex-col rounded-2xl border overflow-hidden ${cardCls}`}>
+                <div className={`shrink-0 px-3 py-2 border-b flex items-center justify-between gap-2 ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={() => setThirdColumnTab('copilot')}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${thirdColumnTab === 'copilot' ? (isDark ? 'bg-indigo-500/20 text-indigo-300' : 'bg-indigo-100 text-indigo-700') : mutedCls}`}
+                        >
+                            Copiloto
+                        </button>
+                        {activeJobId && (
+                            <button
+                                onClick={() => setThirdColumnTab('report')}
+                                className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${thirdColumnTab === 'report' ? (isDark ? 'bg-green-500/20 text-green-300' : 'bg-green-100 text-green-700') : mutedCls}`}
+                            >
+                                Relatório
+                            </button>
+                        )}
+                    </div>
+                    <button onClick={() => setIsCopilotCollapsed(true)} className={`text-sm font-bold ${mutedCls} hover:text-rose-500`} title="Recolher">
+                        &times;
+                    </button>
                 </div>
+
+                {/* HermesGlobalChat fica sempre montado (troca só isOpen) enquanto o chat do WhatsApp
+                    não muda — preserva a conversa do Copiloto ao alternar para a aba Relatório e
+                    voltar. `key={selectedChatId}` força uma sessão nova ao trocar de contato, para
+                    não misturar contexto/histórico entre conversas diferentes. */}
+                <div className={`relative min-h-0 flex-1 ${thirdColumnTab === 'copilot' ? '' : 'hidden'}`}>
+                    <HermesGlobalChat
+                        key={selectedChatId}
+                        isOpen={thirdColumnTab === 'copilot'}
+                        onClose={() => setIsCopilotCollapsed(true)}
+                        layout="inline"
+                        isDark={isDark}
+                        userId={userId}
+                        liveContextProvider={liveContextProvider}
+                        historyEnabled={false}
+                        showToolsMenu={false}
+                        showMinimizeButton={false}
+                        resetSessionOnOpen={false}
+                        headerTitle={`Copiloto — ${selectedChat?.chat_name || ''}`}
+                        headerSubtitle={`${messages.length} mensagem(ns) carregada(s) nesta tela`}
+                        emptyStateTitle="Pergunte sobre esta conversa"
+                        emptyStateDescription="Uso as mensagens já carregadas desta conversa como contexto — carregue mais acima para ampliar o histórico disponível."
+                        composerPlaceholder="Pergunte sobre esta conversa..."
+                    />
+                </div>
+                {thirdColumnTab === 'report' && renderReportBody()}
             </div>
         );
     };
 
     return (
         <div className={`p-4 lg:p-8 ${isDark ? 'bg-[#0f1724]' : ''}`}>
-            <div className="mb-4">
-                <h3 className={`text-xl font-black ${isDark ? 'text-white' : 'text-slate-800'}`}>Caixa de Entrada WhatsApp</h3>
-                <p className={`text-xs font-medium mt-1 font-sans ${isDark ? 'text-slate-400' : 'text-slate-550'}`}>
-                    Selecione mensagens de uma conversa monitorada e consolide em um relatório — transcrição literal + síntese — para registrar no diário de uma ação.
-                </p>
-            </div>
-
-            <div className="flex gap-4 h-[calc(100vh-190px)] min-h-[420px]">
+            <div className="flex gap-4 h-[calc(100vh-140px)] min-h-[420px]">
                 {/* Lista de chats: escondida no mobile quando um chat está aberto */}
                 <div className={`w-full md:w-72 shrink-0 ${selectedChatId ? 'hidden md:flex md:flex-col' : 'flex flex-col'}`}>
                     {renderChatList()}
@@ -636,7 +798,7 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, isDark =
                 {selectedChatId ? (
                     <>
                         {renderTimeline()}
-                        {activeJobId && renderReportPanel()}
+                        {renderThirdColumn()}
                     </>
                 ) : (
                     <div className={`hidden md:flex flex-1 items-center justify-center rounded-2xl border ${cardCls}`}>
