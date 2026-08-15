@@ -4974,12 +4974,20 @@ def _health_red_flag_active(data: dict) -> bool:
     return False
 
 
-@firestore_fn.on_document_written(document="health_exercise_logs/{date}")
+@firestore_fn.on_document_written(document="health_exercise_logs/{date}", retry=False)
 def on_health_log_red_flag(event: Event[Change[DocumentSnapshot]]) -> None:
     """Envia o alerta de sinais de alerta assim que um registro diário (painel ou
-    Telegram) passa a atender a uma das condições de risco. Deduplica por dia via
-    `redFlagAlertedAt` — só reenvia se o registro tinha sido "limpo" e voltou a
-    disparar a condição."""
+    Telegram) passa a atender a uma das condições de risco.
+
+    Dois guards distintos, para dois problemas distintos:
+    1. Transição before->after: evita reenviar quando o campo de risco já estava
+       ativo antes desta escrita (ex.: usuário edita outro campo no mesmo dia).
+    2. Claim atômico em `sentAlerts`: Cloud Functions gen2 tem entrega "at-least-once"
+       — o mesmo evento pode ser reprocessado. Sem uma reivindicação atômica *antes*
+       de enviar, duas execuções do mesmo evento passam pelo guard 1 e ambas
+       enviam. `create()` só é bem-sucedido para a primeira; a segunda recebe
+       AlreadyExists e para ali, antes de tocar no Telegram.
+    """
     if not event.data or not event.data.after or not event.data.after.exists:
         return
     after = event.data.after.to_dict() or {}
@@ -4990,7 +4998,21 @@ def on_health_log_red_flag(event: Event[Change[DocumentSnapshot]]) -> None:
     if not now_active or (now_active and was_active):
         return
 
+    date_id = event.params.get("date", "")
     db = _get_db()
+
+    claim_ref = db.collection("sentAlerts").document(f"{date_id}_redFlag")
+    try:
+        claim_ref.create({
+            "type": "health_red_flag",
+            "date": date_id,
+            "claimed_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": datetime.now(timezone.utc) + timedelta(days=30),
+        })
+    except Exception as exc:
+        print(f"[HealthRedFlag] Claim para {date_id} já existente (redelivery) ou falhou: {exc}")
+        return
+
     chat_id = _get_allowed_chat_id()
     if not chat_id:
         keys = _cached_doc_get(db, "system", "api_keys").to_dict() or {}
@@ -5001,7 +5023,6 @@ def on_health_log_red_flag(event: Event[Change[DocumentSnapshot]]) -> None:
 
     token = _get_telegram_token(db)
     _send_telegram_message(token, chat_id, _HEALTH_RED_FLAG_MESSAGE)
-    event.data.after.reference.set({"redFlagAlertedAt": datetime.now(timezone.utc).isoformat()}, merge=True)
 
 
 @firestore_fn.on_document_created(
