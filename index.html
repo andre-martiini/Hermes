@@ -81,18 +81,9 @@
     })();
   </script>
   <script type="module" src="/index.tsx"></script>
-  <script>
-    const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
-    if ('serviceWorker' in navigator && !isLocalhost) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').then(registration => {
-          console.log('SW registered: ', registration);
-        }).catch(registrationError => {
-          console.log('SW registration failed: ', registrationError);
-        });
-      });
-    }
-  </script>
+  <!-- O service worker e registrado pelo componente UpdatePrompt (virtual:pwa-register/react),
+       nao aqui — esse era o registro sem logica de atualizacao que deixava abas antigas presas
+       num bundle desatualizado apos cada deploy. -->
 </body>
 
 </html>

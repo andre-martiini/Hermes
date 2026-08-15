@@ -20,7 +20,8 @@ export default defineConfig(() => {
     plugins: [
       react(),
       VitePWA({
-        registerType: "autoUpdate",
+        registerType: "prompt",
+        injectRegister: false,
         includeAssets: ["icon.svg"],
         manifest: {
           name: "Hermes - Gestão à Vista",

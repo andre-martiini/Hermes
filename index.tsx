@@ -13,6 +13,8 @@ import {
   HealthTelegramReminder, EstrategiaPessoal, EstrategiaIndicadorSucesso
 } from './types';
 import HealthView from './HealthView';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { UpdatePrompt } from './src/components/UpdatePrompt';
 import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscriptionTool';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
 import { db, functions, auth, storage, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
@@ -5908,7 +5910,16 @@ const App: React.FC = () => {
                 ) : viewMode === 'diario' ? (
                   <PersonalDiaryView isDark={isDarkTheme} />
                 ) : viewMode === 'whatsapp' ? (
-                  <WhatsappInboxView tarefas={tarefas} userId={user?.uid || ''} isDark={isDarkTheme} />
+                  <WhatsappInboxView
+                    tarefas={tarefas}
+                    userId={user?.uid || ''}
+                    isDark={isDarkTheme}
+                    onOpenContact={(id) => {
+                      window.history.pushState(null, '', '?contactId=' + id);
+                      setActiveModule('acoes');
+                      setViewMode('contacts');
+                    }}
+                  />
                 ) : viewMode === 'ferramentas' ? (
                   <FerramentasView
                     ideas={brainstormIdeas}
@@ -7266,5 +7277,10 @@ if (container) {
   if (!window.__hermesReactRoot) {
     window.__hermesReactRoot = createRoot(container);
   }
-  window.__hermesReactRoot.render(<App />);
+  window.__hermesReactRoot.render(
+    <ErrorBoundary>
+      <App />
+      <UpdatePrompt />
+    </ErrorBoundary>
+  );
 }
