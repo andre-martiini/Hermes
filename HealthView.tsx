@@ -1063,6 +1063,11 @@ const HealthView: React.FC<HealthViewProps> = ({
     const [examData, setExamData] = useState<string>(formatDateLocalISO(new Date()));
     const [examDoutorLocal, setExamDoutorLocal] = useState<string>('');
     const [examResultados, setExamResultados] = useState<string>('');
+    const [examAchadosChave, setExamAchadosChave] = useState<string>('');
+    const [examProfissional, setExamProfissional] = useState<string>('');
+    const [examEspecialidade, setExamEspecialidade] = useState<string>('');
+    const [examProximaReavaliacao, setExamProximaReavaliacao] = useState<string>('');
+    const [examTags, setExamTags] = useState<string>('');
     const [examFiles, setExamFiles] = useState<File[]>([]);
     const [isSavingExam, setIsSavingExam] = useState<boolean>(false);
     const [editingExamId, setEditingExamId] = useState<string | null>(null);
@@ -1071,6 +1076,11 @@ const HealthView: React.FC<HealthViewProps> = ({
     const [editData, setEditData] = useState<string>('');
     const [editDoutorLocal, setEditDoutorLocal] = useState<string>('');
     const [editResultados, setEditResultados] = useState<string>('');
+    const [editAchadosChave, setEditAchadosChave] = useState<string>('');
+    const [editProfissional, setEditProfissional] = useState<string>('');
+    const [editEspecialidade, setEditEspecialidade] = useState<string>('');
+    const [editProximaReavaliacao, setEditProximaReavaliacao] = useState<string>('');
+    const [editTags, setEditTags] = useState<string>('');
     const [editFiles, setEditFiles] = useState<File[]>([]);
     const [isSavingEditExam, setIsSavingEditExam] = useState<boolean>(false);
 
@@ -1108,10 +1118,18 @@ const HealthView: React.FC<HealthViewProps> = ({
             .filter(p => p.value > 0);
         return weeklyAggregate(dailyKm);
     }, [exerciseLogs, integratedRangeStart]);
-    const eventsForIntegrated = useMemo(
-        () => [...events].filter(e => !integratedRangeStart || e.date >= integratedRangeStart).sort((a, b) => a.date.localeCompare(b.date)),
-        [events, integratedRangeStart]
-    );
+    const eventsForIntegrated = useMemo(() => {
+        const manual = events
+            .filter(e => !integratedRangeStart || e.date >= integratedRangeStart)
+            .map(e => ({ ...e, source: 'manual' as const }));
+        // Todo registro do arquivo médico com data vira automaticamente um marcador —
+        // derivado aqui na leitura, não duplicado no Firestore, para nunca ficar
+        // dessincronizado se o exame for editado ou removido.
+        const fromExams = exams
+            .filter(e => e.data && (!integratedRangeStart || e.data >= integratedRangeStart))
+            .map(e => ({ id: `exam_${e.id}`, date: e.data, type: 'consulta_medica' as HealthEventType, label: e.titulo, source: 'exam' as const }));
+        return [...manual, ...fromExams].sort((a, b) => a.date.localeCompare(b.date));
+    }, [events, exams, integratedRangeStart]);
 
     const logsInReportPeriod = useMemo(
         () => exerciseLogs.filter(l => !integratedRangeStart || l.id >= integratedRangeStart),
@@ -1411,6 +1429,11 @@ const HealthView: React.FC<HealthViewProps> = ({
                     // '' e não undefined — o Firestore rejeita addDoc/updateDoc com campo undefined
                     doutor_local: examDoutorLocal.trim(),
                     resultados: examResultados.trim(),
+                    achadosChave: examAchadosChave.trim(),
+                    profissional: examProfissional.trim(),
+                    especialidade: examEspecialidade.trim(),
+                    proximaReavaliacao: examProximaReavaliacao,
+                    tags: examTags.split(',').map(t => t.trim()).filter(Boolean),
                 },
                 examFiles
             );
@@ -1421,6 +1444,11 @@ const HealthView: React.FC<HealthViewProps> = ({
             setExamData(formatDateLocalISO(new Date()));
             setExamDoutorLocal('');
             setExamResultados('');
+            setExamAchadosChave('');
+            setExamProfissional('');
+            setExamEspecialidade('');
+            setExamProximaReavaliacao('');
+            setExamTags('');
             setExamFiles([]);
         } catch (err) {
             console.error('Falha ao adicionar registro de saúde:', err);
@@ -1436,6 +1464,11 @@ const HealthView: React.FC<HealthViewProps> = ({
         setEditData(exam.data);
         setEditDoutorLocal(exam.doutor_local || '');
         setEditResultados(exam.resultados || '');
+        setEditAchadosChave(exam.achadosChave || '');
+        setEditProfissional(exam.profissional || '');
+        setEditEspecialidade(exam.especialidade || '');
+        setEditProximaReavaliacao(exam.proximaReavaliacao || '');
+        setEditTags((exam.tags || []).join(', '));
         setEditFiles([]);
     };
 
@@ -1459,6 +1492,11 @@ const HealthView: React.FC<HealthViewProps> = ({
                     // "Unsupported field value: undefined" do Firestore
                     doutor_local: editDoutorLocal.trim(),
                     resultados: editResultados.trim(),
+                    achadosChave: editAchadosChave.trim(),
+                    profissional: editProfissional.trim(),
+                    especialidade: editEspecialidade.trim(),
+                    proximaReavaliacao: editProximaReavaliacao,
+                    tags: editTags.split(',').map(t => t.trim()).filter(Boolean),
                 },
                 editFiles
             );
@@ -1770,7 +1808,11 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     {eventsForIntegrated.map(event => (
                                         <span key={event.id} className="inline-flex items-center gap-1.5 rounded-full border border-border-standard bg-white px-2.5 py-1 text-[10px] font-semibold text-on-surface-variant">
                                             {formatShortDate(event.date)} · {event.label}
-                                            <button type="button" onClick={() => onDeleteEvent(event.id)} className="text-on-surface-variant/60 hover:text-error" aria-label="Remover evento">×</button>
+                                            {event.source === 'manual' ? (
+                                                <button type="button" onClick={() => onDeleteEvent(event.id)} className="text-on-surface-variant/60 hover:text-error" aria-label="Remover evento">×</button>
+                                            ) : (
+                                                <span className="text-on-surface-variant/50" title="Vem do arquivo médico">📎</span>
+                                            )}
                                         </span>
                                     ))}
                                 </div>
@@ -2435,6 +2477,55 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     />
                                 </label>
                                 <label className="block sm:col-span-2">
+                                    <span className={labelClasses}>Achados-chave</span>
+                                    <input
+                                        type="text"
+                                        value={examAchadosChave}
+                                        onChange={e => setExamAchadosChave(e.target.value)}
+                                        placeholder="Resumo em uma linha (opcional)"
+                                        className={inputClasses}
+                                    />
+                                </label>
+                                <label className="block">
+                                    <span className={labelClasses}>Profissional</span>
+                                    <input
+                                        type="text"
+                                        value={examProfissional}
+                                        onChange={e => setExamProfissional(e.target.value)}
+                                        placeholder="Opcional"
+                                        className={inputClasses}
+                                    />
+                                </label>
+                                <label className="block">
+                                    <span className={labelClasses}>Especialidade</span>
+                                    <input
+                                        type="text"
+                                        value={examEspecialidade}
+                                        onChange={e => setExamEspecialidade(e.target.value)}
+                                        placeholder="Opcional"
+                                        className={inputClasses}
+                                    />
+                                </label>
+                                <label className="block">
+                                    <span className={labelClasses}>Próxima reavaliação</span>
+                                    <input
+                                        type="date"
+                                        value={examProximaReavaliacao}
+                                        onChange={e => setExamProximaReavaliacao(e.target.value)}
+                                        className={inputClasses}
+                                    />
+                                </label>
+                                <label className="block">
+                                    <span className={labelClasses}>Tags</span>
+                                    <input
+                                        type="text"
+                                        value={examTags}
+                                        onChange={e => setExamTags(e.target.value)}
+                                        placeholder="Separadas por vírgula"
+                                        className={inputClasses}
+                                    />
+                                </label>
+                                <label className="block sm:col-span-2">
                                     <span className={labelClasses}>Anexar arquivos</span>
                                     <input
                                         type="file"
@@ -2490,6 +2581,30 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                     <span className={labelClasses}>Resultados / notas</span>
                                                     <textarea value={editResultados} onChange={e => setEditResultados(e.target.value)} placeholder="Opcional" className={`${inputClasses} min-h-[64px]`} />
                                                 </label>
+                                                <label className="block">
+                                                    <span className={labelClasses}>Achados-chave</span>
+                                                    <input type="text" value={editAchadosChave} onChange={e => setEditAchadosChave(e.target.value)} placeholder="Opcional" className={inputClasses} />
+                                                </label>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <label className="block">
+                                                        <span className={labelClasses}>Profissional</span>
+                                                        <input type="text" value={editProfissional} onChange={e => setEditProfissional(e.target.value)} placeholder="Opcional" className={inputClasses} />
+                                                    </label>
+                                                    <label className="block">
+                                                        <span className={labelClasses}>Especialidade</span>
+                                                        <input type="text" value={editEspecialidade} onChange={e => setEditEspecialidade(e.target.value)} placeholder="Opcional" className={inputClasses} />
+                                                    </label>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <label className="block">
+                                                        <span className={labelClasses}>Próxima reavaliação</span>
+                                                        <input type="date" value={editProximaReavaliacao} onChange={e => setEditProximaReavaliacao(e.target.value)} className={inputClasses} />
+                                                    </label>
+                                                    <label className="block">
+                                                        <span className={labelClasses}>Tags</span>
+                                                        <input type="text" value={editTags} onChange={e => setEditTags(e.target.value)} placeholder="Separadas por vírgula" className={inputClasses} />
+                                                    </label>
+                                                </div>
                                                 {exam.pool_dados && exam.pool_dados.length > 0 && (
                                                     <div className="flex flex-wrap gap-2">
                                                         {exam.pool_dados.map(file => (
@@ -2556,8 +2671,28 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                 </div>
                                                 <h4 className="mt-4 text-base font-bold text-on-surface">{exam.titulo}</h4>
                                                 <p className="mt-1 text-sm text-on-surface-variant">{exam.doutor_local || 'Local não informado'}</p>
+                                                {exam.achadosChave && (
+                                                    <p className="mt-2 text-sm font-semibold text-on-surface">{exam.achadosChave}</p>
+                                                )}
+                                                {(exam.profissional || exam.especialidade) && (
+                                                    <p className="mt-1 text-xs text-on-surface-variant">
+                                                        {[exam.profissional, exam.especialidade].filter(Boolean).join(' · ')}
+                                                    </p>
+                                                )}
                                                 {exam.resultados && (
                                                     <p className="mt-2 whitespace-pre-wrap text-sm text-on-surface-variant">{renderTextWithLinks(exam.resultados)}</p>
+                                                )}
+                                                {exam.proximaReavaliacao && (
+                                                    <p className="mt-2 text-xs font-semibold text-on-surface-variant">
+                                                        Próxima reavaliação: {formatDate(exam.proximaReavaliacao)}
+                                                    </p>
+                                                )}
+                                                {exam.tags && exam.tags.length > 0 && (
+                                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                                        {exam.tags.map(tag => (
+                                                            <span key={tag} className="rounded-full bg-surface-container-low px-2 py-0.5 text-[10px] font-semibold text-on-surface-variant">{tag}</span>
+                                                        ))}
+                                                    </div>
                                                 )}
                                                 {exam.pool_dados && exam.pool_dados.length > 0 && (
                                                     <div className="mt-4 flex flex-wrap gap-2">

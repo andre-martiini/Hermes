@@ -700,6 +700,11 @@ export interface HealthExam {
     resultados?: string;
     pool_dados?: PoolItem[];
     data_criacao: string;
+    achadosChave?: string;
+    profissional?: string;
+    especialidade?: string;
+    proximaReavaliacao?: string;
+    tags?: string[];
 }
 
 export interface HermesNotification {

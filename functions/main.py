@@ -13733,8 +13733,8 @@ from ai_notification_planner import ai_notification_planner_daily
 # Import personal diary + weekly personality consolidation jobs
 from personal_diary import gerar_diario_pessoal, consolidar_personalidade
 
-# Import weekly health summary job
-from health_weekly_summary import gerar_resumo_semanal_saude
+# Import weekly health summary + reevaluation reminder jobs
+from health_weekly_summary import gerar_resumo_semanal_saude, verificar_reavaliacoes_saude
 
 
 @https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=60)

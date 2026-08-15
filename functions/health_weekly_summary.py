@@ -5,7 +5,7 @@ documento salvo em health_weekly_summaries/{data_fim} e uma mensagem no
 Telegram. Sem LLM — e uma agregacao deterministica, nao uma narrativa.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from firebase_functions import scheduler_fn, options
 
@@ -158,3 +158,53 @@ def gerar_resumo_semanal_saude(event: scheduler_fn.ScheduledEvent = None) -> Non
             print("[ResumoSaude] Nenhum chat_id do Telegram configurado; resumo apenas salvo no Firestore.")
     except Exception as exc:
         print(f"[ResumoSaude] Falha ao gerar resumo semanal: {exc}")
+
+
+@scheduler_fn.on_schedule(
+    schedule="0 8 * * *",
+    timezone="America/Sao_Paulo",
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=60,
+)
+def verificar_reavaliacoes_saude(event: scheduler_fn.ScheduledEvent = None) -> None:
+    """Agendada diariamente 8h BRT — avisa no Telegram quando a proximaReavaliacao
+    de um registro do arquivo medico chega a exatamente 14 dias."""
+    from main import get_db, _get_telegram_token
+    from hermes_core_logic import _get_allowed_chat_id, _send_telegram_message
+    from zoneinfo import ZoneInfo
+
+    db = get_db()
+    today = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+
+    chat_id = _get_allowed_chat_id()
+    if not chat_id:
+        print("[ReavaliacaoSaude] Nenhum chat_id do Telegram configurado.")
+        return
+    token = _get_telegram_token(db)
+
+    try:
+        for doc in db.collection("exames").stream():
+            data = doc.to_dict() or {}
+            proxima = data.get("proximaReavaliacao")
+            if not proxima:
+                continue
+            try:
+                proxima_date = datetime.strptime(proxima, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if (proxima_date - today).days != 14:
+                continue
+
+            dedupe_ref = db.collection("system_reminders").document(f"health_reavaliacao_{doc.id}")
+            if dedupe_ref.get().exists:
+                continue
+
+            titulo = data.get("titulo") or "Reavaliação"
+            message = (
+                f"🗓️ <b>Reavaliação em 14 dias</b>\n"
+                f"{titulo}, marcada para {proxima_date.strftime('%d/%m/%Y')}."
+            )
+            _send_telegram_message(token, chat_id, message)
+            dedupe_ref.set({"sent_at": datetime.now(timezone.utc).isoformat(), "type": "health_reavaliacao"})
+    except Exception as exc:
+        print(f"[ReavaliacaoSaude] Falha ao verificar reavaliações: {exc}")
