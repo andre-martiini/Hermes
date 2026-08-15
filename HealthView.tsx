@@ -387,6 +387,9 @@ const chartPalette = (isDark: boolean) => ({
     emerald: isDark ? '#34d399' : '#10b981',
     trajectory: isDark ? '#a78bfa' : '#7c3aed',
     trendLine: isDark ? '#fb923c' : '#c2410c',
+    // Vermelho fica reservado para o estado de alerta (sinal vermelho) — nenhuma
+    // série de gráfico usa vermelho/rose, para não diluir esse único canal de alarme.
+    eveningPain: isDark ? '#818cf8' : '#4f46e5',
 });
 
 function nearestByTime<T>(items: T[], getTime: (item: T) => number, targetTime: number): T | null {
@@ -595,7 +598,7 @@ const PainTrendChart = ({ points, isDark = false }: { points: PainTrendPoint[]; 
             )}
             <div className="mb-3 flex flex-wrap items-center gap-4 text-xs font-semibold text-on-surface-variant">
                 <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" />Manhã</span>
-                <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-rose-600" />Noite / Telegram</span>
+                <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-indigo-600" />Noite / Telegram</span>
                 <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-on-surface" />Crise</span>
             </div>
             <svg
@@ -619,11 +622,11 @@ const PainTrendChart = ({ points, isDark = false }: { points: PainTrendPoint[]; 
                     <line x1={xFor(hoveredIndex)} x2={xFor(hoveredIndex)} y1={pad.top} y2={height - pad.bottom} stroke={palette.text} strokeOpacity="0.3" strokeWidth="1.5" />
                 )}
                 {lineFor('morning') && <polyline points={lineFor('morning')} fill="none" stroke={palette.amber} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
-                {lineFor('evening') && <polyline points={lineFor('evening')} fill="none" stroke={palette.rose} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />}
+                {lineFor('evening') && <polyline points={lineFor('evening')} fill="none" stroke={palette.eveningPain} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />}
                 {visiblePoints.map((point, index) => (
                     <g key={point.id}>
                         {point.morning !== undefined && <circle cx={xFor(index)} cy={yFor(point.morning)} r={hoveredIndex === index ? 7 : 5} fill={palette.point} stroke={palette.amber} strokeWidth="3" />}
-                        {point.evening !== undefined && <circle cx={xFor(index)} cy={yFor(point.evening)} r={hoveredIndex === index ? 8 : 6} fill={palette.point} stroke={palette.rose} strokeWidth="3" />}
+                        {point.evening !== undefined && <circle cx={xFor(index)} cy={yFor(point.evening)} r={hoveredIndex === index ? 8 : 6} fill={palette.point} stroke={palette.eveningPain} strokeWidth="3" />}
                         {point.crisis && <circle cx={xFor(index)} cy={yFor(Math.max(point.morning ?? 0, point.evening ?? 0, 1))} r="9" fill="none" stroke={palette.text} strokeWidth="2" strokeDasharray="3 3" />}
                     </g>
                 ))}
@@ -772,10 +775,13 @@ const WalkDailyChart = ({
                     const x = pad.left + index * slot + (slot - barWidth) / 2;
                     const y = yFor(day.km);
                     const barHeight = Math.max(0, pad.top + plotHeight - y);
-                    const color = day.km >= idealKm ? palette.emerald : day.km >= minimumKm ? palette.amber : palette.line;
+                    // Uma única cor para km em todo o app (mesma de "km" no gráfico integrado) — as
+                    // linhas tracejadas de mínimo/ideal já comunicam o status; abaixo do mínimo só
+                    // fica um tom mais claro da mesma cor, não uma cor categórica diferente.
+                    const opacity = hoveredIndex === index ? 1 : day.km >= minimumKm ? 0.9 : 0.45;
                     return (
                         <g key={day.id}>
-                            {day.km > 0 && <rect x={x} y={y} width={barWidth} height={barHeight} rx="5" fill={color} opacity={hoveredIndex === index ? 1 : 0.9} />}
+                            {day.km > 0 && <rect x={x} y={y} width={barWidth} height={barHeight} rx="5" fill={palette.emerald} opacity={opacity} />}
                             <text x={x + barWidth / 2} y={height - 14} textAnchor="middle" fontSize="10" fontWeight="700" fill={palette.text}>{day.label}</text>
                         </g>
                     );
@@ -790,12 +796,14 @@ const IntegratedTrendChart = ({
     painWeekly,
     kmWeekly,
     events,
+    targetWeight,
     isDark = false,
 }: {
     weightPoints: { date: string; value: number }[];
     painWeekly: WeeklyBucket[];
     kmWeekly: WeeklyBucket[];
     events: HealthEvent[];
+    targetWeight?: number;
     isDark?: boolean;
 }) => {
     const [showTable, setShowTable] = useState(false);
@@ -824,16 +832,31 @@ const IntegratedTrendChart = ({
     const maxTime = parseLocalDate(maxDate).getTime();
     const totalSpan = Math.max(1, maxTime - minTime);
 
+    // Layout: cada painel tem cabeçalho próprio (fora da área de plotagem), superfície
+    // própria e gap real entre painéis. Trilha de eventos reservada no topo, com
+    // clearance para o botão "Ver tabela"/"Gerar relatório" do cabeçalho do card.
     const width = 720;
-    const panelH = 92;
-    const panelGap = 22;
-    const padTop = 10;
-    const padBottom = 26;
-    const padLeft = 46;
+    const padLeft = 50;
     const padRight = 18;
     const plotWidth = width - padLeft - padRight;
-    const panelTops = [padTop, padTop + panelH + panelGap, padTop + 2 * (panelH + panelGap)];
-    const totalHeight = padTop + panelH * 3 + panelGap * 2 + padBottom;
+
+    const eventTrackTop = 30;
+    const eventTrackH = 24;
+    const headerH = 16;
+    const panelGap = 22;
+    const weightH = 150;
+    const painH = 130;
+    const kmH = 130;
+
+    const weightHeaderY = eventTrackTop + eventTrackH + 8;
+    const weightPlotY = weightHeaderY + headerH;
+    const painHeaderY = weightPlotY + weightH + panelGap;
+    const painPlotY = painHeaderY + headerH;
+    const kmHeaderY = painPlotY + painH + panelGap;
+    const kmPlotY = kmHeaderY + headerH;
+    const gridBottomY = kmPlotY + kmH;
+    const xAxisY = gridBottomY + 24;
+    const totalHeight = xAxisY + 8;
 
     const xForTime = (t: number) => padLeft + ((t - minTime) / totalSpan) * plotWidth;
     const xForDate = (d: string) => xForTime(parseLocalDate(d).getTime());
@@ -843,17 +866,27 @@ const IntegratedTrendChart = ({
     const weightMin = weightValues.length ? Math.floor(Math.min(...weightValues) - 0.5) : 0;
     const weightMax = weightValues.length ? Math.ceil(Math.max(...weightValues) + 0.5) : 1;
     const weightRange = Math.max(0.5, weightMax - weightMin);
-    const yForWeight = (v: number) => panelTops[0] + ((weightMax - v) / weightRange) * panelH;
+    const weightScaleExpanded = targetWeight !== undefined && (targetWeight < weightMin || targetWeight > weightMax);
+    const yForWeight = (v: number) => weightPlotY + ((weightMax - v) / weightRange) * weightH;
     const weightPath = weightPoints.map(p => `${xForDate(p.date)},${yForWeight(p.value)}`).join(' ');
+    const weightTicks = [weightMax, weightMax - weightRange / 3, weightMax - (2 * weightRange) / 3, weightMin];
 
     // Painel 2: dor media semanal (escala fixa 0-10)
-    const yForPain = (v: number) => panelTops[1] + ((10 - v) / 10) * panelH;
+    const yForPain = (v: number) => painPlotY + ((10 - v) / 10) * painH;
     const painPath = painWeekly.map(b => `${xForDate(b.weekStart)},${yForPain(b.average)}`).join(' ');
+    const painTicks = [10, 5, 0];
 
     // Painel 3: km caminhados por semana (barras)
     const maxKmWeek = Math.max(1, ...kmWeekly.map(b => b.sum));
-    const yForKm = (v: number) => panelTops[2] + panelH - (v / maxKmWeek) * panelH;
+    const yForKm = (v: number) => kmPlotY + kmH - (v / maxKmWeek) * kmH;
     const kmBarWidth = Math.min(24, (plotWidth / Math.max(1, kmWeekly.length)) * 0.6);
+    const kmTicks = [maxKmWeek, maxKmWeek / 2, 0];
+
+    // Datas do eixo X compartilhado (5-6 marcas, com grade vertical atravessando os 3 painéis)
+    const AXIS_TICK_COUNT = 6;
+    const axisTimes = Array.from({ length: AXIS_TICK_COUNT }, (_, i) => minTime + (totalSpan * i) / (AXIS_TICK_COUNT - 1));
+
+    const sortedEvents = [...events].sort((a, b) => a.date.localeCompare(b.date));
 
     const updateHoverFromClientX = (clientX: number, containerRect: DOMRect) => {
         if (containerRect.width === 0) return;
@@ -883,9 +916,10 @@ const IntegratedTrendChart = ({
                 <ChartTableToggle showTable={showTable} onToggle={() => setShowTable(false)} />
                 <p className={`${labelClasses} mb-2`}>Gráfico integrado — por semana</p>
                 <ChartDataTable
-                    columns={['Semana', 'Dor média', 'Km na semana']}
+                    columns={['Semana', 'Peso méd. 7d (kg)', 'Dor média', 'Km na semana']}
                     rows={weekStarts.map(ws => [
                         formatShortDate(ws),
+                        nearestByTime(weightPoints, p => parseLocalDate(p.date).getTime(), parseLocalDate(ws).getTime())?.value.toFixed(1) ?? '-',
                         painWeekly.find(b => b.weekStart === ws)?.average.toFixed(1) ?? '-',
                         kmWeekly.find(b => b.weekStart === ws)?.sum.toFixed(1) ?? '-',
                     ])}
@@ -913,43 +947,105 @@ const IntegratedTrendChart = ({
                 onTouchEnd={handleLeave}
             >
                 <svg viewBox={`0 0 ${width} ${totalHeight}`} className="w-full overflow-visible" role="img" aria-label="Gráfico integrado de peso, dor e caminhada">
-                    {events.map(event => (
-                        <g key={event.id}>
-                            <line x1={xForDate(event.date)} x2={xForDate(event.date)} y1={padTop} y2={totalHeight - padBottom} stroke={palette.text} strokeOpacity="0.35" strokeWidth="1.5" strokeDasharray="4 4" />
-                            <circle cx={xForDate(event.date)} cy={padTop} r="3" fill={palette.text} opacity="0.6" />
-                            <title>{`${event.label} — ${formatShortDate(event.date)}`}</title>
+                    {/* Grade vertical do eixo X compartilhado, atravessando os 3 painéis */}
+                    {axisTimes.map(t => (
+                        <line key={t} x1={xForTime(t)} x2={xForTime(t)} y1={weightPlotY} y2={gridBottomY} stroke={palette.grid} strokeWidth="1" opacity="0.6" />
+                    ))}
+
+                    {/* Painel 1 — Peso */}
+                    <text x={padLeft} y={weightHeaderY + 11} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="start">PESO — MÉDIA 7D</text>
+                    <text x={padLeft + plotWidth} y={weightHeaderY + 11} fontSize="11" fontWeight="700" fill={palette.line} textAnchor="end">
+                        {weightPoints.length ? `${weightPoints[weightPoints.length - 1].value.toFixed(1)} kg` : '—'}
+                    </text>
+                    <rect x={padLeft} y={weightPlotY} width={plotWidth} height={weightH} fill={palette.bg} stroke={palette.grid} strokeWidth="1" rx="10" />
+                    {weightTicks.map((tick, i) => (
+                        <g key={i}>
+                            <line x1={padLeft} x2={padLeft + plotWidth} y1={yForWeight(tick)} y2={yForWeight(tick)} stroke={palette.grid} strokeWidth="1" />
+                            <text x={padLeft - 6} y={yForWeight(tick) + 3} fontSize="9" fill={palette.text} textAnchor="end">{tick.toFixed(1)}</text>
                         </g>
                     ))}
-                    {hoverX !== null && (
-                        <line x1={hoverX} x2={hoverX} y1={padTop} y2={totalHeight - padBottom} stroke={palette.line} strokeOpacity="0.4" strokeWidth="1.5" />
+                    {weightPoints.length >= 2 && <polyline points={weightPath} fill="none" stroke={palette.line} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
+                    {weightScaleExpanded && (
+                        <text x={padLeft + plotWidth} y={weightPlotY + weightH - 6} fontSize="8" fontStyle="italic" fill={palette.text} opacity="0.6" textAnchor="end">
+                            escala ampliada — meta {targetWeight} kg fora do intervalo visível
+                        </text>
                     )}
 
-                    <text x={padLeft} y={panelTops[0] - 2} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="start">PESO — MÉDIA 7D (KG)</text>
-                    <rect x={padLeft} y={panelTops[0]} width={plotWidth} height={panelH} fill={palette.bg} rx="8" />
-                    {weightPoints.length >= 2 && <polyline points={weightPath} fill="none" stroke={palette.line} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
-                    <text x={padLeft - 6} y={panelTops[0] + 8} fontSize="9" fill={palette.text} textAnchor="end">{weightMax}</text>
-                    <text x={padLeft - 6} y={panelTops[0] + panelH} fontSize="9" fill={palette.text} textAnchor="end">{weightMin}</text>
+                    {/* Painel 2 — Dor */}
+                    <text x={padLeft} y={painHeaderY + 11} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="start">DOR MÉDIA SEMANAL (0–10)</text>
+                    <text x={padLeft + plotWidth} y={painHeaderY + 11} fontSize="11" fontWeight="700" fill={palette.amber} textAnchor="end">
+                        {painWeekly.length ? painWeekly[painWeekly.length - 1].average.toFixed(1) : '—'}
+                    </text>
+                    <rect x={padLeft} y={painPlotY} width={plotWidth} height={painH} fill={palette.bg} stroke={palette.grid} strokeWidth="1" rx="10" />
+                    {painTicks.map(tick => (
+                        <g key={tick}>
+                            <line x1={padLeft} x2={padLeft + plotWidth} y1={yForPain(tick)} y2={yForPain(tick)} stroke={palette.grid} strokeWidth="1" />
+                            <text x={padLeft - 6} y={yForPain(tick) + 3} fontSize="9" fill={palette.text} textAnchor="end">{tick}</text>
+                        </g>
+                    ))}
+                    {painWeekly.length >= 2 && <polyline points={painPath} fill="none" stroke={palette.amber} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
+                    {painWeekly.map((b, i) => (
+                        (i === 0 || i === painWeekly.length - 1 || (hoverPain && hoverPain.weekStart === b.weekStart)) && (
+                            <circle key={b.weekStart} cx={xForDate(b.weekStart)} cy={yForPain(b.average)} r="3.5" fill={palette.point} stroke={palette.amber} strokeWidth="2" />
+                        )
+                    ))}
 
-                    <text x={padLeft} y={panelTops[1] - 2} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="start">DOR MÉDIA SEMANAL (0–10)</text>
-                    <rect x={padLeft} y={panelTops[1]} width={plotWidth} height={panelH} fill={palette.bg} rx="8" />
-                    {painWeekly.length >= 2 && <polyline points={painPath} fill="none" stroke={palette.rose} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
-                    {painWeekly.map(b => <circle key={b.weekStart} cx={xForDate(b.weekStart)} cy={yForPain(b.average)} r="3.5" fill={palette.point} stroke={palette.rose} strokeWidth="2" />)}
-                    <text x={padLeft - 6} y={panelTops[1] + 8} fontSize="9" fill={palette.text} textAnchor="end">10</text>
-                    <text x={padLeft - 6} y={panelTops[1] + panelH} fontSize="9" fill={palette.text} textAnchor="end">0</text>
-
-                    <text x={padLeft} y={panelTops[2] - 2} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="start">KM CAMINHADOS POR SEMANA</text>
-                    <rect x={padLeft} y={panelTops[2]} width={plotWidth} height={panelH} fill={palette.bg} rx="8" />
-                    {kmWeekly.map(b => {
+                    {/* Painel 3 — Km */}
+                    <text x={padLeft} y={kmHeaderY + 11} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="start">KM CAMINHADOS POR SEMANA</text>
+                    <text x={padLeft + plotWidth} y={kmHeaderY + 11} fontSize="11" fontWeight="700" fill={palette.emerald} textAnchor="end">
+                        {kmWeekly.length ? `${kmWeekly[kmWeekly.length - 1].sum.toFixed(1)} km` : '—'}
+                    </text>
+                    <rect x={padLeft} y={kmPlotY} width={plotWidth} height={kmH} fill={palette.bg} stroke={palette.grid} strokeWidth="1" rx="10" />
+                    {kmTicks.map((tick, i) => (
+                        <g key={i}>
+                            <line x1={padLeft} x2={padLeft + plotWidth} y1={yForKm(tick)} y2={yForKm(tick)} stroke={palette.grid} strokeWidth="1" />
+                            <text x={padLeft - 6} y={yForKm(tick) + 3} fontSize="9" fill={palette.text} textAnchor="end">{tick.toFixed(0)}</text>
+                        </g>
+                    ))}
+                    {kmWeekly.length > 0 ? kmWeekly.map(b => {
                         const x = xForDate(b.weekStart) - kmBarWidth / 2;
                         const y = yForKm(b.sum);
-                        const h = Math.max(0, panelTops[2] + panelH - y);
+                        const h = Math.max(0, kmPlotY + kmH - y);
                         return <rect key={b.weekStart} x={x} y={y} width={kmBarWidth} height={h} rx="3" fill={palette.emerald} />;
-                    })}
-                    <text x={padLeft - 6} y={panelTops[2] + 8} fontSize="9" fill={palette.text} textAnchor="end">{maxKmWeek.toFixed(0)}</text>
-                    <text x={padLeft - 6} y={panelTops[2] + panelH} fontSize="9" fill={palette.text} textAnchor="end">0</text>
+                    }) : (
+                        <text x={padLeft + plotWidth / 2} y={kmPlotY + kmH / 2} fontSize="10" fill={palette.text} opacity="0.5" textAnchor="middle">sem registro no período</text>
+                    )}
 
-                    <text x={padLeft} y={totalHeight - 8} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="start">{formatShortDate(minDate)}</text>
-                    <text x={width - padRight} y={totalHeight - 8} fontSize="10" fontWeight="700" fill={palette.text} textAnchor="end">{formatShortDate(maxDate)}</text>
+                    {/* Eixo X compartilhado */}
+                    {axisTimes.map((t, i) => (
+                        <text
+                            key={t}
+                            x={xForTime(t)}
+                            y={xAxisY}
+                            fontSize="10"
+                            fontWeight="700"
+                            fill={palette.text}
+                            textAnchor={i === 0 ? 'start' : i === axisTimes.length - 1 ? 'end' : 'middle'}
+                        >
+                            {formatShortDate(formatLocalISO(new Date(t)))}
+                        </text>
+                    ))}
+
+                    {/* Trilha de eventos — desenhada por cima dos painéis, nunca embaixo */}
+                    {sortedEvents.map((event, i) => {
+                        const x = xForDate(event.date);
+                        const row = i % 2;
+                        const pinY = eventTrackTop + 6 + row * 11;
+                        const label = event.label.length > 13 ? `${event.label.slice(0, 12)}…` : event.label;
+                        return (
+                            <g key={event.id}>
+                                <line x1={x} x2={x} y1={weightPlotY} y2={gridBottomY} stroke={palette.text} strokeOpacity="0.2" strokeWidth="1.25" strokeDasharray="3 3" />
+                                <circle cx={x} cy={pinY} r="3" fill={palette.text} opacity="0.75" />
+                                <text x={x} y={pinY - 5} fontSize="8" fontWeight="700" fill={palette.text} textAnchor="middle" opacity="0.85">{label}</text>
+                                <title>{`${event.label} — ${formatShortDate(event.date)}`}</title>
+                            </g>
+                        );
+                    })}
+
+                    {/* Crosshair — camada de overlay, sempre por cima de tudo */}
+                    {hoverX !== null && (
+                        <line x1={hoverX} x2={hoverX} y1={weightPlotY} y2={gridBottomY} stroke={palette.line} strokeOpacity="0.5" strokeWidth="1.5" />
+                    )}
                 </svg>
             </div>
         </div>
@@ -1630,6 +1726,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                             painWeekly={painWeeklyForIntegrated}
                             kmWeekly={kmWeeklyForIntegrated}
                             events={eventsForIntegrated}
+                            targetWeight={settings.targetWeight}
                             isDark={false}
                         />
                     </div>
@@ -1844,6 +1941,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                             painWeekly={painWeeklyForIntegrated}
                             kmWeekly={kmWeeklyForIntegrated}
                             events={eventsForIntegrated}
+                            targetWeight={settings.targetWeight}
                             isDark={isDark}
                         />
                         <div className="mt-5 rounded-2xl border border-border-subtle bg-background p-4">
@@ -2209,7 +2307,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                 <span className={labelClasses}>Noite</span>
                                                 <input type="number" min="0" max="10" value={todayLog.pain?.evening ?? ''} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, evening: Math.min(10, Math.max(0, parseInt(e.target.value) || 0)) } })} className={inputClasses} />
                                             </label>
-                                            <button type="button" onClick={() => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, sciatica: !todayLog.pain?.sciatica } })} className={`rounded-xl border p-4 text-left transition ${todayLog.pain?.sciatica ? 'border-tertiary-container bg-tertiary-fixed text-on-tertiary-fixed' : 'border-border-subtle bg-background text-on-surface'}`}>
+                                            <button type="button" onClick={() => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, sciatica: !todayLog.pain?.sciatica } })} className={`rounded-xl border p-4 text-left transition ${todayLog.pain?.sciatica ? 'border-tertiary-container bg-tertiary-container text-on-tertiary-container' : 'border-border-subtle bg-background text-on-surface'}`}>
                                                 <span className={labelClasses}>Ciática</span>
                                                 <div className="mt-2 text-sm font-bold">{todayLog.pain?.sciatica ? 'Sim' : 'Não'}</div>
                                             </button>

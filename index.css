@@ -220,6 +220,50 @@ body {
   fill: #0f172a;
 }
 
+/* Este bloco cobria só as classes cruas do Tailwind (bg-white, text-slate-*).
+   O módulo Saúde usa em boa parte os tokens semânticos (bg-background,
+   text-on-surface etc.), que no tailwind.config.js são hex fixo sem variação
+   por tema — por isso, sem estas regras, textos e superfícies do módulo
+   ficam presos na cor do claro dentro do escuro. Correção definitiva é migrar
+   esses tokens para CSS custom properties; isto aqui é a extensão pragmática
+   do padrão já existente, escopada ao módulo Saúde. */
+.health-view-dark .bg-background {
+  background-color: #0b1120 !important;
+}
+
+.health-view-dark .text-on-surface {
+  color: #f1f5f9 !important;
+}
+
+.health-view-dark .text-on-surface-variant {
+  color: #b8c0d4 !important;
+}
+
+.health-view-dark .border-border-subtle,
+.health-view-dark .border-border-standard {
+  border-color: #2c3547 !important;
+}
+
+.health-view-dark .bg-surface-container-low {
+  background-color: #1e293b !important;
+}
+
+.health-view-dark .bg-error-container {
+  background-color: rgba(239, 68, 68, 0.22) !important;
+}
+
+.health-view-dark .text-on-error-container {
+  color: #fecaca !important;
+}
+
+.health-view-dark .bg-tertiary-container {
+  background-color: rgba(217, 119, 6, 0.28) !important;
+}
+
+.health-view-dark .text-on-tertiary-container {
+  color: #fde9c8 !important;
+}
+
 /* Systems module dark-mode surface fixes */
 :is(.systems-view-dark, .system-execution-view-dark) {
   color: #e2e8f0;
