@@ -1820,7 +1820,111 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
 
 
 
-    if data.startswith("health_pain:"):
+    if data.startswith("health_checkin:"):
+        parts = data.split(":")
+        checkin_date = parts[1] if len(parts) > 1 else ""
+        checkin_mode = parts[2] if len(parts) > 2 else ""
+        try:
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", checkin_date):
+                raise ValueError("data inválida")
+            _answer_callback_query(token, query_id, "Check-in iniciado")
+            if checkin_mode == "morning":
+                response_text = "☀️ <b>Check-in da manhã</b>\n\nComo está a dor lombar ao acordar? (0 = sem dor, 10 = pior possível)"
+                pain_keyboard = [
+                    [{"text": str(n), "callback_data": f"health_mpain:{checkin_date}:{n}"} for n in range(0, 6)],
+                    [{"text": str(n), "callback_data": f"health_mpain:{checkin_date}:{n}"} for n in range(6, 11)],
+                ]
+            else:
+                response_text = "🌙 <b>Check-in da noite</b>\n\nComo ficou sua lombar hoje? (0 = sem dor, 10 = pior possível)"
+                pain_keyboard = [
+                    [{"text": str(n), "callback_data": f"health_pain:{checkin_date}:{n}"} for n in range(0, 6)],
+                    [{"text": str(n), "callback_data": f"health_pain:{checkin_date}:{n}"} for n in range(6, 11)],
+                ]
+            _persist_callback_turn(f"Iniciar check-in ({'manhã' if checkin_mode == 'morning' else 'noite'})", response_text)
+            _send_telegram_message_with_keyboard(token, chat_id, response_text, pain_keyboard)
+        except Exception as exc:
+            print(f"[HealthCheckin] Falha ao iniciar check-in guiado: {exc}")
+            _answer_callback_query(token, query_id, "Não consegui iniciar.")
+            _send_telegram_message(token, chat_id, "⚠️ Não consegui iniciar o check-in. Toque no botão novamente.")
+
+    elif data.startswith("health_mpain:"):
+        parts = data.split(":")
+        mpain_date = parts[1] if len(parts) > 1 else ""
+        mpain_raw = parts[2] if len(parts) > 2 else ""
+        try:
+            mpain_score = max(0, min(10, int(mpain_raw)))
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", mpain_date):
+                raise ValueError("data inválida")
+            doc_ref = db.collection("health_exercise_logs").document(mpain_date)
+            current = doc_ref.get()
+            current_data = (current.to_dict() or {}) if current.exists else {}
+            current_pain = current_data.get("pain") or {}
+            current_pain["morning"] = mpain_score
+            current_pain["telegram_checked_at"] = datetime.now(timezone.utc).isoformat()
+            doc_ref.set({"pain": current_pain, "entrySource": _health_entry_source_after_telegram(current_data)}, merge=True)
+            _answer_callback_query(token, query_id, f"Dor ao acordar: {mpain_score}/10")
+            response_text = f"✅ Dor ao acordar registrada: <b>{mpain_score}/10</b>. Você acordou com dor durante a noite?"
+            _persist_callback_turn(f"Check-in manhã — dor ao acordar: {mpain_score}/10", response_text)
+            woke_keyboard = [[
+                {"text": "Sim", "callback_data": f"health_woke:{mpain_date}:sim"},
+                {"text": "Não", "callback_data": f"health_woke:{mpain_date}:nao"},
+            ]]
+            _send_telegram_message_with_keyboard(token, chat_id, response_text, woke_keyboard)
+        except Exception as exc:
+            print(f"[HealthCheckin] Falha ao registrar dor da manhã: {exc}")
+            _answer_callback_query(token, query_id, "Não consegui registrar.")
+            _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar a dor da manhã. Tente responder novamente.")
+
+    elif data.startswith("health_woke:"):
+        parts = data.split(":")
+        woke_date = parts[1] if len(parts) > 1 else ""
+        woke_raw = parts[2] if len(parts) > 2 else ""
+        try:
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", woke_date):
+                raise ValueError("data inválida")
+            woke_in_pain = woke_raw == "sim"
+            doc_ref = db.collection("health_exercise_logs").document(woke_date)
+            current = doc_ref.get()
+            current_data = (current.to_dict() or {}) if current.exists else {}
+            sleep_quality = current_data.get("sleepQuality") or {}
+            sleep_quality["wokeInPain"] = woke_in_pain
+            doc_ref.set({"sleepQuality": sleep_quality, "entrySource": _health_entry_source_after_telegram(current_data)}, merge=True)
+            _answer_callback_query(token, query_id, "Registrado")
+            response_text = f"✅ Acordou com dor: <b>{'sim' if woke_in_pain else 'não'}</b>. Como foi a qualidade do sono? (1 = péssima, 5 = ótima)"
+            _persist_callback_turn(f"Check-in manhã — acordou com dor: {'sim' if woke_in_pain else 'não'}", response_text)
+            quality_keyboard = [[{"text": str(n), "callback_data": f"health_sleepq:{woke_date}:{n}"} for n in range(1, 6)]]
+            _send_telegram_message_with_keyboard(token, chat_id, response_text, quality_keyboard)
+        except Exception as exc:
+            print(f"[HealthCheckin] Falha ao registrar despertar com dor: {exc}")
+            _answer_callback_query(token, query_id, "Não consegui registrar.")
+            _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar essa resposta. Tente novamente.")
+
+    elif data.startswith("health_sleepq:"):
+        parts = data.split(":")
+        sleepq_date = parts[1] if len(parts) > 1 else ""
+        sleepq_raw = parts[2] if len(parts) > 2 else ""
+        try:
+            sleepq_score = max(1, min(5, int(sleepq_raw)))
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", sleepq_date):
+                raise ValueError("data inválida")
+            doc_ref = db.collection("health_exercise_logs").document(sleepq_date)
+            current = doc_ref.get()
+            current_data = (current.to_dict() or {}) if current.exists else {}
+            sleep_quality = current_data.get("sleepQuality") or {}
+            sleep_quality["quality"] = sleepq_score
+            if "wokeInPain" not in sleep_quality:
+                sleep_quality["wokeInPain"] = False
+            doc_ref.set({"sleepQuality": sleep_quality, "entrySource": _health_entry_source_after_telegram(current_data)}, merge=True)
+            _answer_callback_query(token, query_id, f"Sono: {sleepq_score}/5")
+            response_text = f"✅ Qualidade do sono: <b>{sleepq_score}/5</b>.\n\n☀️ Check-in da manhã completo! O da noite chega às 19h."
+            _persist_callback_turn(f"Check-in manhã — sono: {sleepq_score}/5", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+        except Exception as exc:
+            print(f"[HealthCheckin] Falha ao registrar qualidade do sono: {exc}")
+            _answer_callback_query(token, query_id, "Não consegui registrar.")
+            _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar a qualidade do sono. Tente novamente.")
+
+    elif data.startswith("health_pain:"):
         parts = data.split(":")
         pain_date = parts[1] if len(parts) > 1 else ""
         pain_raw = parts[2] if len(parts) > 2 else ""

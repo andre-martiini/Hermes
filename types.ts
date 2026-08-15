@@ -685,7 +685,7 @@ export interface HealthTelegramReminder {
     time: string; // HH:mm
     enabled: boolean;
     daysOfWeek?: number[]; // 0-6 (Sunday-Saturday)
-    category?: 'spine' | 'walking' | 'nutrition' | 'pain' | 'custom';
+    category?: 'spine' | 'walking' | 'nutrition' | 'pain' | 'checkin_morning' | 'checkin_night' | 'custom';
     telegramOnly?: boolean;
     created_by_uid?: string;
     last_sent_date?: string;

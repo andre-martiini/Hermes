@@ -3040,13 +3040,22 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
             "category": "nutrition",
         },
         {
-            "id": "pain_checkin",
-            "title": "Check-in lombar",
-            "message": "André, check-in rápido: como ficou sua lombar hoje?",
-            "time": "21:30",
+            "id": "morning_checkin",
+            "title": "Check-in da manhã",
+            "message": "André, hora do check-in da manhã — 3 perguntas rápidas sobre dor e sono.",
+            "time": "12:00",
             "enabled": True,
             "daysOfWeek": [0, 1, 2, 3, 4, 5, 6],
-            "category": "pain",
+            "category": "checkin_morning",
+        },
+        {
+            "id": "night_checkin",
+            "title": "Check-in da noite",
+            "message": "André, hora do check-in da noite — uma pergunta por vez, leva menos de 1 minuto.",
+            "time": "19:00",
+            "enabled": True,
+            "daysOfWeek": [0, 1, 2, 3, 4, 5, 6],
+            "category": "checkin_night",
         },
         {
             "id": "strength_training",
@@ -3123,11 +3132,10 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
             title = (reminder.get("title") or "Lembrete de saúde").strip()
             message = (reminder.get("message") or "André, lembrete de saúde configurado no Hermes.").strip()
             keyboard = None
-            if reminder.get("category") == "pain":
-                keyboard = [
-                    [{"text": str(n), "callback_data": f"health_pain:{today_str}:{n}"} for n in range(0, 6)],
-                    [{"text": str(n), "callback_data": f"health_pain:{today_str}:{n}"} for n in range(6, 11)],
-                ]
+            if reminder.get("category") == "checkin_morning":
+                keyboard = [[{"text": "▶️ Iniciar check-in", "callback_data": f"health_checkin:{today_str}:morning"}]]
+            elif reminder.get("category") == "checkin_night":
+                keyboard = [[{"text": "▶️ Iniciar check-in", "callback_data": f"health_checkin:{today_str}:night"}]]
             sent = _send_telegram_message_raw_with_keyboard(db, telegram_chat_id, f"{title}\n\n{message}", keyboard)
             db.collection("system_reminders").document(sent_id).set({
                 "sent_at": now.isoformat(),

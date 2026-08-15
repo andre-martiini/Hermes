@@ -68,13 +68,23 @@ const DEFAULT_HEALTH_REMINDERS: HealthTelegramReminder[] = [
         telegramOnly: true,
     },
     {
-        id: 'pain_checkin',
-        title: 'Check-in lombar',
-        message: 'André, check-in rápido: como ficou sua lombar hoje?',
-        time: '21:30',
+        id: 'morning_checkin',
+        title: 'Check-in da manhã',
+        message: 'André, hora do check-in da manhã — 3 perguntas rápidas sobre dor e sono.',
+        time: '12:00',
         enabled: true,
         daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
-        category: 'pain',
+        category: 'checkin_morning',
+        telegramOnly: true,
+    },
+    {
+        id: 'night_checkin',
+        title: 'Check-in da noite',
+        message: 'André, hora do check-in da noite — uma pergunta por vez, leva menos de 1 minuto.',
+        time: '19:00',
+        enabled: true,
+        daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+        category: 'checkin_night',
         telegramOnly: true,
     },
     {
@@ -1244,6 +1254,7 @@ const HealthView: React.FC<HealthViewProps> = ({
     const [editBlockCalories, setEditBlockCalories] = useState<string>('');
     const [integratedRangeDays, setIntegratedRangeDays] = useState<number | null>(90);
     const [isReportOpen, setIsReportOpen] = useState<boolean>(false);
+    const [isAddExamOpen, setIsAddExamOpen] = useState<boolean>(false);
     const [guidedMode, setGuidedMode] = useState<'morning' | 'night' | null>(null);
     const [guidedStep, setGuidedStep] = useState<number>(0);
     const [eventDate, setEventDate] = useState<string>(formatDateLocalISO(new Date()));
@@ -1706,6 +1717,7 @@ const HealthView: React.FC<HealthViewProps> = ({
             setExamProximaReavaliacao('');
             setExamTags('');
             setExamFiles([]);
+            setIsAddExamOpen(false);
         } catch (err) {
             console.error('Falha ao adicionar registro de saúde:', err);
         } finally {
