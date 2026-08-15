@@ -4332,6 +4332,9 @@ const App: React.FC = () => {
   // Na ferramenta de reuniões o Copiloto já vive embutido na tela (split view),
   // então o launcher flutuante e o chat overlay globais ficam ocultos.
   const isMeetingToolActive = viewMode === 'ferramentas' && activeFerramenta === 'meeting_transcription';
+  // Caixa de Entrada WhatsApp já tem o Copiloto embutido numa terceira coluna (WhatsappInboxView) —
+  // a bolinha flutuante global fica redundante/confusa ali, mesmo espírito de isMeetingToolActive.
+  const isWhatsappInboxActive = viewMode === 'whatsapp';
   const closeCopiloto = () => {
     setIsCopilotoOpen(false);
     setCopilotoAutoStartMic(false);
@@ -7175,7 +7178,7 @@ const App: React.FC = () => {
             />
           )
         }
-        {!isCopilotoOpen && !isVoiceLiveActive && viewMode !== 'godmode' && !isMeetingToolActive && !(selectedTask && (taskModalMode === 'execute' || (taskModalMode === 'default' && selectedTask.area_tematica === 'CLC'))) && (
+        {!isCopilotoOpen && !isVoiceLiveActive && viewMode !== 'godmode' && !isMeetingToolActive && !isWhatsappInboxActive && !(selectedTask && (taskModalMode === 'execute' || (taskModalMode === 'default' && selectedTask.area_tematica === 'CLC'))) && (
           <>
             {/* Backdrop invisivel: clique fora fecha o menu do launcher */}
             {isCopilotoLauncherOpen && (
@@ -7255,7 +7258,7 @@ const App: React.FC = () => {
         {isVoiceLiveActive && (
           <HermesVoiceOverlay isDark={isDarkTheme} onExit={() => setIsVoiceLiveActive(false)} onUICommand={handleVoiceUICommand} uiContext={currentUIContext} />
         )}
-        {!isStrategySplitCopilot && !isMeetingToolActive && (
+        {!isStrategySplitCopilot && !isMeetingToolActive && !isWhatsappInboxActive && (
         <HermesGlobalChat
           isOpen={isCopilotoOpen}
           onClose={closeCopiloto}
