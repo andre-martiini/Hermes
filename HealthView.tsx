@@ -222,6 +222,87 @@ const ToggleTile = ({
     );
 };
 
+const ReminderCard = ({
+    reminder,
+    isDefault,
+    onSave,
+    onDelete,
+}: {
+    reminder: HealthTelegramReminder;
+    isDefault: boolean;
+    onSave: (reminder: HealthTelegramReminder) => void;
+    onDelete: (id: string) => void;
+}) => {
+    // Estado local do horário: grava no Firestore só no onBlur, não a cada tecla. Digitar
+    // direto no <input type="time"> e persistir em cada onChange fazia o valor voltar do
+    // estado no meio da digitação (perdia dígito) e reordenava a lista embaixo do cursor —
+    // os dois eram o mesmo bug (achados N10/N11 da revisão).
+    const [timeValue, setTimeValue] = useState(reminder.time);
+    useEffect(() => setTimeValue(reminder.time), [reminder.time]);
+    const commitTime = () => {
+        if (timeValue && timeValue !== reminder.time) onSave({ ...reminder, time: timeValue });
+    };
+    return (
+        <div className="rounded-xl border border-border-subtle bg-background p-4">
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <p className="text-sm font-bold text-on-surface">{reminder.title}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">{reminder.message}</p>
+                    <p className="mt-1 text-xs font-semibold text-primary-container">{formatCadence(reminder.daysOfWeek, reminder.time)}</p>
+                </div>
+                <button
+                    type="button"
+                    onClick={() => onSave({ ...reminder, enabled: !reminder.enabled })}
+                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase ${reminder.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}
+                >
+                    {reminder.enabled ? 'Ativo' : 'Pausado'}
+                </button>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                {WEEKDAY_LABELS.map((label, day) => {
+                    const days = reminder.daysOfWeek && reminder.daysOfWeek.length ? reminder.daysOfWeek : [0, 1, 2, 3, 4, 5, 6];
+                    const active = days.includes(day);
+                    return (
+                        <button
+                            key={day}
+                            type="button"
+                            title={WEEKDAY_NAMES[day]}
+                            aria-label={`${WEEKDAY_NAMES[day]} — ${active ? 'ativo' : 'inativo'}`}
+                            aria-pressed={active}
+                            onClick={() => {
+                                const next = active ? days.filter(d => d !== day) : [...days, day];
+                                if (next.length === 0) return;
+                                onSave({ ...reminder, daysOfWeek: next.sort() });
+                            }}
+                            className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold transition ${active ? 'bg-primary-container text-white' : 'bg-white text-on-surface-variant border border-border-standard'}`}
+                        >
+                            {label}
+                        </button>
+                    );
+                })}
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-3">
+                <input
+                    type="time"
+                    value={timeValue}
+                    onChange={e => setTimeValue(e.target.value)}
+                    onBlur={commitTime}
+                    className="rounded-lg border border-border-standard bg-white px-3 py-2 text-sm font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-container"
+                />
+                {!isDefault && (
+                    <button
+                        type="button"
+                        onClick={() => onDelete(reminder.id)}
+                        className="text-xs font-semibold text-error hover:underline"
+                    >
+                        Remover
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+};
+
 const Icon = ({ name, className = 'h-4 w-4' }: { name: IconName; className?: string }) => {
     const common = { className, fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' };
     switch (name) {
@@ -257,6 +338,12 @@ const formatShortDate = (value: string) => {
     const [, month, day] = value.split('-');
     return day && month ? `${day}/${month}` : value;
 };
+
+// Sessão recorrente de terapia sincronizada da agenda (pilates/fisio/acupuntura toda
+// semana) é linha de base, não evento — não responde "o que mudou aqui na curva?" como
+// uma consulta ou um exame pontual respondem. Vira faixa de densidade, não pino numerado.
+const isRecurringTherapySession = (event: { source?: 'manual' | 'calendar' | 'exam'; type: HealthEventType }) =>
+    event.source === 'calendar' && (event.type === 'fisioterapia' || event.type === 'modalidade_terapeutica');
 
 const formatKm = (value: number) => value.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
 
@@ -959,11 +1046,19 @@ const IntegratedTrendChart = ({
 
     const sortedEvents = [...events].sort((a, b) => a.date.localeCompare(b.date));
 
+    // Sessão recorrente sincronizada da agenda (pilates/fisio/acupuntura semanais) é
+    // linha de base, não evento pontual — separada em faixa de densidade discreta, sem
+    // número. Pino numerado fica só para o que de fato explica uma inflexão na curva:
+    // consulta, exame, viagem, medicação, troca de modalidade.
+    const recurringSessions = sortedEvents.filter(isRecurringTherapySession);
+    const punctualEvents = sortedEvents.filter(e => !isRecurringTherapySession(e));
+
     // Pinos numerados em vez de rótulo de texto no SVG: com eventos próximos no tempo,
     // qualquer rótulo textual — mesmo truncado e empacotado por linha — fica ilegível.
     // O número mapeia 1:1 com os chips de legenda abaixo do gráfico (mesma ordem
     // cronológica), que já trazem data e nome completo. Título completo também no hover.
-    const eventLayout = sortedEvents.map((event, i) => ({ event, x: xForDate(event.date), number: i + 1 }));
+    const eventLayout = punctualEvents.map((event, i) => ({ event, x: xForDate(event.date), number: i + 1 }));
+    const recurringLayout = recurringSessions.map(event => ({ event, x: xForDate(event.date) }));
 
     const updateHoverFromClientX = (clientX: number, clientY: number, containerRect: DOMRect) => {
         if (containerRect.width === 0) return;
@@ -1106,7 +1201,16 @@ const IntegratedTrendChart = ({
                         </text>
                     ))}
 
-                    {/* Trilha de eventos — desenhada por cima dos painéis, nunca embaixo */}
+                    {/* Faixa de densidade das sessões recorrentes — presença sem numeração,
+                        sem linha vertical cruzando os painéis (com dezenas de sessões, as
+                        linhas por si só voltariam a poluir o eixo) */}
+                    {recurringLayout.map(({ event, x }) => (
+                        <circle key={event.id} cx={x} cy={eventTrackTop + eventTrackH - 3} r="1.75" fill={palette.text} opacity="0.3">
+                            <title>{`${event.label} — ${formatShortDate(event.date)}`}</title>
+                        </circle>
+                    ))}
+
+                    {/* Trilha de eventos pontuais — desenhada por cima dos painéis, nunca embaixo */}
                     {eventLayout.map(({ event, x, number }) => {
                         const pinY = eventTrackTop + 12;
                         return (
@@ -1270,6 +1374,50 @@ const HealthView: React.FC<HealthViewProps> = ({
             addExamTriggerRef.current?.focus();
         };
     }, [isAddExamOpen]);
+
+    const [isAddReminderOpen, setIsAddReminderOpen] = useState<boolean>(false);
+    const [newReminderTitle, setNewReminderTitle] = useState('');
+    const [newReminderMessage, setNewReminderMessage] = useState('');
+    const [newReminderTime, setNewReminderTime] = useState('08:00');
+    const [newReminderDays, setNewReminderDays] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
+    const addReminderTituloRef = useRef<HTMLInputElement>(null);
+    const addReminderTriggerRef = useRef<HTMLButtonElement>(null);
+
+    useEffect(() => {
+        if (!isAddReminderOpen) return;
+        addReminderTituloRef.current?.focus();
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setIsAddReminderOpen(false);
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            addReminderTriggerRef.current?.focus();
+        };
+    }, [isAddReminderOpen]);
+
+    // Grava só ao confirmar no modal — o botão antigo criava o lembrete na hora do
+    // clique ("Novo lembrete", 08:00, todo dia), sem dar chance de escolher nada antes
+    // de já existir no Firestore. Foi assim que 7 lembretes duplicados nasceram.
+    const handleCreateReminder = () => {
+        const title = newReminderTitle.trim();
+        if (!title) return;
+        onSaveTelegramReminder({
+            id: `custom_${Date.now()}`,
+            title,
+            message: newReminderMessage.trim() || 'André, lembrete de saúde configurado no Hermes.',
+            time: newReminderTime,
+            enabled: true,
+            daysOfWeek: newReminderDays.length ? newReminderDays : [0, 1, 2, 3, 4, 5, 6],
+            category: 'custom',
+            telegramOnly: true,
+        });
+        setNewReminderTitle('');
+        setNewReminderMessage('');
+        setNewReminderTime('08:00');
+        setNewReminderDays([0, 1, 2, 3, 4, 5, 6]);
+        setIsAddReminderOpen(false);
+    };
     const [guidedMode, setGuidedMode] = useState<'morning' | 'night' | null>(null);
     const [guidedStep, setGuidedStep] = useState<number>(0);
     const [eventDate, setEventDate] = useState<string>(formatDateLocalISO(new Date()));
@@ -2187,39 +2335,38 @@ const HealthView: React.FC<HealthViewProps> = ({
         <div className={`health-view min-h-screen bg-background pb-20 ${isDark ? 'health-view-dark' : ''}`}>
             <div className="border-b border-border-subtle bg-white">
                 <div className="mx-auto flex max-w-[1440px] flex-col gap-5 px-6 py-6 lg:px-8">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                        <div>
-                            <p className={labelClasses}>Saúde integrada</p>
-                            <h2 className="mt-1 text-2xl font-bold tracking-tight text-on-surface">Painel de saúde</h2>
-                            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-on-surface-variant">
-                                Registro manual de peso, acompanhamento de dor lombar e arquivo médico em um painel de acompanhamento contínuo.
-                            </p>
+                    <div>
+                        <p className={labelClasses}>Saúde integrada</p>
+                        <h2 className="mt-1 text-2xl font-bold tracking-tight text-on-surface">Painel de saúde</h2>
+                        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-on-surface-variant">
+                            Registro manual de peso, acompanhamento de dor lombar e arquivo médico em um painel de acompanhamento contínuo.
+                        </p>
+                    </div>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex flex-wrap rounded-xl border border-border-standard bg-background p-1">
+                            {[
+                                { id: 'overview', label: 'Visão geral' },
+                                { id: 'records', label: 'Registros' },
+                                { id: 'charts', label: 'Gráficos' },
+                                { id: 'reminders', label: 'Lembretes' },
+                                { id: 'archive', label: 'Arquivo médico' },
+                            ].map(tab => (
+                                <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={() => setActiveTab(tab.id as typeof activeTab)}
+                                    className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                                        activeTab === tab.id
+                                            ? 'bg-primary-container text-white shadow-card'
+                                            : 'text-on-surface-variant hover:bg-white hover:text-on-surface'
+                                    }`}
+                                >
+                                    {tab.label}
+                                </button>
+                            ))}
                         </div>
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                            <div className="flex flex-wrap rounded-xl border border-border-standard bg-background p-1">
-                                {[
-                                    { id: 'overview', label: 'Visão geral' },
-                                    { id: 'records', label: 'Registros' },
-                                    { id: 'charts', label: 'Gráficos' },
-                                    { id: 'reminders', label: 'Lembretes' },
-                                    { id: 'archive', label: 'Arquivo médico' },
-                                ].map(tab => (
-                                    <button
-                                        key={tab.id}
-                                        type="button"
-                                        onClick={() => setActiveTab(tab.id as typeof activeTab)}
-                                        className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
-                                            activeTab === tab.id
-                                                ? 'bg-primary-container text-white shadow-card'
-                                                : 'text-on-surface-variant hover:bg-white hover:text-on-surface'
-                                        }`}
-                                    >
-                                        {tab.label}
-                                    </button>
-                                ))}
-                            </div>
-                            <label className="flex items-center gap-2 rounded-xl border border-border-standard bg-background px-3 py-2">
-                                <Icon name="calendar" className="h-4 w-4 text-on-surface-variant" />
+                        <label className="flex items-center gap-2 rounded-xl border border-border-standard bg-background px-3 py-2">
+                            <Icon name="calendar" className="h-4 w-4 text-on-surface-variant" />
                                 <input
                                     type="date"
                                     value={selectedDate}
@@ -2228,12 +2375,11 @@ const HealthView: React.FC<HealthViewProps> = ({
                                 />
                             </label>
                         </div>
-                    </div>
 
                     <div className="grid grid-cols-1 gap-4 sm:max-w-2xl sm:grid-cols-2">
                         <MetricCard
-                            label={weightHeadline?.isAverage ? 'Peso atual (média 7d)' : 'Peso atual'}
-                            value={weightHeadline?.isAverage ? weightHeadline.displayValue.toFixed(1).replace('.', ',') : '—'}
+                            label={weightHeadline?.isAverage ? 'Média de 7 dias' : 'Peso de hoje'}
+                            value={weightHeadline ? weightHeadline.displayValue.toFixed(1).replace('.', ',') : '—'}
                             unit="kg"
                             helper={weightHeadline ? (
                                 <>
@@ -2388,24 +2534,39 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     Adicionar
                                 </button>
                             </div>
-                            {eventsForIntegrated.length > 0 && (
-                                <div className="mt-4 flex flex-wrap gap-2">
-                                    <p className="w-full text-[10px] font-medium text-on-surface-variant">Legenda dos pinos numerados do gráfico acima:</p>
-                                    {eventsForIntegrated.map((event, i) => (
-                                        <span key={event.id} className="inline-flex items-center gap-1.5 rounded-full border border-border-standard bg-white px-2.5 py-1 text-[10px] font-semibold text-on-surface-variant">
-                                            <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-surface-container-low text-[9px] font-bold text-on-surface">{i + 1}</span>
-                                            {formatShortDate(event.date)} · {event.label}
-                                            {event.source === 'exam' ? (
-                                                <span className="text-on-surface-variant/50" title="Vem do arquivo médico">📎</span>
-                                            ) : event.source === 'calendar' ? (
-                                                <span className="text-on-surface-variant/50" title="Vem da Google Agenda">📅</span>
-                                            ) : (
-                                                <button type="button" onClick={() => onDeleteEvent(event.id)} className="text-on-surface-variant/60 hover:text-error" aria-label="Remover evento">×</button>
-                                            )}
-                                        </span>
-                                    ))}
-                                </div>
-                            )}
+                            {eventsForIntegrated.length > 0 && (() => {
+                                const punctualLegend = eventsForIntegrated.filter(e => !isRecurringTherapySession(e));
+                                const recurringLegend = eventsForIntegrated.filter(isRecurringTherapySession);
+                                const recurringCounts = new Map<string, number>();
+                                recurringLegend.forEach(e => recurringCounts.set(e.label, (recurringCounts.get(e.label) ?? 0) + 1));
+                                return (
+                                    <div className="mt-4 space-y-3">
+                                        {punctualLegend.length > 0 && (
+                                            <div className="flex flex-wrap gap-2">
+                                                <p className="w-full text-[10px] font-medium text-on-surface-variant">Legenda dos pinos numerados do gráfico acima:</p>
+                                                {punctualLegend.map((event, i) => (
+                                                    <span key={event.id} className="inline-flex items-center gap-1.5 rounded-full border border-border-standard bg-white px-2.5 py-1 text-[10px] font-semibold text-on-surface-variant">
+                                                        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-surface-container-low text-[9px] font-bold text-on-surface">{i + 1}</span>
+                                                        {formatShortDate(event.date)} · {event.label}
+                                                        {event.source === 'exam' ? (
+                                                            <span className="text-on-surface-variant/50" title="Vem do arquivo médico">📎</span>
+                                                        ) : event.source === 'calendar' ? (
+                                                            <span className="text-on-surface-variant/50" title="Vem da Google Agenda">📅</span>
+                                                        ) : (
+                                                            <button type="button" onClick={() => onDeleteEvent(event.id)} className="text-on-surface-variant/60 hover:text-error" aria-label="Remover evento">×</button>
+                                                        )}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
+                                        {recurringCounts.size > 0 && (
+                                            <p className="text-[10px] font-medium text-on-surface-variant">
+                                                Pontinhos discretos na trilha: {[...recurringCounts.entries()].map(([label, count]) => `${label.toLowerCase()} ${count}×`).join(' · ')} nesta janela — sessões recorrentes, sem pino próprio
+                                            </p>
+                                        )}
+                                    </div>
+                                );
+                            })()}
                         </div>
                     </HealthSection>
                     </>
@@ -3041,82 +3202,103 @@ const HealthView: React.FC<HealthViewProps> = ({
                 )}
                 {activeTab === 'reminders' && (
                             <HealthSection title="Lembretes Telegram" eyebrow="Intervenções leves">
-                                <div className="space-y-3">
-                                    {activeReminders.map(reminder => (
-                                        <div key={reminder.id} className="rounded-xl border border-border-subtle bg-background p-4">
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div className="min-w-0">
-                                                    <p className="text-sm font-bold text-on-surface">{reminder.title}</p>
-                                                    <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">{reminder.message}</p>
-                                                    <p className="mt-1 text-xs font-semibold text-primary-container">{formatCadence(reminder.daysOfWeek, reminder.time)}</p>
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => onSaveTelegramReminder({ ...reminder, enabled: !reminder.enabled })}
-                                                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase ${reminder.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}
-                                                >
-                                                    {reminder.enabled ? 'Ativo' : 'Pausado'}
-                                                </button>
-                                            </div>
-                                            <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                                                {WEEKDAY_LABELS.map((label, day) => {
-                                                    const days = reminder.daysOfWeek && reminder.daysOfWeek.length ? reminder.daysOfWeek : [0, 1, 2, 3, 4, 5, 6];
-                                                    const active = days.includes(day);
-                                                    return (
-                                                        <button
-                                                            key={day}
-                                                            type="button"
-                                                            title={WEEKDAY_NAMES[day]}
-                                                            aria-label={`${WEEKDAY_NAMES[day]} — ${active ? 'ativo' : 'inativo'}`}
-                                                            aria-pressed={active}
-                                                            onClick={() => {
-                                                                const next = active ? days.filter(d => d !== day) : [...days, day];
-                                                                if (next.length === 0) return;
-                                                                onSaveTelegramReminder({ ...reminder, daysOfWeek: next.sort() });
-                                                            }}
-                                                            className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold transition ${active ? 'bg-primary-container text-white' : 'bg-white text-on-surface-variant border border-border-standard'}`}
-                                                        >
-                                                            {label}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                            <div className="mt-3 flex items-center justify-between gap-3">
-                                                <input
-                                                    type="time"
-                                                    value={reminder.time}
-                                                    onChange={e => onSaveTelegramReminder({ ...reminder, time: e.target.value })}
-                                                    className="rounded-lg border border-border-standard bg-white px-3 py-2 text-sm font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-container"
-                                                />
-                                                {!DEFAULT_HEALTH_REMINDERS.some(defaultReminder => defaultReminder.id === reminder.id) && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => onDeleteTelegramReminder(reminder.id)}
-                                                        className="text-xs font-semibold text-error hover:underline"
-                                                    >
-                                                        Remover
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))}
+                                <div className="mb-4 flex justify-end">
                                     <button
                                         type="button"
-                                        onClick={() => onSaveTelegramReminder({
-                                            id: `custom_${Date.now()}`,
-                                            title: 'Novo lembrete',
-                                            message: 'André, lembrete de saúde configurado no Hermes.',
-                                            time: '08:00',
-                                            enabled: true,
-                                            daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
-                                            category: 'custom',
-                                            telegramOnly: true,
-                                        })}
-                                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border-standard bg-white px-4 py-3 text-sm font-semibold text-on-surface-variant transition hover:border-primary-container hover:text-primary-container"
+                                        ref={addReminderTriggerRef}
+                                        onClick={() => setIsAddReminderOpen(true)}
+                                        className="flex items-center gap-2 rounded-xl bg-primary-container px-4 py-2.5 text-sm font-bold text-white transition hover:opacity-90"
                                     >
                                         <Icon name="plus" className="h-4 w-4" />
                                         Adicionar lembrete
                                     </button>
+                                </div>
+                                {isAddReminderOpen && (
+                                    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 py-10" onClick={() => setIsAddReminderOpen(false)}>
+                                        <div role="dialog" aria-modal="true" aria-labelledby="add-reminder-modal-title" className="w-full max-w-lg rounded-2xl border border-border-subtle bg-white p-5 shadow-card" onClick={e => e.stopPropagation()}>
+                                            <div className="mb-3 flex items-center justify-between">
+                                                <p id="add-reminder-modal-title" className={labelClasses}>Novo lembrete</p>
+                                                <button type="button" onClick={() => setIsAddReminderOpen(false)} aria-label="Fechar" className="rounded-lg px-2 py-1 text-sm font-bold text-on-surface-variant transition hover:bg-surface-container-low">✕</button>
+                                            </div>
+                                            <div className="space-y-3">
+                                                <label className="block">
+                                                    <span className={labelClasses}>Título</span>
+                                                    <input
+                                                        ref={addReminderTituloRef}
+                                                        type="text"
+                                                        value={newReminderTitle}
+                                                        onChange={e => setNewReminderTitle(e.target.value)}
+                                                        placeholder="Ex: Alongamento pós-almoço"
+                                                        className={inputClasses}
+                                                    />
+                                                </label>
+                                                <label className="block">
+                                                    <span className={labelClasses}>Mensagem</span>
+                                                    <input
+                                                        type="text"
+                                                        value={newReminderMessage}
+                                                        onChange={e => setNewReminderMessage(e.target.value)}
+                                                        placeholder="André, lembrete de saúde configurado no Hermes."
+                                                        className={inputClasses}
+                                                    />
+                                                </label>
+                                                <label className="block w-fit">
+                                                    <span className={labelClasses}>Horário</span>
+                                                    <input
+                                                        type="time"
+                                                        value={newReminderTime}
+                                                        onChange={e => setNewReminderTime(e.target.value)}
+                                                        className={inputClasses}
+                                                    />
+                                                </label>
+                                                <div>
+                                                    <span className={labelClasses}>Dias</span>
+                                                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                                        {WEEKDAY_LABELS.map((label, day) => {
+                                                            const active = newReminderDays.includes(day);
+                                                            return (
+                                                                <button
+                                                                    key={day}
+                                                                    type="button"
+                                                                    title={WEEKDAY_NAMES[day]}
+                                                                    aria-label={`${WEEKDAY_NAMES[day]} — ${active ? 'ativo' : 'inativo'}`}
+                                                                    aria-pressed={active}
+                                                                    onClick={() => {
+                                                                        const next = active ? newReminderDays.filter(d => d !== day) : [...newReminderDays, day];
+                                                                        if (next.length === 0) return;
+                                                                        setNewReminderDays(next.sort());
+                                                                    }}
+                                                                    className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold transition ${active ? 'bg-primary-container text-white' : 'bg-white text-on-surface-variant border border-border-standard'}`}
+                                                                >
+                                                                    {label}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleCreateReminder}
+                                                    disabled={!newReminderTitle.trim()}
+                                                    className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-primary-container px-4 py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                                                >
+                                                    <Icon name="plus" className="h-4 w-4" />
+                                                    Adicionar lembrete
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="space-y-3">
+                                    {activeReminders.map(reminder => (
+                                        <ReminderCard
+                                            key={reminder.id}
+                                            reminder={reminder}
+                                            isDefault={DEFAULT_HEALTH_REMINDERS.some(defaultReminder => defaultReminder.id === reminder.id)}
+                                            onSave={onSaveTelegramReminder}
+                                            onDelete={onDeleteTelegramReminder}
+                                        />
+                                    ))}
                                 </div>
                             </HealthSection>
                 )}

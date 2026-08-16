@@ -1077,7 +1077,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                             Massa Corporal {weightHeadline?.isAverage ? '(média 7d)' : ''}
                                         </span>
                                         <div className="text-lg font-bold font-mono mt-0.5 flex items-baseline gap-1">
-                                            {weightHeadline?.isAverage ? weightHeadline.displayValue.toFixed(1).replace('.', ',') : '—'}
+                                            {weightHeadline ? weightHeadline.displayValue.toFixed(1).replace('.', ',') : '—'}
                                             <span className="text-[10px] text-slate-400 font-sans">KG</span>
                                         </div>
                                         {weightHeadline && (
