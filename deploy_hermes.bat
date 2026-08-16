@@ -74,19 +74,15 @@ echo       Observacao: Deep Research salva HTML mesmo sem PDF.
 echo       Para habilitar PDF, configure PUPPETEER_INTERNAL_SECRET nas functions Python e Node
 echo       e publique tambem: firebase deploy --only functions:node --project gestao-hermes
 echo.
-
 REM -------------------------------------------------------
 REM [4/4] Registrar webhook do Telegram
 REM -------------------------------------------------------
 echo [4/4] Atualizando webhook do Telegram...
 echo.
-echo       Para registrar o webhook, execute o comando abaixo
-echo       (substitua TOKEN e URL pela URL real da function):
+echo       Para registrar o webhook, execute o comando abaixo:
 echo.
 echo   curl -X POST "https://api.telegram.org/bot^<TOKEN^>/setWebhook" ^
-echo        -d "url=https://southamerica-east1-gestao-hermes.cloudfunctions.net/telegramWebhook"
-echo.
-echo       Ou acesse setup_bot.bat se estiver configurado.
+echo        -d "url=https://us-central1-gestao-hermes.cloudfunctions.net/telegramWebhook"
 echo.
 
 REM -------------------------------------------------------
