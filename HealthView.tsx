@@ -1451,6 +1451,8 @@ const HealthView: React.FC<HealthViewProps> = ({
     };
     const [guidedMode, setGuidedMode] = useState<'morning' | 'night' | null>(null);
     const [guidedStep, setGuidedStep] = useState<number>(0);
+    const guidedTriggerRef = useRef<HTMLButtonElement | null>(null);
+    const guidedStepContentRef = useRef<HTMLDivElement>(null);
     const [eventDate, setEventDate] = useState<string>(formatDateLocalISO(new Date()));
     const [eventType, setEventType] = useState<HealthEventType>('fisioterapia');
     const [eventLabel, setEventLabel] = useState<string>('');
@@ -2242,11 +2244,38 @@ const HealthView: React.FC<HealthViewProps> = ({
     };
 
     const openGuided = (mode: 'morning' | 'night') => {
+        guidedTriggerRef.current = document.activeElement as HTMLButtonElement | null;
         const steps = (mode === 'morning' ? morningSteps : nightSteps).filter(s => !s.skip || !s.skip());
         const firstUnanswered = steps.findIndex(s => !s.answered());
         setGuidedStep(firstUnanswered === -1 ? Math.max(0, steps.length - 1) : firstUnanswered);
         setGuidedMode(mode);
     };
+
+    // Semântica de diálogo do check-in guiado (achado N19, mesmo padrão do A17):
+    // role="dialog" no container, foco movido para dentro do passo atual a cada
+    // troca (o usuário de teclado não fica preso fora do fluxo), Escape fecha
+    // igual ao botão "Fechar" já fazia (sem confirmação — as respostas já estão
+    // salvas incrementalmente a cada passo, fechar cedo só deixa incompleto, não
+    // perde dado), e o foco volta para quem abriu.
+    useEffect(() => {
+        if (!guidedMode) return;
+        guidedStepContentRef.current?.focus();
+    }, [guidedMode, guidedStep]);
+
+    useEffect(() => {
+        if (!guidedMode) return;
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                setGuidedMode(null);
+                setGuidedStep(0);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            guidedTriggerRef.current?.focus();
+        };
+    }, [guidedMode]);
 
     if (guidedMode) {
         const allSteps = guidedMode === 'morning' ? morningSteps : nightSteps;
@@ -2268,7 +2297,7 @@ const HealthView: React.FC<HealthViewProps> = ({
         const goBack = () => setGuidedStep(Math.max(0, clampedStep - 1));
 
         return (
-            <div className="fixed inset-0 z-50 flex flex-col bg-background">
+            <div role="dialog" aria-modal="true" aria-labelledby="guided-checkin-title" className="fixed inset-0 z-50 flex flex-col bg-background">
                 <div className="border-b border-border-subtle bg-white px-6 py-4">
                     <div className="mx-auto flex max-w-[600px] items-center justify-between">
                         <button type="button" onClick={closeGuided} className="text-xs font-semibold text-on-surface-variant hover:text-primary-container">Fechar</button>
@@ -2281,11 +2310,11 @@ const HealthView: React.FC<HealthViewProps> = ({
                 <div className="flex flex-1 justify-center overflow-y-auto px-6 py-10">
                     <div className="h-fit w-full max-w-[600px] pt-[8vh]">
                         <p className={labelClasses}>{guidedMode === 'morning' ? 'Check-in da manhã' : 'Check-in da noite'}</p>
-                        <h2 className="mt-1 text-xl font-bold text-on-surface">{step ? guidedStepLabels[step.id] : ''}</h2>
+                        <h2 id="guided-checkin-title" className="mt-1 text-xl font-bold text-on-surface">{step ? guidedStepLabels[step.id] : ''}</h2>
                         {step && guidedStepQuestions[step.id] && (
                             <p className="mt-1 text-sm text-on-surface-variant">{guidedStepQuestions[step.id]}</p>
                         )}
-                        <div className="mt-6">{step?.render()}</div>
+                        <div ref={guidedStepContentRef} tabIndex={-1} className="mt-6 outline-none">{step?.render()}</div>
                     </div>
                 </div>
                 <div className="border-t border-border-subtle bg-white px-6 py-4">
