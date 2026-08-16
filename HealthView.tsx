@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { arrayUnion, arrayRemove } from 'firebase/firestore';
 import {
     HealthWeight, HealthSettings, ExerciseLog,
@@ -1255,6 +1255,21 @@ const HealthView: React.FC<HealthViewProps> = ({
     const [integratedRangeDays, setIntegratedRangeDays] = useState<number | null>(90);
     const [isReportOpen, setIsReportOpen] = useState<boolean>(false);
     const [isAddExamOpen, setIsAddExamOpen] = useState<boolean>(false);
+    const addExamTituloRef = useRef<HTMLInputElement>(null);
+    const addExamTriggerRef = useRef<HTMLButtonElement>(null);
+
+    useEffect(() => {
+        if (!isAddExamOpen) return;
+        addExamTituloRef.current?.focus();
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setIsAddExamOpen(false);
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            addExamTriggerRef.current?.focus();
+        };
+    }, [isAddExamOpen]);
     const [guidedMode, setGuidedMode] = useState<'morning' | 'night' | null>(null);
     const [guidedStep, setGuidedStep] = useState<number>(0);
     const [eventDate, setEventDate] = useState<string>(formatDateLocalISO(new Date()));
@@ -3110,6 +3125,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                         <div className="flex justify-end">
                             <button
                                 type="button"
+                                ref={addExamTriggerRef}
                                 onClick={() => setIsAddExamOpen(true)}
                                 className="flex items-center gap-2 rounded-xl bg-primary-container px-4 py-2.5 text-sm font-bold text-white transition hover:opacity-90"
                             >
@@ -3119,15 +3135,16 @@ const HealthView: React.FC<HealthViewProps> = ({
                         </div>
                         {isAddExamOpen && (
                         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 py-10" onClick={() => setIsAddExamOpen(false)}>
-                        <div className="w-full max-w-3xl rounded-2xl border border-border-subtle bg-white p-5 shadow-card" onClick={e => e.stopPropagation()}>
+                        <div role="dialog" aria-modal="true" aria-labelledby="add-exam-modal-title" className="w-full max-w-3xl rounded-2xl border border-border-subtle bg-white p-5 shadow-card" onClick={e => e.stopPropagation()}>
                             <div className="mb-3 flex items-center justify-between">
-                                <p className={labelClasses}>Novo registro</p>
+                                <p id="add-exam-modal-title" className={labelClasses}>Novo registro</p>
                                 <button type="button" onClick={() => setIsAddExamOpen(false)} aria-label="Fechar" className="rounded-lg px-2 py-1 text-sm font-bold text-on-surface-variant transition hover:bg-surface-container-low">✕</button>
                             </div>
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <label className="block">
                                     <span className={labelClasses}>Título</span>
                                     <input
+                                        ref={addExamTituloRef}
                                         type="text"
                                         value={examTitulo}
                                         onChange={e => setExamTitulo(e.target.value)}
