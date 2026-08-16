@@ -514,6 +514,7 @@ export interface ExerciseLog {
     };
     pain?: {
         morning?: number;
+        afterWalk?: number; // N16 correção 2 — dor logo após a caminhada matinal, campo próprio (não sobrescreve morning)
         evening?: number;
         sciatica?: boolean;
         crisis?: boolean;

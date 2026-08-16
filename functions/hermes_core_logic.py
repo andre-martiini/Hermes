@@ -1867,17 +1867,44 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
             current_pain["telegram_checked_at"] = datetime.now(timezone.utc).isoformat()
             doc_ref.set({"pain": current_pain, "entrySource": _health_entry_source_after_telegram(current_data)}, merge=True)
             _answer_callback_query(token, query_id, f"Dor ao acordar: {mpain_score}/10")
-            response_text = f"✅ Dor ao acordar registrada: <b>{mpain_score}/10</b>. Você acordou com dor durante a noite?"
+            response_text = "✅ Dor ao acordar registrada: <b>" + f"{mpain_score}/10</b>. E depois da caminhada, como ficou?"
             _persist_callback_turn(f"Check-in manhã — dor ao acordar: {mpain_score}/10", response_text)
-            woke_keyboard = [[
-                {"text": "Sim", "callback_data": f"health_woke:{mpain_date}:sim"},
-                {"text": "Não", "callback_data": f"health_woke:{mpain_date}:nao"},
-            ]]
-            _send_telegram_message_with_keyboard(token, chat_id, response_text, woke_keyboard)
+            afterwalk_keyboard = [
+                [{"text": str(n), "callback_data": f"health_mafterwalk:{mpain_date}:{n}"} for n in range(0, 6)],
+                [{"text": str(n), "callback_data": f"health_mafterwalk:{mpain_date}:{n}"} for n in range(6, 11)],
+            ]
+            _send_telegram_message_with_keyboard(token, chat_id, response_text, afterwalk_keyboard)
         except Exception as exc:
             print(f"[HealthCheckin] Falha ao registrar dor da manhã: {exc}")
             _answer_callback_query(token, query_id, "Não consegui registrar.")
             _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar a dor da manhã. Tente responder novamente.")
+
+    elif data.startswith("health_mafterwalk:"):
+        parts = data.split(":")
+        afterwalk_date = parts[1] if len(parts) > 1 else ""
+        afterwalk_raw = parts[2] if len(parts) > 2 else ""
+        try:
+            afterwalk_score = max(0, min(10, int(afterwalk_raw)))
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", afterwalk_date):
+                raise ValueError("data inválida")
+            doc_ref = db.collection("health_exercise_logs").document(afterwalk_date)
+            current = doc_ref.get()
+            current_data = (current.to_dict() or {}) if current.exists else {}
+            current_pain = current_data.get("pain") or {}
+            current_pain["afterWalk"] = afterwalk_score
+            doc_ref.set({"pain": current_pain, "entrySource": _health_entry_source_after_telegram(current_data)}, merge=True)
+            _answer_callback_query(token, query_id, f"Dor após a caminhada: {afterwalk_score}/10")
+            response_text = f"✅ Dor após a caminhada registrada: <b>{afterwalk_score}/10</b>. Você acordou com dor durante a noite?"
+            _persist_callback_turn(f"Check-in manhã — dor após a caminhada: {afterwalk_score}/10", response_text)
+            woke_keyboard = [[
+                {"text": "Sim", "callback_data": f"health_woke:{afterwalk_date}:sim"},
+                {"text": "Não", "callback_data": f"health_woke:{afterwalk_date}:nao"},
+            ]]
+            _send_telegram_message_with_keyboard(token, chat_id, response_text, woke_keyboard)
+        except Exception as exc:
+            print(f"[HealthCheckin] Falha ao registrar dor após a caminhada: {exc}")
+            _answer_callback_query(token, query_id, "Não consegui registrar.")
+            _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar essa resposta. Tente novamente.")
 
     elif data.startswith("health_woke:"):
         parts = data.split(":")

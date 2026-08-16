@@ -2027,6 +2027,17 @@ const HealthView: React.FC<HealthViewProps> = ({
             ),
         },
         {
+            id: 'morning_afterwalk',
+            answered: () => todayLog.pain?.afterWalk !== undefined,
+            render: () => (
+                <div>
+                    <p className="text-4xl font-bold text-center text-on-surface">{todayLog.pain?.afterWalk ?? '—'}<span className="text-base font-semibold text-on-surface-variant">/10</span></p>
+                    <input type="range" min="0" max="10" value={todayLog.pain?.afterWalk ?? 0} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, afterWalk: parseInt(e.target.value) } })} className={`mt-4 w-full accent-primary-container ${todayLog.pain?.afterWalk === undefined ? 'opacity-40' : ''}`} />
+                    {todayLog.pain?.afterWalk === undefined && <p className="mt-2 text-center text-xs font-semibold text-on-surface-variant">Arraste o slider para responder</p>}
+                </div>
+            ),
+        },
+        {
             id: 'morning_woke',
             answered: () => todayLog.sleepQuality?.wokeInPain !== undefined,
             render: () => (
@@ -2210,10 +2221,12 @@ const HealthView: React.FC<HealthViewProps> = ({
     // sem nenhum sinal disso na série.
     const guidedStepQuestions: Record<string, string> = {
         morning_pain: 'Nota para a dor nos primeiros minutos depois de levantar da cama, antes da caminhada.',
+        morning_afterwalk: 'E depois da caminhada, como ficou? A diferença entre as duas notas mede o quanto caminhar alivia a dor.',
     };
 
     const guidedStepLabels: Record<string, string> = {
         morning_pain: 'Dor ao acordar',
+        morning_afterwalk: 'Dor após a caminhada',
         morning_woke: 'Acordou com dor?',
         morning_quality: 'Qualidade do sono',
         night_pain: 'Dor lombar à noite',
@@ -3391,11 +3404,22 @@ const HealthView: React.FC<HealthViewProps> = ({
                 )}
                 {activeTab === 'report' && (
                     <HealthSection title="Relatório semanal" eyebrow="Placar de resultado — domingo 19h">
-                        {weeklyReports.length === 0 ? (
-                            <p className="text-sm font-semibold text-on-surface-variant">
-                                Ainda não há relatório gerado. O primeiro sai automaticamente no próximo domingo às 19h.
-                            </p>
-                        ) : (() => {
+                        {weeklyReports.length === 0 ? (() => {
+                            // Data real da próxima geração, não "próximo domingo" solto — ambíguo
+                            // justamente quando hoje já é domingo antes das 19h (achado N18).
+                            const now = new Date();
+                            const nextRun = new Date(now);
+                            const daysUntilSunday = (7 - nextRun.getDay()) % 7;
+                            nextRun.setDate(nextRun.getDate() + daysUntilSunday);
+                            if (daysUntilSunday === 0 && now.getHours() >= 19) nextRun.setDate(nextRun.getDate() + 7);
+                            const isToday = daysUntilSunday === 0 && now.getHours() < 19;
+                            const nextRunLabel = `${isToday ? 'hoje, ' : ''}domingo ${nextRun.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`;
+                            return (
+                                <p className="text-sm font-semibold text-on-surface-variant">
+                                    Ainda não há relatório gerado. O primeiro sai automaticamente {nextRunLabel} às 19h.
+                                </p>
+                            );
+                        })() : (() => {
                             const [latest, ...history] = weeklyReports;
                             const card = latest.card;
                             const fmt1 = (v: number | null, suffix = '') => v !== null ? `${v.toFixed(1).replace('.', ',')}${suffix}` : 'ainda não dá para dizer';
