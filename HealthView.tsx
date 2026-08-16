@@ -2345,7 +2345,7 @@ const HealthView: React.FC<HealthViewProps> = ({
 
     return (
         <div className={`health-view min-h-screen bg-background pb-20 ${isDark ? 'health-view-dark' : ''}`}>
-            <div className="border-b border-border-subtle bg-white">
+            <div>
                 <div className="mx-auto flex max-w-[1440px] flex-col gap-5 px-6 py-6 lg:px-8">
                     <div>
                         <p className={labelClasses}>Saúde integrada</p>
@@ -2388,6 +2388,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                             </label>
                         </div>
 
+                    {activeTab === 'overview' && (
                     <div className="grid grid-cols-1 gap-4 sm:max-w-2xl sm:grid-cols-2">
                         <MetricCard
                             label={weightHeadline?.isAverage ? 'Média de 7 dias' : 'Peso de hoje'}
@@ -2419,6 +2420,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                             tone="text-emerald-600"
                         />
                     </div>
+                    )}
                 </div>
             </div>
 
