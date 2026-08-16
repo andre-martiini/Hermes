@@ -89,7 +89,7 @@ const DEFAULT_HEALTH_REMINDERS: HealthTelegramReminder[] = [
     },
     {
         id: 'strength_training',
-        title: 'Treino de força',
+        title: 'Treino de força — Seg e Sex',
         message: 'André, hoje é dia de treino de força (bloco A ou B).',
         time: '17:20',
         enabled: true,
@@ -99,7 +99,7 @@ const DEFAULT_HEALTH_REMINDERS: HealthTelegramReminder[] = [
     },
     {
         id: 'strength_training_wed',
-        title: 'Treino de força',
+        title: 'Treino de força — Quarta (antes da acupuntura)',
         message: 'André, hoje é dia de treino de força (bloco A ou B) — mais cedo por causa da acupuntura às 17h.',
         time: '15:05',
         enabled: true,
@@ -808,17 +808,37 @@ const PainTrendChart = ({ points, isDark = false }: { points: PainTrendPoint[]; 
 const WalkGoalBar = ({
     doneKm,
     minimumKm,
-    idealKm,
+    normalTopKm,
+    isCrisis,
 }: {
     doneKm: number;
     minimumKm: number;
-    idealKm: number;
+    normalTopKm: number;
+    isCrisis: boolean;
 }) => {
-    const scaleKm = Math.max(idealKm, minimumKm, doneKm, 1);
+    const scaleKm = Math.max(normalTopKm, minimumKm, doneKm, 1);
     const percent = Math.min((doneKm / scaleKm) * 100, 100);
     const minPercent = Math.min((minimumKm / scaleKm) * 100, 100);
     const metMinimum = doneKm >= minimumKm;
-    const metIdeal = doneKm >= idealKm;
+    const inBonus = doneKm > normalTopKm;
+
+    if (isCrisis) {
+        return (
+            <div>
+                <div className="flex items-baseline justify-between gap-3">
+                    <p className="text-2xl font-bold leading-none text-on-surface">
+                        {formatKm(doneKm)} <span className="text-xs font-semibold uppercase text-on-surface-variant">km hoje</span>
+                    </p>
+                    <span className="rounded-full bg-tertiary-container px-2.5 py-1 text-[10px] font-semibold uppercase text-on-tertiary-container">
+                        Dia de crise
+                    </span>
+                </div>
+                <p className="mt-3 text-xs font-semibold leading-relaxed text-on-surface-variant">
+                    Caminhadas curtas e frequentes, sem meta de distância — o piso mínimo não se aplica hoje.
+                </p>
+            </div>
+        );
+    }
 
     return (
         <div>
@@ -827,24 +847,24 @@ const WalkGoalBar = ({
                     {formatKm(doneKm)} <span className="text-xs font-semibold uppercase text-on-surface-variant">km hoje</span>
                 </p>
                 <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase ${
-                    metIdeal ? 'bg-emerald-100 text-emerald-700'
+                    inBonus ? 'bg-emerald-100 text-emerald-700'
                         : metMinimum ? 'bg-amber-100 text-amber-700'
                             : 'bg-slate-100 text-slate-500'
                 }`}>
-                    {metIdeal ? 'Meta ideal atingida' : metMinimum ? 'Mínimo atingido' : `Faltam ${formatKm(minimumKm - doneKm)} km p/ mínimo`}
+                    {inBonus ? 'Bônus — acima da faixa normal' : metMinimum ? 'Dentro da faixa normal' : `Faltam ${formatKm(minimumKm - doneKm)} km p/ mínimo`}
                 </span>
             </div>
             <div className="relative mt-3 h-3 w-full overflow-hidden rounded-full bg-surface-container-low">
                 <div
                     style={{ width: `${percent}%` }}
-                    className={`h-full rounded-full transition-all duration-500 ${metIdeal ? 'bg-emerald-500' : metMinimum ? 'bg-amber-500' : 'bg-primary-container'}`}
+                    className={`h-full rounded-full transition-all duration-500 ${inBonus ? 'bg-emerald-500' : metMinimum ? 'bg-amber-500' : 'bg-primary-container'}`}
                 />
                 <div style={{ left: `${minPercent}%` }} className="absolute top-0 h-full w-0.5 bg-on-surface/40" title={`Mínimo: ${formatKm(minimumKm)} km`} />
             </div>
             <div className="mt-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.05em] text-on-surface-variant">
                 <span>0 km</span>
                 <span>Mínimo {formatKm(minimumKm)} km</span>
-                <span>Ideal {formatKm(idealKm)} km</span>
+                <span>Faixa normal até {formatKm(normalTopKm)} km</span>
             </div>
         </div>
     );
@@ -934,7 +954,7 @@ const WalkDailyChart = ({
                 <line x1={pad.left} x2={width - pad.right} y1={yFor(minimumKm)} y2={yFor(minimumKm)} stroke={palette.amber} strokeWidth="2" strokeDasharray="6 6" />
                 <text x={width - pad.right} y={yFor(minimumKm) - 6} textAnchor="end" fontSize="11" fontWeight="700" fill={palette.amberText}>mínimo</text>
                 <line x1={pad.left} x2={width - pad.right} y1={yFor(idealKm)} y2={yFor(idealKm)} stroke={palette.target} strokeWidth="2" strokeDasharray="6 6" />
-                <text x={width - pad.right} y={yFor(idealKm) - 6} textAnchor="end" fontSize="11" fontWeight="700" fill={palette.targetText}>ideal</text>
+                <text x={width - pad.right} y={yFor(idealKm) - 6} textAnchor="end" fontSize="11" fontWeight="700" fill={palette.targetText}>normal</text>
                 {hoveredIndex !== null && (
                     <rect x={pad.left + hoveredIndex * slot} y={pad.top} width={slot} height={plotHeight} fill={palette.text} opacity="0.06" />
                 )}
@@ -1719,12 +1739,36 @@ const HealthView: React.FC<HealthViewProps> = ({
     );
 
     const walkingMinimumKm = settings.walkingMinimumKm ?? 3;
-    const walkingIdealKm = settings.walkingIdealKm ?? 8;
+    // "walkingIdealKm" guarda o topo da faixa normal (4-6 km é dia normal; acima é
+    // bônus, não meta a perseguir) — não é mais um teto a ser alcançado.
+    const walkingIdealKm = settings.walkingIdealKm ?? 6;
+    const isCrisisToday = !!todayLog.pain?.crisis;
     const selectedWalkBlocks = todayLog.walkBlocks || [];
     const selectedWalkKm = sumWalkBlocksKm(todayLog);
+    const walkGapMinutes = (a?: string, b?: string): number | null => {
+        if (!a || !b) return null;
+        const [ah, am] = a.split(':').map(Number);
+        const [bh, bm] = b.split(':').map(Number);
+        if ([ah, am, bh, bm].some(Number.isNaN)) return null;
+        return (bh * 60 + bm) - (ah * 60 + am);
+    };
+    const maiorIntervaloSemCaminharMin = useMemo(() => {
+        const times = selectedWalkBlocks.map(b => b.time).filter((t): t is string => !!t).sort();
+        if (times.length < 2) return null;
+        let maxGap = -Infinity;
+        for (let i = 1; i < times.length; i++) {
+            const gap = walkGapMinutes(times[i - 1], times[i]);
+            if (gap !== null) maxGap = Math.max(maxGap, gap);
+        }
+        return maxGap === -Infinity ? null : maxGap;
+    }, [selectedWalkBlocks]);
     const todayWalkKm = useMemo(() => {
         const todayKey = formatDateLocalISO(new Date());
         return sumWalkBlocksKm(exerciseLogs.find(log => log.id === todayKey));
+    }, [exerciseLogs]);
+    const isCrisisTodayReal = useMemo(() => {
+        const todayKey = formatDateLocalISO(new Date());
+        return !!exerciseLogs.find(log => log.id === todayKey)?.pain?.crisis;
     }, [exerciseLogs]);
     const walkChartDays = useMemo(() => {
         const days: { id: string; label: string; km: number }[] = [];
@@ -2411,11 +2455,13 @@ const HealthView: React.FC<HealthViewProps> = ({
                             label="Caminhada hoje"
                             value={formatKm(todayWalkKm)}
                             unit="km"
-                            helper={todayWalkKm >= walkingIdealKm
-                                ? 'Meta ideal atingida!'
-                                : todayWalkKm >= walkingMinimumKm
-                                    ? `Mínimo ok — faltam ${formatKm(walkingIdealKm - todayWalkKm)} km para o ideal`
-                                    : `Faltam ${formatKm(walkingMinimumKm - todayWalkKm)} km para o mínimo de ${formatKm(walkingMinimumKm)} km`}
+                            helper={isCrisisTodayReal
+                                ? 'Dia de crise: caminhadas curtas e frequentes, sem meta de distância.'
+                                : todayWalkKm > walkingIdealKm
+                                    ? `Bônus — acima da faixa normal (${formatKm(walkingMinimumKm)}–${formatKm(walkingIdealKm)} km)`
+                                    : todayWalkKm >= walkingMinimumKm
+                                        ? 'Dentro da faixa normal'
+                                        : `Faltam ${formatKm(walkingMinimumKm - todayWalkKm)} km para o mínimo de ${formatKm(walkingMinimumKm)} km`}
                             icon="walk"
                             tone="text-emerald-600"
                         />
@@ -2743,7 +2789,7 @@ const HealthView: React.FC<HealthViewProps> = ({
 
                         <div className="space-y-6">
                             <HealthSection title="Caminhada na esteira" eyebrow="Meta diária de distância">
-                                <WalkGoalBar doneKm={selectedWalkKm} minimumKm={walkingMinimumKm} idealKm={walkingIdealKm} />
+                                <WalkGoalBar doneKm={selectedWalkKm} minimumKm={walkingMinimumKm} normalTopKm={walkingIdealKm} isCrisis={isCrisisToday} />
 
                                 <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr]">
                                     <div className="rounded-2xl border border-border-subtle bg-background p-5">
@@ -2799,6 +2845,20 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     </div>
                                     <div className="rounded-2xl border border-border-subtle bg-background p-5">
                                         <p className={labelClasses}>Blocos de {selectedDateLabel}</p>
+                                        {selectedWalkBlocks.length > 0 && (
+                                            <div className="mt-2 flex flex-wrap gap-4 text-xs font-semibold text-on-surface-variant">
+                                                <span>
+                                                    <span className="text-sm font-bold text-on-surface">{selectedWalkBlocks.length}</span> bloco{selectedWalkBlocks.length === 1 ? '' : 's'} hoje
+                                                    {selectedWalkBlocks.length >= 4 && <span className="ml-1 text-emerald-600">· meta de 4+ ok</span>}
+                                                </span>
+                                                {maiorIntervaloSemCaminharMin !== null && (
+                                                    <span>
+                                                        Maior intervalo sem caminhar: <span className="text-sm font-bold text-on-surface">{Math.floor(maiorIntervaloSemCaminharMin / 60)}h{String(maiorIntervaloSemCaminharMin % 60).padStart(2, '0')}
+                                                        </span>
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
                                         {selectedWalkBlocks.length > 0 ? (
                                             <div className="mt-3 max-h-[220px] space-y-2 overflow-y-auto">
                                                 {selectedWalkBlocks.map(block => (
@@ -2851,7 +2911,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                         )}
                                         <div className="mt-4 grid grid-cols-2 gap-2">
                                             <label className="block">
-                                                <span className={labelClasses}>Meta mínima (km)</span>
+                                                <span className={labelClasses}>Mínimo (km) — não se aplica em dia de crise</span>
                                                 <input
                                                     type="number"
                                                     step="0.5"
@@ -2862,12 +2922,12 @@ const HealthView: React.FC<HealthViewProps> = ({
                                                 />
                                             </label>
                                             <label className="block">
-                                                <span className={labelClasses}>Meta ideal (km)</span>
+                                                <span className={labelClasses}>Topo da faixa normal (km) — acima é bônus</span>
                                                 <input
                                                     type="number"
                                                     step="0.5"
                                                     min="0"
-                                                    value={settings.walkingIdealKm ?? 8}
+                                                    value={settings.walkingIdealKm ?? 6}
                                                     onChange={e => onUpdateSettings({ ...settings, walkingIdealKm: parseFloat(e.target.value) || 0 })}
                                                     className={inputClasses}
                                                 />

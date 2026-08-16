@@ -3059,7 +3059,7 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
         },
         {
             "id": "strength_training",
-            "title": "Treino de força",
+            "title": "Treino de força — Seg e Sex",
             "message": "André, hoje é dia de treino de força (bloco A ou B).",
             "time": "17:20",
             "enabled": True,
@@ -3068,7 +3068,7 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
         },
         {
             "id": "strength_training_wed",
-            "title": "Treino de força",
+            "title": "Treino de força — Quarta (antes da acupuntura)",
             "message": "André, hoje é dia de treino de força (bloco A ou B) — mais cedo por causa da acupuntura às 17h.",
             "time": "15:05",
             "enabled": True,
