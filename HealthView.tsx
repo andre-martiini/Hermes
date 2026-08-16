@@ -2268,13 +2268,11 @@ const HealthView: React.FC<HealthViewProps> = ({
             if (e.key === 'Escape') {
                 setGuidedMode(null);
                 setGuidedStep(0);
+                guidedTriggerRef.current?.focus();
             }
         };
         window.addEventListener('keydown', handleKeyDown);
-        return () => {
-            window.removeEventListener('keydown', handleKeyDown);
-            guidedTriggerRef.current?.focus();
-        };
+        return () => window.removeEventListener('keydown', handleKeyDown);
     }, [guidedMode]);
 
     if (guidedMode) {
@@ -2285,7 +2283,16 @@ const HealthView: React.FC<HealthViewProps> = ({
         const isLast = clampedStep === visibleSteps.length - 1;
         const isAnswered = step ? step.answered() : true;
 
-        const closeGuided = () => { setGuidedMode(null); setGuidedStep(0); };
+        // .focus() chamado direto aqui, não só na cleanup do useEffect de baixo: a
+        // cleanup roda depois que o React já desmontou o dialog (o botão "Fechar"
+        // focado é removido do DOM primeiro, o navegador já jogou o foco pro body
+        // nesse instante) — às vezes perdia a corrida. Chamar aqui garante que o
+        // foco vai pro gatilho antes de qualquer desmonte.
+        const closeGuided = () => {
+            setGuidedMode(null);
+            setGuidedStep(0);
+            guidedTriggerRef.current?.focus();
+        };
         const goNext = () => {
             if (isLast) { closeGuided(); return; }
             setGuidedStep(clampedStep + 1);
