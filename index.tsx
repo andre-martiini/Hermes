@@ -5,7 +5,7 @@ import {
   Tarefa, Status, EntregaInstitucional, AtividadeRealizada,
   Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento,
   BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings,
-  FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight, HealthWaist, HealthEvent, HealthWeeklySummary,
+  FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight, HealthWaist, HealthEvent, HealthWeeklySummary, HealthWeeklyReport,
   HealthSettings, ExerciseLog, ExerciseSettings, HermesNotification, AppSettings,
   formatDate, formatDateLocalISO,
   GoogleCalendarEvent,
@@ -1018,6 +1018,7 @@ const App: React.FC = () => {
   const [healthWaist, setHealthWaist] = useState<HealthWaist[]>([]);
   const [healthEvents, setHealthEvents] = useState<HealthEvent[]>([]);
   const [healthWeeklySummaries, setHealthWeeklySummaries] = useState<HealthWeeklySummary[]>([]);
+  const [healthWeeklyReports, setHealthWeeklyReports] = useState<HealthWeeklyReport[]>([]);
   const [healthSettings, setHealthSettings] = useState<HealthSettings>({ targetWeight: 0 });
   const [exerciseLogs, setExerciseLogs] = useState<ExerciseLog[]>([]);
   const [exerciseSettings, setExerciseSettings] = useState<ExerciseSettings>({});
@@ -1281,6 +1282,9 @@ const App: React.FC = () => {
     const unsubHealthWeeklySummaries = onSnapshot(collection(db, 'health_weekly_summaries'), (snapshot) => {
       setHealthWeeklySummaries(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HealthWeeklySummary)));
     }, handleSnapshotError('health_weekly_summaries'));
+    const unsubHealthWeeklyReports = onSnapshot(collection(db, 'health_weekly_reports'), (snapshot) => {
+      setHealthWeeklyReports(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HealthWeeklyReport)));
+    }, handleSnapshotError('health_weekly_reports'));
     const unsubHealthSettings = onSnapshot(doc(db, 'health_settings', 'config'), (doc) => {
       if (doc.exists()) setHealthSettings(doc.data() as HealthSettings);
     }, handleSnapshotError('health_settings/config'));
@@ -1320,6 +1324,7 @@ const App: React.FC = () => {
       unsubHealthWaist();
       unsubHealthEvents();
       unsubHealthWeeklySummaries();
+      unsubHealthWeeklyReports();
       unsubHealthSettings();
       unsubExerciseLogs();
       unsubExerciseSettings();
@@ -5813,6 +5818,7 @@ const App: React.FC = () => {
                     onAddEvent={handleAddHealthEvent}
                     onDeleteEvent={handleDeleteHealthEvent}
                     latestWeeklySummary={[...healthWeeklySummaries].sort((a, b) => b.id.localeCompare(a.id))[0]}
+                    weeklyReports={[...healthWeeklyReports].sort((a, b) => (b.card?.week_end || b.id).localeCompare(a.card?.week_end || a.id))}
                     exerciseLogs={exerciseLogs}
                     exerciseSettings={exerciseSettings}
                     onSaveExerciseLog={handleSaveExerciseLog}

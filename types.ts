@@ -646,6 +646,37 @@ export interface HealthWeeklySummary {
     events: { date: string; label: string; type: string }[];
 }
 
+// N14 — Relatorio Semanal (placa de resultado), Fase 1: so campos calculados em
+// codigo. adjustment/text/audit ficam null ate as fases 2 e 3 existirem.
+export interface HealthWeeklyReportCard {
+    week_start: string;
+    week_end: string;
+    weight_avg7: number | null;
+    weight_delta: number | null;
+    waist: { value: number | null; delta: number | null };
+    km_total: number;
+    km_days: number;
+    pain_morning_avg: number | null;
+    pain_evening_avg: number | null;
+    radicular_trend: 'subindo' | 'estável' | 'descendo' | 'sem_dado';
+    strength_done: number;
+    strength_planned: number;
+    therapy_done: number;
+    therapy_planned: number;
+    checkin_adherence: number;
+    sleep_avg: number | null;
+}
+
+export interface HealthWeeklyReport {
+    id: string; // = YYYY-Www (semana ISO)
+    card: HealthWeeklyReportCard;
+    adjustment: string | null;
+    text: string | null;
+    audit: string | null;
+    prompt_version: string | null;
+    generated_at: string;
+}
+
 export type HealthEventType = 'fisioterapia' | 'viagem' | 'medicacao_inicio' | 'medicacao_fim' | 'modalidade_terapeutica' | 'consulta_medica' | 'outro';
 
 export interface HealthEvent {

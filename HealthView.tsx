@@ -6,7 +6,7 @@ import {
     HealthExam, HealthExamTipo, HEALTH_EXAM_TYPES, HealthTelegramReminder, WalkBlock, sumWalkBlocksKm,
     HealthWaist, RadicularLocation, RadicularSide, TherapyModality, TriggerType,
     RADICULAR_LOCATIONS, THERAPY_MODALITIES, TRIGGER_TYPES,
-    HealthEvent, HealthEventType, HEALTH_EVENT_TYPES, HealthWeeklySummary
+    HealthEvent, HealthEventType, HEALTH_EVENT_TYPES, HealthWeeklySummary, HealthWeeklyReport
 } from './types';
 import {
     computeWeightHeadline, movingAverage, weeklyAggregate, parseLocalDate, formatLocalISO, addDays,
@@ -27,6 +27,7 @@ interface HealthViewProps {
     onAddEvent: (event: Omit<HealthEvent, 'id'>) => Promise<void>;
     onDeleteEvent: (id: string) => void;
     latestWeeklySummary?: HealthWeeklySummary;
+    weeklyReports?: HealthWeeklyReport[];
     exerciseLogs: ExerciseLog[];
     exerciseSettings: ExerciseSettings;
     onSaveExerciseLog: (date: string, data: Partial<ExerciseLog>) => Promise<void>;
@@ -1369,13 +1370,13 @@ const RadicularTimelineChart = ({
 const HealthView: React.FC<HealthViewProps> = ({
     weights, settings, onUpdateSettings, onAddWeight, onUpdateWeight, onDeleteWeight,
     waist, onAddWaist, onDeleteWaist,
-    events, onAddEvent, onDeleteEvent, latestWeeklySummary,
+    events, onAddEvent, onDeleteEvent, latestWeeklySummary, weeklyReports = [],
     exerciseLogs, onSaveExerciseLog, exams, onAddExam, onDeleteExam, onUpdateExam,
     telegramReminders, onSaveTelegramReminder, onDeleteTelegramReminder,
     isDark = false
 }) => {
     const [selectedDate, setSelectedDate] = useState<string>(formatDateLocalISO(new Date()));
-    const [activeTab, setActiveTab] = useState<'overview' | 'records' | 'charts' | 'reminders' | 'archive'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'records' | 'charts' | 'reminders' | 'report' | 'archive'>('overview');
     const [weightInput, setWeightInput] = useState<string>('');
     const [waistInput, setWaistInput] = useState<string>('');
     const [editingWeightId, setEditingWeightId] = useState<string | null>(null);
@@ -2203,6 +2204,14 @@ const HealthView: React.FC<HealthViewProps> = ({
         },
     ];
 
+    // Pergunta ancorada no evento em vez de "dor da manhã" solto — o check-in da
+    // manhã só dispara ao meio-dia (de propósito, ver N16), e sem a âncora a
+    // resposta varia dia a dia entre "como acordei", "média da manhã" e "agora",
+    // sem nenhum sinal disso na série.
+    const guidedStepQuestions: Record<string, string> = {
+        morning_pain: 'Nota para a dor nos primeiros minutos depois de levantar da cama, antes da caminhada.',
+    };
+
     const guidedStepLabels: Record<string, string> = {
         morning_pain: 'Dor ao acordar',
         morning_woke: 'Acordou com dor?',
@@ -2260,6 +2269,9 @@ const HealthView: React.FC<HealthViewProps> = ({
                     <div className="h-fit w-full max-w-[600px] pt-[8vh]">
                         <p className={labelClasses}>{guidedMode === 'morning' ? 'Check-in da manhã' : 'Check-in da noite'}</p>
                         <h2 className="mt-1 text-xl font-bold text-on-surface">{step ? guidedStepLabels[step.id] : ''}</h2>
+                        {step && guidedStepQuestions[step.id] && (
+                            <p className="mt-1 text-sm text-on-surface-variant">{guidedStepQuestions[step.id]}</p>
+                        )}
                         <div className="mt-6">{step?.render()}</div>
                     </div>
                 </div>
@@ -2405,6 +2417,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                 { id: 'records', label: 'Registros' },
                                 { id: 'charts', label: 'Gráficos' },
                                 { id: 'reminders', label: 'Lembretes' },
+                                { id: 'report', label: 'Relatório' },
                                 { id: 'archive', label: 'Arquivo médico' },
                             ].map(tab => (
                                 <button
@@ -2960,7 +2973,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                             <div className="rounded-xl border border-border-subtle bg-background p-4">
                                                 <div className="flex items-baseline justify-between">
-                                                    <span className={labelClasses}>Manhã</span>
+                                                    <span className={labelClasses} title="Nos primeiros minutos depois de levantar da cama, antes da caminhada">Manhã (ao levantar)</span>
                                                     <span className="text-sm font-bold text-on-surface">{todayLog.pain?.morning ?? '—'}/10</span>
                                                 </div>
                                                 <input type="range" min="0" max="10" value={todayLog.pain?.morning ?? 0} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, morning: parseInt(e.target.value) } })} className="mt-2 w-full accent-primary-container" />
@@ -3375,6 +3388,70 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     ))}
                                 </div>
                             </HealthSection>
+                )}
+                {activeTab === 'report' && (
+                    <HealthSection title="Relatório semanal" eyebrow="Placar de resultado — domingo 19h">
+                        {weeklyReports.length === 0 ? (
+                            <p className="text-sm font-semibold text-on-surface-variant">
+                                Ainda não há relatório gerado. O primeiro sai automaticamente no próximo domingo às 19h.
+                            </p>
+                        ) : (() => {
+                            const [latest, ...history] = weeklyReports;
+                            const card = latest.card;
+                            const fmt1 = (v: number | null, suffix = '') => v !== null ? `${v.toFixed(1).replace('.', ',')}${suffix}` : 'ainda não dá para dizer';
+                            const radicularLabel: Record<string, string> = {
+                                subindo: 'Subindo (centralizando — bom sinal)',
+                                descendo: 'Descendo (periferalizando — atenção)',
+                                estável: 'Estável',
+                                sem_dado: 'Sem dado suficiente',
+                            };
+                            const stat = (label: string, value: React.ReactNode) => (
+                                <div>
+                                    <p className="text-[10px] font-semibold uppercase text-on-surface-variant">{label}</p>
+                                    <p className="text-sm font-bold text-on-surface">{value}</p>
+                                </div>
+                            );
+                            return (
+                                <div className="space-y-6">
+                                    <div className="rounded-2xl border border-border-subtle bg-background p-5">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <p className={labelClasses}>Semana {formatShortDate(card.week_start)} a {formatShortDate(card.week_end)}</p>
+                                            <span className="rounded-full bg-primary-container px-2.5 py-1 text-[10px] font-semibold uppercase text-white">Mais recente</span>
+                                        </div>
+                                        <p className="mt-2 text-xs font-medium text-on-surface-variant">
+                                            Fase 1 do relatório — só o placar calculado, sem narrativa nem ajuste sugerido ainda.
+                                        </p>
+                                        <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3">
+                                            {stat('Peso méd. 7d', <>{fmt1(card.weight_avg7, ' kg')}{card.weight_delta !== null && <span className="ml-1 text-xs font-semibold text-on-surface-variant">({card.weight_delta > 0 ? '+' : ''}{card.weight_delta.toFixed(1).replace('.', ',')})</span>}</>)}
+                                            {stat('Cintura', card.waist.value !== null ? <>{fmt1(card.waist.value, ' cm')}{card.waist.delta !== null && <span className="ml-1 text-xs font-semibold text-on-surface-variant">({card.waist.delta > 0 ? '+' : ''}{card.waist.delta.toFixed(1).replace('.', ',')})</span>}</> : 'ainda não dá para dizer')}
+                                            {stat('Km na semana', `${formatKm(card.km_total)} km em ${card.km_days} dia(s)`)}
+                                            {stat('Dor manhã / noite', `${card.pain_morning_avg ?? '—'} / ${card.pain_evening_avg ?? '—'}`)}
+                                            {stat('Sintoma radicular', radicularLabel[card.radicular_trend] || card.radicular_trend)}
+                                            {stat('Treino de força', `${card.strength_done}/${card.strength_planned}`)}
+                                            {stat('Terapia', `${card.therapy_done}/${card.therapy_planned}`)}
+                                            {stat('Aderência ao check-in', `${Math.round(card.checkin_adherence * 100)}%`)}
+                                            {stat('Sono médio', fmt1(card.sleep_avg, '/5'))}
+                                        </div>
+                                    </div>
+                                    {history.length > 0 && (
+                                        <div>
+                                            <p className={`${labelClasses} mb-2`}>Histórico</p>
+                                            <div className="space-y-2">
+                                                {history.map(report => (
+                                                    <div key={report.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border-subtle bg-background px-4 py-2.5 text-xs font-semibold text-on-surface-variant">
+                                                        <span>{formatShortDate(report.card.week_start)} a {formatShortDate(report.card.week_end)}</span>
+                                                        <span>{fmt1(report.card.weight_avg7, ' kg')}</span>
+                                                        <span>{formatKm(report.card.km_total)} km</span>
+                                                        <span>check-in {Math.round(report.card.checkin_adherence * 100)}%</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
+                    </HealthSection>
                 )}
                 {activeTab === 'archive' && (
                     <HealthSection title="Arquivo médico" eyebrow="Exames e consultas">

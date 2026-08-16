@@ -1829,7 +1829,11 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
                 raise ValueError("data inválida")
             _answer_callback_query(token, query_id, "Check-in iniciado")
             if checkin_mode == "morning":
-                response_text = "☀️ <b>Check-in da manhã</b>\n\nComo está a dor lombar ao acordar? (0 = sem dor, 10 = pior possível)"
+                response_text = (
+                    "☀️ <b>Check-in da manhã</b>\n\n"
+                    "Que nota você dá para a dor nos primeiros minutos depois de levantar da cama, "
+                    "antes da caminhada? (0 = sem dor, 10 = pior possível)"
+                )
                 pain_keyboard = [
                     [{"text": str(n), "callback_data": f"health_mpain:{checkin_date}:{n}"} for n in range(0, 6)],
                     [{"text": str(n), "callback_data": f"health_mpain:{checkin_date}:{n}"} for n in range(6, 11)],
