@@ -2535,7 +2535,7 @@ const HealthView: React.FC<HealthViewProps> = ({
             </div>
 
             <main className="mx-auto max-w-[1440px] px-6 py-6 lg:px-8">
-                {activeTab !== 'archive' && (
+                {activeTab === 'records' && (
                     <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-primary-container/30 bg-white p-5 shadow-card sm:flex-row sm:items-center sm:justify-between">
                         <div>
                             <p className={labelClasses}>Check-in guiado</p>

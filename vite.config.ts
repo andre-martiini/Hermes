@@ -60,6 +60,7 @@ export default defineConfig(() => {
           }
         },
         workbox: {
+          clientsClaim: true,
           navigateFallbackDenylist: [/^\/__/],
           maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
           importScripts: ["firebase-messaging-sw.js", "share-target-sw.js"],

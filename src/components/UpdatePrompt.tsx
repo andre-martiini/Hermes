@@ -41,7 +41,15 @@ export const UpdatePrompt: React.FC = () => {
             <span>Nova versão disponível.</span>
             <button
                 type="button"
-                onClick={() => updateServiceWorker(true)}
+                onClick={async () => {
+                    // updateServiceWorker(true) so recarrega depois do evento
+                    // 'controllerchange', que depende de clientsClaim no worker novo.
+                    // Cinto de seguranca: se o evento nao vier em 3s, recarrega assim
+                    // mesmo -- um clique do usuario nao pode ficar sem efeito nenhum.
+                    const timeout = new Promise(resolve => setTimeout(resolve, 3000));
+                    await Promise.race([updateServiceWorker(true), timeout]);
+                    window.location.reload();
+                }}
                 style={{
                     padding: '6px 14px',
                     borderRadius: '8px',
