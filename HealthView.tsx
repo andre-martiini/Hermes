@@ -3473,15 +3473,35 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     <p className="text-sm font-bold text-on-surface">{value}</p>
                                 </div>
                             );
+                            const isAlert = latest.adjustment === null && !!latest.text;
                             return (
                                 <div className="space-y-6">
+                                    {latest.text && (
+                                        <div className={`rounded-2xl border p-5 ${isAlert ? 'border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950/40' : 'border-border-subtle bg-background'}`}>
+                                            <p className={labelClasses}>{isAlert ? 'Sinais de alerta esta semana' : 'Relatório da semana'}</p>
+                                            <div className="mt-2 space-y-2 text-sm font-medium leading-relaxed text-on-surface">
+                                                {latest.text.split('\n\n').filter(Boolean).map((par, i) => <p key={i}>{par}</p>)}
+                                            </div>
+                                            {!isAlert && (
+                                                <p className="mt-3 text-[10px] font-semibold uppercase text-on-surface-variant">
+                                                    {latest.prompt_version ? 'Redigido pelo Hermes a partir da placa abaixo' : 'Texto seco, sem modelo (Gemini indisponível no momento)'}
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
+                                    {!latest.text && latest.adjustment && (
+                                        <div className="rounded-2xl border border-border-subtle bg-background p-5">
+                                            <p className={labelClasses}>Ajuste desta semana</p>
+                                            <p className="mt-2 text-sm font-medium text-on-surface">{latest.adjustment}</p>
+                                        </div>
+                                    )}
                                     <div className="rounded-2xl border border-border-subtle bg-background p-5">
                                         <div className="flex flex-wrap items-center justify-between gap-2">
                                             <p className={labelClasses}>Semana {formatShortDate(card.week_start)} a {formatShortDate(card.week_end)}</p>
                                             <span className="rounded-full bg-primary-container px-2.5 py-1 text-[10px] font-semibold uppercase text-white">Mais recente</span>
                                         </div>
                                         <p className="mt-2 text-xs font-medium text-on-surface-variant">
-                                            Fase 1 do relatório — só o placar calculado, sem narrativa nem ajuste sugerido ainda.
+                                            Placa calculada em código — cada número abaixo é conferível 1:1 com o texto acima.
                                         </p>
                                         <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3">
                                             {stat('Peso méd. 7d', <>{fmt1(card.weight_avg7, ' kg')}{card.weight_delta !== null && <span className="ml-1 text-xs font-semibold text-on-surface-variant">({card.weight_delta > 0 ? '+' : ''}{card.weight_delta.toFixed(1).replace('.', ',')})</span>}</>)}
@@ -3495,6 +3515,12 @@ const HealthView: React.FC<HealthViewProps> = ({
                                             {stat('Sono médio', fmt1(card.sleep_avg, '/5'))}
                                         </div>
                                     </div>
+                                    {latest.audit && (
+                                        <p className="text-xs font-medium text-on-surface-variant">
+                                            <span className="font-bold uppercase tracking-wide">Auditoria — </span>
+                                            {latest.audit}
+                                        </p>
+                                    )}
                                     {history.length > 0 && (
                                         <div>
                                             <p className={`${labelClasses} mb-2`}>Histórico</p>
