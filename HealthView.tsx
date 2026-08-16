@@ -2275,77 +2275,6 @@ const HealthView: React.FC<HealthViewProps> = ({
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [guidedMode]);
 
-    if (guidedMode) {
-        const allSteps = guidedMode === 'morning' ? morningSteps : nightSteps;
-        const visibleSteps = allSteps.filter(s => !s.skip || !s.skip());
-        const clampedStep = Math.min(guidedStep, visibleSteps.length - 1);
-        const step = visibleSteps[clampedStep];
-        const isLast = clampedStep === visibleSteps.length - 1;
-        const isAnswered = step ? step.answered() : true;
-
-        // .focus() chamado direto aqui, não só na cleanup do useEffect de baixo: a
-        // cleanup roda depois que o React já desmontou o dialog (o botão "Fechar"
-        // focado é removido do DOM primeiro, o navegador já jogou o foco pro body
-        // nesse instante) — às vezes perdia a corrida. Chamar aqui garante que o
-        // foco vai pro gatilho antes de qualquer desmonte.
-        const closeGuided = () => {
-            setGuidedMode(null);
-            setGuidedStep(0);
-            guidedTriggerRef.current?.focus();
-        };
-        const goNext = () => {
-            if (isLast) { closeGuided(); return; }
-            setGuidedStep(clampedStep + 1);
-        };
-        const skipStep = () => {
-            if (isLast) { closeGuided(); return; }
-            setGuidedStep(clampedStep + 1);
-        };
-        const goBack = () => setGuidedStep(Math.max(0, clampedStep - 1));
-
-        return (
-            <div role="dialog" aria-modal="true" aria-labelledby="guided-checkin-title" className="fixed inset-0 z-50 flex flex-col bg-background">
-                <div className="border-b border-border-subtle bg-white px-6 py-4">
-                    <div className="mx-auto flex max-w-[600px] items-center justify-between">
-                        <button type="button" onClick={closeGuided} className="text-xs font-semibold text-on-surface-variant hover:text-primary-container">Fechar</button>
-                        <span className="text-xs font-semibold text-on-surface-variant">{clampedStep + 1} de {visibleSteps.length}</span>
-                    </div>
-                    <div className="mx-auto mt-3 h-1.5 max-w-[600px] overflow-hidden rounded-full bg-surface-container-low">
-                        <div className="h-full rounded-full bg-primary-container transition-all duration-300" style={{ width: `${((clampedStep + 1) / visibleSteps.length) * 100}%` }} />
-                    </div>
-                </div>
-                <div className="flex flex-1 justify-center overflow-y-auto px-6 py-10">
-                    <div className="h-fit w-full max-w-[600px] pt-[8vh]">
-                        <p className={labelClasses}>{guidedMode === 'morning' ? 'Check-in da manhã' : 'Check-in da noite'}</p>
-                        <h2 id="guided-checkin-title" className="mt-1 text-xl font-bold text-on-surface">{step ? guidedStepLabels[step.id] : ''}</h2>
-                        {step && guidedStepQuestions[step.id] && (
-                            <p className="mt-1 text-sm text-on-surface-variant">{guidedStepQuestions[step.id]}</p>
-                        )}
-                        <div ref={guidedStepContentRef} tabIndex={-1} className="mt-6 outline-none">{step?.render()}</div>
-                    </div>
-                </div>
-                <div className="border-t border-border-subtle bg-white px-6 py-4">
-                    <div className="mx-auto flex max-w-[600px] items-center justify-between gap-3">
-                        <button type="button" onClick={goBack} disabled={clampedStep === 0} className="rounded-xl border border-border-standard px-4 py-2.5 text-sm font-semibold text-on-surface-variant transition disabled:cursor-not-allowed disabled:opacity-30">Voltar</button>
-                        <div className="flex items-center gap-2">
-                            {!isLast && (
-                                <button type="button" onClick={skipStep} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-on-surface-variant">Pular</button>
-                            )}
-                            <button
-                                type="button"
-                                onClick={goNext}
-                                disabled={!isAnswered}
-                                className="rounded-xl bg-primary-container px-6 py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                                {isLast ? 'Concluir' : 'Continuar'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
     if (isReportOpen) {
         const periodStartLabel = formatDate(integratedRangeStart || (exerciseLogs[0]?.id ?? selectedDate));
         const periodEndLabel = formatDate(formatDateLocalISO(new Date()));
@@ -2450,6 +2379,79 @@ const HealthView: React.FC<HealthViewProps> = ({
 
     return (
         <div className={`health-view min-h-screen bg-background pb-20 ${isDark ? 'health-view-dark' : ''}`}>
+            {guidedMode && (() => {
+                // Renderizado *dentro* da árvore principal, sobre o resto via
+                // fixed inset-0 — não mais como early-return substituindo a view
+                // inteira. Era esse early-return a causa real do N19: ele desmontava
+                // o botão gatilho enquanto o check-in estava aberto, então
+                // guidedTriggerRef.current virava um nó órfão e .focus() nele era
+                // um no-op silencioso (confirmado pela revisão com instrumentação).
+                // Com o gatilho permanecendo montado o tempo todo, o mesmo padrão
+                // do A17 passa a funcionar sem adaptação.
+                const allSteps = guidedMode === 'morning' ? morningSteps : nightSteps;
+                const visibleSteps = allSteps.filter(s => !s.skip || !s.skip());
+                const clampedStep = Math.min(guidedStep, visibleSteps.length - 1);
+                const step = visibleSteps[clampedStep];
+                const isLast = clampedStep === visibleSteps.length - 1;
+                const isAnswered = step ? step.answered() : true;
+
+                const closeGuided = () => {
+                    setGuidedMode(null);
+                    setGuidedStep(0);
+                    guidedTriggerRef.current?.focus();
+                };
+                const goNext = () => {
+                    if (isLast) { closeGuided(); return; }
+                    setGuidedStep(clampedStep + 1);
+                };
+                const skipStep = () => {
+                    if (isLast) { closeGuided(); return; }
+                    setGuidedStep(clampedStep + 1);
+                };
+                const goBack = () => setGuidedStep(Math.max(0, clampedStep - 1));
+
+                return (
+                    <div role="dialog" aria-modal="true" aria-labelledby="guided-checkin-title" className="fixed inset-0 z-50 flex flex-col bg-background">
+                        <div className="border-b border-border-subtle bg-white px-6 py-4">
+                            <div className="mx-auto flex max-w-[600px] items-center justify-between">
+                                <button type="button" onClick={closeGuided} className="text-xs font-semibold text-on-surface-variant hover:text-primary-container">Fechar</button>
+                                <span className="text-xs font-semibold text-on-surface-variant">{clampedStep + 1} de {visibleSteps.length}</span>
+                            </div>
+                            <div className="mx-auto mt-3 h-1.5 max-w-[600px] overflow-hidden rounded-full bg-surface-container-low">
+                                <div className="h-full rounded-full bg-primary-container transition-all duration-300" style={{ width: `${((clampedStep + 1) / visibleSteps.length) * 100}%` }} />
+                            </div>
+                        </div>
+                        <div className="flex flex-1 justify-center overflow-y-auto px-6 py-10">
+                            <div className="h-fit w-full max-w-[600px] pt-[8vh]">
+                                <p className={labelClasses}>{guidedMode === 'morning' ? 'Check-in da manhã' : 'Check-in da noite'}</p>
+                                <h2 id="guided-checkin-title" className="mt-1 text-xl font-bold text-on-surface">{step ? guidedStepLabels[step.id] : ''}</h2>
+                                {step && guidedStepQuestions[step.id] && (
+                                    <p className="mt-1 text-sm text-on-surface-variant">{guidedStepQuestions[step.id]}</p>
+                                )}
+                                <div ref={guidedStepContentRef} tabIndex={-1} className="mt-6 outline-none">{step?.render()}</div>
+                            </div>
+                        </div>
+                        <div className="border-t border-border-subtle bg-white px-6 py-4">
+                            <div className="mx-auto flex max-w-[600px] items-center justify-between gap-3">
+                                <button type="button" onClick={goBack} disabled={clampedStep === 0} className="rounded-xl border border-border-standard px-4 py-2.5 text-sm font-semibold text-on-surface-variant transition disabled:cursor-not-allowed disabled:opacity-30">Voltar</button>
+                                <div className="flex items-center gap-2">
+                                    {!isLast && (
+                                        <button type="button" onClick={skipStep} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-on-surface-variant">Pular</button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={goNext}
+                                        disabled={!isAnswered}
+                                        className="rounded-xl bg-primary-container px-6 py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                                    >
+                                        {isLast ? 'Concluir' : 'Continuar'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
             <div>
                 <div className="mx-auto flex max-w-[1440px] flex-col gap-5 px-6 py-6 lg:px-8">
                     <div>
