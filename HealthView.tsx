@@ -91,17 +91,27 @@ const DEFAULT_HEALTH_REMINDERS: HealthTelegramReminder[] = [
         id: 'strength_training',
         title: 'Treino de força',
         message: 'André, hoje é dia de treino de força (bloco A ou B).',
-        time: '07:00',
+        time: '17:20',
         enabled: true,
-        daysOfWeek: [1, 3, 5],
+        daysOfWeek: [1, 5],
+        category: 'spine',
+        telegramOnly: true,
+    },
+    {
+        id: 'strength_training_wed',
+        title: 'Treino de força',
+        message: 'André, hoje é dia de treino de força (bloco A ou B) — mais cedo por causa da acupuntura às 17h.',
+        time: '15:05',
+        enabled: true,
+        daysOfWeek: [3],
         category: 'spine',
         telegramOnly: true,
     },
     {
         id: 'daily_weighin',
         title: 'Pesagem diária',
-        message: 'André, pese-se ao acordar, antes do café.',
-        time: '06:30',
+        message: 'André, pese-se ao acordar, antes do café — antes da caminhada.',
+        time: '04:20',
         enabled: true,
         daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
         category: 'custom',
@@ -121,7 +131,7 @@ const DEFAULT_HEALTH_REMINDERS: HealthTelegramReminder[] = [
         id: 'batch_cooking_sunday',
         title: 'Batch cooking',
         message: 'André, hora de preparar as refeições da semana.',
-        time: '10:00',
+        time: '09:45',
         enabled: true,
         daysOfWeek: [0],
         category: 'nutrition',
@@ -1949,10 +1959,12 @@ const HealthView: React.FC<HealthViewProps> = ({
     }, [telegramReminders]);
 
     const isStrengthTrainingDay = useMemo(() => {
+        // O treino de força virou dois lembretes (dias/horários diferentes: seg+sex vs.
+        // quarta, por causa da acupuntura) — precisa checar os dois ids, não só um.
         const todayJsDay = parseLocalDate(selectedDate).getDay();
-        const reminder = activeReminders.find(r => r.id === 'strength_training');
-        const days = reminder?.daysOfWeek && reminder.daysOfWeek.length ? reminder.daysOfWeek : [1, 3, 5];
-        return days.includes(todayJsDay);
+        const strengthReminders = activeReminders.filter(r => r.id.startsWith('strength_training'));
+        if (strengthReminders.length === 0) return [1, 3, 5].includes(todayJsDay);
+        return strengthReminders.some(r => (r.daysOfWeek && r.daysOfWeek.length ? r.daysOfWeek : [1, 3, 5]).includes(todayJsDay));
     }, [selectedDate, activeReminders]);
 
     type GuidedStep = { id: string; skip?: () => boolean; answered: () => boolean; render: () => React.ReactNode };
