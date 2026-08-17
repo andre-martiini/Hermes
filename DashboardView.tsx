@@ -7,7 +7,7 @@ import {
     formatDateLocalISO, sumWalkBlocksKm
 } from './types';
 import { buildDiaryEmailNote, buildDiaryGenericNote, buildDiaryWhatsappNote, DiaryWhatsappActionItem } from './src/utils/diaryEntries';
-import { computeWeightHeadline } from './src/utils/healthAnalytics';
+import { computeWeightHeadline, addDays } from './src/utils/healthAnalytics';
 
 interface DashboardViewProps {
     tarefas: Tarefa[];
@@ -129,41 +129,122 @@ const MiniSparkline: React.FC<{
     formatValue: (v: number) => string;
     barTone: (v: number) => string;
     isDark?: boolean;
-}> = ({ title, points, formatValue, barTone, isDark }) => {
+    /** N25: peso e nivel, nao quantidade -- barra distorce (base != 0), linha nao. */
+    variant?: 'bar' | 'line';
+    /** N25: pontos brutos do dia, plotados como marcador de fundo atras da linha (media). */
+    secondaryPoints?: SparklinePoint[];
+    /** N27: quando presente, cada dia vira uma barra empilhada -- um segmento por
+     * bloco de caminhada, mesma cor, separados por um vao fino. Mostra de graca
+     * se o km do dia veio espalhado (o alvo) ou de um bloco so. */
+    segmentsFor?: (day: string) => number[];
+    /** Sobrescreve o texto do canto superior direito (ex.: "4,0 km · 3 blocos"). */
+    headerValueOverride?: string;
+}> = ({ title, points, formatValue, barTone, isDark, variant = 'bar', secondaryPoints, segmentsFor, headerValueOverride }) => {
     const values = points.map(p => p.value).filter((v): v is number => v !== null);
     const maxVal = Math.max(...values, 1);
     const latest = [...points].reverse().find(p => p.value !== null)?.value ?? null;
+
+    const header = (
+        <div className="flex items-center justify-between">
+            <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">{title}</span>
+            <span className="text-[10px] font-bold font-mono text-slate-600 dark:text-slate-300">
+                {headerValueOverride ?? (latest !== null ? formatValue(latest) : '—')}
+            </span>
+        </div>
+    );
+
+    if (variant === 'line') {
+        const secondaryValues = (secondaryPoints || []).map(p => p.value).filter((v): v is number => v !== null);
+        const allValues = [...values, ...secondaryValues];
+        const min = allValues.length ? Math.min(...allValues) : 0;
+        const max = allValues.length ? Math.max(...allValues) : 1;
+        const range = max - min || 1;
+        const pad = range * 0.2;
+        const yFor = (v: number) => 38 - ((v - (min - pad)) / (range + pad * 2)) * 36;
+        const xFor = (i: number) => points.length > 1 ? (i / (points.length - 1)) * 100 : 50;
+        const linePoints = points
+            .map((p, i) => (p.value !== null ? `${xFor(i)},${yFor(p.value)}` : null))
+            .filter((s): s is string => s !== null)
+            .join(' ');
+
+        return (
+            <div className={`p-3.5 rounded-xl border flex flex-col gap-2 ${
+                isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
+            }`}>
+                {header}
+                {values.length >= 2 ? (
+                    <div className="h-16 w-full pt-1">
+                        <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="h-full w-full overflow-visible">
+                            {(secondaryPoints || []).map((p, i) => p.value !== null && (
+                                <circle key={p.day} cx={xFor(i)} cy={yFor(p.value)} r="1.6" className={isDark ? 'fill-slate-600' : 'fill-slate-300'} />
+                            ))}
+                            <polyline
+                                points={linePoints}
+                                fill="none"
+                                stroke="#9333ea"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                vectorEffect="non-scaling-stroke"
+                            />
+                            {points.map((p, i) => p.value !== null && (
+                                <circle key={`ma-${p.day}`} cx={xFor(i)} cy={yFor(p.value)} r="1.8" fill="#9333ea" />
+                            ))}
+                        </svg>
+                    </div>
+                ) : (
+                    <p className="text-[10px] text-slate-400 font-mono italic text-center py-2">Ainda não dá para dizer.</p>
+                )}
+                <div className="flex items-center justify-between text-[8px] font-mono text-slate-400 font-bold">
+                    {points.map(p => (
+                        <span key={p.day} className="flex-1 text-center">{p.day.split('-')[2] || p.day}</span>
+                    ))}
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className={`p-3.5 rounded-xl border flex flex-col gap-2 ${
             isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
         }`}>
-            <div className="flex items-center justify-between">
-                <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">{title}</span>
-                <span className="text-[10px] font-bold font-mono text-slate-600 dark:text-slate-300">
-                    {latest !== null ? formatValue(latest) : '—'}
-                </span>
-            </div>
+            {header}
             {values.length >= 2 ? (
                 <div className="h-16 w-full flex items-end justify-between gap-1.5 pt-1">
                     {points.map(p => {
                         const heightPct = p.value !== null ? Math.max((p.value / maxVal) * 100, 8) : 2;
                         const dayLabel = p.day.split('-')[2] || p.day;
+                        const segments = p.value !== null ? segmentsFor?.(p.day) : undefined;
                         return (
                             <div key={p.day} className="flex-1 h-full flex flex-col justify-end items-center group/bar relative">
                                 <div className="w-full flex-1 flex items-end justify-center">
-                                    <div
-                                        className={`w-full rounded-t transition-all duration-300 ${
-                                            p.value !== null ? barTone(p.value) : (isDark ? 'bg-white/5' : 'bg-slate-100')
-                                        }`}
-                                        style={{ height: `${heightPct}%` }}
-                                    />
+                                    {segments && segments.length > 1 ? (
+                                        <div className="w-full flex flex-col-reverse gap-[1.5px]" style={{ height: `${heightPct}%` }}>
+                                            {segments.map((seg, si) => (
+                                                <div
+                                                    key={si}
+                                                    className={`w-full rounded-[1px] ${barTone(p.value as number)}`}
+                                                    style={{ height: `${Math.max((seg / (p.value as number)) * 100, 4)}%` }}
+                                                />
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div
+                                            className={`w-full rounded-t transition-all duration-300 ${
+                                                p.value !== null ? barTone(p.value) : (isDark ? 'bg-white/5' : 'bg-slate-100')
+                                            }`}
+                                            style={{ height: `${heightPct}%` }}
+                                        />
+                                    )}
                                 </div>
                                 <span className="text-[8px] font-mono text-slate-400 font-semibold mt-1 shrink-0">{dayLabel}</span>
                                 {p.value !== null && (
                                     <div className="absolute -top-8 hidden group-hover/bar:flex flex-col items-center bg-slate-900 text-white text-[9px] px-2 py-1 rounded shadow-xl z-20 whitespace-nowrap font-mono border border-slate-700 pointer-events-none">
                                         <span className="font-bold text-amber-400">{p.day}</span>
-                                        <span>{formatValue(p.value)}</span>
+                                        <span>
+                                            {formatValue(p.value)}
+                                            {segments && segments.length > 0 ? ` · ${segments.length} bloco${segments.length > 1 ? 's' : ''}` : ''}
+                                        </span>
                                     </div>
                                 )}
                             </div>
@@ -866,10 +947,30 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         return map;
     }, [exerciseLogs]);
 
+    // N25: peso e nivel, nao quantidade -- o sparkline mostra a media movel de 7
+    // dias (a mesma leitura que o plano do Andre pede: nunca o registro do dia
+    // isolado), com o registro bruto de cada dia como ponto de fundo, nao como
+    // barra. Precisa de pelo menos 4 pesagens na janela de 7 dias terminando
+    // naquele dia para render -- mesmo limiar que computeWeightHeadline usa no
+    // tile logo acima, senao "ainda nao da pra dizer".
     const weightSparkPoints: SparklinePoint[] = useMemo(
+        () => last7Days.map(day => {
+            const windowStart = addDays(day, -6);
+            const valuesInWindow = healthWeights
+                .filter(w => w.date >= windowStart && w.date <= day)
+                .map(w => w.weight);
+            const value = valuesInWindow.length >= 4
+                ? valuesInWindow.reduce((s, v) => s + v, 0) / valuesInWindow.length
+                : null;
+            return { day, value };
+        }),
+        [last7Days, healthWeights]
+    );
+    const weightRawSparkPoints: SparklinePoint[] = useMemo(
         () => last7Days.map(day => ({ day, value: weightByDate.get(day) ?? null })),
         [last7Days, weightByDate]
     );
+
     const walkSparkPoints: SparklinePoint[] = useMemo(
         () => last7Days.map(day => {
             const log = logByDate.get(day);
@@ -877,6 +978,18 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         }),
         [last7Days, logByDate]
     );
+    // N27: distancia de cada bloco do dia, na ordem em que foram registrados --
+    // vira segmento da barra empilhada, pra mostrar de graca se o km do dia
+    // veio espalhado (o alvo) ou de uma vez so (o padrao que trava a lombar).
+    const walkBlocksPerDay = useMemo(() => {
+        const map = new Map<string, number[]>();
+        last7Days.forEach(day => {
+            const log = logByDate.get(day);
+            map.set(day, (log?.walkBlocks || []).map(b => b.distance || 0).filter(d => d > 0));
+        });
+        return map;
+    }, [last7Days, logByDate]);
+
     const painSparkPoints: SparklinePoint[] = useMemo(
         () => last7Days.map(day => ({ day, value: logByDate.get(day)?.pain?.evening ?? null })),
         [last7Days, logByDate]
@@ -977,20 +1090,23 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
                     {/* CARD: Carga de Trabalho Semanal */}
                     <DashboardCard title="Carga Semanal de Trabalho" isDark={isDark} onRedirect={() => onNavigate('gallery')}>
-                        <div className="flex flex-col gap-4">
-                            <p className="text-[10px] font-bold uppercase tracking-[0.2em] font-mono text-slate-400">
+                        <div className="flex h-full flex-col gap-4">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.2em] font-mono text-slate-400 shrink-0">
                                 // CARGA OPERACIONAL D+6
                             </p>
 
-                            <div className="grid grid-cols-7 gap-2 md:gap-3 border-b border-[#f3f4f6] pb-2 dark:border-white/5">
+                            {/* N26: o grafico cresce junto com o cartao (flex-1) em vez de ficar em
+                                altura fixa -- senao sobra vao vazio quando o cartao estica pra bater
+                                com a altura do Resumo Financeiro. */}
+                            <div className="grid flex-1 grid-cols-7 gap-2 md:gap-3 border-b border-[#f3f4f6] pb-2 dark:border-white/5">
                                 {actionsByDay.map((day, i) => {
                                     const maxCount = Math.max(...actionsByDay.map(d => d.count), 1);
                                     const heightPercent = (day.count / maxCount) * 100;
 
                                     return (
                                         <div key={i} className="flex min-w-0 flex-col items-center group">
-                                            <div className="flex h-40 w-full flex-col justify-end">
-                                                <div className="flex h-32 w-full items-end">
+                                            <div className="flex flex-1 w-full flex-col justify-end">
+                                                <div className="flex flex-1 w-full items-end">
                                                     <div
                                                         className="flex w-full flex-col items-center"
                                                         style={{ height: day.count > 0 ? `${Math.max(heightPercent, 8)}%` : '2px' }}
@@ -1339,8 +1455,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 dele, não um segundo dialeto visual. */}
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                 <MiniSparkline
-                                    title="Peso (7d)"
+                                    title="Peso (7d) — média móvel"
+                                    variant="line"
                                     points={weightSparkPoints}
+                                    secondaryPoints={weightRawSparkPoints}
                                     formatValue={v => `${v.toFixed(1).replace('.', ',')} kg`}
                                     barTone={() => 'bg-[#9333ea]/60'}
                                     isDark={isDark}
@@ -1350,6 +1468,13 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                     points={walkSparkPoints}
                                     formatValue={v => `${v.toFixed(1).replace('.', ',')} km`}
                                     barTone={v => v >= walkingMinimumKm ? 'bg-emerald-500' : (isDark ? 'bg-slate-600' : 'bg-slate-400')}
+                                    segmentsFor={day => walkBlocksPerDay.get(day)}
+                                    headerValueOverride={(() => {
+                                        const lastWithData = [...walkSparkPoints].reverse().find(p => p.value !== null);
+                                        if (!lastWithData) return undefined;
+                                        const blocks = walkBlocksPerDay.get(lastWithData.day)?.length ?? 0;
+                                        return `${(lastWithData.value as number).toFixed(1).replace('.', ',')} km · ${blocks} bloco${blocks !== 1 ? 's' : ''}`;
+                                    })()}
                                     isDark={isDark}
                                 />
                                 <MiniSparkline
