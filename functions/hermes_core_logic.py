@@ -2793,6 +2793,101 @@ def _transcribe_audio_bytes(audio_bytes: bytes, extension: str, db) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Video transcription (Gemini nativo — Groq/Whisper não processa vídeo)
+# ---------------------------------------------------------------------------
+
+_VIDEO_INLINE_MAX_BYTES = 10 * 1024 * 1024  # acima disso usa Files API (teto ~20MB de payload inline do Gemini, já com folga p/ inflação do base64)
+_VIDEO_MIME_MAP = {
+    # cobre extensões convencionais E os subtipos de MIME crus que o worker
+    # de captura grava (mimetype.split('/')[1] — ex.: video/quicktime -> .quicktime)
+    "mp4": "video/mp4", "quicktime": "video/quicktime", "mov": "video/quicktime",
+    "webm": "video/webm", "3gpp": "video/3gpp", "3gp": "video/3gpp",
+    "mpeg": "video/mpeg", "mpg": "video/mpeg",
+}
+_VIDEO_TRANSCRIPTION_PROMPT = (
+    "Transcreva a fala deste vídeo literalmente e, em seguida, descreva em 1 a 3 frases "
+    "o conteúdo visual relevante (documentos, produtos, telas gravadas, ações). "
+    "Responda em português, direto, sem introduções."
+)
+
+
+def _transcribe_video_bytes(video_bytes: bytes, extension: str, db) -> str:
+    """Transcreve fala + descreve conteúdo visual de um vídeo via Gemini nativo
+    (entendimento multimodal direto — sem extrair áudio via FFmpeg)."""
+    keys = _get_api_keys(db)
+    gemini_key = keys.get("gemini_api_key")
+    if not gemini_key:
+        return "[Transcrição indisponível: Gemini API Key não configurada]"
+
+    clean_ext = extension.lower().strip(".")
+    mime_type = _VIDEO_MIME_MAP.get(clean_ext, "video/mp4")
+
+    try:
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=gemini_key)
+
+        if len(video_bytes) <= _VIDEO_INLINE_MAX_BYTES:
+            response = generate_content_logged(
+                client,
+                model=GEMINI_TRANSCRIPTION_MODEL,
+                contents=[types.Part.from_bytes(data=video_bytes, mime_type=mime_type), _VIDEO_TRANSCRIPTION_PROMPT],
+                feature="whatsapp_consolidation.video_transcription",
+                db=db,
+            )
+            if response and response.text:
+                return response.text.strip()
+            return "[Transcrição indisponível: resposta vazia do Gemini]"
+
+        suffix = f".{clean_ext or 'mp4'}"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(video_bytes)
+            tmp_path = tmp.name
+        gemini_file = None
+        try:
+            gemini_file = client.files.upload(
+                file=tmp_path,
+                config=types.UploadFileConfig(mime_type=mime_type, display_name=os.path.basename(tmp_path)),
+            )
+            waited = 0
+            while str(getattr(gemini_file.state, "name", gemini_file.state)) == "PROCESSING":
+                if waited >= 120:
+                    raise TimeoutError("Files API demorou demais para preparar o vídeo (>2min).")
+                time.sleep(3)
+                waited += 3
+                gemini_file = client.files.get(name=gemini_file.name)
+            final_state = str(getattr(gemini_file.state, "name", gemini_file.state))
+            if final_state == "FAILED":
+                raise RuntimeError("Files API falhou ao preparar o vídeo.")
+
+            response = generate_content_logged(
+                client,
+                model=GEMINI_TRANSCRIPTION_MODEL,
+                contents=[_VIDEO_TRANSCRIPTION_PROMPT, gemini_file],
+                feature="whatsapp_consolidation.video_transcription",
+                db=db,
+            )
+            if response and response.text:
+                return response.text.strip()
+            return "[Transcrição indisponível: resposta vazia do Gemini]"
+        finally:
+            if gemini_file is not None:
+                try:
+                    client.files.delete(name=gemini_file.name)
+                except Exception:
+                    pass
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
+    except Exception as exc:
+        print(f"[Transcription] Gemini video understanding failed: {exc}")
+
+    return "[Transcrição indisponível: erro no motor Gemini]"
+
+
+# ---------------------------------------------------------------------------
 # Media upload to Firebase Storage
 # ---------------------------------------------------------------------------
 

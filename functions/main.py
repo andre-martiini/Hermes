@@ -13808,7 +13808,7 @@ def listWhatsappChats(req: https_fn.CallableRequest) -> dict:
 
 @firestore_fn.on_document_created(
     document="whatsapp_consolidacoes/{jobId}",
-    memory=options.MemoryOption.GB_1,
+    memory=options.MemoryOption.GB_2,
     timeout_sec=540,
 )
 def on_whatsapp_consolidacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):

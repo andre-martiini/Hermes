@@ -129,6 +129,8 @@ export interface WhatsappConsolidacao {
     n_mensagens?: number;
     n_audios_transcritos?: number;
     n_audios_ignorados?: number;
+    n_videos_transcritos?: number;
+    n_videos_ignorados?: number;
     attachments?: { message_id: string; mimeType: string; storage_path?: string }[];
     digest_id?: string;      // doc gravado em whatsapp_digests (consol_*)
     // Associação (frontend, ao anexar a uma ação)

@@ -30,6 +30,7 @@ const PAGE_SIZE = 30;
 const MAX_SELECTION = 200; // mesmo cap validado no backend (whatsapp_consolidation.py)
 const AUDIO_TYPES = new Set(['ptt', 'audio']);
 const IMAGE_TYPES = new Set(['image', 'sticker']);
+const VIDEO_TYPES = new Set(['video']);
 const LIVE_CONTEXT_MAX_CHARS = 9000; // mesmo teto usado pelo Copiloto embutido de Reuniões
 const LAST_SEEN_KEY_PREFIX = 'hermes_whatsapp_last_seen:';
 
@@ -487,6 +488,18 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
         return deduplicated;
     }, [liveDocs, olderDocs]);
 
+    // Contagem por tipo da seleção atual — ajuda a confirmar a mistura antes de consolidar.
+    const selectionBreakdown = useMemo(() => {
+        let nAudio = 0, nVideo = 0, nOutro = 0;
+        for (const m of messages) {
+            if (!selection.has(m.id)) continue;
+            if (AUDIO_TYPES.has(m.message_type)) nAudio++;
+            else if (VIDEO_TYPES.has(m.message_type)) nVideo++;
+            else nOutro++;
+        }
+        return { nAudio, nVideo, nOutro };
+    }, [messages, selection]);
+
     // Auto-scroll para as mensagens mais recentes (fim da lista)
     useEffect(() => {
         if (messages.length > 0 && shouldAutoScrollRef.current) {
@@ -814,6 +827,7 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
         const showDay = !prevMsg || fmtDay(prevMsg.timestamp) !== fmtDay(msg.timestamp);
         const isAudio = AUDIO_TYPES.has(msg.message_type);
         const isImage = IMAGE_TYPES.has(msg.message_type);
+        const isVideo = VIDEO_TYPES.has(msg.message_type);
         const storagePath = msg.media?.storage_path;
         const selected = selection.has(msg.id);
         const consolidated = (msg.consolidation_ids || []).length > 0;
@@ -882,6 +896,26 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
                                     <span className={`italic text-[10px] ${mutedCls}`}>[imagem não capturada]</span>
                                 )}
                                 {msg.content && <p className="whitespace-pre-line break-words">{msg.content}</p>}
+                            </div>
+                        ) : isVideo ? (
+                            <div className="space-y-1">
+                                {storagePath ? (
+                                    mediaUrls[storagePath] ? (
+                                        <video controls src={mediaUrls[storagePath]} className="max-w-full max-h-64 rounded-lg" />
+                                    ) : (
+                                        <button onClick={() => loadMedia(storagePath)} className={`text-[10px] font-bold underline ${isDark ? 'text-green-300' : 'text-green-700'}`}>
+                                            {loadingMedia.has(storagePath) ? 'Carregando vídeo...' : '▶ Carregar vídeo'}
+                                        </button>
+                                    )
+                                ) : (
+                                    <span className={`italic text-[10px] ${mutedCls}`}>[vídeo não capturado]</span>
+                                )}
+                                {msg.content && <p className="whitespace-pre-line break-words">{msg.content}</p>}
+                                {msg.transcription_text && (
+                                    <p className={`text-[10px] leading-relaxed border-l-2 pl-2 ${isDark ? 'border-green-500/30 text-white/60' : 'border-green-200 text-slate-500'}`}>
+                                        {msg.transcription_text}
+                                    </p>
+                                )}
                             </div>
                         ) : (
                             <p className="whitespace-pre-line break-words">
@@ -1031,6 +1065,11 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
                 <div className="flex items-center gap-3">
                     <span className={`text-[10px] font-bold ${selection.size >= MAX_SELECTION ? 'text-amber-500' : mutedCls}`}>
                         {selection.size} selecionada(s){selection.size >= MAX_SELECTION ? ` (máx. ${MAX_SELECTION})` : ''}
+                        {(selectionBreakdown.nAudio > 0 || selectionBreakdown.nVideo > 0) && (
+                            <span className={`font-normal ${mutedCls}`}>
+                                {' '}({selectionBreakdown.nOutro} texto/outro · {selectionBreakdown.nAudio} áudio · {selectionBreakdown.nVideo} vídeo)
+                            </span>
+                        )}
                     </span>
                     <button onClick={selectAllVisible} className={`text-[10px] font-bold underline ${mutedCls}`}>Selecionar visíveis</button>
                     {selection.size > 0 && (
@@ -1075,7 +1114,9 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
                         <div>
                             <p className={`text-[10px] font-black uppercase tracking-wider mb-1 ${mutedCls}`}>
                                 Síntese (IA) · {activeJob.n_mensagens} msg · {activeJob.n_audios_transcritos || 0} áudio(s) transcrito(s)
-                                {(activeJob.n_audios_ignorados || 0) > 0 ? ` · ${activeJob.n_audios_ignorados} ignorado(s)` : ''}
+                                {(activeJob.n_audios_ignorados || 0) > 0 ? ` · ${activeJob.n_audios_ignorados} áudio(s) ignorado(s)` : ''}
+                                {((activeJob.n_videos_transcritos || 0) > 0 || (activeJob.n_videos_ignorados || 0) > 0) ? ` · ${activeJob.n_videos_transcritos || 0} vídeo(s) transcrito(s)` : ''}
+                                {(activeJob.n_videos_ignorados || 0) > 0 ? ` · ${activeJob.n_videos_ignorados} vídeo(s) ignorado(s)` : ''}
                             </p>
                             <p className={`leading-relaxed ${isDark ? 'text-white/85' : 'text-slate-700'}`}>{activeJob.resumo || '(sem resumo)'}</p>
                         </div>
