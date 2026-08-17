@@ -668,10 +668,24 @@ export interface HealthWeeklyReportCard {
     sleep_avg: number | null;
 }
 
+// Chave estavel da regra de decisao (N14 Fase 2) que gerou `adjustment` -- a
+// auditoria da semana seguinte compara por esta chave, nunca reparseando a
+// prosa de `adjustment`. Ausente em relatorios da Fase 1 (antes da Fase 2
+// existir).
+export type HealthWeeklyReportAdjustmentRule =
+    | 'sinal_vermelho'
+    | 'reduzir_carga'
+    | 'poucos_dados'
+    | 'aderencia'
+    | 'cortar_kcal'
+    | 'aumentar_kcal'
+    | 'manter';
+
 export interface HealthWeeklyReport {
     id: string; // = YYYY-Www (semana ISO)
     card: HealthWeeklyReportCard;
     adjustment: string | null;
+    adjustment_rule?: HealthWeeklyReportAdjustmentRule;
     text: string | null;
     audit: string | null;
     prompt_version: string | null;

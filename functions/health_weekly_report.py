@@ -388,6 +388,52 @@ def _dry_fallback_narrative(card: dict, adjustment_text: str | None, audit_text:
     return "\n\n".join(parts)
 
 
+def _format_card_for_display(card: dict) -> dict:
+    """N22: formata o card para exibicao -- pt-BR com virgula, porcentagem em vez
+    de fracao, `null` como a string literal "ainda nao da pra dizer" -- antes de
+    passar pro modelo. Achado do revisor: o modelo recebia `checkin_adherence:
+    0.14` cru e escrevia "0,14" na narrativa, enquanto o tile da UI mostra
+    "14%"; e `pain_evening_avg: 3.8` batia com ponto no tile, virgula na
+    narrativa. A UI e o modelo devem ler do mesmo texto pronto, nao cada um
+    formatar o numero cru do seu jeito. So usado para montar o prompt -- o
+    `card` numerico que vai pro Firestore continua intacto, e a UI segue
+    formatando os proprios tiles a partir dele."""
+    NAO_DA_PRA_DIZER = "ainda não dá para dizer"
+
+    def kg(v):
+        return f"{v:.1f}".replace(".", ",") + " kg" if v is not None else NAO_DA_PRA_DIZER
+
+    def cm(v):
+        return f"{v:.1f}".replace(".", ",") + " cm" if v is not None else NAO_DA_PRA_DIZER
+
+    def dor(v):
+        return f"{v:.1f}".replace(".", ",") + "/10" if v is not None else NAO_DA_PRA_DIZER
+
+    def pct(v):
+        return f"{round(v * 100)}%" if v is not None else NAO_DA_PRA_DIZER
+
+    def sono(v):
+        return f"{v:.1f}".replace(".", ",") + "/5" if v is not None else NAO_DA_PRA_DIZER
+
+    waist = card.get("waist") or {}
+    return {
+        "semana": f"{card['week_start']} a {card['week_end']}",
+        "peso_medio_7d": kg(card.get("weight_avg7")),
+        "peso_variacao_vs_semana_anterior": kg(card.get("weight_delta")) if card.get("weight_delta") is not None else NAO_DA_PRA_DIZER,
+        "cintura": cm(waist.get("value")),
+        "cintura_variacao": cm(waist.get("delta")) if waist.get("delta") is not None else NAO_DA_PRA_DIZER,
+        "caminhada_km_total_semana": f"{card['km_total']:.1f}".replace(".", ",") + " km",
+        "caminhada_dias_com_registro": f"{card['km_days']} de 7 dias",
+        "dor_manha_media": dor(card.get("pain_morning_avg")),
+        "dor_noite_media": dor(card.get("pain_evening_avg")),
+        "tendencia_sintoma_radicular": card.get("radicular_trend"),
+        "treino_de_forca": f"{card['strength_done']} de {card['strength_planned']} sessões previstas",
+        "terapia": f"{card['therapy_done']} de {card['therapy_planned']} sessões previstas",
+        "aderencia_ao_checkin": pct(card.get("checkin_adherence")),
+        "sono_medio": sono(card.get("sleep_avg")),
+    }
+
+
 def generate_weekly_narrative(db, card: dict, adjustment_text: str | None, audit_text: str | None) -> str | None:
     """Fase 3: o modelo escreve a versao amigavel por cima do que o codigo ja
     decidiu. Nunca calcula, compara semanas ou afirma causa -- essas contas ja
@@ -405,7 +451,7 @@ def generate_weekly_narrative(db, card: dict, adjustment_text: str | None, audit
     from google import genai
     from google.genai import types as genai_types
 
-    card_json = json.dumps(card, ensure_ascii=False, indent=2)
+    card_json = json.dumps(_format_card_for_display(card), ensure_ascii=False, indent=2)
 
     prompt = f"""Você escreve o relatório semanal de saúde do André para ele mesmo ler, em português.
 

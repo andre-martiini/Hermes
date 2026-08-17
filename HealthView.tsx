@@ -3507,7 +3507,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                             {stat('Peso méd. 7d', <>{fmt1(card.weight_avg7, ' kg')}{card.weight_delta !== null && <span className="ml-1 text-xs font-semibold text-on-surface-variant">({card.weight_delta > 0 ? '+' : ''}{card.weight_delta.toFixed(1).replace('.', ',')})</span>}</>)}
                                             {stat('Cintura', card.waist.value !== null ? <>{fmt1(card.waist.value, ' cm')}{card.waist.delta !== null && <span className="ml-1 text-xs font-semibold text-on-surface-variant">({card.waist.delta > 0 ? '+' : ''}{card.waist.delta.toFixed(1).replace('.', ',')})</span>}</> : 'ainda não dá para dizer')}
                                             {stat('Km na semana', `${formatKm(card.km_total)} km em ${card.km_days} dia(s)`)}
-                                            {stat('Dor manhã / noite', `${card.pain_morning_avg ?? '—'} / ${card.pain_evening_avg ?? '—'}`)}
+                                            {stat('Dor manhã / noite', `${card.pain_morning_avg !== null ? card.pain_morning_avg.toFixed(1).replace('.', ',') : '—'} / ${card.pain_evening_avg !== null ? card.pain_evening_avg.toFixed(1).replace('.', ',') : '—'}`)}
                                             {stat('Sintoma radicular', radicularLabel[card.radicular_trend] || card.radicular_trend)}
                                             {stat('Treino de força', `${card.strength_done}/${card.strength_planned}`)}
                                             {stat('Terapia', `${card.therapy_done}/${card.therapy_planned}`)}
