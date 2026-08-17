@@ -114,6 +114,69 @@ const HiddenMoney = ({ className = "", compact = false }: { className?: string, 
     </span>
 );
 
+// --- MINI SPARKLINE (N23): mesma gramática visual nos 3 gráficos do cartão de
+// saúde -- sem eixo, sem grade, só o valor mais recente rotulado, para o
+// Dashboard ficar uma prévia do "Gráfico integrado" do módulo Saúde, e não um
+// segundo dialeto visual dele.
+interface SparklinePoint {
+    day: string;
+    value: number | null;
+}
+
+const MiniSparkline: React.FC<{
+    title: string;
+    points: SparklinePoint[];
+    formatValue: (v: number) => string;
+    barTone: (v: number) => string;
+    isDark?: boolean;
+}> = ({ title, points, formatValue, barTone, isDark }) => {
+    const values = points.map(p => p.value).filter((v): v is number => v !== null);
+    const maxVal = Math.max(...values, 1);
+    const latest = [...points].reverse().find(p => p.value !== null)?.value ?? null;
+
+    return (
+        <div className={`p-3.5 rounded-xl border flex flex-col gap-2 ${
+            isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
+        }`}>
+            <div className="flex items-center justify-between">
+                <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">{title}</span>
+                <span className="text-[10px] font-bold font-mono text-slate-600 dark:text-slate-300">
+                    {latest !== null ? formatValue(latest) : '—'}
+                </span>
+            </div>
+            {values.length >= 2 ? (
+                <div className="h-16 w-full flex items-end justify-between gap-1.5 pt-1">
+                    {points.map(p => {
+                        const heightPct = p.value !== null ? Math.max((p.value / maxVal) * 100, 8) : 2;
+                        const dayLabel = p.day.split('-')[2] || p.day;
+                        return (
+                            <div key={p.day} className="flex-1 h-full flex flex-col justify-end items-center group/bar relative">
+                                <div className="w-full flex-1 flex items-end justify-center">
+                                    <div
+                                        className={`w-full rounded-t transition-all duration-300 ${
+                                            p.value !== null ? barTone(p.value) : (isDark ? 'bg-white/5' : 'bg-slate-100')
+                                        }`}
+                                        style={{ height: `${heightPct}%` }}
+                                    />
+                                </div>
+                                <span className="text-[8px] font-mono text-slate-400 font-semibold mt-1 shrink-0">{dayLabel}</span>
+                                {p.value !== null && (
+                                    <div className="absolute -top-8 hidden group-hover/bar:flex flex-col items-center bg-slate-900 text-white text-[9px] px-2 py-1 rounded shadow-xl z-20 whitespace-nowrap font-mono border border-slate-700 pointer-events-none">
+                                        <span className="font-bold text-amber-400">{p.day}</span>
+                                        <span>{formatValue(p.value)}</span>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            ) : (
+                <p className="text-[10px] text-slate-400 font-mono italic text-center py-2">Aguardando histórico.</p>
+            )}
+        </div>
+    );
+};
+
 const getFinanceDateParts = (dateValue?: string) => {
     if (!dateValue) return null;
 
@@ -779,19 +842,58 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         return exerciseLogs.find(l => l.id === todayKey) || null;
     }, [exerciseLogs, todayKey]);
 
-    const painLogs = useMemo(() => {
-        return [...exerciseLogs]
-            .filter(log => log.pain?.evening !== undefined)
-            .sort((a, b) => a.id.localeCompare(b.id))
-            .slice(-7);
+    // N23: janela de 7 dias corridos compartilhada pelos 3 sparklines (peso,
+    // caminhada, dor) -- "se leem em conjunto" só funciona se o eixo bate.
+    const last7Days = useMemo(() => {
+        const days: string[] = [];
+        for (let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            days.push(formatDateLocalISO(d));
+        }
+        return days;
+    }, []);
+
+    const weightByDate = useMemo(() => {
+        const map = new Map<string, number>();
+        healthWeights.forEach(w => { if (!map.has(w.date)) map.set(w.date, w.weight); });
+        return map;
+    }, [healthWeights]);
+
+    const logByDate = useMemo(() => {
+        const map = new Map<string, ExerciseLog>();
+        exerciseLogs.forEach(l => map.set(l.id, l));
+        return map;
     }, [exerciseLogs]);
 
+    const weightSparkPoints: SparklinePoint[] = useMemo(
+        () => last7Days.map(day => ({ day, value: weightByDate.get(day) ?? null })),
+        [last7Days, weightByDate]
+    );
+    const walkSparkPoints: SparklinePoint[] = useMemo(
+        () => last7Days.map(day => {
+            const log = logByDate.get(day);
+            return { day, value: log ? sumWalkBlocksKm(log) : null };
+        }),
+        [last7Days, logByDate]
+    );
+    const painSparkPoints: SparklinePoint[] = useMemo(
+        () => last7Days.map(day => ({ day, value: logByDate.get(day)?.pain?.evening ?? null })),
+        [last7Days, logByDate]
+    );
+
     // --- WALK GOAL LOGIC ---
+    // N24: mesmos limiares e a mesma lógica de faixa normal / dia de crise do
+    // módulo Saúde pós-N17 (walkingIdealKm agora é o TOPO da faixa normal, não
+    // uma meta a perseguir; o piso mínimo não se aplica em dia de crise). Foi a
+    // duplicação de número solto que gerou a divergência que este achado
+    // corrigiu -- não repetir o erro do N7 aqui.
     const todayWalkKm = useMemo(() => sumWalkBlocksKm(todayHealthLog), [todayHealthLog]);
     const walkingMinimumKm = healthSettings?.walkingMinimumKm ?? 3;
-    const walkingIdealKm = healthSettings?.walkingIdealKm ?? 8;
+    const walkingIdealKm = healthSettings?.walkingIdealKm ?? 6;
+    const isCrisisToday = !!todayHealthLog?.pain?.crisis;
     const walkMetMinimum = todayWalkKm >= walkingMinimumKm;
-    const walkMetIdeal = todayWalkKm >= walkingIdealKm;
+    const walkInBonus = todayWalkKm > walkingIdealKm;
 
     const [isWalkModalOpen, setIsWalkModalOpen] = useState(false);
     const [walkKmInput, setWalkKmInput] = useState('');
@@ -866,10 +968,12 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
             <EmailLinkSuggestionsPanel isDark={isDark} onOpenTask={onOpenTask} onAskCopiloto={onAskCopiloto} />
 
-            <div className="flex flex-col xl:flex-row gap-6 w-full items-stretch min-h-0 xl:h-[calc(100vh-7rem)]">
+            <div className="flex flex-col gap-6 w-full">
 
-                {/* 1. COLUNA ESQUERDA: Área de Trabalho (Flexível) */}
-                <div className="flex-1 flex flex-col gap-6 xl:overflow-y-auto custom-scrollbar xl:max-h-[calc(100vh-7rem)] pr-1">
+              <div className="flex flex-col xl:flex-row gap-6 w-full items-stretch">
+
+                {/* 1. COLUNA ESQUERDA: Carga de Trabalho (Flexível) */}
+                <div className="flex-1 flex flex-col gap-6">
 
                     {/* CARD: Carga de Trabalho Semanal */}
                     <DashboardCard title="Carga Semanal de Trabalho" isDark={isDark} onRedirect={() => onNavigate('gallery')}>
@@ -926,6 +1030,12 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                             </div>
                         </div>
                     </DashboardCard>
+
+                </div>
+
+                {/* 2. COLUNA DIREITA: Resumo Financeiro (320px Fixo) */}
+                <div className="w-full xl:w-[320px] shrink-0 flex flex-col gap-6">
+
                     {/* CARD: Painel Financeiro */}
                     <DashboardCard
                         title="Resumo Financeiro"
@@ -1057,15 +1167,19 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
                 </div>
 
-                {/* 2. COLUNA DIREITA: Saúde & Telemetria (320px Fixo) */}
-                <div className="w-full xl:w-[320px] shrink-0 flex flex-col gap-6 xl:overflow-y-auto custom-scrollbar xl:max-h-[calc(100vh-7rem)] pr-1">
-                    {/* CARD: Saúde & Telemetria */}
-                    <DashboardCard title="Saúde & Telemetria" isDark={isDark} onRedirect={() => onNavigate('saude')}>
+              </div>
+
+              {/* 3. LARGURA TOTAL, ABAIXO DA CARGA SEMANAL: Saúde & Telemetria (N23) */}
+              <DashboardCard title="Saúde & Telemetria" isDark={isDark} onRedirect={() => onNavigate('saude')}>
                         <div className="flex flex-col gap-4">
                             <div className="flex items-center justify-between shrink-0">
                                 <span className="text-[9px] uppercase tracking-wider text-slate-400 font-mono">// BIOMETRIA & SINAL CLÍNICO</span>
                                 <span className="text-[9px] font-bold text-[#9333ea] dark:text-[#ddb8ff] uppercase tracking-wider font-mono">PAINEL INTEGRADO →</span>
                             </div>
+
+                            {/* N23: peso, caminhada e dor lado a lado -- o cartão agora tem largura
+                                total, então as três seções viram uma linha de 3 em vez de empilhadas. */}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
 
                             {/* 1. SEÇÃO PESO E META */}
                             <div className={`p-3.5 rounded-xl border flex flex-col gap-2.5 ${
@@ -1130,20 +1244,19 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 )}
                             </div>
 
-                            {/* 2. SEÇÃO CAMINHADA NA ESTEIRA */}
+                            {/* 2. SEÇÃO CAMINHADA NA ESTEIRA (N24: faixa normal + exceção de crise, mesma fonte do módulo Saúde) */}
                             <div className={`p-3.5 rounded-xl border flex flex-col gap-2.5 ${
                                 isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
                             }`}>
                                 <div className="flex items-center justify-between">
                                     <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Caminhada (Hoje)</span>
-                                    <span
-                                        className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded"
-                                        style={{
-                                            color: walkGradientColor(todayWalkKm, walkingMinimumKm, walkingIdealKm),
-                                            backgroundColor: `${walkGradientColor(todayWalkKm, walkingMinimumKm, walkingIdealKm)}33`,
-                                        }}
-                                    >
-                                        {walkMetIdeal ? 'Meta ideal' : walkMetMinimum ? 'Mínimo ok' : 'Abaixo do mínimo'}
+                                    <span className={`px-1.5 py-0.5 text-[8px] font-black uppercase rounded ${
+                                        isCrisisToday ? 'bg-amber-500/20 text-amber-500'
+                                            : walkInBonus ? 'bg-emerald-500/20 text-emerald-500'
+                                                : walkMetMinimum ? 'bg-amber-500/20 text-amber-500'
+                                                    : 'bg-slate-500/20 text-slate-400'
+                                    }`}>
+                                        {isCrisisToday ? 'Dia de crise' : walkInBonus ? 'Bônus' : walkMetMinimum ? 'Faixa normal' : 'Abaixo do mínimo'}
                                     </span>
                                 </div>
 
@@ -1166,20 +1279,28 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                     </button>
                                 </div>
 
-                                <div className="relative h-[6px] w-full rounded-full overflow-hidden mt-0.5">
-                                    <div className={`absolute inset-0 rounded-full ${isDark ? 'bg-[#2a313d]' : 'bg-[#f3f4f6]'}`} />
-                                    <div
-                                        style={{
-                                            width: `${Math.min((todayWalkKm / Math.max(walkingIdealKm, walkingMinimumKm, todayWalkKm, 1)) * 100, 100)}%`,
-                                            backgroundColor: walkGradientColor(todayWalkKm, walkingMinimumKm, walkingIdealKm),
-                                        }}
-                                        className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
-                                    />
-                                </div>
-                                <div className="flex items-center justify-between text-[8px] font-mono text-slate-400 font-bold uppercase">
-                                    <span>Mín. {walkingMinimumKm} km</span>
-                                    <span>Ideal {walkingIdealKm} km</span>
-                                </div>
+                                {isCrisisToday ? (
+                                    <p className="text-[9px] font-mono text-slate-400 leading-relaxed">
+                                        Caminhadas curtas e frequentes, sem meta de distância — o piso mínimo não se aplica hoje.
+                                    </p>
+                                ) : (
+                                    <>
+                                        <div className="relative h-[6px] w-full rounded-full overflow-hidden mt-0.5">
+                                            <div className={`absolute inset-0 rounded-full ${isDark ? 'bg-[#2a313d]' : 'bg-[#f3f4f6]'}`} />
+                                            <div
+                                                style={{
+                                                    width: `${Math.min((todayWalkKm / Math.max(walkingIdealKm, walkingMinimumKm, todayWalkKm, 1)) * 100, 100)}%`,
+                                                    backgroundColor: walkInBonus ? '#10b981' : walkMetMinimum ? '#f59e0b' : (isDark ? '#475569' : '#94a3b8'),
+                                                }}
+                                                className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
+                                            />
+                                        </div>
+                                        <div className="flex items-center justify-between text-[8px] font-mono text-slate-400 font-bold uppercase">
+                                            <span>Mínimo {walkingMinimumKm} km</span>
+                                            <span>Faixa normal até {walkingIdealKm} km</span>
+                                        </div>
+                                    </>
+                                )}
                             </div>
 
                             {/* 3. SEÇÃO DOR LOMBAR / CHECK-IN TELEGRAM */}
@@ -1211,50 +1332,37 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 )}
                             </div>
 
-                            {/* 4. MINI GRÁFICO / TENDÊNCIA DE DOR NOTURNA (7 REGISTROS RECENTES) */}
-                            <div className={`p-3.5 rounded-xl border flex flex-col gap-2 ${
-                                isDark ? 'border-white/5 bg-white/[0.01]' : 'border-[#f3f4f6] bg-[#f9fafb]'
-                            }`}>
-                                <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 font-mono">Tendência Recente de Dor Noturna (0-10)</span>
-                                
-                                {painLogs.length >= 2 ? (
-                                    <div className="h-20 w-full flex items-end justify-between gap-1.5 pt-2">
-                                        {painLogs.map(log => {
-                                            const val = log.pain?.evening ?? 0;
-                                            const heightPct = Math.max(val * 10, 8);
-                                            const isHigh = val >= 6;
-                                            const isMid = val >= 3;
-                                            const dayLabel = log.id.split('-')[2] || log.id;
-                                            return (
-                                                <div key={log.id} className="flex-1 h-full flex flex-col justify-end items-center group/bar relative">
-                                                    <div className="w-full flex-1 flex items-end justify-center">
-                                                        <div 
-                                                            className={`w-full rounded-t transition-all duration-300 ${
-                                                                log.pain?.crisis ? 'bg-rose-600' : isHigh ? 'bg-rose-500' : isMid ? 'bg-amber-500' : 'bg-emerald-500'
-                                                            }`}
-                                                            style={{ height: `${heightPct}%` }}
-                                                        />
-                                                    </div>
-                                                    <span className="text-[8px] font-mono text-slate-400 font-semibold mt-1 shrink-0">{dayLabel}</span>
-                                                    <div className="absolute -top-8 hidden group-hover/bar:flex flex-col items-center bg-slate-900 text-white text-[9px] px-2 py-1 rounded shadow-xl z-20 whitespace-nowrap font-mono border border-slate-700 pointer-events-none">
-                                                        <span className="font-bold text-amber-400">{log.id}</span>
-                                                        <span>Dor Noturna: {val}/10</span>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                ) : (
-                                    <p className="text-[10px] text-slate-400 font-mono italic text-center py-2">
-                                        Aguardando histórico de check-ins.
-                                    </p>
-                                )}
+                            </div>
+
+                            {/* 4. TRÊS GRÁFICOS NA MESMA JANELA DE TEMPO (N23): peso, caminhada e dor
+                                juntos, mesma gramática do "Gráfico integrado" do módulo Saúde -- prévia
+                                dele, não um segundo dialeto visual. */}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <MiniSparkline
+                                    title="Peso (7d)"
+                                    points={weightSparkPoints}
+                                    formatValue={v => `${v.toFixed(1).replace('.', ',')} kg`}
+                                    barTone={() => 'bg-[#9333ea]/60'}
+                                    isDark={isDark}
+                                />
+                                <MiniSparkline
+                                    title="Caminhada (7d)"
+                                    points={walkSparkPoints}
+                                    formatValue={v => `${v.toFixed(1).replace('.', ',')} km`}
+                                    barTone={v => v >= walkingMinimumKm ? 'bg-emerald-500' : (isDark ? 'bg-slate-600' : 'bg-slate-400')}
+                                    isDark={isDark}
+                                />
+                                <MiniSparkline
+                                    title="Dor noturna (7d)"
+                                    points={painSparkPoints}
+                                    formatValue={v => `${v}/10`}
+                                    barTone={v => v >= 6 ? 'bg-rose-500' : v >= 3 ? 'bg-amber-500' : 'bg-emerald-500'}
+                                    isDark={isDark}
+                                />
                             </div>
 
                         </div>
-                    </DashboardCard>
-
-                </div>
+              </DashboardCard>
 
             </div>
 
