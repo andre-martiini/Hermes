@@ -535,31 +535,37 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
 
     try {
       micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      systemStream = await navigator.mediaDevices.getDisplayMedia({
-        audio: {
-          autoGainControl: false,
-          echoCancellation: false,
-          noiseSuppression: false,
-          suppressLocalAudioPlayback: false,
-        },
-        video: {
-          displaySurface: 'monitor',
-        },
-        systemAudio: 'include',
-        surfaceSwitching: 'exclude',
-      } as DisplayMediaStreamOptions);
 
-      if (systemStream.getAudioTracks().length === 0) {
-        showToast('Áudio não capturado. Selecione "Tela inteira" e marque "Compartilhar áudio do sistema".', 'error');
-        systemStream.getTracks().forEach(track => track.stop());
-        micStream.getTracks().forEach(track => track.stop());
-        return;
-      }
+      try {
+        systemStream = await navigator.mediaDevices.getDisplayMedia({
+          audio: {
+            autoGainControl: false,
+            echoCancellation: false,
+            noiseSuppression: false,
+            suppressLocalAudioPlayback: false,
+          },
+          video: {
+            displaySurface: 'monitor',
+          },
+          systemAudio: 'include',
+          surfaceSwitching: 'exclude',
+        } as DisplayMediaStreamOptions);
 
-      const displayTrack = systemStream.getVideoTracks()[0];
-      const displaySettings = displayTrack?.getSettings() as DisplayMediaTrackSettings | undefined;
-      if (displaySettings?.displaySurface && displaySettings.displaySurface !== 'monitor') {
-        showToast('Para reuniões no Teams, prefira "Tela inteira"; janelas individuais normalmente não entregam o áudio do sistema.', 'info');
+        if (systemStream.getAudioTracks().length === 0) {
+          systemStream.getTracks().forEach(track => track.stop());
+          systemStream = null;
+          showToast('Áudio da reunião não capturado (selecione "Tela inteira" e marque "Compartilhar áudio do sistema"). Gravando só o seu microfone por enquanto.', 'info');
+        } else {
+          const displayTrack = systemStream.getVideoTracks()[0];
+          const displaySettings = displayTrack?.getSettings() as DisplayMediaTrackSettings | undefined;
+          if (displaySettings?.displaySurface && displaySettings.displaySurface !== 'monitor') {
+            showToast('Para reuniões no Teams ou Meet, prefira "Tela inteira"; janelas ou abas individuais normalmente não entregam o áudio do sistema.', 'info');
+          }
+        }
+      } catch (displayErr) {
+        console.warn('Áudio da reunião não compartilhado:', displayErr);
+        systemStream = null;
+        showToast('Áudio da reunião não compartilhado. Gravando só o seu microfone.', 'info');
       }
 
       const startedNow = new Date();
@@ -576,14 +582,12 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
 
       micStreamRef.current = micStream;
       systemStreamRef.current = systemStream;
-      startSystemAudioMonitor(systemStream);
+      if (systemStream) startSystemAudioMonitor(systemStream);
 
       const wsUrl = 'wss://api.deepgram.com/v1/listen?model=nova-2&language=pt-BR';
       const protocols = ['token', deepgramKey];
       const micWs = new WebSocket(wsUrl, protocols);
-      const systemWs = new WebSocket(wsUrl, protocols);
       micWsRef.current = micWs;
-      systemWsRef.current = systemWs;
 
       micWs.onopen = () => {
         const recorder = new MediaRecorder(micStream!);
@@ -607,37 +611,68 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
         appendTranscriptEntry('Você', transcript, new Date());
       };
 
-      systemWs.onopen = () => {
-        const recorder = new MediaRecorder(systemStream!);
-        recorder.ondataavailable = event => {
-          if (event.data.size > 0 && systemWs.readyState === WebSocket.OPEN) {
-            systemWs.send(event.data);
+      micWs.onerror = event => {
+        console.error('Erro na conexão com Deepgram (microfone):', event);
+      };
+
+      micWs.onclose = event => {
+        if (!event.wasClean) {
+          console.error('Conexão com Deepgram (microfone) encerrada inesperadamente:', event.code, event.reason);
+          showToast('A transcrição do seu microfone caiu (verifique a chave do Deepgram ou a conexão).', 'error');
+        }
+      };
+
+      if (systemStream) {
+        const activeSystemStream = systemStream;
+        const systemWs = new WebSocket(wsUrl, protocols);
+        systemWsRef.current = systemWs;
+
+        systemWs.onopen = () => {
+          const recorder = new MediaRecorder(activeSystemStream);
+          recorder.ondataavailable = event => {
+            if (event.data.size > 0 && systemWs.readyState === WebSocket.OPEN) {
+              systemWs.send(event.data);
+            }
+          };
+          recorder.start(250);
+          systemRecorderRef.current = recorder;
+        };
+
+        systemWs.onmessage = message => {
+          const received = JSON.parse(message.data);
+          const transcript = received?.channel?.alternatives?.[0]?.transcript;
+          const hasFinalFlag = typeof received?.is_final === 'boolean' || typeof received?.speech_final === 'boolean';
+          const isFinal = Boolean(received?.is_final ?? received?.speech_final);
+
+          if (hasFinalFlag && !isFinal) return;
+          if (typeof transcript !== 'string' || !transcript.trim()) return;
+          systemAudioActivityDetectedRef.current = true;
+          appendTranscriptEntry('Reunião', transcript, new Date());
+        };
+
+        systemWs.onerror = event => {
+          console.error('Erro na conexão com Deepgram (áudio da reunião):', event);
+        };
+
+        systemWs.onclose = event => {
+          if (!event.wasClean) {
+            console.error('Conexão com Deepgram (áudio da reunião) encerrada inesperadamente:', event.code, event.reason);
+            showToast('A transcrição do áudio da reunião caiu (verifique a chave do Deepgram ou a conexão).', 'error');
           }
         };
-        recorder.start(250);
-        systemRecorderRef.current = recorder;
-      };
 
-      systemWs.onmessage = message => {
-        const received = JSON.parse(message.data);
-        const transcript = received?.channel?.alternatives?.[0]?.transcript;
-        const hasFinalFlag = typeof received?.is_final === 'boolean' || typeof received?.speech_final === 'boolean';
-        const isFinal = Boolean(received?.is_final ?? received?.speech_final);
-
-        if (hasFinalFlag && !isFinal) return;
-        if (typeof transcript !== 'string' || !transcript.trim()) return;
-        systemAudioActivityDetectedRef.current = true;
-        appendTranscriptEntry('Reunião', transcript, new Date());
-      };
-
-      systemStream.getVideoTracks().forEach(track => {
-        track.onended = () => {
-          stopRecording(true);
-        };
-      });
+        activeSystemStream.getVideoTracks().forEach(track => {
+          track.onended = () => {
+            stopRecording(true);
+          };
+        });
+      }
 
       setIsRecording(true);
-      showToast('Gravação e transcrição iniciadas.', 'info');
+      showToast(
+        systemStream ? 'Gravação e transcrição iniciadas.' : 'Gravação do microfone iniciada (sem áudio da reunião).',
+        'info'
+      );
     } catch (err) {
       console.error('Erro ao acessar mídias:', err);
       if (micStream) micStream.getTracks().forEach(track => track.stop());
