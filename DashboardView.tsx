@@ -69,7 +69,7 @@ const DashboardCard: React.FC<DashboardCardProps> = ({
                 fontFamily: 'Inter, sans-serif',
                 ...style
             }}
-            className={`group p-5 rounded-2xl border transition-all duration-300 flex flex-col min-h-0 shrink-0 ${
+            className={`group p-5 rounded-2xl border transition-all duration-300 flex flex-col min-h-0 h-full shrink-0 ${
                 isClickable ? 'cursor-pointer hover:border-[#861fdd]/40 hover:bg-slate-50/50 dark:hover:bg-slate-900/10' : ''
             } ${
                 isDark
@@ -1033,8 +1033,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
                 </div>
 
-                {/* 2. COLUNA DIREITA: Resumo Financeiro (320px Fixo) */}
-                <div className="w-full xl:w-[320px] shrink-0 flex flex-col gap-6">
+                {/* 2. COLUNA DIREITA: Resumo Financeiro (380px Fixo) */}
+                <div className="w-full xl:w-[380px] shrink-0 flex flex-col gap-6">
 
                     {/* CARD: Painel Financeiro */}
                     <DashboardCard
