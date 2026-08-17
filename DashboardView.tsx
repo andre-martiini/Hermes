@@ -919,6 +919,15 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
     const todayKey = useMemo(() => formatDateLocalISO(new Date()), []);
 
+    // Pedido do Andre: "Ultimo registro: 95,7 kg" nao diz se foi ontem ou mes
+    // passado -- sem a data, o numero nao tem como ser lido com confianca.
+    const formatRegisteredWhen = (dateStr: string): string => {
+        if (dateStr === todayKey) return 'hoje';
+        if (dateStr === addDays(todayKey, -1)) return 'ontem';
+        const [, m, d] = dateStr.split('-');
+        return `${d}/${m}`;
+    };
+
     const todayHealthLog = useMemo(() => {
         return exerciseLogs.find(l => l.id === todayKey) || null;
     }, [exerciseLogs, todayKey]);
@@ -1312,7 +1321,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                         </div>
                                         {weightHeadline && (
                                             <div className="text-[9px] text-slate-400 font-mono mt-0.5">
-                                                Último registro: {weightHeadline.latestRaw.toFixed(1).replace('.', ',')} kg
+                                                Último registro: {weightHeadline.latestRaw.toFixed(1).replace('.', ',')} kg · {formatRegisteredWhen(weightHeadline.latestRawDate)}
                                             </div>
                                         )}
                                     </div>
