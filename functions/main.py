@@ -836,7 +836,7 @@ def release_action_dedup_slot(db, titulo, data_limite, horario_inicio):
         pass
 
 
-def emit_notification_backend(title, message, n_type='info', link=None):
+def emit_notification_backend(title, message, n_type='info', link=None, sent_to_telegram=False):
 
     from datetime import datetime
 
@@ -861,6 +861,10 @@ def emit_notification_backend(title, message, n_type='info', link=None):
         'isRead': False,
 
         'link': link,
+
+        # True quando o caller já mandou (ou vai mandar) um Telegram próprio e melhor —
+        # evita o espelhamento genérico duplicado do on_notificacao_created.
+        'sent_to_telegram': sent_to_telegram,
 
     })
 
@@ -3179,7 +3183,11 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
         task_reminders = _normalize_task_reminders(t)
         due_reminder = next((reminder for reminder in task_reminders if not reminder.get('reminder_sent')), None)
         reminder_iso = due_reminder.get('reminder_at') if due_reminder else t.get('reminder_at')
+        reminder_note = (due_reminder.get('message') if due_reminder else '') or t.get('reminder_message') or ''
 
+        # sent_to_telegram=True: o Telegram já recebe a mensagem única e mais completa
+        # montada abaixo (_build_task_reminder_telegram_message) — sem isso,
+        # on_notificacao_created espelharia uma segunda mensagem genérica.
         emit_notification_backend(
 
             f"Lembrete: {title}",
@@ -3188,15 +3196,17 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
 
             'warning',
 
-            'acoes'
+            'acoes',
+
+            sent_to_telegram=True,
 
         )
 
-        
+
 
         owner_uid = t.get('created_by_uid')
         telegram_chat_id = _resolve_telegram_chat_id_for_uid(db, owner_uid) or _resolve_default_telegram_chat_id(db)
-        telegram_message = _build_task_reminder_telegram_message(t, reminder_iso)
+        telegram_message = _build_task_reminder_telegram_message(t, reminder_iso, reminder_note)
         if telegram_chat_id:
             _send_telegram_message_raw(db, telegram_chat_id, telegram_message)
         else:
@@ -6437,10 +6447,11 @@ def _send_telegram_message_raw_with_keyboard(db, chat_id: str | int | None, text
         return False
 
 
-def _build_task_reminder_telegram_message(task: dict, reminder_iso: str | None):
+def _build_task_reminder_telegram_message(task: dict, reminder_iso: str | None, note: str | None = None):
+    """Mensagem única de lembrete de ação para o Telegram — título, a observação que o
+    usuário escreveu ao criar o lembrete (se houver) e o horário. Propositalmente sem
+    status/descrição/plano de ação: o lembrete é um empurrão pontual, não um relatório."""
     title = (task.get('titulo') or 'Ação pendente').strip()
-    status = (task.get('status') or 'não informado').strip()
-    descricao = (task.get('descricao') or '').strip()
     reminder_label = ''
     if reminder_iso:
         try:
@@ -6449,36 +6460,14 @@ def _build_task_reminder_telegram_message(task: dict, reminder_iso: str | None):
         except Exception:
             reminder_label = str(reminder_iso)
 
-    plan_items = task.get('plano_acao') or []
-    pending_steps = []
-    for item in plan_items:
-        if not isinstance(item, dict):
-            continue
-        text = str(item.get('text') or '').strip()
-        if text and not item.get('completed'):
-            pending_steps.append(text)
-        if len(pending_steps) >= 3:
-            break
+    lines = [f"⚠️ Hermes - Lembrete: {title}"]
 
-    lines = [
-        "Lembrete de ação",
-        f"Título: {title}",
-    ]
+    note = (note or '').strip()
+    if note:
+        lines.extend(["", note])
 
-    if reminder_label:
-        lines.append(f"Agendado para: {reminder_label}")
-    lines.append(f"Status atual: {status}")
-
-    if descricao:
-        resumo = descricao if len(descricao) <= 220 else f"{descricao[:217]}..."
-        lines.append(f"Contexto: {resumo}")
-
-    if pending_steps:
-        lines.append("Próximas etapas:")
-        for idx, step in enumerate(pending_steps, start=1):
-            lines.append(f"{idx}. {step}")
-    else:
-        lines.append("Próximas etapas: revise a ação e defina o próximo passo operacional.")
+    lines.append("")
+    lines.append(f"Agendado para {reminder_label}." if reminder_label else "Está na hora de realizar esta ação agendada!")
 
     return "\n".join(lines)
 

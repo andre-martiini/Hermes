@@ -406,7 +406,7 @@ export const TaskExecutionView = ({
     setManualChatName('');
   };
 
-  const handleSaveWhatsappLinks = () => {
+  const handleSaveWhatsappLinks = async () => {
     const previousById = new Map((currentTaskData.whatsapp_vinculos || []).map(v => [v.chat_id, v]));
     const optionsById = new Map(whatsappChatOptions.map(o => [o.chat_id, o]));
     const nowIso = new Date().toISOString();
@@ -418,9 +418,35 @@ export const TaskExecutionView = ({
       return { chat_id: chatId, chat_name: opt?.chat_name || chatId, is_group: opt?.is_group || false, data_vinculo: nowIso };
     });
 
+    // Vincular sem captura ativa deixa o vínculo sem efeito prático (nenhuma mensagem
+    // chega a whatsapp_messages), então todo chat recém-vinculado que ainda não está
+    // na allowlist é ativado automaticamente aqui.
+    const newlyLinkedChatIds = Array.from(selectedWhatsappChatIds).filter(chatId => {
+      if (previousById.has(chatId)) return false;
+      return optionsById.get(chatId)?.monitored !== true;
+    });
+
     onSave(task.id, { whatsapp_vinculos: next });
     setIsWhatsappLinkModalOpen(false);
-    showToast('Vínculos de WhatsApp atualizados.', 'success');
+
+    if (newlyLinkedChatIds.length === 0) {
+      showToast('Vínculos de WhatsApp atualizados.', 'success');
+      return;
+    }
+
+    const toggleFn = httpsCallable(functions, 'toggleWhatsappChatMonitored');
+    const results = await Promise.allSettled(
+      newlyLinkedChatIds.map(chatId => toggleFn({ chat_id: chatId, monitored: true }))
+    );
+    const failures = results.filter(r => r.status === 'rejected').length;
+
+    if (failures === 0) {
+      showToast('Vínculos de WhatsApp atualizados e captura ativada.', 'success');
+    } else if (failures < newlyLinkedChatIds.length) {
+      showToast('Vínculos salvos, mas a captura não pôde ser ativada para alguns chats.', 'info');
+    } else {
+      showToast('Vínculos salvos, mas falhou ao ativar a captura automaticamente.', 'error');
+    }
   };
 
   const handleRemoveWhatsappVinculo = (chatId: string) => {
