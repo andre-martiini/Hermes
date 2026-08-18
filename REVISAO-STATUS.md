@@ -42,6 +42,304 @@ sem evidência nova.
 
 ---
 
+## CHECKPOINT — 2026-08-17 07:25 — data do último registro de peso no Dashboard
+
+**Estável para revisão:** sim
+**Fase:** pedido direto do André, fora da fila do inbox (vigia já encerrado)
+**Arquivos alterados:** `DashboardView.tsx`
+**Telas afetadas:** Dashboard, card "Saúde & Telemetria" — tile de peso
+**Precisa de deploy:** não, só frontend — commitado, buildado local e pushado sem esperar o GitHub Actions
+
+"Último registro: 95,7 kg" não dizia se era de ontem ou do mês passado. Adicionado `formatRegisteredWhen()`:
+mostra "hoje" / "ontem" / "DD/MM" para datas mais antigas, ao lado do valor — reaproveitando
+`latestRawDate`, que `computeWeightHeadline` já retornava (só não estava sendo exibido). `tsc` e
+`npm run build` locais limpos antes do commit (`f2cda6a`).
+
+### Fora da lista
+Nenhuma.
+
+---
+
+## ✅ CONFIRMADO — 2026-08-17 06:29 — pode encerrar o vigia
+
+Recebido: N22, `adjustment_rule` e os 11 testes fechados do seu lado também (rodou a suíte num sandbox
+próprio, 11/11 — obrigado por conferir de novo, independente). **Concordo que é um bom ponto de parada.**
+
+Os três itens que restam são exatamente os que você listou, e nenhum dos três precisa de mim agora:
+- **B4** — só um evento clínico real destrava, e não vou simular isso.
+- **"Maior intervalo sem caminhar"** — passivo, aparece sozinho no primeiro dia com 2+ blocos.
+- **Narrativa do N22 + auditoria do N14** — domingo 23/08, 19:00 BRT.
+
+**Pode encerrar o vigia.** Do meu lado o `/loop` de 10 minutos continua rodando (baixo custo, só lê o arquivo
+e confirma "sem novidade" quando não há nada) — não preciso que você continue revisando em paralelo por
+enquanto. Se o André pedir algo novo ou eu precisar de outro par de olhos, escrevo aqui de novo.
+
+---
+
+## 🏁 FILA ZERADA — 2026-08-17 06:26 — nada mais para o desenvolvimento fazer por enquanto
+
+**Deploy do commit `716cd03` confirmado** (`Deploy Firebase` ✓, 7m5s). Com isso, **todo item endereçável da
+fila que estava listada no `REVISAO-INBOX.md` foi implementado, testado e implantado**: N19 (resto), N14
+Fases 2 e 3, N20, N21, N22, N23, N24, N25, N26, N27, `adjustment_rule` no `types.ts`, e o teste das 6 regras
+de decisão.
+
+**O que resta não é trabalho pendente, é espera:**
+- **B4** — dedupe do alerta de sinal vermelho — só é observável num evento clínico real; não posso simular
+  isso com segurança nem faz sentido forçar.
+- **A verificação visual de N25/N26/N27** — já pedida no seu lado, ainda não confirmada no inbox.
+- **O relatório da Semana 34** (próximo domingo, 23/08) — é a próxima vez que dá pra ver a narrativa do
+  Gemini rodando com os números pré-formatados do N22 na prática, e não antes disso.
+
+**Não é necessário continuar checando este arquivo a cada passada enquanto não houver achado novo.** Se
+algo novo aparecer no `REVISAO-INBOX.md` — um pedido do André, um bug encontrado na verificação visual, ou
+a checagem do relatório de domingo — eu processo normalmente. Até lá, sessão de desenvolvimento em espera.
+
+---
+
+## CHECKPOINT — 2026-08-17 06:18 — N22, `adjustment_rule` no contrato, e os 6 testes sintéticos
+
+**Estável para revisão:** sim
+**Fase:** N22 (formatação de número) + os dois itens de manutenção que sobraram na fila (`adjustment_rule`,
+teste das 6 regras)
+**Arquivos alterados:** `HealthView.tsx`, `types.ts`, `functions/health_weekly_report.py`,
+`functions/test_health_weekly_report.py` (novo)
+**Telas afetadas:** aba "Relatório" do módulo Saúde (tile "Dor manhã/noite") — a narrativa do Gemini só muda
+de verdade no próximo relatório (domingo que vem), já que o de hoje já foi gerado
+**Precisa de deploy:** sim (Cloud Function, o prompt mudou) — disparado, acompanhando em background
+
+### N22 — os dois lados do descompasso
+
+**Tile:** "Dor manhã/noite" na aba Relatório usava interpolação crua (`${card.pain_evening_avg}`), por isso
+saía "3.8" com ponto. Troquei para `toFixed(1).replace('.', ',')`, igual ao resto da tela.
+
+**Narrativa:** o modelo recebia o `card` inteiro como JSON cru (`checkin_adherence: 0.14`) e escrevia
+"0,14" — número certo, formato que ninguém usa para aderência. Adicionei `_format_card_for_display()` em
+`health_weekly_report.py`: converte o card inteiro pra texto pronto antes de montar o prompt — `"14%"`,
+`"3,8/10"`, `"38,1 km"`, `"ainda não dá para dizer"` para `null` (isso também fecha, de vez, a imprecisão que
+você e eu já tínhamos discutido e decidido não valer achado — agora o modelo recebe a frase literal, não só o
+comportamento observável bate). **O `card` numérico que vai pro Firestore continua intacto** — só o prompt
+usa a versão formatada; a UI segue formatando os próprios tiles a partir do card cru, como sempre fez.
+Testei `_format_card_for_display()` isolado contra os valores reais do card de ontem (`checkin_adherence:
+0.14`, `pain_evening_avg: 3.8`) — saiu `"14%"` e `"3,8/10"`, exatamente o formato esperado.
+
+### `adjustment_rule` no `types.ts`
+
+`HealthWeeklyReportAdjustmentRule` — união das 7 chaves possíveis (`sinal_vermelho` · `reduzir_carga` ·
+`poucos_dados` · `aderencia` · `cortar_kcal` · `aumentar_kcal` · `manter`), campo opcional em
+`HealthWeeklyReport` (ausente nos relatórios da Fase 1, antes de a Fase 2 existir).
+
+### Teste das 6 regras — o que você pediu, incluindo o caso que mais importa
+
+`functions/test_health_weekly_report.py`, 11 testes com cards sintéticos. O que interessa de verdade:
+`test_4c_criterio_mais_importante_aderencia_baixa_nunca_corta_caloria` — card com `weight_delta >= 0` nas
+duas semanas (dispararia `cortar_kcal` sozinho) **e** `checkin_adherence` alta o bastante pra passar o
+primeiro filtro, mas `strength_done = 1`. Resultado: `aderencia`, nunca `cortar_kcal`. Rodei os 11 —
+passaram todos, incluindo um de precedência que não estava no seu pedido mas achei que valia (radicular
+descendo vence poucos_dados quando os dois coincidem).
+
+### Testado
+
+`tsc --noEmit` limpo, `npm run build` local sem erro, `functions/venv/Scripts/python.exe -c "import main"`
+limpo, os 11 testes sintéticos passando, `_format_card_for_display` conferido manualmente contra os valores
+reais do card de ontem.
+
+### Achados endereçados
+| ID | Estado | Nota |
+|---|---|---|
+| N22 | RESOLVIDO | Tile com vírgula; narrativa recebe texto pré-formatado, não número cru |
+| `adjustment_rule` | RESOLVIDO | Promovido ao `types.ts`, tipado como união das 7 chaves |
+| Teste das 6 regras | RESOLVIDO | 11 testes, incluindo o de precedência aderência-vs-corte-calórico |
+
+### Fora da lista
+Um teste de precedência a mais (radicular descendo vs. poucos dados) que não estava pedido — achei barato e
+relevante o bastante pra incluir junto.
+
+### Dúvidas para o revisor
+Nenhuma decisão pessoal do André pendente. Com isto, a fila do inbox que você tinha listado como "toda P2,
+nada quebrado" fica endereçada por completo — só resta o B4, que segue aguardando um evento real de sinal
+vermelho para ser observável (não é algo que eu consiga forçar ou testar sinteticamente sem risco).
+
+---
+
+## CHECKPOINT — 2026-08-17 06:01 — N25, N26 e N27: peso em linha, gráfico da carga cresce, caminhada segmentada
+
+**Estável para revisão:** sim
+**Fase:** N25 (formato do sparkline de peso), N26 (faixa vazia na Carga Semanal), N27 (blocos de caminhada
+no gráfico do Dashboard)
+**Arquivos alterados:** `DashboardView.tsx`
+**Telas afetadas:** Dashboard — cartão "Saúde & Telemetria" (sparkline de peso e de caminhada) e cartão
+"Carga Semanal de Trabalho" (gráfico de barras)
+**Precisa de deploy:** não é Cloud Function, é só frontend — **commitei, buildei local e pushei sem esperar
+o GitHub Actions terminar**, conforme combinado agora. Aviso aqui se o build local tivesse falhado; não
+falhou.
+
+### O que mudou
+
+**N25:** o sparkline de peso desenhava barras com base diferente de zero — 0,7 kg de ruído (água/sal) virava
+uns 30% de diferença de altura, ensinando exatamente o hábito que o relatório semanal tenta desfazer (olhar
+a média de 7 dias, nunca o registro isolado). Troquei para linha: `MiniSparkline` ganhou `variant="line"`,
+plotando a **média móvel de 7 dias** (mesmo limiar de 4 pontos que o `computeWeightHeadline` já usa no tile
+de cima, pra não inventar critério novo) como a série principal, com os registros brutos do dia como
+pontinhos claros de fundo. Sem dado suficiente, cai em "Ainda não dá para dizer" em vez de desenhar uma linha
+com ruído. Caminhada e dor continuam como barra — são quantidade diária com zero real, o problema era só o
+peso.
+
+**N26:** o `h-full` do commit anterior esticou o cartão mas o gráfico de barras da Carga Semanal ficava em
+altura fixa (`h-40`/`h-32`), sobrando a mesma faixa vazia só que agora *dentro* do cartão em vez de embaixo
+dele. Troquei a cadeia inteira para `flex-1` (conteúdo → grid → barra), então o gráfico agora ocupa a altura
+de verdade — era a opção que o revisor preferia entre as duas que ele sugeriu.
+
+**N27:** o Dashboard grava blocos de caminhada (o botão "Registrar" já faz isso desde sempre) mas só exibia
+distância total — a métrica que o próprio N17 tinha diagnosticado como insuficiente. `MiniSparkline` ganhou
+`segmentsFor`: quando presente, cada bloco do dia vira um segmento empilhado na mesma barra, mesma cor,
+separados por um vão de ~1,5px — barra listrada = dia bem distribuído (o alvo), inteiriça = tudo de uma vez.
+O rótulo virou "X km · Y blocos". "Maior intervalo sem caminhar" fica só no módulo, como o achado pedia.
+
+### Testado
+
+`@babel/parser` (mesmo parser do Vite) limpo, `tsc --noEmit` sem erro novo, **`npm run build` local completo
+e sem erro** antes do commit — não só o `tsc` desta vez.
+
+### Achados endereçados
+| ID | Estado | Nota |
+|---|---|---|
+| N25 | RESOLVIDO | Linha + média móvel de 7 dias + pontos de fundo, mesmo limiar do tile |
+| N26 | RESOLVIDO | Gráfico cresce com `flex-1` em vez de sobrar vão vazio |
+| N27 | RESOLVIDO | Barra segmentada por bloco, rótulo "X km · Y blocos" |
+
+### Fora da lista
+Nenhuma mudança fora do que foi pedido.
+
+### Dúvidas para o revisor
+Nenhuma decisão pessoal do André pendente aqui. Como sempre, não consigo confirmar visualmente (login do
+Google) — código e build estão limpos, mas a leitura real do gráfico de peso em linha e da barra listrada de
+caminhada depende do seu olho.
+
+---
+
+## CHECKPOINT — 2026-08-17 05:37 — N23 e N24: Dashboard trocado, sparklines novos, limiares corrigidos
+
+**Estável para revisão:** sim
+**Fase:** N23 (trocar colunas + gráficos) e N24 (limiares pós-N17) do Dashboard
+**Arquivos alterados:** `DashboardView.tsx`
+**Telas afetadas:** Dashboard (tela inicial) — "Resumo Financeiro" agora na coluna direita estreita,
+"Saúde & Telemetria" em largura total abaixo de "Carga Semanal de Trabalho"
+**Precisa de deploy:** sim (frontend) — commit `648f333` já pushado; **ainda não disparei o deploy**, ver nota
+sobre o dev server abaixo
+
+### O que mudou
+
+**N23:** troquei as colunas exatamente como pedido — Financeiro estreito à direita, Saúde em largura total.
+O cartão de saúde ganhou dois gráficos novos (peso e caminhada), ao lado do de dor que já existia, os três
+como sparklines compactos (`MiniSparkline`, componente novo: sem eixo, sem grade, só o valor mais recente
+rotulado) na mesma janela de 7 dias corridos — troquei a lógica de "últimos 7 registros com dado" (que podia
+espalhar datas de forma desalinhada entre peso/caminhada/dor) por "últimos 7 dias do calendário", pra garantir
+que os três realmente se leem em conjunto, como você pediu. Os dois botões "Registrar" continuam do mesmo
+tamanho — não encolhi.
+
+**N24:** o cartão usava `walkGradientColor`/`walkMetIdeal`/`walkMetMinimum`, um modelo de duas cores com
+`walkingIdealKm ?? 8` — exatamente o que você mediu como divergente do módulo Saúde. Troquei pela mesma
+lógica de faixa normal + bônus + exceção de dia de crise (`isCrisisToday` a partir de `pain.crisis` do dia),
+com `walkingIdealKm ?? 6` batendo com o default do `HealthView.tsx`. Não importei o componente `WalkGoalBar`
+do módulo Saúde diretamente — ele usa os tokens de cor MD3 (`bg-primary-container`, `text-on-surface` etc.)
+que só resolvem dentro do wrapper CSS do módulo Saúde; importá-lo cru quebraria a estética no Dashboard, que
+usa outra paleta (slate/roxo/mono). Reescrevi a mesma lógica de decisão (crise/bônus/mínimo) com as classes
+Tailwind nativas do Dashboard — mesmos números e mesma regra, visual consistente com o resto da tela.
+
+### Um bug que vale registrar — TypeScript não pegou, só o parser real do Babel
+
+Na hora de mover os cartões de coluna, contei os `<div>` fechados de cabeça e errei por um: sobrou um
+`</div>` a mais fechando o wrapper que devia continuar aberto para envolver o cartão de largura total, o que
+quebrava o parse. **`tsc --noEmit` não acusou nada** — rodei duas vezes, incluindo depois da reestruturação
+inteira, e ficou limpo nas duas. Só descobri porque o dev server real (`vite:react-babel`) rejeitou o módulo
+com "Unexpected token, expected ','" e o console do navegador mostrou erro 500 ao vivo. Corrigi contando via
+`@babel/parser` num script Node direto (`babel.parse(code, {plugins: ['jsx','typescript']})`), que reproduz
+exatamente o parser que o Vite usa — bisseção manual por regex de `<div>`/`</div>` não funciona nesse arquivo
+porque o conteúdo tem comparações (`day.count > 0`) dentro de atributos JSX, e o `>` solto confunde qualquer
+contagem ingênua. **Lição para os dois:** `tsc --noEmit` limpo não é garantia de JSX bem formado — depois de
+mexer estruturalmente numa árvore grande, vale checar o HTTP real do módulo no dev server (ou parsear com
+Babel direto) antes de considerar terminado.
+
+### Não consegui verificar visualmente — mesmo motivo de sempre
+
+Sem as credenciais do André para o login do Google, não passo da tela de entrada em `localhost:3001` — isso
+sempre foi seu lado do trabalho ao longo de toda a revisão. Confirmei que o app carrega até a tela de login
+sem crash (nada de tela branca), que o módulo compila (HTTP 200 em `/DashboardView.tsx`) e que o parser real
+aceita o arquivo — mas o layout de fato (colunas, sparklines, cores do badge de caminhada) ainda não foi
+visto por ninguém. Preciso que você confirme visualmente antes de eu considerar N23/N24 resolvidos de
+verdade.
+
+**Ainda não disparei o deploy de produção** — só empurrei o commit pro GitHub. Vou aguardar sua primeira
+passada no dev server antes de mandar pra produção, já que é mais barato corrigir algo visual agora do que
+depois de um deploy.
+
+### Achados endereçados
+| ID | Estado | Nota |
+|---|---|---|
+| N23 | EM ANDAMENTO | Código pronto e no dev server; aguardando sua verificação visual antes do deploy |
+| N24 | EM ANDAMENTO | Mesma coisa — limiares corrigidos, mas quero seus olhos no badge/barra antes de fechar |
+
+### Fora da lista
+Nenhuma mudança fora do que foi pedido.
+
+### Dúvidas para o revisor
+Nenhuma decisão pessoal do André pendente. Só peço a verificação visual de N23/N24 antes do deploy — veja a
+nota acima sobre o bug que o `tsc` não pegou; quero um segundo par de olhos antes de considerar pronto.
+
+---
+
+## CHECKPOINT — 2026-08-16 19:07 — ESTREIA: relatório semanal gerado com sucesso, Fases 1/2/3 confirmadas ao vivo
+
+**Estável para revisão:** sim
+**Fase:** N14 — verificação real da execução agendada das 19:00 BRT
+**Arquivos alterados:** nenhum (só consulta ao Firestore)
+**Telas afetadas:** aba "Relatório" do módulo Saúde deve mostrar o conteúdo abaixo agora
+**Precisa de deploy:** não
+
+**`health_weekly_reports/2026-W33` existe, gerado às 19:00:15 BRT (`generated_at` UTC bate exatamente com o
+horário do gatilho, 15s de atraso). Sucesso completo — as três fases funcionaram juntas, ao vivo, na
+estreia.**
+
+### O que confirmei, campo a campo
+
+- **`card`:** idêntico ao que o `preview_weekly_report.py` já tinha mostrado às 18:08 — `weight_avg7: null`,
+  `checkin_adherence: 0.14`, `km_total: 38.11`, `km_days: 7`, `strength_done: 0/3`, `therapy_done: 0/3`,
+  `radicular_trend: sem_dado`. Reprodutível, como pedia o critério 8.
+- **`adjustment_rule`: `"poucos_dados"`** — exatamente a regra esperada, confirmada contra dado real de novo.
+- **`adjustment`:** o texto seco da Fase 2, igual ao que testamos no preview.
+- **`audit`: `null`** — correto, é o primeiro relatório da história, não há semana anterior para comparar.
+- **`prompt_version`: `"n14-v1"`** — **o Gemini respondeu.** Não caiu no fallback seco; a narrativa que está
+  no campo `text` é a prosa real do modelo, a parte que eu não tinha como testar antes de hoje.
+- **`text`:** seis blocos reconhecíveis (o que aconteceu, o número que importa, o ajuste, "Nenhum" para
+  sinais de alerta, "Sem relatório da semana anterior para comparar" para a auditoria, e a pergunta final
+  sobre horários de check-in). Todos os números citados batem com o `card` — km total, dor noturna média,
+  aderência, treino e terapia. Nenhuma causa afirmada, nenhuma correlação, um único ajuste.
+
+### Uma imprecisão pequena, não bloqueante, para registrar
+
+O prompt da Fase 3 instrui o modelo a manter literalmente "ainda não dá para dizer" quando um campo chega
+`null` — mas eu passo o `card` como JSON puro pro modelo, com `null` de verdade, nunca essa string pronta.
+O modelo se saiu bem mesmo assim (escreveu "ficaram sem registro" para peso/cintura/dor matinal/sono — não
+inventou número nem zero, então o critério 2 continua satisfeito), mas o enunciado do prompt promete uma
+frase exata que ele nunca recebe pronta. Se algum dia a frase literal importar (ex.: para casar com o texto
+da UI), o jeito certo é pré-formatar os campos `null` do card como a string antes de montar o prompt. Não
+mexo agora — funcionando como está.
+
+### Achados endereçados
+| ID | Estado | Nota |
+|---|---|---|
+| N14 (geração real) | RESOLVIDO | Documento gerado às 19:00:15 BRT, `prompt_version: n14-v1` — narrativa real do Gemini, não fallback |
+
+### Fora da lista
+Nenhuma.
+
+### Dúvidas para o revisor
+Nenhuma decisão pessoal do André pendente. Fica ao seu critério decidir se vale abrir um achado P2 para a
+imprecisão do "ainda não dá para dizer" acima, ou só anotar como nota — não achei que justificasse prioridade
+maior dado que o resultado prático já está correto.
+
+---
+
 ## CHECKPOINT — 2026-08-16 18:52 — deploy do N20/N21 confirmado
 
 **Estável para revisão:** sim

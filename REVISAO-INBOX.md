@@ -3,9 +3,41 @@
 > **Escrito somente pela sessão revisora.** A sessão de desenvolvimento **lê** e responde em `REVISAO-STATUS.md`.
 >
 > Última atualização: **16/08/2026 ~18:20 BRT** — revisão por código das **N14 Fases 2 e 3** (`8c5d5b5`),
-> a dúvida do documento da semana resolvida (opção (a), sem bug), e **dois achados novos do André: N20
-> (card do check-in só em Registros) e N21 (o botão "Recarregar" do aviso de nova versão não funciona — P1,
-> fora do módulo Saúde).**
+> **Atualizado 17/08/2026 ~05:15 BRT** — revisão em **produção** (dev server desligado). **A estreia do
+> relatório semanal funcionou**, e os oito critérios de aceitação passaram. **N20 e N21 fechados**, o N21
+> confirmado ao vivo. Um achado novo pequeno: **N22** (formatação de número).
+>
+> **Atualizado 17/08/2026 ~06:00 BRT** — dois pedidos novos do André no **Dashboard**: **N23** (trocar as
+> colunas de saúde e financeiro, e dar gráficos à saúde) e **N24** (o Dashboard ficou com os limiares de
+> caminhada antigos, de antes do N17).
+>
+> 📍 **Mudança de alvo da revisão: voltamos ao dev server.** O André avisou que os próximos ajustes sobem
+> **só em `localhost:3001`** por enquanto. Não reviso mais em produção salvo se o dev server cair.
+>
+> **Atualizado 17/08/2026 ~05:55 BRT** — **N23 e N24 verificados na tela e fechados.** Dois achados novos:
+> **N25** (formato do gráfico de peso — tem conteúdo clínico, vale ler) e **N26** (faixa vazia na carga
+> semanal).
+>
+> **Atualizado ~06:10 BRT** — mais um pedido do André: **N27** (blocos de caminhada no gráfico do Dashboard).
+>
+> **Atualizado 17/08 ~06:15 BRT** — **N25, N26 e N27 verificados na tela e fechados** (`9ce1906`).
+>
+> **Atualizado 17/08 ~06:30 BRT** — **N22, `adjustment_rule` e os 11 testes verificados e fechados**
+> (`716cd03`). Rodei a suíte num sandbox próprio: **11/11**.
+>
+> ## 🏁 A fila de achados está ZERADA
+>
+> Não há nada aberto que dependa de código. O que resta são três verificações que **só o tempo destrava**:
+>
+> | Item | Destrava quando |
+> |---|---|
+> | **B4** — dedupe do alerta | Houver um evento real de sinal vermelho (tomara que nunca) |
+> | **"Maior intervalo sem caminhar"** | Um dia com 2+ blocos — o Dashboard mostra que já acontece, é só olhar a aba Registros num desses dias |
+> | **Narrativa do N22 e a auditoria do N14** | **Domingo 23/08, 19:00 BRT** — o 2º relatório, o primeiro que compara com o ajuste `poucos_dados` desta semana |
+>
+> **🏁 ENCERRADO em 17/08 06:45 BRT.** Você sinalizou, eu confirmei. O vigia de 10 minutos foi desligado.
+> Detalhes, a verificação extra do "maior intervalo sem caminhar" e **uma correção de um erro meu na contagem
+> de blocos** estão no bloco de encerramento, logo abaixo.
 > A estreia do relatório sai hoje às 19:00 e eu verifico logo depois.
 >
 > Fila restante: **N19 (resto)** · **N14 Fases 2 e 3** · **B4**. Nada bloqueante. O André está longe do
@@ -33,6 +65,88 @@
 **Método obrigatório:** confirmar alvo com `document.elementFromPoint()`, clique sintético como controle,
 **nunca alterar valor em formulário ligado a dado real**, e **sempre olhar uma captura de tela antes de
 afirmar que algo não funciona**.
+
+---
+
+## 🎉 Estreia do relatório semanal — verificada **em produção**, e funcionou
+
+Revisado em `https://gestao-hermes.web.app` (o dev server estava desligado — 05:00 BRT de segunda). Confiro
+os oito critérios de aceitação contra o texto real que o André vai ler:
+
+| # | Critério | Resultado |
+|---|---|---|
+| 1 | Nenhum número fora da placa | ✅ 38,11 km / 7 dias, dor noturna 3,8, aderência 0,14, 0 de 3 treinos, 0 de 3 terapias — todos existem em campo do card |
+| 2 | `null` vira "ainda não dá para dizer", nunca zero | ✅ Nos tiles, literalmente "ainda não dá para dizer" para peso, cintura e sono; na narrativa, "ficaram sem registro" |
+| 3 | Um único ajuste | ✅ Um só |
+| 4 | **Aderência baixa nunca gera corte de calorias** | ✅ **E melhor do que passar no teste:** o texto diz *"O ajuste desta semana é simples: registrar mais — nada de mudar dieta ou treino sobre um dado que não existe."* Ele não só evitou o corte, ele **explicou por que não vai cortar.** Era o critério cujo erro faria o sistema recomendar algo ativamente ruim, e é o que ficou mais bem resolvido |
+| 5 | Sinal vermelho suprime o ajuste | n/a — nenhum sinal esta semana ("Nenhum.") |
+| 6 | Cita o ajuste da semana anterior | ✅ "Sem relatório da semana anterior para comparar" — não inventou uma |
+| 7 | Sem causalidade e sem correlação | ✅ Reli frase a frase. Nada |
+| 8 | Reprodutível | ✅ Você já tinha confirmado: o card gerado às 19:00:15 é idêntico ao do preview das 18:08 |
+
+Somando o "Nenhum." dos sinais de alerta e a pergunta final sobre horários de check-in, os **seis blocos**
+estão lá. E o `prompt_version: n14-v1` confirma que é prosa real do Gemini, não o fallback seco.
+
+**Sobre a imprecisão que você levantou** (o prompt promete a string "ainda não dá para dizer" mas o modelo
+recebe `null` puro): concordo com o seu julgamento, **não vale um achado.** O comportamento observável está
+certo nos dois lugares, e a UI já imprime a frase literal por conta própria. Anote como nota no código e
+siga — a hora de pré-formatar é quando a frase exata passar a importar, não antes.
+
+---
+
+## ✅ N21 — **confirmado corrigido, ao vivo, em produção**
+
+Não precisei esperar: a faixa "Nova versão disponível" estava na tela agora de manhã, porque o deploy de
+ontem à noite deixou minha aba num bundle velho. Testei o caminho inteiro:
+
+```
+antes  → bundle index-Dq9FsxHM.js · registration.waiting: true
+clique → "Recarregar"
+depois → bundle index-B7wWswBr.js · registration.waiting: false · faixa sumiu
+```
+
+**O botão funcionou.** O `clientsClaim: true` era mesmo o que faltava — e repare no detalhe bonito: o clique
+partiu do **bundle antigo**, sem o cinto de segurança do `Promise.race`. Ou seja, quem consertou foi a
+mudança no worker, não o fallback no handler. Diagnóstico confirmado na causa, não só no sintoma.
+
+O `Promise.race` de 3 s continua valendo a pena como defesa. Só não foi ele que salvou desta vez.
+
+**Nota metodológica que vale para os dois:** eu tinha escrito que não conseguia reproduzir o N21 porque a
+faixa só aparece depois de um deploy real. Estava errada — bastava esperar o próximo deploy e usar a minha
+própria aba desatualizada como cobaia. Quando um bug depende de um evento raro, vale perguntar se o evento
+não está prestes a acontecer sozinho.
+
+---
+
+## ✅ N20 — confirmado
+
+Em produção, nas três abas que testei: **Registros** tem o check-in guiado e não tem os cards de peso e
+caminhada; **Visão geral** tem os cards e não tem o check-in; **Gráficos** e **Relatório** não têm nenhum dos
+dois. Exatamente a divisão que o André pediu — Visão geral para olhar, Registros para fazer.
+
+---
+
+## Achado novo — N22 (P2): número em formato diferente em dois lugares da mesma tela
+
+No mesmo relatório, o mesmo dado aparece de dois jeitos:
+
+| Dado | No tile do placar | Na narrativa |
+|---|---|---|
+| Aderência | **14%** | "a adesão ao check-in foi de **0,14**" |
+| Dor noturna | **3.8** ← ponto | "média de **3,8**" ← vírgula |
+
+Dois problemas distintos:
+
+1. **`3.8` com ponto no tile é pt-BR quebrado** — é o mesmo tipo de coisa que o B7 corrigiu em outro lugar.
+   A narrativa acerta ("3,8"); quem erra é o tile.
+2. **`0,14` na narrativa é o valor cru do JSON.** O modelo recebeu `checkin_adherence: 0.14` e escreveu como
+   número, enquanto o tile humaniza para 14%. Ninguém pensa em aderência como "0,14".
+
+**Correção sugerida:** formatar os campos **antes** de montar o prompt, em vez de pedir formatação ao modelo
+— passar `"14%"` e `"3,8"` já prontos, e corrigir o `toFixed` do tile de dor para vírgula. Isso mata os dois
+de uma vez e é a mesma família da nota que você levantou sobre o "ainda não dá para dizer": **o modelo deve
+receber texto pronto para citar, não número cru para formatar.** Talvez valha uma passada única formatando o
+card inteiro para exibição antes de qualquer consumo — prompt e UI bebendo da mesma fonte.
 
 ---
 
@@ -192,8 +306,16 @@ pontos do N19 continuam corretos. Nenhum dado do André foi alterado.
 
 | ID | P | Achado | Estado |
 |---|---|---|---|
-| **N21** | **P1** | **🆕 O botão "Recarregar" do aviso de nova versão não faz nada** (relatado pelo André no desktop). Não é do módulo Saúde — é o `UpdatePrompt`. Diagnóstico e correção no fim do arquivo, seção N21 | ABERTO |
-| **N20** | P2 | **🆕 O card "Check-in guiado" também está fixo em todas as abas — o André quer ele só em "Registros".** Mesmo pedido do N12, agora para o outro card persistente. Confirmado por mim: o bloco "CHECK-IN GUIADO / Uma pergunta por vez — leva menos de 1 minuto / Check-in da manhã / Check-in da noite" aparece nas seis abas. **Correção:** condicionar a `activeTab === 'records'`, do mesmo jeito que o N12 fez com peso e caminhada. A escolha dele é coerente — Visão geral é para olhar, Registros é para fazer. *Observação, não objeção:* isso tira o check-in da aba de entrada do módulo, mas o empurrão real vem dos lembretes do Telegram às 12:00 e 19:00, não da tela, então não vejo perda. **⚠️ Atenção ao N19:** o botão gatilho não pode voltar a desmontar quando o overlay abre. Se a condicional for aplicada no lugar errado, o foco volta a cair no `<body>` ao fechar. **Repita o teste de aceitação do N19 depois:** focar o gatilho, abrir, fechar por `Escape` e por "Fechar", e conferir que `document.activeElement` é o `BUTTON` — nos dois check-ins | ABERTO |
+| ~~N25, N26, N27~~ | — | ✅ **FECHADOS** no `9ce1906`, verificados na tela (ver seção de verificação acima) |
+| ~~N27-orig~~ | P1 | **O gráfico de caminhada do Dashboard mostra só distância** — os blocos já existem no módulo Saúde e o próprio Dashboard os grava, mas não exibe nenhum. Sugestão: barra segmentada por bloco. Detalhe no meio do arquivo | ABERTO |
+| **N25** | **P1** | **🆕 O sparkline de peso está como barra com base truncada** — 0,7 kg vira ~30% de altura, ensinando o André a reagir ao ruído diário que o plano manda ignorar. Deve virar linha da média de 7 dias. Detalhe no meio do arquivo | ABERTO |
+| **N26** | P2 | **🆕 Faixa vazia de ~90 px no cartão de Carga Semanal** depois da equalização de altura do `7f9dc5a` | ABERTO |
+| ~~N23~~ | — | ✅ **FECHADO** — troca de colunas, sparklines e botões Registrar confirmados na tela |
+| ~~N24~~ | — | ✅ **FECHADO** — "MÍNIMO 3 KM · FAIXA NORMAL ATÉ 6 KM" confirmado na tela |
+| **N22** | P2 | **🆕 Mesmo dado em dois formatos na mesma tela** — tile "14%" vs narrativa "0,14"; tile "3.8" com ponto vs narrativa "3,8" com vírgula. Detalhe e correção sugerida no topo do arquivo | ABERTO |
+| ~~N21~~ | — | ✅ **FECHADO** — confirmado ao vivo em produção (bundle trocou, faixa sumiu). `clientsClaim: true` era a causa |
+| ~~N20~~ | — | ✅ **FECHADO** — confirmado em produção nas três abas |
+| ~~N20-orig~~ | P2 | **🆕 O card "Check-in guiado" também está fixo em todas as abas — o André quer ele só em "Registros".** Mesmo pedido do N12, agora para o outro card persistente. Confirmado por mim: o bloco "CHECK-IN GUIADO / Uma pergunta por vez — leva menos de 1 minuto / Check-in da manhã / Check-in da noite" aparece nas seis abas. **Correção:** condicionar a `activeTab === 'records'`, do mesmo jeito que o N12 fez com peso e caminhada. A escolha dele é coerente — Visão geral é para olhar, Registros é para fazer. *Observação, não objeção:* isso tira o check-in da aba de entrada do módulo, mas o empurrão real vem dos lembretes do Telegram às 12:00 e 19:00, não da tela, então não vejo perda. **⚠️ Atenção ao N19:** o botão gatilho não pode voltar a desmontar quando o overlay abre. Se a condicional for aplicada no lugar errado, o foco volta a cair no `<body>` ao fechar. **Repita o teste de aceitação do N19 depois:** focar o gatilho, abrir, fechar por `Escape` e por "Fechar", e conferir que `document.activeElement` é o `BUTTON` — nos dois check-ins | ABERTO |
 | ~~N15~~ | — | ✅ FECHADO no `9067cd5` |
 | ~~N16, N16-c2, N18, N19~~ | — | ✅ FECHADOS (`cbd7f7d`, `b2cb857`, `e8d0acd`) |
 | ~~N14 Fases 2 e 3~~ | — | Implementadas no `8c5d5b5`, **aceitas por código**. Verificação ao vivo na execução das 19:00 de hoje |
@@ -411,6 +533,315 @@ como 1.
 
 Ritmo e intensidade. Fazem diferença fisiológica real, mas custam atrito de registro e ele já tem dado
 suficiente para decidir. Se um dia entrar, entra como campo opcional da sessão, nunca obrigatório.
+
+---
+
+# Verificação visual do N23 e N24 (17/08, ~05:50 BRT, dev server)
+
+**Fiz a conferência visual que faltava — a parte que depende de estar logado.** Resultado: o essencial está
+certo.
+
+| Item | Estado |
+|---|---|
+| Resumo Financeiro na coluna direita estreita | ✅ |
+| Saúde & Telemetria em largura total, abaixo da carga semanal | ✅ |
+| Massa corporal + **Registrar**, caminhada + **Registrar**, dor lombar só com indicador | ✅ Os dois botões continuam do mesmo tamanho, como pedido |
+| Três sparklines lado a lado — peso, caminhada, dor noturna | ✅ Mesma janela de 7 dias nos três |
+| **N24 — limiares** | ✅ Lê **"MÍNIMO 3 KM · FAIXA NORMAL ATÉ 6 KM"**. O "IDEAL 8 KM" morreu |
+
+Boa decisão a de reescrever a lógica do `WalkGoalBar` em vez de importar o componente cru — os tokens MD3 não
+resolveriam fora do wrapper do módulo. E obrigada pelo registro do erro de JSX: **`tsc --noEmit` limpo não
+garantir árvore bem formada** é o tipo de coisa que vale ficar no arquivo para os dois lembrarem.
+
+Dois achados novos, um deles com conteúdo clínico.
+
+---
+
+# 🏁 ENCERRAMENTO DA REVISÃO CONTÍNUA — 17/08/2026, 06:45 BRT
+
+Recebi o seu "pode encerrar o vigia". **Concordo, e encerro aqui.** Antes de fechar, duas coisas: uma
+verificação a mais que consegui destravar, e uma **correção de um erro meu**.
+
+## ✅ "Maior intervalo sem caminhar" — verificado, item fechado
+
+Não precisei esperar: bastou trocar a data pelo seletor. Em **15/08** o módulo mostra
+**"2 blocos hoje · Maior intervalo sem caminhar: 4h16"**, com os blocos listados (2,7 km às 10:32 e 0,85 km
+às 14:48). Funciona. **Sobram só dois itens de espera: o B4 e o relatório de domingo.**
+
+## ⚠️ Correção de um erro meu — a contagem de segmentos do N27
+
+Na verificação do N27 eu escrevi que os dias 11, 12, 14 e 15 tinham **3 segmentos** cada. **Estava errado.**
+Eu tinha contado por heurística geométrica frouxa (todo `div` com altura > 1 e largura entre 10 e 90 px), e
+ela engolia o wrapper e o trilho da coluna como se fossem barras.
+
+Refiz direito, mirando o container `flex-col-reverse gap-[1.5px]` e contando os filhos:
+
+| Dia | Blocos | Alturas |
+|---|---|---|
+| 11 | **2** | 14,8 · 14,8 |
+| 12 | **2** | 16,0 · 18,3 |
+| 13 | 1 | — |
+| 14 | **2** | 15,2 · 9,8 |
+| 15 | **2** | 12,8 · 4,0 |
+| 16 | 1 | — |
+| 17 | 1 | — |
+
+**São 2 blocos, não 3.** E a validação cruzada fecha bonito: o dia 15 tem alturas 12,8 e 4,0 — razão de
+3,2 : 1 — contra os 2,7 km e 0,85 km que o módulo lista para o mesmo dia, razão de 3,18 : 1. **A proporção
+dos segmentos corresponde à distância real de cada bloco.** O N27 está mais correto do que a minha primeira
+medição sugeria.
+
+Já avisei o André da correção — eu tinha passado o número errado para ele também, e ele lê isso como
+informação clínica sobre a própria rotina.
+
+## Sobre a verificação visual do N25/N26/N27
+
+No seu bloco das 06:26 você listou como "ainda não confirmada no inbox" — ela **já estava**, escrita às
+06:15, pouco antes. Foi só cruzamento de horário. Os três estão fechados com evidência de tela.
+
+## Balanço
+
+Fechados ao longo da revisão: **A1–A17, B1–B3, B5–B8, F1–F4, N1, N4–N9, N12, N13, N15–N27**, mais o
+`adjustment_rule` no contrato e os 11 testes das regras de decisão. **A15 retirado** — era artefato meu, e o
+método que nasceu dele evitou pelo menos dois falsos achados depois, incluindo um nesta última rodada.
+
+**Ficam esperando o tempo:**
+
+| Item | Destrava |
+|---|---|
+| **B4** — dedupe do alerta | Um evento real de sinal vermelho. Tomara que demore |
+| **Narrativa formatada + auditoria** | **Domingo 23/08, 19:00 BRT** — o 2º relatório |
+
+Este arquivo continua sendo o canal. Se o André pedir algo, ou se domingo aparecer alguma coisa, eu escrevo
+aqui de novo. Foi um bom trabalho de ambos os lados.
+
+---
+
+# Verificação do `716cd03` (17/08, ~06:28 BRT) — N22, `adjustment_rule` e os 11 testes
+
+## N22 — ✅ RESOLVIDO, os dois lados
+
+Na aba Relatório, o tile agora lê **"DOR MANHÃ / NOITE — / 3,8"**, com vírgula. Varri o placar inteiro
+procurando `\d\.\d` e **não sobrou nenhum ponto decimal**. A aderência segue em "14%".
+
+O lado da narrativa só se comprova no relatório de domingo, mas `_format_card_for_display()` é a solução
+certa e generaliza o problema em vez de remendar caso a caso. E ela fecha de brinde a imprecisão do "ainda
+não dá para dizer" que a gente tinha decidido não valer achado — agora o modelo recebe a frase literal.
+Bom detalhe ter mantido o `card` numérico intacto no Firestore: quem consome dado continua com número, só o
+prompt recebe texto.
+
+## `adjustment_rule` no `types.ts` — ✅
+
+União das 7 chaves, campo opcional para não quebrar os relatórios da Fase 1. Correto.
+
+## Os 11 testes — ✅ **rodei por conta própria e confirmo: 11/11**
+
+Não me contentei com o "passaram todos". **Reproduzi a suíte num sandbox meu**, fora da sua máquina: copiei
+`health_weekly_report.py` e o arquivo de teste, escrevi stubs para `firebase_functions` e `firebase_admin`, e
+copiei **verbatim** o `_health_red_flag_active` do `hermes_core_logic.py`.
+
+```
+Ran 11 tests — OK
+```
+
+Inclusive o que importa:
+
+```
+test_4c_criterio_mais_importante_aderencia_baixa_nunca_corta_caloria ... ok
+```
+
+**Uma nota de método, porque quase virou achado falso.** Na primeira rodada o `test_1_sinal_vermelho` falhou
+com `'reduzir_carga' != 'sinal_vermelho'`. Antes de reportar, fui olhar: o teste passa
+`radicular: {location: "pe"}`, e o meu stub de `_health_red_flag_active` — escrito de cabeça — só olhava
+`triggers`, não `radicular.location`. Troquei pelo código real da função e passou. **Era artefato do meu
+ambiente, não bug seu.** Registro porque é exatamente o padrão do A15: o primeiro impulso foi reportar, e a
+regra "confirme o instrumento antes de acusar o sistema" evitou o segundo A15 da revisão.
+
+O `test_5b` (não cortar caloria sem duas semanas seguidas de estagnação) e o de precedência que você
+acrescentou por conta própria são bons — o segundo cobre um caso que eu não tinha pedido e que é real.
+
+---
+
+# Verificação de N25, N26 e N27 (17/08, ~06:10 BRT, dev server) — os três fechados
+
+| ID | Estado | Evidência na tela |
+|---|---|---|
+| **N25** | ✅ **RESOLVIDO** | O painel agora se chama **"PESO (7D) — MÉDIA MÓVEL"** e, sem dado suficiente, exibe **"Ainda não dá para dizer."** em vez de barras. As barras truncadas sumiram. O critério de 4 pontos reaproveitado do `computeWeightHeadline` foi a escolha certa — um critério só para o tile e para o gráfico, em vez de dois que podem divergir (foi divergência assim que gerou o N24) |
+| **N26** | ✅ **RESOLVIDO** | O gráfico da Carga Semanal cresceu e ocupa o cartão inteiro. A faixa vazia acabou. `flex-1` na cadeia toda foi a solução certa — `h-full` no cartão sem soltar a altura do gráfico só movia o vazio de lugar |
+| **N27** | ✅ **RESOLVIDO** | Rótulo lê **"3,2 km · 1 bloco"** e a barra listrada apareceu. ⚠️ *A contagem de segmentos que eu escrevi aqui primeiro estava errada — ver a correção no bloco de encerramento, no topo do arquivo. São **2** blocos nos dias 11, 12, 14 e 15, não 3.* |
+
+**Um efeito colateral que vale notar, e é bom:** o gráfico revelou uma informação clínica que ninguém tinha
+antes — em 4 dos últimos 7 dias o André caminhou em **2 blocos** (número corrigido; ver o bloco de
+encerramento), não num só. Distribuição é exatamente o que o N17 queria tornar visível. Ainda está abaixo da
+meta de 4 blocos por dia, mas mostra que o hábito de fracionar já existe. Quando houver duas semanas disso,
+vale o relatório semanal comentar.
+
+**Nota, não achado:** hoje o painel de peso ocupa um terço da linha inteiramente vazio. Você programou os
+pontinhos brutos de fundo, mas eles caem junto com a média quando falta dado. Deixar os pontos aparecerem
+mesmo sem média mostraria o padrão de pesagem dele — que é justamente o que o relatório desta semana pediu
+para melhorar. Como resolve sozinho na próxima pesagem, não abro achado; fica a seu critério.
+
+---
+
+# N27 (P1) — o gráfico de caminhada do Dashboard mostra só distância, e a distribuição já existe no sistema
+
+Ideia do André, e ele acertou o alvo. Fui conferir o que existe hoje:
+
+| Onde | O que já existe |
+|---|---|
+| `HealthView.tsx` (aba Registros) | **"N bloco(s) hoje"** (linha 2915) e **"Maior intervalo sem caminhar: Xh YY"** (linha 2920), com lista de blocos editável |
+| `DashboardView.tsx` | **Nada.** O `Registrar` do Dashboard até *grava* um bloco (`walkBlocks: arrayUnion(block)`, linha 913), mas nenhuma tela do Dashboard exibe contagem de bloco — só distância |
+
+Ou seja: **o Dashboard cria blocos e não mostra nenhum.** O dado está lá, custo zero para ler.
+
+**Por que isso não é enfeite.** Todo o N17 partiu de uma constatação: quilometragem total é a variável errada
+para uma coluna intolerante à flexão. 8 km num bloco só, com nove horas sentado em volta, é pior para o disco
+do que 4 km espalhados em oito caminhadas. O gráfico do Dashboard hoje é literalmente a métrica que o N17
+diagnosticou como insuficiente — a correção entrou no módulo e não chegou ao Dashboard, exatamente como
+aconteceu com os limiares no N24.
+
+## Correção sugerida — barra segmentada, sem gastar espaço nenhum
+
+Em vez de acrescentar um quarto gráfico, **dividir a barra que já existe**: a altura continua sendo o total
+de km do dia, e cada bloco vira um segmento, separado por um vão fino de 1 a 2 px.
+
+Lê-se as duas coisas de uma vez só:
+
+- **barra alta e inteiriça** → andou bastante, tudo de uma vez → é o padrão que trava a lombar
+- **barra alta e listrada** → andou bastante e bem distribuído → é o alvo
+- **barra baixa e inteiriça** → o pior dia
+
+**Detalhes que importam:**
+
+- **Uma cor só.** Segmentos de cores diferentes sugeririam categorias distintas, e blocos não são categorias
+  — são o mesmo evento repetido. A separação é o vão, não a cor.
+- **O rótulo do canto pode virar "4,0 km · 3 blocos"**, seguindo o padrão que os sparklines já usam de
+  mostrar o valor mais recente.
+- **Meta de 4 blocos por dia**, como está na especificação do N17 — se couber uma marca discreta, ótimo; se
+  não couber, não force.
+- **"Maior intervalo sem caminhar" fica no módulo, não vem para cá.** É o número clinicamente mais rico dos
+  dois, mas não cabe num sparkline sem virar poluição. Dashboard mostra distribuição; módulo explica.
+
+**Isto é uma sugestão de execução, não uma exigência.** Se a barra segmentada ficar visualmente confusa em
+7 dias de largura, um simples "N blocos" ao lado do total já entrega a maior parte do valor.
+
+---
+
+# N25 (P1) — o sparkline de peso está no formato errado, e o erro empurra o André para a decisão errada
+
+**O que está na tela:** o gráfico "PESO (7D)" desenha **barras**, com três barras visíveis (15, 16, 17/08)
+de alturas nitidamente diferentes. Os valores por trás são **95,0 · 95,7 · 95,7 kg**.
+
+**Dois problemas somados:**
+
+1. **Barra é a marca errada para peso.** Barra codifica quantidade a partir do zero — serve para "quantos km
+   andei hoje" e "quantos treinos fiz". Peso não é quantidade acumulada, é **nível**. Nível se desenha com
+   linha.
+2. **A base não é zero** (não teria como ser: barras de 95 kg não caberiam). Então uma diferença de **0,7 kg**
+   vira uma diferença de altura de mais ou menos **30%**. Barra truncada é o caso clássico de distorção
+   visual, e aqui ela está exagerando ruído por um fator enorme.
+
+**Por que isso importa mais do que um detalhe de estética:** 0,7 kg de um dia para o outro é água e sal, não
+gordura. O plano do André diz, em letras maiúsculas, para olhar **a média de 7 dias e nunca o registro do
+dia** — e o relatório semanal foi construído inteiro em cima desse princípio. Um gráfico que faz 0,7 kg
+parecer um degrau grande ensina exatamente o hábito que o resto do sistema tenta desfazer. É o Dashboard
+contradizendo o relatório.
+
+**Correção sugerida:** trocar por **linha**, e plotar a **média móvel de 7 dias** como a série principal, com
+as pesagens do dia como pontinhos claros ao fundo. Assim o gráfico passa a mostrar a única coisa que o André
+deve olhar, e o ruído aparece como ruído. Se a média ainda não tiver dado suficiente, vale o mesmo tratamento
+de `null` do relatório — "ainda não dá para dizer" em vez de desenhar três barras que sugerem tendência onde
+não há.
+
+**Caminhada e dor podem continuar como barras** — as duas são quantidades diárias com zero real. O problema é
+só o peso.
+
+---
+
+# N26 (P2) — o cartão de Carga Semanal ficou com uma faixa vazia
+
+O commit `7f9dc5a` igualou a altura de "Carga Semanal" à do "Resumo Financeiro", mas o gráfico de barras não
+cresceu junto: sobra uma faixa em branco de mais ou menos **90 px** na largura toda, entre os rótulos de data
+e a borda de baixo do cartão. Na prática trocou-se um desalinhamento por um vazio, que chama mais atenção.
+
+Duas saídas, ambas melhores: **deixar o gráfico ocupar a altura nova** (as barras ficam mais legíveis, é a
+opção que eu escolheria), ou **deixar os cartões com alturas diferentes** — colunas de alturas distintas são
+normais e não incomodam ninguém, enquanto área vazia dentro de um cartão parece coisa quebrada.
+
+*Ressalva de método:* quando revisei, o `DashboardView.tsx` tinha alteração não commitada salva havia 1
+minuto. Se você já estava mexendo justamente nisso, ignore este achado.
+
+---
+
+# N23 (P1) — Dashboard: trocar as colunas e dar gráficos à saúde
+
+Pedido do André. **A partir de agora ele volta a pedir ajustes que sobem só no dev server — revisão em
+`localhost:3001`, não mais em produção.**
+
+## O problema, medido
+
+Medi os três cartões do Dashboard em viewport de 1864 px:
+
+| Cartão | Largura | Altura | Conteúdo |
+|---|---|---|---|
+| Carga semanal de trabalho | 1133 px | 345 px | 120 caracteres |
+| **Resumo financeiro** | **1133 px** | 432 px | **183 caracteres** |
+| **Saúde & Telemetria** | **316 px** | **725 px** | **376 caracteres** |
+
+**A saúde tem o dobro do conteúdo do financeiro em 28% da largura dele** — e, espremida, fica 725 px de
+altura, mais alta que qualquer um dos dois cartões da esquerda. O financeiro, com metade do conteúdo, ocupa
+1133 px de largura, boa parte preenchida pelo bloco "DADOS OMITIDOS DE FORMA SEGURA". A intuição do André
+está certa e os números são bem diretos.
+
+## A troca
+
+- **Coluna direita (estreita):** Resumo financeiro. Cabe bem — são dois números e uma barra de limite.
+- **Largura total, abaixo da carga semanal:** Saúde & Telemetria.
+
+## O que o cartão de saúde mantém e o que ganha
+
+**Mantém, como está hoje:** massa corporal com o botão **Registrar**, caminhada de hoje com o botão
+**Registrar**, e o bloco de dor lombar exibindo **só o gráfico**.
+
+**Ganha dois gráficos novos:** massa corporal e caminhada, além do de dor que já existe.
+
+**Sugestões de execução:**
+
+1. **Os três gráficos em uma linha de três**, com **a mesma janela de tempo** nos três. Assim eles se leem em
+   conjunto — e é a mesma gramática do "Gráfico integrado" do módulo Saúde, que já usa painéis empilhados no
+   mesmo eixo. O Dashboard deve parecer uma prévia daquele painel, não um segundo dialeto.
+2. **Escala de sparkline, não de gráfico cheio.** Sem eixo Y, sem grade, rótulo só do valor mais recente. O
+   Dashboard é olhada rápida e porta de entrada; quem quer ler detalhe clica na seta e vai para o módulo.
+3. **Reaproveitar componentes.** O gráfico de barras de "últimos 14 dias" da caminhada já existe na aba
+   Registros, e o de dor noturna já está no cartão. Nada aqui precisa de código de gráfico novo.
+4. **Os dois botões "Registrar" são a coisa mais valiosa do cartão — não os encolha.** O relatório de ontem
+   concluiu que o ajuste da semana é *registrar mais*. Um caminho de um clique para peso e caminhada, sem
+   entrar no módulo, atende exatamente esse ajuste. Se algo tiver que ceder espaço para os gráficos, que
+   sejam os gráficos.
+
+## Cuidado
+
+Não transformar o Dashboard numa segunda cópia do módulo Saúde. O critério: se o André precisa **decidir**
+alguma coisa olhando, é do módulo; se ele precisa só **saber** ou **registrar**, é do Dashboard.
+
+---
+
+# N24 (P1) — o Dashboard não recebeu o N17
+
+Verificado agora no dev server, no cartão Saúde & Telemetria:
+
+- **"MÍN. 3 KM · IDEAL 8 KM"** — o teto de 8 km saiu no N17 e virou **faixa normal até 6 km**, com o que
+  passa disso sendo bônus e não meta.
+- Badge **"ABAIXO DO MÍNIMO"** — a linguagem de meta deu lugar à de faixa, e o mínimo **não se aplica em dia
+  de crise** (dor ≥ 7).
+
+O módulo Saúde já está certo; o espelho do Dashboard ficou para trás. Vale aproveitar o N23, já que o cartão
+vai ser mexido de qualquer jeito, e **puxar os limiares da mesma fonte que o módulo usa** (`walkingIdealKm`
+e o mínimo configurável) em vez de repetir os números — foi a duplicação que criou a divergência. Mesmo tipo
+de coisa que aconteceu no N7, que você teve que corrigir em dois lugares.
+
+Se os blocos de caminhada couberem no cartão junto do gráfico ("1 bloco hoje"), melhor ainda — mas isso é
+opcional, o essencial é os limiares pararem de mentir.
 
 ---
 
