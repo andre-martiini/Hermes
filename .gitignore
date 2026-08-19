@@ -33,6 +33,10 @@ token.json.revoked-*.bak
 
 credentials.json
 
+# Payload local dos dados cadastrais pessoais (CPF/RG/bancários etc.) — nunca versionado.
+# Ver scripts/seed_dados_cadastrais.py.
+scripts/dados_cadastrais_seed.json
+
 # Firebase
 .firebase/
 

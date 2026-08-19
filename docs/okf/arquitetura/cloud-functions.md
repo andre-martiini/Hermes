@@ -75,7 +75,7 @@ O backend roda em Cloud Functions Python (gen2). Há ~80 funções exportadas em
 |---|---|---|
 | `askTaskAssistant` | Callable | Assistente com contexto de uma tarefa específica |
 | `askChatbot` | Callable | Chatbot genérico sem contexto específico |
-| `askCopilotoHermes` | Callable | Copiloto principal — memória, RAG, tool calling |
+| `askCopilotoHermes` | Callable | Copiloto principal — memória, RAG, tool calling. Exige dono verificado (`_require_internal_user`), não só `req.auth` — roda com Admin SDK, que ignora `firestore.rules` |
 | `confirmarConflitoMemoria` | Callable | Resolve conflito detectado em memória do Copiloto |
 
 ### Análises e insights
@@ -140,7 +140,7 @@ Modo estratégico do Copiloto sobre Claude (Anthropic) em vez de Gemini — mód
 
 | Função | Trigger | O que faz |
 |---|---|---|
-| `askHermesGodmode` | Callable | Loop de tool-calling com Claude (`llm_providers/claude_provider.py`). Ferramentas de leitura ampla — tarefas (`consultar_tarefas`), metas estratégicas (`consultar_metas_estrategicas`), finanças (`consultar_financas`, via `tools/telegram_extended.py`), saúde (`consultar_saude`/`consultar_relatorio_semanal_saude`, via `health_tools.py`), diário pessoal (`consultar_diario_pessoal`), agenda (`consultar_agenda`), pessoas (`buscar_contato`/`consultar_interacoes_pessoa`), WhatsApp (`buscar_conversas_whatsapp`) e conhecimento/RAG (`buscar_conhecimento`) — e escrita restrita ao módulo Estratégia (`criar_objetivo_estrategico`, `editar_objetivo_estrategico`, `gerenciar_item_estrategico`, `excluir_objetivo_estrategico`, via `strategy_tools.py`, compartilhado com `main.py`) |
+| `askHermesGodmode` | Callable | Loop de tool-calling com Claude (`llm_providers/claude_provider.py`). Ferramentas de leitura ampla — tarefas (`consultar_tarefas`), metas estratégicas (`consultar_metas_estrategicas`), finanças (`consultar_financas`, via `tools/telegram_extended.py`), saúde (`consultar_saude`/`consultar_relatorio_semanal_saude`, via `health_tools.py`), diário pessoal (`consultar_diario_pessoal`), agenda (`consultar_agenda`), pessoas (`buscar_contato`/`consultar_interacoes_pessoa`), WhatsApp (`buscar_conversas_whatsapp`), dados cadastrais pessoais (`consultar_dados_cadastrais`, via `dados_cadastrais.py` — CPF/RG/bancários/plano de saúde etc., só lidos sob demanda, nunca injetados na persona) e conhecimento/RAG (`buscar_conhecimento`) — e escrita restrita ao módulo Estratégia (`criar_objetivo_estrategico`, `editar_objetivo_estrategico`, `gerenciar_item_estrategico`, `excluir_objetivo_estrategico`, via `strategy_tools.py`, compartilhado com `main.py`) |
 
 ## `functions/ai_notification_planner.py`
 

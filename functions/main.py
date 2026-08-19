@@ -7717,7 +7717,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         for item in strategy_directives_raw
         if str(item).strip()
     ][:24] if isinstance(strategy_directives_raw, list) else []
-    user_uid = req.auth.uid if req.auth else None
+    # Só exigia `req.auth` existir (qualquer conta Firebase autenticada), enquanto o
+    # acesso direto às coleções que este callable lê/escreve é restrito ao dono
+    # verificado via firestore.rules (`internalUser()`) — como este callable roda com
+    # o Admin SDK (ignora as regras), precisa da mesma checagem explicitamente.
+    _require_internal_user(req)
+    user_uid = req.auth.uid
 
     def _copilot_remaining_sec() -> float:
         elapsed = time.monotonic() - request_start_monotonic
@@ -10077,6 +10082,26 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 print(f"[Copiloto] Erro em registrar_interacao_contato: {_re}")
                 return f"ERRO|{str(_re)}"
 
+        def consultar_dados_cadastrais(secao: str = ""):
+            """
+            Consulta os dados cadastrais pessoais completos do usuário (documentos —
+            CPF, RG, título de eleitor, PIS/PASEP, CTPS, CNH —, contato, família,
+            formação acadêmica, carreira, dados bancários, plano de saúde etc.).
+            Use quando o usuário pedir ajuda para preencher um formulário/documento
+            oficial, ou perguntar um dado cadastral específico que esqueceu.
+            Parâmetros:
+            - secao: deixe vazio na primeira chamada para ver as seções disponíveis;
+              chame de novo com o nome de uma seção (ex.: 'pessoais', 'familia',
+              'carreira') para ver o conteúdo completo dela. O objeto é grande demais
+              para retornar de uma vez.
+            """
+            try:
+                from dados_cadastrais import get_dados_cadastrais
+                return json.dumps(get_dados_cadastrais(db, user_uid, secao), ensure_ascii=False, default=str)
+            except Exception as _re:
+                print(f"[Copiloto] Erro em consultar_dados_cadastrais: {_re}")
+                return f"ERRO|{str(_re)}"
+
         # Configuração do Chat com ferramentas
         model_id = COPILOT_CHAT_MODEL
 
@@ -10534,6 +10559,25 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         _gate_reagendamento = _protocolo_ativo("reagend", "redistribu", "remarc", "mover", "mova", "lote", "horario")
         _gate_relatorios = _protocolo_ativo("relatorio", "resumo executivo", "consolidad", "sintese", "balanco")
         _gate_formularios = _protocolo_ativo("formul", "question", "enquete", "pesquisa", "survey")
+        # Dados cadastrais (CPF/RG/bancários/plano de saúde etc.) são sensíveis —
+        # a ferramenta só é declarada quando o assunto aparece na conversa, nunca
+        # como contexto sempre presente (ver docs/okf/arquitetura/schema-firestore.md).
+        _gate_dados_cadastrais = _protocolo_ativo(
+            "cadastr", "meus dados", "cpf", "meu rg", "titulo de eleitor",
+            "carteira de trabalho", "ctps", "pis/pasep", "pis pasep",
+            "dados bancarios", "conta banc", "agencia banc", "plano de saude",
+            "carteirinha", "cnh", "carteira de motorista", "certidao de nasc",
+            "certidao de casamento", "cartao do sus", "cartao sus", "lattes",
+            "orcid", "cra-es", "cra es",
+            # Contato/endereço
+            "meu endereco", "meu cep", "meu telefone", "meu celular",
+            # Família
+            "minha esposa", "meu marido", "meu conjuge", "minha familia",
+            "meu filho", "minha filha", "meus pais", "meu pai", "minha mae",
+            # Formação/carreira
+            "minha formacao", "minha graduacao", "minha faculdade",
+            "meu mestrado", "minha carreira", "meu cargo", "meu emprego",
+        )
         _gate_diagramas = _protocolo_ativo(
             "diagrama", "fluxograma", "mapa mental", "mermaid", "grafo", "gantt",
             "cronograma", "linha do tempo", "organograma", "visualiza", "timeline"
@@ -10783,6 +10827,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'preparar_vinculo_contatos': preparar_vinculo_contatos,
             'preparar_atualizacao_contato': preparar_atualizacao_contato,
             'registrar_interacao_contato': registrar_interacao_contato,
+            'consultar_dados_cadastrais': consultar_dados_cadastrais,
             'consultar_processo_sipac_copiloto': consultar_processo_sipac_copiloto,
             'incorporar_documento_especifico_sipac_no_rag_da_acao': incorporar_documento_especifico_sipac_no_rag_da_acao,
             'acompanhar_processo_sipac_copiloto': acompanhar_processo_sipac_copiloto,
@@ -10886,6 +10931,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             static_tools.append(gerar_relatorio)
         if _gate_formularios:
             static_tools.append(gerar_rascunho_formulario)
+        if _gate_dados_cadastrais:
+            static_tools.append(consultar_dados_cadastrais)
         if _gate_reagendamento:
             static_tools.append(preparar_reagendamento_em_lote)
             static_tools.append(preparar_remocao_horarios_em_lote)

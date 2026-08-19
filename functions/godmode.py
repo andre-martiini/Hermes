@@ -431,6 +431,13 @@ def _build_tools(
         except Exception as exc:
             return {"error": str(exc)}
 
+    def consultar_dados_cadastrais(secao: str = "") -> dict:
+        try:
+            from dados_cadastrais import get_dados_cadastrais
+            return get_dados_cadastrais(db, user_uid, secao)
+        except Exception as exc:
+            return {"error": str(exc)}
+
     def buscar_conhecimento(consulta: str, area_tematica: str = "", tags: list | None = None) -> dict:
         if not gemini_key:
             return {"error": "RAG indisponível: chave Gemini não configurada (necessária para embeddings)."}
@@ -472,6 +479,7 @@ def _build_tools(
         "buscar_contato": buscar_contato,
         "consultar_interacoes_pessoa": consultar_interacoes_pessoa,
         "buscar_conversas_whatsapp": buscar_conversas_whatsapp,
+        "consultar_dados_cadastrais": consultar_dados_cadastrais,
         "buscar_conhecimento": buscar_conhecimento,
     }
     if attached_drive_file_id:
@@ -739,6 +747,27 @@ def _build_tools(
                     "limite": {"type": "integer", "description": "Padrão 5."},
                 },
                 "required": ["query"],
+            },
+        },
+        {
+            "name": "consultar_dados_cadastrais",
+            "description": (
+                "Consulta os dados cadastrais pessoais completos do usuário (documentos — CPF, RG, "
+                "título de eleitor, PIS/PASEP, CTPS, CNH —, contato, família, formação acadêmica, "
+                "carreira, dados bancários, plano de saúde etc.). Use quando o usuário pedir ajuda "
+                "para preencher um formulário/documento oficial, ou perguntar um dado cadastral "
+                "específico que esqueceu. O objeto é grande demais para retornar de uma vez — chame "
+                "primeiro sem 'secao' para ver as seções disponíveis, depois de novo com a seção "
+                "desejada."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "secao": {
+                        "type": "string",
+                        "description": "Nome de uma seção retornada por uma chamada anterior sem esse parâmetro (ex.: 'pessoais', 'familia', 'carreira'). Deixe vazio para listar as seções disponíveis.",
+                    },
+                },
             },
         },
         {
