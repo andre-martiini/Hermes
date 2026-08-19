@@ -431,6 +431,13 @@ def _build_tools(
         except Exception as exc:
             return {"error": str(exc)}
 
+    def consultar_dados_cadastrais() -> dict:
+        try:
+            from dados_cadastrais import get_dados_cadastrais
+            return get_dados_cadastrais(db, user_uid)
+        except Exception as exc:
+            return {"error": str(exc)}
+
     def buscar_conhecimento(consulta: str, area_tematica: str = "", tags: list | None = None) -> dict:
         if not gemini_key:
             return {"error": "RAG indisponível: chave Gemini não configurada (necessária para embeddings)."}
@@ -472,6 +479,7 @@ def _build_tools(
         "buscar_contato": buscar_contato,
         "consultar_interacoes_pessoa": consultar_interacoes_pessoa,
         "buscar_conversas_whatsapp": buscar_conversas_whatsapp,
+        "consultar_dados_cadastrais": consultar_dados_cadastrais,
         "buscar_conhecimento": buscar_conhecimento,
     }
     if attached_drive_file_id:
@@ -740,6 +748,17 @@ def _build_tools(
                 },
                 "required": ["query"],
             },
+        },
+        {
+            "name": "consultar_dados_cadastrais",
+            "description": (
+                "Consulta os dados cadastrais pessoais completos do usuário (documentos — CPF, RG, "
+                "título de eleitor, PIS/PASEP, CTPS, CNH —, contato, família, formação acadêmica, "
+                "carreira, dados bancários, plano de saúde etc.). Use quando o usuário pedir ajuda "
+                "para preencher um formulário/documento oficial, ou perguntar um dado cadastral "
+                "específico que esqueceu."
+            ),
+            "input_schema": {"type": "object", "properties": {}},
         },
         {
             "name": "buscar_conhecimento",
