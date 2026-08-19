@@ -108,7 +108,7 @@ O backend roda em Cloud Functions Python (gen2). Há ~80 funções exportadas em
 |---|---|---|
 | `relatorio_diario_custo_gemini` | Scheduler (20h30 BRT) | Resumo diário de custo Gemini no Telegram |
 | `consolidar_memorias_copiloto` | Scheduler (4h BRT) | Consolida memórias do Copiloto |
-| `gerar_diario_pessoal` (`personal_diary.py`) | Scheduler (21h30 BRT) | Agrega ações, saúde, finanças, agenda, conversas e pessoas do dia (`tarefas`, `health_*`, `finance_transactions`, `google_calendar_events`, `sessoes_copiloto`, `interacoes_pessoas`) e usa um modelo de linguagem para redigir o diário pessoal do dia em primeira pessoa, salvo em `diario_pessoal/{data}`; entrega no Telegram com botões "✍️ Ajustar"/"👍 Ok". Flag `system/settings.personal_diary.enabled` |
+| `gerar_diario_pessoal` (`personal_diary.py`) | Scheduler (21h30 BRT) | Agrega ações, saúde, finanças, agenda, conversas (`sessoes_copiloto` e `sessoes_godmode`) e pessoas do dia (`tarefas`, `health_*`, `finance_transactions`, `google_calendar_events`, `interacoes_pessoas`) e usa um modelo de linguagem para redigir o diário pessoal do dia em primeira pessoa, salvo em `diario_pessoal/{data}`; entrega no Telegram com botões "✍️ Ajustar"/"👍 Ok". Flag `system/settings.personal_diary.enabled` |
 | `consolidar_personalidade` (`personal_diary.py`) | Scheduler (domingo 22h BRT) | Destila os diários da semana (+ ajustes pedidos pelo usuário) num perfil de personalidade em `usuarios/{uid}.ai_profile.personalidade`, versionado. Mesma flag `personal_diary.enabled` |
 
 ## `functions/knowledge_graph.py` (~9 funções)
@@ -134,6 +134,14 @@ O backend roda em Cloud Functions Python (gen2). Há ~80 funções exportadas em
 | `on_telegram_inbound` | Firestore create (`telegram_inbound/{id}`) | Processa mensagem recebida do Telegram |
 | `_handle_telegram_callback` | (interno, chamado por `telegramWebhook`) | Processa botões inline, inclusive `ai_notif:{id}:{useful\|dismiss}` (grava feedback em `scheduled_notifications`), `emlink:{id}:{ok\|on\|mut\|no}` (aplica/ignora sugestão de vínculo sinal↔ação em `email_action_suggestions`; `mut` também aplica as `mutacoes_propostas` na tarefa vinculada) e `diary_edit:{data}`/`diary_ok:{data}` (trava a sessão para capturar um ajuste ao diário pessoal do dia, ou confirma sem alteração) |
 
+## `functions/godmode.py`
+
+Modo estratégico do Copiloto sobre Claude (Anthropic) em vez de Gemini — módulo aditivo, não altera o fluxo de `askCopilotoHermes`. Sessões em `sessoes_godmode` (+ subcoleção `mensagens`), mesmo formato de `sessoes_copiloto`.
+
+| Função | Trigger | O que faz |
+|---|---|---|
+| `askHermesGodmode` | Callable | Loop de tool-calling com Claude (`llm_providers/claude_provider.py`). Ferramentas de leitura ampla — tarefas (`consultar_tarefas`), metas estratégicas (`consultar_metas_estrategicas`), finanças (`consultar_financas`, via `tools/telegram_extended.py`), saúde (`consultar_saude`/`consultar_relatorio_semanal_saude`, via `health_tools.py`), diário pessoal (`consultar_diario_pessoal`), agenda (`consultar_agenda`), pessoas (`buscar_contato`/`consultar_interacoes_pessoa`), WhatsApp (`buscar_conversas_whatsapp`) e conhecimento/RAG (`buscar_conhecimento`) — e escrita restrita ao módulo Estratégia (`criar_objetivo_estrategico`, `editar_objetivo_estrategico`, `gerenciar_item_estrategico`, `excluir_objetivo_estrategico`, via `strategy_tools.py`, compartilhado com `main.py`) |
+
 ## `functions/ai_notification_planner.py`
 
 Planejador proativo de notificações por IA — módulo aditivo, usa o mesmo provider/loop de tool-calling do Godmode (Claude), mas roda sem interação do usuário.
@@ -143,7 +151,7 @@ Planejador proativo de notificações por IA — módulo aditivo, usa o mesmo pr
 | `ai_notification_planner_daily` | Scheduler (6h30 BRT, diário) | Agente com Claude analisa tarefas ativas e metas estratégicas (`estrategia_pessoal`) e propõe, via ferramenta `propor_notificacao`, no máximo `AI_PLANNER_MAX_DAILY_NOTIFICATIONS` (padrão 3) notificações para o dia, gravadas em `scheduled_notifications` (status `pending`) |
 | `dispatch_pending_ai_notifications` | (interno, chamado por `check_and_send_reminders`) | Envia ao Telegram as notificações agendadas cujo `send_at` já chegou, com botões inline de feedback (👍 útil / 👎 dispensar), e marca `status: sent`/`failed` |
 
-Financeiro e saúde estão fora do escopo deste planejador (mesma limitação atual do Godmode — sem ferramentas de leitura calibradas para esses domínios).
+Financeiro e saúde ainda estão fora do escopo deste planejador — ele não foi migrado para os módulos `health_tools.py`/`tools/telegram_extended.py` recém-compartilhados com o Godmode (ver `functions/godmode.py` acima).
 
 ## `functions/security_portals.py`
 

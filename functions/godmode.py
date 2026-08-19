@@ -2,19 +2,26 @@
 Hermes Godmode — modo estratégico do Copiloto, rodando sobre Claude
 (Anthropic) em vez de Gemini. Módulo aditivo: não altera nada do fluxo
 existente de askCopilotoHermes; expõe seu próprio callable e seu próprio
-registro de ferramentas, todas de leitura, sobre as coleções de tarefas,
-metas estratégicas e conhecimento já usadas pelo restante do app.
+registro de ferramentas.
 
-Os módulos financeiro e de saúde estão temporariamente desvinculados do
-Godmode (em ajuste separado) — não há ferramentas nem calibração de dados
-para eles aqui.
+Escopo: leitura ampla sobre todas as superfícies do Hermes onde o usuário
+deixa rastro (tarefas, metas estratégicas, finanças, saúde, diário pessoal,
+agenda, pessoas, WhatsApp, conhecimento) — o mesmo panorama que já alimenta
+o diário pessoal diário (ver `personal_diary.py:_collect_diary_material`) —
+e escrita restrita ao módulo de Estratégia (`estrategia_pessoal`), via os
+mesmos módulos compartilhados usados pelo Copiloto padrão
+(`strategy_tools.py`, `health_tools.py`, `tools/telegram_extended.py`,
+`whatsapp_ingest.py`).
 """
 
+import json
 import os
 
 from firebase_admin import firestore
 from firebase_functions import https_fn, options
 
+import strategy_tools
+from health_tools import build_health_summary
 from llm_providers import claude_provider
 
 GODMODE_MODEL = os.environ.get("GODMODE_MODEL", "claude-fable-5")
@@ -27,10 +34,17 @@ GODMODE_PERSONA = (
     "Você é o Hermes Godmode: um conselheiro adversário, não um assistente condescendente. "
     "Sua função é auditar viabilidade e confrontar premissas do usuário com dados reais do "
     "sistema — nunca validar por educação.\n\n"
-    "Escopo atual: apenas tarefas/ações, metas estratégicas e base de conhecimento. Os módulos "
-    "financeiro e de saúde estão temporariamente fora do seu escopo — você não tem ferramentas "
-    "para consultá-los. Se a pergunta depender de dados financeiros ou de saúde, diga isso "
-    "explicitamente e não estime ou infira esses números a partir de outras fontes.\n\n"
+    "Escopo: você enxerga o panorama completo do usuário no Hermes — tarefas/ações, metas "
+    "estratégicas, finanças, saúde (telemetria diária e relatório semanal), diário pessoal, "
+    "agenda, pessoas/contatos, conversas de WhatsApp indexadas e base de conhecimento. Cruze "
+    "essas fontes: uma meta financeira parada, uma dor lombar recorrente atrapalhando a agenda, "
+    "um objetivo estratégico sem indicador com progresso real — esse tipo de conexão entre "
+    "domínios é exatamente o valor que você entrega e que uma consulta isolada não mostra.\n\n"
+    "Módulo Estratégia: além de consultar, você pode criar, editar e excluir objetivos "
+    "estratégicos e seus indicadores/marcos. Sempre apresente o que vai fazer (ou o que vai "
+    "excluir) e peça confirmação explícita do usuário antes de chamar uma ferramenta de escrita "
+    "— em especial excluir_objetivo_estrategico, que é irreversível. Todas as demais ferramentas "
+    "são somente-leitura.\n\n"
     "Regras de conduta:\n"
     "- Nunca bajule. Discorde com fundamento quando os fatos não sustentarem o pedido.\n"
     "- Toda afirmação de risco, custo ou prazo deve estar ancorada em dado concreto obtido via "
@@ -57,17 +71,20 @@ def _get_persona(db) -> str:
 
 
 def _get_user_profile_text(db, uid: str | None) -> str:
+    """Mesmo perfil completo (dados básicos + preferências + personalidade
+    destilada semanalmente do diário pessoal) lido pelo copiloto web
+    (`main.py:_format_ai_profile_for_prompt`) e pela ponte de voz
+    (`context.py:_format_user_profile`) — ver `docs/okf/arquitetura/schema-firestore.md`."""
     if not uid:
         return "(usuário não autenticado)"
+    from main import _format_ai_profile_for_prompt  # import tardio: evita import circular com main.py
+
     try:
         snap = db.collection("usuarios").document(uid).get()
         profile = (snap.to_dict() or {}).get("ai_profile") if snap.exists else {}
     except Exception:
         return "(perfil indisponível)"
-    if not profile:
-        return "(perfil ainda não configurado)"
-    lines = [f"- {key}: {profile[key]}" for key in ("nome", "cargo", "setor", "email") if profile.get(key)]
-    return "\n".join(lines) or "(perfil sem dados básicos)"
+    return _format_ai_profile_for_prompt(profile)
 
 
 _GAPPS_EXPORT_MIME = {
@@ -152,7 +169,8 @@ def _build_tools(
     attached_drive_file_id: str | None = None,
     attached_file_name: str | None = None,
 ):
-    """Registro de ferramentas somente-leitura do Godmode."""
+    """Registro de ferramentas do Godmode: leitura ampla sobre as superfícies do
+    Hermes, e escrita restrita ao módulo de Estratégia (via strategy_tools)."""
 
     def consultar_tarefas(status: str = "", area_tematica: str = "", incluir_concluidas: bool = False, limite: int = 50) -> dict:
         limite = max(1, min(int(limite or 50), 150))
@@ -200,6 +218,219 @@ def _build_tools(
             ]
         return {"metas": metas}
 
+    def criar_objetivo_estrategico(
+        objetivoMacro: str,
+        pilar: str = "carreira",
+        tipoMeta: str = "relativa_qualitativa",
+        status: str = "ativo",
+        diretrizes: list | None = None,
+        indicadores: list | None = None,
+        marcos: list | None = None,
+        metrica_valor_inicial: float | None = None,
+        metrica_valor_atual: float | None = None,
+        metrica_valor_objetivo: float | None = None,
+        metrica_unidade: str = "",
+    ) -> dict:
+        return strategy_tools.criar_objetivo_estrategico(
+            db, user_uid, objetivoMacro, pilar, tipoMeta, status,
+            diretrizes, indicadores, marcos,
+            metrica_valor_inicial, metrica_valor_atual, metrica_valor_objetivo, metrica_unidade,
+        )
+
+    def editar_objetivo_estrategico(
+        objetivo_id: str,
+        objetivoMacro: str | None = None,
+        pilar: str | None = None,
+        tipoMeta: str | None = None,
+        status: str | None = None,
+        diretrizes: list | None = None,
+        metrica_valor_inicial: float | None = None,
+        metrica_valor_atual: float | None = None,
+        metrica_valor_objetivo: float | None = None,
+        metrica_unidade: str | None = None,
+    ) -> dict:
+        return strategy_tools.editar_objetivo_estrategico(
+            db, user_uid, objetivo_id, objetivoMacro, pilar, tipoMeta, status,
+            diretrizes, metrica_valor_inicial, metrica_valor_atual, metrica_valor_objetivo, metrica_unidade,
+        )
+
+    def gerenciar_item_estrategico(
+        objetivo_id: str,
+        tipo: str,
+        acao: str,
+        descricao: str | None = None,
+        item_id: str | None = None,
+    ) -> dict:
+        return strategy_tools.gerenciar_item_estrategico(db, user_uid, objetivo_id, tipo, acao, descricao, item_id)
+
+    def excluir_objetivo_estrategico(objetivo_id: str) -> dict:
+        return strategy_tools.excluir_objetivo_estrategico(db, user_uid, objetivo_id)
+
+    def consultar_financas(mes: int | None = None, ano: int | None = None) -> dict:
+        try:
+            from tools.telegram_extended import execute as _execute_telegram_tool
+            return json.loads(_execute_telegram_tool("consultar_financas_v2", {"mes": mes, "ano": ano}, db))
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def consultar_saude(ultimos_dias: int = 7, data_especifica: str = "") -> dict:
+        try:
+            return build_health_summary(db, ultimos_dias, data_especifica or None)
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def consultar_relatorio_semanal_saude(semana: str = "") -> dict:
+        try:
+            week_id = (semana or "").strip()
+            if week_id:
+                doc = db.collection("health_weekly_reports").document(week_id).get()
+                if not doc.exists:
+                    return {"error": f"Relatório semanal '{week_id}' não encontrado."}
+                return dict(doc.to_dict() or {}, semana=week_id)
+
+            # Sem semana especificada: pega o mais recente já gerado. IDs no formato
+            # ISO 'YYYY-Www' ordenam corretamente por comparação lexicográfica (ano
+            # primeiro) — ordenar pelo nome do documento resolve direto, sem depender
+            # de caminhar semana a semana (o que devolveria "não encontrado" à toa se
+            # o scheduler tivesse ficado parado por mais de uma semana).
+            docs = list(
+                db.collection("health_weekly_reports")
+                .order_by("__name__", direction=firestore.Query.DESCENDING)
+                .limit(1)
+                .stream()
+            )
+            if not docs:
+                return {"error": "Nenhum relatório semanal de saúde foi gerado ainda."}
+            doc = docs[0]
+            return dict(doc.to_dict() or {}, semana=doc.id)
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def consultar_diario_pessoal(dias: int = 7) -> dict:
+        try:
+            from datetime import datetime as _dt, timedelta as _timedelta
+            from zoneinfo import ZoneInfo as _ZoneInfo
+
+            n = max(1, min(int(dias or 7), 30))
+            today_local = _dt.now(_ZoneInfo("America/Sao_Paulo")).date()
+            diarios = []
+            for i in range(n):
+                data_str = (today_local - _timedelta(days=i)).strftime("%Y-%m-%d")
+                doc = db.collection("diario_pessoal").document(data_str).get()
+                if not doc.exists:
+                    continue
+                d = doc.to_dict() or {}
+                if d.get("sem_material") or not d.get("texto"):
+                    continue
+                diarios.append({
+                    "data": d.get("data", data_str),
+                    "texto": d.get("texto"),
+                    "fontes": d.get("fontes"),
+                    "editado": bool(d.get("editado")),
+                })
+            return {"diarios": diarios}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def consultar_agenda(data_inicio: str, data_fim: str) -> dict:
+        # `google_calendar_events.data_inicio` é gravado cru a partir da API do Calendar
+        # (main.py, `event['start'].get('dateTime', ...)`) — offset LOCAL do evento (ex.
+        # "-03:00"), nunca normalizado para UTC, ou uma data pura em eventos de dia inteiro.
+        # Comparar essas strings direto contra data_inicio/data_fim por ordem lexicográfica
+        # é incorreto perto das bordas do intervalo (mesmo problema já corrigido para
+        # data_fim em email_action_linker.py:CALENDAR_QUERY_SLACK_MINUTES) — a query abaixo
+        # é só um pré-filtro barato com folga de 1 dia; quem decide de fato é a data local
+        # recalculada a partir do datetime normalizado.
+        try:
+            from datetime import datetime as _dt, timedelta as _timedelta
+            from zoneinfo import ZoneInfo as _ZoneInfo
+            from main import parse_iso_datetime
+
+            tz = _ZoneInfo("America/Sao_Paulo")
+            prefilter_start = (_dt.strptime(data_inicio, "%Y-%m-%d") - _timedelta(days=1)).strftime("%Y-%m-%d")
+            prefilter_end = (_dt.strptime(data_fim, "%Y-%m-%d") + _timedelta(days=1)).strftime("%Y-%m-%d") + "T23:59:59"
+
+            eventos = []
+            query = (
+                db.collection("google_calendar_events")
+                .where("data_inicio", ">=", prefilter_start)
+                .where("data_inicio", "<=", prefilter_end)
+            )
+            for d in query.stream():
+                ev = d.to_dict() or {}
+                raw_inicio = ev.get("data_inicio")
+                start_dt = parse_iso_datetime(raw_inicio)
+                if start_dt is None:
+                    continue
+                # Com horário: normaliza para o fuso local antes de extrair a data.
+                # Sem horário (dia inteiro): a própria string já é a data local.
+                data_local = start_dt.astimezone(tz).strftime("%Y-%m-%d") if start_dt.tzinfo else str(raw_inicio)[:10]
+                if not (data_inicio <= data_local <= data_fim):
+                    continue
+                eventos.append({
+                    "titulo": ev.get("titulo"),
+                    "inicio": ev.get("data_inicio"),
+                    "fim": ev.get("data_fim"),
+                    "criado_pelo_hermes": ev.get("criado_pelo_hermes"),
+                })
+            eventos.sort(key=lambda x: x.get("inicio") or "")
+            return {"eventos": eventos}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def buscar_contato(termo: str, limite: int = 5) -> dict:
+        try:
+            termo_lower = (termo or "").strip().lower()
+            if not termo_lower:
+                return {"error": "Termo de busca vazio."}
+            candidatos = []
+            for d in db.collection("perfil_pessoas").limit(500).stream():
+                pdata = d.to_dict() or {}
+                nome = (pdata.get("nome") or "").lower()
+                email = (pdata.get("email") or "").lower()
+                tags = [str(t).lower() for t in (pdata.get("tags") or [])]
+                score = 0.0
+                if nome == termo_lower or email == termo_lower:
+                    score = 1.0
+                elif termo_lower in nome:
+                    score = 0.8
+                elif termo_lower in email:
+                    score = 0.7
+                elif any(termo_lower in t for t in tags):
+                    score = 0.5
+                if score > 0:
+                    candidatos.append({
+                        "pessoa_id": d.id,
+                        "nome": pdata.get("nome", ""),
+                        "email": pdata.get("email", ""),
+                        "tags": pdata.get("tags", []),
+                        "score": score,
+                    })
+            candidatos.sort(key=lambda x: -x["score"])
+            return {"candidatos": candidatos[: max(1, int(limite or 5))]}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def consultar_interacoes_pessoa(pessoa_id: str, limite: int = 20) -> dict:
+        try:
+            if not pessoa_id:
+                return {"error": "pessoa_id é obrigatório."}
+            interacoes = [
+                dict(d.to_dict() or {}, id=d.id)
+                for d in db.collection("interacoes_pessoas").where("pessoa_id", "==", pessoa_id).limit(max(1, min(int(limite or 20), 60))).stream()
+            ]
+            interacoes.sort(key=lambda x: str(x.get("data") or ""), reverse=True)
+            return {"interacoes": interacoes}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def buscar_conversas_whatsapp(query: str, limite: int = 5) -> dict:
+        try:
+            from whatsapp_ingest import buscar_conversas_whatsapp as _buscar_whatsapp
+            return _buscar_whatsapp(db, query, limite)
+        except Exception as exc:
+            return {"error": str(exc)}
+
     def buscar_conhecimento(consulta: str, area_tematica: str = "", tags: list | None = None) -> dict:
         if not gemini_key:
             return {"error": "RAG indisponível: chave Gemini não configurada (necessária para embeddings)."}
@@ -229,6 +460,18 @@ def _build_tools(
     function_map = {
         "consultar_tarefas": consultar_tarefas,
         "consultar_metas_estrategicas": consultar_metas_estrategicas,
+        "criar_objetivo_estrategico": criar_objetivo_estrategico,
+        "editar_objetivo_estrategico": editar_objetivo_estrategico,
+        "gerenciar_item_estrategico": gerenciar_item_estrategico,
+        "excluir_objetivo_estrategico": excluir_objetivo_estrategico,
+        "consultar_financas": consultar_financas,
+        "consultar_saude": consultar_saude,
+        "consultar_relatorio_semanal_saude": consultar_relatorio_semanal_saude,
+        "consultar_diario_pessoal": consultar_diario_pessoal,
+        "consultar_agenda": consultar_agenda,
+        "buscar_contato": buscar_contato,
+        "consultar_interacoes_pessoa": consultar_interacoes_pessoa,
+        "buscar_conversas_whatsapp": buscar_conversas_whatsapp,
         "buscar_conhecimento": buscar_conhecimento,
     }
     if attached_drive_file_id:
@@ -280,6 +523,222 @@ def _build_tools(
                         "description": "Se true (padrão), oculta metas concluídas/canceladas/arquivadas.",
                     },
                 },
+            },
+        },
+        {
+            "name": "criar_objetivo_estrategico",
+            "description": (
+                "[ESCRITA] Cria um novo objetivo estratégico pessoal em estrategia_pessoal. "
+                "Use APENAS quando o usuário pedir explicitamente para criar/cadastrar um objetivo, "
+                "meta ou pilar estratégico. Apresente um rascunho ao usuário e só chame após "
+                "confirmação explícita."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "objetivoMacro": {"type": "string", "description": "Enunciado do objetivo macro (obrigatório)."},
+                    "pilar": {
+                        "type": "string",
+                        "enum": ["carreira", "financas", "saude", "intelectual", "estilo_vida"],
+                        "description": "Pilar estratégico. Padrão: carreira.",
+                    },
+                    "tipoMeta": {
+                        "type": "string",
+                        "enum": ["absoluta", "relativa_qualitativa"],
+                        "description": "'absoluta' (com métrica numérica) ou 'relativa_qualitativa'.",
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["ativo", "revisar", "concluido"],
+                        "description": "Padrão: ativo.",
+                    },
+                    "diretrizes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Diretrizes derivadas (frases que orientam a IA) — obrigatório ao menos uma.",
+                    },
+                    "indicadores": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Descrições de indicadores contínuos de sucesso.",
+                    },
+                    "marcos": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Descrições de marcos pontuais.",
+                    },
+                    "metrica_valor_inicial": {"type": "number", "description": "Só para tipoMeta 'absoluta'."},
+                    "metrica_valor_atual": {"type": "number", "description": "Só para tipoMeta 'absoluta'."},
+                    "metrica_valor_objetivo": {"type": "number", "description": "Só para tipoMeta 'absoluta'."},
+                    "metrica_unidade": {"type": "string", "description": "Só para tipoMeta 'absoluta'."},
+                },
+                "required": ["objetivoMacro", "diretrizes"],
+            },
+        },
+        {
+            "name": "editar_objetivo_estrategico",
+            "description": (
+                "[ESCRITA] Edita um objetivo estratégico existente (objetivo_id visível em "
+                "consultar_metas_estrategicas). Só passe os campos que devem mudar. Para indicadores "
+                "ou marcos individuais use gerenciar_item_estrategico. Use APENAS após confirmação do usuário."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "objetivo_id": {"type": "string", "description": "ID do objetivo (obrigatório)."},
+                    "objetivoMacro": {"type": "string"},
+                    "pilar": {"type": "string", "enum": ["carreira", "financas", "saude", "intelectual", "estilo_vida"]},
+                    "tipoMeta": {"type": "string", "enum": ["absoluta", "relativa_qualitativa"]},
+                    "status": {"type": "string", "enum": ["ativo", "revisar", "concluido"]},
+                    "diretrizes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Se fornecida, SUBSTITUI a lista completa de diretrizes.",
+                    },
+                    "metrica_valor_inicial": {"type": "number"},
+                    "metrica_valor_atual": {"type": "number"},
+                    "metrica_valor_objetivo": {"type": "number"},
+                    "metrica_unidade": {"type": "string"},
+                },
+                "required": ["objetivo_id"],
+            },
+        },
+        {
+            "name": "gerenciar_item_estrategico",
+            "description": (
+                "[ESCRITA] Gerencia um indicador ou marco dentro de um objetivo estratégico, preservando "
+                "IDs. Use APENAS após confirmação do usuário."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "objetivo_id": {"type": "string"},
+                    "tipo": {"type": "string", "enum": ["indicador", "marco"]},
+                    "acao": {
+                        "type": "string",
+                        "enum": ["adicionar", "editar", "remover", "concluir"],
+                        "description": "'adicionar' precisa de descricao; 'editar' precisa item_id+descricao; 'remover'/'concluir' precisam item_id.",
+                    },
+                    "descricao": {"type": "string"},
+                    "item_id": {"type": "string", "description": "ID do item existente (visível no snapshot da meta)."},
+                },
+                "required": ["objetivo_id", "tipo", "acao"],
+            },
+        },
+        {
+            "name": "excluir_objetivo_estrategico",
+            "description": (
+                "[ESCRITA — IRREVERSÍVEL] Exclui definitivamente um objetivo estratégico e seus "
+                "indicadores/marcos/diretrizes. Use APENAS após confirmação explícita e inequívoca do usuário."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {"objetivo_id": {"type": "string"}},
+                "required": ["objetivo_id"],
+            },
+        },
+        {
+            "name": "consultar_financas",
+            "description": (
+                "Resumo financeiro unificado do mês (rendas, contas fixas, metas financeiras, reserva de "
+                "emergência e balancete previsto/atual). Sem argumentos, usa o mês corrente."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "mes": {"type": "integer", "description": "Mês 0-11 (0=janeiro). Padrão: mês atual."},
+                    "ano": {"type": "integer", "description": "Ano (YYYY). Padrão: ano atual."},
+                },
+            },
+        },
+        {
+            "name": "consultar_saude",
+            "description": (
+                "Telemetria diária de saúde: peso, caminhada/passos (com nível frente à meta mínima/ideal), "
+                "calorias, sono e dor. Cobre um intervalo de dias ou um dia específico."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "ultimos_dias": {"type": "integer", "description": "Número de dias a consultar (padrão 7, máximo 30)."},
+                    "data_especifica": {"type": "string", "description": "YYYY-MM-DD — sobrepõe ultimos_dias."},
+                },
+            },
+        },
+        {
+            "name": "consultar_relatorio_semanal_saude",
+            "description": (
+                "Relatório semanal de saúde já computado em código (placa de resultado, regra de ajuste "
+                "decidida e auditoria do ajuste da semana anterior — o texto só redige por cima de números "
+                "já calculados, não é opinião do modelo). Sem argumento, traz a semana mais recente disponível."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "semana": {"type": "string", "description": "Formato ISO 'YYYY-Www' (ex.: '2026-W33'). Deixe vazio para a mais recente."},
+                },
+            },
+        },
+        {
+            "name": "consultar_diario_pessoal",
+            "description": (
+                "Lê o diário pessoal do usuário (texto em primeira pessoa gerado diariamente a partir de "
+                "todas as superfícies do Hermes — ações, saúde, finanças, agenda, conversas, pessoas). É a "
+                "fonte mais rica para entender o panorama e o estado recente do usuário."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "dias": {"type": "integer", "description": "Quantos dias recentes trazer (padrão 7, máximo 30)."},
+                },
+            },
+        },
+        {
+            "name": "consultar_agenda",
+            "description": "Lista eventos do Google Calendar sincronizados num intervalo de datas.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "data_inicio": {"type": "string", "description": "YYYY-MM-DD (obrigatório)."},
+                    "data_fim": {"type": "string", "description": "YYYY-MM-DD (obrigatório)."},
+                },
+                "required": ["data_inicio", "data_fim"],
+            },
+        },
+        {
+            "name": "buscar_contato",
+            "description": "Busca contatos por nome, e-mail ou tag em perfil_pessoas.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "termo": {"type": "string", "description": "Nome, e-mail ou tag a buscar."},
+                    "limite": {"type": "integer", "description": "Padrão 5."},
+                },
+                "required": ["termo"],
+            },
+        },
+        {
+            "name": "consultar_interacoes_pessoa",
+            "description": "Histórico de interações registradas com uma pessoa específica (reuniões, menções em tarefas/diário/copiloto, WhatsApp).",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "pessoa_id": {"type": "string", "description": "ID da pessoa (obtido via buscar_contato)."},
+                    "limite": {"type": "integer", "description": "Padrão 20, máximo 60."},
+                },
+                "required": ["pessoa_id"],
+            },
+        },
+        {
+            "name": "buscar_conversas_whatsapp",
+            "description": "Busca semântica nas conversas de WhatsApp indexadas (digests). Use quando a pergunta envolver algo discutido no WhatsApp.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Texto da busca."},
+                    "limite": {"type": "integer", "description": "Padrão 5."},
+                },
+                "required": ["query"],
             },
         },
         {
@@ -376,13 +835,15 @@ def askHermesGodmode(req: https_fn.CallableRequest):
     first_file_id = drive_files[0]["driveFileId"] if drive_files else None
     first_file_name = drive_files[0]["driveFileName"] if drive_files else None
 
-    user_uid = req.auth.uid if req.auth else None
+    from main import _require_internal_user  # import tardio: evita import circular com main.py
 
-    if not user_uid:
-        raise https_fn.HttpsError(
-            code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
-            message="Autenticação obrigatória para usar o Hermes Godmode.",
-        )
+    # Godmode roda com o Admin SDK, que ignora firestore.rules — sem esta checagem,
+    # bastaria qualquer conta Firebase autenticada (não o dono verificado que as
+    # regras exigem para estas coleções) para ler tarefas, finanças, saúde, diário,
+    # agenda, pessoas e WhatsApp através dele.
+    _require_internal_user(req)
+    user_uid = req.auth.uid
+
     if not prompt and not drive_files:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
