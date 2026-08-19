@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     QueryDocumentSnapshot, Timestamp, addDoc, arrayUnion, collection, doc, getDocs, limit,
-    onSnapshot, orderBy, query, serverTimestamp, startAfter, updateDoc, where, writeBatch
+    onSnapshot, orderBy, query, serverTimestamp, setDoc, startAfter, updateDoc, where, writeBatch
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { getDownloadURL, ref as storageRef } from 'firebase/storage';
@@ -136,6 +136,7 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(false);
     const [timelineError, setTimelineError] = useState<string | null>(null);
+    const [syncStatus, setSyncStatus] = useState<'pending' | 'processing' | 'done' | 'skipped' | 'error' | null>(null);
 
     // Seleção para consolidar
     const [selection, setSelection] = useState<Set<string>>(new Set());
@@ -381,6 +382,30 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
             setTimelineError(err?.message || 'Falha ao carregar mensagens.');
             setIsLoadingMessages(false);
         });
+        return () => unsubscribe();
+    }, [selectedChatId]);
+
+    // Sync sob demanda: ao abrir um chat, pede pro worker local buscar o histórico
+    // recente direto do WhatsApp Web (chat.fetchMessages) — a captura ao vivo só grava
+    // o que chega enquanto o worker está rodando, então sem isso o chat fica com buraco
+    // entre "última vez que o worker esteve de pé" e agora. Best-effort: se o worker
+    // estiver offline, o pedido fica 'pending' parado e a tela simplesmente não atualiza
+    // (a timeline em si já é ao vivo via onSnapshot, então mensagens novas aparecem
+    // assim que o worker gravar).
+    useEffect(() => {
+        setSyncStatus(null);
+        if (!selectedChatId) return;
+
+        setDoc(doc(db, 'whatsapp_sync_requests', selectedChatId), {
+            chat_id: selectedChatId,
+            status: 'pending',
+            limit: 100,
+            requested_at: serverTimestamp(),
+        }, { merge: true }).catch(() => { /* pedido é best-effort — sem permissão/offline não deve travar a tela */ });
+
+        const unsubscribe = onSnapshot(doc(db, 'whatsapp_sync_requests', selectedChatId), snap => {
+            setSyncStatus(snap.exists() ? (snap.data().status || null) : null);
+        }, () => { /* ignora — indicador de sync é cosmético */ });
         return () => unsubscribe();
     }, [selectedChatId]);
 
@@ -958,6 +983,11 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
                             <span className={`w-1.5 h-1.5 rounded-full ${selectedChat.monitored !== false ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
                             <span>{selectedChat.monitored !== false ? 'Captura Ativa' : 'Ativar Captura'}</span>
                         </button>
+                    )}
+                    {(syncStatus === 'pending' || syncStatus === 'processing') && (
+                        <span className={`text-[10px] font-bold shrink-0 ${mutedCls}`} title="Buscando mensagens recentes direto do WhatsApp Web via worker local.">
+                            ⟳ sincronizando…
+                        </span>
                     )}
                     {linkedPerson && (
                         <div className="flex items-center gap-1.5 ml-2 pl-2 border-l border-slate-200 dark:border-white/10 shrink-0">

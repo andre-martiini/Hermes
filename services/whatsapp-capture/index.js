@@ -214,35 +214,106 @@ client.on('disconnected', async (reason) => {
     }
 });
 
+async function resolveChatContext(message) {
+    let chat = null;
+    let chatId = null;
+    let isGroup = false;
+
+    try {
+        chat = await message.getChat();
+        if (chat && chat.id) {
+            chatId = chat.id._serialized;
+            isGroup = !!chat.isGroup;
+        }
+    } catch (chatErr) {
+        console.warn('[Message] Falha ao obter chat via getChat():', chatErr.message || chatErr);
+    }
+
+    // Fallback para chatId se getChat() falhar
+    if (!chatId) {
+        const rawTarget = message.fromMe ? message.to : message.from;
+        if (rawTarget) {
+            chatId = typeof rawTarget === 'object' && rawTarget._serialized ? rawTarget._serialized : String(rawTarget);
+        }
+        if (chatId) {
+            isGroup = chatId.endsWith('@g.us');
+        }
+    }
+
+    return { chat, chatId, isGroup };
+}
+
+// Grava uma mensagem em whatsapp_messages — usado tanto pela captura ao vivo
+// (handleMessage) quanto pelo backfill sob demanda (backfillChatHistory).
+async function persistMessage(message, chat, chatId, isGroup) {
+    let authorName = 'Desconhecido';
+    if (message.fromMe) {
+        authorName = 'Eu';
+    } else {
+        try {
+            const contact = await message.getContact();
+            if (contact) {
+                authorName = contact.name || contact.pushname || contact.number || 'Desconhecido';
+            }
+        } catch (contactErr) {
+            authorName = message._data?.notifyName || message.author || message.from || 'Desconhecido';
+        }
+    }
+
+    const chatTitle = chat?.name || (isGroup ? 'Grupo' : authorName);
+
+    const msgData = {
+        // ID idempotente: chat + ID nativo da mensagem — antes misturava o
+        // relógio de ingestão no ID, então qualquer redelivery (reconexão,
+        // restart) duplicava a mensagem em vez de sobrescrever.
+        id: `${chatId}_${message.id.id}`,
+        wa_message_id: message.id.id,
+        chat_id: chatId,
+        chat_name: chatTitle,
+        is_group: isGroup,
+        author_name: authorName,
+        from_me: !!message.fromMe,
+        timestamp: admin.firestore.Timestamp.fromDate(new Date(message.timestamp * 1000)),
+        message_type: message.type,
+        content: message.body || '',
+        links: (message.links || []).map((l) => (typeof l === 'string' ? l : l.link)).filter(Boolean),
+        transcription_text: null,
+        transcription_model: null,
+        ingested_at: admin.firestore.Timestamp.now(),
+    };
+
+    if (message.hasMedia) {
+        try {
+            const media = await message.downloadMedia();
+            if (media) {
+                const buffer = Buffer.from(media.data, 'base64');
+                msgData.media = { mimeType: media.mimetype, sizeBytes: buffer.length };
+                try {
+                    const ext = (media.mimetype.split('/')[1] || 'bin').split(';')[0];
+                    const storagePath = `whatsapp_media/${chatId}/${message.id.id}.${ext}`;
+                    await admin.storage().bucket().file(storagePath).save(buffer, {
+                        metadata: { contentType: media.mimetype },
+                    });
+                    msgData.media.storage_path = storagePath;
+                } catch (storageErr) {
+                    console.error(`[Media] Falha ao subir para o Storage (${message.id.id}):`, storageErr.message || storageErr);
+                }
+            }
+        } catch (mediaErr) {
+            console.error(`[Media] Falha ao baixar mídia (${message.id.id}):`, mediaErr.message || mediaErr);
+        }
+    }
+
+    await db.collection('whatsapp_messages').doc(msgData.id).set(msgData, { merge: true });
+    return msgData.id;
+}
+
 // Um único listener em `message_create` cobre mensagens recebidas E enviadas
 // (`message.fromMe`) — antes só `message` (só recebidas) era escutado, então o
 // outro lado da conversa nunca era capturado.
 async function handleMessage(message) {
     try {
-        let chat = null;
-        let chatId = null;
-        let isGroup = false;
-
-        try {
-            chat = await message.getChat();
-            if (chat && chat.id) {
-                chatId = chat.id._serialized;
-                isGroup = !!chat.isGroup;
-            }
-        } catch (chatErr) {
-            console.warn('[Message] Falha ao obter chat via getChat():', chatErr.message || chatErr);
-        }
-
-        // Fallback para chatId se getChat() falhar
-        if (!chatId) {
-            const rawTarget = message.fromMe ? message.to : message.from;
-            if (rawTarget) {
-                chatId = typeof rawTarget === 'object' && rawTarget._serialized ? rawTarget._serialized : String(rawTarget);
-            }
-            if (chatId) {
-                isGroup = chatId.endsWith('@g.us');
-            }
-        }
+        const { chat, chatId, isGroup } = await resolveChatContext(message);
 
         if (!chatId) {
             console.warn('[Message] Não foi possível determinar o chatId da mensagem:', message.id?.id);
@@ -253,72 +324,99 @@ async function handleMessage(message) {
             return;
         }
 
-        let authorName = 'Desconhecido';
-        if (message.fromMe) {
-            authorName = 'Eu';
-        } else {
-            try {
-                const contact = await message.getContact();
-                if (contact) {
-                    authorName = contact.name || contact.pushname || contact.number || 'Desconhecido';
-                }
-            } catch (contactErr) {
-                authorName = message._data?.notifyName || message.author || message.from || 'Desconhecido';
-            }
-        }
-
-        const chatTitle = chat?.name || (isGroup ? 'Grupo' : authorName);
-
-        const msgData = {
-            // ID idempotente: chat + ID nativo da mensagem — antes misturava o
-            // relógio de ingestão no ID, então qualquer redelivery (reconexão,
-            // restart) duplicava a mensagem em vez de sobrescrever.
-            id: `${chatId}_${message.id.id}`,
-            wa_message_id: message.id.id,
-            chat_id: chatId,
-            chat_name: chatTitle,
-            is_group: isGroup,
-            author_name: authorName,
-            from_me: !!message.fromMe,
-            timestamp: admin.firestore.Timestamp.fromDate(new Date(message.timestamp * 1000)),
-            message_type: message.type,
-            content: message.body || '',
-            links: (message.links || []).map((l) => (typeof l === 'string' ? l : l.link)).filter(Boolean),
-            transcription_text: null,
-            transcription_model: null,
-            ingested_at: admin.firestore.Timestamp.now(),
-        };
-
-        if (message.hasMedia) {
-            try {
-                const media = await message.downloadMedia();
-                if (media) {
-                    const buffer = Buffer.from(media.data, 'base64');
-                    msgData.media = { mimeType: media.mimetype, sizeBytes: buffer.length };
-                    try {
-                        const ext = (media.mimetype.split('/')[1] || 'bin').split(';')[0];
-                        const storagePath = `whatsapp_media/${chatId}/${message.id.id}.${ext}`;
-                        await admin.storage().bucket().file(storagePath).save(buffer, {
-                            metadata: { contentType: media.mimetype },
-                        });
-                        msgData.media.storage_path = storagePath;
-                    } catch (storageErr) {
-                        console.error(`[Media] Falha ao subir para o Storage (${message.id.id}):`, storageErr.message || storageErr);
-                    }
-                }
-            } catch (mediaErr) {
-                console.error(`[Media] Falha ao baixar mídia (${message.id.id}):`, mediaErr.message || mediaErr);
-            }
-        }
-
-        await db.collection('whatsapp_messages').doc(msgData.id).set(msgData, { merge: true });
-        console.log(`Stored message ${msgData.id} (chat=${chatId}, fromMe=${msgData.from_me}) in whatsapp_messages.`);
+        const storedId = await persistMessage(message, chat, chatId, isGroup);
+        console.log(`Stored message ${storedId} (chat=${chatId}) in whatsapp_messages.`);
     } catch (error) {
         console.error('Error handling message:', error);
     }
 }
 
 client.on('message_create', handleMessage);
+
+// --- Sync sob demanda (backfill de histórico) ---
+// A captura ao vivo (handleMessage) só grava o que chega enquanto o worker está
+// rodando — sem histórico anterior. Quando o front abre um chat, grava um pedido em
+// whatsapp_sync_requests/{chat_id}; aqui puxamos as últimas mensagens via
+// chat.fetchMessages() (API do próprio WhatsApp Web, não passa pelo listener ao
+// vivo) e completamos só o que ainda não está em whatsapp_messages — mensagens já
+// conhecidas não são regravadas, então mídia já baixada não é rebaixada a cada sync.
+const DEFAULT_SYNC_LIMIT = 100;
+const MAX_SYNC_LIMIT = 300;
+const processingSyncRequests = new Set();
+
+async function backfillChatHistory(chatId, limitCount) {
+    const chat = await client.getChatById(chatId);
+    const isGroup = !!chat.isGroup;
+    const fetched = await chat.fetchMessages({ limit: limitCount });
+
+    if (!Array.isArray(fetched) || fetched.length === 0) {
+        return { fetched: 0, stored: 0 };
+    }
+
+    const refs = fetched.map((m) => db.collection('whatsapp_messages').doc(`${chatId}_${m.id.id}`));
+    const snaps = await db.getAll(...refs);
+    const existingIds = new Set(snaps.filter((snap) => snap.exists).map((snap) => snap.id));
+
+    let stored = 0;
+    for (const message of fetched) {
+        const id = `${chatId}_${message.id.id}`;
+        if (existingIds.has(id)) continue;
+        try {
+            await persistMessage(message, chat, chatId, isGroup);
+            stored++;
+        } catch (persistErr) {
+            console.error(`[Sync] Falha ao gravar mensagem ${id} do backfill:`, persistErr.message || persistErr);
+        }
+    }
+
+    return { fetched: fetched.length, stored };
+}
+
+async function handleSyncRequest(requestId, data) {
+    if (processingSyncRequests.has(requestId)) return;
+    processingSyncRequests.add(requestId);
+
+    const ref = db.collection('whatsapp_sync_requests').doc(requestId);
+    const chatId = data.chat_id || requestId;
+    const limitCount = Math.min(Math.max(Number(data.limit) || DEFAULT_SYNC_LIMIT, 1), MAX_SYNC_LIMIT);
+
+    try {
+        if (!isClientReady) {
+            await ref.set({ status: 'error', error: 'worker_not_ready', updated_at: admin.firestore.Timestamp.now() }, { merge: true });
+            return;
+        }
+        // Mesma allowlist da captura ao vivo — não busca histórico de chat fora dela.
+        if (!allowlistLoaded || !chatsAllowlist.has(chatId)) {
+            await ref.set({ status: 'skipped', error: 'chat_not_monitored', updated_at: admin.firestore.Timestamp.now() }, { merge: true });
+            return;
+        }
+
+        await ref.set({ status: 'processing', updated_at: admin.firestore.Timestamp.now() }, { merge: true });
+        const { fetched, stored } = await backfillChatHistory(chatId, limitCount);
+        await ref.set({
+            status: 'done',
+            fetched_count: fetched,
+            stored_count: stored,
+            updated_at: admin.firestore.Timestamp.now(),
+        }, { merge: true });
+        console.log(`[Sync] Chat ${chatId}: ${stored} nova(s) mensagem(ns) de ${fetched} verificada(s).`);
+    } catch (err) {
+        console.error(`[Sync] Falha ao sincronizar chat ${chatId}:`, err.message || err);
+        await ref.set({ status: 'error', error: String(err.message || err), updated_at: admin.firestore.Timestamp.now() }, { merge: true }).catch(() => {});
+    } finally {
+        processingSyncRequests.delete(requestId);
+    }
+}
+
+db.collection('whatsapp_sync_requests')
+    .where('status', '==', 'pending')
+    .onSnapshot((snap) => {
+        snap.docChanges().forEach((change) => {
+            if (change.type === 'added' || change.type === 'modified') {
+                handleSyncRequest(change.doc.id, change.doc.data());
+            }
+        });
+    }, (err) => console.error('[Sync] Falha ao observar whatsapp_sync_requests:', err));
 
 client.initialize();
 
