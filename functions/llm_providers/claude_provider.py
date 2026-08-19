@@ -12,6 +12,23 @@ GODMODE_MAX_ROUNDS = 10
 GODMODE_MAX_TOOL_WORKERS = 8
 GODMODE_TOOL_RESULT_CHAR_LIMIT = 8000
 
+# Campos aceitos de volta pela Messages API ao reenviar um bloco do assistente no
+# histórico. O SDK anthropic é permissivo na leitura (ToolUseBlock/TextBlock têm
+# additionalProperties=True) e pode incluir campos novos só de resposta (ex.:
+# "caller", "toolset_name") que a própria API rejeita como input com 400 "Extra
+# inputs are not permitted" — por isso NÃO dá pra reenviar block.model_dump() cru.
+_TOOL_USE_ALLOWED_KEYS = {"type", "id", "name", "input"}
+_TEXT_ALLOWED_KEYS = {"type", "text"}
+
+
+def _serialize_block_for_request(block) -> dict:
+    dumped = block.model_dump()
+    if block.type == "tool_use":
+        return {k: v for k, v in dumped.items() if k in _TOOL_USE_ALLOWED_KEYS}
+    if block.type == "text":
+        return {k: v for k, v in dumped.items() if k in _TEXT_ALLOWED_KEYS}
+    return dumped
+
 
 def _is_model_unavailable_error(exc: Exception) -> bool:
     """Detecta um modelo indisponível (ex: rollout parcial) sem depender do
@@ -85,7 +102,7 @@ def run_tool_loop(
             usage_totals["input_tokens"] += getattr(usage, "input_tokens", 0) or 0
             usage_totals["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
 
-        assistant_content = [block.model_dump() for block in response.content]
+        assistant_content = [_serialize_block_for_request(block) for block in response.content]
         messages.append({"role": "assistant", "content": assistant_content})
 
         text_blocks = [block.text for block in response.content if block.type == "text"]
