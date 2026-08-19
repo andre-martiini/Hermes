@@ -431,10 +431,10 @@ def _build_tools(
         except Exception as exc:
             return {"error": str(exc)}
 
-    def consultar_dados_cadastrais() -> dict:
+    def consultar_dados_cadastrais(secao: str = "") -> dict:
         try:
             from dados_cadastrais import get_dados_cadastrais
-            return get_dados_cadastrais(db, user_uid)
+            return get_dados_cadastrais(db, user_uid, secao)
         except Exception as exc:
             return {"error": str(exc)}
 
@@ -756,9 +756,19 @@ def _build_tools(
                 "título de eleitor, PIS/PASEP, CTPS, CNH —, contato, família, formação acadêmica, "
                 "carreira, dados bancários, plano de saúde etc.). Use quando o usuário pedir ajuda "
                 "para preencher um formulário/documento oficial, ou perguntar um dado cadastral "
-                "específico que esqueceu."
+                "específico que esqueceu. O objeto é grande demais para retornar de uma vez — chame "
+                "primeiro sem 'secao' para ver as seções disponíveis, depois de novo com a seção "
+                "desejada."
             ),
-            "input_schema": {"type": "object", "properties": {}},
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "secao": {
+                        "type": "string",
+                        "description": "Nome de uma seção retornada por uma chamada anterior sem esse parâmetro (ex.: 'pessoais', 'familia', 'carreira'). Deixe vazio para listar as seções disponíveis.",
+                    },
+                },
+            },
         },
         {
             "name": "buscar_conhecimento",

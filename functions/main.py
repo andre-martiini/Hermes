@@ -10082,17 +10082,22 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 print(f"[Copiloto] Erro em registrar_interacao_contato: {_re}")
                 return f"ERRO|{str(_re)}"
 
-        def consultar_dados_cadastrais():
+        def consultar_dados_cadastrais(secao: str = ""):
             """
             Consulta os dados cadastrais pessoais completos do usuário (documentos —
             CPF, RG, título de eleitor, PIS/PASEP, CTPS, CNH —, contato, família,
             formação acadêmica, carreira, dados bancários, plano de saúde etc.).
             Use quando o usuário pedir ajuda para preencher um formulário/documento
             oficial, ou perguntar um dado cadastral específico que esqueceu.
+            Parâmetros:
+            - secao: deixe vazio na primeira chamada para ver as seções disponíveis;
+              chame de novo com o nome de uma seção (ex.: 'pessoais', 'familia',
+              'carreira') para ver o conteúdo completo dela. O objeto é grande demais
+              para retornar de uma vez.
             """
             try:
                 from dados_cadastrais import get_dados_cadastrais
-                return json.dumps(get_dados_cadastrais(db, user_uid), ensure_ascii=False, default=str)
+                return json.dumps(get_dados_cadastrais(db, user_uid, secao), ensure_ascii=False, default=str)
             except Exception as _re:
                 print(f"[Copiloto] Erro em consultar_dados_cadastrais: {_re}")
                 return f"ERRO|{str(_re)}"
@@ -10558,11 +10563,20 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         # a ferramenta só é declarada quando o assunto aparece na conversa, nunca
         # como contexto sempre presente (ver docs/okf/arquitetura/schema-firestore.md).
         _gate_dados_cadastrais = _protocolo_ativo(
-            "cadastr", "cpf", "meu rg", "titulo de eleitor", "carteira de trabalho",
-            "ctps", "pis/pasep", "pis pasep", "dados bancarios", "conta banc",
-            "agencia banc", "plano de saude", "carteirinha", "cnh",
-            "carteira de motorista", "certidao de nasc", "certidao de casamento",
-            "cartao do sus", "cartao sus", "lattes", "orcid",
+            "cadastr", "meus dados", "cpf", "meu rg", "titulo de eleitor",
+            "carteira de trabalho", "ctps", "pis/pasep", "pis pasep",
+            "dados bancarios", "conta banc", "agencia banc", "plano de saude",
+            "carteirinha", "cnh", "carteira de motorista", "certidao de nasc",
+            "certidao de casamento", "cartao do sus", "cartao sus", "lattes",
+            "orcid", "cra-es", "cra es",
+            # Contato/endereço
+            "meu endereco", "meu cep", "meu telefone", "meu celular",
+            # Família
+            "minha esposa", "meu marido", "meu conjuge", "minha familia",
+            "meu filho", "minha filha", "meus pais", "meu pai", "minha mae",
+            # Formação/carreira
+            "minha formacao", "minha graduacao", "minha faculdade",
+            "meu mestrado", "minha carreira", "meu cargo", "meu emprego",
         )
         _gate_diagramas = _protocolo_ativo(
             "diagrama", "fluxograma", "mapa mental", "mermaid", "grafo", "gantt",

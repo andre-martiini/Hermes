@@ -67,10 +67,18 @@ def main():
     db = init_db()
     uid = args.uid or resolve_uid(db)
 
-    db.collection('usuarios').document(uid).set({
-        'dados_cadastrais': payload,
-        'dados_cadastrais_atualizado_em': datetime.now(timezone.utc).isoformat(),
-    }, merge=True)
+    # merge=True faria um merge RECURSIVO: um campo removido do payload (ex.: uma
+    # conta bancária encerrada) sobreviveria como resíduo obsoleto dentro de
+    # dados_cadastrais em vez de sumir. merge=[<field paths>] substitui cada campo
+    # listado por inteiro (sem mesclar o conteúdo aninhado dele), preservando ao
+    # mesmo tempo os demais campos do documento (ex.: ai_profile).
+    db.collection('usuarios').document(uid).set(
+        {
+            'dados_cadastrais': payload,
+            'dados_cadastrais_atualizado_em': datetime.now(timezone.utc).isoformat(),
+        },
+        merge=['dados_cadastrais', 'dados_cadastrais_atualizado_em'],
+    )
 
     secoes = ', '.join(sorted(payload.keys()))
     print(f"Gravado: usuarios/{uid}.dados_cadastrais ({len(payload)} seção(ões): {secoes})")
