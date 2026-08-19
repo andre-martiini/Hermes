@@ -281,25 +281,28 @@ def _build_tools(
 
     def consultar_relatorio_semanal_saude(semana: str = "") -> dict:
         try:
-            from health_weekly_report import iso_week_key
-            from datetime import datetime as _dt, timedelta as _timedelta
-            from zoneinfo import ZoneInfo as _ZoneInfo
-
             week_id = (semana or "").strip()
-            if not week_id:
-                today_local = _dt.now(_ZoneInfo("America/Sao_Paulo"))
-                # Domingo mais recente (o relatório roda domingo 19h) — se ainda não
-                # gerado, recua uma semana para não devolver "não existe" à toa.
-                sunday = today_local - _timedelta(days=(today_local.weekday() + 1) % 7)
-                week_id = iso_week_key(sunday.strftime("%Y-%m-%d"))
+            if week_id:
                 doc = db.collection("health_weekly_reports").document(week_id).get()
                 if not doc.exists:
-                    prev_sunday = sunday - _timedelta(days=7)
-                    week_id = iso_week_key(prev_sunday.strftime("%Y-%m-%d"))
-            doc = db.collection("health_weekly_reports").document(week_id).get()
-            if not doc.exists:
-                return {"error": f"Relatório semanal '{week_id}' não encontrado."}
-            return dict(doc.to_dict() or {}, semana=week_id)
+                    return {"error": f"Relatório semanal '{week_id}' não encontrado."}
+                return dict(doc.to_dict() or {}, semana=week_id)
+
+            # Sem semana especificada: pega o mais recente já gerado. IDs no formato
+            # ISO 'YYYY-Www' ordenam corretamente por comparação lexicográfica (ano
+            # primeiro) — ordenar pelo nome do documento resolve direto, sem depender
+            # de caminhar semana a semana (o que devolveria "não encontrado" à toa se
+            # o scheduler tivesse ficado parado por mais de uma semana).
+            docs = list(
+                db.collection("health_weekly_reports")
+                .order_by("__name__", direction=firestore.Query.DESCENDING)
+                .limit(1)
+                .stream()
+            )
+            if not docs:
+                return {"error": "Nenhum relatório semanal de saúde foi gerado ainda."}
+            doc = docs[0]
+            return dict(doc.to_dict() or {}, semana=doc.id)
         except Exception as exc:
             return {"error": str(exc)}
 
@@ -832,13 +835,15 @@ def askHermesGodmode(req: https_fn.CallableRequest):
     first_file_id = drive_files[0]["driveFileId"] if drive_files else None
     first_file_name = drive_files[0]["driveFileName"] if drive_files else None
 
-    user_uid = req.auth.uid if req.auth else None
+    from main import _require_internal_user  # import tardio: evita import circular com main.py
 
-    if not user_uid:
-        raise https_fn.HttpsError(
-            code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
-            message="Autenticação obrigatória para usar o Hermes Godmode.",
-        )
+    # Godmode roda com o Admin SDK, que ignora firestore.rules — sem esta checagem,
+    # bastaria qualquer conta Firebase autenticada (não o dono verificado que as
+    # regras exigem para estas coleções) para ler tarefas, finanças, saúde, diário,
+    # agenda, pessoas e WhatsApp através dele.
+    _require_internal_user(req)
+    user_uid = req.auth.uid
+
     if not prompt and not drive_files:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
