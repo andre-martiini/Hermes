@@ -11806,14 +11806,15 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
 
 class _CopilotJobAuth:
-    def __init__(self, uid: str | None):
+    def __init__(self, uid: str | None, token: dict | None = None):
         self.uid = uid
+        self.token = token or {}
 
 
 class _CopilotJobRequest:
-    def __init__(self, data: dict, uid: str | None):
+    def __init__(self, data: dict, uid: str | None, token: dict | None = None):
         self.data = data
-        self.auth = _CopilotJobAuth(uid) if uid else None
+        self.auth = _CopilotJobAuth(uid, token) if uid else None
 
 
 @firestore_fn.on_document_created(
@@ -11866,7 +11867,24 @@ def on_copilot_job_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
         }, merge=True)
         _set_session_status("Processando em segundo plano...")
 
-        req = _CopilotJobRequest(payload, user_uid)
+        # askCopilotoHermes exige req.auth.token (claims decodificadas do ID token)
+        # para a checagem _require_internal_user — como este job não tem um ID
+        # token de verdade para decodificar (nunca houve requisição HTTP), buscamos
+        # o e-mail/email_verified reais no Admin SDK para reconstituir as mesmas
+        # claims que um token decodificado teria.
+        copilot_job_token = {}
+        if user_uid:
+            try:
+                from firebase_admin import auth as _firebase_auth
+                _user_record = _firebase_auth.get_user(user_uid)
+                copilot_job_token = {
+                    "email": _user_record.email,
+                    "email_verified": bool(_user_record.email_verified),
+                }
+            except Exception as _auth_lookup_err:
+                print(f"[CopilotJob] Falha ao resolver claims do usuário {user_uid}: {_auth_lookup_err}")
+
+        req = _CopilotJobRequest(payload, user_uid, copilot_job_token)
         # askCopilotoHermes é decorada com @https_fn.on_call, que empilha DUAS
         # camadas preservadas por functools.wraps: o wrapper de CORS (flask_cors,
         # camada externa) e o on_call_wrapped (que chama _on_call_handler e acessa
