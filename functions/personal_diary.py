@@ -160,49 +160,55 @@ def _collect_diary_material(db, date_str: str) -> dict:
             material["feedback_ia"].append({"title": d.get("title"), "feedback": d.get("feedback")})
 
     # Conversas com o copiloto: sessões tocadas no dia, em qualquer superfície
-    # (web global/drawer/task view, voz, Telegram) — lastMessageAt é Timestamp nativo.
+    # (web global/drawer/task view, voz, Telegram, Godmode) — lastMessageAt é
+    # Timestamp nativo em ambas as coleções de sessão.
     start_utc, end_utc = _day_bounds(date_str)
-    try:
-        sessions = list(
-            db.collection("sessoes_copiloto")
-            .where("lastMessageAt", ">=", start_utc)
-            .where("lastMessageAt", "<", end_utc)
-            .limit(30)
-            .stream()
-        )
-    except Exception as exc:
-        print(f"[Diario] Falha ao consultar sessoes_copiloto em {date_str}: {exc}")
-        sessions = []
 
-    for sess_doc in sessions:
-        sess_data = sess_doc.to_dict() or {}
-        # source por mensagem só é gravado hoje em web/drawer/voz/telegram; sessões antigas ou
-        # turnos do backend (askCopilotoHermes) caem para o canal da sessão como aproximação.
-        canal = sess_data.get("channel") or sess_data.get("copilotScope") or "web"
+    def _collect_sessions(collection_name: str, canal_padrao: str) -> None:
         try:
-            msgs = list(
-                sess_doc.reference.collection("mensagens")
-                .where("timestamp", ">=", start_utc)
-                .where("timestamp", "<", end_utc)
-                .order_by("timestamp")
-                .limit(40)
+            sessions = list(
+                db.collection(collection_name)
+                .where("lastMessageAt", ">=", start_utc)
+                .where("lastMessageAt", "<", end_utc)
+                .limit(30)
                 .stream()
             )
         except Exception as exc:
-            print(f"[Diario] Falha ao ler mensagens da sessão {sess_doc.id}: {exc}")
-            continue
+            print(f"[Diario] Falha ao consultar {collection_name} em {date_str}: {exc}")
+            return
 
-        trechos = []
-        for m in msgs:
-            m_data = m.to_dict() or {}
-            if m_data.get("subtype") == "proactive_insight":
+        for sess_doc in sessions:
+            sess_data = sess_doc.to_dict() or {}
+            # source por mensagem só é gravado hoje em web/drawer/voz/telegram; sessões antigas ou
+            # turnos do backend (askCopilotoHermes/askHermesGodmode) caem para o canal padrão.
+            canal = sess_data.get("channel") or sess_data.get("copilotScope") or canal_padrao
+            try:
+                msgs = list(
+                    sess_doc.reference.collection("mensagens")
+                    .where("timestamp", ">=", start_utc)
+                    .where("timestamp", "<", end_utc)
+                    .order_by("timestamp")
+                    .limit(40)
+                    .stream()
+                )
+            except Exception as exc:
+                print(f"[Diario] Falha ao ler mensagens da sessão {sess_doc.id}: {exc}")
                 continue
-            content = str(m_data.get("content") or "").strip()
-            if not content:
-                continue
-            trechos.append(f"{m_data.get('role') or '?'}: {content[:280]}")
-        if trechos:
-            material["conversas"].append({"canal": m_data.get("source") or canal, "trechos": trechos[:20]})
+
+            trechos = []
+            for m in msgs:
+                m_data = m.to_dict() or {}
+                if m_data.get("subtype") == "proactive_insight":
+                    continue
+                content = str(m_data.get("content") or "").strip()
+                if not content:
+                    continue
+                trechos.append(f"{m_data.get('role') or '?'}: {content[:280]}")
+            if trechos:
+                material["conversas"].append({"canal": m_data.get("source") or canal, "trechos": trechos[:20]})
+
+    _collect_sessions("sessoes_copiloto", "web")
+    _collect_sessions("sessoes_godmode", "godmode")
 
     return material
 

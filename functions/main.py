@@ -9083,76 +9083,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             - data_especifica: data no formato YYYY-MM-DD para consulta de um dia específico (sobrepõe ultimos_dias)
             """
             try:
-                import json
-                from datetime import date, timedelta
-                today = date.today()
-                if data_especifica:
-                    start_date = data_especifica
-                    end_date = data_especifica
-                else:
-                    n = min(int(ultimos_dias or 7), 30)
-                    start_date = (today - timedelta(days=n - 1)).isoformat()
-                    end_date = today.isoformat()
-
-                # Metas de caminhada do novo nivelamento (mínimo/ideal em km),
-                # com os mesmos padrões da UI (3 km / 8 km).
-                try:
-                    walk_settings = db.collection('health_settings').document('config').get().to_dict() or {}
-                except Exception:
-                    walk_settings = {}
-                walking_minimum_km = float(walk_settings.get('walkingMinimumKm') or 3)
-                walking_ideal_km = float(walk_settings.get('walkingIdealKm') or 8)
-
-                logs = []
-                for d in db.collection('health_exercise_logs').stream():
-                    if start_date <= d.id <= end_date:
-                        entry = d.to_dict() or {}
-                        # Paradigma atual: blocos de caminhada registrados no
-                        # Hermes (web/Telegram). O campo `walk` é legado (Google Fit).
-                        walk_blocks = [b for b in (entry.get("walkBlocks") or []) if isinstance(b, dict)]
-                        walk_km = sum(float(b.get("distance") or 0) for b in walk_blocks)
-                        if walk_km >= walking_ideal_km:
-                            walk_level = "meta_ideal_atingida"
-                        elif walk_km >= walking_minimum_km:
-                            walk_level = "minimo_atingido"
-                        else:
-                            walk_level = "abaixo_do_minimo"
-                        logs.append({
-                            "data": d.id,
-                            "caminhada_km": round(walk_km, 2),
-                            "caminhada_blocos": walk_blocks,
-                            "caminhada_nivel": walk_level,
-                            "walk_legado_google_fit": entry.get("walk"),
-                            "calories": entry.get("calories"),
-                            "activeMinutes": entry.get("activeMinutes"),
-                            "heartRate": entry.get("heartRate"),
-                            "sleep": entry.get("sleep"),
-                            "pain": entry.get("pain"),
-                        })
-                logs.sort(key=lambda x: x['data'], reverse=True)
-
-                weight_start = (today - timedelta(days=30)).isoformat()
-                weights = []
-                for d in db.collection('health_weights').stream():
-                    w = d.to_dict() or {}
-                    if w.get('date', '') >= weight_start:
-                        weights.append(w)
-                weights.sort(key=lambda x: x.get('date', ''), reverse=True)
-
-                result = {
-                    "periodo": {"inicio": start_date, "fim": end_date},
-                    "metas_caminhada": {
-                        "minimo_km": walking_minimum_km,
-                        "ideal_km": walking_ideal_km,
-                        "paradigma": (
-                            "Abaixo do mínimo não pontua; do mínimo ao ideal o nível "
-                            "progride continuamente; acima do ideal é lucro."
-                        ),
-                    },
-                    "telemetria_diaria": logs,
-                    "pesos_recentes": weights[:5],
-                }
-                return json.dumps(result, ensure_ascii=False, default=str)
+                from health_tools import build_health_summary
+                return json.dumps(build_health_summary(db, ultimos_dias, data_especifica), ensure_ascii=False, default=str)
             except Exception as e:
                 return f"Erro ao consultar dados de saúde: {e}"
 
@@ -10711,27 +10643,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         # ─── FERRAMENTAS DO MÓDULO ESTRATÉGIA (CRUD) ─────────────────────────────
         # Só são declaradas quando copilot_mode == 'estrategia' (ver static_tools).
         # Operam exclusivamente sobre a coleção estrategia_pessoal do usuário atual.
-        _ESTRATEGIA_PILARES = {'carreira', 'financas', 'saude', 'intelectual', 'estilo_vida'}
-        _ESTRATEGIA_STATUS = {'ativo', 'concluido', 'revisar'}
-        _ESTRATEGIA_TIPOS = {'absoluta', 'relativa_qualitativa'}
-
-        def _novo_id_estrategia(prefixo: str) -> str:
-            import uuid as _uuid
-            return f"{prefixo}-{int(time.time() * 1000)}-{str(_uuid.uuid4())[:6]}"
-
-        def _carregar_objetivo_estrategico(objetivo_id: str):
-            """Carrega um objetivo garantindo posse pelo usuário atual. Retorna (ref, data) ou (None, None).
-            Fail-closed: exige usuário autenticado e que o userId do documento bata exatamente."""
-            if not user_uid or not objetivo_id:
-                return None, None
-            ref = db.collection('estrategia_pessoal').document(str(objetivo_id))
-            snap = ref.get()
-            if not snap.exists:
-                return None, None
-            data = snap.to_dict() or {}
-            if data.get('userId') != user_uid:
-                return None, None
-            return ref, data
+        # Implementação em strategy_tools.py — compartilhada com o Godmode (godmode.py).
+        import strategy_tools as _strategy_tools
 
         def criar_objetivo_estrategico(
             objetivoMacro: str,
@@ -10761,65 +10674,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Apresente um rascunho ao usuário e só chame após confirmação explícita.
             """
             try:
-                if not user_uid:
-                    return json.dumps({"status": "error", "reason": "auth_required"}, ensure_ascii=False)
-                titulo = (objetivoMacro or "").strip()
-                if not titulo:
-                    return json.dumps({"status": "error", "reason": "objetivoMacro_obrigatorio"}, ensure_ascii=False)
-                pilar_norm = (pilar or "carreira").strip().lower()
-                if pilar_norm not in _ESTRATEGIA_PILARES:
-                    pilar_norm = "carreira"
-                tipo_norm = (tipoMeta or "relativa_qualitativa").strip().lower()
-                if tipo_norm not in _ESTRATEGIA_TIPOS:
-                    tipo_norm = "relativa_qualitativa"
-                status_norm = (status or "ativo").strip().lower()
-                if status_norm not in _ESTRATEGIA_STATUS:
-                    status_norm = "ativo"
-
-                diretrizes_clean = [str(d).strip() for d in (diretrizes or []) if str(d).strip()]
-                if not diretrizes_clean:
-                    return json.dumps({"status": "error", "reason": "diretrizes_obrigatorias"}, ensure_ascii=False)
-
-                indicadores_obj = [
-                    {"id": _novo_id_estrategia("indicador"), "descricao": str(d).strip(), "concluido": False, "registros": []}
-                    for d in (indicadores or []) if str(d).strip()
-                ]
-                marcos_obj = [
-                    {"id": _novo_id_estrategia("marco"), "descricao": str(d).strip(), "concluido": False, "registros": []}
-                    for d in (marcos or []) if str(d).strip()
-                ]
-
-                payload = {
-                    "userId": user_uid,
-                    "pilar": pilar_norm,
-                    "objetivoMacro": titulo,
-                    "tipoMeta": tipo_norm,
-                    "indicadoresSucesso": indicadores_obj,
-                    "marcos": marcos_obj,
-                    "diretrizesDerivadas": diretrizes_clean,
-                    "status": status_norm,
-                    "timestamp": firestore.SERVER_TIMESTAMP,
-                }
-
-                if tipo_norm == "absoluta":
-                    val_obj = float(metrica_valor_objetivo or 0)
-                    val_atual = float(metrica_valor_atual or 0)
-                    val_ini = float(metrica_valor_inicial) if metrica_valor_inicial is not None else (val_atual if val_obj < val_atual else 0)
-                    payload["metricaAlvo"] = {
-                        "valorInicial": val_ini,
-                        "valorAtual": val_atual,
-                        "valorObjetivo": val_obj,
-                        "unidade": str(metrica_unidade or "").strip(),
-                    }
-
-                ref = db.collection('estrategia_pessoal').document()
-                ref.set(payload)
-                return json.dumps({
-                    "status": "created",
-                    "objetivo_id": ref.id,
-                    "objetivoMacro": titulo,
-                    "pilar": pilar_norm,
-                }, ensure_ascii=False)
+                resultado = _strategy_tools.criar_objetivo_estrategico(
+                    db, user_uid, objetivoMacro, pilar, tipoMeta, status,
+                    diretrizes, indicadores, marcos,
+                    metrica_valor_inicial, metrica_valor_atual, metrica_valor_objetivo, metrica_unidade,
+                )
+                return json.dumps(resultado, ensure_ascii=False)
             except Exception as e:
                 return json.dumps({"status": "error", "reason": str(e)}, ensure_ascii=False)
 
@@ -10843,59 +10703,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Use APENAS após confirmação do usuário.
             """
             try:
-                ref, data = _carregar_objetivo_estrategico(objetivo_id)
-                if not ref:
-                    return json.dumps({"status": "error", "reason": "objetivo_nao_encontrado"}, ensure_ascii=False)
-
-                updates = {}
-                if objetivoMacro is not None and str(objetivoMacro).strip():
-                    updates["objetivoMacro"] = str(objetivoMacro).strip()
-                if pilar is not None:
-                    p = str(pilar).strip().lower()
-                    if p in _ESTRATEGIA_PILARES:
-                        updates["pilar"] = p
-                if status is not None:
-                    s = str(status).strip().lower()
-                    if s in _ESTRATEGIA_STATUS:
-                        updates["status"] = s
-                if tipoMeta is not None:
-                    tm = str(tipoMeta).strip().lower()
-                    if tm in _ESTRATEGIA_TIPOS:
-                        updates["tipoMeta"] = tm
-                if diretrizes is not None:
-                    dz = [str(d).strip() for d in (diretrizes or []) if str(d).strip()]
-                    if not dz:
-                        return json.dumps({"status": "error", "reason": "diretrizes_nao_podem_ficar_vazias"}, ensure_ascii=False)
-                    updates["diretrizesDerivadas"] = dz
-
-                # Métrica: só aplica se o objetivo é/torna-se absoluto
-                tipo_final = updates.get("tipoMeta", data.get("tipoMeta"))
-                if tipo_final == "absoluta" and any(v is not None for v in [metrica_valor_inicial, metrica_valor_atual, metrica_valor_objetivo, metrica_unidade]):
-                    metrica = dict(data.get("metricaAlvo") or {})
-                    if metrica_valor_inicial is not None:
-                        metrica["valorInicial"] = float(metrica_valor_inicial)
-                    if metrica_valor_atual is not None:
-                        metrica["valorAtual"] = float(metrica_valor_atual)
-                    if metrica_valor_objetivo is not None:
-                        metrica["valorObjetivo"] = float(metrica_valor_objetivo)
-                    if metrica_unidade is not None:
-                        metrica["unidade"] = str(metrica_unidade).strip()
-                    metrica.setdefault("valorInicial", 0)
-                    metrica.setdefault("valorAtual", 0)
-                    metrica.setdefault("valorObjetivo", 0)
-                    metrica.setdefault("unidade", "")
-                    updates["metricaAlvo"] = metrica
-
-                if not updates:
-                    return json.dumps({"status": "noop", "reason": "nenhum_campo_alterado"}, ensure_ascii=False)
-
-                updates["timestamp"] = firestore.SERVER_TIMESTAMP
-                ref.update(updates)
-                return json.dumps({
-                    "status": "updated",
-                    "objetivo_id": ref.id,
-                    "campos_alterados": [k for k in updates.keys() if k != "timestamp"],
-                }, ensure_ascii=False)
+                resultado = _strategy_tools.editar_objetivo_estrategico(
+                    db, user_uid, objetivo_id, objetivoMacro, pilar, tipoMeta, status,
+                    diretrizes, metrica_valor_inicial, metrica_valor_atual, metrica_valor_objetivo, metrica_unidade,
+                )
+                return json.dumps(resultado, ensure_ascii=False)
             except Exception as e:
                 return json.dumps({"status": "error", "reason": str(e)}, ensure_ascii=False)
 
@@ -10914,80 +10726,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Use APENAS após confirmação do usuário.
             """
             try:
-                if not user_uid or not objetivo_id:
-                    return json.dumps({"status": "error", "reason": "objetivo_nao_encontrado"}, ensure_ascii=False)
-                tipo_norm = (tipo or "").strip().lower()
-                if tipo_norm not in {"indicador", "marco"}:
-                    return json.dumps({"status": "error", "reason": "tipo_invalido"}, ensure_ascii=False)
-                acao_norm = (acao or "").strip().lower()
-                if acao_norm not in {"adicionar", "editar", "remover", "concluir"}:
-                    return json.dumps({"status": "error", "reason": "acao_invalida"}, ensure_ascii=False)
-                campo = "indicadoresSucesso" if tipo_norm == "indicador" else "marcos"
-                ref = db.collection('estrategia_pessoal').document(str(objetivo_id))
-
-                from datetime import datetime as _dt, timezone as _tz
-
-                # Transação: indispensável porque o loop de tool-calling pode disparar
-                # várias chamadas gerenciar_item_estrategico em paralelo sobre o mesmo
-                # objetivo. Ler/recompor/gravar o array inteiro fora de transação faria
-                # o último writer sobrescrever silenciosamente os demais. A transação
-                # relê dentro do escopo e o Firestore reexecuta sob contenção.
-                @firestore.transactional
-                def _aplicar(transaction):
-                    snap = ref.get(transaction=transaction)
-                    if not snap.exists:
-                        return {"status": "error", "reason": "objetivo_nao_encontrado"}
-                    data = snap.to_dict() or {}
-                    if data.get('userId') != user_uid:
-                        return {"status": "error", "reason": "objetivo_nao_encontrado"}
-
-                    lista = []
-                    for item in (data.get(campo) or []):
-                        if isinstance(item, str):
-                            lista.append({"id": _novo_id_estrategia(tipo_norm), "descricao": item, "concluido": False, "registros": []})
-                        else:
-                            lista.append({
-                                "id": item.get("id") or _novo_id_estrategia(tipo_norm),
-                                "descricao": item.get("descricao", ""),
-                                "concluido": bool(item.get("concluido")),
-                                "registros": item.get("registros", []),
-                                **({"dataConclusao": item["dataConclusao"]} if item.get("dataConclusao") else {}),
-                                **({"evidencia": item["evidencia"]} if item.get("evidencia") else {}),
-                            })
-
-                    if acao_norm == "adicionar":
-                        if not (descricao or "").strip():
-                            return {"status": "error", "reason": "descricao_obrigatoria"}
-                        novo = {"id": _novo_id_estrategia(tipo_norm), "descricao": descricao.strip(), "concluido": False, "registros": []}
-                        lista.append(novo)
-                        resultado_id = novo["id"]
-                    else:  # editar | remover | concluir
-                        if not item_id:
-                            return {"status": "error", "reason": "item_id_obrigatorio"}
-                        alvo = next((it for it in lista if it["id"] == item_id), None)
-                        if not alvo:
-                            return {"status": "error", "reason": "item_nao_encontrado"}
-                        if acao_norm == "editar":
-                            if not (descricao or "").strip():
-                                return {"status": "error", "reason": "descricao_obrigatoria"}
-                            alvo["descricao"] = descricao.strip()
-                        elif acao_norm == "remover":
-                            lista = [it for it in lista if it["id"] != item_id]
-                        elif acao_norm == "concluir":
-                            alvo["concluido"] = True
-                            alvo["dataConclusao"] = _dt.now(_tz.utc).isoformat()
-                        resultado_id = item_id
-
-                    transaction.update(ref, {campo: lista, "timestamp": firestore.SERVER_TIMESTAMP})
-                    return {
-                        "status": "ok",
-                        "objetivo_id": ref.id,
-                        "tipo": tipo_norm,
-                        "acao": acao_norm,
-                        "item_id": resultado_id,
-                    }
-
-                resultado = _aplicar(db.transaction())
+                resultado = _strategy_tools.gerenciar_item_estrategico(db, user_uid, objetivo_id, tipo, acao, descricao, item_id)
                 return json.dumps(resultado, ensure_ascii=False)
             except Exception as e:
                 return json.dumps({"status": "error", "reason": str(e)}, ensure_ascii=False)
@@ -10998,12 +10737,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Operação irreversível. Use APENAS após confirmação explícita e inequívoca do usuário.
             """
             try:
-                ref, data = _carregar_objetivo_estrategico(objetivo_id)
-                if not ref:
-                    return json.dumps({"status": "error", "reason": "objetivo_nao_encontrado"}, ensure_ascii=False)
-                titulo = data.get("objetivoMacro", "")
-                ref.delete()
-                return json.dumps({"status": "deleted", "objetivo_id": objetivo_id, "objetivoMacro": titulo}, ensure_ascii=False)
+                resultado = _strategy_tools.excluir_objetivo_estrategico(db, user_uid, objetivo_id)
+                return json.dumps(resultado, ensure_ascii=False)
             except Exception as e:
                 return json.dumps({"status": "error", "reason": str(e)}, ensure_ascii=False)
 
