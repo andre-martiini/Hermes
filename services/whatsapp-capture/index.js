@@ -42,7 +42,10 @@ const db = admin.firestore();
 const FieldValue = admin.firestore.FieldValue;
 
 const client = new Client({
-    authStrategy: new LocalAuth({ dataPath: AUTH_DIR, rmMaxRetries: 8 })
+    authStrategy: new LocalAuth({ dataPath: AUTH_DIR, rmMaxRetries: 8 }),
+    // Mídias grandes estouravam o protocolTimeout padrão (180s) do puppeteer no
+    // downloadMedia ("Runtime.callFunctionOn timed out") — visto em produção.
+    puppeteer: { protocolTimeout: 300000 },
 });
 
 let isClientReady = false;
@@ -211,6 +214,9 @@ client.on('ready', async () => {
     // Recuperação retroativa: o que chegou com o worker desligado não passa pelo
     // message_create; ao ficar pronto, completamos o buraco a partir do histórico.
     setTimeout(recoverMissedMessages, RECOVERY_READY_DELAY_MS);
+    setTimeout(() => {
+        repairMissingMedia().catch((e) => console.error('[MediaRepair] Falha na varredura pós-ready:', e));
+    }, MEDIA_REPAIR_READY_DELAY_MS);
 });
 
 client.on('auth_failure', async (msg) => {
@@ -272,6 +278,49 @@ async function resolveChatContext(message) {
     return { chat, chatId, isGroup };
 }
 
+// Baixa a mídia de uma mensagem e sobe para o Storage, com retry no upload —
+// falha transitória de rede/DNS (ENOTFOUND www.googleapis.com, visto em produção
+// em 21/08 custando 5 mídias) não pode custar o arquivo, pois a mensagem só é
+// capturada uma vez. Retorna { mimeType, sizeBytes, storage_path? } ou null se
+// o download falhar.
+const STORAGE_UPLOAD_ATTEMPTS = 3;
+
+async function captureMedia(message, chatId) {
+    let media = null;
+    try {
+        media = await message.downloadMedia();
+    } catch (mediaErr) {
+        console.error(`[Media] Falha ao baixar mídia (${message.id.id}):`, mediaErr.message || mediaErr);
+        return null;
+    }
+    if (!media || !media.data) {
+        return null;
+    }
+    const buffer = Buffer.from(media.data, 'base64');
+    // mimetype pode vir undefined — sem o fallback, o undefined quebrava o
+    // upload no split() E invalidava o documento inteiro no Firestore ("Cannot
+    // use undefined as a Firestore value"), perdendo a mensagem por completo.
+    const mimeType = media.mimetype || 'application/octet-stream';
+    const result = { mimeType, sizeBytes: buffer.length };
+    const ext = (mimeType.split('/')[1] || 'bin').split(';')[0];
+    const storagePath = `whatsapp_media/${chatId}/${message.id.id}.${ext}`;
+    for (let attempt = 1; attempt <= STORAGE_UPLOAD_ATTEMPTS; attempt++) {
+        try {
+            await admin.storage().bucket().file(storagePath).save(buffer, {
+                metadata: { contentType: mimeType },
+            });
+            result.storage_path = storagePath;
+            break;
+        } catch (storageErr) {
+            console.error(`[Media] Falha ao subir para o Storage (${message.id.id}, tentativa ${attempt}/${STORAGE_UPLOAD_ATTEMPTS}):`, storageErr.message || storageErr);
+            if (attempt < STORAGE_UPLOAD_ATTEMPTS) {
+                await new Promise((resolve) => setTimeout(resolve, attempt * 5000));
+            }
+        }
+    }
+    return result;
+}
+
 // Grava uma mensagem em whatsapp_messages — usado tanto pela captura ao vivo
 // (handleMessage) quanto pelo backfill sob demanda (backfillChatHistory).
 async function persistMessage(message, chat, chatId, isGroup) {
@@ -297,6 +346,9 @@ async function persistMessage(message, chat, chatId, isGroup) {
         // restart) duplicava a mensagem em vez de sobrescrever.
         id: `${chatId}_${message.id.id}`,
         wa_message_id: message.id.id,
+        // ID serializado completo (fromMe_chatId_id[_participante]) — necessário
+        // para reencontrar a mensagem via getMessageById no reparo de mídia.
+        wa_serialized_id: message.id._serialized || null,
         chat_id: chatId,
         chat_name: chatTitle,
         is_group: isGroup,
@@ -312,29 +364,85 @@ async function persistMessage(message, chat, chatId, isGroup) {
     };
 
     if (message.hasMedia) {
-        try {
-            const media = await message.downloadMedia();
-            if (media) {
-                const buffer = Buffer.from(media.data, 'base64');
-                msgData.media = { mimeType: media.mimetype, sizeBytes: buffer.length };
-                try {
-                    const ext = (media.mimetype.split('/')[1] || 'bin').split(';')[0];
-                    const storagePath = `whatsapp_media/${chatId}/${message.id.id}.${ext}`;
-                    await admin.storage().bucket().file(storagePath).save(buffer, {
-                        metadata: { contentType: media.mimetype },
-                    });
-                    msgData.media.storage_path = storagePath;
-                } catch (storageErr) {
-                    console.error(`[Media] Falha ao subir para o Storage (${message.id.id}):`, storageErr.message || storageErr);
-                }
-            }
-        } catch (mediaErr) {
-            console.error(`[Media] Falha ao baixar mídia (${message.id.id}):`, mediaErr.message || mediaErr);
+        const media = await captureMedia(message, chatId);
+        if (media) {
+            msgData.media = media;
         }
     }
 
     await db.collection('whatsapp_messages').doc(msgData.id).set(msgData, { merge: true });
     return msgData.id;
+}
+
+// ---------------------------------------------------------------------------
+// Reparo de mídia: mensagens gravadas sem media.storage_path (falha de
+// download/upload na captura ao vivo — DNS fora do ar, timeout do puppeteer)
+// são retentadas enquanto a mensagem ainda existe no WhatsApp. Roda pós-ready
+// e a cada hora; teto de tentativas por mensagem para não insistir em mídia
+// que já não está mais disponível no aparelho.
+const MEDIA_REPAIR_TYPES = new Set(['ptt', 'audio', 'image', 'video', 'document', 'sticker']);
+const MEDIA_REPAIR_LOOKBACK_MS = 48 * 60 * 60 * 1000;
+const MEDIA_REPAIR_MAX_ATTEMPTS = 3;
+const MEDIA_REPAIR_READY_DELAY_MS = 2 * 60 * 1000;
+let isRepairingMedia = false;
+
+async function repairMissingMedia() {
+    if (!isClientReady || isRepairingMedia) {
+        return;
+    }
+    isRepairingMedia = true;
+    try {
+        const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - MEDIA_REPAIR_LOOKBACK_MS);
+        const snap = await db.collection('whatsapp_messages').where('timestamp', '>=', cutoff).get();
+        const broken = snap.docs.filter((docSnap) => {
+            const m = docSnap.data();
+            return MEDIA_REPAIR_TYPES.has(String(m.message_type))
+                && !(m.media && m.media.storage_path)
+                // Mensagens importadas de exports .txt não têm mídia real no WhatsApp.
+                && !String(docSnap.id).includes('_txt_')
+                && (m.media_repair_attempts || 0) < MEDIA_REPAIR_MAX_ATTEMPTS
+                && !!m.wa_message_id;
+        });
+        if (!broken.length) {
+            return;
+        }
+        console.log(`[MediaRepair] ${broken.length} mensagem(ns) com mídia pendente; tentando recuperar...`);
+        const exhausted = [];
+        for (const docSnap of broken) {
+            const data = docSnap.data();
+            const serializedId = data.wa_serialized_id
+                || `${data.from_me ? 'true' : 'false'}_${data.chat_id}_${data.wa_message_id}`;
+            try {
+                const message = await client.getMessageById(serializedId);
+                if (!message) {
+                    throw new Error('mensagem não encontrada no WhatsApp');
+                }
+                const media = await captureMedia(message, data.chat_id);
+                if (!media || !media.storage_path) {
+                    throw new Error('download/upload não concluído');
+                }
+                await docSnap.ref.set({ media }, { merge: true });
+                console.log(`[MediaRepair] Mídia recuperada: ${docSnap.id} -> ${media.storage_path}`);
+            } catch (e) {
+                const attempts = (data.media_repair_attempts || 0) + 1;
+                await docSnap.ref.set({ media_repair_attempts: attempts }, { merge: true }).catch(() => {});
+                console.error(`[MediaRepair] Falha em ${docSnap.id} (tentativa ${attempts}/${MEDIA_REPAIR_MAX_ATTEMPTS}):`, e.message || e);
+                if (attempts >= MEDIA_REPAIR_MAX_ATTEMPTS) {
+                    exhausted.push(`${data.chat_name || data.chat_id} (${data.message_type})`);
+                }
+            }
+        }
+        if (exhausted.length) {
+            await sendTelegramAlert(
+                `⚠️ Hermes WhatsApp: não consegui recuperar a mídia de ${exhausted.length} mensagem(ns) mesmo após ${MEDIA_REPAIR_MAX_ATTEMPTS} tentativas: ` +
+                `${exhausted.slice(0, 5).join(', ')}${exhausted.length > 5 ? '…' : ''}. O conteúdo pode não estar mais disponível.`
+            );
+        }
+    } catch (e) {
+        console.error('[MediaRepair] Falha na varredura:', e);
+    } finally {
+        isRepairingMedia = false;
+    }
 }
 
 // Um único listener em `message_create` cobre mensagens recebidas E enviadas
@@ -536,6 +644,12 @@ db.collection('whatsapp_sync_requests')
     }, (err) => console.error('[Sync] Falha ao observar whatsapp_sync_requests:', err));
 
 client.initialize();
+
+// Varredura horária de reparo de mídia (além da passada pós-ready) — recupera
+// mídias cujo download/upload falhou na captura ao vivo.
+cron.schedule('7 * * * *', () => {
+    repairMissingMedia().catch((e) => console.error('[MediaRepair] Falha na varredura horária:', e));
+});
 
 cron.schedule('*/5 * * * *', async () => {
     await writeHeartbeat();

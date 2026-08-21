@@ -29,6 +29,13 @@ DEFAULT_MIN_CONFIDENCE = 0.6
 DEFAULT_FIRST_RUN_LOOKBACK_HOURS = 24
 MIN_WINDOW_TEXT_CHARS = 20
 
+# Tipos de mídia visíveis ao usuário cujo arquivo deveria existir no Storage; quando
+# `media.storage_path` falta, a captura falhou e o worker tem uma varredura de reparo
+# (repairMissingMedia em services/whatsapp-capture/index.js) que retenta por algumas
+# horas. Janelas de chats vinculados esperam esse reparo antes de serem analisadas.
+PENDING_MEDIA_TYPES = {"ptt", "audio", "image", "video", "document"}
+PENDING_MEDIA_DEFER_HOURS = 6
+
 DIGEST_COLLECTION = "whatsapp_digests"
 DIGEST_EMBEDDING_FIELD = "embedding"
 DIGEST_EMBEDDING_DIM = 768
@@ -139,9 +146,15 @@ def _format_conversation_text(messages: list[dict], limit: int = 40) -> str:
     for m in messages[-limit:]:
         quem = "Eu" if m.get("from_me") else (m.get("author_name") or "Contato")
         conteudo = str(m.get("content") or "").strip()
+        cap = 500
+        if not conteudo:
+            # Áudio transcrito (triagem/consolidação): o conteúdo real importa mais
+            # que o placeholder; cap maior porque fala transcrita é prolixa.
+            conteudo = str(m.get("transcription_text") or "").strip()
+            cap = 1500
         if not conteudo:
             conteudo = f"[{m.get('message_type') or 'mídia'}]"
-        lines.append(f"{quem}: {conteudo[:500]}")
+        lines.append(f"{quem}: {conteudo[:cap]}")
     return "\n".join(lines)
 
 
@@ -265,6 +278,134 @@ def _save_whatsapp_digest(db, digest_id: str, wa_chat_id: str, chat_name: str, m
     db.collection(DIGEST_COLLECTION).document(digest_id).set(doc, merge=True)
 
 
+def _msg_text(m: dict) -> str:
+    """Texto útil de uma mensagem para o limiar/análise: o corpo, ou a transcrição
+    quando o corpo é vazio (áudio). Placeholders "[...]" não contam como conteúdo."""
+    texto = str(m.get("content") or "").strip()
+    if not texto:
+        texto = str(m.get("transcription_text") or "").strip()
+        if texto.startswith("["):
+            texto = ""
+    return texto
+
+
+def _is_pending_media(m: dict) -> bool:
+    """Mensagem de mídia cujo arquivo nunca chegou ao Storage — candidata ao reparo
+    do worker. Imports de export .txt (id com "_txt_") nunca têm mídia real."""
+    if str(m.get("message_type")) not in PENDING_MEDIA_TYPES:
+        return False
+    if "_txt_" in str(m.get("id") or ""):
+        return False
+    media = m.get("media") or {}
+    return not str(media.get("storage_path") or "").strip()
+
+
+def _has_pending_media(messages: list[dict]) -> bool:
+    return any(_is_pending_media(m) for m in messages)
+
+
+def _pending_media_expired(messages: list[dict]) -> bool:
+    """True quando a mídia pendente mais antiga já espera há mais de
+    PENDING_MEDIA_DEFER_HOURS pelo reparo do worker — desiste de adiar a janela
+    e segue a análise com o que existe."""
+    oldest = None
+    for m in messages:
+        if _is_pending_media(m):
+            ts = m.get("ingested_at")
+            if ts and (oldest is None or ts < oldest):
+                oldest = ts
+    if oldest is None:
+        return True
+    return (datetime.now(timezone.utc) - oldest) > timedelta(hours=PENDING_MEDIA_DEFER_HOURS)
+
+
+def _transcribe_window_audios(db, messages: list[dict], refs_by_id: dict) -> int:
+    """Transcreve os áudios já capturados da janela (só chats vinculados) antes da
+    análise — mesmo pipeline da consolidação manual (Storage -> transcrição), com o
+    mesmo cache em `transcription_text` no doc da mensagem, então uma consolidação
+    posterior não repaga nada. Placeholders transitórios não são cacheados (retry ok)."""
+    from whatsapp_consolidation import (
+        AUDIO_EXT_ALLOWLIST,
+        AUDIO_MESSAGE_TYPES,
+        MAX_AUDIO_BYTES,
+        _ext_from_storage_path,
+    )
+    from hermes_core_logic import _get_hermes_storage_bucket, _transcribe_audio_bytes
+
+    n_transcritos = 0
+    bucket = None
+    for msg in messages:
+        if str(msg.get("message_type")) not in AUDIO_MESSAGE_TYPES:
+            continue
+        if str(msg.get("transcription_text") or "").strip():
+            continue  # cache hit
+        media = msg.get("media") or {}
+        storage_path = str(media.get("storage_path") or "").strip()
+        if not storage_path:
+            continue  # não capturado — coberto por _has_pending_media/alerta
+        if int(media.get("sizeBytes") or 0) > MAX_AUDIO_BYTES:
+            continue
+        ext = _ext_from_storage_path(storage_path)
+        if ext not in AUDIO_EXT_ALLOWLIST:
+            continue
+        try:
+            if bucket is None:
+                bucket = _get_hermes_storage_bucket()
+            audio_bytes = bucket.blob(storage_path).download_as_bytes()
+        except Exception as exc:
+            print(f"[WA-INGEST] Falha ao baixar {storage_path}: {exc}")
+            continue
+        texto = _transcribe_audio_bytes(audio_bytes, ext, db)
+        msg["transcription_text"] = texto
+        if texto.startswith("[Transcrição indisponível"):
+            continue
+        n_transcritos += 1
+        msg_ref = refs_by_id.get(msg.get("id"))
+        if msg_ref is not None:
+            try:
+                msg_ref.set({
+                    "transcription_text": texto,
+                    "transcription_model": "whisper-large-v3-turbo",
+                }, merge=True)
+            except Exception as exc:
+                print(f"[WA-INGEST] Falha ao cachear transcrição de {msg.get('id')}: {exc}")
+    return n_transcritos
+
+
+def _alert_pending_media_window(db, telegram_chat_id, wa_chat_id: str, chat_name: str, linked_candidates: list[dict], messages: list[dict]) -> None:
+    """Aviso único por janela: chat vinculado a ação recebeu mídia cujo conteúdo não
+    pôde ser recuperado e a janela não tem texto para análise — sem isso, o descarte
+    seria silencioso e uma mensagem potencialmente importante passaria despercebida."""
+    from main import _send_telegram_message_raw
+
+    digest_id = _window_digest_id(wa_chat_id, messages)
+    marker_ref = db.collection("whatsapp_ingest_alerts").document(digest_id)
+    try:
+        if marker_ref.get().exists:
+            return
+    except Exception:
+        pass
+    n_pendentes = sum(1 for m in messages if _is_pending_media(m))
+    titulo = str(linked_candidates[0].get("titulo") or "(sem título)")
+    e_mais = f" e mais {len(linked_candidates) - 1} ação(ões)" if len(linked_candidates) > 1 else ""
+    text = (
+        f'⚠️ Hermes WhatsApp: "{chat_name}" (vinculada à ação "{titulo}"{e_mais}) recebeu '
+        f"{n_pendentes} mensagem(ns) de mídia cujo conteúdo não pôde ser recuperado "
+        f"(ex.: áudio não capturado). A janela não foi analisada pela triagem — confira a "
+        f"Caixa de Entrada do WhatsApp para consolidar manualmente."
+    )
+    try:
+        _send_telegram_message_raw(db, telegram_chat_id, text)
+        marker_ref.set({
+            "wa_chat_id": wa_chat_id,
+            "chat_name": chat_name,
+            "n_pendentes": n_pendentes,
+            "sent_at": datetime.now(timezone.utc),
+        })
+    except Exception as exc:
+        print(f"[WA-INGEST] Falha ao enviar alerta de mídia pendente ({chat_name}): {exc}")
+
+
 def triage_whatsapp_messages(db, sync_ref, logs) -> None:
     """
     Chamada no fim de `run_full_sync` (main.py). Consome mensagens novas de
@@ -307,12 +448,14 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
         return
 
     groups: dict[str, list[dict]] = {}
+    refs_by_id: dict = {}  # doc-id -> DocumentReference (cache de transcrição de áudio)
     for doc in docs:
         data = doc.to_dict() or {}
         chat_id = data.get("chat_id")
         if not chat_id:
             continue
         groups.setdefault(chat_id, []).append(data)
+        refs_by_id[doc.id] = doc.reference
 
     if not groups:
         # Nenhuma mensagem tinha chat_id (não deveria acontecer com o worker atualizado) —
@@ -375,11 +518,8 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
     skipped = len(skipped_windows)
     analyzed = 0
 
+    deferred_media = []  # janelas de chats vinculados aguardando o reparo de mídia do worker
     for wa_chat_id, messages in windows:
-        text_total = " ".join(str(m.get("content") or "") for m in messages).strip()
-        if len(text_total) < MIN_WINDOW_TEXT_CHARS:
-            continue  # janela pouco textual (figurinhas/mídia avulsa) — não vale a chamada de IA
-
         messages.sort(key=lambda m: m.get("timestamp") or 0)
         chat_name = messages[-1].get("chat_name") or wa_chat_id
 
@@ -387,6 +527,27 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
         # vínculo aponta só para ações que saíram da lista de candidatas, ex.:
         # concluídas/opt-out), cai para a lista global de sempre.
         linked_candidates = candidates_by_chat_id.get(wa_chat_id) or []
+
+        if linked_candidates:
+            # Chat vinculado a ação: áudio é conteúdo de primeira classe, não "mídia
+            # avulsa". Se alguma mídia ainda não chegou ao Storage (falha na captura),
+            # adia a janela — segurando o cursor, como o teto de janelas já faz — para
+            # dar tempo ao reparo do worker; após PENDING_MEDIA_DEFER_HOURS segue com
+            # o que existe. Áudios capturados são transcritos antes da análise.
+            if _has_pending_media(messages) and not _pending_media_expired(messages):
+                deferred_media.append((wa_chat_id, messages))
+                continue
+            _transcribe_window_audios(db, messages, refs_by_id)
+
+        text_total = " ".join(_msg_text(m) for m in messages).strip()
+        if len(text_total) < MIN_WINDOW_TEXT_CHARS:
+            # Janela pouco textual (figurinhas/mídia avulsa) — não vale a chamada de
+            # IA. Num chat vinculado com mídia irrecuperável, porém, o descarte
+            # silencioso esconderia mensagem potencialmente importante: avisa no
+            # Telegram (uma única vez por janela).
+            if linked_candidates and _has_pending_media(messages):
+                _alert_pending_media_window(db, telegram_chat_id, wa_chat_id, chat_name, linked_candidates, messages)
+            continue
         if linked_candidates:
             window_candidates_text = _format_candidates_for_prompt(linked_candidates)
             window_candidates_by_id = {c["id"]: c for c in linked_candidates}
@@ -469,14 +630,15 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
         if resumo:
             _save_whatsapp_digest(db, digest_id, wa_chat_id, chat_name, messages, analysis, api_key)
 
-    # Avança o cursor só até onde é seguro: se alguma janela ficou de fora por causa
-    # do teto (`skipped_windows`), o cursor não pode passar da mensagem mais antiga
-    # entre as adiadas — senão elas somem para sempre da próxima consulta por
-    # `ingested_at > cursor`. Sem adiadas, é seguro avançar até a mensagem mais
-    # recente deste lote inteiro.
-    if skipped_windows:
+    # Avança o cursor só até onde é seguro: se alguma janela ficou de fora — pelo
+    # teto (`skipped_windows`) ou aguardando reparo de mídia (`deferred_media`) —
+    # o cursor não pode passar da mensagem mais antiga entre as adiadas, senão
+    # elas somem para sempre da próxima consulta por `ingested_at > cursor`.
+    # Sem adiadas, é seguro avançar até a mensagem mais recente deste lote inteiro.
+    held_windows = skipped_windows + deferred_media
+    if held_windows:
         new_cursor = min(
-            m.get("ingested_at") for _, msgs in skipped_windows for m in msgs if m.get("ingested_at")
+            m.get("ingested_at") for _, msgs in held_windows for m in msgs if m.get("ingested_at")
         )
     else:
         # Máximo sobre TODO o lote lido (não só as janelas analisadas): no modo
@@ -487,8 +649,10 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
         )
     cursor_ref.set({"last_processed_at": new_cursor}, merge=True)
 
-    if analyzed or skipped or ignored_unlinked:
+    if analyzed or skipped or ignored_unlinked or deferred_media:
         extra = f" {skipped} conversa(s) adiada(s) para a próxima passada (teto)." if skipped else ""
+        if deferred_media:
+            extra += f" {len(deferred_media)} janela(s) aguardando reparo de mídia."
         if ignored_unlinked:
             extra += f" {ignored_unlinked} conversa(s) sem ação vinculada ignorada(s)."
         log_to_firestore(sync_ref, logs, f"[WA-INGEST] {analyzed} janela(s) de conversa de WhatsApp analisada(s).{extra}", True)
