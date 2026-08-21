@@ -33,6 +33,13 @@ Por privacidade, o worker **não captura nenhuma conversa até ser configurado e
 - `disconnected`/`auth_failure` disparam um alerta no Telegram (mesmo bot/chat do resto do Hermes) e o worker tenta reconectar automaticamente, exceto em `LOGOUT` (aí é preciso reescanear o QR).
 - Heartbeat a cada 5 min em `system/whatsapp_worker.last_seen` — usado pela Cloud Function de despacho de WhatsApp (§4) para saber se o worker está de pé.
 
+### Backfill de histórico (sob demanda e no boot)
+
+Dois mecanismos completam o que a captura ao vivo não viu, ambos sobre `chat.fetchMessages()` com dedup pelo ID determinístico `{chat_id}_{wa_message_id}` (mensagem já conhecida não é regravada nem tem mídia rebaixada):
+
+- **Sob demanda (Caixa de Entrada)**: ao abrir um chat, o front grava um pedido em `whatsapp_sync_requests/{chat_id}` (`status: 'pending'`, `limit` padrão 100, máx. 300); o worker observa a coleção, roda o backfill e devolve `status`/`fetched_count`/`stored_count` no mesmo doc. Chats fora da allowlist são respondidos com `skipped`/`chat_not_monitored`.
+- **Recuperação retroativa no boot**: 90s após o `ready`, o worker varre todos os chats da allowlist e recupera o que chegou enquanto estava desligado (PC off). Chats sem atividade nova (último `timestamp` do chat ≤ último gravado no Firestore) são pulados sem fetch; nos demais, a profundidade da busca usa o `unreadCount` como pista (mínimo 50, máx. 300), então mensagens já lidas no celular também entram. Resultado registrado em `system/whatsapp_worker` (`last_recovery_at`, `last_recovery_stored`). Como a triagem e a Caixa de Entrada processam por `ingested_at`, o que entra retroativamente segue o fluxo normal de vinculação.
+
 ### Registro de chats (`whatsapp_chats`)
 
 - O worker mantém um registro de todos os chats da conta no Firestore em `whatsapp_chats` (`chat_id`, `chat_name`, `is_group`, `last_activity_ts`, `last_synced_at`), populado via `client.getChats()`.
@@ -99,5 +106,5 @@ Por privacidade, o worker **não captura nenhuma conversa até ser configurado e
 ## Limitações conhecidas
 
 - Automação não-oficial (`whatsapp-web.js`) — sujeita a bloqueio/quebra pelo WhatsApp; sem SLA.
-- Só captura mensagens recebidas enquanto o processo está rodando — sem backfill de histórico anterior.
+- A captura ao vivo depende do processo estar rodando; o buraco é coberto pelo backfill no boot (recuperação retroativa, limitada a 300 mensagens por chat) e pelo sync sob demanda da Caixa de Entrada (§1). Ausências muito longas em chats de alto volume podem exceder essa janela.
 - Upload de mídia ao Storage depende de `FIREBASE_STORAGE_BUCKET` estar configurado no ambiente do worker; sem isso, mídia é capturada só como metadata.

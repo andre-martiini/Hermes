@@ -208,6 +208,9 @@ client.on('ready', async () => {
     isClientReady = true;
     writeHeartbeat();
     setTimeout(syncChatRegistry, CHATS_READY_DELAY_MS);
+    // Recuperação retroativa: o que chegou com o worker desligado não passa pelo
+    // message_create; ao ficar pronto, completamos o buraco a partir do histórico.
+    setTimeout(recoverMissedMessages, RECOVERY_READY_DELAY_MS);
 });
 
 client.on('auth_failure', async (msg) => {
@@ -396,6 +399,94 @@ async function backfillChatHistory(chatId, limitCount) {
     }
 
     return { fetched: fetched.length, stored };
+}
+
+// --- Recuperação retroativa no boot ---
+// A captura ao vivo (message_create) perde tudo que chega com o worker desligado.
+// Ao ficar pronto, varremos os chats da allowlist e completamos o que faltou via o
+// mesmo backfillChatHistory do sync sob demanda (dedup pelo id determinístico
+// chatId_msgId, então rodar de novo é inofensivo). A profundidade da busca usa o
+// unreadCount do chat como pista — mensagens já lidas no celular também entram,
+// pela janela mínima de RECOVERY_BASE_LIMIT. Chats sem atividade nova (último
+// timestamp do chat <= último gravado no Firestore) são pulados sem fetch.
+// A triagem e a Caixa de Entrada leem por ingested_at, então o que entrar aqui
+// segue o fluxo normal de vinculação como se tivesse acabado de chegar.
+const RECOVERY_READY_DELAY_MS = 90_000; // depois do syncChatRegistry (60s), com folga p/ hidratar
+const RECOVERY_BASE_LIMIT = 50;
+const RECOVERY_CHAT_PAUSE_MS = 1_500;
+let isRecoveringMissed = false;
+
+async function getLastStoredTimestampMs(chatId) {
+    const snap = await db.collection('whatsapp_messages')
+        .where('chat_id', '==', chatId)
+        .orderBy('timestamp', 'desc')
+        .limit(1)
+        .get();
+    if (snap.empty) return 0;
+    const ts = snap.docs[0].get('timestamp');
+    return ts && typeof ts.toMillis === 'function' ? ts.toMillis() : 0;
+}
+
+async function recoverMissedMessages() {
+    if (!isClientReady || isRecoveringMissed) return;
+    if (!allowlistLoaded) {
+        // Config ainda não chegou do Firestore — tenta de novo em 60s.
+        console.log('[Recovery] Allowlist ainda não carregada — nova tentativa em 60s.');
+        setTimeout(recoverMissedMessages, 60_000);
+        return;
+    }
+    if (chatsAllowlist.size === 0) {
+        console.log('[Recovery] Allowlist vazia — nada a recuperar.');
+        return;
+    }
+
+    isRecoveringMissed = true;
+    const startedAt = Date.now();
+    let chatsChecked = 0;
+    let chatsBackfilled = 0;
+    let totalStored = 0;
+    try {
+        console.log(`[Recovery] Verificando ${chatsAllowlist.size} chat(s) monitorado(s) por mensagens perdidas...`);
+        for (const chatId of chatsAllowlist) {
+            if (!isClientReady) break; // desconectou no meio; o próximo ready recomeça
+            try {
+                const chat = await client.getChatById(chatId);
+                chatsChecked++;
+                const lastChatMs = Number(chat?.lastMessage?.timestamp || chat?.timestamp || 0) * 1000;
+                const lastStoredMs = await getLastStoredTimestampMs(chatId);
+                if (lastChatMs && lastStoredMs && lastChatMs <= lastStoredMs) continue; // nada perdido
+                const unread = Number(chat?.unreadCount) || 0;
+                const limitCount = Math.min(Math.max(RECOVERY_BASE_LIMIT, unread + 10), MAX_SYNC_LIMIT);
+                let { fetched, stored } = await backfillChatHistory(chatId, limitCount);
+                // Janela saturada (tudo que veio era novo): o buraco pode ser mais fundo
+                // que a janela — refaz uma vez com o teto. Dedup torna a repetição barata.
+                if (stored === fetched && fetched >= limitCount && limitCount < MAX_SYNC_LIMIT) {
+                    const retry = await backfillChatHistory(chatId, MAX_SYNC_LIMIT);
+                    fetched = retry.fetched;
+                    stored += retry.stored;
+                }
+                if (stored > 0) {
+                    chatsBackfilled++;
+                    totalStored += stored;
+                    console.log(`[Recovery] Chat ${chatId}: ${stored} mensagem(ns) recuperada(s) de ${fetched} verificada(s).`);
+                }
+            } catch (chatErr) {
+                console.error(`[Recovery] Falha no chat ${chatId}:`, chatErr.message || chatErr);
+            }
+            // Pausa curta entre chats para não martelar o WhatsApp Web logo no boot.
+            await new Promise((resolve) => setTimeout(resolve, RECOVERY_CHAT_PAUSE_MS));
+        }
+        console.log(`[Recovery] Concluída em ${Math.round((Date.now() - startedAt) / 1000)}s: ${totalStored} mensagem(ns) recuperada(s) em ${chatsBackfilled} de ${chatsChecked} chat(s) verificado(s).`);
+        await db.collection('system').doc('whatsapp_worker').set({
+            last_recovery_at: admin.firestore.Timestamp.now(),
+            last_recovery_stored: totalStored,
+            last_recovery_chats_backfilled: chatsBackfilled,
+        }, { merge: true });
+    } catch (e) {
+        console.error('[Recovery] Falha na recuperação retroativa:', e.message || e);
+    } finally {
+        isRecoveringMissed = false;
+    }
 }
 
 async function handleSyncRequest(requestId, data) {
