@@ -1,3 +1,25 @@
+diff --git a/node_modules/whatsapp-web.js/src/authStrategies/LocalAuth.js b/node_modules/whatsapp-web.js/src/authStrategies/LocalAuth.js
+index 4cc9c4e..789d782 100644
+--- a/node_modules/whatsapp-web.js/src/authStrategies/LocalAuth.js
++++ b/node_modules/whatsapp-web.js/src/authStrategies/LocalAuth.js
+@@ -62,7 +62,16 @@ class LocalAuth extends BaseAuthStrategy {
+                     maxRetries: this.rmMaxRetries,
+                 })
+                 .catch((e) => {
+-                    throw new Error(e);
++                    // Chromium may still hold profile files open (e.g. sqlite
++                    // journals) while logout runs, so rm can fail with EBUSY even
++                    // after retries. Throwing here surfaces as an unhandled
++                    // rejection inside Client's framenavigated handler and kills
++                    // the host process; a leftover session dir is the lesser evil
++                    // and can be cleaned up on the next start.
++                    console.error(
++                        '[LocalAuth] Failed to remove session dir (leftover files can be cleaned on next start):',
++                        e,
++                    );
+                 });
+         }
+     }
 diff --git a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
 index 540078a..520f97f 100644
 --- a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js

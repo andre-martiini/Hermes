@@ -49,6 +49,7 @@ functions_node/.cache/
 # WhatsApp capture local runtime data
 services/whatsapp-capture/.wwebjs_auth/
 services/whatsapp-capture/.wwebjs_cache/
+services/whatsapp-capture/.needs-auth-reset
 services/whatsapp-capture/node_modules/
 services/whatsapp-capture/qr-code.png
 services/whatsapp-capture/logs/

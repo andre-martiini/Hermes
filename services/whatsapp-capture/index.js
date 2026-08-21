@@ -5,10 +5,27 @@ import qrcodeImage from 'qrcode';
 import cron from 'node-cron';
 import admin from 'firebase-admin';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QR_IMAGE_PATH = path.join(__dirname, 'qr-code.png');
+const AUTH_DIR = path.join(__dirname, '.wwebjs_auth');
+const AUTH_RESET_MARKER = path.join(__dirname, '.needs-auth-reset');
+
+// Um LOGOUT pode deixar a sessão pela metade: o Chromium ainda segura arquivos
+// do perfil quando a LocalAuth tenta apagá-la (EBUSY). O marker é gravado no
+// LOGOUT e consumido aqui, antes do Chromium subir — o único momento em que
+// nenhum arquivo do perfil está travado e o rm consegue concluir.
+if (fs.existsSync(AUTH_RESET_MARKER)) {
+    try {
+        fs.rmSync(AUTH_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+        fs.rmSync(AUTH_RESET_MARKER, { force: true });
+        console.log('[Auth] Sessão anterior removida (reset pendente de um LOGOUT).');
+    } catch (e) {
+        console.error('[Auth] Falha ao remover sessão antiga; o login pode exigir novo QR mesmo assim:', e);
+    }
+}
 
 // Initialize Firebase Admin (assuming default credentials in environment).
 // storageBucket precisa ser resolvível para o upload de mídia funcionar — este
@@ -25,7 +42,7 @@ const db = admin.firestore();
 const FieldValue = admin.firestore.FieldValue;
 
 const client = new Client({
-    authStrategy: new LocalAuth()
+    authStrategy: new LocalAuth({ dataPath: AUTH_DIR, rmMaxRetries: 8 })
 });
 
 let isClientReady = false;
@@ -202,9 +219,18 @@ client.on('disconnected', async (reason) => {
     console.log('Client was disconnected', reason);
     isClientReady = false;
     const recoverable = reason !== 'LOGOUT';
+    if (!recoverable) {
+        // O rm feito pela LocalAuth durante o LOGOUT pode falhar com o Chromium
+        // ainda aberto; o marker garante que o próximo boot parta de sessão zerada.
+        try {
+            fs.writeFileSync(AUTH_RESET_MARKER, new Date().toISOString());
+        } catch (e) {
+            console.error('[Auth] Falha ao gravar marker de reset:', e);
+        }
+    }
     await sendTelegramAlert(
         `⚠️ Hermes WhatsApp: sessão desconectada (${reason}). ` +
-        (recoverable ? 'Tentando reconectar automaticamente em 15s...' : 'É preciso reautenticar (escaneie o QR novamente no terminal do worker).')
+        (recoverable ? 'Tentando reconectar automaticamente em 15s...' : 'É preciso reautenticar — um novo QR será gerado e salvo em qr-code.png na pasta do worker.')
     );
     if (recoverable) {
         setTimeout(() => {
@@ -538,3 +564,20 @@ cron.schedule('* * * * *', async () => {
         isProcessingOutbox = false;
     }
 });
+
+// Rede de segurança: erros não tratados (ex.: rejeição dentro de handlers do
+// puppeteer/whatsapp-web.js) derrubariam o processo inteiro — e não há
+// supervisor para reerguê-lo fora do logon. Melhor logar, alertar e seguir vivo.
+let lastFatalAlertMs = 0;
+function reportFatal(kind, err) {
+    console.error(`[${kind}]`, err);
+    const now = Date.now();
+    if (now - lastFatalAlertMs < 10 * 60 * 1000) return; // no máximo 1 alerta a cada 10min
+    lastFatalAlertMs = now;
+    sendTelegramAlert(
+        `🚨 Hermes WhatsApp worker: erro não tratado (${kind}): ${err?.message || err}. ` +
+        'O worker continua rodando; se a captura parar, reinicie-o.'
+    );
+}
+process.on('unhandledRejection', (reason) => reportFatal('unhandledRejection', reason));
+process.on('uncaughtException', (err) => reportFatal('uncaughtException', err));
