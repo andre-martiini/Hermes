@@ -69,7 +69,7 @@ const DashboardCard: React.FC<DashboardCardProps> = ({
                 fontFamily: 'Inter, sans-serif',
                 ...style
             }}
-            className={`group p-5 rounded-2xl border transition-all duration-300 flex flex-col min-h-0 h-full shrink-0 ${
+            className={`group p-5 rounded-2xl border transition-all duration-300 flex flex-col min-h-0 shrink-0 ${
                 isClickable ? 'cursor-pointer hover:border-[#861fdd]/40 hover:bg-slate-50/50 dark:hover:bg-slate-900/10' : ''
             } ${
                 isDark
@@ -114,8 +114,8 @@ const HiddenMoney = ({ className = "", compact = false }: { className?: string, 
     </span>
 );
 
-// --- MINI SPARKLINE (N23): mesma gramática visual nos 3 gráficos do cartão de
-// saúde -- sem eixo, sem grade, só o valor mais recente rotulado, para o
+// --- MINI SPARKLINE (N23/N28): mesma gramática visual nos 3 gráficos do cartão
+// de saúde -- eixo mínimo (máx/mín na linha, piso tracejado nas barras), para o
 // Dashboard ficar uma prévia do "Gráfico integrado" do módulo Saúde, e não um
 // segundo dialeto visual dele.
 interface SparklinePoint {
@@ -139,9 +139,15 @@ const MiniSparkline: React.FC<{
     segmentsFor?: (day: string) => number[];
     /** Sobrescreve o texto do canto superior direito (ex.: "4,0 km · 3 blocos"). */
     headerValueOverride?: string;
-}> = ({ title, points, formatValue, barTone, isDark, variant = 'bar', secondaryPoints, segmentsFor, headerValueOverride }) => {
+    /** N28: linha de referência tracejada na variante bar (ex.: piso mínimo de caminhada). */
+    threshold?: number;
+    thresholdLabel?: string;
+    /** N28: teto fixo da escala na variante bar (ex.: 10 para dor) -- barra vira nível absoluto, não relativo ao pico da semana. */
+    maxScale?: number;
+}> = ({ title, points, formatValue, barTone, isDark, variant = 'bar', secondaryPoints, segmentsFor, headerValueOverride, threshold, thresholdLabel, maxScale }) => {
     const values = points.map(p => p.value).filter((v): v is number => v !== null);
     const maxVal = Math.max(...values, 1);
+    const effectiveMax = Math.max(maxVal, maxScale ?? 0, threshold ?? 0);
     const latest = [...points].reverse().find(p => p.value !== null)?.value ?? null;
 
     const header = (
@@ -159,7 +165,7 @@ const MiniSparkline: React.FC<{
         const min = allValues.length ? Math.min(...allValues) : 0;
         const max = allValues.length ? Math.max(...allValues) : 1;
         const range = max - min || 1;
-        const pad = range * 0.2;
+        const pad = range * 0.1;
         const yFor = (v: number) => 38 - ((v - (min - pad)) / (range + pad * 2)) * 36;
         const xFor = (i: number) => points.length > 1 ? (i / (points.length - 1)) * 100 : 50;
         const linePoints = points
@@ -173,33 +179,50 @@ const MiniSparkline: React.FC<{
             }`}>
                 {header}
                 {values.length >= 2 ? (
-                    <div className="h-16 w-full pt-1">
-                        <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="h-full w-full overflow-visible">
-                            {(secondaryPoints || []).map((p, i) => p.value !== null && (
-                                <circle key={p.day} cx={xFor(i)} cy={yFor(p.value)} r="1.6" className={isDark ? 'fill-slate-600' : 'fill-slate-300'} />
+                    <>
+                        <div className="h-32 w-full pt-1 flex gap-1.5">
+                            {/* N28: gutter com máx/mín -- numa altura maior, a linha sem referência vertical não diz nada. */}
+                            <div className="relative w-9 shrink-0 h-full">
+                                <span className="absolute right-0 -translate-y-1/2 text-[8px] font-mono font-bold text-slate-400" style={{ top: `${(yFor(max) / 40) * 100}%` }}>
+                                    {formatValue(max)}
+                                </span>
+                                {max !== min && (
+                                    <span className="absolute right-0 -translate-y-1/2 text-[8px] font-mono font-bold text-slate-400" style={{ top: `${(yFor(min) / 40) * 100}%` }}>
+                                        {formatValue(min)}
+                                    </span>
+                                )}
+                            </div>
+                            <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="h-full flex-1 overflow-visible">
+                                <line x1="0" x2="100" y1={yFor(max)} y2={yFor(max)} stroke={isDark ? 'rgba(255,255,255,0.08)' : '#e5e7eb'} strokeWidth="1" strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />
+                                {max !== min && (
+                                    <line x1="0" x2="100" y1={yFor(min)} y2={yFor(min)} stroke={isDark ? 'rgba(255,255,255,0.08)' : '#e5e7eb'} strokeWidth="1" strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />
+                                )}
+                                {(secondaryPoints || []).map((p, i) => p.value !== null && (
+                                    <circle key={p.day} cx={xFor(i)} cy={yFor(p.value)} r="1.6" className={isDark ? 'fill-slate-600' : 'fill-slate-300'} />
+                                ))}
+                                <polyline
+                                    points={linePoints}
+                                    fill="none"
+                                    stroke="#9333ea"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    vectorEffect="non-scaling-stroke"
+                                />
+                                {points.map((p, i) => p.value !== null && (
+                                    <circle key={`ma-${p.day}`} cx={xFor(i)} cy={yFor(p.value)} r="1.8" fill="#9333ea" />
+                                ))}
+                            </svg>
+                        </div>
+                        <div className="flex items-center justify-between pl-[42px] text-[8px] font-mono text-slate-400 font-bold">
+                            {points.map(p => (
+                                <span key={p.day} className="flex-1 text-center">{p.day.split('-')[2] || p.day}</span>
                             ))}
-                            <polyline
-                                points={linePoints}
-                                fill="none"
-                                stroke="#9333ea"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                vectorEffect="non-scaling-stroke"
-                            />
-                            {points.map((p, i) => p.value !== null && (
-                                <circle key={`ma-${p.day}`} cx={xFor(i)} cy={yFor(p.value)} r="1.8" fill="#9333ea" />
-                            ))}
-                        </svg>
-                    </div>
+                        </div>
+                    </>
                 ) : (
                     <p className="text-[10px] text-slate-400 font-mono italic text-center py-2">Ainda não dá para dizer.</p>
                 )}
-                <div className="flex items-center justify-between text-[8px] font-mono text-slate-400 font-bold">
-                    {points.map(p => (
-                        <span key={p.day} className="flex-1 text-center">{p.day.split('-')[2] || p.day}</span>
-                    ))}
-                </div>
             </div>
         );
     }
@@ -210,46 +233,64 @@ const MiniSparkline: React.FC<{
         }`}>
             {header}
             {values.length >= 2 ? (
-                <div className="h-16 w-full flex items-end justify-between gap-1.5 pt-1">
-                    {points.map(p => {
-                        const heightPct = p.value !== null ? Math.max((p.value / maxVal) * 100, 8) : 2;
-                        const dayLabel = p.day.split('-')[2] || p.day;
-                        const segments = p.value !== null ? segmentsFor?.(p.day) : undefined;
-                        return (
-                            <div key={p.day} className="flex-1 h-full flex flex-col justify-end items-center group/bar relative">
-                                <div className="w-full flex-1 flex items-end justify-center">
-                                    {segments && segments.length > 1 ? (
-                                        <div className="w-full flex flex-col-reverse gap-[1.5px]" style={{ height: `${heightPct}%` }}>
-                                            {segments.map((seg, si) => (
-                                                <div
-                                                    key={si}
-                                                    className={`w-full rounded-[1px] ${barTone(p.value as number)}`}
-                                                    style={{ height: `${Math.max((seg / (p.value as number)) * 100, 4)}%` }}
-                                                />
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <div
-                                            className={`w-full rounded-t transition-all duration-300 ${
-                                                p.value !== null ? barTone(p.value) : (isDark ? 'bg-white/5' : 'bg-slate-100')
-                                            }`}
-                                            style={{ height: `${heightPct}%` }}
-                                        />
-                                    )}
-                                </div>
-                                <span className="text-[8px] font-mono text-slate-400 font-semibold mt-1 shrink-0">{dayLabel}</span>
-                                {p.value !== null && (
-                                    <div className="absolute -top-8 hidden group-hover/bar:flex flex-col items-center bg-slate-900 text-white text-[9px] px-2 py-1 rounded shadow-xl z-20 whitespace-nowrap font-mono border border-slate-700 pointer-events-none">
-                                        <span className="font-bold text-amber-400">{p.day}</span>
-                                        <span>
-                                            {formatValue(p.value)}
-                                            {segments && segments.length > 0 ? ` · ${segments.length} bloco${segments.length > 1 ? 's' : ''}` : ''}
-                                        </span>
-                                    </div>
+                <div className="w-full pt-1 flex flex-col gap-1">
+                    <div className="relative h-28 w-full">
+                        {/* N28: piso de referência tracejado (ex.: mínimo de caminhada) -- dá leitura vertical à barra. */}
+                        {threshold !== undefined && (
+                            <div
+                                className={`absolute left-0 right-0 z-10 border-t border-dashed pointer-events-none ${isDark ? 'border-white/25' : 'border-slate-300'}`}
+                                style={{ bottom: `${Math.min((threshold / effectiveMax) * 100, 100)}%` }}
+                            >
+                                {thresholdLabel && (
+                                    <span className="absolute right-0 -top-3.5 text-[8px] font-mono font-bold uppercase tracking-wider text-slate-400">
+                                        {thresholdLabel}
+                                    </span>
                                 )}
                             </div>
-                        );
-                    })}
+                        )}
+                        <div className="absolute inset-0 flex items-end justify-between gap-1.5">
+                            {points.map(p => {
+                                const heightPct = p.value !== null ? Math.max((p.value / effectiveMax) * 100, 4) : 2;
+                                const segments = p.value !== null ? segmentsFor?.(p.day) : undefined;
+                                return (
+                                    <div key={p.day} className="flex-1 h-full flex items-end justify-center group/bar relative">
+                                        {segments && segments.length > 1 ? (
+                                            <div className="w-full flex flex-col-reverse gap-[1.5px]" style={{ height: `${heightPct}%` }}>
+                                                {segments.map((seg, si) => (
+                                                    <div
+                                                        key={si}
+                                                        className={`w-full rounded-[1px] ${barTone(p.value as number)}`}
+                                                        style={{ height: `${Math.max((seg / (p.value as number)) * 100, 4)}%` }}
+                                                    />
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div
+                                                className={`w-full rounded-t transition-all duration-300 ${
+                                                    p.value !== null ? barTone(p.value) : (isDark ? 'bg-white/5' : 'bg-slate-100')
+                                                }`}
+                                                style={{ height: `${heightPct}%` }}
+                                            />
+                                        )}
+                                        {p.value !== null && (
+                                            <div className="absolute -top-8 hidden group-hover/bar:flex flex-col items-center bg-slate-900 text-white text-[9px] px-2 py-1 rounded shadow-xl z-20 whitespace-nowrap font-mono border border-slate-700 pointer-events-none">
+                                                <span className="font-bold text-amber-400">{p.day}</span>
+                                                <span>
+                                                    {formatValue(p.value)}
+                                                    {segments && segments.length > 0 ? ` · ${segments.length} bloco${segments.length > 1 ? 's' : ''}` : ''}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-1.5 text-[8px] font-mono text-slate-400 font-semibold">
+                        {points.map(p => (
+                            <span key={p.day} className="flex-1 text-center">{p.day.split('-')[2] || p.day}</span>
+                        ))}
+                    </div>
                 </div>
             ) : (
                 <p className="text-[10px] text-slate-400 font-mono italic text-center py-2">Aguardando histórico.</p>
@@ -1094,11 +1135,13 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
               <div className="flex flex-col xl:flex-row gap-6 w-full items-stretch">
 
-                {/* 1. COLUNA ESQUERDA: Carga de Trabalho (Flexível) */}
-                <div className="flex-1 flex flex-col gap-6">
+                {/* 1. COLUNA ESQUERDA (flexível): Carga de Trabalho + Resumo Financeiro empilhados.
+                    N28: o Financeiro desceu para cá para liberar a coluna direita inteira para a
+                    Saúde -- gráficos clínicos precisam de altura, não de largura. */}
+                <div className="flex-1 min-w-0 flex flex-col gap-6">
 
                     {/* CARD: Carga de Trabalho Semanal */}
-                    <DashboardCard title="Carga Semanal de Trabalho" isDark={isDark} onRedirect={() => onNavigate('gallery')}>
+                    <DashboardCard title="Carga Semanal de Trabalho" isDark={isDark} onRedirect={() => onNavigate('gallery')} className="flex-1">
                         <div className="flex h-full flex-col gap-4">
                             <p className="text-[10px] font-bold uppercase tracking-[0.2em] font-mono text-slate-400 shrink-0">
                                 // CARGA OPERACIONAL D+6
@@ -1107,7 +1150,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                             {/* N26: o grafico cresce junto com o cartao (flex-1) em vez de ficar em
                                 altura fixa -- senao sobra vao vazio quando o cartao estica pra bater
                                 com a altura do Resumo Financeiro. */}
-                            <div className="grid flex-1 grid-cols-7 gap-2 md:gap-3 border-b border-[#f3f4f6] pb-2 dark:border-white/5">
+                            <div className="grid flex-1 min-h-[200px] grid-cols-7 gap-2 md:gap-3 border-b border-[#f3f4f6] pb-2 dark:border-white/5">
                                 {actionsByDay.map((day, i) => {
                                     const maxCount = Math.max(...actionsByDay.map(d => d.count), 1);
                                     const heightPercent = (day.count / maxCount) * 100;
@@ -1156,16 +1199,12 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                         </div>
                     </DashboardCard>
 
-                </div>
-
-                {/* 2. COLUNA DIREITA: Resumo Financeiro (380px Fixo) */}
-                <div className="w-full xl:w-[380px] shrink-0 flex flex-col gap-6">
-
                     {/* CARD: Painel Financeiro */}
                     <DashboardCard
                         title="Resumo Financeiro"
                         isDark={isDark}
                         onRedirect={() => onNavigate('finance')}
+                        className="flex-1"
                         headerAction={
                             <button
                                 onClick={(e) => { e.stopPropagation(); setIsFinanceVisible(!isFinanceVisible); }}
@@ -1185,7 +1224,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                             </button>
                         }
                     >
-                        <div className="flex flex-col gap-5">
+                        <div className="flex flex-col gap-5 flex-1 min-h-0">
                             <div className="flex items-center justify-between">
                                 <div className="flex flex-col gap-1">
                                     <span className="text-[10px] font-bold uppercase tracking-[0.2em] font-mono text-slate-400">
@@ -1235,11 +1274,11 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                             <hr className={isDark ? 'border-white/10' : 'border-[#e5e7eb]'} />
 
                             {/* Gráfico Financeiro */}
-                            <div className="flex flex-col gap-2">
+                            <div className="flex flex-col gap-2 flex-1 min-h-0">
                                 <span className="text-[10px] font-bold uppercase tracking-[0.2em] font-mono text-slate-400">
                                     // CONSUMO DIÁRIO DO PERÍODO
                                 </span>
-                                <div className="h-20 flex items-end gap-1 px-1 relative">
+                                <div className="flex-1 min-h-[80px] flex items-end gap-1 px-1 relative">
                                     {isFinanceVisible ? (
                                         financeChartData.some(item => item.amount > 0) ? (
                                             financeChartData.map((item, i) => {
@@ -1292,19 +1331,21 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
                 </div>
 
-              </div>
+                {/* 2. COLUNA DIREITA (420px fixo): Saúde & Telemetria como coluna vertical alta.
+                    N28: os gráficos de saúde leem melhor empilhados com altura real do que
+                    espremidos numa faixa horizontal de largura total. */}
+                <div className="w-full xl:w-[420px] shrink-0 flex flex-col gap-6">
 
-              {/* 3. LARGURA TOTAL, ABAIXO DA CARGA SEMANAL: Saúde & Telemetria (N23) */}
-              <DashboardCard title="Saúde & Telemetria" isDark={isDark} onRedirect={() => onNavigate('saude')}>
+                  <DashboardCard title="Saúde & Telemetria" isDark={isDark} onRedirect={() => onNavigate('saude')} className="flex-1">
                         <div className="flex flex-col gap-4">
                             <div className="flex items-center justify-between shrink-0">
                                 <span className="text-[9px] uppercase tracking-wider text-slate-400 font-mono">// BIOMETRIA & SINAL CLÍNICO</span>
                                 <span className="text-[9px] font-bold text-[#9333ea] dark:text-[#ddb8ff] uppercase tracking-wider font-mono">PAINEL INTEGRADO →</span>
                             </div>
 
-                            {/* N23: peso, caminhada e dor lado a lado -- o cartão agora tem largura
-                                total, então as três seções viram uma linha de 3 em vez de empilhadas. */}
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            {/* N28: na coluna vertical (xl+) as três seções empilham; entre sm e xl o
+                                cartão ocupa a largura toda, então viram uma linha de 3. */}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-1 gap-3">
 
                             {/* 1. SEÇÃO PESO E META */}
                             <div className={`p-3.5 rounded-xl border flex flex-col gap-2.5 ${
@@ -1459,10 +1500,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
                             </div>
 
-                            {/* 4. TRÊS GRÁFICOS NA MESMA JANELA DE TEMPO (N23): peso, caminhada e dor
-                                juntos, mesma gramática do "Gráfico integrado" do módulo Saúde -- prévia
-                                dele, não um segundo dialeto visual. */}
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            {/* 4. TRÊS GRÁFICOS NA MESMA JANELA DE TEMPO (N23/N28): peso, caminhada e
+                                dor empilhados verticalmente na coluna (xl+), mesma gramática do "Gráfico
+                                integrado" do módulo Saúde -- prévia dele, não um segundo dialeto visual. */}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-1 gap-3">
                                 <MiniSparkline
                                     title="Peso (7d) — média móvel"
                                     variant="line"
@@ -1478,6 +1519,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                     formatValue={v => `${v.toFixed(1).replace('.', ',')} km`}
                                     barTone={v => v >= walkingMinimumKm ? 'bg-emerald-500' : (isDark ? 'bg-slate-600' : 'bg-slate-400')}
                                     segmentsFor={day => walkBlocksPerDay.get(day)}
+                                    threshold={walkingMinimumKm}
+                                    thresholdLabel={`mín ${walkingMinimumKm} km`}
                                     headerValueOverride={(() => {
                                         const lastWithData = [...walkSparkPoints].reverse().find(p => p.value !== null);
                                         if (!lastWithData) return undefined;
@@ -1489,6 +1532,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 <MiniSparkline
                                     title="Dor noturna (7d)"
                                     points={painSparkPoints}
+                                    maxScale={10}
                                     formatValue={v => `${v}/10`}
                                     barTone={v => v >= 6 ? 'bg-rose-500' : v >= 3 ? 'bg-amber-500' : 'bg-emerald-500'}
                                     isDark={isDark}
@@ -1496,7 +1540,11 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                             </div>
 
                         </div>
-              </DashboardCard>
+                  </DashboardCard>
+
+                </div>
+
+              </div>
 
             </div>
 
