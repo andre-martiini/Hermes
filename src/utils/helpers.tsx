@@ -157,6 +157,14 @@ export const getMonthWorkDays = (year: number, month: number) => {
   return days;
 };
 
+// Normaliza texto para busca insensível a acentos/til/trema:
+// "pao" encontra "pão", "Livia" encontra "Lívia".
+export const normalizeSearchText = (text: any): string =>
+  String(text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
 export const normalizeStatus = (status: string): string => {
   if (!status) return 'em andamento';
   return status

@@ -3,6 +3,7 @@ import { addDoc, collection, deleteDoc, doc, onSnapshot, query, Timestamp, updat
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../../firebase';
 import { EstrategiaIndicadorSucesso, EstrategiaMarco, EstrategiaPessoal, EstrategiaPilar, EstrategiaStatus, EstrategiaTipoMeta, Tarefa } from '../../types';
+import { normalizeSearchText } from '../utils/helpers';
 
 
 type StrategyIndicatorDraft = EstrategiaIndicadorSucesso;
@@ -1003,7 +1004,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                                     <div className="mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
                                       {tarefas
                                         .filter(t => !t.estrategia_indicador_id && t.status !== 'excluído')
-                                        .filter(t => t.titulo.toLowerCase().includes(taskSearch.toLowerCase()))
+                                        .filter(t => normalizeSearchText(t.titulo).includes(normalizeSearchText(taskSearch)))
                                         .map(t => (
                                           <button
                                             key={t.id}
@@ -1024,7 +1025,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                                             </span>
                                           </button>
                                       ))}
-                                      {tarefas.filter(t => !t.estrategia_indicador_id && t.status !== 'excluído' && t.titulo.toLowerCase().includes(taskSearch.toLowerCase())).length === 0 && (
+                                      {tarefas.filter(t => !t.estrategia_indicador_id && t.status !== 'excluído' && normalizeSearchText(t.titulo).includes(normalizeSearchText(taskSearch))).length === 0 && (
                                         <div className="px-3 py-2 text-xs text-slate-500">Nenhuma tarefa encontrada</div>
                                       )}
                                     </div>
@@ -1355,7 +1356,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                                         <div className="mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
                                           {tarefas
                                             .filter(t => !t.estrategia_indicador_id && t.status !== 'excluído')
-                                            .filter(t => t.titulo.toLowerCase().includes(taskSearch.toLowerCase()))
+                                            .filter(t => normalizeSearchText(t.titulo).includes(normalizeSearchText(taskSearch)))
                                             .map(t => (
                                               <button
                                                 key={t.id}
@@ -1376,7 +1377,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
                                                 </span>
                                               </button>
                                           ))}
-                                          {tarefas.filter(t => !t.estrategia_indicador_id && t.status !== 'excluído' && t.titulo.toLowerCase().includes(taskSearch.toLowerCase())).length === 0 && (
+                                          {tarefas.filter(t => !t.estrategia_indicador_id && t.status !== 'excluído' && normalizeSearchText(t.titulo).includes(normalizeSearchText(taskSearch))).length === 0 && (
                                             <div className="px-3 py-2 text-xs text-slate-500">Nenhuma tarefa encontrada</div>
                                           )}
                                         </div>

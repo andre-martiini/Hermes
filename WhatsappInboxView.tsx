@@ -8,6 +8,7 @@ import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 import { db, functions, storage } from './firebase';
 import { PerfilPessoa, Tarefa, WhatsappConsolidacao, WhatsappMessageDoc } from './types';
 import { buildDiaryWhatsappNote } from './src/utils/diaryEntries';
+import { normalizeSearchText } from './src/utils/helpers';
 import { HermesGlobalChat } from './src/components/tools/HermesGlobalChat';
 import { parseWhatsappExportTxt } from './src/utils/whatsappExportParser';
 
@@ -621,10 +622,10 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
     }, [tarefas, selectedChatId]);
 
     const searchedTasks = useMemo(() => {
-        const s = taskSearch.trim().toLowerCase();
+        const s = normalizeSearchText(taskSearch.trim());
         if (!s) return [] as Tarefa[];
         return tarefas
-            .filter(t => t.status !== 'concluído' && t.titulo.toLowerCase().includes(s))
+            .filter(t => t.status !== 'concluído' && normalizeSearchText(t.titulo).includes(s))
             .slice(0, 8);
     }, [tarefas, taskSearch]);
 

@@ -37,7 +37,7 @@ import { INTERNAL_NAVIGATION_EVENT } from './src/utils/internalNavigation';
 // Importações dos módulos extraídos pelo split.js
 import {
   DEFAULT_APP_SETTINGS, getDaysInMonth, isWorkDay, callScrapeSipac,
-  getMonthWorkDays, normalizeStatus, formatWhatsAppText,
+  getMonthWorkDays, normalizeStatus, normalizeSearchText, formatWhatsAppText,
   formatInlineWhatsAppText, detectAreaFromTitle, isStandbyStatus,
   applyStandbyDateRules, buildGravityMap, computeGravidade,
   computeScoreGUT
@@ -3768,7 +3768,8 @@ const App: React.FC = () => {
       } else if (s === 'categoria:geral') {
         result = result.filter(t => t.area_tematica === 'GERAL');
       } else {
-        result = result.filter(t => t.titulo?.toLowerCase().includes(s) || t.projeto?.toLowerCase().includes(s) || t.notas?.toLowerCase().includes(s));
+        const sNorm = normalizeSearchText(s);
+        result = result.filter(t => normalizeSearchText(t.titulo).includes(sNorm) || normalizeSearchText(t.projeto).includes(sNorm) || normalizeSearchText(t.notas).includes(sNorm));
       }
     }
     if (statusFilter.length > 0 && viewMode !== 'licitacoes' && viewMode !== 'assistencia') {
