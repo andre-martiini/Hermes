@@ -302,8 +302,9 @@ def gerar_diario_pessoal(event: scheduler_fn.ScheduledEvent = None) -> None:
     existing = diary_ref.get()
     existing_data = (existing.to_dict() or {}) if existing.exists else {}
     # O doc pode já existir só com `notas_manuais` (anotações feitas na UI ao longo
-    # do dia) — isso não conta como diário gerado.
-    if existing_data.get("texto") or existing_data.get("sem_material"):
+    # do dia) ou com `sem_material` de uma rodada anterior — só `texto` conta como
+    # diário gerado.
+    if existing_data.get("texto"):
         print(f"[Diario] Diário de {today_str} já existe; nada a fazer.")
         return
 
