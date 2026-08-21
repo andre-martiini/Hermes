@@ -13396,6 +13396,7 @@ def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
         "personal_diary": {"enabled": bool(diary_cfg.get("enabled", False))},
         "whatsapp_ingest": {
             "enabled": bool(wa_cfg.get("enabled", False)),
+            "linked_chats_only": bool(wa_cfg.get("linked_chats_only", True)),
             "chats_allowlist": list(wa_cfg.get("chats_allowlist") or []),
         },
         "whatsapp_auto_send_enabled": bool(data.get("whatsapp_auto_send_enabled", False)),
@@ -13427,6 +13428,8 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
         wa_updates: dict = {}
         if "enabled" in wa_cfg:
             wa_updates["enabled"] = bool(wa_cfg["enabled"])
+        if "linked_chats_only" in wa_cfg:
+            wa_updates["linked_chats_only"] = bool(wa_cfg["linked_chats_only"])
         if "chats_allowlist" in wa_cfg and isinstance(wa_cfg["chats_allowlist"], list):
             wa_updates["chats_allowlist"] = [str(x).strip() for x in wa_cfg["chats_allowlist"] if str(x).strip()]
         if wa_updates:
@@ -13640,7 +13643,7 @@ from monthly_recurring_actions import gerar_acoes_recorrentes_mensais
 from ai_notification_planner import ai_notification_planner_daily
 
 # Import personal diary + weekly personality consolidation jobs
-from personal_diary import gerar_diario_pessoal, consolidar_personalidade
+from personal_diary import gerar_diario_pessoal, consolidar_personalidade, ajustarDiarioPessoal
 
 # Import weekly health summary + reevaluation reminder jobs
 from health_weekly_summary import gerar_resumo_semanal_saude, verificar_reavaliacoes_saude

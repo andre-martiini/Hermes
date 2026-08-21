@@ -84,7 +84,7 @@ export const HermesModal = ({ isOpen, title, message, type, onConfirm, onCancel,
 interface AutomationSettingsData {
   email_action_linker: { enabled: boolean };
   personal_diary: { enabled: boolean };
-  whatsapp_ingest: { enabled: boolean; chats_allowlist: string[] };
+  whatsapp_ingest: { enabled: boolean; linked_chats_only: boolean; chats_allowlist: string[] };
   whatsapp_auto_send_enabled: boolean;
   whatsapp_worker: { online: boolean; last_seen: string | null };
 }
@@ -135,6 +135,13 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
     const enabled = !data[key].enabled;
     setData({ ...data, [key]: { ...data[key], enabled } });
     save({ [key]: { enabled } });
+  };
+
+  const toggleLinkedOnly = () => {
+    if (!data) return;
+    const linked_chats_only = !data.whatsapp_ingest.linked_chats_only;
+    setData({ ...data, whatsapp_ingest: { ...data.whatsapp_ingest, linked_chats_only } });
+    save({ whatsapp_ingest: { linked_chats_only } });
   };
 
   const toggleAutoSend = () => {
@@ -216,11 +223,22 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
 
       <div className={cardClass}>
         <ToggleRow
-          label="Triagem automática do WhatsApp (legado)"
-          desc="Análise automática de conversas com proposta de vínculo — substituída pela Caixa de Entrada WhatsApp (consolidação manual); mantenha desligado. A captura pelo worker e a lista de conversas abaixo continuam ativas e alimentam a Caixa de Entrada."
+          label="Triagem automática do WhatsApp"
+          desc="Análise automática de conversas com proposta de vínculo a ações via Telegram. Complementa a Caixa de Entrada (consolidação manual). A captura pelo worker e a lista de conversas abaixo continuam ativas independentemente."
           enabled={data.whatsapp_ingest.enabled}
           onToggle={() => toggle('whatsapp_ingest')}
         />
+
+        {data.whatsapp_ingest.enabled && (
+          <div className={`pt-3 border-t border-dashed ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'}`}>
+            <ToggleRow
+              label="Só chats vinculados a ações"
+              desc="Analisa apenas conversas vinculadas manualmente a alguma ação (na tela da ação). Conversas sem vínculo seguem capturadas para a Caixa de Entrada, mas não geram análise de IA nem sugestões."
+              enabled={data.whatsapp_ingest.linked_chats_only}
+              onToggle={toggleLinkedOnly}
+            />
+          </div>
+        )}
 
         <div className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider ${data.whatsapp_worker.online ? 'text-emerald-500' : (isDarkTheme ? 'text-slate-500' : 'text-slate-400')}`}>
           <span className={`w-2 h-2 rounded-full ${data.whatsapp_worker.online ? 'bg-emerald-500' : 'bg-slate-400'}`} />

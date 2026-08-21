@@ -124,6 +124,10 @@ def _load_settings(db) -> dict:
         "enabled": bool(cfg.get("enabled", False)),
         "max_windows_per_pass": int(cfg.get("max_windows_per_pass", DEFAULT_MAX_WINDOWS_PER_PASS)),
         "min_confidence": float(cfg.get("min_confidence", DEFAULT_MIN_CONFIDENCE)),
+        # Padrão True: a triagem automática só analisa conversas vinculadas
+        # manualmente a alguma ação (tarefas.whatsapp_vinculos) — o resto é
+        # capturado para a Caixa de Entrada, mas não gera IA/sugestão/digest.
+        "linked_chats_only": bool(cfg.get("linked_chats_only", True)),
     }
 
 
@@ -334,6 +338,25 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
         for chat_id in c.get("whatsapp_chat_ids") or []:
             candidates_by_chat_id.setdefault(chat_id, []).append(c)
 
+    # Modo "só chats vinculados" (padrão): a triagem analisa apenas conversas que o
+    # usuário vinculou manualmente a alguma ação. Chats sem vínculo continuam
+    # capturados e visíveis na Caixa de Entrada (consolidação manual), mas não
+    # geram chamada de IA, sugestão nem digest automático. As mensagens deles são
+    # descartadas da triagem por decisão — não são "adiadas", então avançam o
+    # cursor normalmente (ver cálculo de new_cursor no fim).
+    ignored_unlinked = 0
+    if settings["linked_chats_only"]:
+        unlinked_ids = [cid for cid in groups if not candidates_by_chat_id.get(cid)]
+        ignored_unlinked = len(unlinked_ids)
+        for cid in unlinked_ids:
+            groups.pop(cid)
+        if not groups:
+            latest_ingested_at = max((d.to_dict() or {}).get("ingested_at") for d in docs)
+            cursor_ref.set({"last_processed_at": latest_ingested_at}, merge=True)
+            if ignored_unlinked:
+                log_to_firestore(sync_ref, logs, f"[WA-INGEST] {ignored_unlinked} conversa(s) sem ação vinculada ignorada(s) (modo só-vinculados); nada a analisar.", True)
+            return
+
     keys_doc = _cached_doc_get(db, "system", "api_keys")
     api_key = keys_doc.to_dict().get("gemini_api_key") if keys_doc.exists else None
     if not api_key:
@@ -456,13 +479,18 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
             m.get("ingested_at") for _, msgs in skipped_windows for m in msgs if m.get("ingested_at")
         )
     else:
+        # Máximo sobre TODO o lote lido (não só as janelas analisadas): no modo
+        # só-vinculados, conversas sem vínculo foram descartadas por decisão e não
+        # podem segurar o cursor — senão seriam relidas para sempre a cada passada.
         new_cursor = max(
-            m.get("ingested_at") for _, msgs in windows for m in msgs if m.get("ingested_at")
+            ts for ts in ((d.to_dict() or {}).get("ingested_at") for d in docs) if ts
         )
     cursor_ref.set({"last_processed_at": new_cursor}, merge=True)
 
-    if analyzed or skipped:
+    if analyzed or skipped or ignored_unlinked:
         extra = f" {skipped} conversa(s) adiada(s) para a próxima passada (teto)." if skipped else ""
+        if ignored_unlinked:
+            extra += f" {ignored_unlinked} conversa(s) sem ação vinculada ignorada(s)."
         log_to_firestore(sync_ref, logs, f"[WA-INGEST] {analyzed} janela(s) de conversa de WhatsApp analisada(s).{extra}", True)
 
 
