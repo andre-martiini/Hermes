@@ -16,7 +16,7 @@ Ver docs/okf/propostas/automacoes-canais-e-diario-pessoal.md (eixo 3).
 import json
 from datetime import datetime, timedelta, timezone
 
-from firebase_functions import scheduler_fn, options
+from firebase_functions import https_fn, scheduler_fn, options
 
 from gemini_cost_controls import GEMINI_FRONTIER_MODEL, generate_content_logged
 
@@ -103,6 +103,7 @@ def _collect_diary_material(db, date_str: str) -> dict:
     """Coletor determinístico (sem IA) do material bruto do dia, varrendo as
     coleções onde a atividade do usuário já fica registrada hoje."""
     material = {
+        "notas_manuais": [],
         "acoes": [],
         "concluidas": [],
         "criadas": [],
@@ -114,6 +115,15 @@ def _collect_diary_material(db, date_str: str) -> dict:
         "pessoas": [],
         "feedback_ia": [],
     }
+
+    # Anotações que o usuário deixou ao longo do dia direto no doc do diário
+    # (via UI web — PersonalDiaryView.tsx) para entrarem na consolidação da noite.
+    diary_doc = db.collection("diario_pessoal").document(date_str).get()
+    if diary_doc.exists:
+        for nota in (diary_doc.to_dict() or {}).get("notas_manuais") or []:
+            texto_nota = str((nota or {}).get("texto") or "").strip() if isinstance(nota, dict) else str(nota or "").strip()
+            if texto_nota:
+                material["notas_manuais"].append(texto_nota)
 
     for doc in db.collection("tarefas").stream():
         data = doc.to_dict() or {}
@@ -215,6 +225,7 @@ def _collect_diary_material(db, date_str: str) -> dict:
 
 def _material_is_empty(material: dict) -> bool:
     return not any([
+        material["notas_manuais"],
         material["acoes"], material["concluidas"], material["criadas"],
         material["saude"], material["peso"], material["financeiro"],
         material["agenda"], material["conversas"], material["pessoas"],
@@ -252,6 +263,7 @@ MATERIAL BRUTO DO DIA (dados de sistema — ações, saúde, finanças, agenda, 
 {material_json}
 
 INSTRUÇÕES:
+- O campo `notas_manuais` do material são anotações que o PRÓPRIO USUÁRIO escreveu ao longo do dia para entrarem no diário — são a entrada mais importante: incorpore todas, com prioridade sobre os dados de sistema, e trate-as como fato relatado (não como impressão sua).
 - Escreva EM PRIMEIRA PESSOA, como se fosse o próprio usuário escrevendo seu diário à noite — não um relatório sobre ele.
 - Tom pessoal e humano, natural, como alguém realmente escreveria — nada de bullet points de métricas nem linguagem corporativa.
 - Baseie-se estritamente no material fornecido. Não invente eventos, conversas ou fatos que não estejam nele.
@@ -287,13 +299,17 @@ def gerar_diario_pessoal(event: scheduler_fn.ScheduledEvent = None) -> None:
 
     today_str = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d")
     diary_ref = db.collection("diario_pessoal").document(today_str)
-    if diary_ref.get().exists:
+    existing = diary_ref.get()
+    existing_data = (existing.to_dict() or {}) if existing.exists else {}
+    # O doc pode já existir só com `notas_manuais` (anotações feitas na UI ao longo
+    # do dia) — isso não conta como diário gerado.
+    if existing_data.get("texto") or existing_data.get("sem_material"):
         print(f"[Diario] Diário de {today_str} já existe; nada a fazer.")
         return
 
     material = _collect_diary_material(db, today_str)
     if _material_is_empty(material):
-        diary_ref.set({"data": today_str, "sem_material": True, "gerado_em": datetime.now(timezone.utc).isoformat()})
+        diary_ref.set({"data": today_str, "sem_material": True, "gerado_em": datetime.now(timezone.utc).isoformat()}, merge=True)
         print(f"[Diario] Sem material para {today_str}.")
         return
 
@@ -343,6 +359,7 @@ def gerar_diario_pessoal(event: scheduler_fn.ScheduledEvent = None) -> None:
         return
 
     fontes = {
+        "notas_manuais": len(material["notas_manuais"]),
         "acoes": len(material["acoes"]),
         "concluidas": len(material["concluidas"]),
         "saude": bool(material["saude"] or material["peso"]),
@@ -352,6 +369,7 @@ def gerar_diario_pessoal(event: scheduler_fn.ScheduledEvent = None) -> None:
         "pessoas": len(material["pessoas"]),
     }
 
+    # merge=True preserva `notas_manuais` gravadas pela UI antes da consolidação.
     diary_ref.set({
         "data": today_str,
         "texto": texto,
@@ -360,7 +378,7 @@ def gerar_diario_pessoal(event: scheduler_fn.ScheduledEvent = None) -> None:
         "modelo": GEMINI_FRONTIER_MODEL,
         "editado": False,
         "confirmado": False,
-    })
+    }, merge=True)
 
     chat_id = _resolve_default_telegram_chat_id(db)
     if chat_id:
@@ -374,13 +392,15 @@ def gerar_diario_pessoal(event: scheduler_fn.ScheduledEvent = None) -> None:
     print(f"[Diario] Diário de {today_str} gerado ({len(texto)} chars).")
 
 
-def apply_diary_feedback(db, date_str: str, feedback_text: str) -> str:
+def _rewrite_diary_with_feedback(db, date_str: str, feedback_text: str) -> tuple[str | None, str]:
     """
-    Reescreve o diário de `date_str` incorporando um ajuste pedido pelo
-    usuário (fluxo Telegram: botão "✍️ Ajustar" trava a sessão, a próxima
-    mensagem livre vira o pedido — ver hermes_core_logic.py, session
-    `pending_diary_edit`). O diff é guardado em `ajustes[]`: é o sinal de
-    calibração de personalidade mais direto que o usuário dá ao sistema.
+    Núcleo do ajuste via IA: reescreve o diário de `date_str` incorporando o
+    pedido do usuário e persiste o resultado. O diff é guardado em `ajustes[]`:
+    é o sinal de calibração de personalidade mais direto que o usuário dá ao
+    sistema (insumo de `consolidar_personalidade`).
+
+    Retorna `(novo_texto, erro)` — `novo_texto` é None quando falhou, com
+    `erro` legível para o usuário.
     """
     from main import _cached_doc_get, get_genai_module
     from firebase_admin import firestore
@@ -388,20 +408,22 @@ def apply_diary_feedback(db, date_str: str, feedback_text: str) -> str:
     diary_ref = db.collection("diario_pessoal").document(date_str)
     diary_doc = diary_ref.get()
     if not diary_doc.exists:
-        return f"Não encontrei o diário de {date_str} para ajustar."
+        return None, f"Não encontrei o diário de {date_str} para ajustar."
 
     settings = _load_settings(db)
     if not settings["enabled"]:
-        return "O diário pessoal está desativado."
+        return None, "O diário pessoal está desativado."
 
     diary_data = diary_doc.to_dict() or {}
     texto_atual = diary_data.get("texto") or ""
+    if not texto_atual:
+        return None, f"O diário de {date_str} ainda não foi gerado."
     texto_original = diary_data.get("texto_original") or texto_atual
 
     keys_doc = _cached_doc_get(db, "system", "api_keys")
     api_key = keys_doc.to_dict().get("gemini_api_key") if keys_doc.exists else None
     if not api_key:
-        return "⚠️ Gemini não configurado."
+        return None, "⚠️ Gemini não configurado."
 
     genai = get_genai_module()
     client = genai.Client(api_key=api_key)
@@ -420,10 +442,10 @@ Reescreva o diário incorporando o ajuste, mantendo o tom em primeira pessoa e p
         novo_texto = (response.text or "").strip()
     except Exception as exc:
         print(f"[Diario] Falha ao aplicar ajuste de {date_str}: {exc}")
-        return "⚠️ Não consegui gerar o ajuste agora."
+        return None, "⚠️ Não consegui gerar o ajuste agora."
 
     if not novo_texto:
-        return "⚠️ Não consegui gerar o ajuste."
+        return None, "⚠️ Não consegui gerar o ajuste."
 
     now_iso = datetime.now(timezone.utc).isoformat()
     diary_ref.update({
@@ -433,8 +455,54 @@ Reescreva o diário incorporando o ajuste, mantendo o tom em primeira pessoa e p
         "ajustes": firestore.ArrayUnion([{"pedido": feedback_text, "em": now_iso}]),
         "atualizado_em": now_iso,
     })
+    return novo_texto, ""
+
+
+def apply_diary_feedback(db, date_str: str, feedback_text: str) -> str:
+    """
+    Wrapper do fluxo Telegram (botão "✍️ Ajustar" trava a sessão, a próxima
+    mensagem livre vira o pedido — ver hermes_core_logic.py, session
+    `pending_diary_edit`): devolve a resposta pronta para enviar no chat.
+    """
+    novo_texto, erro = _rewrite_diary_with_feedback(db, date_str, feedback_text)
+    if novo_texto is None:
+        return erro
     preview = novo_texto if len(novo_texto) <= 3500 else novo_texto[:3500] + "…"
     return f"✍️ Diário de {date_str} ajustado:\n\n{preview}"
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=120)
+def ajustarDiarioPessoal(req: https_fn.CallableRequest):
+    """
+    Ajuste via IA a partir da UI web (PersonalDiaryView.tsx): recebe a data e o
+    pedido de ajuste, reescreve o diário com o mesmo fluxo do Telegram e
+    retorna o texto revisado.
+    """
+    from main import get_db
+
+    if not (req.auth and req.auth.uid):
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
+            message="Usuário não autenticado.",
+        )
+
+    data = req.data or {}
+    date_str = str(data.get("date") or "").strip()
+    feedback = str(data.get("feedback") or "").strip()
+    if not date_str or not feedback:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="Campos 'date' e 'feedback' são obrigatórios.",
+        )
+
+    db = get_db()
+    novo_texto, erro = _rewrite_diary_with_feedback(db, date_str, feedback)
+    if novo_texto is None:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+            message=erro.replace("⚠️ ", ""),
+        )
+    return {"texto": novo_texto}
 
 
 @scheduler_fn.on_schedule(
