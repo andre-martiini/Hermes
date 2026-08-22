@@ -1200,3 +1200,172 @@ export interface CopilotDriveFile {
     driveFileName?: string | null;
 }
 
+
+// --- RESUMO MATINAL (resumo_matinal/{YYYY-MM-DD}) ---
+// Espelho tipado do dict devolvido por functions/morning_summary.py.
+// Tudo aqui é calculado em Python, de forma determinística — o frontend só
+// desenha. Ver o docstring do módulo para por que cada bloco existe.
+
+export type ResumoFocoRegra =
+    | 'prazo_final_iminente'
+    | 'degradacao_critica'
+    | 'sla_estourado'
+    | 'meta_parada'
+    | 'agendada'
+    | 'fila_avanco';
+
+export interface ResumoFoco {
+    task_id: string;
+    titulo: string;
+    regra: ResumoFocoRegra;
+    motivo: string;
+    proximo_passo: string | null;
+    horario_inicio: string | null;
+}
+
+export interface ResumoAcao {
+    id: string;
+    titulo: string;
+    status?: string;
+    area_tematica?: string;
+    projeto?: string;
+    horario_inicio: string | null;
+    horario_fim: string | null;
+    execution_lane: 'avanco' | 'continuo' | 'aguardando_terceiro';
+    degradation_count: number;
+    /** Arrastada para hoje pelo reset da meia-noite, não escolhida para hoje. */
+    herdada: boolean;
+    cobrar: boolean;
+    atrasada: boolean;
+    data_limite: string;
+    prazo_final: string | null;
+    proximo_passo: string | null;
+    etapas_feitas: number;
+    etapas_totais: number;
+    estrategia_objetivo_id: string | null;
+}
+
+export interface ResumoEvento {
+    titulo: string;
+    inicio: string | null;
+    fim: string | null;
+    dia_inteiro: boolean;
+}
+
+export interface ResumoJanelaLivre {
+    inicio: string;
+    fim: string;
+    minutos: number;
+}
+
+export interface ResumoPrazoDuro {
+    id: string;
+    titulo: string;
+    prazo_final: string;
+    dias: number;
+}
+
+export interface ResumoFilaItem {
+    titulo: string;
+    canal?: string;
+    desde?: string;
+    itens?: number;
+    motivo?: string;
+    quando?: string | null;
+    valor?: number;
+    vencimento?: string;
+    dias?: number;
+    vencida?: boolean;
+}
+
+export interface ResumoFila {
+    total: number;
+    amostra: ResumoFilaItem[];
+    /** Destino de navegação sugerido — mapeado para viewMode em index.tsx. */
+    rota: string;
+}
+
+export interface ResumoMeta {
+    id: string;
+    pilar?: EstrategiaPilar;
+    pilar_label?: string;
+    /** false para o pilar `saude`, executado pelos registros do módulo Saúde e não por ações. */
+    gerida_por_acoes: boolean;
+    objetivo: string;
+    status?: EstrategiaStatus;
+    acoes_hoje: number;
+    titulos_hoje: string[];
+    ultimo_movimento: string | null;
+    dias_parada: number | null;
+    progresso_pct: number | null;
+    unidade: string | null;
+    marcos_abertos: number;
+    marcos_total: number;
+}
+
+export interface ResumoMatinal {
+    data: string;
+    dia_semana: string;
+    versao: string;
+    gerado_em: string;
+    foco: ResumoFoco[];
+    hoje: {
+        avanco: ResumoAcao[];
+        continuo: ResumoAcao[];
+        aguardando_terceiro: ResumoAcao[];
+        atrasadas: ResumoAcao[];
+    };
+    agenda: ResumoEvento[];
+    janelas_livres: ResumoJanelaLivre[];
+    prazos_duros: ResumoPrazoDuro[];
+    carga_semana: Array<{ data: string; total: number }>;
+    filas: Record<string, ResumoFila>;
+    saude: {
+        rotinas_hoje: Array<{
+            titulo: string;
+            hora: string | null;
+            categoria?: string;
+            /** Chave de verificação, ou null se a rotina é só um aviso ilustrativo. */
+            verificavel: 'pesagem' | 'cintura' | 'checkin_manha' | 'checkin_noite' | null;
+            /** true/false para rotina verificável; null = não verificável, não mostrar marcador. */
+            feito: boolean | null;
+        }>;
+        pesagem_registrada: boolean;
+        cintura_registrada: boolean;
+        checkin_manha: boolean;
+        checkin_noite: boolean;
+        peso: { ultimo: number; data: string; media7: number | null; alvo?: number; falta: number | null } | null;
+        dor_ontem: { manha?: number; noite?: number; ciatica: boolean; crise: boolean } | null;
+        /** Registro mais recente do módulo Saúde — movimento das metas do pilar saúde. */
+        ultimo_registro: string | null;
+    };
+    estrategia: {
+        metas: ResumoMeta[];
+        paradas: ResumoMeta[];
+        servidas_hoje: number;
+        /** Denominador honesto de "X de N metas recebem trabalho hoje". */
+        total_geridas_por_acoes: number;
+    };
+    ontem: {
+        concluidas: string[];
+        diario: { data: string; texto: string; editado: boolean } | null;
+    };
+    perfil: {
+        resumo?: string;
+        rotinas: string[];
+        gatilhos: string[];
+        energia: string[];
+    } | null;
+    contadores: {
+        ativas: number;
+        hoje: number;
+        herdadas: number;
+        criticas: number;
+        cobrar: number;
+        sem_plano: number;
+        pendencias: number;
+        focos: number;
+    };
+    /** Gravado pela UI na primeira abertura do dia. */
+    visto_em?: string;
+}

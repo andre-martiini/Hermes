@@ -25,6 +25,7 @@ import { httpsCallable } from 'firebase/functions';
 import { ref, uploadBytes } from 'firebase/storage';
 import FinanceView from './FinanceView';
 import DashboardView from './DashboardView';
+import MorningSummaryView, { MorningSummaryRoute } from './src/views/MorningSummaryView';
 import { MobileShortcutsView } from './src/views/MobileShortcutsView';
 import KnowledgeView from './KnowledgeView';
 import ProjectsView from './ProjectsView';
@@ -1733,8 +1734,8 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [completedLimit, setCompletedLimit] = useState(10);
-  const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude' | 'servicos' | 'estrategia'>('dashboard');
-  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'finance' | 'saude' | 'ferramentas' | 'knowledge' | 'services' | 'rag-bases' | 'concluidas' | 'strategy' | 'godmode' | 'contacts' | 'diario' | 'whatsapp'>('dashboard');
+  const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude' | 'servicos' | 'estrategia'>('home');
+  const [viewMode, setViewMode] = useState<'home' | 'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'finance' | 'saude' | 'ferramentas' | 'knowledge' | 'services' | 'rag-bases' | 'concluidas' | 'strategy' | 'godmode' | 'contacts' | 'diario' | 'whatsapp'>('home');
   // Navegação de módulo (sidebar/menu mobile): activeModule e viewMode precisam mudar juntos.
   // flushSync força um commit síncrono único para os dois, em vez de duas chamadas de setState
   // separadas que dependem do agrupamento automático do React — elimina qualquer janela onde
@@ -1863,10 +1864,26 @@ const App: React.FC = () => {
     else if (view === 'saude') setActiveModule('saude');
     else if (view === 'diario') setActiveModule('acoes');
   };
+  // Atalhos do Resumo Matinal — cada fila/bloco aponta para a tela onde a
+  // pendência de fato se resolve (a `rota` vem calculada de morning_summary.py).
+  const handleMorningSummaryNavigate = (route: MorningSummaryRoute) => {
+    const destinos: Record<MorningSummaryRoute, [typeof activeModule, typeof viewMode]> = {
+      gallery: ['acoes', 'gallery'],
+      finance: ['financeiro', 'finance'],
+      saude: ['saude', 'saude'],
+      diario: ['acoes', 'diario'],
+      strategy: ['estrategia', 'strategy'],
+      whatsapp: ['acoes', 'whatsapp'],
+      contacts: ['acoes', 'contacts'],
+      dashboard: ['dashboard', 'dashboard'],
+    };
+    const [modulo, view] = destinos[route];
+    navigateToModule(modulo, view);
+  };
   // Sync state changes with history to enable back button
   useEffect(() => {
-    // Only push if we are NOT at dashboard (root)
-    if (activeModule !== 'dashboard' || viewMode !== 'dashboard' || activeFerramenta) {
+    // Only push if we are NOT at the root view (Resumo Matinal)
+    if (activeModule !== 'home' || viewMode !== 'home' || activeFerramenta) {
       window.history.pushState({ activeModule, viewMode, activeFerramenta }, "", window.location.pathname);
     }
   }, [activeModule, viewMode, activeFerramenta]);
@@ -1879,9 +1896,9 @@ const App: React.FC = () => {
       } else if (activeFerramenta) {
         setActiveFerramenta(null);
         e.preventDefault();
-      } else if (viewMode !== 'dashboard') {
-        setActiveModule('dashboard');
-        setViewMode('dashboard');
+      } else if (viewMode !== 'home') {
+        setActiveModule('home');
+        setViewMode('home');
         e.preventDefault();
       } else {
         const now = Date.now();
@@ -4584,6 +4601,7 @@ const App: React.FC = () => {
             </div>
             <nav className="flex flex-col gap-1.5">
               {[
+                { id: 'home', label: 'Resumo do dia', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>, active: viewMode === 'home', onClick: () => navigateToModule('home', 'home') },
                 { id: 'dashboard', label: 'Dashboard', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>, active: viewMode === 'dashboard', onClick: () => navigateToModule('dashboard', 'dashboard') },
                 { id: 'acoes', label: 'Ações', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>, active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'pgc' || viewMode === 'licitacoes' || viewMode === 'assistencia' || viewMode === 'concluidas'), onClick: () => navigateToModule('acoes', 'gallery') },
                 { id: 'servicos', label: 'Serviços', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>, active: activeModule === 'servicos' && viewMode === 'services', onClick: () => navigateToModule('servicos', 'services') },
@@ -4772,7 +4790,7 @@ const App: React.FC = () => {
                       onCreateAction={() => setIsCreateModalOpen(true)}
                       isDark={isDarkTheme}
                     />
-                    {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && viewMode !== 'whatsapp' && (
+                    {viewMode !== 'home' && viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && viewMode !== 'whatsapp' && (
                       <button
                         onClick={() => setIsCreateModalOpen(true)}
                         className="bg-slate-900 text-white p-1.5 rounded-lg md:rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
@@ -4881,7 +4899,8 @@ const App: React.FC = () => {
                         className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
                       >
                         <h1 className={`text-xl font-black tracking-tight uppercase font-mono ${isDarkTheme ? 'text-slate-100' : 'text-slate-900'}`}>
-                          {viewMode === 'services' ? 'Serviços' :
+                          {viewMode === 'home' ? 'Resumo do Dia' :
+                            viewMode === 'services' ? 'Serviços' :
                             viewMode === 'rag-bases' ? 'Áreas Temáticas' :
                               viewMode === 'knowledge' ? 'Conhecimento' :
                                 viewMode === 'diario' ? 'Diário Pessoal' :
@@ -4896,7 +4915,7 @@ const App: React.FC = () => {
                         </h1>
                       </div>
                     </div>
-                    {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'diario' && viewMode !== 'whatsapp' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
+                    {viewMode !== 'home' && viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'diario' && viewMode !== 'whatsapp' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
                       <nav className={`flex flex-wrap items-center gap-1`}>
                         <button
                           onClick={() => {
@@ -5017,7 +5036,7 @@ const App: React.FC = () => {
                     </div>
                   )}
                   {/* Standard Action Buttons (Search, Sync, Create) */}
-                  {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && viewMode !== 'whatsapp' && (
+                  {viewMode !== 'home' && viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && viewMode !== 'whatsapp' && (
                     <div className="ml-auto flex items-center justify-end gap-3">
                       {activeModule !== 'dashboard' && (
                         <div className={`hidden lg:flex h-10 items-center border rounded-lg px-4 w-72 xl:w-80 group focus-within:ring-1 focus-within:ring-primary-tactile transition-all ${inputSurfaceClass} border-[#e5e7eb] dark:border-slate-800`}>
@@ -5142,6 +5161,7 @@ const App: React.FC = () => {
                 <div className={`md:hidden border-t animate-in slide-in-from-top-4 duration-300 ${isDarkTheme ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
                   <nav className="flex flex-col p-4 gap-2">
                     {[
+                      { label: 'Resumo do dia', active: viewMode === 'home', onClick: () => navigateToModule('home', 'home') },
                       { label: 'Dashboard', active: viewMode === 'dashboard', onClick: () => navigateToModule('dashboard', 'dashboard') },
                       { label: 'Ações', active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia' || viewMode === 'concluidas'), onClick: () => navigateToModule('acoes', 'gallery') },
                       { label: 'Serviços', active: activeModule === 'servicos' && viewMode === 'services', onClick: () => navigateToModule('servicos', 'services') },
@@ -5200,10 +5220,22 @@ const App: React.FC = () => {
                 </div>
               )}
             </header>
-            <div className={`w-full ${(viewMode === 'dashboard' || viewMode === 'whatsapp') ? 'px-0 py-0' : 'px-0 md:px-8 py-6'}`}>
+            <div className={`w-full ${(viewMode === 'home' || viewMode === 'dashboard' || viewMode === 'whatsapp') ? 'px-0 py-0' : 'px-0 md:px-8 py-6'}`}>
               {/* Painel de Estatísticas e Filtros - APENAS NA VISÃO GERAL */}
-              <main className={(viewMode === 'dashboard' || viewMode === 'godmode' || viewMode === 'whatsapp') ? '' : 'mb-20'}>
-                {viewMode === 'dashboard' ? (
+              <main className={(viewMode === 'home' || viewMode === 'dashboard' || viewMode === 'godmode' || viewMode === 'whatsapp') ? '' : 'mb-20'}>
+                {viewMode === 'home' ? (
+                  <MorningSummaryView
+                    isDark={isDarkTheme}
+                    onOpenTask={handleCopilotoOpenTask}
+                    onNavigate={handleMorningSummaryNavigate}
+                    onAskCopiloto={(prompt) => {
+                      setCopilotoMode('default');
+                      setCopilotoAutoStartMic(false);
+                      setCopilotoInitialPrompt(prompt);
+                      setIsCopilotoOpen(true);
+                    }}
+                  />
+                ) : viewMode === 'dashboard' ? (
                   <>
                     {/* Mobile: Atalhos Inteligentes */}
                     <div className="sm:hidden">

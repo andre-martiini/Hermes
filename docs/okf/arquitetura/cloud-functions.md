@@ -4,7 +4,7 @@ title: Mapa de Cloud Functions
 description: Cloud Functions exportadas pelo backend Python do Hermes, agrupadas por arquivo e tipo de trigger.
 resource: functions/main.py
 tags: [hermes, okf, cloud-functions, firebase, arquitetura]
-timestamp: 2026-08-14T00:00:00-03:00
+timestamp: 2026-08-22T00:00:00-03:00
 ---
 
 # Mapa de Cloud Functions
@@ -111,6 +111,8 @@ O backend roda em Cloud Functions Python (gen2). Há ~80 funções exportadas em
 | `gerar_diario_pessoal` (`personal_diary.py`) | Scheduler (21h30 BRT) | Agrega as anotações manuais do dia (`diario_pessoal/{data}.notas_manuais`, deixadas pela UI web — entrada prioritária do prompt), ações, saúde, finanças, agenda, conversas (`sessoes_copiloto` e `sessoes_godmode`) e pessoas do dia (`tarefas`, `health_*`, `finance_transactions`, `google_calendar_events`, `interacoes_pessoas`) e usa um modelo de linguagem para redigir o diário pessoal do dia em primeira pessoa, salvo em `diario_pessoal/{data}` (`merge=True` para preservar as notas manuais); entrega no Telegram com botões "✍️ Ajustar"/"👍 Ok". Flag `system/settings.personal_diary.enabled` |
 | `ajustarDiarioPessoal` (`personal_diary.py`) | Callable | Ajuste via IA a partir da UI web (`PersonalDiaryView.tsx`): recebe `{date, feedback}`, reescreve o diário com o mesmo núcleo do fluxo Telegram (`_rewrite_diary_with_feedback`, registra em `ajustes[]`) e retorna o texto revisado. Mesma flag `personal_diary.enabled` |
 | `consolidar_personalidade` (`personal_diary.py`) | Scheduler (domingo 22h BRT) | Destila os diários da semana (+ ajustes pedidos pelo usuário) num perfil de personalidade em `usuarios/{uid}.ai_profile.personalidade`, versionado. Mesma flag `personal_diary.enabled` |
+| `gerar_resumo_matinal` (`morning_summary.py`) | Scheduler (4h30 BRT) | Resumo Matinal — Camada 1: coletor prospectivo **determinístico** (sem IA) que monta o dia e grava em `resumo_matinal/{data}`. Par simétrico de `gerar_diario_pessoal`: o diário fecha o dia, este abre. Precisa rodar **depois** de `daily_wip_reset_and_degradation` (00:00), que é quem produz a "herança" da madrugada (`auto_data_atualizada`, `degradation_count`). Escolhe até 3 focos do dia por regra explícita em Python (`_escolher_foco`, testada em `test_morning_summary.py`), nunca por modelo — mesma disciplina de `health_weekly_report.py`. Flag `system/settings.resumo_matinal.enabled` (padrão **ligado**) |
+| `gerarResumoMatinal` (`morning_summary.py`) | Callable | Regeneração sob demanda do Resumo Matinal a partir da UI web (`MorningSummaryView.tsx`): botão "Atualizar" e fallback de quando o agendador ainda não rodou. Aceita `{date?}` (`YYYY-MM-DD`, padrão hoje), persiste e devolve o mesmo dict do scheduler |
 
 ## `functions/knowledge_graph.py` (~9 funções)
 
