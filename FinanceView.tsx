@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill, BillRubric, IncomeEntry, IncomeRubric } from './types';
-import { storage, db } from './firebase';
+import { storage, db, functions } from './firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, setDoc } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 
 const parseDateDay = (dateStr?: string) => {
     if (!dateStr) return null;
@@ -63,6 +64,14 @@ interface FinanceViewProps {
     isSettingsOpen: boolean;
     setIsSettingsOpen: (isOpen: boolean) => void;
     onOpenFinancialCopilot?: () => void;
+}
+
+interface BillPdfPasswordConfig {
+    id: string;
+    label: string;
+    rubric_id: string;
+    senders: string[];
+    configured: boolean;
 }
 
 const FinanceSection = ({ title, children, defaultExpanded = true, disableCollapse = false }: { title: string, children: React.ReactNode, defaultExpanded?: boolean, disableCollapse?: boolean }) => {
@@ -292,6 +301,11 @@ const FinanceView = ({
     // Category States for Settings
     const [newBillCategoryInput, setNewBillCategoryInput] = useState('');
     const [newIncomeCategoryInput, setNewIncomeCategoryInput] = useState('');
+    const [billPdfPasswordConfigs, setBillPdfPasswordConfigs] = useState<BillPdfPasswordConfig[]>([]);
+    const [billPdfPasswordDrafts, setBillPdfPasswordDrafts] = useState<Record<string, string>>({});
+    const [billPdfPasswordLoading, setBillPdfPasswordLoading] = useState(false);
+    const [billPdfPasswordSaving, setBillPdfPasswordSaving] = useState<string | null>(null);
+    const [billPdfPasswordFeedback, setBillPdfPasswordFeedback] = useState<Record<string, { type: 'success' | 'error'; message: string }>>({});
 
     // Fixed Bills State
     const [isAddingBill, setIsAddingBill] = useState(false);
@@ -331,6 +345,83 @@ const FinanceView = ({
     useEffect(() => {
         setLocalEmergencyCurrent(emergencyReserve.current);
     }, [emergencyReserve.current]);
+
+    const loadBillPdfPasswordConfigs = async () => {
+        setBillPdfPasswordLoading(true);
+        try {
+            const callable = httpsCallable<Record<string, never>, { configs: BillPdfPasswordConfig[] }>(functions, 'listBillPdfPasswordConfigs');
+            const response = await callable({});
+            setBillPdfPasswordConfigs(response.data.configs || []);
+        } catch (error) {
+            console.error('Falha ao carregar senhas de PDFs protegidos:', error);
+        } finally {
+            setBillPdfPasswordLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (isSettingsOpen) void loadBillPdfPasswordConfigs();
+    }, [isSettingsOpen]);
+
+    const saveBillPdfPassword = async (config: BillPdfPasswordConfig) => {
+        const password = billPdfPasswordDrafts[config.id] ?? '';
+        if (!password) {
+            setBillPdfPasswordFeedback(prev => ({
+                ...prev,
+                [config.id]: { type: 'error', message: 'Digite a senha antes de salvar.' }
+            }));
+            return;
+        }
+        setBillPdfPasswordSaving(config.id);
+        setBillPdfPasswordFeedback(prev => {
+            const next = { ...prev };
+            delete next[config.id];
+            return next;
+        });
+        try {
+            const callable = httpsCallable<
+                { config_id: string; password: string },
+                { success: boolean; verified: boolean; requeued: number }
+            >(functions, 'saveBillPdfPassword', { timeout: 60000 });
+            const response = await callable({ config_id: config.id, password });
+            let reprocessed = false;
+            if (response.data.requeued > 0) {
+                try {
+                    const syncCallable = httpsCallable<Record<string, never>, { success: boolean }>(
+                        functions,
+                        'sync_gmail_bills_callable',
+                        { timeout: 540000 }
+                    );
+                    const syncResponse = await syncCallable({});
+                    reprocessed = Boolean(syncResponse.data.success);
+                } catch (syncError) {
+                    console.error('Senha salva, mas a reimportação imediata falhou:', syncError);
+                }
+            }
+            setBillPdfPasswordDrafts(prev => ({ ...prev, [config.id]: '' }));
+            setBillPdfPasswordConfigs(prev => prev.map(item => item.id === config.id ? { ...item, configured: true } : item));
+            setBillPdfPasswordFeedback(prev => ({
+                ...prev,
+                [config.id]: {
+                    type: 'success',
+                    message: reprocessed
+                        ? 'Senha validada; fatura recente reprocessada.'
+                        : response.data.verified
+                            ? 'Senha validada e protegida.'
+                            : 'Senha protegida; será validada no próximo PDF.'
+                }
+            }));
+        } catch (error: any) {
+            const rawMessage = error?.message || 'Não foi possível salvar a senha.';
+            const message = rawMessage.replace(/^Firebase:\s*/i, '').replace(/\s*\(functions\/[^)]+\)\.?$/i, '');
+            setBillPdfPasswordFeedback(prev => ({
+                ...prev,
+                [config.id]: { type: 'error', message }
+            }));
+        } finally {
+            setBillPdfPasswordSaving(null);
+        }
+    };
 
     useEffect(() => {
         setLocalEmergencyTarget(emergencyReserve.target);
@@ -873,6 +964,64 @@ const FinanceView = ({
                                 Valor base de salário/remuneração aplicável nos meses sem lançamento específico
                             </p>
                         </div>
+                    </div>
+
+                    {/* Senhas de PDFs de obrigações */}
+                    <div className="pt-6 border-t border-slate-200 dark:border-white/10">
+                        <div className="mb-4 flex flex-col gap-1">
+                            <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider text-primary-tactile">// Senhas de Faturas Protegidas</h4>
+                            <p className="text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-wider">
+                                A senha é testada no PDF mais recente e guardada no cofre seguro. Ela nunca aparece nesta tela nem nos logs.
+                            </p>
+                        </div>
+                        {billPdfPasswordLoading ? (
+                            <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950 p-5 text-[10px] font-sans font-bold uppercase tracking-wider text-slate-400">
+                                Carregando obrigações protegidas…
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                                {billPdfPasswordConfigs.map(config => {
+                                    const feedback = billPdfPasswordFeedback[config.id];
+                                    const isSaving = billPdfPasswordSaving === config.id;
+                                    return (
+                                        <div key={config.id} className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950 p-4 space-y-3">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <div className="text-xs font-sans font-bold text-on-surface">{config.label}</div>
+                                                    <div className="mt-1 text-[9px] font-sans font-semibold text-slate-400 break-all">{config.senders.join(', ')}</div>
+                                                </div>
+                                                <span className={`shrink-0 rounded-full px-2.5 py-1 text-[8px] font-sans font-bold uppercase tracking-wider ${config.configured ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'}`}>
+                                                    {config.configured ? 'Configurada' : 'Pendente'}
+                                                </span>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <input
+                                                    type="password"
+                                                    autoComplete="new-password"
+                                                    placeholder={config.configured ? 'Nova senha para substituir' : 'Digite a senha do PDF'}
+                                                    value={billPdfPasswordDrafts[config.id] || ''}
+                                                    onChange={event => setBillPdfPasswordDrafts(prev => ({ ...prev, [config.id]: event.target.value }))}
+                                                    onKeyDown={event => { if (event.key === 'Enter') void saveBillPdfPassword(config); }}
+                                                    className="min-w-0 flex-1 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 px-3 py-2.5 text-xs font-sans font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
+                                                />
+                                                <button
+                                                    onClick={() => void saveBillPdfPassword(config)}
+                                                    disabled={isSaving}
+                                                    className="shrink-0 rounded-lg bg-primary-tactile px-4 py-2.5 text-[9px] font-sans font-bold uppercase tracking-wider text-white transition-opacity disabled:opacity-50"
+                                                >
+                                                    {isSaving ? 'Testando…' : 'Salvar'}
+                                                </button>
+                                            </div>
+                                            {feedback && (
+                                                <div className={`text-[9px] font-sans font-semibold ${feedback.type === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                                    {feedback.message}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
 
                     {/* Configuração de Gastos Externos */}

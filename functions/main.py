@@ -37,6 +37,18 @@ from security_portals import (
 )
 from health_routines import DEFAULT_HEALTH_REMINDERS
 from pdf_precision import extract_pdf_text_with_fallback, is_pdf_mime_type
+from gmail_bill_pdf import (
+    is_gemini_invalid_argument,
+    prepare_pdf_for_gemini,
+    validate_bill_payload,
+)
+from bill_pdf_passwords import (
+    find_password_config,
+    list_password_configs,
+    password_secret_exists,
+    read_password_secret,
+    save_password_secret,
+)
 from godmode import (  # noqa: F401 — registra as Cloud Functions
     askHermesGodmode,
 )
@@ -2179,8 +2191,23 @@ def sync_boletos_gmail(service, sync_ref, logs):
             msg = service.users().messages().get(userId='me', id=msg_id).execute(num_retries=3)
             snippet = msg.get('snippet', '')
             sender, subject = _gmail_message_headers(msg)
+            password_config = find_password_config(db, sender)
+            registered_pdf_password = None
+            if password_config:
+                try:
+                    registered_pdf_password = read_password_secret(
+                        os.environ.get("GCLOUD_PROJECT") or "gestao-hermes",
+                        password_config["secret_id"],
+                    )
+                except Exception as password_read_error:
+                    print(
+                        f"[BOLETO] Não foi possível consultar a senha cadastrada para "
+                        f"{password_config['id']}: {type(password_read_error).__name__}"
+                    )
 
-            # Tentar baixar o primeiro PDF encontrado
+            # Tentar baixar o primeiro PDF encontrado. PDFs protegidos por senha
+            # são rejeitados pelo Gemini com 400 INVALID_ARGUMENT; nesses casos a
+            # análise continua com os metadados e o trecho textual do e-mail.
             pdf_data = None
             def find_pdf(part):
                 nonlocal pdf_data
@@ -2192,6 +2219,18 @@ def sync_boletos_gmail(service, sync_ref, logs):
                     return
             
             find_pdf(msg['payload'])
+            pdf_fallback_reason = None
+            if pdf_data:
+                pdf_data, pdf_fallback_reason = prepare_pdf_for_gemini(
+                    pdf_data,
+                    passwords=[registered_pdf_password] if registered_pdf_password else None,
+                )
+                if pdf_fallback_reason:
+                    log_to_firestore(
+                        sync_ref,
+                        logs,
+                        f"[BOLETO] Anexo {msg_id} não enviado à IA ({pdf_fallback_reason}); usando dados do e-mail."
+                    )
             
             # Formata rubricas para o prompt
             rubrics_text = "\n".join([f"- {r['desc']} (ID: {r['id']})" for r in rubrics_cache])
@@ -2224,20 +2263,59 @@ def sync_boletos_gmail(service, sync_ref, logs):
             Se não for um boleto/fatura ou se não encontrar dados, responda {{"error": "not_a_bill"}}.
             """
             
-            content_parts = [prompt, f"E-mail Fragment: {snippet}"]
+            email_context = (
+                f"Remetente: {sender or 'não informado'}\n"
+                f"Assunto: {subject or 'não informado'}\n"
+                f"Trecho do e-mail: {snippet or 'não informado'}"
+            )
+            if pdf_fallback_reason:
+                email_context += (
+                    "\nObservação: o PDF anexo não pôde ser aberto porque está "
+                    "protegido ou inválido. Extraia somente informações explicitamente "
+                    "presentes nos dados do e-mail; não invente campos ausentes."
+                )
+            elif password_config:
+                email_context += (
+                    f"\nRubrica pré-vinculada: {password_config['label']} "
+                    f"(ID: {password_config['rubric_id']})."
+                )
+
+            text_content_parts = [prompt, email_context]
+            content_parts = list(text_content_parts)
             if pdf_data:
                 content_parts.append(types.Part.from_bytes(data=pdf_data, mime_type="application/pdf"))
             
             try:
-                response = client.models.generate_content(model="gemini-3.5-flash-lite", contents=content_parts)
+                try:
+                    response = client.models.generate_content(model=GEMINI_LIGHT_MODEL, contents=content_parts)
+                except Exception as attachment_error:
+                    # Há PDFs estruturalmente legíveis que a API ainda rejeita. Uma
+                    # segunda chamada sem o binário preserva a importação quando o
+                    # assunto/snippet já contém valor e vencimento.
+                    if not pdf_data or not is_gemini_invalid_argument(attachment_error):
+                        raise
+                    log_to_firestore(
+                        sync_ref,
+                        logs,
+                        f"[BOLETO] Anexo {msg_id} recusado pela IA; repetindo somente com os dados do e-mail."
+                    )
+                    response = client.models.generate_content(
+                        model=GEMINI_LIGHT_MODEL,
+                        contents=text_content_parts,
+                    )
                 res_text = response.text.strip()
                 if "```json" in res_text:
                     res_text = res_text.split("```json")[-1].split("```")[0].strip()
                 elif "```" in res_text:
                     res_text = res_text.split("```")[-1].split("```")[0].strip()
 
-                data = json.loads(res_text)
-                if data.get('error'): 
+                data, invalid_payload_reason = validate_bill_payload(json.loads(res_text))
+                if data is None:
+                    log_to_firestore(
+                        sync_ref,
+                        logs,
+                        f"[BOLETO] Mensagem {msg_id} sem dados suficientes ({invalid_payload_reason}); ignorando."
+                    )
                     new_processed_ids.append(msg_id)
                     continue
                 
@@ -2249,7 +2327,9 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 is_exact_dup = False
                 name_extracted = data['description'].lower()
                 # Prioriza o match de rubrica feito pela IA
-                rubric_id_from_ai = data.get('rubric_id')
+                rubric_id_from_ai = (
+                    password_config.get('rubric_id') if password_config else None
+                ) or data.get('rubric_id')
 
                 for eb in existing_bills_cache:
                     if eb['month'] == month and eb['year'] == year:
@@ -2354,7 +2434,8 @@ def sync_boletos_gmail(service, sync_ref, logs):
                     log_to_firestore(sync_ref, logs, f"Aviso: O PDF da mensagem {msg_id} está vazio. Ignorando.")
                 else:
                     log_to_firestore(sync_ref, logs, f"Aviso: Erro ao processar mensagem {msg_id}: {e}")
-                new_processed_ids.append(msg_id)
+                # Não marca falhas como processadas: erros transitórios da API ou
+                # do parser precisam poder ser recuperados na próxima sincronização.
 
         if new_processed_ids:
             updated_ids = list(set(processed_ids + new_processed_ids))[-500:]
@@ -2394,6 +2475,119 @@ def sync_gmail_bills_callable(req: https_fn.CallableRequest):
         error_msg = f"Erro na sincronização manual: {str(e)}"
         log_to_firestore(sync_ref, logs, error_msg)
         return {"success": False, "error": error_msg}
+
+
+def _validate_bill_pdf_password(service, senders: list[str], password: str) -> tuple[bool | None, list[str]]:
+    """Testa a senha contra o PDF protegido mais recente dos remetentes.
+
+    Retorna None quando não há amostra protegida recente para validar, além dos
+    IDs recentes que a senha conseguiu abrir e que podem ser reprocessados.
+    """
+    sender_query = " OR ".join(f"from:{sender}" for sender in senders)
+    query = f"({sender_query}) has:attachment filename:pdf"
+    messages = service.users().messages().list(userId='me', q=query, maxResults=10).execute(num_retries=3).get('messages', [])
+
+    protected_found = False
+    latest_protected_checked = False
+    unlocked_message_ids = []
+    for message_info in messages:
+        msg_id = message_info['id']
+        message = service.users().messages().get(userId='me', id=msg_id, format='full').execute(num_retries=3)
+        pdf_attachments = []
+
+        def collect_pdf(part):
+            body = part.get('body') or {}
+            if (part.get('filename') or '').lower().endswith('.pdf') and body.get('attachmentId'):
+                pdf_attachments.append(body['attachmentId'])
+            for child in part.get('parts') or []:
+                collect_pdf(child)
+
+        collect_pdf(message.get('payload') or {})
+        for attachment_id in pdf_attachments:
+            attachment = service.users().messages().attachments().get(
+                userId='me', messageId=msg_id, id=attachment_id
+            ).execute(num_retries=3)
+            file_bytes = base64.urlsafe_b64decode(attachment['data'])
+            _, without_password_reason = prepare_pdf_for_gemini(file_bytes)
+            if without_password_reason != "pdf_protegido_por_senha":
+                continue
+            protected_found = True
+            prepared, _ = prepare_pdf_for_gemini(file_bytes, passwords=[password])
+            if not latest_protected_checked:
+                latest_protected_checked = True
+                if prepared is None:
+                    return False, []
+            if prepared is not None:
+                unlocked_message_ids.append(msg_id)
+            break
+    if not protected_found:
+        return None, []
+    return bool(unlocked_message_ids), unlocked_message_ids
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)
+def listBillPdfPasswordConfigs(req: https_fn.CallableRequest) -> dict:
+    _require_internal_user(req)
+    db = get_db()
+    project_id = os.environ.get("GCLOUD_PROJECT") or "gestao-hermes"
+    configs = []
+    for config in list_password_configs(db):
+        public_config = {key: value for key, value in config.items() if key != "secret_id"}
+        public_config["configured"] = password_secret_exists(project_id, config["secret_id"])
+        configs.append(public_config)
+    return {"configs": configs}
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=60)
+def saveBillPdfPassword(req: https_fn.CallableRequest) -> dict:
+    _require_internal_user(req)
+    data = req.data or {}
+    config_id = str(data.get("config_id") or "").strip()
+    password = data.get("password")
+    if not isinstance(password, str) or not password or len(password) > 128:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="Informe uma senha entre 1 e 128 caracteres.",
+        )
+
+    db = get_db()
+    config = next((item for item in list_password_configs(db) if item["id"] == config_id), None)
+    if not config:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.NOT_FOUND,
+            message="Obrigação protegida não cadastrada.",
+        )
+
+    validation, unlockable_message_ids = _validate_bill_pdf_password(
+        get_gmail_service(), config["senders"], password
+    )
+    if validation is False:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="A senha não abriu o PDF recente deste emissor.",
+        )
+
+    save_password_secret(
+        os.environ.get("GCLOUD_PROJECT") or "gestao-hermes",
+        config["secret_id"],
+        password,
+    )
+
+    if unlockable_message_ids:
+        processed_ref = db.collection('system').document('processed_emails')
+        processed_snapshot = processed_ref.get()
+        processed_ids = list((processed_snapshot.to_dict() or {}).get('ids') or []) if processed_snapshot.exists else []
+        unlockable_set = set(unlockable_message_ids)
+        processed_ref.set(
+            {'ids': [message_id for message_id in processed_ids if message_id not in unlockable_set]},
+            merge=True,
+        )
+
+    return {
+        "success": True,
+        "verified": validation is True,
+        "requeued": len(unlockable_message_ids),
+    }
 
 def run_full_sync(trigger_reason='unspecified'):
     """Executa o processo completo de sincronização"""
