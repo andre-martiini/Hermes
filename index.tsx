@@ -57,6 +57,7 @@ import {
 import { DayView } from './src/views/DayView';
 import { CalendarView } from './src/views/CalendarView';
 import { CategoryView } from './src/views/CategoryView';
+import { GanttView } from './src/views/GanttView';
 import { TaskExecutionView } from './src/views/TaskExecutionView';
 import { StrategyDashboardView } from './src/views/StrategyDashboardView';
 import PublicFinancePortal from './src/components/public/PublicFinancePortal';
@@ -1719,7 +1720,7 @@ const App: React.FC = () => {
     }
   };
   // Dashboard states
-  const [dashboardViewMode, setDashboardViewMode] = useState<'list' | 'calendar'>('list');
+  const [dashboardViewMode, setDashboardViewMode] = useState<'list' | 'calendar' | 'gantt'>('list');
   const [groupByDate, setGroupByDate] = useState<boolean>(() => {
     const saved = localStorage.getItem('hermes-group-by-date');
     return saved !== 'false';
@@ -5090,6 +5091,13 @@ const App: React.FC = () => {
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2-2v12a2 2 0 002 2z" /></svg>
                           </button>
+                          <button
+                            onClick={() => setDashboardViewMode('gantt')}
+                            className={`px-3 md:px-4 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center font-sans ${dashboardViewMode === 'gantt' ? (isDarkTheme ? 'bg-slate-600 text-white' : 'bg-white text-slate-900 shadow-sm') : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
+                            title="Visualização em Gantt (execução → prazo final)"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h9M8 12h11M4 18h7" /></svg>
+                          </button>
                         </div>
                       )}
                     </div>
@@ -5366,11 +5374,25 @@ const App: React.FC = () => {
                               <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2-2v12a2 2 0 002 2z" /></svg>
                               Calendário
                             </button>
+
+                            <button
+                              onClick={() => setDashboardViewMode('gantt')}
+                              className={`flex-1 py-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all flex items-center justify-center font-mono border-l ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'} ${dashboardViewMode === 'gantt' ? (isDarkTheme ? 'bg-slate-600 text-white' : 'bg-slate-900 text-white') : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
+                            >
+                              <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h9M8 12h11M4 18h7" /></svg>
+                              Gantt
+                            </button>
                           </div>
                         )}
                       </div>
                     </div>
-                    {dashboardViewMode === 'calendar' ? (
+                    {dashboardViewMode === 'gantt' ? (
+                      <GanttView
+                        tasks={filteredAndSortedTarefas}
+                        onTaskClick={(t) => { setSelectedTask(t); setTaskModalMode('execute'); }}
+                        isDark={isDarkTheme}
+                      />
+                    ) : dashboardViewMode === 'calendar' ? (
                       <CalendarView
                         tasks={filteredAndSortedTarefas}
                         googleEvents={primaryCalendarEvents}
