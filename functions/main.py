@@ -10274,6 +10274,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         parts=[types.Part(text=_msg_text)]
                     ))
                     _history_texts.append(_msg_text)
+                from hermes_core_logic import _sanitize_chat_history
+                history = _sanitize_chat_history(history, types)
                 history_plain = " ".join(_history_texts)
             except Exception as e:
                 print(f"Erro ao carregar histórico da sessão {session_id}: {e}")

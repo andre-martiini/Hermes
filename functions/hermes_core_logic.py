@@ -176,6 +176,49 @@ def _persist_copilot_message(
         print(f"[SessionBridge] Falha ao persistir mensagem na sessao {session_id}: {exc}")
 
 
+def _sanitize_chat_history(history_contents: list, types) -> list:
+    """
+    Sanitiza o histórico de conversação para respeitar os requisitos estritos da API Gemini:
+    1. Apenas papéis válidos ('user' e 'model')
+    2. Remove partes vazias
+    3. Mescla mensagens consecutivas com o mesmo papel (evita 'user' seguido de 'user' ou 'model' de 'model')
+    4. Deve iniciar com 'user' (descarta leading 'model')
+    5. Deve finalizar com 'model' (descarta trailing 'user', já que o próximo chat.send_message envia o novo 'user')
+    """
+    if not history_contents:
+        return []
+
+    cleaned = []
+    for c in history_contents:
+        role = "model" if getattr(c, "role", None) in ("model", "assistant") else "user"
+        parts = []
+        for p in getattr(c, "parts", []) or []:
+            if hasattr(p, "text") and p.text and p.text.strip():
+                parts.append(types.Part(text=p.text))
+            elif hasattr(p, "inline_data") and getattr(p.inline_data, "data", None):
+                parts.append(p)
+            elif hasattr(p, "function_call") and getattr(p.function_call, "name", None):
+                parts.append(p)
+            elif hasattr(p, "function_response") and getattr(p.function_response, "name", None):
+                parts.append(p)
+
+        if not parts:
+            continue
+
+        if cleaned and cleaned[-1].role == role:
+            cleaned[-1].parts.extend(parts)
+        else:
+            cleaned.append(types.Content(role=role, parts=parts))
+
+    while cleaned and cleaned[0].role != "user":
+        cleaned.pop(0)
+
+    while cleaned and cleaned[-1].role != "model":
+        cleaned.pop()
+
+    return cleaned
+
+
 def _load_copilot_session_history(db, session_id: str | None, types, limit: int = _COPILOT_SESSION_HISTORY_LIMIT) -> list:
     if not session_id:
         return []
@@ -199,7 +242,7 @@ def _load_copilot_session_history(db, session_id: str | None, types, limit: int 
             if role not in ("user", "model"):
                 continue
             history.append(types.Content(role=role, parts=[types.Part(text=content)]))
-        return history
+        return _sanitize_chat_history(history, types)
     except Exception as exc:
         print(f"[SessionBridge] Falha ao carregar historico da sessao {session_id}: {exc}")
         return []
@@ -3647,6 +3690,7 @@ def _run_gemini_turn(
             groups.append(current_read_group)
         return groups
 
+    clean_history = _sanitize_chat_history(history, types)
     chat = client.chats.create(
         model=model_id,
         config=types.GenerateContentConfig(
@@ -3656,7 +3700,7 @@ def _run_gemini_turn(
             # Desabilita thinking: evita parts com thought=True que confundem a extração de texto
             thinking_config=types.ThinkingConfig(thinking_budget=0),
         ),
-        history=history,
+        history=clean_history,
     )
     if perf_state is not None:
         _perf_mark(perf_state, "telegram.chat_create")
@@ -4112,11 +4156,11 @@ def _process_telegram_message(db, data: dict):
     # Keep last N turns (each turn = user + model = 2 items)
     if len(raw_history) > _MAX_HISTORY_TURNS * 2:
         raw_history = raw_history[-((_MAX_HISTORY_TURNS * 2)):]
-    telegram_history = [
+    telegram_history = _sanitize_chat_history([
         types.Content(role=h["role"], parts=[types.Part(text=p["text"]) for p in h.get("parts", [])])
         for h in raw_history
         if h.get("role") and h.get("parts")
-    ]
+    ], types)
     copilot_history = _load_copilot_session_history(db, copilot_session_id, types)
     history = copilot_history or telegram_history
     if copilot_history:
@@ -4131,7 +4175,7 @@ def _process_telegram_message(db, data: dict):
     if audio_info and (media_bytes_b64 or media_storage_path):
         audio_bytes = _load_telegram_media_bytes(media_bytes_b64, media_storage_path)
         if not audio_bytes:
-            user_parts.append(types.Part(text="[Audio recebido mas o arquivo nao foi encontrado para transcricao]"))
+            user_parts.append(types.Part(text="[Áudio recebido mas o arquivo não foi encontrado para transcrição]"))
             audio_bytes = None
         if not audio_bytes:
             pass
@@ -4154,10 +4198,10 @@ def _process_telegram_message(db, data: dict):
                         transcription = cleaned_transcription
                 voice_profile, transcription = _extract_voice_profile(transcription, voice_profile)
                 print(f"[Core] transcription response_mode={response_mode} voice_profile={voice_profile} transcription={transcription[:160]}")
-                file_context_text = f"[Transcri??o de ?udio]: {transcription}"
+                file_context_text = f"[Transcrição de áudio]: {transcription}"
                 user_parts.append(types.Part(text=file_context_text))
             else:
-                user_parts.append(types.Part(text="[?udio recebido mas transcri??o falhou]"))
+                user_parts.append(types.Part(text="[Áudio recebido mas a transcrição falhou]"))
             _perf_mark(perf_state, "telegram.audio_transcription")
 
     # File/document
