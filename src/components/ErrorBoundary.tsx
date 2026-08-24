@@ -39,7 +39,25 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
                     </p>
                     <button
                         type="button"
-                        onClick={() => window.location.reload()}
+                        onClick={async () => {
+                            try {
+                                if ('serviceWorker' in navigator) {
+                                    const registrations = await navigator.serviceWorker.getRegistrations();
+                                    for (const reg of registrations) {
+                                        await reg.unregister();
+                                    }
+                                }
+                                if ('caches' in window) {
+                                    const keys = await caches.keys();
+                                    for (const key of keys) {
+                                        await caches.delete(key);
+                                    }
+                                }
+                            } catch (e) {
+                                console.error('[ErrorBoundary] Falha ao limpar cache:', e);
+                            }
+                            window.location.reload();
+                        }}
                         style={{
                             padding: '10px 20px',
                             borderRadius: '10px',

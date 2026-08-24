@@ -7328,9 +7328,11 @@ if (container) {
     window.__hermesReactRoot = createRoot(container);
   }
   window.__hermesReactRoot.render(
-    <ErrorBoundary>
-      <App />
+    <>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
       <UpdatePrompt />
-    </ErrorBoundary>
+    </>
   );
 }
