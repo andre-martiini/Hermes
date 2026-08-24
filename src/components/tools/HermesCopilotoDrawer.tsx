@@ -150,6 +150,22 @@ interface PendingBatchReschedule {
     created_at: string;
 }
 
+interface PendingBatchEditItem {
+    task_id: string;
+    titulo: string;
+    alteracoes: Record<string, { original: string; novo: string; novo_raw?: any }>;
+    snapshot_ts: string;
+}
+
+interface PendingBatchEdit {
+    tipo?: 'edicao_em_lote';
+    items: PendingBatchEditItem[];
+    justificativa: string;
+    status: 'pending' | 'completed' | 'cancelled' | 'error' | 'invalidated';
+    errorMessage?: string;
+    created_at: string;
+}
+
 interface PendingMemoryConflict {
     memory_id: string;
     categoria_existente?: string;
@@ -197,6 +213,7 @@ interface Message {
     type?: 'text' | 'plan_proposal';
     toolsUsed?: string[];
     pendingEdit?: PendingEdit;
+    pendingBatchEdit?: PendingBatchEdit;
     pendingBatchReschedule?: PendingBatchReschedule;
     pendingMemoryConflict?: PendingMemoryConflict;
     reportId?: string;
@@ -217,6 +234,7 @@ const TOOL_LABELS: Record<string, string> = {
     agendar_lembrete_acao: 'Lembrete Agendado',
     editar_plano_acao: 'Ajustando Plano...',
     preparar_edicao_acao: 'Preparando Edição',
+    preparar_edicao_em_lote: 'Edição em Lote',
     preparar_reagendamento_em_lote: 'Planejando Reagendamento',
     gerar_relatorio: 'Gerando Relatório',
     registrar_no_diario: 'Registrado no Diário',
@@ -1351,6 +1369,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     // Estado para rastrear qual card de edição está em processamento
     const [loadingEditId, setLoadingEditId] = useState<string | null>(null);
+    const [loadingBatchEditId, setLoadingBatchEditId] = useState<string | null>(null);
     const [loadingBatchRescheduleId, setLoadingBatchRescheduleId] = useState<string | null>(null);
     const [loadingMemoryConflictId, setLoadingMemoryConflictId] = useState<string | null>(null);
 
@@ -1394,6 +1413,37 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             console.error('[EditCard] Erro ao cancelar edição:', err);
         } finally {
             setLoadingEditId(null);
+        }
+    };
+
+    const handleConfirmBatchEdit = async (messageId: string, batchEdit: PendingBatchEdit) => {
+        if (!currentSessionId || loadingBatchEditId) return;
+        setLoadingBatchEditId(messageId);
+        try {
+            const fn = httpsCallable(functions, 'confirmarEdicaoEmLote');
+            await fn({
+                sessionId: currentSessionId,
+                messageId,
+                items: batchEdit.items,
+                justificativa: batchEdit.justificativa,
+            });
+        } catch (err: any) {
+            console.error('[BatchEdit] Erro ao confirmar edição em lote:', err);
+        } finally {
+            setLoadingBatchEditId(null);
+        }
+    };
+
+    const handleCancelBatchEdit = async (messageId: string) => {
+        if (!currentSessionId || loadingBatchEditId) return;
+        setLoadingBatchEditId(messageId);
+        try {
+            const msgRef = doc(db, 'sessoes_copiloto', currentSessionId, 'mensagens', messageId);
+            await updateDoc(msgRef, { 'pendingBatchEdit.status': 'cancelled' });
+        } catch (err) {
+            console.error('[BatchEdit] Erro ao cancelar edição em lote:', err);
+        } finally {
+            setLoadingBatchEditId(null);
         }
     };
 
@@ -2411,6 +2461,112 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                         </button>
                                                         <button
                                                             onClick={() => handleCancelEdit(mid)}
+                                                            disabled={isProcessing}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-slate-400 border border-[#e5e7eb] dark:border-white/10 text-[10px] font-bold uppercase tracking-wider hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                        >
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                            Cancelar
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
+
+                                        {/* Card de confirmação de edição em lote */}
+                                        {msg.pendingBatchEdit && msg.id && (() => {
+                                            const be = msg.pendingBatchEdit!;
+                                            const mid = msg.id!;
+                                            const isProcessing = loadingBatchEditId === mid;
+
+                                            if (be.status === 'completed') {
+                                                return (
+                                                    <div className="mt-3 p-3 bg-emerald-50 border border-[#e5e7eb] dark:border-white/10 rounded-lg">
+                                                        <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 flex items-center gap-1.5 mb-2">
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                            {be.items.length} ações editadas com sucesso
+                                                        </p>
+                                                        <div className="space-y-1 mt-1">
+                                                            {be.items.map(item => (
+                                                                <div key={item.task_id} className="text-[9px] text-emerald-600 flex gap-1 flex-wrap items-center">
+                                                                    <span className="font-semibold">{item.titulo}:</span>
+                                                                    {Object.entries(item.alteracoes).map(([campo, diff]) => (
+                                                                        <span key={campo} className="bg-emerald-100/70 px-1 py-0.5 rounded text-[8px]">
+                                                                            {campo}: <span className="line-through opacity-60">{diff.original || '—'}</span> → <span className="font-bold">{diff.novo}</span>
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+
+                                            if (be.status === 'error') {
+                                                return (
+                                                    <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                                                        <p className="text-[10px] font-bold uppercase tracking-wider text-red-600 flex items-center gap-1.5 mb-1">
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                                                            Erro na edição em lote
+                                                        </p>
+                                                        <p className="text-[10px] text-red-600">{be.errorMessage ?? 'Operação indisponível.'}</p>
+                                                    </div>
+                                                );
+                                            }
+
+                                            if (be.status === 'cancelled') {
+                                                return (
+                                                    <div className="mt-3 p-3 bg-slate-50 border border-[#e5e7eb] dark:border-white/10 rounded-lg">
+                                                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                            Edição em lote cancelada
+                                                        </p>
+                                                    </div>
+                                                );
+                                            }
+
+                                            // status === 'pending'
+                                            return (
+                                                <div className="mt-3 p-3 bg-white border border-[#e5e7eb] dark:border-white/10 rounded-lg shadow-sm">
+                                                    <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 flex items-center gap-1.5 mb-1">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                                        Edição em lote — {be.items.length} ações
+                                                    </p>
+                                                    <p className="text-[9px] text-slate-500 mb-2 italic">{be.justificativa}</p>
+                                                    <div className="space-y-2 mb-3 max-h-56 overflow-y-auto pr-1">
+                                                        {be.items.map((item, idx) => (
+                                                            <div key={item.task_id} className="p-1.5 bg-slate-50 rounded border border-slate-100 text-[9px] space-y-1">
+                                                                <div className="flex items-center gap-1 font-semibold text-slate-700">
+                                                                    <span className="text-slate-400 font-sans">{idx + 1}.</span>
+                                                                    <span className="truncate">{item.titulo}</span>
+                                                                </div>
+                                                                <div className="flex flex-wrap gap-1 pl-3">
+                                                                    {Object.entries(item.alteracoes).map(([campo, diff]) => (
+                                                                        <div key={campo} className="text-[8.5px] text-slate-600 bg-white px-1.5 py-0.5 rounded border border-slate-200">
+                                                                            <span className="font-semibold text-slate-500">{campo}: </span>
+                                                                            <span className="line-through text-slate-400 mr-1">{diff.original || '—'}</span>
+                                                                            <span className="text-slate-300 mr-1">→</span>
+                                                                            <span className="font-bold text-indigo-700">{diff.novo}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    <div className="flex gap-2 pt-2 border-t border-indigo-100">
+                                                        <button
+                                                            onClick={() => handleConfirmBatchEdit(mid, be)}
+                                                            disabled={isProcessing}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-[10px] font-bold uppercase tracking-wider hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                        >
+                                                            {isProcessing ? (
+                                                                <span className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-lg animate-spin" />
+                                                            ) : (
+                                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                            )}
+                                                            Confirmar todas ({be.items.length})
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleCancelBatchEdit(mid)}
                                                             disabled={isProcessing}
                                                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-slate-400 border border-[#e5e7eb] dark:border-white/10 text-[10px] font-bold uppercase tracking-wider hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                                                         >

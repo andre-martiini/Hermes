@@ -9879,6 +9879,129 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 print(f"[Copiloto] Erro ao preparar edição: {_pe}")
                 return f"ERRO|{str(_pe)}"
 
+        def preparar_edicao_em_lote(
+            itens: list[dict],
+            justificativa: str
+        ):
+            """
+            Prepara uma proposta de edição para MÚLTIPLAS ações simultaneamente para confirmação interativa do usuário.
+            NÃO realiza nenhuma mutação no banco de dados — apenas valida e retorna o payload consolidado.
+
+            Use SEMPRE que o usuário solicitar alteração em 2 ou mais ações ao mesmo tempo (ex: alterar datas, prazos, status, tags, áreas, horários ou títulos de várias tarefas).
+
+            Parâmetros:
+            - itens: lista de objetos, cada um com:
+              - task_id (str): ID da tarefa a ser editada
+              - alteracoes (dict): dicionário de campos e novos valores (titulo, descricao, data_limite, prazo_final, status, tags, area_tematica, tipo_acao, notas, horario_inicio, horario_fim)
+            - justificativa (str): frase curta explicando o motivo da edição em lote
+
+            Retorna JSON string com payload de confirmação em lote ou string de erro.
+            """
+            try:
+                if not itens or not isinstance(itens, list):
+                    return "ERRO|Forneça uma lista de itens com 'task_id' e 'alteracoes'."
+
+                _ALLOWED_FIELDS = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_link_optout'}
+                today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+                def _normalizar_status_acao(valor):
+                    if valor is None:
+                        return valor
+                    raw = str(valor).strip().lower()
+                    try:
+                        import unicodedata
+                        raw = ''.join(c for c in unicodedata.normalize('NFD', raw) if unicodedata.category(c) != 'Mn')
+                    except Exception:
+                        pass
+                    raw = raw.replace('_', ' ').replace('-', ' ')
+                    raw = ' '.join(raw.split())
+                    if raw in ('concluido', 'concluida', 'concluir', 'finalizado', 'finalizada', 'completed', 'done'):
+                        return 'concluído'
+                    if raw in ('stand by', 'standby', 'pausado', 'pausada', 'pausar'):
+                        return 'stand-by'
+                    if raw in ('em andamento', 'andamento', 'pendente', 'aberto', 'aberta', 'reabrir'):
+                        return 'em andamento'
+                    if raw in ('excluido', 'excluir', 'excluida', 'cancelado', 'cancelar', 'cancelada', 'deletar', 'deletado', 'apagar', 'remover'):
+                        return 'excluído'
+                    return valor
+
+                prepared_items = []
+                for item in itens:
+                    tid = str(item.get('task_id') or '').strip()
+                    if not tid:
+                        continue
+                    alteracoes = item.get('alteracoes') or {}
+
+                    if 'data_limite' in alteracoes:
+                        val = alteracoes['data_limite']
+                        if val and val not in ('-', '0000-00-00') and val < today_str:
+                            return f"ERRO|A data de execução da ação '{tid}' não pode ser no passado ({val})."
+                    if 'prazo_final' in alteracoes:
+                        val = alteracoes['prazo_final']
+                        if val and val not in ('-', '0000-00-00') and val < today_str:
+                            return f"ERRO|O prazo final da ação '{tid}' não pode ser no passado ({val})."
+
+                    task_ref = db.collection('tarefas').document(tid)
+                    task_doc = task_ref.get()
+                    if not task_doc.exists:
+                        return f"ERRO|Ação '{tid}' não encontrada."
+
+                    task_data = task_doc.to_dict() or {}
+                    if task_data.get('status') in ('concluído', 'excluído') and alteracoes.get('status') not in ('em andamento', 'stand-by'):
+                        return f"ERRO|A ação '{task_data.get('titulo', tid)}' já foi concluída ou excluída e não pode ser editada."
+
+                    alteracoes_diff = {}
+                    for campo, novo_valor in alteracoes.items():
+                        if campo not in _ALLOWED_FIELDS:
+                            continue
+                        if campo == 'status':
+                            novo_valor = _normalizar_status_acao(novo_valor)
+                        original = task_data.get(campo)
+                        if isinstance(original, dict):
+                            original_str = json.dumps(original, ensure_ascii=False)
+                        else:
+                            original_str = ', '.join(str(v) for v in original) if isinstance(original, list) else (str(original) if original is not None else '')
+
+                        if isinstance(novo_valor, dict):
+                            novo_str = json.dumps(novo_valor, ensure_ascii=False)
+                        else:
+                            novo_str = ', '.join(str(v) for v in novo_valor) if isinstance(novo_valor, list) else (str(novo_valor) if novo_valor is not None else '')
+
+                        alteracoes_diff[campo] = {
+                            'original': original_str,
+                            'novo': novo_str,
+                            'novo_raw': novo_valor
+                        }
+
+                    if not alteracoes_diff:
+                        continue
+
+                    snapshot_ts = task_data.get('data_atualizacao') or task_data.get('data_criacao', '')
+                    prepared_items.append({
+                        'task_id': tid,
+                        'titulo': task_data.get('titulo', 'Ação sem título'),
+                        'alteracoes': alteracoes_diff,
+                        'snapshot_ts': str(snapshot_ts)
+                    })
+
+                if not prepared_items:
+                    return "ERRO|Nenhum campo válido para editar nas ações fornecidas."
+
+                payload = {
+                    'tipo': 'edicao_em_lote',
+                    'items': prepared_items,
+                    'justificativa': justificativa or 'Edição de múltiplas ações via Copiloto Hermes.',
+                    'status': 'pending',
+                    'created_at': datetime.now(timezone.utc).isoformat()
+                }
+
+                print(f"[Copiloto] Edição em lote preparada para {len(prepared_items)} ações.")
+                return json.dumps(payload, ensure_ascii=False)
+
+            except Exception as _pe:
+                print(f"[Copiloto] Erro ao preparar edição em lote: {_pe}")
+                return f"ERRO|{str(_pe)}"
+
         def preparar_reagendamento_em_lote(
             nova_data_inicio: str,
             max_por_semana: int = 5,
@@ -10551,6 +10674,18 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Para alteração do plano de ação (passos), use o fluxo de EDIÇÃO DE PLANO DE AÇÃO acima.\n\n"
         )
 
+                protocolo_edicao_em_lote = (
+            "## EDIÇÃO DE MÚLTIPLAS AÇÕES EM LOTE (CRÍTICO)\n\n"
+            "Quando o usuário solicitar alteração em 2 OU MAIS AÇÕES ao mesmo tempo "
+            "(ex: 'altere a data da ação A para amanhã e da ação B para sexta', 'mude o status dessas 3 tarefas para concluído', "
+            "'mude o prazo e a tag dessas ações'), siga OBRIGATORIAMENTE este fluxo:\n\n"
+            "1. NÃO chame preparar_edicao_acao repetidamente para cada tarefa.\n"
+            "2. Chame UMA ÚNICA VEZ preparar_edicao_em_lote(itens=[{'task_id': 'id1', 'alteracoes': {...}}, {'task_id': 'id2', 'alteracoes': {...}}], justificativa='...').\n"
+            "3. Após chamar com sucesso, sua resposta de texto DEVE ser APENAS:\n"
+            "   ✏️ Preparei a edição em lote para sua confirmação. Verifique o card abaixo e confirme ou cancele.\n"
+            "4. NÃO repita a lista detalhada de mudanças no texto, pois o card visual exibirá todas as ações e alterações.\n\n"
+        )
+
         protocolo_reagendamento_lote = (
             "## REAGENDAMENTO EM LOTE — REDISTRIBUIÇÃO DE AÇÕES (CRÍTICO)\n\n"
             "Quando o usuário pedir para mover, reagendar ou redistribuir múltiplas ações de uma vez "
@@ -10912,6 +11047,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'criar_acao_no_sistema': criar_acao_no_sistema,
             'editar_plano_acao': editar_plano_acao,
             'preparar_edicao_acao': preparar_edicao_acao,
+            preparar_edicao_em_lote,
+            'preparar_edicao_em_lote': preparar_edicao_em_lote,
             'registrar_no_diario': registrar_no_diario,
             'criar_objetivo_estrategico': criar_objetivo_estrategico,
             'editar_objetivo_estrategico': editar_objetivo_estrategico,
@@ -11510,6 +11647,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         tools_used: list[str] = []
         pending_edit_data = None
         pending_batch_reschedule_data = None
+        pending_batch_edit_data = None
         pending_memory_conflict = None
         report_data = None
         tool_invocation_data = None
@@ -11636,6 +11774,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         break_loop = True
                     
                     # Processamento síncrono de efeitos colaterais
+                    if _fc.name == 'preparar_edicao_em_lote' and isinstance(result, str) and result.startswith('{'):
+                        try: pending_batch_edit_data = json.loads(result)
+                        except: pass
                     if _fc.name == 'preparar_edicao_acao' and isinstance(result, str) and result.startswith('{'):
                         try: pending_edit_data = json.loads(result)
                         except: pass
@@ -11852,6 +11993,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "toolsUsed": tools_used if tools_used else None,
                     "pendingEdit": pending_edit_data,
                     "pendingBatchReschedule": pending_batch_reschedule_data,
+                    "pendingBatchEdit": pending_batch_edit_data,
                     "pendingMemoryConflict": pending_memory_conflict,
                     "reportId": report_data.get('report_id') if report_data else None,
                     "timestamp": firestore.SERVER_TIMESTAMP
@@ -12263,6 +12405,153 @@ def confirmarReagendamentoEmLote(req: https_fn.CallableRequest):
         print(f"Erro em confirmarReagendamentoEmLote: {e}")
         try:
             _set_batch_card_status(get_db(), 'error', str(e))
+        except Exception:
+            pass
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=str(e)
+        )
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=60
+)
+def confirmarEdicaoEmLote(req: https_fn.CallableRequest):
+    """
+    Confirma e executa a edição de múltiplas ações em lote preparada pelo Copiloto Hermes.
+    Aplica validações de segurança e grava todas as mutações atomicamente via WriteBatch.
+    """
+    data = req.data or {}
+    session_id = data.get('sessionId')
+    message_id = data.get('messageId')
+    items = data.get('items', [])
+    justificativa = data.get('justificativa', 'Edição em lote via Copiloto Hermes.')
+
+    if not items:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="items é obrigatório e não pode ser vazio."
+        )
+
+    def _set_batch_edit_card_status(db_ref, status, error_msg=None):
+        if not session_id or not message_id:
+            return
+        try:
+            update_payload = {'pendingBatchEdit.status': status}
+            if error_msg:
+                update_payload['pendingBatchEdit.errorMessage'] = error_msg
+            db_ref.collection('sessoes_copiloto').document(session_id)\
+                .collection('mensagens').document(message_id)\
+                .update(update_payload)
+        except Exception as _ue:
+            print(f"[confirmarEdicaoEmLote] Falha ao atualizar status do card: {_ue}")
+
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+
+        db_ref = get_db()
+        _ALLOWED = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_link_optout'}
+
+        def _normalizar_status_acao(valor):
+            if valor is None:
+                return valor
+            raw = str(valor).strip().lower()
+            try:
+                import unicodedata
+                raw = ''.join(c for c in unicodedata.normalize('NFD', raw) if unicodedata.category(c) != 'Mn')
+            except Exception:
+                pass
+            raw = raw.replace('_', ' ').replace('-', ' ')
+            raw = ' '.join(raw.split())
+            if raw in ('concluido', 'concluida', 'concluir', 'finalizado', 'finalizada', 'completed', 'done'):
+                return 'concluído'
+            if raw in ('stand by', 'standby', 'pausado', 'pausada', 'pausar'):
+                return 'stand-by'
+            if raw in ('em andamento', 'andamento', 'pendente', 'aberto', 'aberta', 'reabrir'):
+                return 'em andamento'
+            if raw in ('excluido', 'excluir', 'excluida', 'cancelado', 'cancelar', 'cancelada', 'deletar', 'deletado', 'apagar', 'remover'):
+                return 'excluído'
+            return valor
+
+        batch = db_ref.batch()
+        now_iso = _dt.now(_tz.utc).isoformat()
+        today_str = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+        count = 0
+
+        for item in items:
+            task_id = item.get('task_id')
+            if not task_id:
+                continue
+
+            alteracoes_raw = item.get('alteracoes') or {}
+            alteracoes = {}
+            for k, v in alteracoes_raw.items():
+                if isinstance(v, dict) and ('novo' in v or 'novo_raw' in v):
+                    alteracoes[k] = v.get('novo_raw') if v.get('novo_raw') is not None else v.get('novo')
+                else:
+                    alteracoes[k] = v
+
+            updates = {}
+            for campo, novo_valor in alteracoes.items():
+                if campo not in _ALLOWED:
+                    continue
+                if campo == 'status':
+                    novo_valor = _normalizar_status_acao(novo_valor)
+                    if novo_valor not in ('em andamento', 'stand-by', 'concluído', 'excluído'):
+                        continue
+                updates[campo] = novo_valor
+
+            if not updates:
+                continue
+
+            if 'data_limite' in updates or 'data_inicio' in updates:
+                single_date = updates.get('data_limite') or updates.get('data_inicio') or ''
+                status_val = updates.get('status') or ''
+                if status_val not in ('concluído', 'cancelado', 'excluído') and single_date and single_date not in ('-', '0000-00-00'):
+                    if single_date < today_str:
+                        single_date = today_str
+                updates['data_limite'] = single_date
+                updates['data_inicio'] = single_date
+
+            updates['data_atualizacao'] = now_iso
+            if updates.get('status') == 'concluído':
+                updates['data_conclusao'] = now_iso
+            elif updates.get('status') in ('em andamento', 'stand-by'):
+                updates['data_conclusao'] = None
+
+            campos_desc = ', '.join(k for k in updates if k not in ('data_atualizacao', 'data_conclusao'))
+            diary_entry = {
+                'data': now_iso,
+                'nota': f"[Copiloto Hermes] Ação editada em lote ({justificativa}). Campos alterados: {campos_desc}."
+            }
+
+            task_ref = db_ref.collection('tarefas').document(task_id)
+            batch.update(task_ref, {
+                **updates,
+                'acompanhamento': firestore.ArrayUnion([diary_entry])
+            })
+            count += 1
+
+        if count == 0:
+            _set_batch_edit_card_status(db_ref, 'error', 'Nenhum campo válido para atualizar nas ações informadas.')
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+                message="Nenhum campo válido para atualizar nas ações informadas."
+            )
+
+        batch.commit()
+        _set_batch_edit_card_status(db_ref, 'completed')
+        print(f"[confirmarEdicaoEmLote] {count} ações atualizadas com sucesso em lote.")
+        return {'status': 'completed', 'count': count}
+
+    except https_fn.HttpsError:
+        raise
+    except Exception as e:
+        print(f"Erro em confirmarEdicaoEmLote: {e}")
+        try:
+            _set_batch_edit_card_status(get_db(), 'error', str(e))
         except Exception:
             pass
         raise https_fn.HttpsError(

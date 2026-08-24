@@ -161,6 +161,22 @@ interface Session {
   copilotStatus?: string;
 }
 
+interface PendingBatchEditItem {
+  task_id: string;
+  titulo: string;
+  alteracoes: Record<string, { original: string; novo: string; novo_raw?: any }>;
+  snapshot_ts: string;
+}
+
+interface PendingBatchEdit {
+  tipo?: 'edicao_em_lote';
+  items: PendingBatchEditItem[];
+  justificativa: string;
+  status: 'pending' | 'completed' | 'cancelled' | 'error' | 'invalidated';
+  errorMessage?: string;
+  created_at: string;
+}
+
 interface Message {
   id?: string;
   role: 'user' | 'assistant';
@@ -168,6 +184,7 @@ interface Message {
   timestamp: any;
   toolsUsed?: string[];
   pendingEdit?: PendingEdit;
+  pendingBatchEdit?: PendingBatchEdit;
 }
 
 interface HermesGlobalChatProps {
@@ -306,6 +323,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
   const [loadingEditId, setLoadingEditId] = useState<string | null>(null);
+  const [loadingBatchEditId, setLoadingBatchEditId] = useState<string | null>(null);
   const [strategyDirectives, setStrategyDirectives] = useState<string[]>([]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -883,6 +901,37 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
     }
   };
 
+  const handleConfirmBatchEdit = async (messageId: string, batchEdit: PendingBatchEdit) => {
+    if (!currentSessionId || loadingBatchEditId) return;
+    setLoadingBatchEditId(messageId);
+    try {
+      const fn = httpsCallable(functions, 'confirmarEdicaoEmLote');
+      await fn({
+        sessionId: currentSessionId,
+        messageId,
+        items: batchEdit.items,
+        justificativa: batchEdit.justificativa,
+      });
+    } catch (err: any) {
+      setFooterError(err?.message || 'Erro ao confirmar edição em lote.');
+    } finally {
+      setLoadingBatchEditId(null);
+    }
+  };
+
+  const handleCancelBatchEdit = async (messageId: string) => {
+    if (!currentSessionId || loadingBatchEditId) return;
+    setLoadingBatchEditId(messageId);
+    try {
+      const msgRef = doc(db, 'sessoes_copiloto', currentSessionId, 'mensagens', messageId);
+      await updateDoc(msgRef, { 'pendingBatchEdit.status': 'cancelled' });
+    } catch (err: any) {
+      setFooterError(err?.message || 'Erro ao cancelar edição em lote.');
+    } finally {
+      setLoadingBatchEditId(null);
+    }
+  };
+
   const handleCopyMessage = async (key: string, content: string) => {
     try {
       await navigator.clipboard.writeText(content || '');
@@ -1340,6 +1389,112 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => handleCancelEdit(mid)}
+                                  disabled={isProcessing}
+                                  className={`inline-flex items-center gap-1.5 border px-3 py-1.5 font-mono text-[10px] font-black uppercase tracking-widest shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? 'border-white/10 bg-transparent text-slate-400 hover:bg-white/5 hover:text-slate-200' : 'border-border-grid bg-white text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`}
+                                >
+                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                  Cancelar
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {msg.pendingBatchEdit && msg.id && (() => {
+                          const be = msg.pendingBatchEdit!;
+                          const mid = msg.id!;
+                          const isProcessing = loadingBatchEditId === mid;
+
+                          if (be.status === 'completed') {
+                            return (
+                              <div className={`mt-3 border p-3 ${isDark ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-border-grid bg-emerald-50'}`}>
+                                <p className={`mb-2 flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                  {be.items.length} ações editadas com sucesso
+                                </p>
+                                <div className="mt-1.5 space-y-1">
+                                  {be.items.map((item) => (
+                                    <div key={item.task_id} className={`flex flex-wrap gap-1 text-[9px] ${isDark ? 'text-emerald-300' : 'text-emerald-600'}`}>
+                                      <span className="font-semibold">{item.titulo}:</span>
+                                      {Object.entries(item.alteracoes).map(([campo, diff]) => (
+                                        <span key={campo} className="px-1 py-0.5 rounded text-[8px] bg-emerald-100/50">
+                                          {FIELD_LABELS[campo] ?? campo}: <span className="line-through opacity-60">{diff.original || '—'}</span> → <span className="font-bold">{diff.novo}</span>
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          if (be.status === 'invalidated' || be.status === 'error') {
+                            return (
+                              <div className={`mt-3 border p-3 ${isDark ? 'border-rose-500/40 bg-rose-500/10' : 'border-red-200 bg-red-50'}`}>
+                                <p className={`mb-1 flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-rose-300' : 'text-red-600'}`}>
+                                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                                  {be.status === 'error' ? 'Erro na edição em lote' : 'Edição em lote bloqueada'}
+                                </p>
+                                <p className={`text-[10px] ${isDark ? 'text-rose-300' : 'text-red-600'}`}>{be.errorMessage ?? 'Operação indisponível.'}</p>
+                              </div>
+                            );
+                          }
+
+                          if (be.status === 'cancelled') {
+                            return (
+                              <div className={`mt-3 border p-3 ${isDark ? 'border-white/10 bg-white/5' : 'border-border-grid bg-slate-50'}`}>
+                                <p className={`flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-widest ${mutedClass}`}>
+                                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                  Edição em lote cancelada
+                                </p>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className={`mt-3 border p-3 ${raisedClass}`}>
+                              <p className={`mb-2 flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>
+                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                Edição em lote — {be.items.length} ações
+                              </p>
+                              <p className={`mb-2 text-[9px] italic ${mutedClass}`}>{be.justificativa}</p>
+                              <div className="mb-3 max-h-56 space-y-2 overflow-y-auto pr-1">
+                                {be.items.map((item, idx) => (
+                                  <div key={item.task_id} className={`p-1.5 border ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-100 bg-slate-50'}`}>
+                                    <div className="flex items-center gap-1 font-semibold text-[9px]">
+                                      <span className={mutedClass}>{idx + 1}.</span>
+                                      <span className="truncate">{item.titulo}</span>
+                                    </div>
+                                    <div className="mt-1 flex flex-wrap gap-1 pl-3">
+                                      {Object.entries(item.alteracoes).map(([campo, diff]) => (
+                                        <div key={campo} className={`border px-1.5 py-0.5 text-[8.5px] ${isDark ? 'border-white/10 bg-black/20 text-slate-300' : 'border-slate-200 bg-white text-slate-600'}`}>
+                                          <span className="font-semibold text-slate-400">{FIELD_LABELS[campo] ?? campo}: </span>
+                                          <span className="mr-1 line-through opacity-60">{diff.original || '—'}</span>
+                                          <span className="mr-1 opacity-40">→</span>
+                                          <span className={`font-bold ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>{diff.novo}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className={`flex gap-2 border-t pt-2 ${isDark ? 'border-white/10' : 'border-indigo-100'}`}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleConfirmBatchEdit(mid, be)}
+                                  disabled={isProcessing}
+                                  className="inline-flex items-center gap-1.5 bg-indigo-600 px-3 py-1.5 font-mono text-[10px] font-black uppercase tracking-widest text-white shadow-sm transition-all hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {isProcessing ? (
+                                    <span className="h-2.5 w-2.5 animate-spin border-2 border-white/40 border-t-white" />
+                                  ) : (
+                                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                  )}
+                                  Confirmar todas ({be.items.length})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCancelBatchEdit(mid)}
                                   disabled={isProcessing}
                                   className={`inline-flex items-center gap-1.5 border px-3 py-1.5 font-mono text-[10px] font-black uppercase tracking-widest shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? 'border-white/10 bg-transparent text-slate-400 hover:bg-white/5 hover:text-slate-200' : 'border-border-grid bg-white text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`}
                                 >

@@ -4835,6 +4835,89 @@ def _process_telegram_message(db, data: dict):
         except Exception as _e:
             return f"ERRO|{_e}"
 
+    def editar_acoes_em_lote(
+        itens: list[dict],
+        justificativa: str = "",
+    ):
+        """
+        Edita múltiplas ações no sistema simultaneamente (ex.: alterar datas de execução, prazos finais, status, áreas temáticas, tags, etc.).
+
+        Parâmetros:
+        - itens: lista de dicionários contendo:
+          - task_id (str): ID da tarefa a ser alterada
+          - alteracoes (dict): dicionário com campos e novos valores (ex.: {"data_limite": "2026-08-25"})
+        - justificativa: motivo registrado no diário de acompanhamento de cada ação
+        """
+        try:
+            from datetime import datetime as _dt, timezone as _tz
+            if not itens or not isinstance(itens, list):
+                return "ERRO|Forneça uma lista de itens com 'task_id' e 'alteracoes'."
+
+            _ALLOWED = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_link_optout'}
+            today_str = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+            now_iso = _dt.now(_tz.utc).isoformat()
+            batch = db.batch()
+            count = 0
+            resumo_linhas = []
+
+            for item in itens:
+                tid = str(item.get('task_id') or '').strip()
+                if not tid:
+                    continue
+                alteracoes = item.get('alteracoes') or {}
+                task_ref = db.collection('tarefas').document(tid)
+                task_doc = task_ref.get()
+                if not task_doc.exists:
+                    continue
+                task_data = task_doc.to_dict() or {}
+                updates = {}
+                for campo, novo_valor in alteracoes.items():
+                    if campo not in _ALLOWED:
+                        continue
+                    if campo == 'status':
+                        if novo_valor in ('concluido', 'concluida', 'finalizado'): novo_valor = 'concluído'
+                        elif novo_valor in ('stand by', 'standby'): novo_valor = 'stand-by'
+                        elif novo_valor in ('em andamento', 'andamento', 'aberto'): novo_valor = 'em andamento'
+                        elif novo_valor in ('excluido', 'excluir', 'cancelado', 'deletar'): novo_valor = 'excluído'
+                    updates[campo] = novo_valor
+
+                if not updates:
+                    continue
+
+                if 'data_limite' in updates or 'data_inicio' in updates:
+                    single_date = updates.get('data_limite') or updates.get('data_inicio') or ''
+                    if single_date and single_date not in ('-', '0000-00-00') and single_date < today_str:
+                        single_date = today_str
+                    updates['data_limite'] = single_date
+                    updates['data_inicio'] = single_date
+
+                updates['data_atualizacao'] = now_iso
+                if updates.get('status') == 'concluído':
+                    updates['data_conclusao'] = now_iso
+                elif updates.get('status') in ('em andamento', 'stand-by'):
+                    updates['data_conclusao'] = None
+
+                campos_desc = ', '.join(f"{k}='{v}'" for k, v in updates.items() if k not in ('data_atualizacao', 'data_conclusao'))
+                diary_entry = {
+                    'data': now_iso,
+                    'nota': f"[Copiloto Hermes/Telegram] Edição em lote ({justificativa}). Campos alterados: {campos_desc}."
+                }
+                batch.update(task_ref, {
+                    **updates,
+                    'acompanhamento': firestore.ArrayUnion([diary_entry])
+                })
+                count += 1
+                titulo = task_data.get('titulo', tid)
+                resumo_linhas.append(f"• {titulo}: {campos_desc}")
+
+            if count == 0:
+                return "Nenhuma ação pôde ser atualizada com os dados fornecidos."
+
+            batch.commit()
+            return f"Sucesso! {count} ações atualizadas:\n" + "\n".join(resumo_linhas)
+        except Exception as e:
+            return f"ERRO ao editar ações em lote: {e}"
+
     def salvar_memoria_global(fato: str, categoria: str):
         """Persiste fato durável na memória global do Hermes. Apenas para regras estáveis e preferências permanentes."""
         try:
@@ -5056,6 +5139,7 @@ def _process_telegram_message(db, data: dict):
         encontrar_slot_livre,
         criar_acao_no_sistema,
         reagendar_acoes_em_lote,
+        editar_acoes_em_lote,
         salvar_memoria_global,
         registrar_correcao_procedimento,
         buscar_e_analisar_email,

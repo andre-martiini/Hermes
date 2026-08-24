@@ -1,0 +1,32 @@
+{
+  "name": "preparar_edicao_em_lote",
+  "description": "Prepara proposta de edição de campos para múltiplas ações simultaneamente sem gravar no banco",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "itens": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "description": "ID da tarefa"
+            },
+            "alteracoes": {
+              "type": "object",
+              "description": "Mapa com os campos e novos valores a serem atualizados nesta tarefa"
+            }
+          },
+          "required": ["task_id", "alteracoes"]
+        },
+        "description": "Lista de ações e suas respectivas alterações"
+      },
+      "justificativa": {
+        "type": "string",
+        "description": "Justificativa curta para a edição em lote"
+      }
+    },
+    "required": ["itens", "justificativa"]
+  }
+}

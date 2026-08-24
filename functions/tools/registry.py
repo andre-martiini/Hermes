@@ -24,6 +24,7 @@ _CATALOG: dict[str, str] = {
     "resolver_conflito_procedimento": "Valida ou resolve um procedimento marcado para revisao",
     "editar_plano_acao": "Atualiza o plano de acao de uma tarefa existente preservando passos concluidos",
     "preparar_edicao_acao": "Prepara uma proposta de edicao de campos de uma tarefa sem gravar no banco",
+    "preparar_edicao_em_lote": "Prepara proposta de edicao de campos para multiplas tarefas simultaneamente sem gravar no banco",
     "gerar_relatorio": "Gera um relatorio estruturado em Markdown e salva no sistema",
     "gerar_rascunho_formulario": "Gera um rascunho estruturado de formulario com perguntas e tipos",
     "obter_portal_financeiro_publico": "Lista transacoes externas do portal financeiro publico",
