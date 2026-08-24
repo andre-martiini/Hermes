@@ -186,9 +186,9 @@ const AcaoLinha: React.FC<{
                     {acao.horario_inicio}
                 </span>
             )}
-            <span className="text-sm font-medium leading-snug flex-1 min-w-0">{acao.titulo}</span>
+            <span className="text-sm font-medium leading-snug flex-1 min-w-0">{acao.titulo || '(sem título)'}</span>
             <div className="flex items-center gap-1 shrink-0">
-                {acao.degradation_count >= 3 && (
+                {(acao.degradation_count ?? 0) >= 3 && (
                     <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-red-500/15 text-red-500" title={`Adiada ${acao.degradation_count}x`}>
                         {acao.degradation_count}×
                     </span>
@@ -204,8 +204,8 @@ const AcaoLinha: React.FC<{
             <div className={`text-xs mt-1.5 flex items-start gap-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 <span className="shrink-0">↳</span>
                 <span className="min-w-0">{acao.proximo_passo}</span>
-                {acao.etapas_totais > 0 && (
-                    <span className="shrink-0 tabular-nums opacity-70">({acao.etapas_feitas}/{acao.etapas_totais})</span>
+                {(acao.etapas_totais ?? 0) > 0 && (
+                    <span className="shrink-0 tabular-nums opacity-70">({acao.etapas_feitas ?? 0}/{acao.etapas_totais})</span>
                 )}
             </div>
         )}
@@ -215,7 +215,7 @@ const AcaoLinha: React.FC<{
 const MetaLinha: React.FC<{ meta: ResumoMeta; isDark: boolean }> = ({ meta, isDark }) => (
     <div className={`px-3 py-2.5 rounded-xl border ${isDark ? 'border-[#2a313d]' : 'border-slate-100'}`}>
         <div className="flex items-baseline justify-between gap-2">
-            <span className="text-sm font-medium leading-snug min-w-0">{meta.objetivo}</span>
+            <span className="text-sm font-medium leading-snug min-w-0">{meta.objetivo || '(sem título)'}</span>
             {meta.pilar_label && (
                 <span className={`text-[10px] font-bold uppercase tracking-wider shrink-0 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                     {meta.pilar_label}
@@ -223,9 +223,9 @@ const MetaLinha: React.FC<{ meta: ResumoMeta; isDark: boolean }> = ({ meta, isDa
             )}
         </div>
         <div className={`text-xs mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            {meta.acoes_hoje > 0
+            {(meta.acoes_hoje ?? 0) > 0
                 ? `${meta.acoes_hoje} ação(ões) hoje`
-                : meta.dias_parada === null
+                : meta.dias_parada === null || meta.dias_parada === undefined
                 ? 'Nenhum movimento registrado'
                 : meta.gerida_por_acoes
                 ? `Parada há ${meta.dias_parada} dia(s)`
@@ -234,10 +234,10 @@ const MetaLinha: React.FC<{ meta: ResumoMeta; isDark: boolean }> = ({ meta, isDa
                 : meta.dias_parada === 0
                 ? 'Registro de hoje já lançado'
                 : `Sem registro há ${meta.dias_parada} dia(s)`}
-            {meta.progresso_pct !== null && <span className="ml-2 tabular-nums">· {meta.progresso_pct}%</span>}
-            {meta.marcos_total > 0 && <span className="ml-2 tabular-nums">· {meta.marcos_total - meta.marcos_abertos}/{meta.marcos_total} marcos</span>}
+            {meta.progresso_pct !== null && meta.progresso_pct !== undefined && <span className="ml-2 tabular-nums">· {meta.progresso_pct}%</span>}
+            {(meta.marcos_total ?? 0) > 0 && <span className="ml-2 tabular-nums">· {(meta.marcos_total ?? 0) - (meta.marcos_abertos ?? 0)}/{meta.marcos_total} marcos</span>}
         </div>
-        {meta.progresso_pct !== null && (
+        {meta.progresso_pct !== null && meta.progresso_pct !== undefined && (
             <div className={`h-1 rounded-full mt-2 overflow-hidden ${isDark ? 'bg-[#0f1520]' : 'bg-slate-100'}`}>
                 <div className="h-full rounded-full bg-[#861fdd]" style={{ width: `${meta.progresso_pct}%` }} />
             </div>
@@ -271,7 +271,9 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
         try {
             const fn = httpsCallable<{ date?: string }, ResumoMatinal>(functions, 'gerarResumoMatinal');
             const res = await fn({ date: hoje });
-            setResumo(res.data);
+            if (res?.data && res.data.versao) {
+                setResumo(res.data);
+            }
         } catch (e: any) {
             setErro(e?.message || 'Não foi possível gerar o resumo agora.');
         } finally {
@@ -285,9 +287,13 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
             doc(db, 'resumo_matinal', hoje),
             (snap) => {
                 if (snap.exists()) {
-                    setResumo({ id: snap.id, ...snap.data() } as any);
-                    setIsLoading(false);
-                    return;
+                    const data = snap.data();
+                    // Valida se o documento está estruturado com versão e dados mínimos
+                    if (data && data.versao && data.hoje) {
+                        setResumo({ id: snap.id, ...data } as ResumoMatinal);
+                        setIsLoading(false);
+                        return;
+                    }
                 }
                 setIsLoading(false);
                 if (autoGerado.current !== hoje) {
@@ -303,23 +309,40 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
     // Marca a primeira abertura do dia — insumo para medir, depois, se o resumo
     // está sendo lido antes do dia começar ou só à noite.
     useEffect(() => {
-        if (!resumo || resumo.visto_em) return;
+        if (!resumo || !resumo.versao || resumo.visto_em) return;
         void setDoc(doc(db, 'resumo_matinal', hoje), { visto_em: new Date().toISOString() }, { merge: true });
     }, [resumo, hoje]);
 
     const c = resumo?.contadores;
+    const foco = resumo?.foco || [];
+    const agenda = resumo?.agenda || [];
+    const janelasLivres = resumo?.janelas_livres || [];
+    const hojeLanes = resumo?.hoje || { avanco: [], continuo: [], aguardando_terceiro: [], atrasadas: [] };
+    const prazosDuros = resumo?.prazos_duros || [];
+    const cargaSemana = resumo?.carga_semana || [];
+    const filas = resumo?.filas || {};
+    const saude = resumo?.saude || { rotinas_hoje: [], pesagem_registrada: false, cintura_registrada: false, checkin_manha: false, checkin_noite: false, peso: null, dor_ontem: null, ultimo_registro: null };
+    const estrategia = resumo?.estrategia || { metas: [], paradas: [], servidas_hoje: 0, total_geridas_por_acoes: 0 };
+    const ontem = resumo?.ontem || { concluidas: [], diario: null };
+    const rotinasHoje = saude.rotinas_hoje || [];
+    const metas = estrategia.metas || [];
+    const paradas = estrategia.paradas || [];
+    const concluidasOntem = ontem.concluidas || [];
+    const diarioOntem = ontem.diario;
+    const diarioTexto = diarioOntem?.texto || '';
+
     // `FILA_LABEL` é a allowlist, não só um dicionário de rótulos: uma chave que a
     // tela não conhece não é renderizada. Sem isso, um campo residual no documento
     // (ou uma fila nova sem rótulo) vaza para a UI com o nome cru da chave — foi
     // como `consolidacoes_whatsapp` continuou aparecendo depois de removida.
     const filasComItens = useMemo(
-        () => Object.entries(resumo?.filas || {})
+        () => Object.entries(filas)
             .filter(([chave, f]) => chave in FILA_LABEL && (f as ResumoFila)?.total > 0),
-        [resumo],
+        [filas],
     );
     const cargaMax = useMemo(
-        () => Math.max(1, ...(resumo?.carga_semana || []).map((d) => d.total)),
-        [resumo],
+        () => Math.max(1, ...(cargaSemana).map((d) => d.total || 0)),
+        [cargaSemana],
     );
 
     const irPara = (rota: string) => {
@@ -333,7 +356,7 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
         );
     }
 
-    if (!resumo) {
+    if (!resumo || !resumo.versao) {
         return (
             <div className="p-8 space-y-3">
                 <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -385,7 +408,7 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                 {!!c?.herdadas && <Pill label="herdadas" valor={c.herdadas} tom="atencao" isDark={isDark} onClick={() => irPara('gallery')} />}
                 {!!c?.criticas && <Pill label="críticas" valor={c.criticas} tom="urgente" isDark={isDark} onClick={() => irPara('gallery')} />}
                 {!!c?.cobrar && <Pill label="a cobrar" valor={c.cobrar} tom="atencao" isDark={isDark} onClick={() => irPara('gallery')} />}
-                {!!resumo.prazos_duros.length && <Pill label="prazos 7d" valor={resumo.prazos_duros.length} tom="urgente" isDark={isDark} />}
+                {!!prazosDuros.length && <Pill label="prazos 7d" valor={prazosDuros.length} tom="urgente" isDark={isDark} />}
                 {!!c?.pendencias && <Pill label="pendências" valor={c.pendencias} tom="atencao" isDark={isDark} />}
                 <Pill label="ativas" valor={c?.ativas ?? 0} isDark={isDark} onClick={() => irPara('gallery')} />
             </div>
@@ -410,12 +433,12 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                             </span>
                         }
                     >
-                        {resumo.foco.length === 0 ? (
+                        {foco.length === 0 ? (
                             <Vazio isDark={isDark}>Nenhuma ação programada para hoje. Dia livre.</Vazio>
                         ) : (
                             <ol className="space-y-2.5">
-                                {resumo.foco.map((f, i) => {
-                                    const tom = REGRA_TOM[f.regra];
+                                {foco.map((f, i) => {
+                                    const tom = REGRA_TOM[f.regra] || 'neutro';
                                     const borda =
                                         tom === 'urgente' ? 'border-l-red-500'
                                         : tom === 'atencao' ? 'border-l-amber-500'
@@ -441,7 +464,7 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                                                                 : tom === 'atencao' ? 'bg-amber-500/15 text-amber-600'
                                                                 : isDark ? 'bg-slate-700/40 text-slate-400' : 'bg-slate-100 text-slate-500'
                                                             }`}>
-                                                                {REGRA_LABEL[f.regra]}
+                                                                {REGRA_LABEL[f.regra] || f.regra}
                                                             </span>
                                                             {f.horario_inicio && (
                                                                 <span className={`text-xs font-mono font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -467,11 +490,11 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
 
                     {/* Agenda */}
                     <Secao titulo="Agenda de hoje" isDark={isDark}>
-                        {resumo.agenda.length === 0 ? (
+                        {agenda.length === 0 ? (
                             <Vazio isDark={isDark}>Nenhum compromisso na agenda.</Vazio>
                         ) : (
                             <ul className="space-y-1.5">
-                                {resumo.agenda.map((ev, i) => (
+                                {agenda.map((ev, i) => (
                                     <li key={i} className="flex items-baseline gap-3 text-sm">
                                         <span className={`font-mono text-xs font-bold shrink-0 w-[86px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                                             {ev.dia_inteiro ? 'dia inteiro' : `${ev.inicio}${ev.fim ? `–${ev.fim}` : ''}`}
@@ -481,13 +504,13 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                                 ))}
                             </ul>
                         )}
-                        {resumo.janelas_livres.length > 0 && (
+                        {janelasLivres.length > 0 && (
                             <div className={`mt-4 pt-3 border-t ${isDark ? 'border-[#2a313d]' : 'border-slate-100'}`}>
                                 <div className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                                     Janelas livres
                                 </div>
                                 <div className="flex flex-wrap gap-2">
-                                    {resumo.janelas_livres.map((j, i) => (
+                                    {janelasLivres.map((j, i) => (
                                         <span key={i} className={`text-xs font-mono px-2 py-1 rounded-lg border ${
                                             isDark ? 'border-[#2a313d] bg-[#0f1520] text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-600'
                                         }`}>
@@ -509,30 +532,31 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                             </button>
                         }
                     >
-                        {(['avanco', 'continuo', 'aguardando_terceiro'] as const).every((l) => resumo.hoje[l].length === 0) ? (
+                        {((['avanco', 'continuo', 'aguardando_terceiro'] as const).every((l) => (hojeLanes[l] || []).length === 0)) ? (
                             <Vazio isDark={isDark}>Nada programado.</Vazio>
                         ) : (
                             <div className="space-y-4">
-                                {(['avanco', 'continuo', 'aguardando_terceiro'] as const).map((lane) =>
-                                    resumo.hoje[lane].length === 0 ? null : (
+                                {(['avanco', 'continuo', 'aguardando_terceiro'] as const).map((lane) => {
+                                    const acoesLane = hojeLanes[lane] || [];
+                                    return acoesLane.length === 0 ? null : (
                                         <div key={lane}>
                                             <div className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                                                {LANE_LABEL[lane]} · {resumo.hoje[lane].length}
+                                                {LANE_LABEL[lane]} · {acoesLane.length}
                                             </div>
                                             <div className="space-y-1.5">
-                                                {resumo.hoje[lane].map((a) => (
+                                                {acoesLane.map((a) => (
                                                     <AcaoLinha key={a.id} acao={a} isDark={isDark} onOpen={onOpenTask} />
                                                 ))}
                                             </div>
                                         </div>
-                                    ),
-                                )}
+                                    );
+                                })}
                             </div>
                         )}
                     </Secao>
 
                     {/* Prazos duros */}
-                    {resumo.prazos_duros.length > 0 && (
+                    {prazosDuros.length > 0 && (
                         <Secao
                             titulo="Prazos finais nos próximos 7 dias"
                             isDark={isDark}
@@ -543,7 +567,7 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                             }
                         >
                             <ul className="space-y-1.5">
-                                {resumo.prazos_duros.map((p) => (
+                                {prazosDuros.map((p) => (
                                     <li key={p.id}>
                                         <button
                                             type="button"
@@ -575,14 +599,14 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                     {/* Volume de ações — primeiro da coluna: dá a forma da semana antes do detalhe */}
                     <Secao titulo="Volume de ações nos próximos 7 dias" isDark={isDark}>
                         <div className="flex items-end justify-between gap-1.5 h-24">
-                            {resumo.carga_semana.map((d, i) => (
+                            {cargaSemana.map((d, i) => (
                                 <div key={d.data} className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
                                     <span className={`text-[10px] font-bold tabular-nums ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                                         {d.total || ''}
                                     </span>
                                     <div
                                         className={`w-full rounded-t transition-all ${i === 0 ? 'bg-[#861fdd]' : isDark ? 'bg-slate-700' : 'bg-slate-200'}`}
-                                        style={{ height: `${Math.max(3, (d.total / cargaMax) * 58)}px` }}
+                                        style={{ height: `${Math.max(3, ((d.total || 0) / cargaMax) * 58)}px` }}
                                     />
                                     <span className={`text-[9px] font-mono ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>
                                         {formatDiaCurto(d.data)}
@@ -598,35 +622,38 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                             <Vazio isDark={isDark}>Nenhuma fila parada. Tudo decidido.</Vazio>
                         ) : (
                             <ul className="space-y-2.5">
-                                {filasComItens.map(([chave, fila]) => (
-                                    <li key={chave}>
-                                        <button
-                                            type="button"
-                                            onClick={() => irPara(fila.rota)}
-                                            className={`w-full text-left px-3 py-2.5 rounded-xl border transition-colors ${
-                                                isDark ? 'border-[#2a313d] hover:bg-[#0f1520]' : 'border-slate-100 hover:bg-slate-50'
-                                            }`}
-                                        >
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-base leading-none">{FILA_ICONE[chave] || '•'}</span>
-                                                <span className="text-sm font-medium flex-1 min-w-0">{FILA_LABEL[chave] || chave}</span>
-                                                <span className={`text-sm font-black tabular-nums ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                                    {fila.total}
-                                                </span>
-                                            </div>
-                                            {fila.amostra.length > 0 && (
-                                                <ul className={`mt-1.5 space-y-0.5 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                                                    {fila.amostra.map((item, i) => (
-                                                        <li key={i} className="truncate">
-                                                            · {item.titulo}
-                                                            {item.vencida ? ' (vencida)' : item.dias !== undefined && item.dias >= 0 ? ` (${item.dias}d)` : ''}
-                                                        </li>
-                                                    ))}
-                                                </ul>
-                                            )}
-                                        </button>
-                                    </li>
-                                ))}
+                                {filasComItens.map(([chave, fila]) => {
+                                    const amostra = fila?.amostra || [];
+                                    return (
+                                        <li key={chave}>
+                                            <button
+                                                type="button"
+                                                onClick={() => irPara(fila.rota)}
+                                                className={`w-full text-left px-3 py-2.5 rounded-xl border transition-colors ${
+                                                    isDark ? 'border-[#2a313d] hover:bg-[#0f1520]' : 'border-slate-100 hover:bg-slate-50'
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-base leading-none">{FILA_ICONE[chave] || '•'}</span>
+                                                    <span className="text-sm font-medium flex-1 min-w-0">{FILA_LABEL[chave] || chave}</span>
+                                                    <span className={`text-sm font-black tabular-nums ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                                        {fila.total}
+                                                    </span>
+                                                </div>
+                                                {amostra.length > 0 && (
+                                                    <ul className={`mt-1.5 space-y-0.5 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                                                        {amostra.map((item, i) => (
+                                                            <li key={i} className="truncate">
+                                                                · {item.titulo}
+                                                                {item.vencida ? ' (vencida)' : item.dias !== undefined && item.dias >= 0 ? ` (${item.dias}d)` : ''}
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                )}
+                                            </button>
+                                        </li>
+                                    );
+                                })}
                             </ul>
                         )}
                     </Secao>
@@ -641,29 +668,29 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                             </button>
                         }
                     >
-                        {resumo.estrategia.metas.length === 0 ? (
+                        {metas.length === 0 ? (
                             <Vazio isDark={isDark}>Nenhuma meta ativa cadastrada.</Vazio>
                         ) : (
                             <div className="space-y-3">
                                 <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                                    {resumo.estrategia.total_geridas_por_acoes === 0
+                                    {estrategia.total_geridas_por_acoes === 0
                                         ? 'Nenhuma meta é executada por ações.'
-                                        : resumo.estrategia.servidas_hoje === 0
+                                        : estrategia.servidas_hoje === 0
                                         ? 'Nenhuma ação de hoje está vinculada a uma meta.'
-                                        : `${resumo.estrategia.servidas_hoje} de ${resumo.estrategia.total_geridas_por_acoes} metas recebem trabalho hoje.`}
+                                        : `${estrategia.servidas_hoje} de ${estrategia.total_geridas_por_acoes} metas recebem trabalho hoje.`}
                                 </p>
                                 <div className="space-y-1.5">
-                                    {resumo.estrategia.metas.filter((m) => m.acoes_hoje > 0).map((m) => (
+                                    {metas.filter((m) => (m.acoes_hoje || 0) > 0).map((m) => (
                                         <MetaLinha key={m.id} meta={m} isDark={isDark} />
                                     ))}
                                 </div>
-                                {resumo.estrategia.paradas.length > 0 && (
+                                {paradas.length > 0 && (
                                     <div className={`pt-3 border-t ${isDark ? 'border-[#2a313d]' : 'border-slate-100'}`}>
                                         <div className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${isDark ? 'text-amber-300/70' : 'text-amber-700'}`}>
                                             Sem movimento
                                         </div>
                                         <div className="space-y-1.5">
-                                            {resumo.estrategia.paradas.map((m) => (
+                                            {paradas.map((m) => (
                                                 <MetaLinha key={m.id} meta={m} isDark={isDark} />
                                             ))}
                                         </div>
@@ -684,40 +711,40 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                         }
                     >
                         <div className="space-y-3 text-sm">
-                            {resumo.saude.peso && (
+                            {saude.peso && (
                                 <div className="flex items-baseline gap-2">
-                                    <span className="text-2xl font-black tabular-nums">{resumo.saude.peso.ultimo}</span>
+                                    <span className="text-2xl font-black tabular-nums">{saude.peso.ultimo}</span>
                                     <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>kg</span>
-                                    {resumo.saude.peso.media7 !== null && (
+                                    {saude.peso.media7 !== null && saude.peso.media7 !== undefined && (
                                         <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                                            média 7d {resumo.saude.peso.media7}
+                                            média 7d {saude.peso.media7}
                                         </span>
                                     )}
-                                    {resumo.saude.peso.falta !== null && (
+                                    {saude.peso.falta !== null && saude.peso.falta !== undefined && (
                                         <span className={`text-xs ml-auto ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                                            faltam {resumo.saude.peso.falta.toFixed(1)} kg
+                                            faltam {saude.peso.falta.toFixed(1)} kg
                                         </span>
                                     )}
                                 </div>
                             )}
-                            {resumo.saude.dor_ontem && (
+                            {saude.dor_ontem && (
                                 <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                                     Dor ontem:{' '}
                                     {[
-                                        resumo.saude.dor_ontem.manha !== undefined && resumo.saude.dor_ontem.manha !== null ? `manhã ${resumo.saude.dor_ontem.manha}` : null,
-                                        resumo.saude.dor_ontem.noite !== undefined && resumo.saude.dor_ontem.noite !== null ? `noite ${resumo.saude.dor_ontem.noite}` : null,
+                                        saude.dor_ontem.manha !== undefined && saude.dor_ontem.manha !== null ? `manhã ${saude.dor_ontem.manha}` : null,
+                                        saude.dor_ontem.noite !== undefined && saude.dor_ontem.noite !== null ? `noite ${saude.dor_ontem.noite}` : null,
                                     ].filter(Boolean).join(' · ') || 'sem registro'}
-                                    {resumo.saude.dor_ontem.crise && <span className="text-red-500 font-bold"> · crise</span>}
-                                    {resumo.saude.dor_ontem.ciatica && <span className="text-amber-500"> · ciática</span>}
+                                    {saude.dor_ontem.crise && <span className="text-red-500 font-bold"> · crise</span>}
+                                    {saude.dor_ontem.ciatica && <span className="text-amber-500"> · ciática</span>}
                                 </p>
                             )}
-                            {resumo.saude.rotinas_hoje.length > 0 && (
+                            {rotinasHoje.length > 0 && (
                                 <div className={`pt-2 border-t ${isDark ? 'border-[#2a313d]' : 'border-slate-100'}`}>
                                     <div className={`text-[10px] font-bold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                                         Rotina de hoje
                                     </div>
                                     <ul className="space-y-1">
-                                        {resumo.saude.rotinas_hoje.map((r, i) => (
+                                        {rotinasHoje.map((r, i) => (
                                             <li
                                                 key={i}
                                                 className={`text-xs flex items-baseline gap-2 ${
@@ -753,28 +780,28 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                     >
                         <div className="space-y-3">
                             <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                                {resumo.ontem.concluidas.length === 0
+                                {concluidasOntem.length === 0
                                     ? 'Nenhuma ação concluída ontem.'
-                                    : `${resumo.ontem.concluidas.length} ação(ões) concluída(s).`}
+                                    : `${concluidasOntem.length} ação(ões) concluída(s).`}
                             </p>
-                            {resumo.ontem.concluidas.length > 0 && (
+                            {concluidasOntem.length > 0 && (
                                 <ul className={`space-y-0.5 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                                    {resumo.ontem.concluidas.slice(0, 5).map((t, i) => (
+                                    {concluidasOntem.slice(0, 5).map((t, i) => (
                                         <li key={i} className="truncate">✓ {t}</li>
                                     ))}
-                                    {resumo.ontem.concluidas.length > 5 && (
-                                        <li className="opacity-70">+{resumo.ontem.concluidas.length - 5} outras</li>
+                                    {concluidasOntem.length > 5 && (
+                                        <li className="opacity-70">+{concluidasOntem.length - 5} outras</li>
                                     )}
                                 </ul>
                             )}
-                            {resumo.ontem.diario && (
+                            {diarioTexto ? (
                                 <div className={`pt-3 border-t ${isDark ? 'border-[#2a313d]' : 'border-slate-100'}`}>
                                     <p className={`text-sm leading-relaxed whitespace-pre-wrap ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                                         {diarioAberto
-                                            ? resumo.ontem.diario.texto
-                                            : `${resumo.ontem.diario.texto.slice(0, 260)}${resumo.ontem.diario.texto.length > 260 ? '…' : ''}`}
+                                            ? diarioTexto
+                                            : `${diarioTexto.slice(0, 260)}${diarioTexto.length > 260 ? '…' : ''}`}
                                     </p>
-                                    {resumo.ontem.diario.texto.length > 260 && (
+                                    {diarioTexto.length > 260 && (
                                         <button
                                             type="button"
                                             onClick={() => setDiarioAberto((v) => !v)}
@@ -784,7 +811,7 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                                         </button>
                                     )}
                                 </div>
-                            )}
+                            ) : null}
                         </div>
                     </Secao>
 
@@ -794,10 +821,10 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                             onClick={() =>
                                 onAskCopiloto(
                                     `Este é o meu resumo de ${resumo.data}. Foco escolhido pelo sistema: ` +
-                                    `${resumo.foco.map((f) => `${f.titulo} (${f.motivo})`).join('; ') || 'nenhum'}. ` +
-                                    `${resumo.contadores.herdadas} ação(ões) herdadas do reset da meia-noite, ` +
-                                    `${resumo.contadores.criticas} em degradação crítica, ` +
-                                    `${resumo.contadores.pendencias} pendência(s) em fila. ` +
+                                    `${foco.map((f) => `${f.titulo} (${f.motivo})`).join('; ') || 'nenhum'}. ` +
+                                    `${c?.herdadas ?? 0} ação(ões) herdadas do reset da meia-noite, ` +
+                                    `${c?.criticas ?? 0} em degradação crítica, ` +
+                                    `${c?.pendencias ?? 0} pendência(s) em fila. ` +
                                     `Me ajude a decidir por onde começar.`,
                                 )
                             }
@@ -811,9 +838,11 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                 </div>
             </div>
 
-            <p className={`text-[10px] text-center pt-2 ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>
-                Gerado em {new Date(resumo.gerado_em).toLocaleString('pt-BR')} · sem IA, tudo calculado no backend
-            </p>
+            {resumo.gerado_em && (
+                <p className={`text-[10px] text-center pt-2 ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>
+                    Gerado em {new Date(resumo.gerado_em).toLocaleString('pt-BR')} · sem IA, tudo calculado no backend
+                </p>
+            )}
         </div>
     );
 };

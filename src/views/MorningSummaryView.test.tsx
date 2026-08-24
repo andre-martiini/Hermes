@@ -273,4 +273,25 @@ describe('MorningSummaryView', () => {
         await waitFor(() => expect(callable).toHaveBeenCalledTimes(1));
         expect(callable).toHaveBeenCalledWith({ date: hoje });
     });
+
+    it('não quebra quando snapshot tem campos parciais ou arrays ausentes', async () => {
+        // Simula snapshot parcial ou campos opcionais vindo como undefined/null
+        snapshotData = {
+            data: hoje,
+            dia_semana: 'segunda-feira',
+            versao: 'v1',
+            hoje: { avanco: [] },
+            contadores: { ativas: 1, hoje: 0 },
+        };
+        render(<MorningSummaryView />);
+        expect(await screen.findByText('Foco de hoje')).toBeDefined();
+        expect(screen.getByText('Nenhuma ação programada para hoje. Dia livre.')).toBeDefined();
+    });
+
+    it('dispara geração sob demanda quando snapshot tem apenas visto_em (doc incompleto)', async () => {
+        snapshotData = { visto_em: '2026-08-24T05:00:00Z' };
+        render(<MorningSummaryView />);
+        await waitFor(() => expect(callable).toHaveBeenCalledTimes(1));
+        expect(callable).toHaveBeenCalledWith({ date: hoje });
+    });
 });
