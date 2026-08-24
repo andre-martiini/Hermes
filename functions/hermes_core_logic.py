@@ -2,6 +2,7 @@
 Hermes Core Logic — Telegram Integration
 Webhook receiver + Firestore-triggered async processor.
 """
+import copy
 import json
 import html
 import os
@@ -217,6 +218,178 @@ def _sanitize_chat_history(history_contents: list, types) -> list:
         cleaned.pop()
 
     return cleaned
+
+
+# ---------------------------------------------------------------------------
+# Compatibilidade da requisição com a API Gemini
+# ---------------------------------------------------------------------------
+# A API responde `400 INVALID_ARGUMENT — "Request contains an invalid argument."`
+# sem dizer qual campo recusou. As causas conhecidas que derrubam o copiloto do
+# Telegram são tratadas aqui, na montagem do pedido:
+#
+#   1. Configuração de thinking da família errada. Modelos 3.x aceitam
+#      `thinking_level`; `thinking_budget` é da família 2.x. O copiloto web
+#      (main.py) já usa `thinking_level="MINIMAL"` — o Telegram tinha ficado com
+#      `thinking_budget=0` mesmo depois de o modelo padrão virar gemini-3.x.
+#   2. Schema de ferramenta derivado automaticamente da assinatura Python: um
+#      parâmetro `dict`/`list[dict]` vira OBJECT sem `properties` e os valores
+#      padrão viram o campo `default` — construções que a API pode recusar.
+
+_SCHEMA_FIELDS_TO_DROP = ("default",)
+
+# Campos de tarefa aceitos pela edição em lote (espelha _ALLOWED da ferramenta).
+_BATCH_EDIT_FIELD_SCHEMA = {
+    "titulo": {"type": "STRING", "description": "Novo título da ação."},
+    "descricao": {"type": "STRING", "description": "Nova descrição."},
+    "data_limite": {"type": "STRING", "description": "Data de execução (YYYY-MM-DD)."},
+    "data_inicio": {"type": "STRING", "description": "Data de início (YYYY-MM-DD)."},
+    "prazo_final": {"type": "STRING", "description": "Prazo final (YYYY-MM-DD)."},
+    "horario_inicio": {"type": "STRING", "description": "Horário inicial (HH:MM)."},
+    "horario_fim": {"type": "STRING", "description": "Horário final (HH:MM)."},
+    "status": {
+        "type": "STRING",
+        "description": "Status da ação.",
+        "enum": ["em andamento", "stand-by", "concluído", "excluído"],
+    },
+    "tags": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Lista de tags."},
+    "area_tematica": {"type": "STRING", "description": "Área temática válida."},
+    "tipo_acao": {"type": "STRING", "description": "Tipo da ação (ex.: fast)."},
+    "notas": {"type": "STRING", "description": "Notas da ação."},
+}
+
+# Schemas escritos à mão para ferramentas cuja assinatura o SDK não consegue
+# descrever (dicionário de campos livres).
+_TOOL_PARAMETER_OVERRIDES = {
+    "editar_acoes_em_lote": {
+        "type": "OBJECT",
+        "properties": {
+            "itens": {
+                "type": "ARRAY",
+                "description": "Uma entrada por ação a alterar.",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "task_id": {"type": "STRING", "description": "ID da ação a alterar."},
+                        "alteracoes": {
+                            "type": "OBJECT",
+                            "description": "Somente os campos que mudam nesta ação.",
+                            "properties": copy.deepcopy(_BATCH_EDIT_FIELD_SCHEMA),
+                        },
+                    },
+                    "required": ["task_id", "alteracoes"],
+                },
+            },
+            "justificativa": {
+                "type": "STRING",
+                "description": "Motivo registrado no acompanhamento de cada ação.",
+            },
+        },
+    },
+}
+
+
+def _thinking_config_for_model(types, model_id: str):
+    """Devolve a configuração de thinking compatível com a família do modelo.
+
+    Enviar o campo da família errada (`thinking_budget` para um modelo 3.x) faz a
+    API recusar a requisição inteira com 400 INVALID_ARGUMENT.
+    """
+    major = 0
+    match = re.search(r"gemini-(\d+)", (model_id or "").lower())
+    if match:
+        major = int(match.group(1))
+    try:
+        if major >= 3:
+            return types.ThinkingConfig(thinking_level="MINIMAL")
+        return types.ThinkingConfig(thinking_budget=0)
+    except Exception as exc:
+        # SDK sem suporte ao campo: melhor omitir a configuração do que enviar
+        # algo que o modelo recusa.
+        print(f"[Core] Sem thinking_config para {model_id}: {exc}")
+        return None
+
+
+def _sanitize_tool_schema(node):
+    """Remove do schema construções que a API Gemini pode recusar."""
+    if not isinstance(node, dict):
+        return node
+
+    clean = {k: v for k, v in node.items() if k not in _SCHEMA_FIELDS_TO_DROP}
+
+    props = clean.get("properties")
+    if isinstance(props, dict):
+        clean["properties"] = {k: _sanitize_tool_schema(v) for k, v in props.items()}
+    if isinstance(clean.get("items"), dict):
+        clean["items"] = _sanitize_tool_schema(clean["items"])
+    for key in ("any_of", "anyOf"):
+        if isinstance(clean.get(key), list):
+            clean[key] = [_sanitize_tool_schema(v) for v in clean[key]]
+
+    if str(clean.get("type", "")).upper().endswith("OBJECT") and not clean.get("properties"):
+        # OBJECT sem properties é o resultado de um parâmetro `dict` sem schema.
+        # Trocamos por texto JSON — as ferramentas afetadas aceitam os dois formatos.
+        clean.pop("properties", None)
+        clean.pop("required", None)
+        clean["type"] = "STRING"
+        descricao = (clean.get("description") or "").strip()
+        clean["description"] = (descricao + " Envie um objeto JSON serializado como texto.").strip()
+
+    return clean
+
+
+def _required_param_names(fn) -> list:
+    """Parâmetros realmente obrigatórios — os que não têm valor padrão.
+
+    O SDK marca como obrigatório todo parâmetro cujo padrão é `None`, o que força
+    o modelo a inventar valor para campo opcional (horário, prazo, tags).
+    """
+    import inspect
+
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return []
+    return [
+        nome
+        for nome, param in sig.parameters.items()
+        if param.default is inspect.Parameter.empty
+        and param.kind in (param.POSITIONAL_OR_KEYWORD, param.KEYWORD_ONLY)
+    ]
+
+
+def _build_gemini_tools(client, types, tools_list: list) -> list:
+    """Converte os callables em FunctionDeclarations saneadas.
+
+    Em caso de falha na conversão, devolve a lista original de callables — o SDK
+    volta a gerar os schemas sozinho e nada pior acontece do que já acontecia.
+    """
+    declarations = []
+    for fn in tools_list:
+        nome = getattr(fn, "__name__", str(fn))
+        try:
+            decl = types.FunctionDeclaration.from_callable(client=client, callable=fn)
+            data = decl.model_dump(mode="json", exclude_none=True)
+            params = _TOOL_PARAMETER_OVERRIDES.get(nome) or data.get("parameters")
+            if params:
+                params = _sanitize_tool_schema(copy.deepcopy(params))
+                obrigatorios = _required_param_names(fn)
+                if obrigatorios:
+                    params["required"] = obrigatorios
+                else:
+                    params.pop("required", None)
+                data["parameters"] = params
+            declarations.append(types.FunctionDeclaration(**data))
+        except Exception as exc:
+            print(f"[Core] Falha ao declarar a ferramenta '{nome}': {exc} — usando os schemas automáticos do SDK.")
+            return list(tools_list)
+
+    return [types.Tool(function_declarations=declarations)]
+
+
+def _is_invalid_argument_error(err: Exception) -> bool:
+    texto = f"{getattr(err, 'code', '')} {getattr(err, 'status', '')} {err}".upper()
+    return "INVALID_ARGUMENT" in texto or "400" in texto
+
 
 
 def _load_copilot_session_history(db, session_id: str | None, types, limit: int = _COPILOT_SESSION_HISTORY_LIMIT) -> list:
@@ -3691,27 +3864,62 @@ def _run_gemini_turn(
         return groups
 
     clean_history = _sanitize_chat_history(history, types)
-    chat = client.chats.create(
-        model=model_id,
-        config=types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            tools=tools_list,
-            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-            # Desabilita thinking: evita parts com thought=True que confundem a extração de texto
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
-        ),
-        history=clean_history,
-    )
-    if perf_state is not None:
-        _perf_mark(perf_state, "telegram.chat_create")
+    # Schemas saneados: sem `default`, sem OBJECT vazio e com `required` derivado
+    # da assinatura real (parâmetro com valor padrão não é obrigatório).
+    declared_tools = _build_gemini_tools(client, types, tools_list)
+    # Thinking de acordo com a família do modelo (3.x = thinking_level).
+    thinking_config = _thinking_config_for_model(types, model_id)
 
-    response = send_message_logged(
-        chat,
-        user_message_parts,
-        model=model_id,
-        feature="telegram.first_turn",
-        db=db,
+    def _abrir_chat(*, com_thinking: bool, com_historico: bool):
+        config_kwargs = {
+            "system_instruction": system_instruction,
+            "tools": declared_tools,
+            "automatic_function_calling": types.AutomaticFunctionCallingConfig(disable=True),
+        }
+        # Sem thinking: evita parts com thought=True que confundem a extração de texto.
+        if com_thinking and thinking_config is not None:
+            config_kwargs["thinking_config"] = thinking_config
+        return client.chats.create(
+            model=model_id,
+            config=types.GenerateContentConfig(**config_kwargs),
+            history=clean_history if com_historico else [],
+        )
+
+    # Degradação diagnosticável: a API devolve 400 INVALID_ARGUMENT genérico, sem
+    # apontar o campo. Cada tentativa remove um suspeito e registra no log qual
+    # delas passou — assim uma recaída fica identificada na primeira ocorrência,
+    # em vez de virar só "⚠️ Erro ao processar" para o usuário.
+    tentativas = (
+        ("completa", True, True),
+        ("sem thinking_config", False, True),
+        ("sem histórico", False, False),
     )
+    response = None
+    erro_invalid_argument = None
+    for rotulo, com_thinking, com_historico in tentativas:
+        try:
+            chat = _abrir_chat(com_thinking=com_thinking, com_historico=com_historico)
+            if perf_state is not None:
+                _perf_mark(perf_state, "telegram.chat_create")
+            response = send_message_logged(
+                chat,
+                user_message_parts,
+                model=model_id,
+                feature="telegram.first_turn",
+                db=db,
+            )
+            if rotulo != "completa":
+                print(f"[Core] Gemini aceitou o pedido na tentativa '{rotulo}' (modelo {model_id}).")
+            break
+        except Exception as send_err:
+            if not _is_invalid_argument_error(send_err):
+                raise
+            erro_invalid_argument = send_err
+            print(f"[Core] 400 INVALID_ARGUMENT na tentativa '{rotulo}' (modelo {model_id}): {send_err}")
+
+    if response is None:
+        raise erro_invalid_argument
+
     if perf_state is not None:
         _perf_mark(perf_state, "telegram.first_model_response")
 
@@ -4850,6 +5058,27 @@ def _process_telegram_message(db, data: dict):
         """
         try:
             from datetime import datetime as _dt, timezone as _tz
+
+            def _como_dict(valor):
+                """Aceita dict ou JSON serializado — o schema declarado pode ter
+                virado STRING no saneamento, e o modelo às vezes manda texto."""
+                if isinstance(valor, dict):
+                    return valor
+                if isinstance(valor, str) and valor.strip():
+                    try:
+                        carregado = json.loads(valor)
+                        return carregado if isinstance(carregado, dict) else {}
+                    except Exception:
+                        return {}
+                return {}
+
+            if isinstance(itens, str):
+                try:
+                    itens = json.loads(itens)
+                except Exception:
+                    return "ERRO|Não consegui ler a lista de itens. Envie uma lista com 'task_id' e 'alteracoes'."
+            if isinstance(itens, dict):
+                itens = [itens]
             if not itens or not isinstance(itens, list):
                 return "ERRO|Forneça uma lista de itens com 'task_id' e 'alteracoes'."
 
@@ -4861,10 +5090,11 @@ def _process_telegram_message(db, data: dict):
             resumo_linhas = []
 
             for item in itens:
+                item = _como_dict(item)
                 tid = str(item.get('task_id') or '').strip()
                 if not tid:
                     continue
-                alteracoes = item.get('alteracoes') or {}
+                alteracoes = _como_dict(item.get('alteracoes'))
                 task_ref = db.collection('tarefas').document(tid)
                 task_doc = task_ref.get()
                 if not task_doc.exists:
@@ -5179,14 +5409,24 @@ def _process_telegram_message(db, data: dict):
     except Exception as gemini_err:
         if processing_msg_id:
             _delete_telegram_message(token, chat_id, processing_msg_id)
-        print(f"[Core] Gemini error: {gemini_err}")
+        import traceback as _tb
+        print(f"[Core] Gemini error: {gemini_err}\n{_tb.format_exc()}")
         _perf_log("telegram.request.error", perf_state, {"chat_id": chat_id, "error": str(gemini_err)})
         latest_session = _get_session(db, chat_id)
+        detalhe = html.escape(str(gemini_err))[:300]
+        if _is_invalid_argument_error(gemini_err):
+            aviso = (
+                "⚠️ O modelo recusou a requisição (400 INVALID_ARGUMENT). "
+                "Tente reenviar em uma frase mais curta; se persistir, peça \"limpar conversa\" para zerar o histórico.\n"
+                f"<i>Detalhe técnico: {detalhe}</i>"
+            )
+        else:
+            aviso = f"⚠️ Erro ao processar: {detalhe}"
         _send_telegram_session_message(
             db,
             token,
             chat_id,
-            f"⚠️ Erro ao processar: {gemini_err}",
+            aviso,
             session=latest_session,
         )
         return

@@ -10674,7 +10674,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Para alteração do plano de ação (passos), use o fluxo de EDIÇÃO DE PLANO DE AÇÃO acima.\n\n"
         )
 
-                protocolo_edicao_em_lote = (
+        protocolo_edicao_em_lote = (
             "## EDIÇÃO DE MÚLTIPLAS AÇÕES EM LOTE (CRÍTICO)\n\n"
             "Quando o usuário solicitar alteração em 2 OU MAIS AÇÕES ao mesmo tempo "
             "(ex: 'altere a data da ação A para amanhã e da ação B para sexta', 'mude o status dessas 3 tarefas para concluído', "
@@ -10826,6 +10826,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         system_instruction_static = (
             system_instruction_nucleo
+            + protocolo_edicao_em_lote
             + (protocolo_reagendamento_lote if _gate_reagendamento else "")
             + (protocolo_relatorios if _gate_relatorios else "")
             + (protocolo_formularios if _gate_formularios else "")
@@ -11047,7 +11048,6 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'criar_acao_no_sistema': criar_acao_no_sistema,
             'editar_plano_acao': editar_plano_acao,
             'preparar_edicao_acao': preparar_edicao_acao,
-            preparar_edicao_em_lote,
             'preparar_edicao_em_lote': preparar_edicao_em_lote,
             'registrar_no_diario': registrar_no_diario,
             'criar_objetivo_estrategico': criar_objetivo_estrategico,
@@ -11146,6 +11146,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             criar_acao_no_sistema,
             editar_plano_acao,
             preparar_edicao_acao,
+            preparar_edicao_em_lote,
             registrar_no_diario,
             consultar_agenda,
             encontrar_slot_livre,
