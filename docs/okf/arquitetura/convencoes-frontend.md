@@ -19,7 +19,7 @@ Scripts principais (`package.json`): `npm run dev` (Vite, porta 3001, PWA habili
 
 - **Raiz do projeto:** views grandes ficam direto na raiz (`FinanceView.tsx`, `HealthView.tsx`, `KnowledgeView.tsx`, `DashboardView.tsx`, `ContactsView.tsx`, `BolsistasView.tsx`, `ProjectsView.tsx`...), junto com `index.tsx` (entrypoint), `types.ts` (fonte única de tipos), `constants.tsx` e `firebase.ts`.
 - **`src/components/`:** componentes reutilizáveis, organizados em subpastas por função: `ui/` (componentes base como `UIComponents.tsx`), `modals/` (`Modals.tsx`, `QuickNoteModal.tsx`), `tools/` (ferramentas como `HermesCopilotoDrawer.tsx`, `ShoppingListTool.tsx`), `calendar/`, `projects/`, `public/` (portais públicos).
-- **`src/views/`:** views secundárias/rotas (`CalendarView.tsx`, `RAGBasesView.tsx`, `TaskExecutionView.tsx`, `ServicesView.tsx`...).
+- **`src/views/`:** views secundárias/rotas (`CalendarView.tsx`, `GanttView.tsx`, `RAGBasesView.tsx`, `TaskExecutionView.tsx`, `ServicesView.tsx`...).
 - **`src/services/`:** camada de serviço para chamadas a Cloud Functions — hoje só `knowledgeService.ts`; a maioria dos componentes ainda chama Firestore/Functions direto.
 - **`src/utils/`:** funções puras e lógica de domínio (`knowledgeLogic.ts`, `calendarUtils.ts`, `pdfGenerator.ts`, `destructiveActions.ts`...).
 
