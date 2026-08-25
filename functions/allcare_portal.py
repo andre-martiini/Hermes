@@ -83,10 +83,22 @@ class AllcarePortalClient:
     def __init__(self, session: requests.Session | None = None):
         self.session = session or requests.Session()
         self.session.headers.update({
-            "User-Agent": "Hermes/1.0",
+            # O portal diferencia chamadas AJAX da submissao normal do formulario
+            # de login. Manter X-Requested-With globalmente impede o redirect que
+            # cria a sessao autenticada.
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/140.0.0.0 Safari/537.36"
+            ),
+        })
+
+    @staticmethod
+    def _ajax_headers() -> dict[str, str]:
+        return {
             "Accept": "application/json, text/javascript, */*; q=0.01",
             "X-Requested-With": "XMLHttpRequest",
-        })
+        }
 
     def _request(self, method: str, path: str, **kwargs) -> requests.Response:
         try:
@@ -98,11 +110,12 @@ class AllcarePortalClient:
         return response
 
     def login(self, cpf: str, password: str, plan_match: str = PLAN_MATCH) -> dict:
-        self._request("GET", "/")
+        self._request("GET", "/", headers={"Accept": "text/html,application/xhtml+xml"})
         response = self._request(
             "POST",
             "/Account/ValidarBeneficiario",
             data={"cpf": cpf, "senha": password, "remember": "false"},
+            headers=self._ajax_headers(),
         )
         try:
             profile = select_active_profile(response.json(), plan_match)
@@ -118,6 +131,10 @@ class AllcarePortalClient:
                 "remember": "false",
             },
             allow_redirects=True,
+            headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Referer": f"{BASE_URL}/",
+            },
         )
         if "HomePortalBeneficiario" not in authenticated.url or "Sair" not in authenticated.text:
             raise AllcarePortalError("autenticacao_rejeitada")
@@ -133,7 +150,10 @@ class AllcarePortalClient:
                 "data_inicial": start_month,
                 "data_final": end_month,
             },
-            headers={"Content-Type": "application/json; charset=utf-8"},
+            headers={
+                **self._ajax_headers(),
+                "Content-Type": "application/json; charset=utf-8",
+            },
         )
         try:
             payload = response.json()
@@ -156,6 +176,7 @@ class AllcarePortalClient:
                 "formato_saida": "download",
                 "cod_ts": contract_id,
             },
+            headers=self._ajax_headers(),
         )
         try:
             result = generated.json()

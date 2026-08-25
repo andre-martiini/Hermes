@@ -2756,6 +2756,7 @@ def saveBillPdfPassword(req: https_fn.CallableRequest) -> dict:
         )
 
     if config.get("kind") == "allcare_portal":
+        portal_validation_error = None
         try:
             gmail_service = get_gmail_service()
             gmail_address = gmail_service.users().getProfile(userId="me").execute(
@@ -2764,7 +2765,9 @@ def saveBillPdfPassword(req: https_fn.CallableRequest) -> dict:
             cpf = find_holder_cpf(db, gmail_address)
             AllcarePortalClient().login(cpf, password)
             validation, unlockable_message_ids = True, ["allcare_portal"]
-        except AllcarePortalError:
+        except AllcarePortalError as error:
+            portal_validation_error = str(error)
+            print(f"[ALLCARE] Falha sanitizada na validação da credencial: {portal_validation_error}")
             validation, unlockable_message_ids = False, []
     else:
         validation, unlockable_message_ids = _validate_bill_pdf_password(
@@ -2774,7 +2777,12 @@ def saveBillPdfPassword(req: https_fn.CallableRequest) -> dict:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
             message=(
-                "A senha não autenticou no Portal Allcare."
+                (
+                    "A senha foi aceita, mas o plano Participativo Estadual Adesão "
+                    "não foi localizado entre os perfis ativos."
+                    if portal_validation_error == "perfil_ativo_nao_encontrado"
+                    else "A senha não autenticou no Portal Allcare."
+                )
                 if config.get("kind") == "allcare_portal"
                 else "A senha não abriu o PDF recente deste emissor."
             ),
