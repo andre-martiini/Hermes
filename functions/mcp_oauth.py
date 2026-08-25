@@ -263,23 +263,39 @@ def _handle_register(req: https_fn.Request) -> https_fn.Response:
     """Dynamic Client Registration (RFC 7591). Corpo em JSON, nao form-urlencoded."""
     corpo = req.get_json(silent=True) or {}
     redirect_uris = corpo.get("redirect_uris") or []
+
+    # O que o cliente pede fica no log: quando o registro devolve 201 e mesmo
+    # assim o fluxo nao avanca para /oauth/authorize, a diferenca entre pedido e
+    # resposta e a unica pista disponivel deste lado.
+    print(f"[mcp_oauth] DCR pedido: {json.dumps(corpo, ensure_ascii=False, default=str)[:900]}")
+
     if not isinstance(redirect_uris, list) or not redirect_uris:
         return _erro_oauth("invalid_redirect_uri", "redirect_uris e obrigatorio")
 
     client_id = f"hermes-{secrets.token_urlsafe(16)}"
+    agora = _agora()
     registro = {
         "client_id": client_id,
+        # Ecoa o que o cliente pediu, quando pediu algo valido: o RFC manda a
+        # resposta refletir os metadados registrados, e um cliente que compara o
+        # que enviou com o que voltou trava se receber outra coisa.
         "redirect_uris": [str(u) for u in redirect_uris],
         "client_name": str(corpo.get("client_name") or "Cliente MCP"),
-        "grant_types": ["authorization_code", "refresh_token"],
-        "response_types": ["code"],
+        "grant_types": [str(g) for g in (corpo.get("grant_types")
+                                         or ["authorization_code", "refresh_token"])],
+        "response_types": [str(r) for r in (corpo.get("response_types") or ["code"])],
         # Cliente publico: nao ha segredo a guardar num app que roda no
         # dispositivo do usuario. A prova de posse e o PKCE.
         "token_endpoint_auth_method": "none",
-        "criado_em": _agora(),
+        "scope": str(corpo.get("scope") or SCOPE_PADRAO),
+        "client_id_issued_at": agora,
+        # RFC 7591 3.2.1: obrigatorio quando ha client_secret. Nao ha, mas
+        # clientes que leem o campo sem checar tratam a ausencia como erro.
+        "client_secret_expires_at": 0,
     }
-    _db().collection(_COL_CLIENTS).document(client_id).set(registro)
-    return _json({**registro, "client_id_issued_at": registro["criado_em"]}, status=201)
+    _db().collection(_COL_CLIENTS).document(client_id).set({**registro, "criado_em": agora})
+    print(f"[mcp_oauth] DCR resposta: client_id={client_id} redirect_uris={registro['redirect_uris']}")
+    return _json(registro, status=201)
 
 
 # --------------------------------------------------------------------------
@@ -321,7 +337,8 @@ _PAGINA_CONSENTIMENTO = """<!doctype html>
 </div>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup }
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect,
+         getRedirectResult }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const app = initializeApp(__FIREBASE_CONFIG__);
@@ -329,19 +346,51 @@ const auth = getAuth(app);
 const botao = document.getElementById("b");
 const erro = document.getElementById("e");
 
+// Troca o ID token do login pelo `code` e devolve o controle ao cliente OAuth.
+async function concluir(user) {
+  const resp = await fetch("/oauth/authorize", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id_token: await user.getIdToken(), params: __PARAMS__ }),
+  });
+  const dados = await resp.json();
+  if (!resp.ok) throw new Error(dados.error_description || dados.error || "falha");
+  location.href = dados.redirect;
+}
+
+// O cliente OAuth costuma abrir esta pagina numa janela popup. Um popup dentro
+// de um popup e bloqueado pelo navegador na maioria dos casos, entao o login por
+// redirect e o caminho confiavel aqui — e ele volta para esta mesma URL, com os
+// parametros da autorizacao preservados na query string.
+try {
+  const voltando = await getRedirectResult(auth);
+  if (voltando?.user) {
+    botao.disabled = true;
+    botao.textContent = "Concluindo...";
+    await concluir(voltando.user);
+  }
+} catch (ex) {
+  erro.textContent = ex.message || String(ex);
+}
+
 botao.onclick = async () => {
   botao.disabled = true; erro.textContent = "";
+  const provider = new GoogleAuthProvider();
   try {
-    const cred = await signInWithPopup(auth, new GoogleAuthProvider());
-    const resp = await fetch("/oauth/authorize", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id_token: await cred.user.getIdToken(), params: __PARAMS__ }),
-    });
-    const dados = await resp.json();
-    if (!resp.ok) throw new Error(dados.error_description || dados.error || "falha");
-    location.href = dados.redirect;
+    const cred = await signInWithPopup(auth, provider);
+    await concluir(cred.user);
   } catch (ex) {
+    const bloqueado = [
+      "auth/popup-blocked",
+      "auth/cancelled-popup-request",
+      "auth/popup-closed-by-user",
+      "auth/operation-not-supported-in-this-environment",
+      "auth/web-storage-unsupported",
+    ].includes(ex.code);
+    if (bloqueado) {
+      await signInWithRedirect(auth, provider);
+      return;
+    }
     erro.textContent = ex.message || String(ex);
     botao.disabled = false;
   }
