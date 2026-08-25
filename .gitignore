@@ -60,6 +60,8 @@ hermes-voice-client/voices/
 hermes-voice-client/.env
 hermes-voice-bridge/.venv/
 hermes-voice-bridge/.env
+hermes-allcare-agent/.venv/
+hermes-allcare-agent/.env
 logs/
 .claude/
 
