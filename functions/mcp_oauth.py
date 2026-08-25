@@ -84,6 +84,10 @@ _ACCESS_TTL_SEC = 3600          # 1h; o cliente renova pelo refresh
 _REFRESH_TTL_SEC = 60 * 60 * 24 * 30
 _CODE_TTL_SEC = 120             # janela curta: o resgate e imediato
 
+# Curto de proposito: o discovery e servido pelo CDN do Hosting, e uma hora de
+# cache atrasaria demais qualquer correcao no `resource` ou nos endpoints.
+_CACHE_DISCOVERY_SEC = 300
+
 _COL_CLIENTS = "mcp_oauth_clients"
 _COL_CODES = "mcp_oauth_codes"
 _COL_REFRESH = "mcp_oauth_refresh"
@@ -572,10 +576,13 @@ def mcpOAuth(req: https_fn.Request) -> https_fn.Response:
     caminho = (req.path or "/").rstrip("/") or "/"
 
     try:
-        if caminho.endswith("/.well-known/oauth-protected-resource"):
-            return _json(protected_resource_metadata(), cache_sec=3600)
-        if caminho.endswith("/.well-known/oauth-authorization-server"):
-            return _json(authorization_server_metadata(), cache_sec=3600)
+        # `in` e nao `endswith`: o RFC 9728 manda sondar
+        # `/.well-known/oauth-protected-resource/<path-do-recurso>`, entao a rota
+        # chega com sufixo. O mesmo vale para o RFC 8414 com issuer em subpath.
+        if "/.well-known/oauth-protected-resource" in caminho:
+            return _json(protected_resource_metadata(), cache_sec=_CACHE_DISCOVERY_SEC)
+        if "/.well-known/oauth-authorization-server" in caminho:
+            return _json(authorization_server_metadata(), cache_sec=_CACHE_DISCOVERY_SEC)
         if caminho.endswith("/oauth/register"):
             return _handle_register(req)
         if caminho.endswith("/oauth/authorize"):

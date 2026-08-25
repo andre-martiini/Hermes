@@ -287,6 +287,20 @@ class TestRoteamento(unittest.TestCase):
         resp = self.handler(self._Req("/.well-known/oauth-authorization-server/"))
         self.assertEqual(resp.status_code, 200)
 
+    def test_sondagem_com_sufixo_do_recurso(self):
+        """RFC 9728 manda sondar `.../oauth-protected-resource/<path-do-recurso>`.
+
+        Um `endswith` nao pega essa forma e devolvia o 404 do roteador — que e
+        JSON, entao o cliente falha ao ler um documento que parece existir.
+        """
+        for caminho, chave, esperado in (
+            ("/.well-known/oauth-protected-resource/mcp", "resource", mcp_oauth.MCP_RESOURCE),
+            ("/.well-known/oauth-authorization-server/mcp", "issuer", mcp_oauth.ISSUER),
+        ):
+            resp = self.handler(self._Req(caminho))
+            self.assertEqual(resp.status_code, 200, caminho)
+            self.assertEqual(json.loads(resp.get_data(as_text=True))[chave], esperado, caminho)
+
     def test_rota_desconhecida_404(self):
         resp = self.handler(self._Req("/oauth/inexistente"))
         self.assertEqual(resp.status_code, 404)
