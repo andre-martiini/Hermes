@@ -353,10 +353,17 @@ _PAGINA_CONSENTIMENTO = """<!doctype html>
   <button id="b">Entrar com Google e autorizar</button>
   <div class="erro" id="e"></div>
 </div>
+<script>
+  // Erro de carregamento do modulo (CSP, rede, gstatic bloqueado) nao aparece em
+  // lugar nenhum da UI: a pagina fica bonita e inerte. Aqui ele vira texto.
+  window.addEventListener("error", (ev) => {
+    const alvo = document.getElementById("e");
+    if (alvo && !alvo.textContent) alvo.textContent = "Falha ao carregar: " + (ev.message || ev.type);
+  });
+</script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect,
-         getRedirectResult }
+import { getAuth, GoogleAuthProvider, signInWithRedirect, getRedirectResult }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const app = initializeApp(__FIREBASE_CONFIG__);
@@ -376,10 +383,24 @@ async function concluir(user) {
   location.href = dados.redirect;
 }
 
-// O cliente OAuth costuma abrir esta pagina numa janela popup. Um popup dentro
-// de um popup e bloqueado pelo navegador na maioria dos casos, entao o login por
-// redirect e o caminho confiavel aqui — e ele volta para esta mesma URL, com os
-// parametros da autorizacao preservados na query string.
+// O handler do clique e ligado ANTES de qualquer await. Uma promessa lenta
+// aqui — e `getRedirectResult` pode demorar — deixaria o botao inerte: a pagina
+// parece pronta e simplesmente nao responde ao clique.
+botao.onclick = async () => {
+  botao.disabled = true; erro.textContent = "";
+  try {
+    // Redirect, e nao popup. Esta pagina e aberta DENTRO de um popup pelo
+    // cliente OAuth, e popup dentro de popup e bloqueado na maioria dos
+    // navegadores. O redirect navega a propria janela ate o Google e volta para
+    // esta mesma URL, com os parametros da autorizacao preservados na query.
+    await signInWithRedirect(auth, new GoogleAuthProvider());
+  } catch (ex) {
+    erro.textContent = ex.message || String(ex);
+    botao.disabled = false;
+  }
+};
+
+// Volta do Google: retoma o fluxo de onde parou.
 try {
   const voltando = await getRedirectResult(auth);
   if (voltando?.user) {
@@ -390,29 +411,6 @@ try {
 } catch (ex) {
   erro.textContent = ex.message || String(ex);
 }
-
-botao.onclick = async () => {
-  botao.disabled = true; erro.textContent = "";
-  const provider = new GoogleAuthProvider();
-  try {
-    const cred = await signInWithPopup(auth, provider);
-    await concluir(cred.user);
-  } catch (ex) {
-    const bloqueado = [
-      "auth/popup-blocked",
-      "auth/cancelled-popup-request",
-      "auth/popup-closed-by-user",
-      "auth/operation-not-supported-in-this-environment",
-      "auth/web-storage-unsupported",
-    ].includes(ex.code);
-    if (bloqueado) {
-      await signInWithRedirect(auth, provider);
-      return;
-    }
-    erro.textContent = ex.message || String(ex);
-    botao.disabled = false;
-  }
-};
 </script></body></html>"""
 
 
