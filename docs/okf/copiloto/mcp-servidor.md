@@ -122,7 +122,7 @@ abrindo o consentimento no navegador.
 ### Diagnóstico rápido
 
 ```bash
-curl -s https://gestao-hermes.web.app/mcp/health
+curl -s https://gestao-hermes.firebaseapp.com/mcp/health
 ```
 
 Health-check sem autenticação: responde nome, versão e versão do protocolo. Se ele
@@ -132,7 +132,7 @@ responde e a conexão mesmo assim falha, o problema é token ou allowlist —
 Para conferir a cadeia de discovery do OAuth:
 
 ```bash
-curl -si https://gestao-hermes.web.app/mcp | head -3
+curl -si https://gestao-hermes.firebaseapp.com/mcp | head -3
 ```
 
 Tem que ser `401` com `www-authenticate`. Um `200` aqui significa que o desafio de
@@ -148,7 +148,7 @@ o authorization server: OAuth 2.0 com Dynamic Client Registration e PKCE S256.
 URL exatamente assim:
 
 ```
-https://gestao-hermes.web.app/mcp
+https://gestao-hermes.firebaseapp.com/mcp
 ```
 
 Não preencha Client ID nem Client Secret — o DCR registra o cliente sozinho. O
@@ -158,6 +158,47 @@ com `access_denied`.
 
 > A URL precisa bater **exatamente** com o campo `resource` do protected resource
 > metadata, incluindo o path. Uma barra a mais no fim já quebra a validação.
+
+> **O domínio é `firebaseapp.com`, não `web.app`.** Os dois servem o mesmo site do
+> Hosting, mas o service worker do PWA está registrado no segundo — ver
+> "O service worker que engolia tudo" abaixo.
+
+### Se o spinner ficar rodando e nada abrir
+
+O Claude Desktop **delega a autorização ao navegador padrão do sistema**. A janela
+abre no Chrome, muitas vezes atrás do app ou numa janela já existente — o app
+continua mostrando o spinner e parece travado.
+
+Procure no navegador a aba **"Autorizar acesso ao Hermes"**. Use sempre a aba da
+tentativa mais recente: abas antigas carregam `state` e `code_challenge` de
+autorizações já abandonadas, que o Claude não aceita mais.
+
+### O service worker que engolia tudo
+
+A causa que custou mais caro, e que não aparece em log nenhum.
+
+O PWA do Hermes registra um service worker em `gestao-hermes.web.app`, e o
+`navigateFallbackDenylist` do `vite-plugin-pwa` só excluía `/^\/__/`. Toda
+navegação para qualquer outra rota da origem — `/mcp`, `/oauth/authorize`,
+`/.well-known/*` — recebia o `index.html` do app, **do cache, sem tocar na rede**.
+
+O sintoma era enganoso: o discovery funcionava e a autorização não. A assimetria
+era a pista — discovery é fetch server-side da Anthropic, autorização é navegação
+no navegador do usuário. E o log do servidor ficava vazio justamente porque
+nenhuma requisição saía da máquina.
+
+O que separou o problema foi abrir a URL de autorização à mão: por `curl` vinha a
+página de consentimento, no navegador vinha a tela inicial do Hermes.
+
+Duas barreiras, porque uma só não basta:
+
+1. `vite.config.ts` exclui `/mcp`, `/oauth/` e `/.well-known/` do fallback.
+2. O OAuth mora em `firebaseapp.com`, onde não há service worker — o item (1) só
+   passa a valer quando o SW antigo for substituído em cada navegador.
+
+`functions/test_mcp_oauth.py` lê o `vite.config.ts` e falha se alguma rota crítica
+sair do denylist: é uma invariante entre frontend e backend que não aparece em
+nenhum dos dois isoladamente.
 
 ### Por que a URL do OAuth não é a da Cloud Function
 
@@ -172,7 +213,7 @@ origem `cloudfunctions.net` todo caminho `/.well-known/*` devolve 404 do Google
 Frontend — o primeiro segmento do path é o nome da função, então ele procura uma
 função chamada `.well-known` e nunca invoca código nosso. Nem aparece nos logs.
 
-Agora MCP e OAuth atendem na **mesma origem** (`gestao-hermes.web.app`), que é a
+Agora MCP e OAuth atendem na **mesma origem** (`gestao-hermes.firebaseapp.com`), que é a
 recomendação explícita da documentação de conectores. Todo caminho de sondagem do
 RFC 9728 resolve, com ou sem o ponteiro.
 
