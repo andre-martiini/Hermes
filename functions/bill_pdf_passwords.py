@@ -31,6 +31,7 @@ def list_password_configs(db: Any) -> list[dict]:
             "rubric_id": str(data.get("rubric_id") or "").strip(),
             "senders": senders,
             "secret_id": secret_id,
+            "kind": str(data.get("kind") or "pdf").strip(),
         })
     return sorted(configs, key=lambda item: item["label"].casefold())
 
@@ -39,7 +40,10 @@ def find_password_config(db: Any, sender: str | None) -> dict | None:
     normalized = normalize_sender(sender)
     if not normalized:
         return None
-    return next((config for config in list_password_configs(db) if normalized in config["senders"]), None)
+    return next((
+        config for config in list_password_configs(db)
+        if config.get("kind") == "pdf" and normalized in config["senders"]
+    ), None)
 
 
 def _secret_name(project_id: str, secret_id: str, version: str = "latest") -> str:

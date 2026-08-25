@@ -72,6 +72,7 @@ interface BillPdfPasswordConfig {
     rubric_id: string;
     senders: string[];
     configured: boolean;
+    kind?: 'pdf' | 'allcare_portal';
 }
 
 const FinanceSection = ({ title, children, defaultExpanded = true, disableCollapse = false }: { title: string, children: React.ReactNode, defaultExpanded?: boolean, disableCollapse?: boolean }) => {
@@ -353,7 +354,7 @@ const FinanceView = ({
             const response = await callable({});
             setBillPdfPasswordConfigs(response.data.configs || []);
         } catch (error) {
-            console.error('Falha ao carregar senhas de PDFs protegidos:', error);
+            console.error('Falha ao carregar credenciais protegidas:', error);
         } finally {
             setBillPdfPasswordLoading(false);
         }
@@ -385,7 +386,7 @@ const FinanceView = ({
             >(functions, 'saveBillPdfPassword', { timeout: 60000 });
             const response = await callable({ config_id: config.id, password });
             let reprocessed = false;
-            if (response.data.requeued > 0) {
+            if (response.data.requeued > 0 || config.kind === 'allcare_portal') {
                 try {
                     const syncCallable = httpsCallable<Record<string, never>, { success: boolean }>(
                         functions,
@@ -405,10 +406,10 @@ const FinanceView = ({
                 [config.id]: {
                     type: 'success',
                     message: reprocessed
-                        ? 'Senha validada; fatura recente reprocessada.'
+                            ? 'Credencial validada; fatura recente reprocessada.'
                         : response.data.verified
-                            ? 'Senha validada e protegida.'
-                            : 'Senha protegida; será validada no próximo PDF.'
+                            ? 'Credencial validada e protegida.'
+                            : 'Credencial protegida; será validada na próxima sincronização.'
                 }
             }));
         } catch (error: any) {
@@ -966,12 +967,12 @@ const FinanceView = ({
                         </div>
                     </div>
 
-                    {/* Senhas de PDFs de obrigações */}
+                    {/* Credenciais protegidas de obrigações */}
                     <div className="pt-6 border-t border-slate-200 dark:border-white/10">
                         <div className="mb-4 flex flex-col gap-1">
-                            <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider text-primary-tactile">// Senhas de Faturas Protegidas</h4>
+                            <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider text-primary-tactile">// Credenciais de Faturas e Portais</h4>
                             <p className="text-[9px] font-sans font-semibold text-slate-400 uppercase tracking-wider">
-                                A senha é testada no PDF mais recente e guardada no cofre seguro. Ela nunca aparece nesta tela nem nos logs.
+                                A credencial é validada na origem e guardada no cofre seguro. Ela nunca aparece nesta tela nem nos logs.
                             </p>
                         </div>
                         {billPdfPasswordLoading ? (
@@ -998,7 +999,7 @@ const FinanceView = ({
                                                 <input
                                                     type="password"
                                                     autoComplete="new-password"
-                                                    placeholder={config.configured ? 'Nova senha para substituir' : 'Digite a senha do PDF'}
+                                                    placeholder={config.configured ? 'Nova senha para substituir' : config.kind === 'allcare_portal' ? 'Digite a senha do Portal Allcare' : 'Digite a senha do PDF'}
                                                     value={billPdfPasswordDrafts[config.id] || ''}
                                                     onChange={event => setBillPdfPasswordDrafts(prev => ({ ...prev, [config.id]: event.target.value }))}
                                                     onKeyDown={event => { if (event.key === 'Enter') void saveBillPdfPassword(config); }}
@@ -1009,7 +1010,7 @@ const FinanceView = ({
                                                     disabled={isSaving}
                                                     className="shrink-0 rounded-lg bg-primary-tactile px-4 py-2.5 text-[9px] font-sans font-bold uppercase tracking-wider text-white transition-opacity disabled:opacity-50"
                                                 >
-                                                    {isSaving ? 'Testando…' : 'Salvar'}
+                                                    {isSaving ? 'Validando…' : 'Salvar'}
                                                 </button>
                                             </div>
                                             {feedback && (

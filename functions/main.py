@@ -54,6 +54,14 @@ from allcare_bill import (
     download_allcare_bill_pdf,
     is_allcare_bill_sender,
 )
+from allcare_portal import (
+    AllcarePortalClient,
+    AllcarePortalError,
+    current_portal_period,
+    find_holder_cpf,
+    parse_brl_amount,
+    parse_portal_date,
+)
 from firestore_resilience import stream_collection_resilient
 from godmode import (  # noqa: F401 — registra as Cloud Functions
     askHermesGodmode,
@@ -2492,6 +2500,156 @@ def sync_boletos_gmail(service, sync_ref, logs):
         log_to_firestore(sync_ref, logs, f"ERRO na busca de boletos: {e}")
 
 
+def sync_allcare_portal_bills(service, sync_ref, logs) -> int:
+    """Importa a mensalidade principal disponível no Portal do Beneficiário."""
+    db = get_db()
+    config = next(
+        (
+            item for item in list_password_configs(db)
+            if item.get("kind") == "allcare_portal"
+        ),
+        None,
+    )
+    if not config:
+        return 0
+
+    project_id = os.environ.get("GCLOUD_PROJECT") or "gestao-hermes"
+    try:
+        portal_password = read_password_secret(project_id, config["secret_id"])
+    except Exception as error:
+        log_to_firestore(
+            sync_ref,
+            logs,
+            f"[ALLCARE] Credencial do portal indisponível ({type(error).__name__}).",
+        )
+        return 0
+    if not portal_password:
+        log_to_firestore(sync_ref, logs, "[ALLCARE] Senha do Portal do Beneficiário ainda não cadastrada.")
+        return 0
+
+    try:
+        gmail_address = service.users().getProfile(userId="me").execute(
+            num_retries=3
+        ).get("emailAddress")
+        cpf = find_holder_cpf(db, gmail_address)
+        portal = AllcarePortalClient()
+        portal.login(cpf, portal_password)
+        start_month, end_month = current_portal_period()
+        portal_bills = portal.list_bills(start_month, end_month)
+    except AllcarePortalError as error:
+        log_to_firestore(sync_ref, logs, f"[ALLCARE] Falha ao consultar o portal ({error}).")
+        return 0
+
+    rubric_id = config.get("rubric_id")
+    imported = []
+    existing_docs = list(db.collection("fixed_bills").stream())
+
+    for portal_bill in portal_bills:
+        try:
+            invoice_id = str(portal_bill.get("num_fatura") or "").strip()
+            charge_id = str(portal_bill.get("num_seq_cobranca") or "").strip()
+            if not invoice_id or not charge_id:
+                raise AllcarePortalError("identificador_do_boleto_ausente")
+            due_date = parse_portal_date(portal_bill.get("dt_vencimento"))
+            amount = parse_brl_amount(portal_bill.get("val_bruto"))
+            month = due_date.month - 1
+            year = due_date.year
+
+            already_imported = next(
+                (
+                    snapshot for snapshot in existing_docs
+                    if str((snapshot.to_dict() or {}).get("allcare_invoice_id") or "") == invoice_id
+                ),
+                None,
+            )
+            if already_imported:
+                continue
+
+            pdf_bytes = portal.download_bill(portal_bill)
+            prepared_pdf, pdf_reason = prepare_pdf_for_gemini(pdf_bytes)
+            if prepared_pdf is None:
+                raise AllcarePortalError(pdf_reason or "pdf_invalido")
+
+            barcode = ""
+            try:
+                from pypdf import PdfReader
+
+                pdf_text = "\n".join(
+                    page.extract_text() or ""
+                    for page in PdfReader(io.BytesIO(prepared_pdf)).pages
+                )
+                compact_numbers = re.sub(r"[^0-9\n]", "", pdf_text)
+                barcode_match = re.search(r"(?<!\d)(\d{47,48})(?!\d)", compact_numbers)
+                if barcode_match:
+                    barcode = barcode_match.group(1)
+            except Exception:
+                pass
+
+            found_existing = next(
+                (
+                    snapshot for snapshot in existing_docs
+                    if (snapshot.to_dict() or {}).get("rubricId") == rubric_id
+                    and (snapshot.to_dict() or {}).get("month") == month
+                    and (snapshot.to_dict() or {}).get("year") == year
+                ),
+                None,
+            )
+            update_data = {
+                "amount": amount,
+                "dueDay": due_date.day,
+                "rubricId": rubric_id,
+                "barcode": barcode,
+                "allcare_invoice_id": invoice_id,
+                "allcare_charge_id": charge_id,
+                "source": "allcare_portal",
+                "updated_at": datetime.now().isoformat(),
+            }
+            if found_existing:
+                found_existing.reference.update(update_data)
+            else:
+                _, created_ref = db.collection("fixed_bills").add({
+                    "description": config.get("label") or "Allcare plano de saúde",
+                    "month": month,
+                    "year": year,
+                    "isPaid": False,
+                    "category": "Conta Fixa",
+                    **update_data,
+                    "created_at": datetime.now().isoformat(),
+                })
+                existing_docs.append(created_ref.get())
+
+            imported.append({
+                "description": config.get("label") or "Allcare plano de saúde",
+                "amount": amount,
+                "due_date": datetime.combine(due_date, datetime.min.time()),
+                "rubric": config.get("label") or "Allcare plano de saúde",
+                "sender": "Portal do Beneficiário Allcare",
+                "subject": f"Fatura {invoice_id}",
+            })
+            log_to_firestore(
+                sync_ref,
+                logs,
+                f"[ALLCARE] Fatura {invoice_id} vinculada: R$ {amount:.2f}, vencimento {due_date.strftime('%d/%m/%Y')}.",
+            )
+        except AllcarePortalError as error:
+            log_to_firestore(sync_ref, logs, f"[ALLCARE] Boleto do portal ignorado ({error}).")
+        except Exception as error:
+            log_to_firestore(
+                sync_ref,
+                logs,
+                f"[ALLCARE] Erro ao importar boleto ({type(error).__name__}).",
+            )
+
+    if imported:
+        emit_notification_backend(
+            "Novo Boleto Allcare",
+            _build_imported_bills_notification(imported),
+            "success",
+            "financeiro",
+        )
+    return len(imported)
+
+
 @https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=540)
 def sync_gmail_bills_callable(req: https_fn.CallableRequest):
     """Executa a sincronização de boletos do Gmail manualmente via app"""
@@ -2502,13 +2660,14 @@ def sync_gmail_bills_callable(req: https_fn.CallableRequest):
     try:
         gs = get_gmail_service()
         sync_boletos_gmail(gs, sync_ref, logs)
+        portal_imported = sync_allcare_portal_bills(gs, sync_ref, logs)
         
         sync_ref.update({
             'status': 'completed',
             'last_success': datetime.now().isoformat(),
             'logs': logs
         })
-        return {"success": True}
+        return {"success": True, "portal_imported": portal_imported}
     except Exception as e:
         error_msg = f"Erro na sincronização manual: {str(e)}"
         log_to_firestore(sync_ref, logs, error_msg)
@@ -2596,13 +2755,29 @@ def saveBillPdfPassword(req: https_fn.CallableRequest) -> dict:
             message="Obrigação protegida não cadastrada.",
         )
 
-    validation, unlockable_message_ids = _validate_bill_pdf_password(
-        get_gmail_service(), config["senders"], password
-    )
+    if config.get("kind") == "allcare_portal":
+        try:
+            gmail_service = get_gmail_service()
+            gmail_address = gmail_service.users().getProfile(userId="me").execute(
+                num_retries=3
+            ).get("emailAddress")
+            cpf = find_holder_cpf(db, gmail_address)
+            AllcarePortalClient().login(cpf, password)
+            validation, unlockable_message_ids = True, ["allcare_portal"]
+        except AllcarePortalError:
+            validation, unlockable_message_ids = False, []
+    else:
+        validation, unlockable_message_ids = _validate_bill_pdf_password(
+            get_gmail_service(), config["senders"], password
+        )
     if validation is False:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
-            message="A senha não abriu o PDF recente deste emissor.",
+            message=(
+                "A senha não autenticou no Portal Allcare."
+                if config.get("kind") == "allcare_portal"
+                else "A senha não abriu o PDF recente deste emissor."
+            ),
         )
 
     save_password_secret(
@@ -2611,7 +2786,7 @@ def saveBillPdfPassword(req: https_fn.CallableRequest) -> dict:
         password,
     )
 
-    if unlockable_message_ids:
+    if unlockable_message_ids and config.get("kind") != "allcare_portal":
         processed_ref = db.collection('system').document('processed_emails')
         processed_snapshot = processed_ref.get()
         processed_ids = list((processed_snapshot.to_dict() or {}).get('ids') or []) if processed_snapshot.exists else []
@@ -2676,6 +2851,7 @@ def run_full_sync(trigger_reason='unspecified'):
 
 
             sync_boletos_gmail(gs, sync_ref, logs)
+            sync_allcare_portal_bills(gs, sync_ref, logs)
 
             # Vínculo automático de e-mails a ações em andamento/stand-by (via IA + confirmação Telegram).
             # Protegido por try/except próprio: uma falha aqui nunca deve derrubar o sync financeiro/agenda.
