@@ -13,10 +13,10 @@ google-cloud-pubsub
 google-cloud-secret-manager>=2.20.0
 google-auth
 pytz
-# grpcio e grpcio-status precisam ser sempre identicos (sao usados pelo
-# google-cloud-firestore para as RPCs de stream/transacao); deixar sem pin
-# permite que o pip resolva combinacoes incompativeis a cada deploy e
-# quebra com "'_UnaryStreamMultiCallable' object has no attribute '_retry'".
+# grpcio e grpcio-status precisam ser sempre idênticos (são usados pelo
+# google-cloud-firestore nas RPCs de stream/transação). O AttributeError em
+# `_UnaryStreamMultiCallable._retry` é tratado separadamente passando um Retry
+# explícito aos streams longos; veja firestore_resilience.py.
 grpcio==1.83.0
 grpcio-status==1.83.0
 google-api-core==2.33.0

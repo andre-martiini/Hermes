@@ -49,6 +49,7 @@ from bill_pdf_passwords import (
     read_password_secret,
     save_password_secret,
 )
+from firestore_resilience import stream_collection_resilient
 from godmode import (  # noqa: F401 — registra as Cloud Functions
     askHermesGodmode,
 )
@@ -14476,7 +14477,13 @@ def sync_google_contacts_internal(db, sync_ref=None, logs=None):
 
         # 3. Perfis existentes do Firestore em lote para otimização em memória
         existing_profiles = []
-        all_docs = db.collection('perfil_pessoas').stream()
+        # Retry explícito é obrigatório aqui: o retry DEFAULT do
+        # google-cloud-firestore 2.28.0 acessa `_retry` no canal gRPC bruto após
+        # uma interrupção e levanta AttributeError em vez de retomar o stream.
+        all_docs = stream_collection_resilient(
+            db.collection('perfil_pessoas'),
+            timeout=60.0,
+        )
         for doc_snap in all_docs:
             p_data = doc_snap.to_dict() or {}
             p_data['id'] = doc_snap.id
