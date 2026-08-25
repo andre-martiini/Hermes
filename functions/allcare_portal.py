@@ -117,12 +117,9 @@ class AllcarePortalClient:
         return response
 
     def login(self, cpf: str, password: str, plan_match: str = PLAN_MATCH) -> dict:
-        self._request(
-            "GET",
-            "/",
-            error_stage="abertura",
-            headers={"Accept": "text/html,application/xhtml+xml"},
-        )
+        # A pagina inicial e bloqueada para alguns IPs de datacenter, embora os
+        # endpoints de autenticacao permaneçam disponiveis. O POST de validacao
+        # nao depende do cookie anonimo criado pela pagina inicial.
         response = self._request(
             "POST",
             "/Account/ValidarBeneficiario",

@@ -51,8 +51,8 @@ class AllcarePortalTests(unittest.TestCase):
 
         client.login("12345678901", "secret")
 
-        validation_headers = session.calls[1][2]["headers"]
-        authentication_headers = session.calls[2][2]["headers"]
+        validation_headers = session.calls[0][2]["headers"]
+        authentication_headers = session.calls[1][2]["headers"]
         self.assertEqual(validation_headers["X-Requested-With"], "XMLHttpRequest")
         self.assertNotIn("X-Requested-With", authentication_headers)
         self.assertNotIn("X-Requested-With", session.headers)
@@ -62,8 +62,17 @@ class AllcarePortalTests(unittest.TestCase):
         session.request = lambda *args, **kwargs: FakeResponse(ok=False, status_code=400)
         client = AllcarePortalClient(session)
 
-        with self.assertRaisesRegex(AllcarePortalError, "portal_http_400_abertura"):
+        with self.assertRaisesRegex(AllcarePortalError, "portal_http_400_validacao"):
             client.login("12345678901", "secret")
+
+    def test_login_does_not_open_blocked_home_page(self):
+        session = RecordingSession()
+        client = AllcarePortalClient(session)
+
+        client.login("12345678901", "secret")
+
+        self.assertEqual(len(session.calls), 2)
+        self.assertTrue(session.calls[0][1].endswith("/Account/ValidarBeneficiario"))
 
     def test_parses_portal_fields(self):
         self.assertEqual(parse_brl_amount("3.069,76"), 3069.76)
