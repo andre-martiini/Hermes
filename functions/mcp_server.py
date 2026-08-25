@@ -172,19 +172,36 @@ def mcpServer(req: https_fn.Request) -> https_fn.Response:
 # --------------------------------------------------------------------------
 
 def _authenticate(req: https_fn.Request) -> str:
+    """Aceita os dois tipos de credencial, nesta ordem.
+
+    1. Access token OAuth emitido por `mcp_oauth.py` — e o que as superficies
+       hospedadas do Claude (Claude.ai, Desktop, Cowork) usam, porque la nao
+       existe `headersHelper`. Validado localmente, sem I/O.
+    2. Firebase ID Token — o caminho do Claude Code e do cliente de voz, que
+       montam o header por conta propria.
+
+    A ordem e por custo: o JWT proprio verifica com um HMAC local, enquanto
+    `verify_id_token` pode ir buscar as chaves publicas do Google.
+    """
     header = req.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
-        raise McpError(-32001, "Authorization: Bearer <Firebase ID Token> obrigatorio")
+        raise McpError(-32001, "Authorization: Bearer <token> obrigatorio")
 
     token = header[len("Bearer "):].strip()
-    try:
-        decoded = firebase_auth.verify_id_token(token)
-    except Exception:
-        raise McpError(-32001, "ID Token invalido ou expirado")
 
-    uid = decoded.get("uid")
+    from mcp_oauth import validar_access_token
+
+    claims = validar_access_token(token)
+    if claims:
+        uid = claims.get("sub")
+    else:
+        try:
+            uid = firebase_auth.verify_id_token(token).get("uid")
+        except Exception:
+            raise McpError(-32001, "Token invalido ou expirado")
+
     if not uid:
-        raise McpError(-32001, "ID Token nao contem uid")
+        raise McpError(-32001, "Token nao identifica um usuario")
 
     if not _is_uid_allowed(uid):
         raise McpError(-32002, "UID nao autorizado a usar o servidor MCP do Hermes")
@@ -412,10 +429,24 @@ def _json_response(payload: dict, status: int = 200) -> https_fn.Response:
     )
 
 
+# Aponta o cliente para o protected resource metadata, que por sua vez aponta
+# para o authorization server. Sem este header no 401 o Claude nao tem como
+# descobrir onde autenticar: a origem de Cloud Functions nao consegue servir
+# `/.well-known/*` (o primeiro segmento do path e o nome da funcao), entao o
+# fallback por sondagem daquelas rotas nunca acha nada. Ver mcp_oauth.py.
+_RESOURCE_METADATA_URL = "https://gestao-hermes.web.app/.well-known/oauth-protected-resource"
+
+
 def _json_rpc_error(rpc_id, code: int, message: str) -> https_fn.Response:
     status = 401 if code == -32001 else 403 if code == -32002 else 200
-    return _json_response({
+    resposta = _json_response({
         "jsonrpc": "2.0",
         "id": rpc_id,
         "error": {"code": code, "message": message},
     }, status=status)
+    if status == 401:
+        # O 401 e obrigatorio: o Claude ignora WWW-Authenticate numa resposta 200.
+        resposta.headers["WWW-Authenticate"] = (
+            f'Bearer resource_metadata="{_RESOURCE_METADATA_URL}"'
+        )
+    return resposta

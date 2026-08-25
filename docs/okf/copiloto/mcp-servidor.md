@@ -112,8 +112,12 @@ claude mcp get hermes
 
 **Limite conhecido:** o ID token vale 1 hora. Numa sessão mais longa que isso as
 chamadas passam a falhar com `-32001` até o servidor ser reconectado no cliente.
-Não há como esticar isso com ID Token do Firebase; a saída definitiva é o servidor
-aceitar OAuth (ver "Cowork" abaixo).
+Não há como esticar isso com ID Token do Firebase.
+
+O caminho OAuth (abaixo) não tem esse limite — ele renova sozinho pelo refresh
+token. O Claude Code também fala OAuth: para usá-lo em vez do `headersHelper`,
+adicione o servidor sem `headersHelper` e ele negocia o fluxo por conta própria,
+abrindo o consentimento no navegador.
 
 ### Diagnóstico rápido
 
@@ -127,17 +131,99 @@ allowlist — `-32001` é token inválido/expirado, `-32002` é uid fora da allo
 
 ## Claude Cowork e outras superfícies hospedadas
 
-As superfícies hospedadas (Claude.ai, Desktop, mobile, Cowork) **não aceitam** um
-header montado localmente: não há `headersHelper` lá. Elas suportam `oauth_dcr`,
-`oauth_cimd`, `oauth_anthropic_creds`, `static_headers` (beta, entrado por admin
-de organização) ou `none`.
+As superfícies hospedadas (Claude.ai, Desktop, mobile, Cowork) não têm
+`headersHelper` — elas autenticam por OAuth. `functions/mcp_oauth.py` implementa
+o authorization server: OAuth 2.0 com Dynamic Client Registration e PKCE S256.
 
-Ou seja, para expor o Hermes ao Cowork falta uma camada OAuth 2.1 no servidor:
-metadata RFC 9728, resposta `401` com `WWW-Authenticate: Bearer resource_metadata=...`,
-PKCE S256, e `/register` (DCR) ou CIMD. É o item mais caro da lista e não bloqueia
-o uso pelo Claude Code. Atalho viável quando for a hora: pôr um IdP que já faz DCR
-(Auth0, Stytch, WorkOS) na frente da função, em vez de escrever o authorization
-server à mão.
+**Para conectar:** em *Customize → Connectors → Add custom connector*, informe a
+URL do MCP exatamente assim:
+
+```
+https://us-central1-gestao-hermes.cloudfunctions.net/mcpServer
+```
+
+Não preencha Client ID nem Client Secret — o DCR registra o cliente sozinho. O
+Claude abre a página de consentimento, você entra com a mesma conta Google do
+Hermes, e pronto. Contas fora de `system/mcp_access.allowed_uids` são recusadas
+com `access_denied`.
+
+> A URL precisa bater **exatamente** com o campo `resource` do protected resource
+> metadata, incluindo o path. Uma barra a mais no fim já quebra a validação.
+
+### Por que o OAuth mora no Hosting e o MCP não
+
+Duas restrições que se cruzam:
+
+1. A origem de Cloud Functions **não consegue servir `/.well-known/*`** — o
+   primeiro segmento do path é o nome da função, então `/.well-known/...`
+   procuraria uma função chamada `.well-known`. O Firebase Hosting consegue.
+2. Um rewrite do Hosting tem **timeout de 60s**, e a Cloud Function direta tem
+   300s. Tools como `gerar_relatorio` e `ler_documento_na_integra` passam de 60s.
+
+Então: o endpoint MCP fica onde está (função direta, 300s) e o OAuth inteiro fica
+no Hosting (`gestao-hermes.web.app`), onde todos os endpoints são rápidos. A
+especificação permite essa divisão — `resource_metadata` pode morar em qualquer
+HTTPS, e authorization server em outro host é explicitamente suportado.
+
+O que amarra os dois é o `401` do `mcpServer`, que sempre responde:
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer resource_metadata="https://gestao-hermes.web.app/.well-known/oauth-protected-resource"
+```
+
+Esse header é obrigatório: o Claude **ignora** `WWW-Authenticate` numa resposta
+`200`, e o fallback de sondar as rotas `/.well-known/` na origem do MCP não
+funciona aqui, pela restrição (1). Sem ele o sintoma é "Couldn't reach the MCP
+server" com o authorization server sem receber tráfego nenhum.
+
+### Rotas e armazenamento
+
+| Rota (no Hosting) | Papel |
+|---|---|
+| `/.well-known/oauth-protected-resource` | RFC 9728 — diz onde fica o AS |
+| `/.well-known/oauth-authorization-server` | RFC 8414 — endpoints e `code_challenge_methods_supported: ["S256"]` |
+| `/oauth/register` | DCR (RFC 7591), corpo em JSON |
+| `/oauth/authorize` | GET serve a página de consentimento; POST recebe o ID token do login e devolve o `code` |
+| `/oauth/token` | `authorization_code` e `refresh_token`, corpo form-urlencoded |
+
+Coleções: `mcp_oauth_clients` (registros do DCR), `mcp_oauth_codes` e
+`mcp_oauth_refresh` (ambos guardados **só como hash SHA-256** — quem ler o banco
+não reconstrói um token utilizável). O segredo de assinatura fica em
+`system/mcp_oauth.signing_secret`, gerado na primeira execução; `system/**` é
+negado a todo mundo nas firestore.rules, só o Admin SDK alcança.
+
+### Decisões que valem registrar
+
+**O access token é próprio, não um Firebase ID token repassado.** É um JWT HS256
+com `aud` fixado no recurso MCP e validade de 1h. Repassar o par de tokens do
+Firebase seria mais simples, mas entregaria ao cliente a identidade inteira do
+usuário, com refresh de longa duração e sem escopo. O token próprio é limitado a
+este recurso e revogável isoladamente.
+
+**Refresh token rotaciona a cada uso.** O DCR registra o Claude como cliente
+público, e a especificação de autorização do MCP adota a exigência do OAuth 2.1
+de rotacionar nesse caso. O antigo é apagado no mesmo request que emite o novo.
+
+**Erros seguem o RFC 6749 à risca.** `invalid_grant` para refresh token morto —
+um código custom faz o Claude falhar em silêncio em vez de reautenticar.
+
+**Redirect URI compara exato, exceto loopback.** O Claude Code é cliente nativo e
+usa `http://localhost:<porta efêmera>/callback` (RFC 8252), então a porta é
+ignorada para `localhost` e `127.0.0.1`. As superfícies hospedadas usam sempre
+`https://claude.ai/api/mcp/auth_callback`, que casa exatamente.
+
+**A config do app web vem do Firestore.** A página de consentimento precisa dela
+para o login com Google, e lê `public_configs/firebase_web` em vez de trazer a
+config escrita no backend — que criaria mais uma cópia do padrão `AIza...` num
+repositório público. `scripts/seed_mcp_oauth_config.py` copia de `firebase.ts`,
+que continua sendo a fonte única.
+
+### Os dois canais convivem
+
+`mcpServer` aceita as duas credenciais, nesta ordem: access token OAuth (validado
+localmente por HMAC, sem I/O) e, se não for um, Firebase ID Token. O Claude Code
+com `headersHelper` continua funcionando exatamente como antes.
 
 ## Como as tools chegam ao MCP
 
@@ -200,6 +286,9 @@ compartilhada; só a apresentação difere, e é assim que deve ser.
 | Arquivo | Papel |
 |---|---|
 | `functions/mcp_server.py` | Cloud Function `mcpServer`: JSON-RPC, auth, allowlist, rate limit, auditoria |
+| `functions/mcp_oauth.py` | Cloud Function `mcpOAuth`: authorization server OAuth 2.1 (DCR, PKCE S256, discovery) |
+| `functions/test_mcp_oauth.py` | Contrato do discovery, PKCE, redirect URIs, tokens e o desafio `401` |
+| `scripts/seed_mcp_oauth_config.py` | Copia a config do app web de `firebase.ts` para `public_configs/firebase_web` |
 | `functions/tools/hermes_tools.py` | Executor do catálogo fora do copiloto web |
 | `functions/tools/tool_context.py` | `ToolContext` — estado que as tools precisam, com construção preguiçosa |
 | `functions/tools/callable_bridge.py` | Invoca callables `@https_fn.on_call` de dentro do backend |

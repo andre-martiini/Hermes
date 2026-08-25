@@ -38,3 +38,4 @@ nbconvert>=7.0.0
 pandas
 openpyxl
 imageio-ffmpeg>=0.5.1
+pyjwt>=2.8.0
