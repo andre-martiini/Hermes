@@ -53,6 +53,13 @@ class PortalClient:
         return response
 
     def login(self, cpf: str, password: str, plan_match: str) -> dict:
+        # Na conexão residencial a página inicial responde normalmente e cria o
+        # cookie anônimo esperado pelo fluxo completo de autenticação.
+        self.request(
+            "GET",
+            "/",
+            headers={"Accept": "text/html,application/xhtml+xml"},
+        )
         response = self.request(
             "POST",
             "/Account/ValidarBeneficiario",

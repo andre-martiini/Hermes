@@ -33,6 +33,7 @@ class PortalTests(unittest.TestCase):
 
     def test_login_selects_expected_active_plan(self):
         session = Session([
+            Response(url="https://beneficiario.allcare.com.br/"),
             Response(payload={"retorno": {"dadosAtivarBenef": [
                 {"ind_situacao": "A", "nome_plano_cartao": "OUTRO", "cod_usuario": 1},
                 {"ind_situacao": "A", "nome_plano_cartao": "Participativo Estadual Adesão Enfermaria", "cod_usuario": 2},
@@ -43,10 +44,11 @@ class PortalTests(unittest.TestCase):
             "12345678901", "secret", "PARTICIPATIVO ESTADUAL ADESAO"
         )
         self.assertEqual(profile["cod_usuario"], 2)
-        self.assertEqual(session.calls[1][2]["data"]["usuario"], "2")
+        self.assertEqual(session.calls[2][2]["data"]["usuario"], "2")
 
     def test_login_does_not_store_password_in_headers(self):
         session = Session([
+            Response(url="https://beneficiario.allcare.com.br/"),
             Response(payload={"retorno": {"dadosAtivarBenef": [{
                 "ind_situacao": "A", "nome_plano_cartao": "Participativo Estadual Adesão", "cod_usuario": 2,
             }]}}),
@@ -56,7 +58,10 @@ class PortalTests(unittest.TestCase):
         self.assertNotIn("secret", repr(session.headers))
 
     def test_empty_profiles_mean_rejected_credentials(self):
-        session = Session([Response(payload={"retorno": {"dadosAtivarBenef": []}})])
+        session = Session([
+            Response(url="https://beneficiario.allcare.com.br/"),
+            Response(payload={"retorno": {"dadosAtivarBenef": []}}),
+        ])
         with self.assertRaisesRegex(PortalError, "credenciais_rejeitadas"):
             PortalClient(session).login("12345678901", "wrong", "PLANO")
 
