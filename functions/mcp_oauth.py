@@ -16,9 +16,12 @@ permite. Nao bastou: a tentativa de conectar pelo Cowork falhou no registro
 **sem nenhuma requisicao chegar ao servidor**, sinal de que o cliente procura o
 discovery antes de receber o `401` que traria o ponteiro.
 
-Entao MCP e OAuth passaram a atender na mesma origem, `gestao-hermes.web.app`,
-que e a recomendacao explicita da documentacao de conectores. Assim todo caminho
-de sondagem do RFC 9728 resolve, com ou sem o ponteiro.
+Entao MCP e OAuth passaram a atender na mesma origem do Firebase Hosting, que e
+a recomendacao explicita da documentacao de conectores: assim todo caminho de
+sondagem do RFC 9728 resolve, com ou sem o ponteiro.
+
+A origem escolhida e `firebaseapp.com`, e nao `web.app`, por causa do service
+worker do PWA — ver o comentario em ISSUER.
 
 O preco e o timeout: um rewrite do Hosting corta em 60s, contra 300s da funcao
 direta. Por isso a URL direta continua valendo — e o que o Claude Code usa com
@@ -55,8 +58,19 @@ from firebase_functions import https_fn, options
 from firebase_admin import auth as firebase_auth
 from firebase_admin import firestore
 
-# Origem publica do Hosting: e onde o discovery e os endpoints OAuth respondem.
-ISSUER = "https://gestao-hermes.web.app"
+# Origem do OAuth. Deliberadamente o dominio `firebaseapp.com` e nao o `web.app`,
+# embora os dois sirvam o mesmo site do Hosting.
+#
+# O PWA do Hermes registra um service worker em `web.app`, e o fallback de
+# navegacao dele devolve o index.html do app para QUALQUER rota da origem — sem
+# tocar na rede. Era isso que quebrava a vinculacao: o Claude abria a pagina de
+# autorizacao e recebia a tela inicial do Hermes, servida do cache do navegador.
+# Nada aparecia no log do servidor porque nenhuma requisicao saia da maquina.
+#
+# `vite.config.ts` ganhou um navigateFallbackDenylist para essas rotas, mas isso
+# so vale quando o service worker antigo for substituido no navegador de cada
+# usuario. Manter o OAuth numa origem sem service worker torna o fluxo imune.
+ISSUER = "https://gestao-hermes.firebaseapp.com"
 
 # URL canonica do MCP para clientes OAuth, e o valor do campo `resource` do
 # protected resource metadata — que precisa bater literalmente com o que o
@@ -76,7 +90,11 @@ MCP_RESOURCE = f"{ISSUER}/mcp"
 # nao invalidar um token emitido contra ela.
 MCP_RESOURCE_DIRETO = "https://us-central1-gestao-hermes.cloudfunctions.net/mcpServer"
 
-_AUDIENCIAS_ACEITAS = [MCP_RESOURCE, MCP_RESOURCE_DIRETO]
+# O mesmo endpoint tambem responde pelo dominio do PWA; aceito como audiencia
+# para nao invalidar token de quem tenha configurado o conector por ali.
+MCP_RESOURCE_WEBAPP = "https://gestao-hermes.web.app/mcp"
+
+_AUDIENCIAS_ACEITAS = [MCP_RESOURCE, MCP_RESOURCE_DIRETO, MCP_RESOURCE_WEBAPP]
 
 SCOPE_PADRAO = "hermes:tools"
 
@@ -408,6 +426,16 @@ def _config_firebase_web() -> dict:
     return (snap.to_dict() or {}) if snap.exists else {}
 
 
+def _config_pagina_consentimento() -> dict:
+    """Config do Firebase para a pagina, com `authDomain` na origem que a serve.
+
+    Deixar o authDomain apontando para outro dominio faz o login depender de
+    storage cross-origin, que os navegadores particionam — falha silenciosa e
+    dificil de diagnosticar.
+    """
+    return {**_config_firebase_web(), "authDomain": urlparse(ISSUER).netloc}
+
+
 def _validar_pedido_authorize(params: dict) -> tuple[dict | None, https_fn.Response | None]:
     client_id = params.get("client_id") or ""
     redirect_uri = params.get("redirect_uri") or ""
@@ -439,7 +467,7 @@ def _handle_authorize_get(req: https_fn.Request) -> https_fn.Response:
         _PAGINA_CONSENTIMENTO
         .replace("__CLIENT_NAME__", _escapar(cliente.get("client_name", "Cliente MCP")))
         .replace("__REDIRECT__", _escapar(params["redirect_uri"]))
-        .replace("__FIREBASE_CONFIG__", json.dumps(_config_firebase_web()))
+        .replace("__FIREBASE_CONFIG__", json.dumps(_config_pagina_consentimento()))
         .replace("__PARAMS__", json.dumps(params))
     )
     return https_fn.Response(html, status=200, mimetype="text/html",

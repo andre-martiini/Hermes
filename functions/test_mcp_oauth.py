@@ -9,6 +9,8 @@ silencio ate a sessao expirar. Nada aqui usa rede ou Firestore.
 import base64
 import hashlib
 import json
+import os
+import re
 import unittest
 from unittest import mock
 
@@ -259,6 +261,51 @@ class TestGetNoMcpServer(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         corpo = json.loads(resp.get_data(as_text=True))
         self.assertEqual(corpo["resource"], mcp_oauth.MCP_RESOURCE)
+
+
+class TestServiceWorkerNaoSequestraOAuth(unittest.TestCase):
+    """O PWA e o OAuth dividem o site do Hosting — e o service worker ganha.
+
+    O `navigateFallbackDenylist` do vite-plugin-pwa e a unica coisa que impede o
+    service worker de responder as rotas do MCP e do OAuth com o index.html do
+    app, do cache, sem tocar na rede. Quando isso acontece nao ha erro em lugar
+    nenhum: o cliente recebe 200 com HTML, e o log do servidor fica vazio porque
+    nenhuma requisicao sai do navegador. Foi assim que a vinculacao do conector
+    falhou por horas.
+    """
+
+    ROTAS_CRITICAS = ("/mcp", "/mcp/health", "/oauth/authorize",
+                      "/.well-known/oauth-protected-resource")
+
+    @classmethod
+    def setUpClass(cls):
+        caminho = os.path.join(os.path.dirname(__file__), os.pardir, "vite.config.ts")
+        with open(caminho, encoding="utf-8") as f:
+            fonte = f.read()
+        bloco = re.search(r"navigateFallbackDenylist:\s*\[(.*?)\]", fonte, re.S)
+        assert bloco, "navigateFallbackDenylist nao encontrado em vite.config.ts"
+        cls.padroes = [
+            re.compile(p) for p in re.findall(r"/(\S+?)/[gimsuy]*\s*,", bloco.group(1) + ",")
+        ]
+
+    def test_denylist_cobre_as_rotas_do_mcp_e_do_oauth(self):
+        for rota in self.ROTAS_CRITICAS:
+            self.assertTrue(
+                any(p.search(rota) for p in self.padroes),
+                f"'{rota}' nao esta no navigateFallbackDenylist — o service worker "
+                f"vai devolver o index.html do app nessa rota",
+            )
+
+    def test_oauth_nao_serve_da_origem_do_pwa(self):
+        """Segunda barreira: o denylist so vale depois que o SW antigo e trocado.
+
+        Enquanto isso, um navegador com o service worker velho continua
+        sequestrando `web.app`. Servir o OAuth de outra origem torna o fluxo
+        imune a esse intervalo.
+        """
+        self.assertNotIn("web.app", mcp_oauth.ISSUER)
+        self.assertNotIn("web.app", mcp_oauth.MCP_RESOURCE)
+        self.assertNotIn("web.app", mcp_server._RESOURCE_METADATA_URL)
 
 
 class TestRoteamento(unittest.TestCase):

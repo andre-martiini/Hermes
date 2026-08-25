@@ -61,7 +61,17 @@ export default defineConfig(() => {
         },
         workbox: {
           clientsClaim: true,
-          navigateFallbackDenylist: [/^\/__/],
+          // Sem estas exclusões o service worker devolve o index.html do app
+          // para QUALQUER rota da origem, sem tocar na rede — inclusive as do
+          // servidor MCP e do OAuth. Foi o que quebrou a vinculação do conector:
+          // a página de autorização chegava como a tela inicial do Hermes,
+          // servida do cache, e nenhuma requisição saía do navegador.
+          navigateFallbackDenylist: [
+            /^\/__/,
+            /^\/mcp(\/|$)/,
+            /^\/oauth\//,
+            /^\/\.well-known\//,
+          ],
           maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
           importScripts: ["firebase-messaging-sw.js", "share-target-sw.js"],
           runtimeCaching: [

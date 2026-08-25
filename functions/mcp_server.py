@@ -455,7 +455,9 @@ def _json_response(payload: dict, status: int = 200) -> https_fn.Response:
 # descobrir onde autenticar: a origem de Cloud Functions nao consegue servir
 # `/.well-known/*` (o primeiro segmento do path e o nome da funcao), entao o
 # fallback por sondagem daquelas rotas nunca acha nada. Ver mcp_oauth.py.
-_RESOURCE_METADATA_URL = "https://gestao-hermes.web.app/.well-known/oauth-protected-resource"
+_RESOURCE_METADATA_URL = (
+    "https://gestao-hermes.firebaseapp.com/.well-known/oauth-protected-resource"
+)
 
 
 def _json_rpc_error(rpc_id, code: int, message: str) -> https_fn.Response:
