@@ -87,13 +87,34 @@ class McpError(Exception):
     timeout_sec=300,
 )
 def mcpServer(req: https_fn.Request) -> https_fn.Response:
+    caminho = (req.path or "/").rstrip("/")
+
+    # Servido tambem aqui, e nao so no Hosting, para o cliente que sonda o
+    # metadata relativo a propria URL do MCP em vez de seguir o ponteiro do 401.
+    if caminho.endswith("/.well-known/oauth-protected-resource"):
+        from mcp_oauth import protected_resource_metadata
+
+        return _json_response(protected_resource_metadata())
+
     if req.method == "GET":
-        return _json_response({
-            "server": SERVER_NAME,
-            "version": SERVER_VERSION,
-            "protocolVersion": MCP_PROTOCOL_VERSION,
-            "status": "ok",
-        })
+        # Health-check num path proprio. O GET na raiz NAO pode devolver 200:
+        # e por ele que um cliente OAuth descobre que precisa autenticar, e a
+        # especificacao exige o 401 — `WWW-Authenticate` numa resposta 200 e
+        # ignorado. Antes daqui, qualquer GET caia neste health e respondia 200,
+        # o que escondia o desafio de autenticacao.
+        if caminho.endswith("/health"):
+            return _json_response({
+                "server": SERVER_NAME,
+                "version": SERVER_VERSION,
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "status": "ok",
+            })
+        try:
+            _authenticate(req)
+        except McpError as auth_err:
+            return _json_rpc_error(None, auth_err.code, auth_err.message)
+        # Autenticado, mas nao ha stream SSE a abrir neste transporte sincrono.
+        return https_fn.Response("", status=405, headers={"Allow": "POST"})
 
     if req.method == "DELETE":
         # Encerramento de sessao no Streamable HTTP. O servidor e stateless,

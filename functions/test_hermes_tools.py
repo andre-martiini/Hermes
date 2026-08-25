@@ -165,8 +165,9 @@ except ImportError:  # firebase_functions so existe no venv de deploy
 class _FakeRequest:
     """So o que `mcpServer` realmente le do request."""
 
-    def __init__(self, body=None, method="POST", headers=None):
+    def __init__(self, body=None, method="POST", headers=None, path="/mcp"):
         self.method = method
+        self.path = path
         self.headers = headers or {"Authorization": "Bearer fake"}
         self._body = body
 

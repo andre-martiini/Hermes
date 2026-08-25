@@ -198,6 +198,69 @@ class TestDesafio401(unittest.TestCase):
         self.assertNotIn("WWW-Authenticate", resp.headers)
 
 
+class TestResourceClamp(unittest.TestCase):
+    """`resource` (RFC 8707) vindo do cliente nao pode virar `aud` arbitraria."""
+
+    def test_recurso_conhecido_passa(self):
+        for r in (mcp_oauth.MCP_RESOURCE, mcp_oauth.MCP_RESOURCE_DIRETO):
+            self.assertEqual(mcp_oauth._resource_valido(r), r)
+
+    def test_recurso_desconhecido_cai_no_canonico(self):
+        for r in ("https://evil.example.com/mcp", "", None):
+            self.assertEqual(mcp_oauth._resource_valido(r), mcp_oauth.MCP_RESOURCE)
+
+
+class TestMesmaOrigem(unittest.TestCase):
+    """MCP e discovery precisam responder na mesma origem.
+
+    A origem de Cloud Functions nao serve `/.well-known/*` — o primeiro segmento
+    do path e o nome da funcao — entao um cliente que procura o discovery antes
+    de receber o `401` nao acharia nada.
+    """
+
+    def test_recurso_canonico_esta_no_issuer(self):
+        self.assertTrue(mcp_oauth.MCP_RESOURCE.startswith(mcp_oauth.ISSUER + "/"))
+
+    def test_prm_anunciado_esta_na_mesma_origem_do_recurso(self):
+        self.assertTrue(
+            mcp_server._RESOURCE_METADATA_URL.startswith(mcp_oauth.ISSUER + "/"))
+
+    def test_url_direta_segue_aceita_como_audiencia(self):
+        """Nao invalida token emitido contra a funcao direta (tools longas)."""
+        self.assertIn(mcp_oauth.MCP_RESOURCE_DIRETO, mcp_oauth._AUDIENCIAS_ACEITAS)
+
+
+class TestGetNoMcpServer(unittest.TestCase):
+    """O GET na raiz devolvia 200 com health-check, escondendo o desafio de auth."""
+
+    class _Req:
+        def __init__(self, path="/mcp", method="GET", headers=None):
+            self.path, self.method = path, method
+            self.headers = headers or {}
+        def get_json(self, silent=False):
+            return None
+
+    def setUp(self):
+        import inspect
+        self.handler = inspect.unwrap(mcp_server.mcpServer)
+
+    def test_get_sem_token_devolve_401_com_desafio(self):
+        resp = self.handler(self._Req())
+        self.assertEqual(resp.status_code, 401)
+        self.assertIn("resource_metadata=", resp.headers.get("WWW-Authenticate", ""))
+
+    def test_health_continua_publico(self):
+        resp = self.handler(self._Req(path="/mcp/health"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(json.loads(resp.get_data(as_text=True))["status"], "ok")
+
+    def test_prm_servido_na_propria_origem_do_mcp(self):
+        resp = self.handler(self._Req(path="/mcp/.well-known/oauth-protected-resource"))
+        self.assertEqual(resp.status_code, 200)
+        corpo = json.loads(resp.get_data(as_text=True))
+        self.assertEqual(corpo["resource"], mcp_oauth.MCP_RESOURCE)
+
+
 class TestRoteamento(unittest.TestCase):
     class _Req:
         def __init__(self, path, method="GET"):

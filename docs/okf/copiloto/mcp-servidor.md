@@ -122,12 +122,21 @@ abrindo o consentimento no navegador.
 ### Diagnóstico rápido
 
 ```bash
-curl -s https://us-central1-gestao-hermes.cloudfunctions.net/mcpServer
+curl -s https://gestao-hermes.web.app/mcp/health
 ```
 
-O `GET` é um health-check sem autenticação e responde nome, versão e versão do
-protocolo. Se ele responde e a conexão mesmo assim falha, o problema é token ou
-allowlist — `-32001` é token inválido/expirado, `-32002` é uid fora da allowlist.
+Health-check sem autenticação: responde nome, versão e versão do protocolo. Se ele
+responde e a conexão mesmo assim falha, o problema é token ou allowlist —
+`-32001` é token inválido/expirado, `-32002` é uid fora da allowlist.
+
+Para conferir a cadeia de discovery do OAuth:
+
+```bash
+curl -si https://gestao-hermes.web.app/mcp | head -3
+```
+
+Tem que ser `401` com `www-authenticate`. Um `200` aqui significa que o desafio de
+autenticação está escondido e nenhum cliente OAuth vai conseguir conectar.
 
 ## Claude Cowork e outras superfícies hospedadas
 
@@ -136,10 +145,10 @@ As superfícies hospedadas (Claude.ai, Desktop, mobile, Cowork) não têm
 o authorization server: OAuth 2.0 com Dynamic Client Registration e PKCE S256.
 
 **Para conectar:** em *Customize → Connectors → Add custom connector*, informe a
-URL do MCP exatamente assim:
+URL exatamente assim:
 
 ```
-https://us-central1-gestao-hermes.cloudfunctions.net/mcpServer
+https://gestao-hermes.web.app/mcp
 ```
 
 Não preencha Client ID nem Client Secret — o DCR registra o cliente sozinho. O
@@ -150,22 +159,29 @@ com `access_denied`.
 > A URL precisa bater **exatamente** com o campo `resource` do protected resource
 > metadata, incluindo o path. Uma barra a mais no fim já quebra a validação.
 
-### Por que o OAuth mora no Hosting e o MCP não
+### Por que a URL do OAuth não é a da Cloud Function
 
-Duas restrições que se cruzam:
+Esta foi a lição cara. A primeira versão manteve o MCP em
+`cloudfunctions.net/mcpServer` e pôs só o OAuth no Hosting, apontando o
+`resource_metadata` do `401` para lá — o que a especificação permite.
 
-1. A origem de Cloud Functions **não consegue servir `/.well-known/*`** — o
-   primeiro segmento do path é o nome da função, então `/.well-known/...`
-   procuraria uma função chamada `.well-known`. O Firebase Hosting consegue.
-2. Um rewrite do Hosting tem **timeout de 60s**, e a Cloud Function direta tem
-   300s. Tools como `gerar_relatorio` e `ler_documento_na_integra` passam de 60s.
+**Não funcionou.** A tentativa de conectar pelo Cowork falhou no registro e os
+logs mostraram o motivo: *nenhuma requisição chegou ao servidor*. O cliente
+procura o discovery **antes** de receber o `401` que traria o ponteiro, e na
+origem `cloudfunctions.net` todo caminho `/.well-known/*` devolve 404 do Google
+Frontend — o primeiro segmento do path é o nome da função, então ele procura uma
+função chamada `.well-known` e nunca invoca código nosso. Nem aparece nos logs.
 
-Então: o endpoint MCP fica onde está (função direta, 300s) e o OAuth inteiro fica
-no Hosting (`gestao-hermes.web.app`), onde todos os endpoints são rápidos. A
-especificação permite essa divisão — `resource_metadata` pode morar em qualquer
-HTTPS, e authorization server em outro host é explicitamente suportado.
+Agora MCP e OAuth atendem na **mesma origem** (`gestao-hermes.web.app`), que é a
+recomendação explícita da documentação de conectores. Todo caminho de sondagem do
+RFC 9728 resolve, com ou sem o ponteiro.
 
-O que amarra os dois é o `401` do `mcpServer`, que sempre responde:
+A URL direta da função continua valendo, e é o que o Claude Code usa com
+`headersHelper`: um rewrite do Hosting corta em **60s**, contra 300s da função
+direta, e tools como `gerar_relatorio` e `ler_documento_na_integra` passam disso.
+Ambas as URLs são aceitas como audiência do token.
+
+O `401` — em `GET` e em `POST` — sempre responde:
 
 ```http
 HTTP/1.1 401 Unauthorized
@@ -173,9 +189,9 @@ WWW-Authenticate: Bearer resource_metadata="https://gestao-hermes.web.app/.well-
 ```
 
 Esse header é obrigatório: o Claude **ignora** `WWW-Authenticate` numa resposta
-`200`, e o fallback de sondar as rotas `/.well-known/` na origem do MCP não
-funciona aqui, pela restrição (1). Sem ele o sintoma é "Couldn't reach the MCP
-server" com o authorization server sem receber tráfego nenhum.
+`200`. Por isso o `GET` na raiz também devolve `401` — antes ele respondia `200`
+com o health-check em qualquer path, o que escondia o desafio de autenticação. O
+health-check mudou para `/mcp/health`.
 
 ### Rotas e armazenamento
 

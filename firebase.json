@@ -51,7 +51,28 @@
         ],
         "rewrites": [
             {
+                "source": "/mcp",
+                "function": {
+                    "functionId": "mcpServer",
+                    "region": "us-central1"
+                }
+            },
+            {
+                "source": "/.well-known/oauth-protected-resource/**",
+                "function": {
+                    "functionId": "mcpOAuth",
+                    "region": "us-central1"
+                }
+            },
+            {
                 "source": "/.well-known/oauth-protected-resource",
+                "function": {
+                    "functionId": "mcpOAuth",
+                    "region": "us-central1"
+                }
+            },
+            {
+                "source": "/.well-known/oauth-authorization-server/**",
                 "function": {
                     "functionId": "mcpOAuth",
                     "region": "us-central1"

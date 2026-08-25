@@ -5,20 +5,25 @@ Cowork), que nao tem `headersHelper`: elas so aceitam `oauth_dcr`, `oauth_cimd`,
 `oauth_anthropic_creds`, `static_headers` (beta) ou `none`. Este modulo entrega
 o primeiro — OAuth 2.0 com Dynamic Client Registration e PKCE S256.
 
-## Por que fica no Hosting e o MCP nao
+## Por que tudo fica na origem do Hosting
 
-O endpoint MCP e uma Cloud Function em `cloudfunctions.net/mcpServer`. Aquela
-origem nao consegue servir `/.well-known/*`: o primeiro segmento do path e o
-nome da funcao, entao `/.well-known/...` procuraria uma funcao chamada
-".well-known". O Firebase Hosting consegue, e por isso o authorization server e
-os dois documentos de discovery moram em `gestao-hermes.web.app`.
+A origem `cloudfunctions.net` nao consegue servir `/.well-known/*`: o primeiro
+segmento do path e o nome da funcao, entao `/.well-known/oauth-...` procuraria
+uma funcao com esse nome e o Google Frontend devolve 404 sem invocar codigo
+nosso — invisivel ate nos logs. A primeira versao disto tentou contornar com o
+`resource_metadata` do `401` apontando para outro host, o que a especificacao
+permite. Nao bastou: a tentativa de conectar pelo Cowork falhou no registro
+**sem nenhuma requisicao chegar ao servidor**, sinal de que o cliente procura o
+discovery antes de receber o `401` que traria o ponteiro.
 
-O MCP **nao** se muda junto porque um rewrite do Hosting tem timeout de 60s,
-enquanto a Cloud Function direta tem 300s — e tools como `gerar_relatorio` e
-`ler_documento_na_integra` passam de 60s. A especificacao permite essa divisao:
-o `resource_metadata` pode morar em qualquer HTTPS, e authorization server em
-outro host e explicitamente suportado. O que amarra os dois e o `401` do
-`mcpServer` apontando para ca.
+Entao MCP e OAuth passaram a atender na mesma origem, `gestao-hermes.web.app`,
+que e a recomendacao explicita da documentacao de conectores. Assim todo caminho
+de sondagem do RFC 9728 resolve, com ou sem o ponteiro.
+
+O preco e o timeout: um rewrite do Hosting corta em 60s, contra 300s da funcao
+direta. Por isso a URL direta continua valendo — e o que o Claude Code usa com
+`headersHelper`, e o caminho para as tools longas (`gerar_relatorio`,
+`ler_documento_na_integra`).
 
 ## Fluxo
 
@@ -53,9 +58,25 @@ from firebase_admin import firestore
 # Origem publica do Hosting: e onde o discovery e os endpoints OAuth respondem.
 ISSUER = "https://gestao-hermes.web.app"
 
-# URL do endpoint MCP exatamente como o usuario a digita no cliente. O campo
-# `resource` do protected resource metadata precisa bater com ela literalmente.
-MCP_RESOURCE = "https://us-central1-gestao-hermes.cloudfunctions.net/mcpServer"
+# URL canonica do MCP para clientes OAuth, e o valor do campo `resource` do
+# protected resource metadata — que precisa bater literalmente com o que o
+# usuario digita no cliente.
+#
+# Fica na origem do Hosting, e nao na Cloud Function direta, porque so ela serve
+# `/.well-known/*`: na origem `cloudfunctions.net` o primeiro segmento do path e
+# o nome da funcao, entao qualquer caminho de discovery devolve 404 do Google
+# Frontend sem sequer invocar codigo nosso. Com MCP e discovery na mesma origem,
+# todos os caminhos de sondagem do RFC 9728 funcionam — que e a recomendacao
+# explicita da documentacao de conectores.
+MCP_RESOURCE = f"{ISSUER}/mcp"
+
+# A URL direta da funcao continua valendo para quem monta o header por conta
+# propria (Claude Code com headersHelper) e para tools longas: um rewrite do
+# Hosting corta em 60s, a funcao direta vai a 300s. Aceita como audiencia para
+# nao invalidar um token emitido contra ela.
+MCP_RESOURCE_DIRETO = "https://us-central1-gestao-hermes.cloudfunctions.net/mcpServer"
+
+_AUDIENCIAS_ACEITAS = [MCP_RESOURCE, MCP_RESOURCE_DIRETO]
 
 SCOPE_PADRAO = "hermes:tools"
 
@@ -164,7 +185,7 @@ def validar_access_token(token: str) -> dict | None:
             token,
             _signing_secret(),
             algorithms=["HS256"],
-            audience=MCP_RESOURCE,
+            audience=_AUDIENCIAS_ACEITAS,
             issuer=ISSUER,
         )
     except Exception:
@@ -405,7 +426,10 @@ def _handle_authorize_post(req: https_fn.Request) -> https_fn.Response:
         "redirect_uri": params["redirect_uri"],
         "code_challenge": params["code_challenge"],
         "scope": params.get("scope") or SCOPE_PADRAO,
-        "resource": params.get("resource") or MCP_RESOURCE,
+        # Clampeia o `resource` (RFC 8707) ao que de fato existe: sem isso o
+        # cliente escolheria a `aud` do token, e uma audiencia arbitraria nao
+        # seria aceita por ninguem — falha silenciosa e dificil de rastrear.
+        "resource": _resource_valido(params.get("resource")),
         "expira_em": _agora() + _CODE_TTL_SEC,
     })
 
@@ -414,6 +438,11 @@ def _handle_authorize_post(req: https_fn.Request) -> https_fn.Response:
         query["state"] = params["state"]
     separador = "&" if "?" in params["redirect_uri"] else "?"
     return _json({"redirect": f"{params['redirect_uri']}{separador}{urlencode(query)}"})
+
+
+def _resource_valido(pedido: str | None) -> str:
+    """So devolve um recurso que este servidor de fato protege."""
+    return pedido if pedido in _AUDIENCIAS_ACEITAS else MCP_RESOURCE
 
 
 def _uid_autorizado(uid: str) -> bool:
