@@ -24,23 +24,21 @@ Configuracao por variavel de ambiente (todas opcionais, com padrao para este rep
     HERMES_SERVICE_ACCOUNT  caminho da chave de service account
                             (padrao: firebase_service_account_key.json na raiz)
     HERMES_MCP_UID          uid a autenticar (padrao: le de system/mcp_access)
-    HERMES_FIREBASE_API_KEY Web API key do projeto (padrao: a do app web)
+    HERMES_FIREBASE_API_KEY Web API key do projeto
+                            (padrao: lida de firebase.ts, a fonte unica)
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
 
 _RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SERVICE_ACCOUNT_PADRAO = os.path.join(_RAIZ, "firebase_service_account_key.json")
-
-# Web API key do app cliente. Nao e segredo: ja vai no bundle do front-end, e
-# sozinha nao autentica nada — a troca exige o custom token assinado acima.
-_API_KEY_PADRAO = "AIzaSyCc00Qqsa7Zgfx9NZkLoPj_gvXcuMczuxk"
 
 _SIGN_IN_URL = (
     "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key={key}"
@@ -50,6 +48,36 @@ _SIGN_IN_URL = (
 def _erro(mensagem: str, codigo: int = 1):
     print(mensagem, file=sys.stderr)
     raise SystemExit(codigo)
+
+
+def _resolver_api_key() -> str:
+    """Web API key do projeto, sem uma segunda copia literal no repositorio.
+
+    Esta chave nao e um segredo — ela ja vai no bundle do front-end e sozinha
+    nao autoriza nada (a troca exige o custom token assinado com a service
+    account). Ainda assim, escrever a string de novo aqui criava uma segunda
+    ocorrencia de um padrao `AIza...` num repositorio publico, que e o que os
+    scanners automaticos de chave sinalizam. `firebase.ts` continua sendo a
+    fonte unica.
+    """
+    da_env = (os.environ.get("HERMES_FIREBASE_API_KEY") or "").strip()
+    if da_env:
+        return da_env
+
+    caminho = os.path.join(_RAIZ, "firebase.ts")
+    try:
+        with open(caminho, encoding="utf-8") as f:
+            achado = re.search(r"""apiKey:\s*["']([^"']+)["']""", f.read())
+        if achado:
+            return achado.group(1)
+    except OSError:
+        pass
+
+    _erro(
+        "Nao foi possivel resolver a Web API key do Firebase.\n"
+        f"Esperava encontrar `apiKey` em {caminho}, ou a variavel de ambiente "
+        "HERMES_FIREBASE_API_KEY definida."
+    )
 
 
 def _resolver_uid(app, caminho_credencial: str) -> str:
@@ -133,9 +161,7 @@ def main() -> None:
 
     uid = _resolver_uid(app, caminho)
     custom_token = auth.create_custom_token(uid, app=app).decode("utf-8")
-    id_token = _trocar_por_id_token(
-        custom_token, os.environ.get("HERMES_FIREBASE_API_KEY") or _API_KEY_PADRAO
-    )
+    id_token = _trocar_por_id_token(custom_token, _resolver_api_key())
 
     # Unica coisa no stdout: o cliente MCP le isto como JSON.
     print(json.dumps({"Authorization": f"Bearer {id_token}"}))
