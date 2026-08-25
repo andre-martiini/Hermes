@@ -2787,10 +2787,15 @@ def saveBillPdfPassword(req: https_fn.CallableRequest) -> dict:
             code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
             message=(
                 (
-                    "A senha foi aceita, mas o plano Participativo Estadual Adesão "
-                    "não foi localizado entre os perfis ativos."
-                    if portal_validation_error == "perfil_ativo_nao_encontrado"
-                    else "A senha não autenticou no Portal Allcare."
+                    "O Portal Allcare bloqueou a conexão do servidor Hermes antes "
+                    "de avaliar a senha. A credencial não foi rejeitada."
+                    if str(portal_validation_error or "").startswith("portal_http_400_")
+                    else (
+                        "A senha foi aceita, mas o plano Participativo Estadual Adesão "
+                        "não foi localizado entre os perfis ativos."
+                        if portal_validation_error == "perfil_ativo_nao_encontrado"
+                        else "A senha não autenticou no Portal Allcare."
+                    )
                 )
                 if config.get("kind") == "allcare_portal"
                 else "A senha não abriu o PDF recente deste emissor."
