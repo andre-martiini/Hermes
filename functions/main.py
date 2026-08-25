@@ -2540,96 +2540,24 @@ def sync_allcare_portal_bills(service, sync_ref, logs) -> int:
         log_to_firestore(sync_ref, logs, f"[ALLCARE] Falha ao consultar o portal ({error}).")
         return 0
 
-    rubric_id = config.get("rubric_id")
     imported = []
     existing_docs = list(db.collection("fixed_bills").stream())
 
     for portal_bill in portal_bills:
         try:
-            invoice_id = str(portal_bill.get("num_fatura") or "").strip()
-            charge_id = str(portal_bill.get("num_seq_cobranca") or "").strip()
-            if not invoice_id or not charge_id:
-                raise AllcarePortalError("identificador_do_boleto_ausente")
-            due_date = parse_portal_date(portal_bill.get("dt_vencimento"))
-            amount = parse_brl_amount(portal_bill.get("val_bruto"))
-            month = due_date.month - 1
-            year = due_date.year
-
-            already_imported = next(
-                (
-                    snapshot for snapshot in existing_docs
-                    if str((snapshot.to_dict() or {}).get("allcare_invoice_id") or "") == invoice_id
-                ),
-                None,
-            )
-            if already_imported:
-                continue
-
             pdf_bytes = portal.download_bill(portal_bill)
-            prepared_pdf, pdf_reason = prepare_pdf_for_gemini(pdf_bytes)
-            if prepared_pdf is None:
-                raise AllcarePortalError(pdf_reason or "pdf_invalido")
-
-            barcode = ""
-            try:
-                from pypdf import PdfReader
-
-                pdf_text = "\n".join(
-                    page.extract_text() or ""
-                    for page in PdfReader(io.BytesIO(prepared_pdf)).pages
-                )
-                compact_numbers = re.sub(r"[^0-9\n]", "", pdf_text)
-                barcode_match = re.search(r"(?<!\d)(\d{47,48})(?!\d)", compact_numbers)
-                if barcode_match:
-                    barcode = barcode_match.group(1)
-            except Exception:
-                pass
-
-            found_existing = next(
-                (
-                    snapshot for snapshot in existing_docs
-                    if (snapshot.to_dict() or {}).get("rubricId") == rubric_id
-                    and (snapshot.to_dict() or {}).get("month") == month
-                    and (snapshot.to_dict() or {}).get("year") == year
-                ),
-                None,
+            imported_bill = _persist_allcare_portal_bill(
+                db, config, portal_bill, pdf_bytes, existing_docs
             )
-            update_data = {
-                "amount": amount,
-                "dueDay": due_date.day,
-                "rubricId": rubric_id,
-                "barcode": barcode,
-                "allcare_invoice_id": invoice_id,
-                "allcare_charge_id": charge_id,
-                "source": "allcare_portal",
-                "updated_at": datetime.now().isoformat(),
-            }
-            if found_existing:
-                found_existing.reference.update(update_data)
-            else:
-                _, created_ref = db.collection("fixed_bills").add({
-                    "description": config.get("label") or "Allcare plano de saúde",
-                    "month": month,
-                    "year": year,
-                    "isPaid": False,
-                    "category": "Conta Fixa",
-                    **update_data,
-                    "created_at": datetime.now().isoformat(),
-                })
-                existing_docs.append(created_ref.get())
-
-            imported.append({
-                "description": config.get("label") or "Allcare plano de saúde",
-                "amount": amount,
-                "due_date": datetime.combine(due_date, datetime.min.time()),
-                "rubric": config.get("label") or "Allcare plano de saúde",
-                "sender": "Portal do Beneficiário Allcare",
-                "subject": f"Fatura {invoice_id}",
-            })
+            if imported_bill is None:
+                continue
+            imported.append(imported_bill)
             log_to_firestore(
                 sync_ref,
                 logs,
-                f"[ALLCARE] Fatura {invoice_id} vinculada: R$ {amount:.2f}, vencimento {due_date.strftime('%d/%m/%Y')}.",
+                f"[ALLCARE] Fatura {imported_bill['invoice_id']} vinculada: "
+                f"R$ {imported_bill['amount']:.2f}, vencimento "
+                f"{imported_bill['due_date'].strftime('%d/%m/%Y')}.",
             )
         except AllcarePortalError as error:
             log_to_firestore(sync_ref, logs, f"[ALLCARE] Boleto do portal ignorado ({error}).")
@@ -2648,6 +2576,102 @@ def sync_allcare_portal_bills(service, sync_ref, logs) -> int:
             "financeiro",
         )
     return len(imported)
+
+
+def _persist_allcare_portal_bill(
+    db,
+    config: dict,
+    portal_bill: dict,
+    pdf_bytes: bytes,
+    existing_docs: list | None = None,
+    *,
+    source: str = "allcare_portal",
+) -> dict | None:
+    """Valida e grava uma fatura Allcare, independentemente de quem a baixou."""
+    invoice_id = str(portal_bill.get("num_fatura") or "").strip()
+    charge_id = str(portal_bill.get("num_seq_cobranca") or "").strip()
+    if not re.fullmatch(r"\d{1,30}", invoice_id) or not re.fullmatch(r"\d{1,30}", charge_id):
+        raise AllcarePortalError("identificador_do_boleto_invalido")
+
+    due_date = parse_portal_date(portal_bill.get("dt_vencimento"))
+    amount = parse_brl_amount(portal_bill.get("val_bruto"))
+    if amount > 1_000_000:
+        raise AllcarePortalError("valor_invalido")
+
+    prepared_pdf, pdf_reason = prepare_pdf_for_gemini(pdf_bytes)
+    if prepared_pdf is None:
+        raise AllcarePortalError(pdf_reason or "pdf_invalido")
+
+    snapshots = existing_docs if existing_docs is not None else list(db.collection("fixed_bills").stream())
+    if any(
+        str((snapshot.to_dict() or {}).get("allcare_invoice_id") or "") == invoice_id
+        for snapshot in snapshots
+    ):
+        return None
+
+    barcode = ""
+    try:
+        from pypdf import PdfReader
+
+        pdf_text = "\n".join(
+            page.extract_text() or ""
+            for page in PdfReader(io.BytesIO(prepared_pdf)).pages
+        )
+        compact_numbers = re.sub(r"\D", "", pdf_text)
+        barcode_match = re.search(r"(?<!\d)(\d{47,48})(?!\d)", compact_numbers)
+        if barcode_match:
+            barcode = barcode_match.group(1)
+    except Exception:
+        pass
+
+    rubric_id = str(config.get("rubric_id") or "").strip()
+    if not rubric_id:
+        raise AllcarePortalError("rubrica_nao_configurada")
+    month = due_date.month - 1
+    year = due_date.year
+    found_existing = next(
+        (
+            snapshot for snapshot in snapshots
+            if (snapshot.to_dict() or {}).get("rubricId") == rubric_id
+            and (snapshot.to_dict() or {}).get("month") == month
+            and (snapshot.to_dict() or {}).get("year") == year
+        ),
+        None,
+    )
+    update_data = {
+        "amount": amount,
+        "dueDay": due_date.day,
+        "rubricId": rubric_id,
+        "barcode": barcode,
+        "allcare_invoice_id": invoice_id,
+        "allcare_charge_id": charge_id,
+        "source": source,
+        "updated_at": datetime.now().isoformat(),
+    }
+    if found_existing:
+        found_existing.reference.update(update_data)
+    else:
+        _, created_ref = db.collection("fixed_bills").add({
+            "description": config.get("label") or "Allcare plano de saúde",
+            "month": month,
+            "year": year,
+            "isPaid": False,
+            "category": "Conta Fixa",
+            **update_data,
+            "created_at": datetime.now().isoformat(),
+        })
+        if existing_docs is not None:
+            existing_docs.append(created_ref.get())
+
+    return {
+        "invoice_id": invoice_id,
+        "description": config.get("label") or "Allcare plano de saúde",
+        "amount": amount,
+        "due_date": datetime.combine(due_date, datetime.min.time()),
+        "rubric": config.get("label") or "Allcare plano de saúde",
+        "sender": "Portal do Beneficiário Allcare",
+        "subject": f"Fatura {invoice_id}",
+    }
 
 
 @https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=540)
@@ -2822,6 +2846,100 @@ def saveBillPdfPassword(req: https_fn.CallableRequest) -> dict:
         "success": True,
         "verified": validation is True,
         "requeued": len(unlockable_message_ids),
+    }
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)
+def getAllcareLocalAgentConfig(req: https_fn.CallableRequest) -> dict:
+    """Entrega ao agente autenticado apenas a configuração necessária localmente."""
+    _require_internal_user(req)
+    db = get_db()
+    config = next(
+        (item for item in list_password_configs(db) if item.get("kind") == "allcare_portal"),
+        None,
+    )
+    if not config:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.NOT_FOUND,
+            message="Integração Allcare não configurada.",
+        )
+    cpf = find_holder_cpf(db, INTERNAL_USER_EMAIL)
+    return {
+        "cpf": cpf,
+        "plan_match": config.get("plan_match") or "PARTICIPATIVO ESTADUAL ADESÃO",
+        "interval_hours": 6,
+    }
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=120)
+def importAllcarePortalBill(req: https_fn.CallableRequest) -> dict:
+    """Recebe do agente local um PDF já baixado e o grava com validação server-side."""
+    _require_internal_user(req)
+    data = req.data or {}
+    bill = data.get("bill")
+    encoded_pdf = data.get("pdf_base64")
+    if not isinstance(bill, dict) or not isinstance(encoded_pdf, str):
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="Payload do agente Allcare inválido.",
+        )
+    if not encoded_pdf or len(encoded_pdf) > 28_000_000:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="PDF do boleto ausente ou muito grande.",
+        )
+    try:
+        pdf_bytes = base64.b64decode(encoded_pdf, validate=True)
+    except Exception as error:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="PDF do boleto não está em Base64 válido.",
+        ) from error
+
+    db = get_db()
+    config = next(
+        (item for item in list_password_configs(db) if item.get("kind") == "allcare_portal"),
+        None,
+    )
+    if not config:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.NOT_FOUND,
+            message="Integração Allcare não configurada.",
+        )
+    safe_bill = {
+        "num_fatura": bill.get("num_fatura"),
+        "num_seq_cobranca": bill.get("num_seq_cobranca"),
+        "dt_vencimento": bill.get("dt_vencimento"),
+        "val_bruto": bill.get("val_bruto"),
+    }
+    try:
+        imported = _persist_allcare_portal_bill(
+            db, config, safe_bill, pdf_bytes, source="allcare_local_agent"
+        )
+    except AllcarePortalError as error:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message=f"Boleto Allcare rejeitado ({error}).",
+        ) from error
+
+    now = datetime.now(timezone.utc)
+    db.collection("system").document("allcare_local_agent").set({
+        "last_seen": now,
+        "last_success": now,
+        "last_invoice_id": str(safe_bill.get("num_fatura") or ""),
+        "last_imported": imported is not None,
+    }, merge=True)
+    if imported:
+        emit_notification_backend(
+            "Novo Boleto Allcare",
+            _build_imported_bills_notification([imported]),
+            "success",
+            "financeiro",
+        )
+    return {
+        "success": True,
+        "imported": imported is not None,
+        "invoice_id": str(safe_bill.get("num_fatura") or ""),
     }
 
 def run_full_sync(trigger_reason='unspecified'):
