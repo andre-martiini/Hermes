@@ -30,7 +30,9 @@
       },
       "tags": {
         "type": "array",
-        "items": {"type": "string"},
+        "items": {
+          "type": "string"
+        },
         "description": "Tags para categorização"
       },
       "notas": {
@@ -39,7 +41,9 @@
       },
       "plano_acao": {
         "type": "array",
-        "items": {"type": "string"},
+        "items": {
+          "type": "string"
+        },
         "description": "Lista de etapas do plano de ação"
       },
       "horario_inicio": {
@@ -49,8 +53,43 @@
       "horario_fim": {
         "type": "string",
         "description": "Horário de fim no formato HH:MM (se agendado)"
+      },
+      "recorrencia_semanal": {
+        "type": "boolean",
+        "description": "True se a ação deve se repetir semanalmente"
+      },
+      "dias_da_semana_recorrencia": {
+        "type": "array",
+        "items": {
+          "type": "integer"
+        },
+        "description": "Dias da semana da recorrência: 0=domingo, 1=segunda ... 6=sábado. Obrigatório quando recorrencia_semanal=true"
+      },
+      "intervalo_semanas_recorrencia": {
+        "type": "integer",
+        "description": "Repetir a cada N semanas (1=toda semana, 2=quinzenal). Padrão 1"
+      },
+      "recorrencia_mensal": {
+        "type": "boolean",
+        "description": "True se a ação deve se repetir todo mês. Use recorrencia_semanal OU recorrencia_mensal, nunca ambas"
+      },
+      "dia_do_mes_recorrencia": {
+        "type": "integer",
+        "description": "Dia do mês (1 a 31) da recorrência mensal. Obrigatório quando recorrencia_mensal=true"
+      },
+      "sourceGmailMessageId": {
+        "type": "string",
+        "description": "ID da mensagem do Gmail que originou a ação, para controle de duplicação"
+      },
+      "sourceKnowledgeText": {
+        "type": "string",
+        "description": "Texto longo de origem a ser arquivado como nó de RAG vinculado à ação"
       }
     },
-    "required": ["titulo", "area_tematica", "data_limite"]
+    "required": [
+      "titulo",
+      "area_tematica",
+      "data_limite"
+    ]
   }
 }

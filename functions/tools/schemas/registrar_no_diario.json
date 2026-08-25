@@ -1,0 +1,20 @@
+{
+  "name": "registrar_no_diario",
+  "description": "Registra uma entrada livre no diário de bordo de uma ação",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "nota": {
+        "type": "string",
+        "description": "Texto da entrada a registrar"
+      },
+      "task_id_alvo": {
+        "type": "string",
+        "description": "ID da ação alvo; se omitido usa a ação em contexto"
+      }
+    },
+    "required": [
+      "nota"
+    ]
+  }
+}

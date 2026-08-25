@@ -1,0 +1,25 @@
+{
+  "name": "preparar_remocao_horarios_em_lote",
+  "description": "Prepara a remoção de horários de várias ações em lote, sem gravar no banco",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "filtro_data": {
+        "type": "string",
+        "description": "YYYY-MM-DD — seleciona ações com data_limite igual a esta data"
+      },
+      "task_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Lista explícita de IDs de ação, alternativa a filtro_data"
+      },
+      "justificativa": {
+        "type": "string",
+        "description": "Frase curta explicando o motivo"
+      }
+    },
+    "required": []
+  }
+}

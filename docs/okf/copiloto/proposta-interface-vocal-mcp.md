@@ -304,11 +304,19 @@ respectivamente); gating de confirmação testado isoladamente. **Não testado**
 real contra Firestore de produção, nem deploy real no Cloud Functions (exige
 `firebase deploy --only functions:python` e as credenciais do projeto).
 
+> **Superado em 2026-08-25.** O servidor MCP deixou de expor 4 tools e passou a expor
+> as **53** do catálogo, com o executor unificado em `functions/tools/hermes_tools.py`
+> (`tools/mcp_dispatch.py` foi removido). O estado atual, o modelo de segurança, o
+> passo a passo de conexão de um cliente e o débito de duplicação com `main.py` estão
+> em **[Servidor MCP do Hermes](./mcp-servidor.md)** — esta seção fica como registro
+> histórico da fase 1.
+
 ### Próximos passos (fase 3 e além)
 
-1. Configurar `system/mcp_access.allowed_uids` (ou a env var) no projeto real e rodar
-   `firebase deploy --only functions:python`.
-2. Testar `tools/call consultar_historico_acoes` contra dados reais.
+1. ~~Configurar `system/mcp_access.allowed_uids` (ou a env var) no projeto real~~ —
+   feito; a allowlist está configurada e autenticando.
+2. ~~Testar `tools/call consultar_historico_acoes` contra dados reais~~ — feito em
+   2026-08-25 contra a função em produção, retornando ações reais.
 3. ~~Iniciar o cliente local (Módulo A da fase 2)~~ — feito, ver seção 5.
 4. Medir a latência real ("< 4s") com credenciais reais (Firebase, Gemini, MCP
    deployado) — não foi possível neste ambiente de implementação.
@@ -316,9 +324,10 @@ real contra Firestore de produção, nem deploy real no Cloud Functions (exige
    alternativas) e trocar o default se necessário.
 6. Fase 3: VAD contínuo + barge-in (a captura hoje é só push-to-talk) e persistência
    de sessão entre reinícios do cliente local.
-7. Migrar mais tools para `mcp_dispatch.py` conforme a necessidade do cliente de voz
-   for exigindo (ex.: `consultar_agenda`, `criar_acao_no_sistema` já com o gating de
-   confirmação pronto para recebê-la).
+7. ~~Migrar mais tools para `mcp_dispatch.py`~~ — feito de uma vez: o catálogo inteiro
+   está exposto por `tools/hermes_tools.py`. O que sobra é convergir as closures de
+   `main.py` para delegarem ao executor, eliminando a duplicação das 14 tools cuja
+   lógica não existia em nenhum outro módulo (ver [mcp-servidor.md](./mcp-servidor.md)).
 
 ## 5. Fase 2 implementada — cliente local (`hermes-voice-client/`)
 

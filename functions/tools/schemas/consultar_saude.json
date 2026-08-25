@@ -1,0 +1,18 @@
+{
+  "name": "consultar_saude",
+  "description": "Consulta dados de saúde do usuário: peso, passos, calorias, sono e dor",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "ultimos_dias": {
+        "type": "integer",
+        "description": "Número de dias a consultar (padrão 7, máximo 30)"
+      },
+      "data_especifica": {
+        "type": "string",
+        "description": "Data YYYY-MM-DD para um dia específico; sobrepõe ultimos_dias"
+      }
+    },
+    "required": []
+  }
+}

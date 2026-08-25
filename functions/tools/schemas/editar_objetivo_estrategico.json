@@ -1,0 +1,55 @@
+{
+  "name": "editar_objetivo_estrategico",
+  "description": "Edita campos de um objetivo estratégico existente",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "objetivo_id": {
+        "type": "string",
+        "description": "ID do objetivo estratégico"
+      },
+      "objetivoMacro": {
+        "type": "string",
+        "description": "Novo título do objetivo macro"
+      },
+      "pilar": {
+        "type": "string",
+        "description": "Novo pilar"
+      },
+      "tipoMeta": {
+        "type": "string",
+        "description": "Novo tipo de meta"
+      },
+      "status": {
+        "type": "string",
+        "description": "Novo status"
+      },
+      "diretrizes": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Nova lista de diretrizes"
+      },
+      "metrica_valor_inicial": {
+        "type": "number",
+        "description": "Valor inicial da métrica"
+      },
+      "metrica_valor_atual": {
+        "type": "number",
+        "description": "Valor atual da métrica"
+      },
+      "metrica_valor_objetivo": {
+        "type": "number",
+        "description": "Valor alvo da métrica"
+      },
+      "metrica_unidade": {
+        "type": "string",
+        "description": "Unidade da métrica"
+      }
+    },
+    "required": [
+      "objetivo_id"
+    ]
+  }
+}

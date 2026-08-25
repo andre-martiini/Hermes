@@ -1,0 +1,23 @@
+{
+  "name": "confirmar_reagendamento_em_lote",
+  "description": "Aplica de fato o reagendamento em lote montado por preparar_reagendamento_em_lote ou preparar_remocao_horarios_em_lote",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "Lista de itens no formato devolvido pela tool de preparação"
+      },
+      "justificativa": {
+        "type": "string",
+        "description": "Motivo do reagendamento"
+      }
+    },
+    "required": [
+      "items"
+    ]
+  }
+}

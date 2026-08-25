@@ -1,0 +1,16 @@
+{
+  "name": "excluir_objetivo_estrategico",
+  "description": "Exclui definitivamente um objetivo estratégico",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "objetivo_id": {
+        "type": "string",
+        "description": "ID do objetivo estratégico"
+      }
+    },
+    "required": [
+      "objetivo_id"
+    ]
+  }
+}

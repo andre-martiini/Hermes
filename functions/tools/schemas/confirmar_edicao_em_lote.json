@@ -1,0 +1,23 @@
+{
+  "name": "confirmar_edicao_em_lote",
+  "description": "Aplica de fato a edição em lote previamente montada por preparar_edicao_em_lote",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "Lista de itens no formato devolvido por preparar_edicao_em_lote"
+      },
+      "justificativa": {
+        "type": "string",
+        "description": "Motivo da edição em lote"
+      }
+    },
+    "required": [
+      "items"
+    ]
+  }
+}

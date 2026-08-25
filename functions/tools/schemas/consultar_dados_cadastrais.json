@@ -1,0 +1,14 @@
+{
+  "name": "consultar_dados_cadastrais",
+  "description": "Consulta os dados cadastrais pessoais do usuário (documentos, contato, família, formação, carreira, banco, plano de saúde)",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "secao": {
+        "type": "string",
+        "description": "Deixe vazio para listar as seções disponíveis; informe o nome de uma seção (ex.: 'pessoais', 'familia', 'carreira') para ver o conteúdo completo dela"
+      }
+    },
+    "required": []
+  }
+}

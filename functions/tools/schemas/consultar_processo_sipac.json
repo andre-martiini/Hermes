@@ -1,0 +1,16 @@
+{
+  "name": "consultar_processo_sipac",
+  "description": "Consulta um processo no SIPAC: dados gerais, interessados, movimentações e documentos",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "numero_processo": {
+        "type": "string",
+        "description": "Número do processo SIPAC"
+      }
+    },
+    "required": [
+      "numero_processo"
+    ]
+  }
+}

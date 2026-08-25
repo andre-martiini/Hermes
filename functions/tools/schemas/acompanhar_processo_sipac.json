@@ -1,0 +1,20 @@
+{
+  "name": "acompanhar_processo_sipac",
+  "description": "Ativa ou desativa o monitoramento automático de um processo SIPAC",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "numero_processo": {
+        "type": "string",
+        "description": "Número do processo SIPAC"
+      },
+      "acompanhar": {
+        "type": "boolean",
+        "description": "True para monitorar (padrão), False para parar"
+      }
+    },
+    "required": [
+      "numero_processo"
+    ]
+  }
+}

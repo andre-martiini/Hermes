@@ -1,0 +1,65 @@
+{
+  "name": "criar_objetivo_estrategico",
+  "description": "Cria um objetivo estratégico (pilar, meta, diretrizes, indicadores e marcos)",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "objetivoMacro": {
+        "type": "string",
+        "description": "Título do objetivo macro"
+      },
+      "pilar": {
+        "type": "string",
+        "description": "Pilar do objetivo (padrão 'carreira')"
+      },
+      "tipoMeta": {
+        "type": "string",
+        "description": "Tipo da meta (padrão 'relativa_qualitativa')"
+      },
+      "status": {
+        "type": "string",
+        "description": "Status do objetivo (padrão 'ativo')"
+      },
+      "diretrizes": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Lista de diretrizes"
+      },
+      "indicadores": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Lista de indicadores"
+      },
+      "marcos": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Lista de marcos"
+      },
+      "metrica_valor_inicial": {
+        "type": "number",
+        "description": "Valor inicial da métrica"
+      },
+      "metrica_valor_atual": {
+        "type": "number",
+        "description": "Valor atual da métrica"
+      },
+      "metrica_valor_objetivo": {
+        "type": "number",
+        "description": "Valor alvo da métrica"
+      },
+      "metrica_unidade": {
+        "type": "string",
+        "description": "Unidade da métrica"
+      }
+    },
+    "required": [
+      "objetivoMacro"
+    ]
+  }
+}

@@ -23,8 +23,14 @@
       "data_limite_fim": {
         "type": "string",
         "description": "Data final no formato YYYY-MM-DD"
+      },
+      "ultimas_n_acoes": {
+        "type": "integer",
+        "description": "Número máximo de ações a retornar (padrão 20)"
       }
     },
-    "required": ["query"]
+    "required": [
+      "query"
+    ]
   }
 }

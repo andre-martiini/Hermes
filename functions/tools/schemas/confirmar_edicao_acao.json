@@ -1,0 +1,25 @@
+{
+  "name": "confirmar_edicao_acao",
+  "description": "Aplica de fato uma edição de ação previamente montada por preparar_edicao_acao",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "ID da ação a editar"
+      },
+      "alteracoes": {
+        "type": "object",
+        "description": "Mapa campo -> novo valor, no formato devolvido por preparar_edicao_acao"
+      },
+      "snapshot_ts": {
+        "type": "string",
+        "description": "snapshot_ts devolvido por preparar_edicao_acao; protege contra edição concorrente"
+      }
+    },
+    "required": [
+      "task_id",
+      "alteracoes"
+    ]
+  }
+}

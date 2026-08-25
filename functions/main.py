@@ -8273,6 +8273,25 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         # --- DEFINIÇÃO DE FERRAMENTAS ---
         _perf_mark(perf_state, "web.session_context")
+
+        from tools import hermes_tools as _hermes_tools
+        from tools.tool_context import ToolContext as _ToolContext
+
+        def _ctx():
+            """Contexto para as tools que vivem em tools/hermes_tools.py.
+
+            Construido a cada chamada, e nao uma vez, porque `session_id` e
+            `task_id_scoped` sao reatribuidos ao longo da requisicao — uma
+            instancia unica congelaria valores obsoletos.
+            """
+            return _ToolContext(
+                user_uid=user_uid,
+                session_id=session_id,
+                task_id=task_id_scoped or task_id,
+                canal="web",
+                _db=db,
+            )
+
         def consultar_historico_acoes(query: str, area_tematica: str = None, data_limite_inicio: str = None, data_limite_fim: str = None, ultimas_n_acoes: int = 20, status: str = None):
             """
             Busca tarefas reais no banco de dados do Hermes por texto, area, prazo e/ou status.
@@ -8370,19 +8389,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         def buscar_conversas_whatsapp(query: str, limite: int = 5):
             """Busca conversas de WhatsApp indexadas (digests) por similaridade semântica. Use quando o usuário perguntar sobre algo discutido no WhatsApp."""
-            from whatsapp_ingest import buscar_conversas_whatsapp as _buscar_whatsapp
-            res = _buscar_whatsapp(db, query, limite)
-            if res.get("erro"):
-                return f"⚠️ {res['erro']}"
-            resultados = res.get("resultados", [])
-            if not resultados:
-                return "Nenhuma conversa de WhatsApp indexada encontrada para esta busca."
-            linhas = []
-            for r in resultados:
-                topicos = ", ".join(r.get("topicos") or [])
-                chat_id_info = f" (chat_id: {r.get('chat_id')})" if r.get("chat_id") else ""
-                linhas.append(f"- [{r.get('chat_name')}]{chat_id_info} {r.get('resumo')}" + (f" (tópicos: {topicos})" if topicos else ""))
-            return "\n".join(linhas)
+            return _hermes_tools.execute(
+                "buscar_conversas_whatsapp", {"query": query, "limite": limite}, _ctx())
 
         def buscar_arquivos_acervo(query: str):
             """Busca documentação, manuais e arquivos de referência no Acervo Global (FindNearest)."""
@@ -8518,50 +8526,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             ou qualquer informação que possa estar desatualizada no seu conhecimento.
             Parâmetro: query — a frase de busca otimizada em português ou inglês.
             """
-            _prompt_lower = (prompt or "").lower()
-            _web_triggers = (
-                "http://", "https://", "www.", "internet", "na web", "busca online",
-                "pesquise", "pesquisar", "notícia", "noticias", "cotação", "cotacao",
-                "atualiz", "link", "site", "acesse",
-            )
-            if not any(t in _prompt_lower for t in _web_triggers):
-                return '{"blocked": true, "reason": "O prompt não menciona internet, URL ou busca atual. Use esta ferramenta apenas quando o usuário pedir explicitamente informações da web."}'
-            import requests as _req
-            try:
-                keys_doc_web = _cached_doc_get(db, 'system', 'api_keys')
-                tavily_key = keys_doc_web.to_dict().get('tavily_api_key') if keys_doc_web.exists else None
-                if not tavily_key:
-                    return '{"error": "Tavily API key não configurada. Informe ao usuário que a busca na internet está indisponível no momento."}'
-
-                resp = _req.post(
-                    "https://api.tavily.com/search",
-                    json={
-                        "api_key": tavily_key,
-                        "query": query,
-                        "search_depth": "advanced",
-                        "include_answer": True,
-                        "include_raw_content": False,
-                        "max_results": 5
-                    },
-                    timeout=20
-                )
-                resp.raise_for_status()
-                data = resp.json()
-
-                parts = []
-                if data.get("answer"):
-                    parts.append(f"RESPOSTA DIRETA: {data['answer']}\n")
-                for r in data.get("results", []):
-                    parts.append(
-                        f"FONTE: {r.get('title', '')} ({r.get('url', '')})\n"
-                        f"{r.get('content', '')}"
-                    )
-                return "\n\n".join(parts) if parts else "Nenhum resultado encontrado para esta busca."
-
-            except _req.exceptions.Timeout:
-                return '{"error": "Timeout ao acessar a Tavily API. Informe ao usuário que a busca demorou demais e tente novamente."}'
-            except Exception as web_err:
-                return f'{{"error": "Falha na busca: {str(web_err)}. Informe ao usuário que não foi possível realizar a pesquisa."}}'
+            # prompt_gate: no canal web a busca so pode disparar se o proprio pedido do
+            # usuario mencionar internet/URL. Canais onde a escolha da tool ja e explicita
+            # (MCP) passam None e o portao fica desligado.
+            return _hermes_tools.pesquisar_internet(
+                _ctx(), {"query": query}, prompt_gate=prompt or "")
         def consultar_processo_sipac_copiloto(numero_processo: str):
             """
             Consulta e retorna informações detalhadas de um processo no SIPAC,
@@ -8570,42 +8539,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Use esta ferramenta sempre que o usuário fornecer um número de processo do SIPAC ou pedir
             informações sobre o trâmite, status ou documentos de um processo específico.
             """
-            try:
-                from hermes_core_logic import _call_web_callable
-                print(f"[Copiloto] Consultando processo SIPAC: {numero_processo}")
-                res = _call_web_callable(
-                    function_name="consultarProcessoSipac",
-                    data={"numeroProcesso": numero_processo},
-                    user_uid=user_uid
-                )
-                
-                lines = []
-                lines.append(f"=== DETALHES DO PROCESSO SIPAC {res.get('numeroProcesso')} ===")
-                lines.append(f"Status: {res.get('status')}")
-                lines.append(f"Unidade Atual: {res.get('unidadeAtual')}")
-                lines.append(f"Natureza: {res.get('natureza')}")
-                lines.append(f"Assunto: {res.get('assuntoCodigo')} - {res.get('assuntoDescricao')}")
-                if res.get('observacao') and res.get('observacao') != 'Não informado':
-                    lines.append(f"Observação: {res.get('observacao')}")
-                lines.append(f"Autuação: {res.get('dataAutuacion')} às {res.get('horarioAutuacion')}")
-                
-                lines.append("\nInteressados:")
-                for i in res.get('interessados', []):
-                    lines.append(f"- {i.get('tipo')}: {i.get('nome')}")
-                    
-                lines.append("\nDocumentos Públicos:")
-                for d in res.get('documentos', []):
-                    url_str = f" | Link: {d.get('url')}" if d.get('url') else " | (Acesso Restrito)"
-                    lines.append(f"- Seq #{d.get('ordem')} - Tipo: {d.get('tipo')} | Data: {d.get('data')} | Origem: {d.get('unidadeOrigem')}{url_str}")
-                    
-                lines.append("\nMovimentações Recentes (Linha do Tempo):")
-                for m in res.get('movimentacoes', [])[:8]:
-                    lines.append(f"- [{m.get('data')} {m.get('horario')}] De {m.get('unidadeOrigem')} para {m.get('unidadeDestino')} | Recebedor: {m.get('usuarioRecebedor') or 'N/A'}")
-                    
-                return "\n".join(lines)
-            except Exception as e:
-                print(f"[Copiloto] Erro ao consultar SIPAC: {e}")
-                return f"⚠️ Erro ao consultar processo {numero_processo} no SIPAC: {str(e)}"
+            return _hermes_tools.execute(
+                "consultar_processo_sipac", {"numero_processo": numero_processo}, _ctx())
         def acompanhar_processo_sipac_copiloto(numero_processo: str, acompanhar: bool = True):
             """
             Ativa ou desativa o monitoramento/acompanhamento automático de um processo SIPAC no Hermes.
@@ -8615,36 +8550,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             - numero_processo: número do processo SIPAC.
             - acompanhar: True para monitorar (padrão), False para parar de monitorar.
             """
-            from hermes_core_logic import _call_web_callable
-            from firebase_admin import firestore
-            from datetime import datetime, timezone
-            import re as _re
-            
-            try:
-                print(f"[Copiloto] Acompanhar processo SIPAC: {numero_processo} -> {acompanhar}")
-                res = _call_web_callable(
-                    function_name="consultarProcessoSipac",
-                    data={"numeroProcesso": numero_processo},
-                    user_uid=user_uid
-                )
-
-                clean_num = _re.sub(r'[^\d]', '', numero_processo)
-                doc_id = f"{user_uid}_{clean_num}" if user_uid else f"global_{clean_num}"
-                ref = db.collection('sipac_processos').document(doc_id)
-                
-                ref.set({
-                    "acompanhar": acompanhar,
-                    "numeroProcesso": res.get("numeroProcesso", numero_processo),
-                    "uid": user_uid or "global",
-                    "ultimaConsulta": datetime.now(timezone.utc).isoformat(),
-                    **res
-                }, merge=True)
-                
-                status_str = "ATIVADO" if acompanhar else "DESATIVADO"
-                return f"Sucesso: O acompanhamento automático para o processo {numero_processo} foi {status_str}."
-            except Exception as e:
-                print(f"[Copiloto] Erro ao alterar acompanhamento SIPAC: {e}")
-                return f"⚠️ Erro ao alterar acompanhamento para o processo {numero_processo}: {str(e)}"
+            return _hermes_tools.execute(
+                "acompanhar_processo_sipac",
+                {"numero_processo": numero_processo, "acompanhar": acompanhar},
+                _ctx())
 
         def incorporar_documento_especifico_sipac_no_rag_da_acao(numero_processo: str, sequencial: int, task_id: str = None):
             """
@@ -8925,28 +8834,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             ler, analisar, resumir ou extrair informações de uma página.
             Parâmetro: url — o link exato informado pelo usuário.
             """
-            import requests as _req
-            try:
-                jina_url = f"https://r.jina.ai/{url}"
-                resp = _req.get(
-                    jina_url,
-                    headers={"Accept": "text/markdown", "X-No-Cache": "true"},
-                    timeout=25
-                )
-                if resp.status_code in (403, 401, 429):
-                    return '{"error": "Falha de acesso: O servidor alvo bloqueou a leitura por questões de segurança (Cloudflare/Paywall/Rate-limit). Informe ao usuário de forma clara que não foi possível ler este conteúdo específico."}'
-                resp.raise_for_status()
-
-                content = resp.text.strip()
-                # Trunca para ~12k chars para não explodir o contexto
-                if len(content) > 12000:
-                    content = content[:12000] + "\n\n[...conteúdo truncado para caber no contexto...]"
-                return content if content else "A página foi carregada mas não contém conteúdo legível."
-
-            except _req.exceptions.Timeout:
-                return '{"error": "Timeout ao tentar ler a página. O servidor demorou demais para responder. Informe ao usuário."}'
-            except Exception as scrape_err:
-                return f'{{"error": "Falha ao ler a página: {str(scrape_err)}. Informe ao usuário que não foi possível acessar o conteúdo."}}'
+            return _hermes_tools.execute("ler_pagina_web", {"url": url}, _ctx())
 
         def ler_documento_na_integra(drive_file_id: str, query_especifica: str):
             """
@@ -9184,27 +9072,13 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             - novo_conteudo_proposto: novo conteúdo completo do procedimento em Markdown
             - justificativa: justificativa fornecida pelo usuário em linguagem natural
             """
-            try:
-                import uuid as _corr_uuid
-                _corr_id = str(_corr_uuid.uuid4())[:12]
-                db.collection('correcoes_pendentes').document(_corr_id).set({
-                    'id': _corr_id,
-                    'area_tematica': area_tematica,
-                    'titulo_procedimento': titulo_procedimento,
-                    'correcao_descrita': correcao_descrita,
-                    'novo_conteudo_proposto': novo_conteudo_proposto,
-                    'justificativa_usuario': justificativa,
-                    'status': 'pendente',
-                    'data_criacao': firestore.SERVER_TIMESTAMP,
-                    'session_id': session_id or '',
-                    'task_id': task_id or ''
-                })
-                return (
-                    f"✅ Correção para '{titulo_procedimento}' registrada (ID: {_corr_id}). "
-                    "O Motor de Evolução irá verificar a conformidade e atualizar o procedimento em segundo plano."
-                )
-            except Exception as _corr_err:
-                return f"⚠️ Falha ao registrar correção: {str(_corr_err)}"
+            return _hermes_tools.execute("registrar_correcao_procedimento", {
+                "area_tematica": area_tematica,
+                "titulo_procedimento": titulo_procedimento,
+                "correcao_descrita": correcao_descrita,
+                "novo_conteudo_proposto": novo_conteudo_proposto,
+                "justificativa": justificativa,
+            }, _ctx())
 
         def salvar_memoria_global(fato: str, categoria: str):
             """
@@ -9212,35 +9086,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Use apenas para fatos duráveis, preferências estáveis do ambiente ou regras de negócio
             que possam ser úteis em conversas futuras. Nunca use para ruído transitório.
             """
-            try:
-                retention = _classify_memory_candidate(
-                    api_key=gemini_key,
-                    fato=fato,
-                    categoria=categoria,
-                )
-                if not retention.get("should_save"):
-                    return json.dumps({
-                        "status": "ignored",
-                        "reason": retention.get("reason", "retention_filter"),
-                        "categoria": retention.get("normalized_category", _normalize_memory_category(categoria)),
-                        "confidence": retention.get("confidence", 0.0),
-                    }, ensure_ascii=False)
-                result = _save_memory_node(
-                    db=db,
-                    api_key=gemini_key,
-                    fato=fato,
-                    categoria=retention.get("normalized_category", categoria),
-                    session_id=session_id,
-                    user_uid=user_uid,
-                )
-                result["retention_reason"] = retention.get("reason")
-                result["retention_confidence"] = retention.get("confidence")
-                return json.dumps(result, ensure_ascii=False)
-            except Exception as mem_err:
-                return json.dumps({
-                    "status": "error",
-                    "reason": str(mem_err),
-                }, ensure_ascii=False)
+            return _hermes_tools.execute(
+                "salvar_memoria_global", {"fato": fato, "categoria": categoria}, _ctx())
 
         def salvar_pop_global(
             titulo: str,
@@ -9483,35 +9330,15 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         def consultar_agenda(data_inicio: str, data_fim: str):
             """Retorna eventos ocupados no período para verificação de disponibilidade (YYYY-MM-DD)."""
-            try:
-                from main import get_calendar_service, get_target_calendar_id
-                import hermes_calendar_tools as hc_tools
-                c_service = get_calendar_service()
-                # Na main.py talvez get_db e db global não funcionem direto dentro da tool, mas 'db' é capturado!
-                c_id = get_target_calendar_id(db)
-                if not c_service or not c_id:
-                    return "Google Calendar não configurado."
-                events = hc_tools.consultar_eventos(c_service, c_id, data_inicio, data_fim)
-                return hc_tools.formatar_eventos_para_llm(events)
-            except Exception as e:
-                return f"Erro ao consultar agenda: {e}"
+            return _hermes_tools.execute(
+                "consultar_agenda", {"data_inicio": data_inicio, "data_fim": data_fim}, _ctx())
 
         def encontrar_slot_livre(a_partir_de: str, duracao_min: int = 30):
             """Encontra o próximo horário livre na agenda. a_partir_de = YYYY-MM-DD. Retorna JSON com data, horario_inicio, horario_fim."""
-            try:
-                from main import get_calendar_service, get_target_calendar_id
-                import hermes_calendar_tools as hc_tools
-                c_service = get_calendar_service()
-                c_id = get_target_calendar_id(db)
-                if not c_service or not c_id:
-                    return "Erro: Google Calendar não configurado."
-                slot = hc_tools.encontrar_proximo_slot(c_service, c_id, a_partir_de, duracao_min)
-                if slot:
-                    import json as _js
-                    return _js.dumps(slot, ensure_ascii=False)
-                return "Nenhum slot livre encontrado."
-            except Exception as e:
-                return f"Erro ao buscar slot livre: {e}"
+            return _hermes_tools.execute(
+                "encontrar_slot_livre",
+                {"a_partir_de": a_partir_de, "duracao_min": duracao_min},
+                _ctx())
 
         def agendar_lembrete_acao(data: str, horario: str, task_id: str = None, texto: str = ""):
             """
@@ -9545,11 +9372,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             - ultimos_dias: número de dias a consultar (padrão: 7, máximo: 30)
             - data_especifica: data no formato YYYY-MM-DD para consulta de um dia específico (sobrepõe ultimos_dias)
             """
-            try:
-                from health_tools import build_health_summary
-                return json.dumps(build_health_summary(db, ultimos_dias, data_especifica), ensure_ascii=False, default=str)
-            except Exception as e:
-                return f"Erro ao consultar dados de saúde: {e}"
+            return _hermes_tools.execute("consultar_saude", {
+                "ultimos_dias": ultimos_dias,
+                "data_especifica": data_especifica,
+            }, _ctx())
 
         def registrar_item_financeiro_v2(tipo: str, descricao: str, valor: float, mes: int = None, ano: int = None, data: str = None):
             """
@@ -9613,183 +9439,29 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Use recorrencia_semanal OU recorrencia_mensal, nunca ambas.
             Retorna o ID da tarefa criada ou mensagem de erro.
             """
-            try:
-                import uuid as _uuid
-                from datetime import datetime as _dt, timezone as _tz
-
-                # Garante que o copiloto só use áreas temáticas existentes (fallback 'GERAL').
-                area_tematica = normalizar_area_tematica(area_tematica, _areas_validas)
-
-                now_iso = _dt.now(_tz.utc).isoformat()
-                
-                # Normalização de horários e timezone local
-                def normalize_hhmm(t_str: str) -> str | None:
-                    if not t_str:
-                        return None
-                    t_str = str(t_str).strip()
-                    if ":" not in t_str:
-                        return None
-                    try:
-                        h, m = t_str.split(":")
-                        return f"{int(h):02d}:{int(m):02d}"
-                    except:
-                        return t_str
-
-                horario_inicio = normalize_hhmm(horario_inicio)
-                horario_fim = normalize_hhmm(horario_fim)
-
-                from zoneinfo import ZoneInfo
-                tz = ZoneInfo("America/Sao_Paulo")
-                now_local = _dt.now(tz)
-                today_brt = now_local.strftime("%Y-%m-%d")
-
-                if not data_limite or str(data_limite) < today_brt:
-                    data_limite = today_brt
-
-                if prazo_final and str(prazo_final) < today_brt:
-                    prazo_final = today_brt
-
-                if data_limite == today_brt and horario_inicio:
-                    current_time_str = now_local.strftime("%H:%M")
-                    if horario_inicio < current_time_str:
-                        return f"ERRO|Não é possível agendar um horário anterior ao horário atual ({current_time_str}). Por favor, escolha um horário posterior."
-
-                # Idempotência: reivindica atomicamente a chave (título, data, horário) para
-                # evitar criar a mesma ação duas ou três vezes quando o modelo chama esta tool
-                # mais de uma vez para o mesmo pedido (lote de function calls repetido, retry)
-                # — sintoma relatado como "aparece duplicada no mesmo horário, com evento
-                # duplicado na agenda". Ver claim_action_dedup_slot para o mecanismo atômico.
-                _dedup_status, _dedup_task_id = claim_action_dedup_slot(db, titulo, data_limite, horario_inicio)
-                if _dedup_status == "duplicate":
-                    print(f"[Copiloto] Ação duplicada evitada: reaproveitando {_dedup_task_id} em vez de criar outra.")
-                    return f"OK|{_dedup_task_id}"
-                if _dedup_status == "pending":
-                    return "ERRO|Esta ação já está sendo registrada por outra chamada. Aguarde alguns segundos e verifique a lista de ações antes de tentar de novo."
-
-                task_id = str(_uuid.uuid4())[:20]
-
-                # Reuso da lógica de reagendamento se houver horários
-                try:
-                    import hermes_calendar_tools as hc_tools
-                    c_service = get_calendar_service()
-                    c_id = get_target_calendar_id(db)
-                    if c_service and c_id and horario_inicio and horario_fim:
-                        hc_tools.reagendar_acoes_hermes(db, c_service, c_id, data_limite, horario_inicio, horario_fim)
-                except Exception as e:
-                    print(f"[Copiloto] Erro ao reagendar iterativo: {e}")
-
-                # Converte lista de strings em array de objetos para o React
-                plano_convertido = [
-                    {
-                        "id": str(_uuid.uuid4())[:8],
-                        "text": str(passo),
-                        "completed": False
-                    }
-                    for passo in (plano_acao or [])
-                    if str(passo).strip()
-                ]
-
-                source_knowledge_id = None
-                if sourceKnowledgeText:
-                    from knowledge_graph import _get_embedding
-                    try:
-                        kg_id = str(_uuid.uuid4())[:20]
-                        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
-                        gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
-                        if not gemini_key:
-                            raise ValueError("Gemini API Key não encontrada (system/api_keys).")
-
-                        embedding = _get_embedding(sourceKnowledgeText, gemini_key)
-
-                        db.collection('conhecimento_mestre').document(kg_id).set({
-                            'id': kg_id,
-                            'titulo': f'Contexto de E-mail: {titulo}',
-                            'tipo': 'paragrafo',
-                            'conteudo_regra': sourceKnowledgeText,
-                            'justificativa_da_regra': 'Contexto extraído via integração Gmail-Hermes',
-                            'tags': tags or [],
-                            'area_tematica': area_tematica,
-                            'status': 'ativo',
-                            'origem': 'gmail_copiloto',
-                            'task_origin_id': task_id,
-                            'peso_semantico': 1.0,
-                            'data_criacao': now_iso,
-                            'data_atualizacao': now_iso,
-                            'embedding': embedding
-                        })
-                        source_knowledge_id = kg_id
-                    except Exception as e_kg:
-                        print(f"Erro ao criar Nó de Fonte do Gmail: {e_kg}")
-
-                now_iso = now_iso
-
-                doc = {
-                    # Campos fornecidos pelo LLM
-                    "titulo": titulo.strip(),
-                    "descricao": descricao or "",
-                    "area_tematica": (area_tematica or "GERAL").upper(),
-                    "data_limite": data_limite or None,
-                    "prazo_final": prazo_final or None,
-                    "tipo_acao": tipo_acao if tipo_acao in ("fast", "deep") else "fast",
-                    "tags": list(tags) if tags else [],
-                    "notas": notas or "",
-                    "plano_acao": plano_convertido,
-                    # Campos forçados (hidratação interna)
-                    "status": "em andamento",
-                    "origem": "copiloto",
-                    "projeto": "GERAL",
-                    "data_criacao": now_iso,
-                    "data_atualizacao": now_iso,
-                    "contabilizar_meta": True,
-                    "acompanhamento": [],
-                    "entregas_relacionadas": [],
-                    "pool_dados": [],
-                    "plano_acao_historico": [],
-                    "sync_status": "new",
-                    "horario_inicio": horario_inicio,
-                    "horario_fim": horario_fim,
-
-                    "sourceGmailMessageId": sourceGmailMessageId or None,
-                    "sourceKnowledgeId": source_knowledge_id or None,}
-
-                if recorrencia_semanal and dias_da_semana_recorrencia:
-                    doc["recorrencia"] = {
-                        "ativo": True,
-                        "frequencia": "semanal",
-                        "dias_da_semana": sorted({max(0, min(6, int(d))) for d in dias_da_semana_recorrencia}),
-                    }
-                    if intervalo_semanas_recorrencia and int(intervalo_semanas_recorrencia) > 1:
-                        doc["recorrencia"]["intervalo_semanas"] = min(12, int(intervalo_semanas_recorrencia))
-                elif recorrencia_mensal and dia_do_mes_recorrencia:
-                    doc["recorrencia"] = {
-                        "ativo": True,
-                        "frequencia": "mensal",
-                        "dia_do_mes": max(1, min(31, int(dia_do_mes_recorrencia))),
-                    }
-
-                if artefatos_pendentes_vinculo:
-                    # Vincula à nova tarefa os arquivos que o usuário anexou nesta mesma
-                    # mensagem (antes de a tarefa existir), para que apareçam no contexto dela.
-                    doc["pool_dados"] = list(artefatos_pendentes_vinculo)
-                    doc["acompanhamento"] = [
-                        {
-                            'data': item['data_criacao'],
-                            'nota': f"📎 [Copiloto] Arquivo '{item['nome']}' ({item.get('_natureza') or 'documento'}) carregado junto com a criação desta ação."
-                        }
-                        for item in artefatos_pendentes_vinculo
-                    ]
-                    doc["pool_dados"] = [{k: v for k, v in item.items() if k != '_natureza'} for item in doc["pool_dados"]]
-                    artefatos_pendentes_vinculo.clear()
-
-                db.collection("tarefas").document(task_id).set(doc)
-                store_action_dedup_result(db, titulo, data_limite, horario_inicio, task_id)
-                print(f"[Copiloto] Ação criada: id={task_id}, titulo='{titulo}'")
-                return f"OK|{task_id}"
-
-            except Exception as _ce:
-                print(f"[Copiloto] Erro ao criar ação: {_ce}")
-                release_action_dedup_slot(db, titulo, data_limite, horario_inicio)
-                return f"ERRO|{str(_ce)}"
+            # _areas_validas e artefatos_pendentes_vinculo so existem no canal web (ja
+            # carregados no escopo do request); o executor recarrega/ignora quando ausentes.
+            return _hermes_tools.criar_acao_no_sistema(_ctx(), {
+                "titulo": titulo,
+                "descricao": descricao,
+                "area_tematica": area_tematica,
+                "data_limite": data_limite,
+                "prazo_final": prazo_final,
+                "tipo_acao": tipo_acao,
+                "tags": tags,
+                "notas": notas,
+                "plano_acao": plano_acao,
+                "sourceGmailMessageId": sourceGmailMessageId,
+                "sourceKnowledgeText": sourceKnowledgeText,
+                "horario_inicio": horario_inicio,
+                "horario_fim": horario_fim,
+                "recorrencia_mensal": recorrencia_mensal,
+                "dia_do_mes_recorrencia": dia_do_mes_recorrencia,
+                "recorrencia_semanal": recorrencia_semanal,
+                "dias_da_semana_recorrencia": dias_da_semana_recorrencia,
+                "intervalo_semanas_recorrencia": intervalo_semanas_recorrencia,
+            }, areas_validas=_areas_validas,
+               artefatos_pendentes_vinculo=artefatos_pendentes_vinculo)
 
         def editar_plano_acao(
             task_id: str,
@@ -9893,26 +9565,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
               ANTES de chamar esta função.
             Retorna JSON com status e título da tarefa, ou 'ERRO|{detalhe}'.
             """
-            try:
-                from datetime import datetime as _dt, timezone as _tz
-                alvo = (task_id_alvo or task_id or "").strip()
-                if not alvo:
-                    return "ERRO|Sem tarefa ativa. Informe o ID da tarefa onde registrar."
-                if not (nota or "").strip():
-                    return "ERRO|Nota vazia."
-                task_ref = db.collection('tarefas').document(alvo)
-                task_doc = task_ref.get()
-                if not task_doc.exists:
-                    return f"ERRO|Tarefa '{alvo}' não encontrada."
-                now_iso = _dt.now(_tz.utc).isoformat()
-                entry = {'data': now_iso, 'nota': nota.strip()}
-                task_ref.update({'acompanhamento': firestore.ArrayUnion([entry])})
-                titulo_tarefa = (task_doc.to_dict() or {}).get('titulo', alvo)
-                print(f"[Copiloto] Diário registrado na tarefa {alvo}.")
-                return json.dumps({"status": "ok", "task_id": alvo, "titulo": titulo_tarefa}, ensure_ascii=False)
-            except Exception as _err:
-                print(f"[Copiloto] Erro ao registrar no diário: {_err}")
-                return f"ERRO|{str(_err)}"
+            return _hermes_tools.execute(
+                "registrar_no_diario", {"nota": nota, "task_id_alvo": task_id_alvo}, _ctx())
 
         def gerar_imagem(prompt: str, proporcao: str = "1:1"):
             """
@@ -9924,59 +9578,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Retorna a URL pública da imagem gerada no formato Markdown.
             IMPORTANTE: Você DEVE incluir a tag markdown da imagem retornada (ex: ![Imagem Gerada](url)) de forma exata e visível na sua resposta final para que o usuário possa vê-la.
             """
-            try:
-                limit_images = int(os.environ.get("LIMIT_IMAGE_GENERATION", "5"))
-                if not check_and_increment_limit(db, user_uid, "image_generation", limit_images):
-                    return "ERRO|Você atingiu o limite diário de 5 gerações de imagem."
-
-                import uuid
-                from firebase_admin import storage
-                import os
-                
-                # Gera a imagem usando o Gemini (Nano Banana 2 / 3.1 Flash Image)
-                config_kwargs = {
-                    "response_modalities": ["IMAGE"],
-                    "image_config": types.ImageConfig(
-                        aspect_ratio=proporcao,
-                        image_size="1K",
-                    ),
-                    "thinking_config": types.ThinkingConfig(thinking_level="MINIMAL")
-                }
-                config = types.GenerateContentConfig(**config_kwargs)
-                
-                resp = client.models.generate_content(
-                    model='gemini-3.1-flash-image-preview',
-                    contents=[prompt],
-                    config=config
-                )
-                
-                image_bytes = None
-                if getattr(resp, 'candidates', None) and len(resp.candidates) > 0:
-                    cand = resp.candidates[0]
-                    if getattr(cand, 'content', None) and getattr(cand.content, 'parts', None):
-                        for part in cand.content.parts:
-                            if getattr(part, 'inline_data', None) and getattr(part.inline_data, 'data', None):
-                                image_bytes = part.inline_data.data
-                                break
-
-                if not image_bytes:
-                    return "ERRO|Não foi possível gerar a imagem com o modelo Nano Banana 2."
-                
-                # Upload para Firebase Storage
-                from hermes_core_logic import _get_hermes_storage_bucket
-                bucket = _get_hermes_storage_bucket()
-                    
-                file_name = f"imagens_geradas/img_{uuid.uuid4().hex[:8]}.jpg"
-                blob = bucket.blob(file_name)
-                blob.upload_from_string(image_bytes, content_type="image/jpeg")
-                
-                from hermes_core_logic import _blob_public_url
-                url = _blob_public_url(blob)
-                return f"![Imagem Gerada]({url})\n\n*(Imagem gerada via Imagen 3. URL: {url})*"
-            except Exception as e:
-                import traceback
-                print(f"[Copiloto] Erro ao gerar imagem: {e}\n{traceback.format_exc()}")
-                return f"⚠️ Erro ao gerar imagem: {str(e)}"
+            return _hermes_tools.execute(
+                "gerar_imagem", {"prompt": prompt, "proporcao": proporcao}, _ctx())
 
         def gerar_relatorio(
             titulo: str,
@@ -10251,110 +9854,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
             Retorna JSON string com payload de confirmação em lote ou string de erro.
             """
-            try:
-                if not itens or not isinstance(itens, list):
-                    return "ERRO|Forneça uma lista de itens com 'task_id' e 'alteracoes'."
-
-                _ALLOWED_FIELDS = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_link_optout'}
-                today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-                def _normalizar_status_acao(valor):
-                    if valor is None:
-                        return valor
-                    raw = str(valor).strip().lower()
-                    try:
-                        import unicodedata
-                        raw = ''.join(c for c in unicodedata.normalize('NFD', raw) if unicodedata.category(c) != 'Mn')
-                    except Exception:
-                        pass
-                    raw = raw.replace('_', ' ').replace('-', ' ')
-                    raw = ' '.join(raw.split())
-                    if raw in ('concluido', 'concluida', 'concluir', 'finalizado', 'finalizada', 'completed', 'done'):
-                        return 'concluído'
-                    if raw in ('stand by', 'standby', 'pausado', 'pausada', 'pausar'):
-                        return 'stand-by'
-                    if raw in ('em andamento', 'andamento', 'pendente', 'aberto', 'aberta', 'reabrir'):
-                        return 'em andamento'
-                    if raw in ('excluido', 'excluir', 'excluida', 'cancelado', 'cancelar', 'cancelada', 'deletar', 'deletado', 'apagar', 'remover'):
-                        return 'excluído'
-                    return valor
-
-                prepared_items = []
-                for item in itens:
-                    tid = str(item.get('task_id') or '').strip()
-                    if not tid:
-                        continue
-                    alteracoes = item.get('alteracoes') or {}
-
-                    if 'data_limite' in alteracoes:
-                        val = alteracoes['data_limite']
-                        if val and val not in ('-', '0000-00-00') and val < today_str:
-                            return f"ERRO|A data de execução da ação '{tid}' não pode ser no passado ({val})."
-                    if 'prazo_final' in alteracoes:
-                        val = alteracoes['prazo_final']
-                        if val and val not in ('-', '0000-00-00') and val < today_str:
-                            return f"ERRO|O prazo final da ação '{tid}' não pode ser no passado ({val})."
-
-                    task_ref = db.collection('tarefas').document(tid)
-                    task_doc = task_ref.get()
-                    if not task_doc.exists:
-                        return f"ERRO|Ação '{tid}' não encontrada."
-
-                    task_data = task_doc.to_dict() or {}
-                    if task_data.get('status') in ('concluído', 'excluído') and alteracoes.get('status') not in ('em andamento', 'stand-by'):
-                        return f"ERRO|A ação '{task_data.get('titulo', tid)}' já foi concluída ou excluída e não pode ser editada."
-
-                    alteracoes_diff = {}
-                    for campo, novo_valor in alteracoes.items():
-                        if campo not in _ALLOWED_FIELDS:
-                            continue
-                        if campo == 'status':
-                            novo_valor = _normalizar_status_acao(novo_valor)
-                        original = task_data.get(campo)
-                        if isinstance(original, dict):
-                            original_str = json.dumps(original, ensure_ascii=False)
-                        else:
-                            original_str = ', '.join(str(v) for v in original) if isinstance(original, list) else (str(original) if original is not None else '')
-
-                        if isinstance(novo_valor, dict):
-                            novo_str = json.dumps(novo_valor, ensure_ascii=False)
-                        else:
-                            novo_str = ', '.join(str(v) for v in novo_valor) if isinstance(novo_valor, list) else (str(novo_valor) if novo_valor is not None else '')
-
-                        alteracoes_diff[campo] = {
-                            'original': original_str,
-                            'novo': novo_str,
-                            'novo_raw': novo_valor
-                        }
-
-                    if not alteracoes_diff:
-                        continue
-
-                    snapshot_ts = task_data.get('data_atualizacao') or task_data.get('data_criacao', '')
-                    prepared_items.append({
-                        'task_id': tid,
-                        'titulo': task_data.get('titulo', 'Ação sem título'),
-                        'alteracoes': alteracoes_diff,
-                        'snapshot_ts': str(snapshot_ts)
-                    })
-
-                if not prepared_items:
-                    return "ERRO|Nenhum campo válido para editar nas ações fornecidas."
-
-                payload = {
-                    'tipo': 'edicao_em_lote',
-                    'items': prepared_items,
-                    'justificativa': justificativa or 'Edição de múltiplas ações via Copiloto Hermes.',
-                    'status': 'pending',
-                    'created_at': datetime.now(timezone.utc).isoformat()
-                }
-
-                print(f"[Copiloto] Edição em lote preparada para {len(prepared_items)} ações.")
-                return json.dumps(payload, ensure_ascii=False)
-
-            except Exception as _pe:
-                print(f"[Copiloto] Erro ao preparar edição em lote: {_pe}")
-                return f"ERRO|{str(_pe)}"
+            return _hermes_tools.execute(
+                "preparar_edicao_em_lote",
+                {"itens": itens, "justificativa": justificativa},
+                _ctx())
 
         def preparar_reagendamento_em_lote(
             nova_data_inicio: str,
@@ -10379,91 +9882,14 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
             Retorna JSON string com payload de confirmação ou string de erro.
             """
-            try:
-                from datetime import timedelta as _td
-
-                if not filtro_data and not task_ids:
-                    return "ERRO|Forneça filtro_data (YYYY-MM-DD) ou task_ids (lista de IDs)."
-
-                tasks = []
-                if task_ids:
-                    for tid in (task_ids or []):
-                        tdoc = db.collection('tarefas').document(str(tid)).get()
-                        if tdoc.exists:
-                            t = tdoc.to_dict()
-                            if t.get('status') not in ('concluído', 'cancelado'):
-                                tasks.append({'_doc_id': str(tid), **t})
-                else:
-                    q = db.collection('tarefas')\
-                        .where('data_limite', '==', filtro_data)\
-                        .where('status', 'in', ['em andamento', 'stand-by'])\
-                        .get()
-                    for qdoc in q:
-                        tasks.append({'_doc_id': qdoc.id, **qdoc.to_dict()})
-
-                if not tasks:
-                    return "ERRO|Nenhuma ação encontrada com os critérios informados."
-
-                if estrategia == 'tipo_acao':
-                    tasks.sort(key=lambda x: (0 if x.get('tipo_acao') == 'fast' else 1, x.get('data_criacao', '')))
-                elif estrategia == 'alfa':
-                    tasks.sort(key=lambda x: x.get('titulo', '').lower())
-                else:
-                    tasks.sort(key=lambda x: x.get('data_criacao', ''))
-
-                try:
-                    from datetime import date as _date
-                    start_date = datetime.strptime(nova_data_inicio, "%Y-%m-%d").date()
-                    today_date = datetime.now(timezone.utc).date()
-                    if start_date < today_date:
-                        start_date = today_date
-                except ValueError:
-                    return f"ERRO|Formato de data inválido: '{nova_data_inicio}'. Use YYYY-MM-DD."
-
-                def _next_weekday(d):
-                    while d.weekday() >= 5:
-                        d += _td(days=1)
-                    return d
-
-                day_cursor = _next_weekday(start_date)
-                count_this_week = 0
-                items = []
-
-                for task in tasks:
-                    if count_this_week >= max_por_semana:
-                        days_to_monday = 7 - day_cursor.weekday()
-                        day_cursor += _td(days=days_to_monday)
-                        day_cursor = _next_weekday(day_cursor)
-                        count_this_week = 0
-
-                    items.append({
-                        'task_id': task['_doc_id'],
-                        'titulo': task.get('titulo', ''),
-                        'data_limite_original': task.get('data_limite', ''),
-                        'horario_inicio_original': task.get('horario_inicio'),
-                        'horario_fim_original': task.get('horario_fim'),
-                        'nova_data_limite': day_cursor.strftime("%Y-%m-%d"),
-                        'novo_horario_inicio': None,
-                        'novo_horario_fim': None,
-                    })
-
-                    count_this_week += 1
-                    day_cursor += _td(days=1)
-                    day_cursor = _next_weekday(day_cursor)
-
-                payload = {
-                    'items': items,
-                    'justificativa': justificativa or f"Reagendamento em lote para semana de {nova_data_inicio}.",
-                    'status': 'pending',
-                    'created_at': datetime.now(timezone.utc).isoformat(),
-                }
-
-                print(f"[Copiloto] Reagendamento em lote preparado: {len(items)} ações.")
-                return json.dumps(payload, ensure_ascii=False)
-
-            except Exception as _re:
-                print(f"[Copiloto] Erro em preparar_reagendamento_em_lote: {_re}")
-                return f"ERRO|{str(_re)}"
+            return _hermes_tools.execute("preparar_reagendamento_em_lote", {
+                "nova_data_inicio": nova_data_inicio,
+                "max_por_semana": max_por_semana,
+                "estrategia": estrategia,
+                "filtro_data": filtro_data,
+                "task_ids": task_ids,
+                "justificativa": justificativa,
+            }, _ctx())
 
         def preparar_remocao_horarios_em_lote(
             filtro_data: str = None,
@@ -10484,184 +9910,46 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             alteracoes={"horario_inicio": None, "horario_fim": None}.
             Retorna JSON string com payload de confirmação ou string de erro.
             """
-            try:
-                if not filtro_data and not task_ids:
-                    return "ERRO|Forneça filtro_data (YYYY-MM-DD) ou task_ids (lista de IDs)."
-
-                tasks = []
-                if task_ids:
-                    for tid in (task_ids or []):
-                        tdoc = db.collection('tarefas').document(str(tid)).get()
-                        if tdoc.exists:
-                            t = tdoc.to_dict()
-                            if t.get('status') not in ('concluído', 'excluído'):
-                                tasks.append({'_doc_id': str(tid), **t})
-                else:
-                    q = db.collection('tarefas')\
-                        .where('data_limite', '==', filtro_data)\
-                        .where('status', 'in', ['em andamento', 'stand-by'])\
-                        .get()
-                    for qdoc in q:
-                        tasks.append({'_doc_id': qdoc.id, **qdoc.to_dict()})
-
-                tasks_com_horario = [t for t in tasks if t.get('horario_inicio')]
-
-                if not tasks_com_horario:
-                    if tasks:
-                        return "ERRO|Nenhuma das ações encontradas possui horário definido."
-                    return "ERRO|Nenhuma ação encontrada com os critérios informados."
-
-                items = []
-                for task in tasks_com_horario:
-                    items.append({
-                        'task_id': task['_doc_id'],
-                        'titulo': task.get('titulo', ''),
-                        'data_limite_original': task.get('data_limite', ''),
-                        'horario_inicio_original': task.get('horario_inicio'),
-                        'horario_fim_original': task.get('horario_fim'),
-                        'nova_data_limite': task.get('data_limite', ''),
-                        'novo_horario_inicio': None,
-                        'novo_horario_fim': None,
-                    })
-
-                payload = {
-                    'items': items,
-                    'justificativa': justificativa or "Remoção de horários em lote via Copiloto Hermes.",
-                    'status': 'pending',
-                    'created_at': datetime.now(timezone.utc).isoformat(),
-                }
-
-                print(f"[Copiloto] Remoção de horários preparada: {len(items)} ações.")
-                return json.dumps(payload, ensure_ascii=False)
-
-            except Exception as _re:
-                print(f"[Copiloto] Erro em preparar_remocao_horarios_em_lote: {_re}")
-                return f"ERRO|{str(_re)}"
+            return _hermes_tools.execute("preparar_remocao_horarios_em_lote", {
+                "filtro_data": filtro_data,
+                "task_ids": task_ids,
+                "justificativa": justificativa,
+            }, _ctx())
 
         def buscar_contato(termo: str, limite: int = 5):
             """Busca contatos por nome, email ou tag em perfil_pessoas. Retorna dados do contato incluindo telefone e whatsapp_chat_id (para vincular com conversas do WhatsApp)."""
-            try:
-                termo_lower = (termo or "").strip().lower()
-                if not termo_lower:
-                    return "ERRO|Termo de busca vazio."
-                docs = db.collection('perfil_pessoas').limit(500).stream()
-                candidatos = []
-                for d in docs:
-                    pdata = d.to_dict() or {}
-                    nome = (pdata.get('nome') or '').lower()
-                    email = (pdata.get('email') or '').lower()
-                    tags = [str(t).lower() for t in (pdata.get('tags') or [])]
-                    score = 0.0
-                    if nome == termo_lower or email == termo_lower:
-                        score = 1.0
-                    elif termo_lower in nome:
-                        score = 0.8
-                    elif termo_lower in email:
-                        score = 0.7
-                    elif any(termo_lower in t for t in tags):
-                        score = 0.5
-                    if score > 0:
-                        candidatos.append({
-                            'pessoa_id': d.id,
-                            'nome': pdata.get('nome', ''),
-                            'email': pdata.get('email', ''),
-                            'telefone': pdata.get('telefone', ''),
-                            'whatsapp_chat_id': pdata.get('whatsapp_chat_id', ''),
-                            'tags': pdata.get('tags', []),
-                            'score': score,
-                        })
-                candidatos.sort(key=lambda x: -x['score'])
-                return json.dumps({'candidatos': candidatos[: max(1, int(limite or 5))]}, ensure_ascii=False)
-            except Exception as _re:
-                print(f"[Copiloto] Erro em buscar_contato: {_re}")
-                return f"ERRO|{str(_re)}"
+            # O executor devolve dict; o canal web contratou string JSON (e "ERRO|..." no
+            # erro) e o modelo ja opera nesse formato — converte aqui.
+            _res = _hermes_tools.execute(
+                "buscar_contato", {"termo": termo, "limite": limite}, _ctx())
+            if _res.get("erro"):
+                return f"ERRO|{_res['erro']}"
+            return json.dumps(_res, ensure_ascii=False)
 
         def preparar_vinculo_contatos(task_id: str, mencoes: list[dict]):
             """Prepara payload de confirmação para vincular pessoas a uma tarefa. Não grava nada."""
-            try:
-                if not task_id:
-                    return "ERRO|task_id é obrigatório."
-                tdoc = db.collection('tarefas').document(str(task_id)).get()
-                if not tdoc.exists:
-                    return f"ERRO|Tarefa '{task_id}' não encontrada."
-                payload = {
-                    'kind': 'contact_link',
-                    'task_id': task_id,
-                    'task_titulo': (tdoc.to_dict() or {}).get('titulo', ''),
-                    'mencoes': mencoes or [],
-                    'status': 'pending',
-                    'created_at': datetime.now(timezone.utc).isoformat(),
-                }
-                return json.dumps(payload, ensure_ascii=False)
-            except Exception as _re:
-                print(f"[Copiloto] Erro em preparar_vinculo_contatos: {_re}")
-                return f"ERRO|{str(_re)}"
+            return _hermes_tools.execute(
+                "preparar_vinculo_contatos",
+                {"task_id": task_id, "mencoes": mencoes},
+                _ctx())
 
         def preparar_atualizacao_contato(nome: str, campos_novos: dict, justificativa: str, pessoa_id: str = None):
             """Prepara payload de confirmação para criar/atualizar contato. Não grava nada."""
-            try:
-                if not nome or not (campos_novos or {}):
-                    return "ERRO|nome e campos_novos são obrigatórios."
-                modo = 'update' if pessoa_id else 'create'
-                contato_atual = None
-                if pessoa_id:
-                    pdoc = db.collection('perfil_pessoas').document(str(pessoa_id)).get()
-                    if not pdoc.exists:
-                        return f"ERRO|Contato '{pessoa_id}' não encontrado."
-                    contato_atual = pdoc.to_dict()
-                payload = {
-                    'kind': 'contact_upsert',
-                    'modo': modo,
-                    'pessoa_id': pessoa_id,
-                    'nome': nome,
-                    'contato_atual': contato_atual,
-                    'campos_novos': campos_novos,
-                    'justificativa': justificativa or '',
-                    'status': 'pending',
-                    'created_at': datetime.now(timezone.utc).isoformat(),
-                }
-                return json.dumps(payload, ensure_ascii=False)
-            except Exception as _re:
-                print(f"[Copiloto] Erro em preparar_atualizacao_contato: {_re}")
-                return f"ERRO|{str(_re)}"
+            return _hermes_tools.execute("preparar_atualizacao_contato", {
+                "nome": nome,
+                "campos_novos": campos_novos,
+                "justificativa": justificativa,
+                "pessoa_id": pessoa_id,
+            }, _ctx())
 
         def registrar_interacao_contato(pessoa_id: str, descricao: str, tarefa_id: str = None, sessao_copiloto_id: str = None):
             """Registra interação silenciosa no histórico de um contato. Grava direto, sem confirmação."""
-            try:
-                if not pessoa_id or not descricao:
-                    return "ERRO|pessoa_id e descricao são obrigatórios."
-                pref = db.collection('perfil_pessoas').document(str(pessoa_id)).get()
-                if not pref.exists:
-                    return f"ERRO|Contato '{pessoa_id}' não encontrado."
-                desc_short = str(descricao)[:280]
-                now_iso = datetime.now(timezone.utc).isoformat()
-                sess_id = sessao_copiloto_id or session_id
-                payload = {
-                    'pessoa_id': str(pessoa_id),
-                    'descricao': desc_short,
-                    'tipo': 'mencao_copiloto',
-                    'data': now_iso,
-                    'data_criacao': now_iso,
-                }
-                if tarefa_id:
-                    payload['tarefa_id'] = str(tarefa_id)
-                if sess_id:
-                    payload['sessao_copiloto_id'] = str(sess_id)
-                # Marca contato com tag Copiloto para aparecer no filtro
-                try:
-                    tags_atuais = (pref.to_dict() or {}).get('tags') or []
-                    if 'Copiloto' not in tags_atuais:
-                        db.collection('perfil_pessoas').document(str(pessoa_id)).update({
-                            'tags': tags_atuais + ['Copiloto']
-                        })
-                except Exception as _tag_err:
-                    print(f"[Copiloto] Aviso: falha ao marcar tag Copiloto em {pessoa_id}: {_tag_err}")
-                new_ref = db.collection('interacoes_pessoas').document()
-                new_ref.set(payload)
-                return json.dumps({'status': 'ok', 'interacao_id': new_ref.id}, ensure_ascii=False)
-            except Exception as _re:
-                print(f"[Copiloto] Erro em registrar_interacao_contato: {_re}")
-                return f"ERRO|{str(_re)}"
+            return _hermes_tools.execute("registrar_interacao_contato", {
+                "pessoa_id": pessoa_id,
+                "descricao": descricao,
+                "tarefa_id": tarefa_id,
+                "sessao_copiloto_id": sessao_copiloto_id,
+            }, _ctx())
 
         def consultar_dados_cadastrais(secao: str = ""):
             """
@@ -10676,12 +9964,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
               'carreira') para ver o conteúdo completo dela. O objeto é grande demais
               para retornar de uma vez.
             """
-            try:
-                from dados_cadastrais import get_dados_cadastrais
-                return json.dumps(get_dados_cadastrais(db, user_uid, secao), ensure_ascii=False, default=str)
-            except Exception as _re:
-                print(f"[Copiloto] Erro em consultar_dados_cadastrais: {_re}")
-                return f"ERRO|{str(_re)}"
+            return _hermes_tools.execute(
+                "consultar_dados_cadastrais", {"secao": secao}, _ctx())
 
         # Configuração do Chat com ferramentas
         model_id = COPILOT_CHAT_MODEL

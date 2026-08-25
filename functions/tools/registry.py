@@ -42,6 +42,26 @@ _CATALOG: dict[str, str] = {
     "preparar_vinculo_contatos": "Prepara proposta de vínculo de pessoas a uma tarefa (gera card de confirmação)",
     "preparar_atualizacao_contato": "Prepara criação ou atualização de contato com novos fatos (gera card de confirmação)",
     "registrar_interacao_contato": "Registra interação silenciosa no histórico de um contato (sem confirmação)",
+    # Tools que ja existiam como closure no copiloto web mas nunca tinham entrado
+    # no catalogo — entraram junto com a migracao para tools/hermes_tools.py.
+    "consultar_saude": "Consulta dados de saude do usuario: peso, passos, calorias, sono e dor",
+    "consultar_dados_cadastrais": "Consulta dados cadastrais pessoais (documentos, contato, familia, formacao, carreira, banco, plano de saude)",
+    "registrar_no_diario": "Registra uma entrada livre no diario de bordo de uma acao",
+    "gerar_imagem": "Gera uma imagem a partir de uma descricao textual e devolve a URL publica",
+    "preparar_reagendamento_em_lote": "Prepara reagendamento de varias acoes redistribuidas por dias uteis, sem gravar",
+    "preparar_remocao_horarios_em_lote": "Prepara a remocao de horarios de varias acoes em lote, sem gravar",
+    "criar_objetivo_estrategico": "Cria um objetivo estrategico com pilar, meta, diretrizes, indicadores e marcos",
+    "editar_objetivo_estrategico": "Edita campos de um objetivo estrategico existente",
+    "gerenciar_item_estrategico": "Adiciona, edita, remove ou conclui um indicador ou marco de um objetivo",
+    "excluir_objetivo_estrategico": "Exclui definitivamente um objetivo estrategico",
+    "consultar_processo_sipac": "Consulta um processo no SIPAC: dados gerais, interessados, movimentacoes e documentos",
+    "acompanhar_processo_sipac": "Ativa ou desativa o monitoramento automatico de um processo SIPAC",
+    # Contraparte de gravacao das tools `preparar_*`. No web app quem chama e o
+    # card de confirmacao da UI; canais sem UI (MCP) precisam chamar diretamente,
+    # senao a proposta preparada nunca e aplicada.
+    "confirmar_edicao_acao": "Aplica de fato a edicao de acao montada por preparar_edicao_acao",
+    "confirmar_edicao_em_lote": "Aplica de fato a edicao em lote montada por preparar_edicao_em_lote",
+    "confirmar_reagendamento_em_lote": "Aplica de fato o reagendamento em lote montado por preparar_reagendamento_em_lote",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {
@@ -60,6 +80,18 @@ _NEEDS_CONFIRMATION: set[str] = {
     "schedule_whatsapp_message",
     "preparar_vinculo_contatos",
     "preparar_atualizacao_contato",
+    # Gravam direto, sem card de confirmacao intermediario.
+    "registrar_no_diario",
+    "criar_objetivo_estrategico",
+    "editar_objetivo_estrategico",
+    "gerenciar_item_estrategico",
+    "excluir_objetivo_estrategico",
+    "acompanhar_processo_sipac",
+    "gerar_imagem",
+    # Contraparte de gravacao das `preparar_*`: e aqui que a mutacao acontece.
+    "confirmar_edicao_acao",
+    "confirmar_edicao_em_lote",
+    "confirmar_reagendamento_em_lote",
 }
 
 _ASYNC_TOOLS: set[str] = {
@@ -70,22 +102,33 @@ _ASYNC_TOOLS: set[str] = {
     "ler_pagina_web",
 }
 
-# Tools com execucao ja extraida para fora dos closures de askCopilotoHermes
-# (functions/tools/mcp_dispatch.py) e por isso disponiveis via servidor MCP.
-# A maioria das ~42 tools do catalogo ainda vive como closure presa ao estado
-# da requisicao do copiloto web (db/session/user_uid fechados por escopo) — vao
-# sendo migradas para ca incrementalmente. Nao adicionar um nome aqui sem
-# tambem implementar seu executor em mcp_dispatch.py.
-_MCP_ENABLED: set[str] = {
-    "consultar_historico_acoes",
-    "buscar_arquivos_acervo",
-    "buscar_contato",
-    "calculadora",
-}
+# Tools disponiveis via servidor MCP. A fonte da verdade e o executor
+# `tools/hermes_tools.py`: se ha handler la, a tool roda fora do copiloto web e
+# pode ser exposta. Derivar em vez de manter uma lista manual evita o modo de
+# falha antigo — anunciar em `tools/list` uma tool que falha ao ser chamada.
+#
+# A intersecao com _CATALOG e deliberada: `tools/list` so publica o que tem
+# descricao no catalogo E schema em `schemas/`, entao um handler novo sem
+# schema simplesmente nao aparece, em vez de quebrar o cliente.
+def _mcp_enabled() -> set[str]:
+    from tools import hermes_tools
 
-# Subconjunto de _MCP_ENABLED liberado para o canal de voz (algumas tools MCP
-# podem nao fazer sentido faladas mesmo estando disponiveis via MCP).
-_VOICE_ENABLED: set[str] = set(_MCP_ENABLED)
+    return {name for name in hermes_tools.list_tools() if name in _CATALOG}
+
+
+# Tools que nao fazem sentido faladas continuam fora do canal de voz mesmo
+# estando disponiveis via MCP (formulario, imagem, relatorio longo, lote).
+_VOICE_EXCLUDED: set[str] = {
+    "gerar_rascunho_formulario",
+    "gerar_imagem",
+    "gerar_relatorio",
+    "preparar_edicao_em_lote",
+    "preparar_reagendamento_em_lote",
+    "preparar_remocao_horarios_em_lote",
+    "confirmar_edicao_em_lote",
+    "confirmar_reagendamento_em_lote",
+    "ler_documento_na_integra",
+}
 
 _schema_cache: dict[str, dict] = {}
 
@@ -115,16 +158,25 @@ def is_async(tool_name: str) -> bool:
 
 
 def is_mcp_enabled(tool_name: str) -> bool:
-    return tool_name in _MCP_ENABLED
+    return tool_name in _mcp_enabled()
 
 
 def is_voice_enabled(tool_name: str) -> bool:
-    return tool_name in _VOICE_ENABLED
+    return tool_name in _mcp_enabled() and tool_name not in _VOICE_EXCLUDED
 
 
 def list_mcp_enabled_tools() -> list[str]:
     """Nomes do catalogo com executor real ligado ao servidor MCP, na ordem do catalogo."""
-    return [name for name in _CATALOG if name in _MCP_ENABLED]
+    enabled = _mcp_enabled()
+    return [name for name in _CATALOG if name in enabled]
+
+
+def has_schema(tool_name: str) -> bool:
+    try:
+        get_schema(tool_name)
+        return True
+    except (FileNotFoundError, OSError):
+        return False
 
 
 def get_required_params(tool_name: str) -> list[str]:

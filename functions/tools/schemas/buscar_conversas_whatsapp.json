@@ -1,0 +1,20 @@
+{
+  "name": "buscar_conversas_whatsapp",
+  "description": "Busca conversas de WhatsApp indexadas (digests) por similaridade semântica",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Frase de busca sobre o que foi discutido no WhatsApp"
+      },
+      "limite": {
+        "type": "integer",
+        "description": "Número máximo de conversas a retornar (padrão 5)"
+      }
+    },
+    "required": [
+      "query"
+    ]
+  }
+}

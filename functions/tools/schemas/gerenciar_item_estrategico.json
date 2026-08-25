@@ -1,0 +1,34 @@
+{
+  "name": "gerenciar_item_estrategico",
+  "description": "Adiciona, edita, remove ou conclui um indicador ou marco de um objetivo estratégico",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "objetivo_id": {
+        "type": "string",
+        "description": "ID do objetivo estratégico"
+      },
+      "tipo": {
+        "type": "string",
+        "description": "'indicador' ou 'marco'"
+      },
+      "acao": {
+        "type": "string",
+        "description": "'adicionar', 'editar', 'remover' ou 'concluir'"
+      },
+      "descricao": {
+        "type": "string",
+        "description": "Descrição do item"
+      },
+      "item_id": {
+        "type": "string",
+        "description": "ID do item, obrigatório para editar/remover/concluir"
+      }
+    },
+    "required": [
+      "objetivo_id",
+      "tipo",
+      "acao"
+    ]
+  }
+}
