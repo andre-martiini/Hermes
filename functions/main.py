@@ -2773,6 +2773,15 @@ def saveBillPdfPassword(req: https_fn.CallableRequest) -> dict:
         validation, unlockable_message_ids = _validate_bill_pdf_password(
             get_gmail_service(), config["senders"], password
         )
+
+    if config.get("kind") == "allcare_portal" and len(password) > 10:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message=(
+                "O Portal Allcare aceita no máximo 10 caracteres. "
+                "Informe exatamente a senha usada no campo do portal."
+            ),
+        )
     if validation is False:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,

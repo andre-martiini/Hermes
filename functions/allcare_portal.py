@@ -100,20 +100,33 @@ class AllcarePortalClient:
             "X-Requested-With": "XMLHttpRequest",
         }
 
-    def _request(self, method: str, path: str, **kwargs) -> requests.Response:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        error_stage: str = "consulta",
+        **kwargs,
+    ) -> requests.Response:
         try:
             response = self.session.request(method, f"{BASE_URL}{path}", timeout=60, **kwargs)
         except requests.RequestException as exc:
-            raise AllcarePortalError("portal_indisponivel") from exc
+            raise AllcarePortalError(f"portal_indisponivel_{error_stage}") from exc
         if not response.ok:
-            raise AllcarePortalError(f"portal_http_{response.status_code}")
+            raise AllcarePortalError(f"portal_http_{response.status_code}_{error_stage}")
         return response
 
     def login(self, cpf: str, password: str, plan_match: str = PLAN_MATCH) -> dict:
-        self._request("GET", "/", headers={"Accept": "text/html,application/xhtml+xml"})
+        self._request(
+            "GET",
+            "/",
+            error_stage="abertura",
+            headers={"Accept": "text/html,application/xhtml+xml"},
+        )
         response = self._request(
             "POST",
             "/Account/ValidarBeneficiario",
+            error_stage="validacao",
             data={"cpf": cpf, "senha": password, "remember": "false"},
             headers=self._ajax_headers(),
         )
@@ -125,6 +138,7 @@ class AllcarePortalClient:
         authenticated = self._request(
             "POST",
             "/Account/AutenticarBeneficiario/?returnUrl=",
+            error_stage="autenticacao",
             data={
                 "usuario": str(profile["cod_usuario"]),
                 "senha": password,
@@ -144,6 +158,7 @@ class AllcarePortalClient:
         response = self._request(
             "POST",
             "/TSNMVC/HomePortalBeneficiario/SegundaViaBoleto/FiltrarBoletos",
+            error_stage="lista_boletos",
             params={
                 "v_vencidas": "S",
                 "v_a_vencer": "S",
@@ -171,6 +186,7 @@ class AllcarePortalClient:
         generated = self._request(
             "GET",
             "/TSNMVC/HomePortalBeneficiario/SegundaViaBoleto/Gerar",
+            error_stage="emissao_boleto",
             params={
                 "num_seq_cobranca": charge_id,
                 "formato_saida": "download",
@@ -190,6 +206,7 @@ class AllcarePortalClient:
         document = self._request(
             "GET",
             "/TSNMVC/HomePortalBeneficiario/FileUtils/FileDownload",
+            error_stage="download_boleto",
             params={"nome_arquivo": str(result[2]), "ext": str(result[3])},
             allow_redirects=True,
         )

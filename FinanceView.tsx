@@ -373,6 +373,16 @@ const FinanceView = ({
             }));
             return;
         }
+        if (config.kind === 'allcare_portal' && password.length > 10) {
+            setBillPdfPasswordFeedback(prev => ({
+                ...prev,
+                [config.id]: {
+                    type: 'error',
+                    message: 'O Portal Allcare aceita no máximo 10 caracteres.'
+                }
+            }));
+            return;
+        }
         setBillPdfPasswordSaving(config.id);
         setBillPdfPasswordFeedback(prev => {
             const next = { ...prev };
@@ -999,6 +1009,7 @@ const FinanceView = ({
                                                 <input
                                                     type="password"
                                                     autoComplete="new-password"
+                                                    maxLength={config.kind === 'allcare_portal' ? 10 : 128}
                                                     placeholder={config.configured ? 'Nova senha para substituir' : config.kind === 'allcare_portal' ? 'Digite a senha do Portal Allcare' : 'Digite a senha do PDF'}
                                                     value={billPdfPasswordDrafts[config.id] || ''}
                                                     onChange={event => setBillPdfPasswordDrafts(prev => ({ ...prev, [config.id]: event.target.value }))}

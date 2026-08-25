@@ -12,12 +12,12 @@ from allcare_portal import (
 
 
 class FakeResponse:
-    def __init__(self, *, payload=None, url="", text="", ok=True):
+    def __init__(self, *, payload=None, url="", text="", ok=True, status_code=200):
         self._payload = payload
         self.url = url
         self.text = text
         self.ok = ok
-        self.status_code = 200
+        self.status_code = status_code
 
     def json(self):
         return self._payload
@@ -56,6 +56,14 @@ class AllcarePortalTests(unittest.TestCase):
         self.assertEqual(validation_headers["X-Requested-With"], "XMLHttpRequest")
         self.assertNotIn("X-Requested-With", authentication_headers)
         self.assertNotIn("X-Requested-With", session.headers)
+
+    def test_http_error_identifies_only_the_safe_stage(self):
+        session = RecordingSession()
+        session.request = lambda *args, **kwargs: FakeResponse(ok=False, status_code=400)
+        client = AllcarePortalClient(session)
+
+        with self.assertRaisesRegex(AllcarePortalError, "portal_http_400_abertura"):
+            client.login("12345678901", "secret")
 
     def test_parses_portal_fields(self):
         self.assertEqual(parse_brl_amount("3.069,76"), 3069.76)
