@@ -49,6 +49,11 @@ from bill_pdf_passwords import (
     read_password_secret,
     save_password_secret,
 )
+from allcare_bill import (
+    AllcareBillError,
+    download_allcare_bill_pdf,
+    is_allcare_bill_sender,
+)
 from firestore_resilience import stream_collection_resilient
 from godmode import (  # noqa: F401 — registra as Cloud Functions
     askHermesGodmode,
@@ -2123,9 +2128,10 @@ def sync_boletos_gmail(service, sync_ref, logs):
     
     log_to_firestore(sync_ref, logs, "Buscando boletos no Gmail via IA...")
     
-    # Query para emails com anexos PDF ou assuntos de fatura/boleto/pagamento
-    # Pegamos os mais recentes para a sincronia automática
-    query = 'has:attachment filename:pdf (subject:(boleto OR fatura OR bill OR pagamento OR "o seu boleto" OR "sua fatura" OR "vencimento") OR "boleto" OR "fatura")'
+    # A maioria dos fornecedores anexa o PDF. A Allcare, porém, envia um link
+    # autenticado no corpo do e-mail; por isso seu remetente oficial também é
+    # incluído explicitamente na busca.
+    query = '{has:attachment filename:pdf from:boleto@allcaregestoradesaude.com.br} (subject:(boleto OR fatura OR bill OR pagamento OR "o seu boleto" OR "sua fatura" OR "vencimento") OR "boleto" OR "fatura")'
     
     try:
         results = service.users().messages().list(userId='me', q=query, maxResults=15).execute(num_retries=3)
@@ -2149,6 +2155,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
 
         processed_count = 0
         imported_bills = []
+        gmail_address = None
         
         # Cache de boletos existentes para permitir duplicatas ou vinculação
         existing_bills_cache = []
@@ -2220,6 +2227,36 @@ def sync_boletos_gmail(service, sync_ref, logs):
                     return
             
             find_pdf(msg['payload'])
+            allcare_pdf_unavailable = False
+            if not pdf_data and is_allcare_bill_sender(sender):
+                try:
+                    if not gmail_address:
+                        gmail_address = service.users().getProfile(userId='me').execute(
+                            num_retries=3
+                        ).get('emailAddress')
+                    pdf_data = download_allcare_bill_pdf(
+                        msg['payload'],
+                        gmail_address,
+                        db,
+                    )
+                    log_to_firestore(
+                        sync_ref,
+                        logs,
+                        f"[BOLETO] Documento Allcare {msg_id} obtido pelo portal oficial."
+                    )
+                except AllcareBillError as allcare_error:
+                    allcare_pdf_unavailable = True
+                    log_to_firestore(
+                        sync_ref,
+                        logs,
+                        f"[BOLETO] Não foi possível obter o documento Allcare {msg_id} "
+                        f"({allcare_error}); será tentado novamente."
+                    )
+            if allcare_pdf_unavailable:
+                # O e-mail da Allcare não contém valor nem vencimento. Mantê-lo
+                # fora da lista de processados permite uma nova tentativa quando
+                # o portal estiver disponível novamente.
+                continue
             pdf_fallback_reason = None
             if pdf_data:
                 pdf_data, pdf_fallback_reason = prepare_pdf_for_gemini(
