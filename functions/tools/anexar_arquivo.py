@@ -84,6 +84,9 @@ COL_UPLOADS = "uploads_pendentes"
 
 PASTA_ANEXOS = "Anexos do Copiloto"
 
+# Mesma origem que serve o MCP — a unica garantidamente alcancavel pelo cliente.
+ORIGEM_MCP = "https://gestao-hermes.firebaseapp.com"
+
 
 def _mime_de(nome: str) -> str:
     return mimetypes.guess_type(nome or "")[0] or "application/octet-stream"
@@ -413,6 +416,51 @@ def _bucket():
     return _get_hermes_storage_bucket()
 
 
+# Teto da rota que passa pelo Hermes. O corpo da requisicao atravessa o Hosting
+# e a Cloud Function, que tem limite proprio; acima disto so a URL assinada
+# direta ao GCS serve.
+MAX_BYTES_VIA_HERMES = 30 * 1024 * 1024
+
+
+def receber_upload(ctx_db, uid_esperado, token: str, corpo: bytes) -> dict:
+    """Recebe o PUT do arquivo na propria origem do MCP.
+
+    Existe porque a URL assinada aponta para `storage.googleapis.com`, e ha
+    ambiente de cliente que bloqueia egresso para esse host — o PUT morre num
+    filtro de rede antes de sair. A origem do Hermes, essa, e necessariamente
+    alcancavel: e por ela que o MCP conversa.
+
+    O `token` e a credencial: 128 bits de entropia, uso unico, 15 minutos de
+    validade, preso a um uid e a um arquivo ja declarado (tamanho e digest).
+    E o mesmo modelo de seguranca de uma URL assinada, entao nao afrouxa nada —
+    e nao pode exigir o Bearer do MCP, porque com `headersHelper` o token nem
+    chega ao modelo, que e quem monta o comando de upload.
+    """
+    snap = ctx_db.collection(COL_UPLOADS).document(token).get() if token else None
+    if not snap or not snap.exists:
+        return {"erro": "upload_token desconhecido ou ja consumido.", "status": 404}
+
+    reserva = snap.to_dict() or {}
+    if uid_esperado and reserva.get("uid") != uid_esperado:
+        return {"erro": "upload_token desconhecido ou ja consumido.", "status": 404}
+    if reserva.get("expira_em", "") < datetime.now(timezone.utc).isoformat():
+        return {"erro": "upload_token expirado; chame preparar_upload de novo.", "status": 410}
+
+    if len(corpo) != reserva["tamanho_bytes"]:
+        return {"erro": f"corpo com {len(corpo)} bytes, "
+                        f"{reserva['tamanho_bytes']} declarados.", "status": 400}
+    obtido = hashlib.sha256(corpo).hexdigest()
+    if obtido != reserva["sha256"]:
+        return {"erro": f"checksum nao confere: declarado "
+                        f"{reserva['sha256'][:16]}..., recebido {obtido[:16]}...",
+                "status": 400}
+
+    _bucket().blob(reserva["caminho"]).upload_from_string(
+        corpo, content_type=reserva.get("mime") or "application/octet-stream")
+    return {"status": 200, "ok": True, "bytes": len(corpo), "nome": reserva["nome"],
+            "proximo_passo": f"anexar_arquivo(task_id=..., upload_token='{token}')"}
+
+
 def _assinar_upload(caminho: str, mime: str) -> str:
     """URL assinada de PUT, funcionando dentro da Cloud Function.
 
@@ -479,7 +527,13 @@ def preparar_upload(ctx, args: dict) -> dict:
     caminho = f"uploads_mcp/{ctx.user_uid}/{token}/{nome}"
     mime = _mime_de(nome)
 
-    url = _assinar_upload(caminho, mime)
+    # Assinar pode falhar (permissao de IAM ausente, por exemplo) e nao pode
+    # derrubar a preparacao: a rota pelo Hermes nao depende disso.
+    try:
+        url_gcs = _assinar_upload(caminho, mime)
+    except Exception as exc:
+        url_gcs = None
+        print(f"[anexar_arquivo] URL assinada indisponivel: {exc}")
 
     expira = (datetime.now(timezone.utc) + timedelta(minutes=UPLOAD_TTL_MIN)).isoformat()
     ctx.db.collection(COL_UPLOADS).document(token).set({
@@ -493,16 +547,25 @@ def preparar_upload(ctx, args: dict) -> dict:
         "expira_em": expira,
     })
 
+    url_hermes = f"{ORIGEM_MCP}/mcp/upload/{token}"
+    cabe_no_hermes = tamanho <= MAX_BYTES_VIA_HERMES
     return {
         "upload_token": token,
-        "upload_url": url,
+        # Rota padrao: mesma origem do MCP, logo alcancavel por qualquer cliente
+        # que ja fale com o servidor. Ambientes com allowlist de egresso costumam
+        # bloquear `storage.googleapis.com`, e o PUT morreria no filtro de rede.
+        "upload_url": url_hermes if cabe_no_hermes else url_gcs,
+        "upload_url_alternativa": url_gcs if cabe_no_hermes else None,
         "metodo": "PUT",
         "content_type": mime,
         "expira_em": expira,
         "instrucao": (
-            f"Suba o arquivo com: curl -X PUT -H 'Content-Type: {mime}' "
-            f"--data-binary @ARQUIVO '<upload_url>'. Depois chame anexar_arquivo "
-            f"com upload_token='{token}' e o task_id."
+            f"curl -X PUT -H 'Content-Type: {mime}' --data-binary @ARQUIVO "
+            f"'{url_hermes if cabe_no_hermes else url_gcs}'  "
+            f"Depois: anexar_arquivo(task_id=..., upload_token='{token}'). "
+            + ("" if cabe_no_hermes else
+               f"Arquivo acima de {MAX_BYTES_VIA_HERMES // 1024 // 1024} MB so sobe "
+               "pela URL assinada direta, que exige egresso para storage.googleapis.com.")
         ),
     }
 

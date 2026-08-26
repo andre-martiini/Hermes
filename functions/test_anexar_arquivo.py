@@ -161,6 +161,29 @@ class TestResolucaoDeOrigem(unittest.TestCase):
         self.assertEqual(nome, "local.txt")
 
 
+class TestRotaDeUpload(unittest.TestCase):
+    """A URL assinada aponta para `storage.googleapis.com`, e ha cliente que
+    bloqueia egresso para esse host — o PUT morre no filtro de rede antes de
+    sair. A origem do MCP e necessariamente alcancavel: e por ela que o cliente
+    ja conversa com o servidor.
+    """
+
+    def test_rota_padrao_e_a_origem_do_mcp(self):
+        self.assertIn("firebaseapp.com", aa.ORIGEM_MCP)
+        self.assertNotIn("storage.googleapis.com", aa.ORIGEM_MCP)
+
+    def test_teto_da_rota_pelo_hermes_e_menor_que_o_geral(self):
+        """O corpo atravessa Hosting e Cloud Function, que tem limite proprio."""
+        self.assertLess(aa.MAX_BYTES_VIA_HERMES, aa.MAX_BYTES)
+
+    def test_checksum_conferido_no_recebimento(self):
+        """O endpoint refaz a conferencia; nao confia no que foi declarado."""
+        import inspect
+        fonte = inspect.getsource(aa.receber_upload)
+        self.assertIn("sha256", fonte)
+        self.assertIn("tamanho_bytes", fonte)
+
+
 class TestMime(unittest.TestCase):
     def test_extensoes_comuns(self):
         self.assertEqual(aa._mime_de("recibo.pdf"), "application/pdf")

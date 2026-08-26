@@ -112,6 +112,25 @@ def mcpServer(req: https_fn.Request) -> https_fn.Response:
 
         return _json_response(protected_resource_metadata())
 
+    # Upload do arquivo pela propria origem do MCP.
+    #
+    # Fica antes de `_authenticate` de proposito: o `upload_token` E a
+    # credencial. Com `headersHelper` o Bearer do MCP nem chega ao modelo, que e
+    # quem monta o comando de upload — exigi-lo aqui inviabilizaria a rota. O
+    # token tem 128 bits, vale 15 minutos, e uso unico e esta preso a um uid e a
+    # um arquivo ja declarado por tamanho e digest; mesmo modelo de uma URL
+    # assinada.
+    if "/upload/" in caminho and req.method in ("PUT", "POST"):
+        from tools.anexar_arquivo import receber_upload
+
+        token = caminho.rsplit("/", 1)[-1]
+        try:
+            resultado = receber_upload(firestore.client(), None, token, req.get_data())
+        except Exception as exc:  # noqa: BLE001
+            print(f"[mcp_server] Falha no upload de {token}: {exc}")
+            resultado = {"erro": "Falha ao gravar o arquivo.", "status": 500}
+        return _json_response(resultado, status=resultado.pop("status", 200))
+
     if req.method == "GET":
         # Health-check num path proprio. O GET na raiz NAO pode devolver 200:
         # e por ele que um cliente OAuth descobre que precisa autenticar, e a
