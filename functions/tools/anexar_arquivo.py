@@ -61,8 +61,15 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-# Teto do que o backend aceita por qualquer via.
-MAX_BYTES = 6 * 1024 * 1024
+# Teto das vias que NAO passam o arquivo pela conversa (upload_token, url,
+# gmail). Nao ha razao tecnica para ser baixo: o binario vai direto ao storage e
+# a funcao so o carrega uma vez para mover ao Drive, com 1 GB de memoria
+# disponivel. 50 MB cobre foto de celular, PDF escaneado e video curto.
+#
+# Ressalva de rota: pela URL do Hosting (Cowork, Desktop, celular) o corte e de
+# 60s, entao arquivo perto do teto pode estourar tempo antes de estourar
+# tamanho. Pela funcao direta ha 300s.
+MAX_BYTES = 50 * 1024 * 1024
 
 # Teto especifico do base64. O parametro e cortado em torno de 16 KiB de string
 # antes de chegar aqui — o limite anunciado de 6 MB era inalcancavel por essa
@@ -226,8 +233,6 @@ def _do_upload_token(ctx, args: dict) -> tuple[bytes, str]:
     O binario foi de PUT direto ao Storage, fora da conversa. Aqui so se confere
     tamanho e digest contra o que foi declarado na preparacao, e se le.
     """
-    from firebase_admin import storage
-
     token = str(args.get("upload_token") or "").strip()
     snap = ctx.db.collection(COL_UPLOADS).document(token).get() if token else None
     if not snap or not snap.exists:
@@ -239,7 +244,7 @@ def _do_upload_token(ctx, args: dict) -> tuple[bytes, str]:
     if reserva.get("expira_em", "") < datetime.now(timezone.utc).isoformat():
         raise ValueError("upload_token expirado. Chame preparar_upload de novo.")
 
-    blob = storage.bucket().blob(reserva["caminho"])
+    blob = _bucket().blob(reserva["caminho"])
     if not blob.exists():
         raise ValueError(
             "Nada foi enviado para a URL assinada ainda. Faca o PUT do arquivo "
@@ -397,6 +402,55 @@ def anexar(ctx, args: dict) -> dict:
 # Upload sem passar o arquivo pela conversa
 # --------------------------------------------------------------------------
 
+def _bucket():
+    """Reusa o resolvedor de bucket ja testado do projeto.
+
+    O nome varia entre `.firebasestorage.app` e `.appspot.com` conforme a idade
+    do projeto, e `hermes_core_logic` ja carrega essa lista de candidatos.
+    """
+    from hermes_core_logic import _get_hermes_storage_bucket
+
+    return _get_hermes_storage_bucket()
+
+
+def _assinar_upload(caminho: str, mime: str) -> str:
+    """URL assinada de PUT, funcionando dentro da Cloud Function.
+
+    Assinar exige uma chave privada. Localmente ela vem do arquivo de service
+    account, mas no runtime do Cloud Functions as credenciais chegam pelo
+    metadata server e NAO tem chave — `generate_signed_url` falharia com
+    "you need a private key to sign credentials".
+
+    A saida e delegar a assinatura ao IAM: passando `service_account_email` e um
+    `access_token`, a biblioteca usa a API SignBlob em vez de assinar local. Isso
+    exige que a service account do runtime tenha permissao de assinar em si
+    mesma (`roles/iam.serviceAccountTokenCreator`).
+    """
+    blob = _bucket().blob(caminho)
+    comum = dict(version="v4", expiration=timedelta(minutes=UPLOAD_TTL_MIN),
+                 method="PUT", content_type=mime)
+    try:
+        return blob.generate_signed_url(**comum)
+    except Exception as sem_chave:
+        import google.auth
+        from google.auth.transport import requests as greq
+
+        try:
+            cred, _ = google.auth.default()
+            cred.refresh(greq.Request())
+            return blob.generate_signed_url(
+                **comum,
+                service_account_email=getattr(cred, "service_account_email", None),
+                access_token=cred.token,
+            )
+        except Exception as via_iam:
+            raise ValueError(
+                "Nao foi possivel gerar a URL assinada de upload. Assinatura "
+                f"local falhou ({sem_chave}) e a via IAM tambem ({via_iam}). "
+                "Confira se a service account do runtime tem "
+                "roles/iam.serviceAccountTokenCreator sobre si mesma."
+            ) from via_iam
+
 def preparar_upload(ctx, args: dict) -> dict:
     """Devolve uma URL assinada para o cliente subir o arquivo direto.
 
@@ -408,8 +462,6 @@ def preparar_upload(ctx, args: dict) -> dict:
     `tamanho_bytes` e `sha256` sao registrados agora e conferidos depois, quando
     `anexar_arquivo` for chamada com o `upload_token`.
     """
-    from firebase_admin import storage
-
     nome = str(args.get("nome") or "").strip()
     if not nome:
         raise ValueError("`nome` e obrigatorio.")
@@ -427,12 +479,7 @@ def preparar_upload(ctx, args: dict) -> dict:
     caminho = f"uploads_mcp/{ctx.user_uid}/{token}/{nome}"
     mime = _mime_de(nome)
 
-    url = storage.bucket().blob(caminho).generate_signed_url(
-        version="v4",
-        expiration=timedelta(minutes=UPLOAD_TTL_MIN),
-        method="PUT",
-        content_type=mime,
-    )
+    url = _assinar_upload(caminho, mime)
 
     expira = (datetime.now(timezone.utc) + timedelta(minutes=UPLOAD_TTL_MIN)).isoformat()
     ctx.db.collection(COL_UPLOADS).document(token).set({

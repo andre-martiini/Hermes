@@ -18,7 +18,7 @@
       },
       "url": {
         "type": "string",
-        "description": "URL http(s) de onde o Hermes baixa o arquivo. Preferível a base64: nenhum byte passa pelo modelo"
+        "description": "URL http(s) de onde o Hermes baixa o arquivo (teto de 50 MB). Nenhum byte passa pelo modelo"
       },
       "gmail_message_id": {
         "type": "string",

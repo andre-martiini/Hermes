@@ -10,7 +10,7 @@
       },
       "tamanho_bytes": {
         "type": "integer",
-        "description": "Tamanho exato do arquivo em bytes (ex.: stat -c %s arquivo)"
+        "description": "Tamanho exato do arquivo em bytes (ex.: stat -c %s arquivo). Teto de 50 MB"
       },
       "sha256": {
         "type": "string",
