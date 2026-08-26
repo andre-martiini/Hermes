@@ -42,6 +42,7 @@ from gmail_bill_pdf import (
     prepare_pdf_for_gemini,
     validate_bill_payload,
 )
+import fatura_cartao
 from bill_pdf_passwords import (
     find_password_config,
     list_password_configs,
@@ -2279,7 +2280,45 @@ def sync_boletos_gmail(service, sync_ref, logs):
                         logs,
                         f"[BOLETO] Anexo {msg_id} não enviado à IA ({pdf_fallback_reason}); usando dados do e-mail."
                     )
-            
+
+            # Fatura de cartão ganha uma segunda leitura do MESMO PDF, para
+            # extrair os lançamentos. A extração de boleto abaixo continua
+            # valendo e cuida do lado "conta a pagar" (valor, vencimento,
+            # código de barras); esta aqui cuida do que uma fatura tem e um
+            # boleto não: em que o dinheiro foi gasto, e quanto está parcelado.
+            # Uma falha aqui não pode derrubar a sincronização de boletos.
+            _cartao = fatura_cartao.e_fatura_de_cartao(sender) if pdf_data else None
+            if _cartao:
+                try:
+                    _extraido = fatura_cartao.extrair(
+                        client, types, pdf_data,
+                        contexto_email=f"Remetente: {sender}\nAssunto: {subject or ''}",
+                    )
+                    _resumo = fatura_cartao.salvar(
+                        db, _cartao, _extraido, google_message_id=msg_id
+                    )
+                    log_to_firestore(
+                        sync_ref, logs,
+                        f"[FATURA] {_cartao} {_resumo['competencia']}: "
+                        f"{_resumo['itens_gravados']} lançamento(s), total R$ {_resumo['total']}."
+                    )
+                    _correcao = fatura_cartao.corrigir_fixed_bill(db, _cartao, _resumo)
+                    if _correcao.get("corrigido"):
+                        log_to_firestore(
+                            sync_ref, logs,
+                            f"[FATURA] Total do card corrigido: {_correcao['alteracoes']}"
+                        )
+                    elif _correcao.get("motivo"):
+                        log_to_firestore(
+                            sync_ref, logs,
+                            f"[FATURA] Card não corrigido — {_correcao['motivo']}."
+                        )
+                except Exception as _fatura_err:
+                    log_to_firestore(
+                        sync_ref, logs,
+                        f"[FATURA] Falha ao extrair lançamentos de {msg_id}: {_fatura_err}"
+                    )
+
             # Formata rubricas para o prompt
             rubrics_text = "\n".join([f"- {r['desc']} (ID: {r['id']})" for r in rubrics_cache])
             

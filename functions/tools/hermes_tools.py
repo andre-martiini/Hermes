@@ -1314,6 +1314,31 @@ def reagendar_acoes_em_lote(ctx: ToolContext, args: dict):
     return resultado
 
 
+def consultar_fatura_cartao(ctx: ToolContext, args: dict):
+    """Lancamentos da fatura de cartao, com total por estabelecimento."""
+    from fatura_cartao import consultar
+
+    return consultar(
+        ctx.db,
+        competencia=args.get("competencia"),
+        desde=args.get("desde"),
+        estabelecimento=args.get("estabelecimento"),
+        apenas_parceladas=bool(args.get("apenas_parceladas")),
+        limite=int(args.get("limite") or 200),
+    )
+
+
+def consultar_compromissos_futuros(ctx: ToolContext, args: dict):
+    """Quanto de cada mes futuro ja esta comprometido por compras parceladas.
+
+    E o numero que a fatura sozinha nao da: ela diz o que foi gasto, isto diz
+    quanto do mes que vem ja esta gasto antes de comecar.
+    """
+    from fatura_cartao import projetar_parcelas
+
+    return projetar_parcelas(ctx.db, meses=int(args.get("meses") or 12))
+
+
 def obter_estado_atual(ctx: ToolContext, args: dict):
     """Panorama do dia numa chamada: acoes, agenda, pendencias, heranca.
 
@@ -1387,6 +1412,8 @@ _HANDLERS: dict = {
     "editar_acoes_em_lote": editar_acoes_em_lote,
     "reagendar_acoes_em_lote": reagendar_acoes_em_lote,
     "obter_estado_atual": obter_estado_atual,
+    "consultar_fatura_cartao": consultar_fatura_cartao,
+    "consultar_compromissos_futuros": consultar_compromissos_futuros,
 }
 
 

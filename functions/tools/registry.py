@@ -71,6 +71,10 @@ _CATALOG: dict[str, str] = {
     "editar_acoes_em_lote": "Edita varias acoes de uma vez, diretamente",
     "reagendar_acoes_em_lote": "Redistribui acoes por dias uteis e ja aplica",
     "obter_estado_atual": "Panorama do dia numa chamada: acoes, agenda, janelas livres e pendencias",
+    # Fatura de cartao: o que um boleto nao tem — em que se gastou e o que
+    # ja esta comprometido nos meses seguintes.
+    "consultar_fatura_cartao": "Consulta os lancamentos da fatura do cartao, com total por estabelecimento",
+    "consultar_compromissos_futuros": "Projeta quanto de cada mes futuro ja esta comprometido por compras parceladas",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {

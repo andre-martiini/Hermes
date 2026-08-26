@@ -1,0 +1,14 @@
+{
+  "name": "consultar_compromissos_futuros",
+  "description": "Projeta quanto de cada mês futuro já está comprometido por compras parceladas no cartão. Use antes de avaliar capacidade de gasto ou de assumir nova parcela",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "meses": {
+        "type": "integer",
+        "description": "Quantos meses à frente projetar (padrão 12)"
+      }
+    },
+    "required": []
+  }
+}

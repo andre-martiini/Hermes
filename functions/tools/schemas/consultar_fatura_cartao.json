@@ -1,0 +1,30 @@
+{
+  "name": "consultar_fatura_cartao",
+  "description": "Consulta os lançamentos da fatura do cartão de crédito, com total por estabelecimento. Use para saber em que o dinheiro foi gasto",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "competencia": {
+        "type": "string",
+        "description": "Mês da fatura no formato YYYY-MM. Ex: '2026-09'"
+      },
+      "desde": {
+        "type": "string",
+        "description": "YYYY-MM — traz desta competência em diante. Alternativa a competencia"
+      },
+      "estabelecimento": {
+        "type": "string",
+        "description": "Filtra por nome do estabelecimento (busca parcial)"
+      },
+      "apenas_parceladas": {
+        "type": "boolean",
+        "description": "Se true, só compras parceladas"
+      },
+      "limite": {
+        "type": "integer",
+        "description": "Máximo de lançamentos na lista (padrão 200). O total por estabelecimento vem sempre completo"
+      }
+    },
+    "required": []
+  }
+}
