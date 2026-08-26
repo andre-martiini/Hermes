@@ -45,10 +45,26 @@ nula. O ganho nao e impedir o erro: e faze-lo alto em vez de silencioso.
 
 ## As vias sem bytes pelo modelo
 
-`url`, `gmail_message_id` e `upload_token` nao passam o arquivo pela conversa —
-o Hermes busca por conta propria. Sao sempre preferiveis. `preparar_upload`
-devolve uma URL assinada para o cliente subir o arquivo direto, fora da conversa,
-e funciona para qualquer tamanho.
+`drive_file_id`, `url`, `gmail_message_id` e `upload_token` nao passam o arquivo
+pela conversa — o Hermes busca por conta propria. Sao sempre preferiveis.
+`preparar_upload` devolve uma URL assinada para o cliente subir o arquivo direto,
+fora da conversa, e funciona para qualquer tamanho.
+
+## `drive_file_id`: o arquivo que ja esta no Drive
+
+Adicionada em 26/08/2026, a pedido do dono do sistema, como caminho padrao para
+quando o agente nao consegue fazer o upload ele mesmo: **quem tem os bytes poe no
+Drive** — o celular pelo app, o Gmail, o proprio usuario — e o agente so acha e
+vincula.
+
+A tentacao aqui era o agente subir o arquivo ao Drive pelo conector do Google.
+Nao serve: aquele `create_file` recebe `base64Content`, ou seja, os bytes voltam
+a passar pelo modelo, e o conector do Drive nao confere tamanho nem checksum.
+Seria trocar a rota que verifica pela que nao verifica nada — o mesmo defeito que
+corrompeu o cartao de embarque, de novo e sem rede.
+
+Nesta via a integridade e ancorada no `md5Checksum` que o Drive guarda do
+arquivo: um valor que o modelo nunca toca e nao tem como inventar.
 """
 
 from __future__ import annotations
@@ -57,6 +73,7 @@ import base64
 import hashlib
 import io
 import mimetypes
+import re
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -170,6 +187,136 @@ def _de_base64(args: dict) -> tuple[bytes, str]:
             f"checksum nao confere: sha256 recebido {esperado_hash[:16]}..., "
             f"calculado {obtido[:16]}.... O conteudo chegou alterado."
         )
+    return dados, nome
+
+
+# --------------------------------------------------------------------------
+# Google Drive
+# --------------------------------------------------------------------------
+
+# Formatos de link que o Drive produz, mais o `?id=` das URLs de download.
+_PADRAO_DRIVE_PATH = re.compile(
+    r"(?:drive|docs)\.google\.com/.*?/d/([A-Za-z0-9_-]{10,})")
+_PADRAO_DRIVE_QUERY = re.compile(
+    r"(?:drive|docs)\.google\.com/[^ ]*[?&]id=([A-Za-z0-9_-]{10,})")
+
+# Nativos do Google nao tem bytes proprios: precisam ser exportados.
+_EXPORTAVEIS = {
+    "application/vnd.google-apps.document": ("application/pdf", ".pdf"),
+    "application/vnd.google-apps.spreadsheet": ("application/pdf", ".pdf"),
+    "application/vnd.google-apps.presentation": ("application/pdf", ".pdf"),
+    "application/vnd.google-apps.drawing": ("image/png", ".png"),
+}
+
+
+def id_do_drive(texto) -> str | None:
+    """ID do arquivo a partir de um link do Drive, ou do proprio ID.
+
+    Existe porque link de compartilhamento do Drive **nao devolve o arquivo**:
+    `drive.google.com/file/d/<id>/view` responde uma pagina HTML. Baixar esse
+    link por GET e gravar o resultado como anexo produziria um arquivo que
+    parece existir, abre no navegador e nao e o documento — a mesma falha
+    silenciosa que corrompeu o cartao de embarque em 26/08/2026, com outro
+    disfarce. Reconhecer o link aqui e o que impede isso.
+    """
+    bruto = str(texto or "").strip()
+    if not bruto:
+        return None
+    for padrao in (_PADRAO_DRIVE_PATH, _PADRAO_DRIVE_QUERY):
+        achado = padrao.search(bruto)
+        if achado:
+            return achado.group(1)
+    # ID solto: sem barra, sem espaco, no formato que o Drive usa.
+    if "/" not in bruto and " " not in bruto and re.fullmatch(r"[A-Za-z0-9_-]{20,}", bruto):
+        return bruto
+    return None
+
+
+def _do_drive(args: dict) -> tuple[bytes, str]:
+    """Baixa pela API do Drive, conferindo contra os metadados do proprio Drive.
+
+    Nenhum byte passa pelo modelo: ele informa um ID, o Hermes busca o arquivo.
+    A integridade e ancorada no `md5Checksum` que o Drive guarda do arquivo —
+    um valor que o modelo nunca toca e nao tem como inventar.
+    """
+    import hashlib
+    import io as _io
+
+    from googleapiclient.http import MediaIoBaseDownload
+
+    from main import get_drive_service
+
+    file_id = id_do_drive(args.get("drive_file_id") or args.get("url"))
+    if not file_id:
+        raise ValueError(
+            "Nao reconheci um arquivo do Drive. Passe `drive_file_id` com o ID, "
+            "ou uma URL no formato drive.google.com/file/d/<id>/view.")
+
+    service = get_drive_service()
+    try:
+        meta = service.files().get(
+            fileId=file_id,
+            fields="id, name, mimeType, size, md5Checksum, trashed",
+            supportsAllDrives=True,
+        ).execute()
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(
+            f"Nao consegui abrir o arquivo '{file_id}' no Drive: {exc}. "
+            "Confira se ele existe e se a conta do Hermes tem acesso."
+        ) from exc
+
+    if meta.get("trashed"):
+        raise ValueError(
+            f"'{meta.get('name')}' esta na lixeira do Drive. Restaure antes de anexar.")
+
+    mime = str(meta.get("mimeType") or "")
+    nome = str(args.get("nome") or meta.get("name") or "arquivo").strip()
+    tamanho_declarado = int(meta.get("size") or 0)
+
+    if tamanho_declarado > MAX_BYTES:
+        raise ValueError(
+            f"'{nome}' tem {tamanho_declarado // 1024 // 1024} MB e excede o teto "
+            f"de {MAX_BYTES // 1024 // 1024} MB.")
+
+    buffer = _io.BytesIO()
+    if mime in _EXPORTAVEIS:
+        # Documento nativo do Google nao tem arquivo: e exportado na hora, e por
+        # isso nao ha checksum guardado com que comparar.
+        destino, extensao = _EXPORTAVEIS[mime]
+        pedido = service.files().export_media(fileId=file_id, mimeType=destino)
+        if not nome.lower().endswith(extensao):
+            nome = f"{nome}{extensao}"
+    elif mime.startswith("application/vnd.google-apps."):
+        raise ValueError(
+            f"'{nome}' e um item nativo do Google ({mime}) que nao pode ser "
+            "baixado nem exportado. Anexe um arquivo de verdade.")
+    else:
+        pedido = service.files().get_media(fileId=file_id, supportsAllDrives=True)
+
+    baixador = MediaIoBaseDownload(buffer, pedido, chunksize=5 * 1024 * 1024)
+    concluido = False
+    while not concluido:
+        _, concluido = baixador.next_chunk()
+    dados = buffer.getvalue()
+
+    if not dados:
+        raise ValueError(f"'{nome}' veio vazio do Drive.")
+
+    # Confere contra o que o Drive diz do arquivo. Nao e paranoia com o modelo,
+    # que aqui nem toca nos bytes: e o download que pode truncar.
+    if tamanho_declarado and len(dados) != tamanho_declarado:
+        raise ValueError(
+            f"Download incompleto de '{nome}': chegaram {len(dados)} bytes, "
+            f"{tamanho_declarado} declarados pelo Drive.")
+
+    md5_drive = str(meta.get("md5Checksum") or "")
+    if md5_drive:
+        obtido = hashlib.md5(dados).hexdigest()
+        if obtido != md5_drive:
+            raise ValueError(
+                f"Checksum de '{nome}' nao confere com o do Drive "
+                f"({obtido[:12]}... contra {md5_drive[:12]}...).")
+
     return dados, nome
 
 
@@ -287,15 +434,21 @@ def _resolver_conteudo(ctx, args: dict) -> tuple[bytes, str]:
                 f"Arquivo de {len(dados) // 1024} KB e grande demais para a via "
                 f"base64 (teto de {MAX_BYTES_BASE64 // 1024} KB). Use "
                 "`preparar_upload`, `url` ou `gmail_message_id`.")
+    elif args.get("drive_file_id"):
+        dados, nome = _do_drive(args)
     elif args.get("url"):
-        dados, nome = _de_url(args)
+        # Link do Drive nao vai por GET: ele responde uma pagina HTML, e gravar
+        # essa pagina como anexo daria `status: ok` num arquivo que nao e o
+        # documento. Reconhecer aqui e o que fecha essa porta.
+        dados, nome = (_do_drive(args) if id_do_drive(args["url"]) else _de_url(args))
     elif args.get("gmail_message_id"):
         dados, nome = _do_gmail(args)
     else:
         raise ValueError(
-            "Informe uma origem: upload_token (via preparar_upload, a melhor para "
-            "arquivo local), url, gmail_message_id, ou conteudo_base64 "
-            "(+nome, tamanho_bytes e sha256; so para arquivo pequeno).")
+            "Informe uma origem: drive_file_id (arquivo ja no Drive), "
+            "upload_token (via preparar_upload, para arquivo local), url, "
+            "gmail_message_id, ou conteudo_base64 (+nome, tamanho_bytes e "
+            "sha256; so para arquivo pequeno).")
 
     if len(dados) > MAX_BYTES:
         raise ValueError(

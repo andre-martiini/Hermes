@@ -8,6 +8,10 @@
         "type": "string",
         "description": "ID da ação à qual anexar. Se omitido, usa a ação em contexto"
       },
+      "drive_file_id": {
+        "type": "string",
+        "description": "ID ou link de um arquivo que JÁ ESTÁ no Google Drive. VIA PREFERIDA quando o arquivo já existe lá: nenhum byte passa pelo modelo e o Hermes confere o download contra o checksum do próprio Drive. Aceita o ID puro ou a URL drive.google.com/file/d/<id>/view"
+      },
       "conteudo_base64": {
         "type": "string",
         "description": "Conteúdo em base64. Só para arquivo PEQUENO (< 100 KB): payloads maiores são truncados em trânsito, e o truncamento é silencioso sem sha256. Exige nome, tamanho_bytes e sha256. Para qualquer arquivo real use preparar_upload, url ou gmail_message_id"
@@ -18,7 +22,7 @@
       },
       "url": {
         "type": "string",
-        "description": "URL http(s) de onde o Hermes baixa o arquivo (teto de 50 MB). Nenhum byte passa pelo modelo"
+        "description": "URL http(s) de onde o Hermes baixa o arquivo (teto de 50 MB). Nenhum byte passa pelo modelo. Link do Drive é detectado e baixado pela API do Drive, não por GET — o GET devolveria a página HTML, não o arquivo"
       },
       "gmail_message_id": {
         "type": "string",

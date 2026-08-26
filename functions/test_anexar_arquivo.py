@@ -211,5 +211,194 @@ class TestFormatoDoDiario(unittest.TestCase):
         self.assertEqual(json.loads(nota[len("FILE::JSON::"):])["n"], "cartão.pdf")
 
 
+# --------------------------------------------------------------------------
+# Via do Drive (26/08/2026)
+# --------------------------------------------------------------------------
+
+class TestReconhecerArquivoDoDrive(unittest.TestCase):
+    """O reconhecimento do link e o que fecha a porta da pagina HTML.
+
+    `drive.google.com/file/d/<id>/view` responde HTML, nao o arquivo. Um GET
+    nesse link gravaria a pagina como anexo e responderia `status: ok` — a mesma
+    falha silenciosa do cartao de embarque, com outro disfarce. Por isso todo
+    formato de link que o Drive produz precisa cair na via da API.
+    """
+
+    ID = "1AbC_dEfGhIjKlMnOpQrStUvWxYz01234"
+
+    def test_link_de_compartilhamento(self):
+        self.assertEqual(
+            aa.id_do_drive(f"https://drive.google.com/file/d/{self.ID}/view?usp=sharing"),
+            self.ID)
+
+    def test_link_sem_parametros(self):
+        self.assertEqual(
+            aa.id_do_drive(f"https://drive.google.com/file/d/{self.ID}/view"),
+            self.ID)
+
+    def test_link_de_documento_do_google(self):
+        self.assertEqual(
+            aa.id_do_drive(f"https://docs.google.com/document/d/{self.ID}/edit"),
+            self.ID)
+
+    def test_link_de_planilha(self):
+        self.assertEqual(
+            aa.id_do_drive(f"https://docs.google.com/spreadsheets/d/{self.ID}/edit#gid=0"),
+            self.ID)
+
+    def test_link_de_download_direto(self):
+        self.assertEqual(
+            aa.id_do_drive(f"https://drive.google.com/uc?export=download&id={self.ID}"),
+            self.ID)
+
+    def test_link_open(self):
+        self.assertEqual(
+            aa.id_do_drive(f"https://drive.google.com/open?id={self.ID}"),
+            self.ID)
+
+    def test_id_solto(self):
+        self.assertEqual(aa.id_do_drive(self.ID), self.ID)
+
+    def test_url_que_nao_e_do_drive_nao_e_confundida(self):
+        """Link comum tem de continuar indo pelo GET, senao a via `url` morre."""
+        for url in ("https://exemplo.com/nota.pdf",
+                    "https://exemplo.com/file/d/abc/view",
+                    "https://storage.googleapis.com/bucket/x.jpg"):
+            self.assertIsNone(aa.id_do_drive(url), url)
+
+    def test_vazio_e_lixo(self):
+        for valor in ("", None, "   ", "arquivo.pdf", "abc"):
+            self.assertIsNone(aa.id_do_drive(valor))
+
+
+class TestConteudoVindoDoDrive(unittest.TestCase):
+    """Download conferido contra os metadados do proprio Drive."""
+
+    ID = "1AbC_dEfGhIjKlMnOpQrStUvWxYz01234"
+
+    def _servico(self, dados: bytes, meta: dict):
+        """Servico do Drive de mentira, so com o que `_do_drive` usa."""
+        import hashlib
+
+        completo = {
+            "id": self.ID, "name": "cartao.jpg", "mimeType": "image/jpeg",
+            "size": str(len(dados)), "md5Checksum": hashlib.md5(dados).hexdigest(),
+            "trashed": False,
+        }
+        completo.update(meta)
+
+        class _Exec:
+            def __init__(self, valor):
+                self._v = valor
+
+            def execute(self):
+                return self._v
+
+        class _Files:
+            def get(self, **kwargs):
+                return _Exec(completo)
+
+            def get_media(self, **kwargs):
+                return dados
+
+            def export_media(self, **kwargs):
+                return dados
+
+        class _Servico:
+            def files(self):
+                return _Files()
+
+        return _Servico()
+
+    def _rodar(self, dados: bytes, meta: dict = None, args: dict = None):
+        """Executa `_do_drive` com o servico falso e um downloader trivial."""
+        import sys
+        import types
+
+        servico = self._servico(dados, meta or {})
+
+        class _Baixador:
+            def __init__(self, buffer, pedido, chunksize=None):
+                self._buffer = buffer
+                self._pedido = pedido
+
+            def next_chunk(self):
+                self._buffer.write(self._pedido if isinstance(self._pedido, bytes) else b"")
+                return None, True
+
+        modulo_http = types.ModuleType("googleapiclient.http")
+        modulo_http.MediaIoBaseDownload = _Baixador
+        modulo_pai = types.ModuleType("googleapiclient")
+        modulo_pai.http = modulo_http
+        modulo_main = types.ModuleType("main")
+        modulo_main.get_drive_service = lambda: servico
+
+        antigos = {n: sys.modules.get(n) for n in
+                   ("googleapiclient", "googleapiclient.http", "main")}
+        sys.modules["googleapiclient"] = modulo_pai
+        sys.modules["googleapiclient.http"] = modulo_http
+        sys.modules["main"] = modulo_main
+        try:
+            return aa._do_drive(args or {"drive_file_id": self.ID})
+        finally:
+            for nome, valor in antigos.items():
+                if valor is None:
+                    sys.modules.pop(nome, None)
+                else:
+                    sys.modules[nome] = valor
+
+    def test_baixa_e_devolve_nome_do_drive(self):
+        dados, nome = self._rodar(b"conteudo real do arquivo")
+        self.assertEqual(dados, b"conteudo real do arquivo")
+        self.assertEqual(nome, "cartao.jpg")
+
+    def test_tamanho_divergente_e_recusado(self):
+        """Download truncado nao pode virar anexo silencioso."""
+        with self.assertRaises(ValueError) as erro:
+            self._rodar(b"12345", {"size": "999"})
+        self.assertIn("incompleto", str(erro.exception))
+
+    def test_checksum_divergente_e_recusado(self):
+        with self.assertRaises(ValueError) as erro:
+            self._rodar(b"12345", {"md5Checksum": "0" * 32})
+        self.assertIn("Checksum", str(erro.exception))
+
+    def test_arquivo_na_lixeira_e_recusado(self):
+        with self.assertRaises(ValueError) as erro:
+            self._rodar(b"x", {"trashed": True})
+        self.assertIn("lixeira", str(erro.exception))
+
+    def test_arquivo_vazio_e_recusado(self):
+        with self.assertRaises(ValueError):
+            self._rodar(b"", {"size": "0", "md5Checksum": ""})
+
+    def test_acima_do_teto_e_recusado_antes_de_baixar(self):
+        with self.assertRaises(ValueError) as erro:
+            self._rodar(b"x", {"size": str(aa.MAX_BYTES + 1)})
+        self.assertIn("excede", str(erro.exception))
+
+    def test_documento_nativo_e_exportado_com_extensao(self):
+        _, nome = self._rodar(b"%PDF-1.4 fake", {
+            "mimeType": "application/vnd.google-apps.document",
+            "name": "Minuta do contrato", "size": None, "md5Checksum": None})
+        self.assertEqual(nome, "Minuta do contrato.pdf")
+
+    def test_nativo_sem_exportacao_e_recusado_com_motivo(self):
+        with self.assertRaises(ValueError) as erro:
+            self._rodar(b"x", {"mimeType": "application/vnd.google-apps.form",
+                               "size": None, "md5Checksum": None})
+        self.assertIn("nativo", str(erro.exception))
+
+    def test_sem_id_reconhecivel_orienta(self):
+        with self.assertRaises(ValueError) as erro:
+            self._rodar(b"x", args={"drive_file_id": "nao-e-id"})
+        self.assertIn("drive_file_id", str(erro.exception))
+
+    def test_link_do_drive_no_campo_url_tambem_funciona(self):
+        dados, _ = self._rodar(
+            b"abc", args={"url": f"https://drive.google.com/file/d/{self.ID}/view"})
+        self.assertEqual(dados, b"abc")
+
+
 if __name__ == "__main__":
     unittest.main()
