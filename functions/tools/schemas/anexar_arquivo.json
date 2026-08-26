@@ -1,0 +1,38 @@
+{
+  "name": "anexar_arquivo",
+  "description": "Anexa um arquivo a uma ação: grava no Drive, vincula ao pool de dados da ação e escreve a entrada no diário de bordo — tudo numa chamada. Use para comprovação documental (recibo, nota fiscal, cartão de embarque, PDF de processo), em que o dado transcrito não substitui o documento.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "ID da ação à qual anexar. Se omitido, usa a ação em contexto"
+      },
+      "conteudo_base64": {
+        "type": "string",
+        "description": "Conteúdo do arquivo em base64. Exige 'nome'. Limite de 6 MB — acima disso use url ou gmail_message_id, que buscam o arquivo sem passá-lo pela conversa"
+      },
+      "nome": {
+        "type": "string",
+        "description": "Nome do arquivo com extensão (ex: 'recibo-hotel.pdf'). Obrigatório com conteudo_base64"
+      },
+      "url": {
+        "type": "string",
+        "description": "URL http(s) de onde o Hermes baixa o arquivo. Preferível a base64: nenhum byte passa pelo modelo"
+      },
+      "gmail_message_id": {
+        "type": "string",
+        "description": "ID da mensagem do Gmail de onde puxar o anexo diretamente. Nenhum byte passa pelo modelo"
+      },
+      "nome_anexo": {
+        "type": "string",
+        "description": "Filtra qual anexo da mensagem usar, por parte do nome. Só com gmail_message_id"
+      },
+      "descricao": {
+        "type": "string",
+        "description": "Texto opcional gravado no diário junto com o anexo, explicando o que é o documento"
+      }
+    },
+    "required": []
+  }
+}

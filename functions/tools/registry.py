@@ -73,6 +73,9 @@ _CATALOG: dict[str, str] = {
     "obter_estado_atual": "Panorama do dia numa chamada: acoes, agenda, janelas livres e pendencias",
     # Fatura de cartao: o que um boleto nao tem — em que se gastou e o que
     # ja esta comprometido nos meses seguintes.
+    # Ingestao de arquivo: sem ela, anexo so entrava por link de algo que ja
+    # estava no Drive, e comprovante nascido fora dele ficava orfao.
+    "anexar_arquivo": "Anexa um arquivo a uma acao: grava no Drive, vincula e escreve no diario",
     "consultar_fatura_cartao": "Consulta os lancamentos da fatura do cartao, com total por estabelecimento",
     "consultar_compromissos_futuros": "Projeta quanto de cada mes futuro ja esta comprometido por compras parceladas",
 }
@@ -102,6 +105,7 @@ _NEEDS_CONFIRMATION: set[str] = {
     "acompanhar_processo_sipac",
     "gerar_imagem",
     # Escrita direta, para canais sem card de confirmacao.
+    "anexar_arquivo",
     "editar_acao",
     "editar_acoes_em_lote",
     "reagendar_acoes_em_lote",

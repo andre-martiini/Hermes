@@ -1314,6 +1314,13 @@ def reagendar_acoes_em_lote(ctx: ToolContext, args: dict):
     return resultado
 
 
+def anexar_arquivo(ctx: ToolContext, args: dict):
+    """Sobe um arquivo para o Drive e vincula a uma acao, numa chamada so."""
+    from tools.anexar_arquivo import anexar
+
+    return anexar(ctx, args)
+
+
 def consultar_fatura_cartao(ctx: ToolContext, args: dict):
     """Lancamentos da fatura de cartao, com total por estabelecimento."""
     from fatura_cartao import consultar
@@ -1412,6 +1419,7 @@ _HANDLERS: dict = {
     "editar_acoes_em_lote": editar_acoes_em_lote,
     "reagendar_acoes_em_lote": reagendar_acoes_em_lote,
     "obter_estado_atual": obter_estado_atual,
+    "anexar_arquivo": anexar_arquivo,
     "consultar_fatura_cartao": consultar_fatura_cartao,
     "consultar_compromissos_futuros": consultar_compromissos_futuros,
 }
