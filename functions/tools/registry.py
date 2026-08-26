@@ -76,6 +76,8 @@ _CATALOG: dict[str, str] = {
     # Ingestao de arquivo: sem ela, anexo so entrava por link de algo que ja
     # estava no Drive, e comprovante nascido fora dele ficava orfao.
     "anexar_arquivo": "Anexa um arquivo a uma acao: grava no Drive, vincula e escreve no diario",
+    "preparar_upload": "Devolve URL assinada para subir arquivo local sem passa-lo pela conversa",
+    "remover_anexo": "Remove um anexo da acao, preservando a trilha de auditoria do diario",
     "consultar_fatura_cartao": "Consulta os lancamentos da fatura do cartao, com total por estabelecimento",
     "consultar_compromissos_futuros": "Projeta quanto de cada mes futuro ja esta comprometido por compras parceladas",
 }
@@ -106,6 +108,7 @@ _NEEDS_CONFIRMATION: set[str] = {
     "gerar_imagem",
     # Escrita direta, para canais sem card de confirmacao.
     "anexar_arquivo",
+    "remover_anexo",
     "editar_acao",
     "editar_acoes_em_lote",
     "reagendar_acoes_em_lote",

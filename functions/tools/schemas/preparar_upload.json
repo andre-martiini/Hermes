@@ -1,0 +1,26 @@
+{
+  "name": "preparar_upload",
+  "description": "Devolve uma URL assinada para subir um arquivo local direto ao storage, sem passá-lo pela conversa. É o caminho correto para qualquer arquivo real: não gasta token, não tem teto de mensagem e o conteúdo não depende do modelo reproduzi-lo. Depois chame anexar_arquivo com o upload_token.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "nome": {
+        "type": "string",
+        "description": "Nome do arquivo com extensão"
+      },
+      "tamanho_bytes": {
+        "type": "integer",
+        "description": "Tamanho exato do arquivo em bytes (ex.: stat -c %s arquivo)"
+      },
+      "sha256": {
+        "type": "string",
+        "description": "SHA-256 do arquivo em hex, 64 caracteres (ex.: sha256sum arquivo). Conferido no anexar_arquivo"
+      }
+    },
+    "required": [
+      "nome",
+      "tamanho_bytes",
+      "sha256"
+    ]
+  }
+}

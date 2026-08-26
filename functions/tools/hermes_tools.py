@@ -1321,6 +1321,23 @@ def anexar_arquivo(ctx: ToolContext, args: dict):
     return anexar(ctx, args)
 
 
+def preparar_upload(ctx: ToolContext, args: dict):
+    """URL assinada para subir um arquivo local sem passa-lo pela conversa."""
+    from tools.anexar_arquivo import preparar_upload as _preparar
+
+    try:
+        return _preparar(ctx, args)
+    except ValueError as exc:
+        return {"erro": str(exc)}
+
+
+def remover_anexo(ctx: ToolContext, args: dict):
+    """Remove um anexo da acao, preservando a trilha de auditoria do diario."""
+    from tools.anexar_arquivo import remover_anexo as _remover
+
+    return _remover(ctx, args)
+
+
 def consultar_fatura_cartao(ctx: ToolContext, args: dict):
     """Lancamentos da fatura de cartao, com total por estabelecimento."""
     from fatura_cartao import consultar
@@ -1420,6 +1437,8 @@ _HANDLERS: dict = {
     "reagendar_acoes_em_lote": reagendar_acoes_em_lote,
     "obter_estado_atual": obter_estado_atual,
     "anexar_arquivo": anexar_arquivo,
+    "preparar_upload": preparar_upload,
+    "remover_anexo": remover_anexo,
     "consultar_fatura_cartao": consultar_fatura_cartao,
     "consultar_compromissos_futuros": consultar_compromissos_futuros,
 }

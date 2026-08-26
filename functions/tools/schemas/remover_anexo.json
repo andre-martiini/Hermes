@@ -1,0 +1,25 @@
+{
+  "name": "remover_anexo",
+  "description": "Remove um anexo de uma ação: manda o arquivo para a lixeira do Drive, tira do pool de dados e grava nota de retificação no diário. A entrada original do diário é preservada — é trilha de auditoria.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "ID da ação. Se omitido, usa a ação em contexto"
+      },
+      "pool_item_id": {
+        "type": "string",
+        "description": "ID do item no pool_dados da ação (campo 'id')"
+      },
+      "motivo": {
+        "type": "string",
+        "description": "Por que está sendo removido. Vai para a trilha de auditoria"
+      }
+    },
+    "required": [
+      "pool_item_id",
+      "motivo"
+    ]
+  }
+}

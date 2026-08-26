@@ -1,6 +1,6 @@
 {
   "name": "anexar_arquivo",
-  "description": "Anexa um arquivo a uma ação: grava no Drive, vincula ao pool de dados da ação e escreve a entrada no diário de bordo — tudo numa chamada. Use para comprovação documental (recibo, nota fiscal, cartão de embarque, PDF de processo), em que o dado transcrito não substitui o documento.",
+  "description": "Anexa um arquivo a uma ação: grava no Drive, vincula ao pool de dados e escreve no diário — numa chamada. Para arquivo local use preparar_upload primeiro e passe o upload_token; é a única via que não depende do conteúdo atravessar a conversa.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -10,7 +10,7 @@
       },
       "conteudo_base64": {
         "type": "string",
-        "description": "Conteúdo do arquivo em base64. Exige 'nome'. Limite de 6 MB — acima disso use url ou gmail_message_id, que buscam o arquivo sem passá-lo pela conversa"
+        "description": "Conteúdo em base64. Só para arquivo PEQUENO (< 100 KB): payloads maiores são truncados em trânsito, e o truncamento é silencioso sem sha256. Exige nome, tamanho_bytes e sha256. Para qualquer arquivo real use preparar_upload, url ou gmail_message_id"
       },
       "nome": {
         "type": "string",
@@ -31,6 +31,18 @@
       "descricao": {
         "type": "string",
         "description": "Texto opcional gravado no diário junto com o anexo, explicando o que é o documento"
+      },
+      "upload_token": {
+        "type": "string",
+        "description": "Token devolvido por preparar_upload, após o PUT do arquivo. VIA PREFERIDA para arquivo local: o conteúdo não passa pela conversa"
+      },
+      "tamanho_bytes": {
+        "type": "integer",
+        "description": "Tamanho exato do arquivo em bytes. OBRIGATÓRIO com conteudo_base64. Calcule do arquivo de origem, nunca do texto base64"
+      },
+      "sha256": {
+        "type": "string",
+        "description": "SHA-256 do arquivo em hex. OBRIGATÓRIO com conteudo_base64. Sem ele um payload truncado grava sem erro"
       }
     },
     "required": []

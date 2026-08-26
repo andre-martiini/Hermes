@@ -20,27 +20,60 @@ esse trabalho.
 Este modulo faz o caminho inteiro: recebe o arquivo, grava no Drive, registra em
 `pool_dados` da acao e escreve a entrada de diario no formato que a UI ja le.
 
-## Sobre de onde o binario vem
+## Por que `conteudo_base64` exige checksum
 
-`conteudo_base64` funciona em qualquer cliente, mas o binario atravessa a
-conversa: e caro em token e limitado pelo tamanho da mensagem. Por isso existem
-as fontes por referencia — `url` e `gmail_message_id` —, em que o Hermes busca o
-arquivo por conta propria e nenhum byte passa pelo modelo. Quando a origem ja e
-alcancavel pelo backend, essa e sempre a via melhor.
+A primeira versao aceitava base64 solto. Um cartao de embarque de 11 KB chegou
+com 1,2 KB, gravou no Drive e devolveu `status: ok`. O arquivo entrou numa
+prestacao de contas como comprovante e nao servia para nada.
+
+A causa nao e o transporte: e que base64 e ruido de alta entropia e um LLM nao
+reproduz milhares de caracteres aleatorios verbatim — ele encurta e produz algo
+plausivel. O corte calhou de cair em multiplo de 4 e de terminar em `FF D9`, o
+marcador de fim de JPEG, entao passou por validacao sintatica.
+
+Inspecao de conteudo tambem nao salva: testado no arquivo corrompido real,
+`PIL.Image.verify()` E `load()` aceitaram os 1,2 KB como JPEG valido de 230x468.
+O corte formou uma imagem decodificavel, menor. Nao ha como um validador
+distinguir "imagem pequena" de "imagem truncada" sem saber o que era esperado.
+
+Por isso `tamanho_bytes` e `sha256` sao **obrigatorios** com `conteudo_base64`.
+Eles vem do arquivo de origem, calculados por quem tem o arquivo — nao pelo
+modelo lendo o conteudo. Se o payload chegar truncado, o tamanho nao bate; se
+chegar alterado, o digest nao bate. Um modelo que alucine tambem o checksum
+falha, porque a chance de o digest inventado casar com o base64 inventado e
+nula. O ganho nao e impedir o erro: e faze-lo alto em vez de silencioso.
+
+## As vias sem bytes pelo modelo
+
+`url`, `gmail_message_id` e `upload_token` nao passam o arquivo pela conversa —
+o Hermes busca por conta propria. Sao sempre preferiveis. `preparar_upload`
+devolve uma URL assinada para o cliente subir o arquivo direto, fora da conversa,
+e funciona para qualquer tamanho.
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import mimetypes
+import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-# O corpo de uma requisicao a Cloud Function tem teto, e base64 infla o binario
-# em ~33%. Acima disto a via correta e `url` ou `gmail_message_id`, que nao
-# passam o arquivo pelo modelo.
+# Teto do que o backend aceita por qualquer via.
 MAX_BYTES = 6 * 1024 * 1024
+
+# Teto especifico do base64. O parametro e cortado em torno de 16 KiB de string
+# antes de chegar aqui — o limite anunciado de 6 MB era inalcancavel por essa
+# via, e anunciar limite que nao existe empurra o usuario para o caminho que
+# corrompe. 100 KB de binario ja excede o corte de transporte com folga, e serve
+# so para a mensagem de erro sair antes de qualquer escrita.
+MAX_BYTES_BASE64 = 100 * 1024
+
+# Janela da URL assinada de upload. Curta porque quem sobe e o cliente, na hora.
+UPLOAD_TTL_MIN = 15
+COL_UPLOADS = "uploads_pendentes"
 
 PASTA_ANEXOS = "Anexos do Copiloto"
 
@@ -80,18 +113,53 @@ def _pasta_de_anexos(service, db) -> str | None:
 # --------------------------------------------------------------------------
 
 def _de_base64(args: dict) -> tuple[bytes, str]:
-    bruto = args.get("conteudo_base64") or ""
+    # `strip()` antes de tudo: um `\n` no fim disparava
+    # "Only base64 data is allowed", erro que nao diz o que fazer.
+    bruto = "".join((args.get("conteudo_base64") or "").split())
     nome = str(args.get("nome") or "").strip()
     if not nome:
         raise ValueError("`nome` e obrigatorio quando o arquivo vem em conteudo_base64.")
+
+    esperado_bytes = args.get("tamanho_bytes")
+    esperado_hash = str(args.get("sha256") or "").strip().lower()
+    if esperado_bytes in (None, "") or not esperado_hash:
+        raise ValueError(
+            "`tamanho_bytes` e `sha256` sao obrigatorios com conteudo_base64. "
+            "Calcule-os do arquivo de origem (ex.: `sha256sum` e `stat`), nunca "
+            "a partir do texto base64. Sem eles nao ha como distinguir o arquivo "
+            "inteiro de um truncado — e um truncado grava sem erro. "
+            "Para arquivo real, prefira `url`, `gmail_message_id` ou "
+            "`preparar_upload`, que nao passam o conteudo pela conversa."
+        )
+
     try:
-        # `validate=True`: base64 truncado pela mensagem falha aqui, alto e claro,
-        # em vez de virar um arquivo corrompido no Drive.
         dados = base64.b64decode(bruto, validate=True)
     except Exception as exc:
-        raise ValueError(f"conteudo_base64 invalido ou truncado: {exc}") from exc
+        raise ValueError(f"conteudo_base64 invalido: {exc}") from exc
     if not dados:
         raise ValueError("conteudo_base64 vazio.")
+
+    # Estas duas checagens sao a unica defesa real. `validate=True` so pega
+    # truncamento que quebra alfabeto ou padding; um corte limpo em multiplo de 4
+    # passa. Foi assim que 11 KB viraram 1,2 KB com `status: ok`.
+    try:
+        esperado_bytes = int(esperado_bytes)
+    except (TypeError, ValueError):
+        raise ValueError(f"`tamanho_bytes` precisa ser um inteiro, veio {esperado_bytes!r}")
+
+    if len(dados) != esperado_bytes:
+        raise ValueError(
+            f"payload truncado: chegaram {len(dados)} bytes, esperados "
+            f"{esperado_bytes}. O conteudo foi cortado no caminho — base64 acima "
+            "de poucos KB nao atravessa a conversa intacto. Use `preparar_upload`."
+        )
+
+    obtido = hashlib.sha256(dados).hexdigest()
+    if obtido != esperado_hash:
+        raise ValueError(
+            f"checksum nao confere: sha256 recebido {esperado_hash[:16]}..., "
+            f"calculado {obtido[:16]}.... O conteudo chegou alterado."
+        )
     return dados, nome
 
 
@@ -152,16 +220,74 @@ def _do_gmail(args: dict) -> tuple[bytes, str]:
     return encontrado[0]
 
 
-def _resolver_conteudo(args: dict) -> tuple[bytes, str]:
-    if args.get("conteudo_base64"):
+def _do_upload_token(ctx, args: dict) -> tuple[bytes, str]:
+    """Le o arquivo que o cliente subiu pela URL assinada de `preparar_upload`.
+
+    O binario foi de PUT direto ao Storage, fora da conversa. Aqui so se confere
+    tamanho e digest contra o que foi declarado na preparacao, e se le.
+    """
+    from firebase_admin import storage
+
+    token = str(args.get("upload_token") or "").strip()
+    snap = ctx.db.collection(COL_UPLOADS).document(token).get() if token else None
+    if not snap or not snap.exists:
+        raise ValueError(f"upload_token '{token}' desconhecido ou ja consumido.")
+
+    reserva = snap.to_dict() or {}
+    if reserva.get("uid") != ctx.user_uid:
+        raise ValueError(f"upload_token '{token}' desconhecido ou ja consumido.")
+    if reserva.get("expira_em", "") < datetime.now(timezone.utc).isoformat():
+        raise ValueError("upload_token expirado. Chame preparar_upload de novo.")
+
+    blob = storage.bucket().blob(reserva["caminho"])
+    if not blob.exists():
+        raise ValueError(
+            "Nada foi enviado para a URL assinada ainda. Faca o PUT do arquivo "
+            "antes de chamar anexar_arquivo com este upload_token."
+        )
+    dados = blob.download_as_bytes()
+
+    # Mesma conferencia da via base64: o que chegou tem de ser o que foi
+    # declarado. Aqui o transporte e confiavel, mas a checagem custa nada e pega
+    # upload parcial ou arquivo trocado.
+    if len(dados) != reserva["tamanho_bytes"]:
+        raise ValueError(
+            f"upload incompleto: {len(dados)} bytes no storage, "
+            f"{reserva['tamanho_bytes']} declarados em preparar_upload.")
+    obtido = hashlib.sha256(dados).hexdigest()
+    if obtido != reserva["sha256"]:
+        raise ValueError(
+            f"checksum nao confere: declarado {reserva['sha256'][:16]}..., "
+            f"calculado {obtido[:16]}...")
+
+    # Some da area de espera: o token e de uso unico.
+    try:
+        blob.delete()
+    except Exception as exc:
+        print(f"[anexar_arquivo] Falha ao limpar staging {reserva['caminho']}: {exc}")
+    snap.reference.delete()
+    return dados, reserva["nome"]
+
+
+def _resolver_conteudo(ctx, args: dict) -> tuple[bytes, str]:
+    if args.get("upload_token"):
+        dados, nome = _do_upload_token(ctx, args)
+    elif args.get("conteudo_base64"):
         dados, nome = _de_base64(args)
+        if len(dados) > MAX_BYTES_BASE64:
+            raise ValueError(
+                f"Arquivo de {len(dados) // 1024} KB e grande demais para a via "
+                f"base64 (teto de {MAX_BYTES_BASE64 // 1024} KB). Use "
+                "`preparar_upload`, `url` ou `gmail_message_id`.")
     elif args.get("url"):
         dados, nome = _de_url(args)
     elif args.get("gmail_message_id"):
         dados, nome = _do_gmail(args)
     else:
         raise ValueError(
-            "Informe uma origem: conteudo_base64 (+nome), url ou gmail_message_id.")
+            "Informe uma origem: upload_token (via preparar_upload, a melhor para "
+            "arquivo local), url, gmail_message_id, ou conteudo_base64 "
+            "(+nome, tamanho_bytes e sha256; so para arquivo pequeno).")
 
     if len(dados) > MAX_BYTES:
         raise ValueError(
@@ -191,7 +317,7 @@ def anexar(ctx, args: dict) -> dict:
         return {"erro": f"Acao '{task_id}' nao encontrada."}
 
     try:
-        dados, nome = _resolver_conteudo(args)
+        dados, nome = _resolver_conteudo(ctx, args)
     except ValueError as exc:
         return {"erro": str(exc)}
 
@@ -236,13 +362,24 @@ def anexar(ctx, args: dict) -> dict:
     }
     nota = "FILE::JSON::" + _json.dumps({"n": nome, "v": link}, ensure_ascii=False)
 
-    atualizacao = {"pool_dados": firestore.ArrayUnion([item])}
     entradas = [{"data": agora, "nota": nota}]
     descricao = str(args.get("descricao") or "").strip()
     if descricao:
         entradas.append({"data": agora, "nota": descricao})
-    atualizacao["acompanhamento"] = firestore.ArrayUnion(entradas)
-    task_ref.update(atualizacao)
+
+    try:
+        task_ref.update({
+            "pool_dados": firestore.ArrayUnion([item]),
+            "acompanhamento": firestore.ArrayUnion(entradas),
+        })
+    except Exception as exc:  # noqa: BLE001
+        # Sem isto o arquivo ficaria no Drive sem estar vinculado a nada —
+        # invisivel na acao e impossivel de achar depois.
+        try:
+            service.files().update(fileId=arquivo["id"], body={"trashed": True}).execute()
+        except Exception as limpeza:
+            print(f"[anexar_arquivo] Orfao em {arquivo['id']}, limpeza falhou: {limpeza}")
+        return {"erro": f"Falha ao vincular a acao (upload revertido): {exc}"}
 
     return {
         "status": "ok",
@@ -253,4 +390,133 @@ def anexar(ctx, args: dict) -> dict:
         "tamanho_kb": round(len(dados) / 1024, 1),
         "nota_diario": nota,
         "pool_item_id": item["id"],
+    }
+
+
+# --------------------------------------------------------------------------
+# Upload sem passar o arquivo pela conversa
+# --------------------------------------------------------------------------
+
+def preparar_upload(ctx, args: dict) -> dict:
+    """Devolve uma URL assinada para o cliente subir o arquivo direto.
+
+    Este e o caminho certo para arquivo local. O binario vai de PUT ao Storage,
+    fora da conversa: nao gasta token, nao tem teto de mensagem e nao depende de
+    o modelo reproduzir milhares de caracteres verbatim — que e onde a via
+    base64 quebra.
+
+    `tamanho_bytes` e `sha256` sao registrados agora e conferidos depois, quando
+    `anexar_arquivo` for chamada com o `upload_token`.
+    """
+    from firebase_admin import storage
+
+    nome = str(args.get("nome") or "").strip()
+    if not nome:
+        raise ValueError("`nome` e obrigatorio.")
+    try:
+        tamanho = int(args.get("tamanho_bytes"))
+    except (TypeError, ValueError):
+        raise ValueError("`tamanho_bytes` e obrigatorio e precisa ser inteiro.")
+    sha = str(args.get("sha256") or "").strip().lower()
+    if len(sha) != 64:
+        raise ValueError("`sha256` e obrigatorio: hex digest de 64 caracteres do arquivo.")
+    if tamanho > MAX_BYTES:
+        raise ValueError(f"Arquivo excede o teto de {MAX_BYTES // 1024 // 1024} MB.")
+
+    token = f"upl-{secrets.token_urlsafe(16)}"
+    caminho = f"uploads_mcp/{ctx.user_uid}/{token}/{nome}"
+    mime = _mime_de(nome)
+
+    url = storage.bucket().blob(caminho).generate_signed_url(
+        version="v4",
+        expiration=timedelta(minutes=UPLOAD_TTL_MIN),
+        method="PUT",
+        content_type=mime,
+    )
+
+    expira = (datetime.now(timezone.utc) + timedelta(minutes=UPLOAD_TTL_MIN)).isoformat()
+    ctx.db.collection(COL_UPLOADS).document(token).set({
+        "uid": ctx.user_uid,
+        "nome": nome,
+        "caminho": caminho,
+        "tamanho_bytes": tamanho,
+        "sha256": sha,
+        "mime": mime,
+        "criado_em": datetime.now(timezone.utc).isoformat(),
+        "expira_em": expira,
+    })
+
+    return {
+        "upload_token": token,
+        "upload_url": url,
+        "metodo": "PUT",
+        "content_type": mime,
+        "expira_em": expira,
+        "instrucao": (
+            f"Suba o arquivo com: curl -X PUT -H 'Content-Type: {mime}' "
+            f"--data-binary @ARQUIVO '<upload_url>'. Depois chame anexar_arquivo "
+            f"com upload_token='{token}' e o task_id."
+        ),
+    }
+
+
+def remover_anexo(ctx, args: dict) -> dict:
+    """Remove um anexo da acao e manda o arquivo para a lixeira do Drive.
+
+    A entrada original do diario NAO e apagada: numa prestacao de contas ela e
+    trilha de auditoria, e sumir com ela esconde que houve um erro. Entra uma
+    nota de retificacao ao lado, dizendo o que foi removido e por que.
+
+    O arquivo vai para a lixeira, nao para exclusao definitiva — anexo removido
+    por engano ainda da para recuperar por 30 dias.
+    """
+    from firebase_admin import firestore
+
+    from main import get_drive_service
+
+    task_id = str(args.get("task_id") or ctx.task_id or "").strip()
+    pool_item_id = str(args.get("pool_item_id") or "").strip()
+    motivo = str(args.get("motivo") or "").strip()
+    if not task_id or not pool_item_id:
+        return {"erro": "Informe task_id e pool_item_id."}
+    if not motivo:
+        return {"erro": "Informe o `motivo` da remocao: ele vai para a trilha de auditoria."}
+
+    task_ref = ctx.db.collection("tarefas").document(task_id)
+    snap = task_ref.get()
+    if not snap.exists:
+        return {"erro": f"Acao '{task_id}' nao encontrada."}
+
+    item = next((i for i in (snap.to_dict() or {}).get("pool_dados") or []
+                 if i.get("id") == pool_item_id), None)
+    if not item:
+        return {"erro": f"Anexo '{pool_item_id}' nao esta no pool da acao {task_id}."}
+
+    drive_id = item.get("drive_file_id")
+    lixeira = None
+    if drive_id:
+        try:
+            get_drive_service().files().update(
+                fileId=drive_id, body={"trashed": True}).execute()
+            lixeira = True
+        except Exception as exc:  # noqa: BLE001
+            lixeira = False
+            print(f"[anexar_arquivo] Falha ao mandar {drive_id} para a lixeira: {exc}")
+
+    agora = datetime.now(timezone.utc).isoformat()
+    task_ref.update({
+        "pool_dados": firestore.ArrayRemove([item]),
+        "acompanhamento": firestore.ArrayUnion([{
+            "data": agora,
+            "nota": (f"RETIFICAÇÃO — anexo '{item.get('nome')}' removido em "
+                     f"{agora[:10]}. Motivo: {motivo}"),
+        }]),
+    })
+    return {
+        "status": "ok",
+        "task_id": task_id,
+        "removido": item.get("nome"),
+        "pool_item_id": pool_item_id,
+        "drive_para_lixeira": lixeira,
+        "observacao": "A entrada original do diario foi mantida, com nota de retificacao ao lado.",
     }
