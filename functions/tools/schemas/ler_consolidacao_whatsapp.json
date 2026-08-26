@@ -1,0 +1,26 @@
+{
+  "name": "ler_consolidacao_whatsapp",
+  "description": "Lê uma consolidação inteira (resumo, itens de ação, decisões) por job_id, ou as mais recentes de uma conversa. Também serve para acompanhar o status de uma consolidação em andamento.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "job_id": {
+        "type": "string",
+        "description": "ID devolvido por consolidar_whatsapp"
+      },
+      "chat_id": {
+        "type": "string",
+        "description": "Alternativa ao job_id: traz as consolidações mais recentes desta conversa"
+      },
+      "incluir_transcript": {
+        "type": "boolean",
+        "description": "Inclui o transcript literal da conversa. Padrão false: é o campo mais sensível e o maior"
+      },
+      "limite": {
+        "type": "integer",
+        "description": "Quantas consolidações trazer quando usado com chat_id (padrão 5)"
+      }
+    },
+    "required": []
+  }
+}

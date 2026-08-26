@@ -1,0 +1,31 @@
+{
+  "name": "consolidar_whatsapp",
+  "description": "Consolida um recorte de mensagens de uma conversa monitorada: transcreve áudio e vídeo, monta o transcript literal e sintetiza resumo, itens de ação e decisões. É assíncrona — devolve job_id; busque o resultado com ler_consolidacao_whatsapp.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "chat_id": {
+        "type": "string",
+        "description": "ID da conversa monitorada"
+      },
+      "message_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "IDs das mensagens (campo 'id' de ler_mensagens_whatsapp). Se omitido, usa o período"
+      },
+      "desde": {
+        "type": "string",
+        "description": "YYYY-MM-DD ou ISO — usado quando message_ids é omitido"
+      },
+      "ate": {
+        "type": "string",
+        "description": "YYYY-MM-DD ou ISO — usado quando message_ids é omitido"
+      }
+    },
+    "required": [
+      "chat_id"
+    ]
+  }
+}

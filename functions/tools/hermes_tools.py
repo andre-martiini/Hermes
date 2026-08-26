@@ -1321,6 +1321,22 @@ def anexar_arquivo(ctx: ToolContext, args: dict):
     return anexar(ctx, args)
 
 
+def _whatsapp(nome: str):
+    """Handler das tools de WhatsApp, com a recusa por allowlist virando erro
+    legivel em vez de excecao — o limite e esperado, nao falha."""
+    def handler(ctx: ToolContext, args: dict):
+        from tools import whatsapp_tools
+
+        try:
+            return getattr(whatsapp_tools, nome)(ctx, args)
+        except whatsapp_tools.WhatsAppNaoMonitorado as limite:
+            return {"erro": str(limite), "motivo": "chat_nao_monitorado"}
+        except ValueError as exc:
+            return {"erro": str(exc)}
+
+    return handler
+
+
 def preparar_upload(ctx: ToolContext, args: dict):
     """URL assinada para subir um arquivo local sem passa-lo pela conversa."""
     from tools.anexar_arquivo import preparar_upload as _preparar
@@ -1436,6 +1452,10 @@ _HANDLERS: dict = {
     "editar_acoes_em_lote": editar_acoes_em_lote,
     "reagendar_acoes_em_lote": reagendar_acoes_em_lote,
     "obter_estado_atual": obter_estado_atual,
+    "listar_conversas_whatsapp": _whatsapp("listar_conversas"),
+    "ler_mensagens_whatsapp": _whatsapp("ler_mensagens"),
+    "consolidar_whatsapp": _whatsapp("consolidar"),
+    "ler_consolidacao_whatsapp": _whatsapp("ler_consolidacao"),
     "anexar_arquivo": anexar_arquivo,
     "preparar_upload": preparar_upload,
     "remover_anexo": remover_anexo,

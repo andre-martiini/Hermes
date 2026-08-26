@@ -1,0 +1,28 @@
+{
+  "name": "ler_mensagens_whatsapp",
+  "description": "Lê as mensagens de uma conversa MONITORADA, em ordem cronológica. Use para escolher o recorte antes de consolidar. Áudio e vídeo só têm transcrição depois de consolidados.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "chat_id": {
+        "type": "string",
+        "description": "ID da conversa (de listar_conversas_whatsapp). Precisa estar monitorada"
+      },
+      "desde": {
+        "type": "string",
+        "description": "YYYY-MM-DD ou ISO — início do período"
+      },
+      "ate": {
+        "type": "string",
+        "description": "YYYY-MM-DD ou ISO — fim do período"
+      },
+      "limite": {
+        "type": "integer",
+        "description": "Máximo de mensagens (padrão 80, teto 400)"
+      }
+    },
+    "required": [
+      "chat_id"
+    ]
+  }
+}

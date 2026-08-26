@@ -1,0 +1,18 @@
+{
+  "name": "listar_conversas_whatsapp",
+  "description": "Lista as conversas de WhatsApp conhecidas, marcando quais estão monitoradas. Só conversas monitoradas permitem ler mensagens ou consolidar.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "apenas_monitoradas": {
+        "type": "boolean",
+        "description": "Padrão true. Se false, inclui conversas não monitoradas — aparecem na lista, mas o conteúdo não é acessível"
+      },
+      "limite": {
+        "type": "integer",
+        "description": "Máximo de conversas (padrão 60)"
+      }
+    },
+    "required": []
+  }
+}
