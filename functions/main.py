@@ -68,6 +68,7 @@ from godmode import (  # noqa: F401 — registra as Cloud Functions
 )
 from mcp_server import mcpServer  # noqa: F401 — registra a Cloud Function
 from mcp_oauth import mcpOAuth  # noqa: F401 — registra a Cloud Function
+from mcp_jobs import on_mcp_job_created  # noqa: F401 — registra a Cloud Function
 
 DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 

@@ -203,6 +203,13 @@ def _buscar_contato(ctx: ToolContext, args: dict):
     return {"candidatos": candidatos[:limite]}
 
 
+def _consultar_job(ctx: ToolContext, args: dict):
+    """Resultado de uma tool longa despachada para execucao assincrona."""
+    from mcp_jobs import ler_job
+
+    return ler_job(ctx.user_uid, str(args.get("job_id") or ""))
+
+
 def _calculadora(ctx: ToolContext, args: dict):
     import math
 
@@ -1253,6 +1260,7 @@ _HANDLERS: dict = {
     "buscar_arquivos_acervo": _buscar_arquivos_acervo,
     "buscar_contato": _buscar_contato,
     "calculadora": _calculadora,
+    "consultar_job": _consultar_job,
     "consultar_agenda": _consultar_agenda,
     "encontrar_slot_livre": _encontrar_slot_livre,
     "consultar_saude": _consultar_saude,

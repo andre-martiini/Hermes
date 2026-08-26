@@ -1,0 +1,16 @@
+{
+  "name": "consultar_job",
+  "description": "Busca o resultado de uma tool longa que devolveu status 'processing' e um job_id",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "job_id": {
+        "type": "string",
+        "description": "O job_id devolvido pela tool longa. Se o status ainda for 'processing', consulte de novo em alguns segundos."
+      }
+    },
+    "required": [
+      "job_id"
+    ]
+  }
+}

@@ -62,6 +62,8 @@ _CATALOG: dict[str, str] = {
     "confirmar_edicao_acao": "Aplica de fato a edicao de acao montada por preparar_edicao_acao",
     "confirmar_edicao_em_lote": "Aplica de fato a edicao em lote montada por preparar_edicao_em_lote",
     "confirmar_reagendamento_em_lote": "Aplica de fato o reagendamento em lote montado por preparar_reagendamento_em_lote",
+    # Contraparte das tools longas, que devolvem job_id em vez do resultado.
+    "consultar_job": "Busca o resultado de uma tool longa que devolveu status processing e um job_id",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {

@@ -62,6 +62,22 @@ _access_cache: dict[str, object] | None = None
 # sobrepoe este padrao — inclusive para voltar a exigir confirmacao em tudo.
 _CONFIRMACAO_PADRAO: set[str] = {"schedule_whatsapp_message"}
 
+# Tools que passam de um minuto e por isso nao podem rodar dentro do request.
+#
+# Pela URL direta da funcao ha 300s; pela URL do Hosting — a que Cowork, Desktop
+# e celular usam — o limite e 60s, e o cliente recebe erro de gateway sem
+# explicacao. Em vez de depender de qual rota atendeu, o comportamento e o mesmo
+# nas duas: devolve `job_id` na hora e o trabalho vai para o trigger de 540s.
+#
+# `pesquisar_internet` e `ler_pagina_web` tambem sao _ASYNC_TOOLS no registry,
+# mas os timeouts delas sao 20s e 25s — cabem sincronas, e faze-las assincronas
+# so acrescentaria uma ida e volta ao caso comum.
+_TOOLS_LONGAS: set[str] = {
+    "gerar_relatorio",
+    "ler_documento_na_integra",
+    "buscar_e_analisar_email",
+}
+
 _RATE_LIMIT_MAX_CALLS = 60
 _RATE_LIMIT_WINDOW_SEC = 60
 _rate_limit_hits: dict[str, list[float]] = {}
@@ -361,6 +377,36 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
     # tools que aceitam a acao implicitamente.
     if arguments.get("task_id"):
         ctx.task_id = str(arguments["task_id"])
+
+    # O perfil do usuario era alimentado so por `askCopilotoHermes`. Com a
+    # interacao migrando para clientes MCP, aquele caminho para de ser exercido e
+    # `ai_profile.historico_deduzido` congela — sem erro e sem log. Registrar
+    # aqui mantem o sistema sabendo o que o usuario anda pedindo.
+    try:
+        from mcp_signals import registrar as registrar_sinal
+
+        registrar_sinal(ctx.user_uid, name, arguments, ctx.task_id)
+    except Exception as exc:  # noqa: BLE001 — telemetria nunca derruba a chamada
+        print(f"[mcp_server] Falha ao registrar sinal de intencao: {exc}")
+
+    if name in _TOOLS_LONGAS:
+        from mcp_jobs import criar_job
+
+        job_id = criar_job(
+            ctx.user_uid, name, arguments,
+            session_id=ctx.session_id, task_id=ctx.task_id,
+        )
+        _audit_log(uid=ctx.user_uid, tool=name, arguments=arguments, latency_ms=0.0)
+        return _text_result({
+            "status": "processing",
+            "job_id": job_id,
+            "tool": name,
+            "message": (
+                "Esta tool leva mais de um minuto e roda fora do request. Chame "
+                "consultar_job com este job_id em alguns segundos para pegar o "
+                "resultado; se ainda estiver 'processing', consulte de novo."
+            ),
+        }, is_error=False)
 
     start = time.monotonic()
     is_error = False

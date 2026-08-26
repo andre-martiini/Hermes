@@ -289,5 +289,108 @@ class TestCamadaJsonRpc(unittest.TestCase):
         self.assertEqual(resp.status_code, 204)
 
 
+class TestSinalDeIntencao(unittest.TestCase):
+    """`ai_profile.historico_deduzido` entra no prompt de toda conversa seguinte.
+
+    Por isso ele so pode receber o que o usuario de fato pediu. Encher de passo
+    intermediario do agente degrada o contexto em vez de enriquecer — e degrada
+    em silencio, porque nada falha.
+    """
+
+    def setUp(self):
+        import mcp_signals
+
+        self.sinal = mcp_signals.sinal_de_intencao
+
+    def test_argumento_do_usuario_vira_frase(self):
+        self.assertEqual(
+            self.sinal("consultar_historico_acoes", {"query": "PDP capacitacao"}),
+            "buscou acoes: PDP capacitacao")
+        self.assertEqual(
+            self.sinal("criar_acao_no_sistema", {"titulo": "Enviar declaracao"}),
+            "criou acao: Enviar declaracao")
+
+    def test_tool_sem_texto_livre_ainda_diz_o_assunto(self):
+        self.assertEqual(self.sinal("consultar_agenda", {}), "consultou a agenda")
+
+    def test_passo_intermediario_do_agente_nao_vira_sinal(self):
+        for tool, args in (("calculadora", {"expressao": "2+2"}),
+                           ("consultar_job", {"job_id": "x"}),
+                           ("obter_contexto_tela", {"task_id": "t1"})):
+            self.assertIsNone(self.sinal(tool, args), tool)
+
+    def test_consultar_job_nunca_gera_sinal(self):
+        """Polling repetido inundaria o historico com a mesma entrada."""
+        self.assertIsNone(self.sinal("consultar_job", {"job_id": "abc"}))
+
+    def test_argumento_vazio_nao_gera_sinal(self):
+        self.assertIsNone(self.sinal("consultar_historico_acoes", {"query": "   "}))
+        self.assertIsNone(self.sinal("criar_acao_no_sistema", {}))
+
+    def test_texto_longo_e_truncado(self):
+        texto = self.sinal("registrar_no_diario", {"nota": "x" * 500})
+        self.assertLessEqual(len(texto), 220)
+        self.assertTrue(texto.endswith("..."))
+
+    def test_toda_tool_com_sinal_existe_no_catalogo(self):
+        import mcp_signals
+
+        conhecidas = set(registry._CATALOG)
+        for tool in set(mcp_signals._INTENCAO_POR_TOOL) | set(mcp_signals._INTENCAO_SEM_ARGUMENTO):
+            self.assertIn(tool, conhecidas, f"'{tool}' saiu do catalogo e o sinal ficou orfao")
+
+
+@unittest.skipIf(mcp_server is None, "firebase_functions indisponivel fora do venv de deploy")
+class TestToolsLongas(unittest.TestCase):
+    """Tools acima de um minuto nao podem rodar dentro do request.
+
+    Pela URL do Hosting — a que Cowork, Desktop e celular usam — o corte e 60s, e
+    o cliente recebe erro de gateway sem explicacao.
+    """
+
+    def setUp(self):
+        import inspect
+
+        self.handler = inspect.unwrap(mcp_server.mcpServer)
+        self._auth = mcp_server._authenticate
+        self._rate = mcp_server._check_rate_limit
+        mcp_server._authenticate = lambda req: "uid-de-teste"
+        mcp_server._check_rate_limit = lambda uid: None
+
+    def tearDown(self):
+        mcp_server._authenticate = self._auth
+        mcp_server._check_rate_limit = self._rate
+
+    def test_sao_um_subconjunto_das_async_do_registry(self):
+        self.assertTrue(mcp_server._TOOLS_LONGAS <= registry._ASYNC_TOOLS)
+
+    def test_tem_contraparte_para_buscar_o_resultado(self):
+        self.assertIn("consultar_job", registry.list_mcp_enabled_tools())
+
+    def test_devolve_job_id_em_vez_de_executar(self):
+        from unittest import mock
+
+        with mock.patch("mcp_jobs.criar_job", return_value="mcpjob-teste") as criar:
+            resp = self.handler(_FakeRequest({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {"name": "gerar_relatorio",
+                           "arguments": {"titulo": "Relatorio X", "tipo": "executivo"}},
+            }))
+        payload = json.loads(resp.get_data(as_text=True))
+        conteudo = json.loads(payload["result"]["content"][0]["text"])
+        self.assertEqual(conteudo["status"], "processing")
+        self.assertEqual(conteudo["job_id"], "mcpjob-teste")
+        self.assertFalse(payload["result"]["isError"])
+        criar.assert_called_once()
+
+    def test_tool_curta_continua_sincrona(self):
+        resp = self.handler(_FakeRequest({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": "calculadora", "arguments": {"expressao": "3*3"}},
+        }))
+        payload = json.loads(resp.get_data(as_text=True))
+        self.assertIn("9", payload["result"]["content"][0]["text"])
+
+
 if __name__ == "__main__":
     unittest.main()
