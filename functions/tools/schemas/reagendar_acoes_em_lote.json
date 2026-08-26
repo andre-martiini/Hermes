@@ -1,0 +1,39 @@
+{
+  "name": "reagendar_acoes_em_lote",
+  "description": "Redistribui ações por dias úteis a partir de uma data e já aplica a mudança",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "nova_data_inicio": {
+        "type": "string",
+        "description": "YYYY-MM-DD — primeiro dia a partir do qual redistribuir"
+      },
+      "max_por_semana": {
+        "type": "integer",
+        "description": "Máximo de ações alocadas por semana (padrão 5)"
+      },
+      "estrategia": {
+        "type": "string",
+        "description": "Ordenação: 'data_criacao' (padrão), 'tipo_acao' ou 'alfa'"
+      },
+      "filtro_data": {
+        "type": "string",
+        "description": "YYYY-MM-DD — seleciona ações com data_limite igual a esta data"
+      },
+      "task_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Lista explícita de IDs de ação, alternativa a filtro_data"
+      },
+      "justificativa": {
+        "type": "string",
+        "description": "Frase curta explicando o motivo"
+      }
+    },
+    "required": [
+      "nova_data_inicio"
+    ]
+  }
+}

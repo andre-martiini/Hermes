@@ -64,6 +64,13 @@ _CATALOG: dict[str, str] = {
     "confirmar_reagendamento_em_lote": "Aplica de fato o reagendamento em lote montado por preparar_reagendamento_em_lote",
     # Contraparte das tools longas, que devolvem job_id em vez do resultado.
     "consultar_job": "Busca o resultado de uma tool longa que devolveu status processing e um job_id",
+    # Escrita direta: o par preparar/confirmar existe por causa do card da UI
+    # web, que um cliente MCP nao tem — la o proprio cliente confirma com o
+    # usuario antes de chamar. As `preparar_*` continuam, para a web.
+    "editar_acao": "Edita uma acao diretamente, sem o passo de preparacao",
+    "editar_acoes_em_lote": "Edita varias acoes de uma vez, diretamente",
+    "reagendar_acoes_em_lote": "Redistribui acoes por dias uteis e ja aplica",
+    "obter_estado_atual": "Panorama do dia numa chamada: acoes, agenda, janelas livres e pendencias",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {
@@ -90,6 +97,10 @@ _NEEDS_CONFIRMATION: set[str] = {
     "excluir_objetivo_estrategico",
     "acompanhar_processo_sipac",
     "gerar_imagem",
+    # Escrita direta, para canais sem card de confirmacao.
+    "editar_acao",
+    "editar_acoes_em_lote",
+    "reagendar_acoes_em_lote",
     # Contraparte de gravacao das `preparar_*`: e aqui que a mutacao acontece.
     "confirmar_edicao_acao",
     "confirmar_edicao_em_lote",

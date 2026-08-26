@@ -1245,6 +1245,91 @@ def _map_confirmar_reagendamento(ctx: ToolContext, args: dict):
     }
 
 
+
+# ---------------------------------------------------------------------------
+# 5. Escrita direta — o par preparar/confirmar sem a ida e volta
+# ---------------------------------------------------------------------------
+#
+# `preparar_*` existe porque a UI do Hermes renderiza um card de confirmacao: a
+# proposta e montada, o usuario clica, a callable grava. Num cliente MCP nao ha
+# card — o proprio cliente mostra ao usuario o que vai fazer antes de fazer —
+# entao o par vira duas chamadas para uma acao so.
+#
+# Estas versoes diretas nao afrouxam validacao nenhuma: elas chamam as mesmas
+# callables de gravacao, que revalidam tudo (acao existe, nao esta concluida,
+# campo permitido, status normalizado). O que some e so o passo intermediario.
+# As `preparar_*` continuam existindo para a web.
+
+
+def editar_acao(ctx: ToolContext, args: dict):
+    """Aplica a edicao direto, sem passar por preparar_edicao_acao.
+
+    Sem `snapshot_ts`: aquela checagem protege contra a acao mudar entre a
+    geracao do card e o clique do usuario, e aqui nao ha intervalo nenhum.
+    """
+    return _via_callable("confirmarEdicaoAcao", _map_confirmar_edicao_acao)(ctx, {
+        "task_id": args.get("task_id"),
+        "alteracoes": args.get("alteracoes") or {},
+    })
+
+
+def editar_acoes_em_lote(ctx: ToolContext, args: dict):
+    """Edita varias acoes de uma vez, sem o passo de preparacao.
+
+    `confirmarEdicaoEmLote` aceita tanto o formato cru (campo -> valor) quanto o
+    diff que `preparar_edicao_em_lote` produz, entao os itens passam direto.
+    """
+    return _via_callable("confirmarEdicaoEmLote", _map_confirmar_edicao_em_lote)(ctx, {
+        "items": args.get("itens") or [],
+        "justificativa": args.get("justificativa"),
+    })
+
+
+def reagendar_acoes_em_lote(ctx: ToolContext, args: dict):
+    """Redistribui acoes por dias uteis e ja aplica.
+
+    Aqui a etapa de preparacao NAO e descartada: e ela que faz a conta da
+    distribuicao (respeitando `max_por_semana`, pulando fim de semana). O que se
+    elimina e a volta ao cliente no meio do caminho.
+    """
+    proposta = execute("preparar_reagendamento_em_lote", args, ctx)
+    if isinstance(proposta, str) and proposta.startswith("ERRO|"):
+        return proposta
+
+    try:
+        dados = json.loads(proposta) if isinstance(proposta, str) else proposta
+    except json.JSONDecodeError:
+        return f"ERRO|Resposta inesperada ao preparar o reagendamento: {str(proposta)[:200]}"
+
+    itens = dados.get("items") or []
+    if not itens:
+        return "ERRO|Nenhuma acao para reagendar."
+
+    resultado = _via_callable("confirmarReagendamentoEmLote", _map_confirmar_reagendamento)(ctx, {
+        "items": itens,
+        "justificativa": dados.get("justificativa"),
+    })
+    if isinstance(resultado, dict):
+        resultado["reagendadas"] = len(itens)
+    return resultado
+
+
+def obter_estado_atual(ctx: ToolContext, args: dict):
+    """Panorama do dia numa chamada: acoes, agenda, pendencias, heranca.
+
+    Existe porque toda sessao de um cliente MCP comeca do zero e precisava de
+    tres ou quatro chamadas so para se situar. Reusa o coletor deterministico do
+    resumo matinal, que ja fazia esse trabalho para a tela inicial da web.
+    """
+    from morning_summary import build_morning_summary
+
+    data = str(args.get("data") or "").strip() or None
+    try:
+        return build_morning_summary(ctx.db, data)
+    except Exception as exc:  # noqa: BLE001
+        return {"erro": f"Falha ao montar o estado atual: {exc}"}
+
+
 # ---------------------------------------------------------------------------
 # Registro
 # ---------------------------------------------------------------------------
@@ -1296,6 +1381,12 @@ _HANDLERS: dict = {
     "confirmar_reagendamento_em_lote": _via_callable(
         "confirmarReagendamentoEmLote", _map_confirmar_reagendamento
     ),
+
+    # Escrita direta, sem o passo de preparacao
+    "editar_acao": editar_acao,
+    "editar_acoes_em_lote": editar_acoes_em_lote,
+    "reagendar_acoes_em_lote": reagendar_acoes_em_lote,
+    "obter_estado_atual": obter_estado_atual,
 }
 
 

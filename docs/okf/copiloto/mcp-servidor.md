@@ -19,7 +19,7 @@ vez de cada canal reimplementar as suas.
 
 ## O que está exposto
 
-**53 tools**, todo o catálogo de `functions/tools/registry.py` que tem executor e
+**58 tools**, todo o catálogo de `functions/tools/registry.py` que tem executor e
 schema. `tools/list` publica exatamente o que é chamável — uma tool sem handler
 ou sem schema simplesmente não aparece, em vez de falhar na chamada.
 
@@ -32,17 +32,74 @@ Um resource também é publicado: `hermes://voice-context`, com persona, perfil 
 usuário e memórias recentes — para um cliente externo compor seu system prompt
 com o mesmo contexto que o copiloto web usa.
 
-### O par preparar/confirmar
+### Comece por `obter_estado_atual`
 
-As tools `preparar_*` **não gravam nada**: montam uma proposta que a UI do Hermes
+Toda sessão de um cliente MCP começa do zero. `obter_estado_atual` devolve o dia
+inteiro numa chamada — ações de hoje, herdadas, críticas, agenda, janelas livres e
+pendências — reusando o coletor determinístico do resumo matinal. É o ponto de
+partida indicado nas `instructions` do servidor.
+
+### Escrita: direta, não em dois passos
+
+As tools `preparar_*` **não gravam nada**: montam uma proposta que a UI web
 renderiza como card de confirmação. Quem grava é a callable correspondente,
-acionada quando o usuário clica em confirmar.
+acionada quando o usuário clica.
 
-Um cliente MCP não tem esse card. Por isso as contrapartes de gravação também são
-tools: `confirmar_edicao_acao`, `confirmar_edicao_em_lote` e
-`confirmar_reagendamento_em_lote`. O fluxo correto por MCP é sempre em dois
-passos — preparar, mostrar ao usuário, confirmar. Sem isso a proposta preparada
-morre no ar.
+Um cliente MCP não tem esse card — ele próprio mostra ao usuário o que vai fazer
+antes de fazer. Então o par vira duas chamadas para uma ação só. Por isso existem
+as versões diretas: **`editar_acao`**, **`editar_acoes_em_lote`** e
+**`reagendar_acoes_em_lote`**.
+
+Elas não afrouxam validação: chamam as mesmas callables de gravação, que
+revalidam tudo (ação existe, não está concluída, campo permitido, status
+normalizado). O que some é só o passo intermediário. `reagendar_acoes_em_lote` é o
+caso em que a preparação **não** é descartada — é ela que faz a conta da
+distribuição por dias úteis; o que se elimina é a volta ao cliente no meio.
+
+As `preparar_*` e `confirmar_*` continuam expostas, para a web e para quem quiser
+o fluxo em dois passos explicitamente.
+
+### Tools longas devolvem `job_id`
+
+`gerar_relatorio`, `ler_documento_na_integra` e `buscar_e_analisar_email` passam
+de um minuto. Pela URL do Hosting — a que Cowork, Desktop e celular usam — o corte
+é **60s**, e o cliente receberia erro de gateway sem explicação.
+
+Elas devolvem `{status: "processing", job_id}` na hora; a execução acontece num
+trigger do Firestore com 540s (`functions/mcp_jobs.py`), e `consultar_job` busca o
+resultado. Comportamento igual nas duas rotas, em vez de depender de qual atendeu.
+
+`pesquisar_internet` e `ler_pagina_web` seguem síncronas — timeouts de 20s e 25s
+cabem, e torná-las assíncronas só somaria uma ida e volta ao caso comum.
+
+### POPs viram prompts MCP
+
+Cada POP de `pops_diretrizes` é publicado em `prompts/list`. No copiloto web o POP
+entra sozinho no system prompt quando um gatilho casa com o texto — útil, mas
+invisível e não acionável. Como prompt MCP ele vira algo que você escolhe: o
+procedimento deixa de ser um documento que você precisa lembrar de seguir e passa
+a ser executável. Não há lógica nova, só exposição do que já existia.
+
+### O servidor instrui o modelo
+
+`initialize` devolve `instructions`, que o cliente mostra ao modelo antes da
+primeira mensagem. Cobre o que a lista de tools não diz — em especial **a captura
+de memória**: no copiloto web, salvar um fato durável era subproduto da conversa,
+porque o system prompt mandava. Num cliente MCP só acontece se algo disser para
+acontecer, e sem isso o Hermes para de aprender.
+
+### O perfil continua aprendendo
+
+`ai_profile.historico_deduzido` guarda o que você andou pedindo e volta como
+contexto. Quem alimentava era `askCopilotoHermes` e mais ninguém — com a interação
+migrando para o Claude, aquele caminho deixaria de ser exercido e o perfil
+congelaria sem erro e sem log.
+
+`functions/mcp_signals.py` recupera o sinal do outro lado: não há "prompt do
+usuário" numa chamada de tool, mas os argumentos carregam a intenção. Só tools
+cujo argumento é de fato algo que o usuário disse — passo intermediário do agente
+(calculadora, contexto de tela, polling de job) não vira sinal, porque o histórico
+entra no prompt de toda conversa seguinte e enchê-lo de ruído degrada o contexto.
 
 ## Modelo de segurança
 

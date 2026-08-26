@@ -392,5 +392,59 @@ class TestToolsLongas(unittest.TestCase):
         self.assertIn("9", payload["result"]["content"][0]["text"])
 
 
+@unittest.skipIf(mcp_server is None, "firebase_functions indisponivel fora do venv de deploy")
+class TestInstrucoesDoServidor(unittest.TestCase):
+    """`instructions` do initialize e o unico canal para o que a lista de tools nao diz.
+
+    O ponto critico e a memoria: no copiloto web salvar um fato duravel era
+    subproduto da conversa, porque o system prompt mandava. Num cliente MCP so
+    acontece se algo disser para acontecer.
+    """
+
+    def setUp(self):
+        self.init = mcp_server._handle_initialize({})
+
+    def test_prompts_anunciado_nas_capabilities(self):
+        self.assertIn("prompts", self.init["capabilities"])
+
+    def test_instrui_a_gravar_memoria(self):
+        self.assertIn("salvar_memoria_global", self.init["instructions"])
+
+    def test_instrui_o_ponto_de_partida_e_o_polling(self):
+        for termo in ("obter_estado_atual", "consultar_job", "editar_acao"):
+            self.assertIn(termo, self.init["instructions"], termo)
+
+    def test_prompts_get_sem_nome_e_erro_de_parametro(self):
+        with self.assertRaises(mcp_server.McpError) as ctx:
+            mcp_server._handle_prompts_get({})
+        self.assertEqual(ctx.exception.code, -32602)
+
+
+class TestEscritaDireta(unittest.TestCase):
+    """As `preparar_*` existem pelo card da UI web; o canal MCP nao tem card."""
+
+    DIRETAS = ("editar_acao", "editar_acoes_em_lote", "reagendar_acoes_em_lote")
+
+    def test_expostas(self):
+        habilitadas = set(registry.list_mcp_enabled_tools())
+        for nome in self.DIRETAS:
+            self.assertIn(nome, habilitadas, nome)
+
+    def test_marcadas_como_mutantes(self):
+        """Gravam sem passo intermediario — o cliente precisa saber disso."""
+        for nome in self.DIRETAS:
+            self.assertTrue(registry.needs_confirmation(nome), nome)
+
+    def test_preparar_continua_existindo_para_a_web(self):
+        habilitadas = set(registry.list_mcp_enabled_tools())
+        for nome in ("preparar_edicao_acao", "preparar_edicao_em_lote",
+                     "preparar_reagendamento_em_lote"):
+            self.assertIn(nome, habilitadas, nome)
+
+    def test_estado_atual_e_somente_leitura(self):
+        self.assertIn("obter_estado_atual", registry.list_mcp_enabled_tools())
+        self.assertFalse(registry.needs_confirmation("obter_estado_atual"))
+
+
 if __name__ == "__main__":
     unittest.main()

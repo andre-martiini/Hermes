@@ -1,0 +1,14 @@
+{
+  "name": "obter_estado_atual",
+  "description": "Panorama do dia numa chamada só: ações de hoje, herdadas do dia anterior, críticas, agenda, janelas livres e pendências. Use no início de uma conversa para se situar",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "data": {
+        "type": "string",
+        "description": "YYYY-MM-DD para consultar outro dia. Padrão: hoje"
+      }
+    },
+    "required": []
+  }
+}

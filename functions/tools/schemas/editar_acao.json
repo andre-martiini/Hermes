@@ -1,0 +1,21 @@
+{
+  "name": "editar_acao",
+  "description": "Edita uma ação diretamente, sem o passo de preparação. Para excluir uma ação use alteracoes={\"status\": \"excluído\"}",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "ID da ação a editar"
+      },
+      "alteracoes": {
+        "type": "object",
+        "description": "Mapa campo -> novo valor. Campos aceitos: titulo, descricao, data_limite, prazo_final, horario_inicio, horario_fim, status, tags, area_tematica, tipo_acao, notas"
+      }
+    },
+    "required": [
+      "task_id",
+      "alteracoes"
+    ]
+  }
+}

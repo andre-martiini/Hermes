@@ -1,0 +1,37 @@
+{
+  "name": "editar_acoes_em_lote",
+  "description": "Edita várias ações de uma vez, diretamente, sem o passo de preparação",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "itens": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "description": "ID da ação"
+            },
+            "alteracoes": {
+              "type": "object",
+              "description": "Mapa campo -> novo valor"
+            }
+          },
+          "required": [
+            "task_id",
+            "alteracoes"
+          ]
+        },
+        "description": "Lista de objetos com task_id e alteracoes (mapa campo -> novo valor)"
+      },
+      "justificativa": {
+        "type": "string",
+        "description": "Motivo da edição em lote"
+      }
+    },
+    "required": [
+      "itens"
+    ]
+  }
+}

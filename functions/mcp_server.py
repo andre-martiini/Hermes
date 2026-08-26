@@ -189,6 +189,10 @@ def mcpServer(req: https_fn.Request) -> https_fn.Response:
             result = _handle_tools_call(params, ctx=ctx)
         elif method == "resources/list":
             result = _handle_resources_list()
+        elif method == "prompts/list":
+            result = _handle_prompts_list()
+        elif method == "prompts/get":
+            result = _handle_prompts_get(params)
         elif method == "resources/templates/list":
             result = {"resourceTemplates": []}
         elif method == "resources/read":
@@ -321,7 +325,28 @@ def _handle_initialize(params: dict) -> dict:
     return {
         "protocolVersion": versao,
         "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
-        "capabilities": {"tools": {}, "resources": {}},
+        "capabilities": {"tools": {}, "resources": {}, "prompts": {}},
+        # O cliente mostra isto ao modelo antes da primeira mensagem. Cobre o que
+        # nao da para deduzir da lista de tools — em especial a captura de
+        # memoria, que no copiloto web era subproduto da conversa e aqui depende
+        # de chamada explicita.
+        "instructions": (
+            "Hermes e o sistema de gestao pessoal e profissional do usuario: "
+            "acoes, agenda, financas, saude, contatos, acervo e memoria.\n\n"
+            "- Comece uma conversa nova com `obter_estado_atual` para se situar "
+            "no dia, em vez de perguntar ao usuario o que esta acontecendo.\n"
+            "- Quando o usuario afirmar um fato duravel sobre si, sobre pessoas "
+            "ou sobre como as coisas funcionam, grave com `salvar_memoria_global`. "
+            "O Hermes so aprende o que for gravado explicitamente.\n"
+            "- Para editar acoes prefira `editar_acao` e `editar_acoes_em_lote`. "
+            "As tools `preparar_*` existem para a interface web, que renderiza um "
+            "card de confirmacao, e exigem uma segunda chamada para gravar.\n"
+            "- Tools longas devolvem status `processing` com um `job_id`; busque o "
+            "resultado com `consultar_job`.\n"
+            "- `schedule_whatsapp_message` manda mensagem para terceiros em nome "
+            "do usuario: confirme com ele antes e repita a chamada com "
+            "`_confirmed: true`."
+        ),
     }
 
 
@@ -446,6 +471,69 @@ def _text_result(payload: dict, *, is_error: bool) -> dict:
     return {
         "content": [{"type": "text", "text": json.dumps(payload, ensure_ascii=False)}],
         "isError": is_error,
+    }
+
+
+def _handle_prompts_list() -> dict:
+    """Os POPs do Hermes, publicados como prompts MCP.
+
+    Um POP e um procedimento operacional que o usuario ja escreveu e versionou em
+    `pops_diretrizes`. No copiloto web ele entra sozinho no system prompt quando
+    um gatilho casa com o texto — util, mas invisivel e nao acionavel.
+
+    Como prompt MCP ele vira algo que o usuario escolhe: o procedimento deixa de
+    ser um documento que ele precisa lembrar de seguir e passa a ser executavel.
+    Nao ha logica nova aqui, so exposicao do que ja existe.
+    """
+    prompts = []
+    for snap in firestore.client().collection("pops_diretrizes").limit(100).stream():
+        dados = snap.to_dict() or {}
+        instrucao = (dados.get("instrucao_sistema") or "").strip()
+        titulo = (dados.get("titulo") or "").strip()
+        if not instrucao or not titulo:
+            continue
+        gatilhos = [str(g) for g in (dados.get("gatilhos") or []) if str(g).strip()]
+        prompts.append({
+            "name": snap.id,
+            "title": titulo,
+            "description": (
+                f"POP do Hermes: {titulo}."
+                + (f" Aciona em: {', '.join(gatilhos[:6])}." if gatilhos else "")
+            ),
+        })
+    return {"prompts": prompts}
+
+
+def _handle_prompts_get(params: dict) -> dict:
+    nome = params.get("name")
+    if not isinstance(nome, str) or not nome:
+        raise McpError(-32602, "params.name obrigatorio em prompts/get")
+
+    snap = firestore.client().collection("pops_diretrizes").document(nome).get()
+    if not snap.exists:
+        raise McpError(-32602, f"POP desconhecido: {nome}")
+
+    dados = snap.to_dict() or {}
+    titulo = (dados.get("titulo") or nome).strip()
+    instrucao = (dados.get("instrucao_sistema") or "").strip()
+    if not instrucao:
+        raise McpError(-32602, f"POP '{titulo}' nao tem instrucao_sistema definida.")
+
+    return {
+        "description": f"POP do Hermes: {titulo}",
+        "messages": [{
+            "role": "user",
+            "content": {
+                "type": "text",
+                "text": (
+                    f"Siga este procedimento operacional do Hermes.\n\n"
+                    f"## {titulo}\n\n{instrucao}\n\n"
+                    "Use as tools do Hermes para executar o que o procedimento pedir. "
+                    "Se faltar algum dado para seguir um passo, pergunte antes de "
+                    "prosseguir em vez de supor."
+                ),
+            },
+        }],
     }
 
 
