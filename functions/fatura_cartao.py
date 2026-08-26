@@ -134,22 +134,39 @@ def extrair(client, types, pdf_bytes: bytes, contexto_email: str = "") -> dict:
 # Normalizacao e gravacao
 # --------------------------------------------------------------------------
 
-# Linhas que a fatura traz mas nao sao compra: saldo anterior, pagamento
-# recebido, encargos. O prompt manda ignora-las e o modelo nao obedece de forma
-# confiavel, entao o filtro tem que ser deterministico. Elas NAO sao descartadas
-# — ficam gravadas como `tipo="ajuste"`, porque somam no total da fatura — mas
-# saem da analise de gastos, onde "TOTAL DA FATURA ANTERIOR" apareceria como o
-# maior "estabelecimento" do mes.
+# A fatura tem tres naturezas de linha, e confundi-las distorce numeros
+# diferentes:
+#
+#   compra   gasto num estabelecimento — e o que responde "onde foi o dinheiro"
+#   encargo  IOF, juros, anuidade, multa. Custo REAL, mas nao e estabelecimento.
+#            Classificar como ajuste subestimava o gasto do mes; como compra,
+#            "IOF COMPRA INTERNACIONAL" viraria um dos maiores "estabelecimentos".
+#   ajuste   saldo anterior e pagamento recebido. Somam zero entre si e existem
+#            so para o total da fatura fechar.
+#
+# O prompt manda ignorar as duas ultimas e o modelo nao obedece de forma
+# confiavel, entao a classificacao e deterministica. Nada e descartado: as tres
+# somadas tem que reproduzir o total impresso, e e assim que se confere a
+# extracao.
 _PADROES_AJUSTE = re.compile(
     r"total\s+da\s+fatura|fatura\s+anterior|saldo\s+anterior|obrigado\s+pelo\s+pagamento"
-    r"|pagamento\s+(efetuado|recebido)|pgto\s+|credito\s+rotativo|encargos?\s+"
-    r"|juros|iof|multa|subtotal|total\s+a\s+pagar|limite\s+",
+    r"|pagamento\s+(efetuado|recebido)|pgto\s+|subtotal|total\s+a\s+pagar|limite\s+"
+    r"|ajuste\s+cred",
+    re.IGNORECASE,
+)
+_PADROES_ENCARGO = re.compile(
+    r"\biof\b|juros|encargos?\b|multa|anuidade|tarifa|mora|rotativ|parcelamento\s+de\s+fatura",
     re.IGNORECASE,
 )
 
 
 def classificar(estabelecimento: str) -> str:
-    return "ajuste" if _PADROES_AJUSTE.search(estabelecimento or "") else "compra"
+    texto = estabelecimento or ""
+    if _PADROES_AJUSTE.search(texto):
+        return "ajuste"
+    if _PADROES_ENCARGO.search(texto):
+        return "encargo"
+    return "compra"
 
 
 def _num(valor) -> float | None:
@@ -247,6 +264,8 @@ def salvar(db, cartao: str, dados: dict, *, google_message_id: str | None = None
     lote = db.batch()
     gravados = 0
     soma_compras = 0.0
+    soma_encargos = 0.0
+    soma_total = 0.0
     for indice, item in enumerate(itens):
         valor = _num(item.get("valor"))
         estabelecimento = str(item.get("estabelecimento") or "").strip()
@@ -254,8 +273,11 @@ def salvar(db, cartao: str, dados: dict, *, google_message_id: str | None = None
             continue
         parcela_total = _inteiro(item.get("parcela_total"))
         tipo = classificar(estabelecimento)
+        soma_total += valor
         if tipo == "compra":
             soma_compras += valor
+        elif tipo == "encargo":
+            soma_encargos += valor
         ref = db.collection(COL_ITENS).document(_id_do_item(competencia, item, indice))
         lote.set(ref, {
             "tipo": tipo,
@@ -276,17 +298,25 @@ def salvar(db, cartao: str, dados: dict, *, google_message_id: str | None = None
     lote.commit()
 
     soma_compras = round(soma_compras, 2)
+    soma_encargos = round(soma_encargos, 2)
+    soma_total = round(soma_total, 2)
     total_cabecalho = doc_cabecalho["total"]
     # O total impresso e a soma das compras deveriam bater. Quando nao batem, o
     # mais provavel e o modelo ter lido o saldo anterior como total da fatura —
     # foi o caso de 2026-06. Registrar a divergencia deixa isso visivel em vez de
     # virar um numero errado com cara de certo.
+    # Confere contra a soma de TODAS as linhas, nao so das compras: IOF e juros
+    # entram no total impresso. Comparar so com as compras marcava como suspeita
+    # uma fatura perfeitamente extraida — foi o que aconteceu com 2026-06, cujos
+    # R$ 389 de "divergencia" eram exatamente o IOF da compra internacional.
     divergencia = (None if total_cabecalho is None
-                   else round(abs(total_cabecalho - soma_compras), 2))
+                   else round(abs(total_cabecalho - soma_total), 2))
     db.collection(COL_FATURAS).document(fatura_id).set({
         "soma_compras": soma_compras,
+        "soma_encargos": soma_encargos,
+        "soma_total": soma_total,
         "divergencia_total": divergencia,
-        "confiavel": divergencia is not None and divergencia < max(1.0, soma_compras * 0.02),
+        "confiavel": divergencia is not None and divergencia < max(1.0, abs(soma_total) * 0.01),
     }, merge=True)
 
     return {
@@ -296,6 +326,8 @@ def salvar(db, cartao: str, dados: dict, *, google_message_id: str | None = None
         "mes": mes,
         "total": total_cabecalho,
         "soma_compras": soma_compras,
+        "soma_encargos": soma_encargos,
+        "soma_total": soma_total,
         "divergencia_total": divergencia,
         "vencimento": vencimento,
         "itens_gravados": gravados,
@@ -327,7 +359,7 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
     for snap in consulta.limit(2000).stream():
         item = snap.to_dict() or {}
         if item.get("tipo") == "ajuste":
-            continue
+            continue   # saldo e pagamento somam zero e nao sao gasto
         if apenas_parceladas and not item.get("parcelado"):
             continue
         if alvo and alvo not in str(item.get("estabelecimento", "")).lower():
@@ -335,6 +367,9 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
         itens.append(item)
 
     itens.sort(key=lambda i: (str(i.get("competencia") or ""), str(i.get("data") or "")))
+
+    encargos = [i for i in itens if i.get("tipo") == "encargo"]
+    itens = [i for i in itens if i.get("tipo") != "encargo"]
 
     por_estabelecimento: dict[str, dict] = {}
     for item in itens:
@@ -345,9 +380,15 @@ def consultar(db, *, competencia: str | None = None, desde: str | None = None,
 
     ranking = sorted(por_estabelecimento.values(), key=lambda x: -x["total"])
 
+    total_encargos = round(sum(i["valor"] for i in encargos), 2)
     return {
         "total_lancamentos": len(itens),
         "total_gasto": round(sum(i["valor"] for i in itens), 2),
+        # Separado de proposito: IOF e juros sao custo real, mas nao sao gasto
+        # num estabelecimento — misturar esconde os dois.
+        "total_encargos": total_encargos,
+        "encargos": [{"descricao": e["estabelecimento"], "valor": e["valor"],
+                      "competencia": e["competencia"]} for e in encargos[:20]],
         "por_estabelecimento": ranking[:40],
         "lancamentos": itens[:limite],
         "truncado": len(itens) > limite,
@@ -425,7 +466,7 @@ def corrigir_fixed_bill(db, cartao: str, resumo: dict) -> dict:
     if not pode_corrigir_fixed_bill(mes, ano):
         return {"corrigido": False, "motivo": f"{mes}/{ano} e anterior ao corte (lancado a mao)"}
     divergencia = resumo.get("divergencia_total")
-    if divergencia is not None and divergencia >= max(1.0, (resumo.get("soma_compras") or 0) * 0.02):
+    if divergencia is not None and divergencia >= max(1.0, abs(resumo.get("soma_total") or 0) * 0.01):
         # Total impresso nao bate com a soma das compras: provavelmente o modelo
         # leu outra linha como total. Nao vale sobrescrever o financeiro com isso.
         return {"corrigido": False,

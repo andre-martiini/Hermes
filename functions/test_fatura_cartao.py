@@ -194,24 +194,33 @@ class TestNormalizacao(unittest.TestCase):
 
 
 class TestClassificacaoDeLinhas(unittest.TestCase):
-    """Linha de saldo nao e compra.
+    """Tres naturezas, porque confundi-las distorce numeros diferentes.
 
-    O prompt manda ignora-las e o modelo nao obedece de forma confiavel: numa
-    fatura real vieram "TOTAL DA FATURA ANTERIOR" (+17.943) e "OBRIGADO PELO
-    PAGAMENTO" (-17.943). Somam zero no total, mas na analise por
-    estabelecimento apareceriam como o maior gasto do mes.
+    Encargo classificado como ajuste subestima o gasto do mes; classificado como
+    compra faz "IOF COMPRA INTERNACIONAL" virar um dos maiores "estabelecimentos"
+    do extrato. Nenhuma das duas leituras e util.
     """
 
-    def test_linhas_de_saldo_sao_ajuste(self):
+    def test_saldo_e_pagamento_sao_ajuste(self):
         for texto in ("TOTAL DA FATURA ANTERIOR", "SALDO ANTERIOR",
                       "OBRIGADO PELO PAGAMENTO", "PAGAMENTO EFETUADO",
-                      "JUROS DE MORA", "IOF", "ENCARGOS DE ATRASO"):
+                      "AJUSTE CRED PARC S/ JUROS"):
             self.assertEqual(fc.classificar(texto), "ajuste", texto)
+
+    def test_custo_sem_estabelecimento_e_encargo(self):
+        for texto in ("IOF COMPRA INTERNACIONAL", "JUROS DE MORA",
+                      "ANUIDADE DIFERENCIADA", "MULTA POR ATRASO", "TARIFA"):
+            self.assertEqual(fc.classificar(texto), "encargo", texto)
 
     def test_compra_de_verdade_e_compra(self):
         for texto in ("OBRAMAX", "CVC VITORIA", "MP MERCADOLIVRE",
-                      "OPENAI *CHATGPT SUBSCR", "POSTO IPIRANGA"):
+                      "OPENAI *CHATGPT SUBSCR", "EXTRABOM VILA RUBIM"):
             self.assertEqual(fc.classificar(texto), "compra", texto)
+
+    def test_iof_exige_palavra_inteira(self):
+        """`\biof\b` evita que BIOFARMA vire encargo."""
+        self.assertEqual(fc.classificar("BIOFARMA DROGARIA"), "compra")
+        self.assertEqual(fc.classificar("IOF"), "encargo")
 
     def test_estabelecimento_vazio_nao_quebra(self):
         self.assertEqual(fc.classificar(""), "compra")
