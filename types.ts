@@ -28,10 +28,21 @@ export interface PoolItem {
 
 export type TipoAcao = 'fast' | 'deep';
 
+export type SubtarefaEstado = 'pendente' | 'em_andamento' | 'aguardando_terceiro' | 'feito';
+
 export interface ActionPlanItem {
     id: string;
     text: string;
+    /** Espelho de `estado === 'feito'`. Mantido porque há telas que só leem ele. */
     completed: boolean;
+    /** Ausente nas etapas anteriores a 26/08/2026 — deduz-se de `completed`. */
+    estado?: SubtarefaEstado;
+    /** De quem se espera, quando `estado === 'aguardando_terceiro'`. */
+    aguardando_de?: string;
+    /** YYYY-MM-DD. Sem ela, a etapa herda a `data_limite` da macroação. */
+    data_prevista?: string;
+    /** Adiamentos desta etapa. Etapa aguardando terceiro não acumula. */
+    degradation_count?: number;
 }
 
 export interface ChatMessage {

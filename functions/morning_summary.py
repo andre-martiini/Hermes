@@ -54,6 +54,8 @@ from datetime import datetime, timedelta, timezone
 from firebase_admin import firestore
 from firebase_functions import https_fn, scheduler_fn, options
 
+import subtarefas
+
 VERSAO = "v1"
 
 MAX_FOCO = 3
@@ -197,10 +199,19 @@ def _coletar_acoes(db, hoje: str) -> dict:
         titulo = str(data.get("titulo") or "(sem título)")
         data_limite = _data_valida(data.get("data_limite"))
         prazo_final = _data_valida(data.get("prazo_final"))
-        lane = data.get("execution_lane") or "avanco"
+        # A faixa é derivada do estado das subtarefas, com o valor gravado como
+        # entrada — e não o contrário. Antes de 26/08/2026 nada no sistema
+        # escrevia esse campo além do reset da virada do dia, então as 43 ações
+        # ativas estavam todas em `avanco` por falta de produtor, não por
+        # estarem todas avançando.
+        plano = data.get("plano_acao") or []
+        lane = subtarefas.derivar_lane(plano, data.get("execution_lane"))
         if lane not in por_lane:
             lane = "avanco"
-        degradacao = int(data.get("degradation_count") or 0)
+        # Espelha, não move: o contador da macroação é o maior entre o que está
+        # gravado e os das subtarefas, para que as ações que já acumularam
+        # adiamentos sem histórico por etapa não zerem de uma vez.
+        degradacao = subtarefas.degradacao_da_acao(plano, data.get("degradation_count"))
         herdada = bool(data.get("auto_data_atualizada"))
         e_cobrar = titulo.startswith("[COBRAR]")
         meta_id = str(data.get("estrategia_objetivo_id") or "").strip()
@@ -240,16 +251,37 @@ def _coletar_acoes(db, hoje: str) -> dict:
         if not e_de_hoje and not e_atrasada:
             continue
 
-        plano = data.get("plano_acao") or []
-        proximo_passo = next(
-            (str(i.get("text") or "").strip() for i in plano
-             if isinstance(i, dict) and i.get("text") and not i.get("completed")),
-            None,
-        )
-        etapas_totais = len([i for i in plano if isinstance(i, dict) and i.get("text")])
-        etapas_feitas = len([i for i in plano if isinstance(i, dict) and i.get("text") and i.get("completed")])
+        etapas_feitas, etapas_totais = subtarefas.contar(plano)
         if not etapas_totais:
             sem_plano += 1
+
+        # `subtarefa_do_dia` escolhe pela menor data prevista; `proximo_passo`
+        # sempre escolheu pela ordem do plano. Numa ação sem datas por etapa —
+        # que são todas as anteriores a 26/08/2026 — as duas coincidem, porque
+        # a herança faz todas as etapas caírem na data da macroação e o empate
+        # resolve pela ordem.
+        corrente = subtarefas.subtarefa_corrente(plano, data_limite)
+        proximo_passo = subtarefas.texto_de(corrente) if corrente else None
+        subtarefa_do_dia = None
+        if corrente:
+            subtarefa_do_dia = {
+                "id": corrente.get("id"),
+                "texto": subtarefas.texto_de(corrente),
+                "estado": subtarefas.estado_de(corrente),
+                "data_prevista": subtarefas.data_prevista_de(corrente, data_limite, plano),
+                "aguardando_de": corrente.get("aguardando_de"),
+                "degradation_count": int(corrente.get("degradation_count") or 0),
+            }
+
+        # A espera some hoje: a macroação aparece em `avanco` por causa de outra
+        # etapa e a pendência de terceiro fica invisível. Aqui ela tem lista
+        # própria, independente da faixa da ação.
+        esperando = [
+            {"id": i.get("id"), "texto": subtarefas.texto_de(i),
+             "aguardando_de": i.get("aguardando_de"),
+             "data_prevista": subtarefas.data_prevista_de(i, data_limite, plano)}
+            for i in subtarefas.aguardando_terceiros(plano)
+        ]
 
         item = {
             "id": doc.id,
@@ -267,6 +299,8 @@ def _coletar_acoes(db, hoje: str) -> dict:
             "data_limite": data_limite,
             "prazo_final": prazo_final or None,
             "proximo_passo": proximo_passo,
+            "subtarefa_do_dia": subtarefa_do_dia,
+            "aguardando_terceiro": esperando,
             "etapas_feitas": etapas_feitas,
             "etapas_totais": etapas_totais,
             "estrategia_objetivo_id": meta_id or None,
@@ -826,6 +860,7 @@ def _escolher_foco(acoes: dict, estrategia: dict, hoje: str) -> list:
             "regra": regra,
             "motivo": motivo,
             "proximo_passo": tarefa["proximo_passo"],
+            "subtarefa_do_dia": tarefa.get("subtarefa_do_dia"),
             "horario_inicio": tarefa["horario_inicio"],
         })
 
@@ -837,9 +872,17 @@ def _escolher_foco(acoes: dict, estrategia: dict, hoje: str) -> list:
             _incluir(t, "prazo_final_iminente", f"Prazo final {quando} ({t['prazo_final']}).")
 
     # 2. Degradação crítica — já foi adiada 3+ vezes pelo reset automático.
+    # Nomear a etapa é o ponto: "adiada 33x" diz que algo está parado, não o quê.
+    # Quando a etapa tem contador próprio, é dela que o número fala.
     for t in sorted((c for c in candidatas if c["degradation_count"] >= DEGRADACAO_CRITICA),
                     key=lambda c: -c["degradation_count"]):
-        _incluir(t, "degradacao_critica", f"Adiada automaticamente {t['degradation_count']}x — não sobrevive a mais um dia.")
+        etapa = t.get("subtarefa_do_dia") or {}
+        if etapa.get("texto") and etapa.get("degradation_count"):
+            motivo = (f"A etapa \"{etapa['texto'][:70]}\" foi adiada "
+                      f"{etapa['degradation_count']}x — é ela que está segurando a ação.")
+        else:
+            motivo = f"Adiada automaticamente {t['degradation_count']}x — não sobrevive a mais um dia."
+        _incluir(t, "degradacao_critica", motivo)
 
     # 3. SLA de espera estourado: virou cobrança e ninguém cobrou.
     for t in (c for c in candidatas if c["cobrar"]):

@@ -9467,7 +9467,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             - tipo_acao: 'fast' para ações rápidas, 'deep' para trabalho profundo
             - tags: lista de tags (opcional)
             - notas: observações adicionais (opcional)
-            - plano_acao: lista de strings com os passos do plano (opcional)
+            - plano_acao: lista de strings com os passos do plano (opcional). Para dar data própria a um passo, ou marcá-lo como em andamento / aguardando terceiro, crie a ação primeiro e depois use editar_plano_acao.
             - sourceGmailMessageId: se a ação veio de um e-mail, passe o ID da mensagem para controle de duplicação.
             - sourceKnowledgeText: se houver texto do e-mail longo a ser arquivado, passe-o aqui para instanciar um Nó de RAG.
             - horario_inicio: horário de início no formato HH:MM (se agendado)
@@ -9516,13 +9516,17 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Parâmetros:
             - task_id: ID da tarefa no Firestore.
             - novo_plano: Lista de dicionários no formato [{"id": "xyz", "text": "Passo 1"}, {"text": "Passo Novo sem id"}].
+              Cada passo aceita ainda, todos opcionais:
+                "data_prevista": "YYYY-MM-DD" — dia previsto para esta etapa; sem ela, herda a data da ação
+                "estado": "pendente" | "em_andamento" | "aguardando_terceiro" | "feito"
+                "aguardando_de": de quem se espera, quando o estado for "aguardando_terceiro"
+              Omitir um campo preserva o valor que a etapa já tinha; não o apaga.
             - justificativa_diario: Texto gerado pela IA explicando o motivo da alteração (será gravado no diário da tarefa).
             Retorna 'OK' ou 'ERRO|{detalhe}'.
             """
             try:
-                import uuid as _uuid
                 from datetime import datetime as _dt, timezone as _tz
-                import difflib as _difflib
+                import subtarefas
 
                 task_ref = db.collection('tarefas').document(task_id)
                 task_doc = task_ref.get()
@@ -9533,56 +9537,24 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 plano_atual = task_data.get('plano_acao', [])
                 now_iso = _dt.now(_tz.utc).isoformat()
 
-                # Índice rápido por ID para Match Direto
-                plano_por_id = {p['id']: p for p in plano_atual if p.get('id')}
-                textos_originais = [p.get('text', p.get('texto', '')) for p in plano_atual]
+                # Match por id, depois por texto parecido (≥85%), depois inserção.
+                # A rotina vive em `subtarefas` porque existia igual em
+                # `tools/telegram_extended.py`, e as duas cópias remontavam a
+                # etapa como {id, text, completed} literal — apagando estado,
+                # data prevista e contador no primeiro ajuste de texto.
+                plano_final = subtarefas.mesclar_plano(plano_atual, novo_plano)
 
-                plano_final = []
-                for item in (novo_plano or []):
-                    texto_novo = str(item.get('text') or item.get('texto') or '').strip()
-                    if not texto_novo:
-                        continue
-
-                    item_id = item.get('id', '')
-
-                    # Caminho 1: Match Direto por ID
-                    if item_id and item_id in plano_por_id:
-                        original = plano_por_id[item_id]
-                        plano_final.append({
-                            'id': item_id,
-                            'text': texto_novo,
-                            'completed': original.get('completed', False)
-                        })
-                        continue
-
-                    # Caminho 2: Fuzzy Match por texto (≥85% similaridade)
-                    matches = _difflib.get_close_matches(texto_novo, textos_originais, n=1, cutoff=0.85)
-                    if matches:
-                        idx = textos_originais.index(matches[0])
-                        original = plano_atual[idx]
-                        plano_final.append({
-                            'id': original.get('id', str(_uuid.uuid4())[:8]),
-                            'text': texto_novo,
-                            'completed': original.get('completed', False)
-                        })
-                        continue
-
-                    # Caminho 3: Inserção — novo passo sem correspondência
-                    plano_final.append({
-                        'id': str(_uuid.uuid4())[:8],
-                        'text': texto_novo,
-                        'completed': False
-                    })
-
-                diary_entry = {
-                    'data': now_iso,
-                    'nota': f"[Copiloto Hermes] Plano de ação atualizado: {justificativa_diario}"
-                }
+                nota = f"[Copiloto Hermes] Plano de ação atualizado: {justificativa_diario}"
+                avisos = subtarefas.inconsistencias(plano_final, task_data.get('prazo_final'))
+                if avisos:
+                    nota += "\n⚠️ " + "; ".join(avisos)
 
                 task_ref.update({
                     'plano_acao': plano_final,
+                    'execution_lane': subtarefas.derivar_lane(
+                        plano_final, task_data.get('execution_lane')),
                     'data_atualizacao': now_iso,
-                    'acompanhamento': firestore.ArrayUnion([diary_entry])
+                    'acompanhamento': firestore.ArrayUnion([{'data': now_iso, 'nota': nota}])
                 })
 
                 print(f"[Copiloto] Plano de ação da tarefa {task_id} atualizado ({len(plano_final)} passos).")

@@ -7,6 +7,8 @@ except ImportError:
 from firebase_admin import firestore
 from firebase_functions import scheduler_fn, options
 
+import subtarefas
+
 @scheduler_fn.on_schedule(
     schedule="0 0 * * *", # Every day at midnight
     timezone="America/Sao_Paulo",
@@ -39,7 +41,11 @@ def daily_wip_reset_and_degradation(event: scheduler_fn.ScheduledEvent):
         status = task_data.get("status")
         due_date = task_data.get("data_limite", "")
         start_date = task_data.get("data_inicio", "")
-        lane = task_data.get("execution_lane", "avanco")
+        plano = task_data.get("plano_acao") or []
+        # A faixa vem do estado das subtarefas, com o valor gravado como entrada.
+        # Antes de 26/08/2026 ninguém escrevia esse campo além deste próprio job,
+        # então "aguardando_terceiro" era um ramo morto na prática.
+        lane = subtarefas.derivar_lane(plano, task_data.get("execution_lane"))
 
         is_overdue = (due_date and due_date not in ["-", "0000-00-00"] and due_date < today_str) or \
                      (start_date and start_date not in ["-", "0000-00-00"] and start_date < today_str)
@@ -59,6 +65,7 @@ def daily_wip_reset_and_degradation(event: scheduler_fn.ScheduledEvent):
         updates = {
             "data_limite": today_str,
             "data_inicio": today_str,
+            "execution_lane": lane,
             "data_atualizacao": datetime.datetime.now(datetime.timezone.utc).isoformat()
         }
 
@@ -69,15 +76,29 @@ def daily_wip_reset_and_degradation(event: scheduler_fn.ScheduledEvent):
                 if not title.startswith("[COBRAR]"):
                     title = f"[COBRAR] {title}"
                 updates["titulo"] = title
-                updates["execution_lane"] = "avanco"
+                # NÃO devolve a faixa para "avanço". Esse reset era a fonte real
+                # do ruído no contador: a espera não degradava no primeiro dia,
+                # mas a partir do segundo degradava como qualquer outra ação,
+                # porque a faixa tinha voltado ao padrão. O [COBRAR] já sinaliza
+                # o SLA estourado; a faixa agora se redefine sozinha quando
+                # alguma subtarefa sair de "aguardando_terceiro".
                 sla_breach_count += 1
             else:
                 if status == "em andamento":
-                    degraded_count += 1
-                    curr_deg = task_data.get("degradation_count", 0) + 1
-                    updates["degradation_count"] = curr_deg
-                    if curr_deg >= 3:
-                        critical_count += 1
+                    # Atribui o adiamento à subtarefa corrente, quando houver uma
+                    # que possa recebê-lo. Etapa esperando terceiro não degrada —
+                    # e, como é ela que segura a ação, a macroação também não.
+                    plano_degradado, etapa, macro_degrada = subtarefas.aplicar_degradacao(
+                        plano, due_date)
+                    if etapa is not None:
+                        updates["plano_acao"] = plano_degradado
+
+                    if macro_degrada:
+                        degraded_count += 1
+                        curr_deg = task_data.get("degradation_count", 0) + 1
+                        updates["degradation_count"] = curr_deg
+                        if curr_deg >= 3:
+                            critical_count += 1
                 auto_advanced_count += 1
         else:
             # Só preenchendo uma data ausente — não é um atraso, não entra na

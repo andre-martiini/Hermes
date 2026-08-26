@@ -1012,7 +1012,12 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                     newId = `plan-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
                 }
                 seenIds.add(newId);
+                // Espalha o item antes de sobrescrever: a etapa carrega campos que
+                // este drawer não exibe (estado, data_prevista, aguardando_de,
+                // degradation_count) e listá-los um a um os apagaria em silêncio
+                // toda vez que um plano proposto fosse aceito.
                 return {
+                    ...item,
                     id: newId,
                     text: item.text || '',
                     completed: !!item.completed

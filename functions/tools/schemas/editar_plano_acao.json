@@ -1,6 +1,6 @@
 {
   "name": "editar_plano_acao",
-  "description": "Atualiza o plano de ação de uma tarefa existente",
+  "description": "Atualiza o plano de ação de uma tarefa existente. Também é a forma de marcar o estado de uma etapa (em andamento, aguardando terceiro, feita) e de dar data própria a cada uma. Campos omitidos preservam o valor atual da etapa — não a apagam.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -10,9 +10,33 @@
       },
       "novo_plano": {
         "type": "array",
-        "description": "Lista de passos no formato {id?, text}",
+        "description": "Lista de etapas. Envie o 'id' das que já existem para preservar histórico; etapa sem 'id' é tratada como nova (o texto ainda é comparado com as existentes, ≥85% de similaridade reaproveita a etapa).",
         "items": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "ID da etapa existente. Omita para criar uma nova"
+            },
+            "text": {
+              "type": "string",
+              "description": "Texto da etapa"
+            },
+            "data_prevista": {
+              "type": "string",
+              "description": "YYYY-MM-DD — dia previsto para esta etapa. Sem ela, a etapa herda a data_limite da ação"
+            },
+            "estado": {
+              "type": "string",
+              "enum": ["pendente", "em_andamento", "aguardando_terceiro", "feito"],
+              "description": "Estado da etapa. Padrão 'pendente'"
+            },
+            "aguardando_de": {
+              "type": "string",
+              "description": "De quem se espera, quando estado='aguardando_terceiro'. Ex.: 'colegas do MAGO', 'Iris / Assuntos Estudantis'"
+            }
+          },
+          "required": ["text"]
         }
       },
       "justificativa_diario": {

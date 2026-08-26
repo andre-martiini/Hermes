@@ -322,7 +322,7 @@ def execute(tool_name: str, slots: dict, db) -> str:
         )
 
     if tool_name == "editar_plano_acao":
-        import difflib as _difflib
+        import subtarefas
 
         task_id = str(slots.get("task_id") or "")
         novo_plano = slots.get("novo_plano") or []
@@ -334,29 +334,27 @@ def execute(tool_name: str, slots: dict, db) -> str:
         task_data = task_doc.to_dict() or {}
         plano_atual = task_data.get("plano_acao", [])
         now_iso = datetime.now(timezone.utc).isoformat()
-        plano_por_id = {p.get("id"): p for p in plano_atual if p.get("id")}
-        textos_originais = [p.get("text", p.get("texto", "")) for p in plano_atual]
-        plano_final = []
-        for item in novo_plano:
-            texto_novo = str(item.get("text") or item.get("texto") or "").strip()
-            if not texto_novo:
-                continue
-            item_id = item.get("id", "")
-            if item_id and item_id in plano_por_id:
-                original = plano_por_id[item_id]
-                plano_final.append({"id": item_id, "text": texto_novo, "completed": original.get("completed", False)})
-                continue
-            matches = _difflib.get_close_matches(texto_novo, textos_originais, n=1, cutoff=0.85)
-            if matches:
-                idx = textos_originais.index(matches[0])
-                original = plano_atual[idx]
-                plano_final.append({"id": original.get("id", str(uuid.uuid4())[:8]), "text": texto_novo, "completed": original.get("completed", False)})
-                continue
-            plano_final.append({"id": str(uuid.uuid4())[:8], "text": texto_novo, "completed": False})
+
+        # O merge vive em `subtarefas` porque esta rotina existia duplicada aqui
+        # e em `main.py`, e as duas remontavam cada etapa como {id, text,
+        # completed} literal — apagando estado, data prevista e contador da
+        # subtarefa no primeiro ajuste de texto.
+        plano_final = subtarefas.mesclar_plano(plano_atual, novo_plano)
+
+        # Inconsistência de data sinaliza, não bloqueia — e vai para o diário em
+        # vez do retorno: o valor de retorno é lido pelo modelo, que tem
+        # instrução casando com "OK" exato, e o diário é onde uma observação
+        # sobre prazo fica visível na interface e sobrevive à conversa.
+        nota = f"[Telegram Hermes] Plano de ação atualizado: {justificativa}"
+        avisos = subtarefas.inconsistencias(plano_final, task_data.get("prazo_final"))
+        if avisos:
+            nota += "\n⚠️ " + "; ".join(avisos)
+
         task_ref.update({
             "plano_acao": plano_final,
+            "execution_lane": subtarefas.derivar_lane(plano_final, task_data.get("execution_lane")),
             "data_atualizacao": now_iso,
-            "acompanhamento": firestore.ArrayUnion([{"data": now_iso, "nota": f"[Telegram Hermes] Plano de ação atualizado: {justificativa}"}]),
+            "acompanhamento": firestore.ArrayUnion([{"data": now_iso, "nota": nota}]),
         })
         return "OK"
 

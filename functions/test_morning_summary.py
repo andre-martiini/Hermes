@@ -452,5 +452,101 @@ class TestDiaDaSemana(unittest.TestCase):
         self.assertEqual(_js_weekday("2026-08-22"), 6)  # sábado
 
 
+class TestGranularidadeDeSubtarefa(unittest.TestCase):
+    """Os critérios de aceite da especificação de 26/08/2026, no payload montado.
+
+    Testar aqui e não só em `test_subtarefas` importa porque é este dict que o
+    `obter_estado_atual` do MCP devolve — a regra pode estar certa e o campo não
+    chegar na resposta.
+    """
+
+    def _plano_do_mago(self):
+        """4 etapas para hoje, 3 para as semanas seguintes (critério 1)."""
+        return [
+            {"id": "e1", "text": "Congelar o escopo", "completed": False,
+             "data_prevista": HOJE},
+            {"id": "e2", "text": "Corrigir os erros", "completed": False,
+             "data_prevista": HOJE},
+            {"id": "e3", "text": "Anotar o que ficou de fora", "completed": False,
+             "data_prevista": HOJE},
+            {"id": "e4", "text": "Publicar e pedir validação", "completed": False,
+             "data_prevista": HOJE},
+            {"id": "e5", "text": "Revisar minhas questões", "completed": False,
+             "data_prevista": "2026-08-31"},
+            {"id": "e6", "text": "Encaminhar aos colegas", "completed": False,
+             "data_prevista": "2026-09-01"},
+            {"id": "e7", "text": "Retomar a fila de melhorias", "completed": False},
+        ]
+
+    def test_criterio_1_mostra_a_subtarefa_corrente_e_nao_as_sete(self):
+        acoes = _acoes({"mago": _tarefa(titulo="Revisar Questões do Mago",
+                                        plano_acao=self._plano_do_mago())})
+        acao = acoes["por_lane"]["avanco"][0]
+        self.assertEqual(acao["subtarefa_do_dia"]["texto"], "Congelar o escopo")
+        self.assertEqual(acao["etapas_totais"], 7)
+        self.assertEqual(acao["etapas_feitas"], 0)
+
+    def test_criterio_2_avanco_e_pendencia_de_terceiro_ao_mesmo_tempo(self):
+        plano = self._plano_do_mago()
+        plano[:3] = [{**p, "estado": "feito", "completed": True} for p in plano[:3]]
+        plano[3] = {**plano[3], "estado": "aguardando_terceiro",
+                    "aguardando_de": "colegas do MAGO"}
+        plano[4] = {**plano[4], "estado": "em_andamento"}
+
+        acoes = _acoes({"mago": _tarefa(titulo="Mago", plano_acao=plano)})
+        self.assertEqual(len(acoes["por_lane"]["avanco"]), 1,
+                         "a ação avança por causa da etapa 5")
+        acao = acoes["por_lane"]["avanco"][0]
+        self.assertEqual([e["texto"] for e in acao["aguardando_terceiro"]],
+                         ["Publicar e pedir validação"])
+        self.assertEqual(acao["aguardando_terceiro"][0]["aguardando_de"], "colegas do MAGO")
+
+    def test_acao_toda_em_espera_muda_de_faixa_sozinha(self):
+        plano = [{"id": "a", "text": "esperar", "completed": False,
+                  "estado": "aguardando_terceiro"}]
+        acoes = _acoes({"x": _tarefa(titulo="Só espera", plano_acao=plano)})
+        self.assertEqual(len(acoes["por_lane"]["aguardando_terceiro"]), 1)
+        self.assertEqual(len(acoes["por_lane"]["avanco"]), 0)
+
+    def test_criterio_5_acao_antiga_sem_os_campos_novos_nao_muda(self):
+        """As 34 ações com plano em 26/08/2026 têm etapas só com {id, text, completed}."""
+        plano = [{"id": "a", "text": "primeira", "completed": True},
+                 {"id": "b", "text": "segunda", "completed": False}]
+        acoes = _acoes({"velha": _tarefa(titulo="Velha", plano_acao=plano,
+                                         degradation_count=4)})
+        acao = acoes["por_lane"]["avanco"][0]
+        self.assertEqual(acao["proximo_passo"], "segunda")
+        self.assertEqual((acao["etapas_feitas"], acao["etapas_totais"]), (1, 2))
+        self.assertEqual(acao["degradation_count"], 4, "o contador gravado não regride")
+        self.assertEqual(acao["aguardando_terceiro"], [])
+
+    def test_acao_sem_plano_nao_inventa_subtarefa(self):
+        """9 das 43 ações ativas não têm plano nenhum."""
+        acoes = _acoes({"sem": _tarefa(titulo="Sem plano", plano_acao=[])})
+        acao = acoes["por_lane"]["avanco"][0]
+        self.assertIsNone(acao["subtarefa_do_dia"])
+        self.assertIsNone(acao["proximo_passo"])
+
+    def test_alerta_critico_nomeia_a_etapa_que_esta_segurando(self):
+        """"Adiada 33x" diz que algo está parado, não o quê."""
+        plano = [{"id": "a", "text": "levantar o mapa de preços", "completed": False,
+                  "degradation_count": 33}]
+        acoes = _acoes({"compra": _tarefa(titulo="Processo de Compra",
+                                          plano_acao=plano, degradation_count=33)})
+        foco = _escolher_foco(acoes, _SEM_ESTRATEGIA, HOJE)
+        critico = next(f for f in foco if f["regra"] == "degradacao_critica")
+        self.assertIn("levantar o mapa de preços", critico["motivo"])
+        self.assertIn("33", critico["motivo"])
+
+    def test_alerta_critico_sem_contador_na_etapa_usa_a_mensagem_antiga(self):
+        """Ação que acumulou adiamentos antes da mudança não tem contador por etapa."""
+        plano = [{"id": "a", "text": "algum passo", "completed": False}]
+        acoes = _acoes({"x": _tarefa(titulo="Velha", plano_acao=plano,
+                                     degradation_count=7)})
+        foco = _escolher_foco(acoes, _SEM_ESTRATEGIA, HOJE)
+        critico = next(f for f in foco if f["regra"] == "degradacao_critica")
+        self.assertIn("Adiada automaticamente 7x", critico["motivo"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

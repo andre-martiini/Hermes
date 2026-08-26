@@ -2662,10 +2662,8 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
                     hc_tools.reagendar_acoes_hermes(db, c_service, c_id, pending.get("data_limite"), pending.get("horario_inicio"), pending.get("horario_fim"))
             except Exception: pass
 
-            plano_convertido = [
-                {"id": str(_uuid.uuid4())[:8], "text": str(p), "completed": False}
-                for p in (pending.get("plano_acao") or []) if str(p).strip()
-            ]
+            import subtarefas as _sub
+            plano_convertido = _sub.converter_plano(pending.get("plano_acao"))
 
             doc = {
                 "id": task_id,
@@ -4879,10 +4877,10 @@ def _process_telegram_message(db, data: dict):
             return "ERRO|Esta ação já está sendo registrada por outra chamada. Aguarde alguns segundos e verifique a lista de ações antes de tentar de novo."
 
         task_id = str(_uuid.uuid4())[:20]
-        plano_convertido = [
-            {"id": str(_uuid.uuid4())[:8], "text": str(p), "completed": False}
-            for p in (plano_acao or []) if str(p).strip()
-        ]
+        # Aceita lista de strings (uso historico) ou de objetos com os campos da
+        # subtarefa — `subtarefas.converter_plano` normaliza os dois.
+        import subtarefas as _sub
+        plano_convertido = _sub.converter_plano(plano_acao)
         try:
             from main import get_calendar_service, get_target_calendar_id
             import hermes_calendar_tools as hc_tools

@@ -41,10 +41,43 @@
       },
       "plano_acao": {
         "type": "array",
+        "description": "Etapas do plano. Aceita texto simples (\"Passo 1\") ou objeto com campos opcionais: data_prevista (YYYY-MM-DD, herda a data da ação se omitida), estado (pendente|em_andamento|aguardando_terceiro|feito) e aguardando_de.",
         "items": {
-          "type": "string"
-        },
-        "description": "Lista de etapas do plano de ação"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Texto da etapa"
+                },
+                "data_prevista": {
+                  "type": "string",
+                  "description": "YYYY-MM-DD"
+                },
+                "estado": {
+                  "type": "string",
+                  "enum": [
+                    "pendente",
+                    "em_andamento",
+                    "aguardando_terceiro",
+                    "feito"
+                  ]
+                },
+                "aguardando_de": {
+                  "type": "string",
+                  "description": "De quem se espera"
+                }
+              },
+              "required": [
+                "text"
+              ]
+            }
+          ]
+        }
       },
       "horario_inicio": {
         "type": "string",
