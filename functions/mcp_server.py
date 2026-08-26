@@ -364,7 +364,12 @@ def _handle_initialize(params: dict) -> dict:
             "resultado com `consultar_job`.\n"
             "- `schedule_whatsapp_message` manda mensagem para terceiros em nome "
             "do usuario: confirme com ele antes e repita a chamada com "
-            "`_confirmed: true`."
+            "`_confirmed: true`.\n"
+            "- Ler conteudo de WhatsApp so e possivel em conversas monitoradas, "
+            "escolhidas pelo usuario na Caixa de Entrada. Uma recusa com motivo "
+            "`chat_nao_monitorado` e o limite funcionando, nao um erro a "
+            "contornar: use `listar_conversas_whatsapp` para ver quais estao "
+            "liberadas e peca ao usuario que habilite se precisar de outra."
         ),
     }
 
