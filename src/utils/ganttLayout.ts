@@ -4,10 +4,33 @@ import { hasValidTaskDate, isCompletedStatus, isStandbyStatus, normalizeStatus }
 /**
  * Layout do gráfico de Gantt das ações.
  *
- * O gráfico usa três parâmetros da ação: o título, a DATA DE EXECUÇÃO
- * (`data_limite`) e a DATA FINAL (`prazo_final`, opcional). A barra é o
- * intervalo entre as duas — ação sem prazo final vira uma barra de um dia,
- * marcada como pontual.
+ * ## De onde vem a barra
+ *
+ * Até 26/08/2026 a barra era o intervalo entre a DATA DE EXECUÇÃO
+ * (`data_limite`) e a DATA FINAL (`prazo_final`). Como quase nada tem prazo
+ * final — 589 das 603 ações que entravam no gráfico —, o resultado era um
+ * campo de losangos de um dia empilhados nas mesmas colunas, não um Gantt.
+ *
+ * Com data por subtarefa, a barra passa a vir do **plano**: do primeiro ao
+ * último dia previsto das etapas. Uma ação com sete etapas espalhadas por uma
+ * semana vira uma barra de uma semana sem precisar de prazo final nenhum.
+ *
+ * ## Prazo final é marco, não fim de barra
+ *
+ * Separá-los é o que torna visível o caso em que o trabalho planejado termina
+ * *depois* do prazo — que antes era normalizado. O código anterior trocava as
+ * pontas quando `prazo_final` vinha antes de `data_limite`, para não desenhar
+ * largura negativa; a barra saía bonita e o dado inconsistente ficava
+ * invisível. Existe pelo menos uma ação assim, com prazo 20 dias antes da
+ * execução. Agora a bandeira aparece onde está e a linha é sinalizada.
+ *
+ * ## A âncora que não desliza
+ *
+ * `daily_reset_job` reempurra `data_limite` para hoje toda madrugada. A borda
+ * esquerda da barra, portanto, mentia: mostrava "começou hoje" para trabalho
+ * arrastado há meses. `data_prevista` de subtarefa não é movida por ninguém —
+ * etapa planejada para um dia que passou continua lá, atrasada à vista. É de
+ * propósito: é onde a derrapagem aparece.
  *
  * Toda a aritmética de datas trabalha com strings `YYYY-MM-DD` em horário
  * local, como o resto do app (ver `formatDateLocalISO` em types.ts). Nada aqui
@@ -16,15 +39,48 @@ import { hasValidTaskDate, isCompletedStatus, isStandbyStatus, normalizeStatus }
 
 export type GanttScale = 'dia' | 'semana' | 'mes';
 
+/** Espelha `subtarefas.ESTADOS` no backend (functions/subtarefas.py). */
+export type GanttEtapaEstado = 'pendente' | 'em_andamento' | 'aguardando_terceiro' | 'feito';
+
+export interface GanttEtapa {
+  id: string;
+  texto: string;
+  /** Dia previsto. Vazio quando a etapa não tem data num plano que tem. */
+  data: string;
+  estado: GanttEtapaEstado;
+  concluida: boolean;
+  /** Prevista para antes de hoje e ainda não concluída. */
+  atrasada: boolean;
+}
+
 export interface GanttRow {
   task: Tarefa;
-  /** Data de execução — início da barra. */
+  /** Primeiro dia da linha, incluindo a bandeira de prazo quando ela vem antes. */
   inicio: string;
-  /** Prazo final quando existir; caso contrário, igual ao início. */
+  /** Último dia da linha, incluindo a folga até o prazo final. */
   fim: string;
+  /**
+   * Extremos do trabalho planejado — do plano quando ele tem datas, senão a
+   * data de execução. É a barra sólida; `inicio`/`fim` são a extensão da linha
+   * inteira e podem ser maiores por causa do prazo.
+   */
+  inicioTrabalho: string;
+  fimTrabalho: string;
   temPrazoFinal: boolean;
-  /** Dias cobertos pela barra, contando as duas pontas. */
+  /** Data do prazo final, para desenhar a bandeira. Null quando não há. */
+  prazoFinal: string | null;
+  /** O trabalho planejado termina depois do prazo final. */
+  prazoEstourado: boolean;
+  /** Prazo final anterior ao início — dado inconsistente, não é largura negativa. */
+  prazoAntesDoInicio: boolean;
+  /** Dias cobertos pela linha, contando as duas pontas. */
   duracaoDias: number;
+  /** Um único dia e sem prazo final — desenha como marco, não como barra. */
+  pontual: boolean;
+  /** Etapas do plano; vazio quando o plano não tem datas próprias. */
+  etapas: GanttEtapa[];
+  /** A barra veio das datas do plano, e não da data de execução. */
+  barraVemDoPlano: boolean;
   concluida: boolean;
   standby: boolean;
   /** Não concluída e com o fim já no passado. */
@@ -106,6 +162,55 @@ const rotuloMes = (iso: string): string => {
   return `${nome.charAt(0).toUpperCase()}${nome.slice(1)} ${data.getFullYear()}`;
 };
 
+/** Data válida do campo, ou string vazia. */
+const dataDoCampo = (valor: unknown): string => {
+  if (!hasValidTaskDate(valor as any)) return '';
+  const iso = String(valor).slice(0, 10);
+  return parseISO(iso) ? iso : '';
+};
+
+/**
+ * Estado da etapa, deduzido de `completed` quando ainda não existir — a mesma
+ * regra de `subtarefas.estado_de` no backend, que é o que dispensa migração das
+ * etapas anteriores a 26/08/2026.
+ */
+const estadoDaEtapa = (item: any): GanttEtapaEstado => {
+  const bruto = String(item?.estado || '').trim().toLowerCase();
+  if (bruto === 'pendente' || bruto === 'em_andamento'
+    || bruto === 'aguardando_terceiro' || bruto === 'feito') return bruto;
+  return item?.completed ? 'feito' : 'pendente';
+};
+
+/**
+ * Etapas posicionáveis do plano.
+ *
+ * Devolve vazio quando nenhuma etapa tem data própria: nesse caso todas
+ * herdariam a `data_limite` e empilhariam no mesmo dia, o que é ruído e não
+ * informação. Mesma distinção de `subtarefas.plano_tem_datas` no backend.
+ */
+export const extrairEtapas = (task: Tarefa, hoje: string): GanttEtapa[] => {
+  const plano = (task as any)?.plano_acao;
+  if (!Array.isArray(plano) || !plano.length) return [];
+  if (!plano.some((p: any) => p && dataDoCampo(p.data_prevista))) return [];
+
+  const etapas: GanttEtapa[] = [];
+  plano.forEach((item: any, i: number) => {
+    const texto = String(item?.text || item?.texto || '').trim();
+    if (!texto) return;
+    const estado = estadoDaEtapa(item);
+    const data = dataDoCampo(item?.data_prevista);
+    etapas.push({
+      id: String(item?.id || `etapa-${i}`),
+      texto,
+      data,
+      estado,
+      concluida: estado === 'feito',
+      atrasada: Boolean(data) && data < hoje && estado !== 'feito',
+    });
+  });
+  return etapas;
+};
+
 /**
  * Monta uma linha por ação elegível — precisa de data de execução válida e não
  * pode estar excluída. Ordena pela data de execução e, no empate, pela ação que
@@ -119,16 +224,33 @@ export const buildGanttRows = (tasks: Tarefa[], options: GanttRowOptions = {}): 
     if (!task) continue;
     if (normalizeStatus(task.status as any) === 'excluido') continue;
 
-    const inicio = hasValidTaskDate(task.data_limite) ? String(task.data_limite).slice(0, 10) : '';
-    if (!inicio || !parseISO(inicio)) continue;
+    const execucao = dataDoCampo(task.data_limite);
+    if (!execucao) continue;
 
-    const prazoBruto = hasValidTaskDate(task.prazo_final) ? String(task.prazo_final).slice(0, 10) : '';
-    const prazoValido = prazoBruto && parseISO(prazoBruto) ? prazoBruto : '';
-    // Prazo anterior à execução é dado inconsistente: a barra usa o intervalo
-    // real entre as duas datas em vez de largura negativa.
-    const temPrazoFinal = Boolean(prazoValido) && prazoValido !== inicio;
-    const inicioBarra = temPrazoFinal && prazoValido < inicio ? prazoValido : inicio;
-    const fimBarra = temPrazoFinal ? (prazoValido < inicio ? inicio : prazoValido) : inicio;
+    const etapas = extrairEtapas(task, hoje);
+    const datasDoPlano = etapas.map(e => e.data).filter(Boolean).sort();
+    const barraVemDoPlano = datasDoPlano.length > 0;
+
+    // O trabalho começa no primeiro dia previsto — incluindo a execução, para a
+    // ação não sumir do dia em que ela está na lista — e termina no último.
+    const inicioTrabalho = barraVemDoPlano
+      ? [execucao, ...datasDoPlano].sort()[0]
+      : execucao;
+    const fimTrabalho = barraVemDoPlano
+      ? datasDoPlano[datasDoPlano.length - 1]
+      : execucao;
+
+    const prazoValido = dataDoCampo(task.prazo_final);
+    const temPrazoFinal = Boolean(prazoValido) && prazoValido !== execucao;
+    const prazoFinal = temPrazoFinal ? prazoValido : null;
+
+    // A linha se estende para cobrir o prazo, antes ou depois do trabalho. O
+    // que ela NÃO faz é trocar as pontas: a barra sólida continua começando na
+    // execução mesmo quando o prazo vem antes dela, e a linha é marcada como
+    // inconsistente em vez de desenhar bonito e esconder o dado errado.
+    const prazoAntesDoInicio = Boolean(prazoFinal) && prazoFinal! < inicioTrabalho;
+    const inicioLinha = prazoAntesDoInicio ? prazoFinal! : inicioTrabalho;
+    const fimLinha = prazoFinal && prazoFinal > fimTrabalho ? prazoFinal : fimTrabalho;
 
     const concluida = isCompletedStatus(task.status as any);
     const standby = isStandbyStatus(task.status as any);
@@ -138,14 +260,22 @@ export const buildGanttRows = (tasks: Tarefa[], options: GanttRowOptions = {}): 
 
     linhas.push({
       task,
-      inicio: inicioBarra,
-      fim: fimBarra,
+      inicio: inicioLinha,
+      fim: fimLinha,
+      inicioTrabalho,
+      fimTrabalho,
       temPrazoFinal,
-      duracaoDias: diffDias(inicioBarra, fimBarra) + 1,
+      prazoFinal,
+      prazoEstourado: Boolean(prazoFinal) && fimTrabalho > prazoFinal!,
+      prazoAntesDoInicio,
+      duracaoDias: diffDias(inicioLinha, fimLinha) + 1,
+      pontual: inicioLinha === fimLinha && !temPrazoFinal,
+      etapas,
+      barraVemDoPlano,
       concluida,
       standby,
-      atrasada: !concluida && fimBarra < hoje,
-      emCurso: !concluida && inicioBarra <= hoje && fimBarra >= hoje,
+      atrasada: !concluida && fimLinha < hoje,
+      emCurso: !concluida && inicioLinha <= hoje && fimLinha >= hoje,
     });
   }
 
@@ -225,15 +355,31 @@ export const buildGanttTicks = (range: GanttRange, escala: GanttScale, hoje: str
   return ticks;
 };
 
-/** Posição da barra dentro da janela, em porcentagem da largura total. */
-export const posicaoDaBarra = (linha: GanttRow, range: GanttRange) => {
-  const offset = diffDias(range.inicio, linha.inicio);
+/** Posição de um intervalo dentro da janela, em porcentagem da largura total. */
+export const posicaoDoIntervalo = (inicio: string, fim: string, range: GanttRange) => {
+  const offset = diffDias(range.inicio, inicio);
+  const dias = diffDias(inicio, fim) + 1;
   const esquerda = (offset / range.totalDias) * 100;
-  const largura = (linha.duracaoDias / range.totalDias) * 100;
+  const largura = (dias / range.totalDias) * 100;
   return {
     left: `${Math.max(0, esquerda)}%`,
     width: `${Math.max(largura, 100 / range.totalDias)}%`,
   };
+};
+
+/** Posição da barra dentro da janela, em porcentagem da largura total. */
+export const posicaoDaBarra = (linha: GanttRow, range: GanttRange) =>
+  posicaoDoIntervalo(linha.inicio, linha.fim, range);
+
+/**
+ * Posição de um dia dentro da janela — usada para marcador de etapa e bandeira
+ * de prazo. Devolve o centro da coluna do dia; `null` quando cai fora da
+ * janela, para o chamador não desenhar nada em vez de desenhar na borda.
+ */
+export const posicaoDeData = (iso: string, range: GanttRange): string | null => {
+  if (!iso || !range || iso < range.inicio || iso > range.fim) return null;
+  const posicao = ((diffDias(range.inicio, iso) + 0.5) / range.totalDias) * 100;
+  return `${posicao}%`;
 };
 
 /** Posição da linha de "hoje" — null quando hoje está fora da janela. */
@@ -251,4 +397,22 @@ export const statusVisualDaLinha = (linha: GanttRow): GanttStatusVisual => {
   if (linha.atrasada) return 'atrasada';
   if (linha.standby) return 'standby';
   return 'andamento';
+};
+
+export type GanttEtapaVisual = 'feito' | 'aguardando' | 'atrasada' | 'em_andamento' | 'pendente';
+
+/**
+ * Aparência do marcador da etapa.
+ *
+ * `aguardando_terceiro` vem **antes** de `atrasada` de propósito: etapa parada
+ * esperando outra pessoa passou da data sem que ninguém tenha procrastinado, e
+ * pintá-la de atrasada seria a mesma confusão que o contador de degradação
+ * fazia antes de 26/08/2026.
+ */
+export const statusVisualDaEtapa = (etapa: GanttEtapa): GanttEtapaVisual => {
+  if (etapa.concluida) return 'feito';
+  if (etapa.estado === 'aguardando_terceiro') return 'aguardando';
+  if (etapa.atrasada) return 'atrasada';
+  if (etapa.estado === 'em_andamento') return 'em_andamento';
+  return 'pendente';
 };

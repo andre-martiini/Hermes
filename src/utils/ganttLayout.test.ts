@@ -6,7 +6,9 @@ import {
   buildGanttTicks,
   diffDias,
   posicaoDaBarra,
+  posicaoDeData,
   posicaoDeHoje,
+  statusVisualDaEtapa,
   statusVisualDaLinha,
 } from './ganttLayout';
 
@@ -186,5 +188,209 @@ describe('aritmética de datas', () => {
   it('conta a diferença em dias nos dois sentidos', () => {
     expect(diffDias('2026-08-10', '2026-08-14')).toBe(4);
     expect(diffDias('2026-08-14', '2026-08-10')).toBe(-4);
+  });
+});
+
+// --------------------------------------------------------------------------
+// Granularidade de subtarefa (26/08/2026)
+// --------------------------------------------------------------------------
+
+const etapa = (over: Record<string, any> = {}) => ({
+  id: over.id || 'e1',
+  text: over.text || 'Etapa',
+  completed: over.completed ?? false,
+  ...over,
+});
+
+describe('barra vinda do plano', () => {
+  it('usa o primeiro e o último dia previsto das etapas', () => {
+    const [linha] = buildGanttRows([tarefa({
+      data_limite: '2026-08-10',
+      plano_acao: [
+        etapa({ id: 'a', text: 'Congelar', data_prevista: '2026-08-10' }),
+        etapa({ id: 'b', text: 'Publicar', data_prevista: '2026-08-14' }),
+        etapa({ id: 'c', text: 'Revisar', data_prevista: '2026-08-12' }),
+      ],
+    })], { hoje: HOJE });
+
+    expect(linha.barraVemDoPlano).toBe(true);
+    expect(linha.inicioTrabalho).toBe('2026-08-10');
+    expect(linha.fimTrabalho).toBe('2026-08-14');
+    expect(linha.duracaoDias).toBe(5);
+    expect(linha.pontual).toBe(false);
+  });
+
+  it('tira do losango uma ação sem prazo final', () => {
+    // Era o caso de 589 das 603 ações: sem prazo final, tudo virava marco de
+    // um dia. Com datas nas etapas a barra existe sem prazo nenhum.
+    const [linha] = buildGanttRows([tarefa({
+      data_limite: '2026-08-10',
+      prazo_final: undefined,
+      plano_acao: [
+        etapa({ id: 'a', data_prevista: '2026-08-10' }),
+        etapa({ id: 'b', data_prevista: '2026-08-20' }),
+      ],
+    })], { hoje: HOJE });
+
+    expect(linha.temPrazoFinal).toBe(false);
+    expect(linha.pontual).toBe(false);
+    expect(linha.duracaoDias).toBe(11);
+  });
+
+  it('cobre também a data de execução quando ela vem antes do plano', () => {
+    const [linha] = buildGanttRows([tarefa({
+      data_limite: '2026-08-05',
+      plano_acao: [etapa({ data_prevista: '2026-08-12' })],
+    })], { hoje: HOJE });
+    expect(linha.inicioTrabalho).toBe('2026-08-05');
+  });
+
+  it('plano sem data nenhuma continua se comportando como antes', () => {
+    // Os 34 planos existentes caem aqui: nenhuma etapa tem data própria, e
+    // marcar todas no mesmo dia seria ruído, não informação.
+    const [linha] = buildGanttRows([tarefa({
+      data_limite: '2026-08-10',
+      plano_acao: [etapa({ id: 'a' }), etapa({ id: 'b', completed: true })],
+    })], { hoje: HOJE });
+
+    expect(linha.barraVemDoPlano).toBe(false);
+    expect(linha.etapas).toEqual([]);
+    expect(linha.pontual).toBe(true);
+    expect(linha.inicioTrabalho).toBe('2026-08-10');
+  });
+
+  it('ação sem plano segue como marco de um dia', () => {
+    const [linha] = buildGanttRows([tarefa({ data_limite: '2026-08-10' })], { hoje: HOJE });
+    expect(linha.pontual).toBe(true);
+    expect(linha.etapas).toEqual([]);
+  });
+
+  it('a janela do gráfico cresce para caber o plano', () => {
+    const linhas = buildGanttRows([tarefa({
+      data_limite: '2026-08-10',
+      plano_acao: [etapa({ data_prevista: '2026-09-20' })],
+    })], { hoje: HOJE });
+    const range = buildGanttRange(linhas, HOJE)!;
+    expect(range.fim >= '2026-09-20').toBe(true);
+  });
+});
+
+describe('prazo final como marco', () => {
+  it('a barra é o trabalho, e o prazo fica como bandeira separada', () => {
+    const [linha] = buildGanttRows([tarefa({
+      data_limite: '2026-08-10',
+      prazo_final: '2026-08-25',
+      plano_acao: [etapa({ data_prevista: '2026-08-14' })],
+    })], { hoje: HOJE });
+
+    expect(linha.fimTrabalho).toBe('2026-08-14');
+    expect(linha.prazoFinal).toBe('2026-08-25');
+    expect(linha.fim).toBe('2026-08-25');   // a linha cobre a folga
+    expect(linha.prazoEstourado).toBe(false);
+  });
+
+  it('sinaliza quando o plano termina depois do prazo', () => {
+    const [linha] = buildGanttRows([tarefa({
+      data_limite: '2026-08-10',
+      prazo_final: '2026-08-15',
+      plano_acao: [etapa({ data_prevista: '2026-08-30' })],
+    })], { hoje: HOJE });
+
+    expect(linha.prazoEstourado).toBe(true);
+    expect(linha.fimTrabalho).toBe('2026-08-30');
+  });
+
+  it('prazo anterior à execução é sinalizado, não corrigido em silêncio', () => {
+    // Existe ação assim em produção, com prazo 20 dias antes da execução. O
+    // código anterior trocava as pontas e a barra saía bonita.
+    const [linha] = buildGanttRows([tarefa({
+      data_limite: '2026-08-20',
+      prazo_final: '2026-07-31',
+    })], { hoje: HOJE });
+
+    expect(linha.prazoAntesDoInicio).toBe(true);
+    expect(linha.inicioTrabalho).toBe('2026-08-20');  // o trabalho não anda
+    expect(linha.inicio).toBe('2026-07-31');          // a linha cobre a bandeira
+  });
+});
+
+describe('etapas', () => {
+  it('deduz o estado de completed quando o campo não existe', () => {
+    const [linha] = buildGanttRows([tarefa({
+      data_limite: '2026-08-10',
+      plano_acao: [
+        etapa({ id: 'a', data_prevista: '2026-08-10', completed: true }),
+        etapa({ id: 'b', data_prevista: '2026-08-11' }),
+      ],
+    })], { hoje: HOJE });
+
+    expect(linha.etapas.map(e => e.estado)).toEqual(['feito', 'pendente']);
+  });
+
+  it('estado explícito manda sobre completed', () => {
+    const [linha] = buildGanttRows([tarefa({
+      data_limite: '2026-08-10',
+      plano_acao: [etapa({ data_prevista: '2026-08-10', estado: 'aguardando_terceiro' })],
+    })], { hoje: HOJE });
+    expect(linha.etapas[0].estado).toBe('aguardando_terceiro');
+  });
+
+  it('marca atrasada a etapa vencida e não concluída', () => {
+    const [linha] = buildGanttRows([tarefa({
+      data_limite: '2026-08-01',
+      plano_acao: [
+        etapa({ id: 'a', data_prevista: '2026-08-01' }),
+        etapa({ id: 'b', data_prevista: '2026-08-01', completed: true }),
+        etapa({ id: 'c', data_prevista: '2026-08-30' }),
+      ],
+    })], { hoje: HOJE });
+
+    expect(linha.etapas.map(e => e.atrasada)).toEqual([true, false, false]);
+  });
+
+  it('etapa sem data num plano datado entra na lista sem posição', () => {
+    const [linha] = buildGanttRows([tarefa({
+      data_limite: '2026-08-10',
+      plano_acao: [
+        etapa({ id: 'a', text: 'Publicar', data_prevista: '2026-08-12' }),
+        etapa({ id: 'b', text: 'Após o retorno' }),
+      ],
+    })], { hoje: HOJE });
+
+    expect(linha.etapas).toHaveLength(2);
+    expect(linha.etapas[1].data).toBe('');
+    // Não pode esticar a barra para um dia que ninguém marcou.
+    expect(linha.fimTrabalho).toBe('2026-08-12');
+  });
+
+  it('espera vence atraso na aparência do marcador', () => {
+    // Etapa parada esperando outra pessoa passou da data sem ninguém ter
+    // procrastinado — pintá-la de atrasada é a confusão que o contador de
+    // degradação fazia antes de 26/08/2026.
+    expect(statusVisualDaEtapa({
+      id: 'a', texto: 'x', data: '2026-08-01', estado: 'aguardando_terceiro',
+      concluida: false, atrasada: true,
+    })).toBe('aguardando');
+  });
+
+  it('etapa concluída não aparece como atrasada', () => {
+    expect(statusVisualDaEtapa({
+      id: 'a', texto: 'x', data: '2026-08-01', estado: 'feito',
+      concluida: true, atrasada: false,
+    })).toBe('feito');
+  });
+});
+
+describe('posicaoDeData', () => {
+  const rangeMarcador = { inicio: '2026-08-02', fim: '2026-08-29', totalDias: 28 };
+
+  it('põe o marcador no centro da coluna do dia', () => {
+    expect(posicaoDeData('2026-08-02', rangeMarcador)).toBe(`${(0.5 / 28) * 100}%`);
+  });
+
+  it('devolve null fora da janela, para não desenhar na borda', () => {
+    expect(posicaoDeData('2026-07-30', rangeMarcador)).toBeNull();
+    expect(posicaoDeData('2026-09-01', rangeMarcador)).toBeNull();
+    expect(posicaoDeData('', rangeMarcador)).toBeNull();
   });
 });
