@@ -148,6 +148,51 @@ async function writeHeartbeat() {
     }
 }
 
+/**
+ * Telefone real de um chat individual.
+ *
+ * `chat.getContact().number` NAO serve para `@lid`: devolve os digitos do
+ * proprio lid. Foi o que aconteceu na primeira tentativa — 120 chats gravaram
+ * `contact_number: 102100113604695` para o chat `102100113604695@lid`, um
+ * numero que nao casa com telefone nenhum e que, pior, poderia colidir nos
+ * ultimos 8 digitos com o telefone de outra pessoa.
+ *
+ * O mapeamento lid -> telefone vive na propria pagina do WhatsApp Web:
+ * `WAWebApiContact.getPhoneNumber(wid)`. A biblioteca ja o expoe injetado como
+ * `WWebJS.enforceLidAndPnRetrieval`, que ainda consulta o servidor quando o
+ * mapeamento nao esta em cache — e por isso a resolucao tem teto por passagem.
+ */
+async function telefoneDoChat(chatId, chat) {
+    const soDigitos = (v) => String(v || '').replace(/[^0-9]/g, '');
+    const lidDigits = chatId.endsWith('@lid') ? soDigitos(chatId.split('@')[0]) : '';
+
+    try {
+        const phone = await client.pupPage.evaluate(async (id) => {
+            try {
+                const r = await window.WWebJS.enforceLidAndPnRetrieval(id);
+                return r?.phone?.user || null;
+            } catch (e) {
+                return null;
+            }
+        }, chatId);
+        const num = soDigitos(phone);
+        // Se voltou o proprio lid, nao resolveu nada: gravar seria pior que
+        // deixar em branco, porque um numero errado casa com alguem.
+        if (num.length >= 8 && num !== lidDigits) return num;
+    } catch (e) {
+        // pupPage indisponivel (reconectando): tenta o caminho classico abaixo.
+    }
+
+    try {
+        const contato = await chat.getContact();
+        const num = soDigitos(contato?.number);
+        if (num.length >= 8 && num !== lidDigits) return num;
+    } catch (e) {
+        // Contato apagado ou sem numero visivel.
+    }
+    return null;
+}
+
 async function syncChatRegistry() {
     if (!isClientReady) {
         console.log('[Chats] Pulando sincronização: cliente WhatsApp não está pronto.');
@@ -213,19 +258,12 @@ async function syncChatRegistry() {
                 // opaco com um telefone de verdade e não casa nada — na medição
                 // de 27/08/2026, 450 chats `@lid` contra 0 vínculos possíveis.
                 if (!isGroup && !jaComNumero.has(chatId) && resolvidos < CONTATOS_POR_SYNC) {
-                    try {
-                        const contato = await chat.getContact();
-                        const numero = String(contato?.number || contato?.id?.user || '')
-                            .replace(/\D/g, '');
-                        if (numero.length >= 8) {
-                            data.contact_number = numero;
-                            data.contact_number_resolved_at =
-                                admin.firestore.FieldValue.serverTimestamp();
-                            resolvidos++;
-                        }
-                    } catch (contatoErr) {
-                        // Contato apagado ou sem número visível: segue sem o campo,
-                        // e a próxima sincronização tenta de novo.
+                    const numero = await telefoneDoChat(chatId, chat);
+                    if (numero) {
+                        data.contact_number = numero;
+                        data.contact_number_resolved_at =
+                            admin.firestore.FieldValue.serverTimestamp();
+                        resolvidos++;
                     }
                 }
 
