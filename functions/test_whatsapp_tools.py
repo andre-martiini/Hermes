@@ -438,5 +438,65 @@ class TestCapturaNaoEhLeitura(unittest.TestCase):
         self.assertFalse(wa._captura_total(_db_padrao()))
 
 
+class TestLeituraTotal(unittest.TestCase):
+    """Interruptor ligado pelo dono em 27/08/2026: leitura em qualquer conversa.
+
+    Testar isto importa nos dois sentidos. Ligado, o agente precisa mesmo
+    conseguir abrir — senao a ferramenta que ele pediu nao existe. Desligado, o
+    bloqueio tem de voltar inteiro, porque e isso que torna a decisao reversivel
+    em vez de definitiva.
+    """
+
+    def _db(self, leitura_total):
+        db = _db_padrao()
+        db._cols["system"] = _Colecao({"settings": {"whatsapp_ingest": {
+            "chats_allowlist": [MONITORADO],
+            "capturar_todos": True,
+            "leitura_total": leitura_total,
+        }}})
+        return db
+
+    def test_ligado_libera_conversa_fora_da_lista(self):
+        ctx = _Ctx(self._db(True))
+        ctx.db._cols[wa.COL_MENSAGENS].dados["z1"] = {
+            "id": "z1", "chat_id": LIVRE, "content": "oi", "message_type": "chat",
+            "timestamp": "2026-08-26T09:00:00"}
+        self.assertEqual(wa.ler_mensagens(ctx, {"chat_id": LIVRE})["total"], 1)
+
+    def test_ligado_libera_consolidacao_e_transcript(self):
+        ctx = _Ctx(self._db(True))
+        snap = _Snap("j", {"chat_id": LIVRE, "status": "completed",
+                           "transcript_literal": "conversa inteira"})
+        r = wa._formatar_consolidacao(ctx, snap, True)
+        self.assertEqual(r["transcript_literal"], "conversa inteira")
+
+    def test_chat_id_vazio_continua_recusado(self):
+        """Liberar leitura não é aceitar chamada malformada."""
+        with self.assertRaises(wa.WhatsAppNaoMonitorado):
+            wa.ler_mensagens(_Ctx(self._db(True)), {"chat_id": ""})
+
+    def test_desligado_o_bloqueio_volta_inteiro(self):
+        ctx = _Ctx(self._db(False))
+        with self.assertRaises(wa.WhatsAppNaoMonitorado):
+            wa.ler_mensagens(ctx, {"chat_id": LIVRE})
+        with self.assertRaises(wa.WhatsAppNaoMonitorado):
+            wa.consolidar(ctx, {"chat_id": LIVRE, "desde": "2026-08-01"})
+
+    def test_listagem_marca_todas_como_monitoradas(self):
+        r = wa.listar_conversas(_Ctx(self._db(True)), {})
+        self.assertEqual(len(r["conversas"]), 2)
+        self.assertTrue(all(c["monitorada"] for c in r["conversas"]))
+
+    def test_observacao_lembra_dos_terceiros(self):
+        """O agente precisa saber que o acesso amplo não é permissão de uso amplo."""
+        r = wa.listar_conversas(_Ctx(self._db(True)), {})
+        self.assertIn("terceiros", r["observacao"])
+
+    def test_flag_lida_do_lugar_certo(self):
+        self.assertTrue(wa._leitura_total(self._db(True)))
+        self.assertFalse(wa._leitura_total(self._db(False)))
+        self.assertFalse(wa._leitura_total(_db_padrao()))
+
+
 if __name__ == "__main__":
     unittest.main()

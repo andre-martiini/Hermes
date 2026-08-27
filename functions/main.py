@@ -13448,6 +13448,7 @@ def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
             # `capturar_todos` guarda toda conversa; `chats_allowlist` diz o que
             # o agente pode ler. Separados em 27/08/2026 — ver whatsapp_tools.
             "capturar_todos": bool(wa_cfg.get("capturar_todos", False)),
+            "leitura_total": bool(wa_cfg.get("leitura_total", False)),
         },
         "whatsapp_auto_send_enabled": bool(data.get("whatsapp_auto_send_enabled", False)),
         "whatsapp_worker": _serialize_whatsapp_worker_heartbeat(db),
@@ -13484,6 +13485,8 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
             wa_updates["chats_allowlist"] = [str(x).strip() for x in wa_cfg["chats_allowlist"] if str(x).strip()]
         if "capturar_todos" in wa_cfg:
             wa_updates["capturar_todos"] = bool(wa_cfg["capturar_todos"])
+        if "leitura_total" in wa_cfg:
+            wa_updates["leitura_total"] = bool(wa_cfg["leitura_total"])
         if wa_updates:
             updates["whatsapp_ingest"] = wa_updates
 

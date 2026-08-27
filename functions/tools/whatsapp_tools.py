@@ -78,10 +78,26 @@ def _captura_total(db) -> bool:
     return bool(_config_ingest(db).get("capturar_todos"))
 
 
+def _leitura_total(db) -> bool:
+    """Se o agente pode abrir qualquer conversa, sem consultar a allowlist.
+
+    Ligado pelo dono em 27/08/2026, depois de a ressalva ter sido colocada: a
+    leitura e uma ferramenta que ELE aciona, quando pergunta alguma coisa — nao
+    uma varredura de fundo. A exposicao acontece no momento do pedido.
+
+    Continua sendo um interruptor, e nao a remocao do mecanismo: desligar
+    devolve o comportamento restrito sem precisar de deploy, e a allowlist
+    permanece intacta enquanto isso.
+    """
+    return bool(_config_ingest(db).get("leitura_total"))
+
+
 def _exigir_monitorado(db, chat_id: str) -> None:
     chat_id = (chat_id or "").strip()
     if not chat_id:
         raise WhatsAppNaoMonitorado("Informe o chat_id.")
+    if _leitura_total(db):
+        return
     if chat_id not in _allowlist(db):
         raise WhatsAppNaoMonitorado(
             f"A conversa '{chat_id}' nao esta monitorada. O Hermes so le conteudo "
@@ -109,6 +125,7 @@ def listar_conversas(ctx, args: dict) -> dict:
     """
     monitoradas = _allowlist(ctx.db)
     captura_total = _captura_total(ctx.db)
+    leitura_total = _leitura_total(ctx.db)
     apenas_monitoradas = args.get("apenas_monitoradas")
     apenas_monitoradas = True if apenas_monitoradas is None else bool(apenas_monitoradas)
     limite = max(1, min(int(args.get("limite") or 60), 200))
@@ -117,7 +134,7 @@ def listar_conversas(ctx, args: dict) -> dict:
     for snap in ctx.db.collection(COL_CHATS).limit(500).stream():
         dados = snap.to_dict() or {}
         chat_id = str(dados.get("chat_id") or snap.id)
-        monitorada = chat_id in monitoradas
+        monitorada = leitura_total or chat_id in monitoradas
         if apenas_monitoradas and not monitorada:
             continue
         conversas.append({
@@ -139,12 +156,15 @@ def listar_conversas(ctx, args: dict) -> dict:
         "monitoradas": sum(1 for c in conversas if c["monitorada"]),
         "conversas": conversas[:limite],
         "observacao": (
-            "Só conversas monitoradas permitem ler mensagens ou consolidar."
-            + (" O Hermes está capturando todas as conversas, mas capturada≠legível: "
-               "peça ao dono para habilitar a leitura na Caixa de Entrada."
-               if captura_total else "")
-            if apenas_monitoradas else
-            "monitorada=false: aparece na lista, mas o conteúdo não é acessível."),
+            "Leitura liberada em todas as conversas por decisão do dono. Use com "
+            "critério: há terceiros nessas conversas que não sabem que um agente lê."
+            if leitura_total else
+            ("Só conversas monitoradas permitem ler mensagens ou consolidar."
+             + (" O Hermes está capturando todas as conversas, mas capturada≠legível: "
+                "peça ao dono para habilitar a leitura na Caixa de Entrada."
+                if captura_total else "")
+             if apenas_monitoradas else
+             "monitorada=false: aparece na lista, mas o conteúdo não é acessível.")),
     }
 
 

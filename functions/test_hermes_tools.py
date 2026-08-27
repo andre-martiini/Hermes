@@ -8,6 +8,7 @@ causa. A checagem e estatica (AST), sem rede e sem Firestore.
 """
 
 import ast
+import contextlib
 import json
 import os
 import unittest
@@ -238,18 +239,52 @@ class TestCamadaJsonRpc(unittest.TestCase):
         self.assertIn("criar_acao_no_sistema", nomes)
         self.assertEqual(len(nomes), len(registry.list_mcp_enabled_tools()))
 
-    def test_whatsapp_exige_confirmacao(self):
-        """Unica tool com gating no canal MCP, por decisao explicita do dono."""
-        resp = self._post({
-            "jsonrpc": "2.0", "id": 5, "method": "tools/call",
-            "params": {
-                "name": "schedule_whatsapp_message",
-                "arguments": {"contact_number": "+5527999999999", "message": "oi"},
-            },
-        })
+    @contextlib.contextmanager
+    def _gating(self, tools):
+        """Fixa a politica de confirmacao do canal durante o teste.
+
+        Antes isto vinha do Firestore de producao, e o teste virou refem de uma
+        configuracao que o dono pode mudar a qualquer hora — como mudou em
+        27/08/2026. Pior: com o gating desligado, o teste passava a exercitar o
+        caminho de ENVIO de verdade, e o que evitou uma mensagem enfileirada foi
+        um argumento obrigatorio faltando na chamada. Sorte, nao desenho.
+        """
+        anterior = mcp_server._access_cache
+        mcp_server._access_cache = {
+            "uids": {"*"},
+            "confirm_tools": set(tools),
+            "expires_at": float("inf"),
+        }
+        try:
+            yield
+        finally:
+            mcp_server._access_cache = anterior
+
+    def test_gating_do_canal_barra_antes_de_executar(self):
+        """Com a tool na politica, a chamada para na confirmacao — nao envia nada."""
+        with self._gating({"schedule_whatsapp_message"}):
+            resp = self._post({
+                "jsonrpc": "2.0", "id": 5, "method": "tools/call",
+                "params": {
+                    "name": "schedule_whatsapp_message",
+                    "arguments": {"contact_number": "+5527999999999", "message": "oi",
+                                  "scheduled_time": "2030-01-01T12:00:00"},
+                },
+            })
         payload = json.loads(resp.get_data(as_text=True))
         conteudo = json.loads(payload["result"]["content"][0]["text"])
         self.assertEqual(conteudo["status"], "confirmation_required")
+
+    def test_politica_vazia_desliga_o_gating(self):
+        """O dono esvaziou `confirm_tools` em 27/08/2026 para o envio funcionar.
+
+        Aqui so se verifica a decisao do gate — a tool nao chega a ser chamada,
+        porque exercitar envio de WhatsApp num teste seria mandar mensagem.
+        """
+        with self._gating(set()):
+            self.assertFalse(mcp_server._exige_confirmacao("schedule_whatsapp_message"))
+        with self._gating({"schedule_whatsapp_message"}):
+            self.assertTrue(mcp_server._exige_confirmacao("schedule_whatsapp_message"))
 
     def test_demais_tools_mutantes_nao_pedem_dupla_chamada(self):
         """`criar_acao_no_sistema` grava, mas o gating do canal esta desligado.
@@ -265,10 +300,15 @@ class TestCamadaJsonRpc(unittest.TestCase):
         resp = self._post({"jsonrpc": "2.0", "id": 8, "method": "tools/list"})
         payload = json.loads(resp.get_data(as_text=True))
         por_nome = {t["name"]: t["_meta"] for t in payload["result"]["tools"]}
-        self.assertTrue(por_nome["schedule_whatsapp_message"]["needsConfirmation"])
+        # `needsConfirmation` reflete a politica viva do canal, que o dono muda
+        # sem deploy; o que este teste trava e a distincao entre gating e mutacao,
+        # nao o valor de uma configuracao.
         self.assertFalse(por_nome["criar_acao_no_sistema"]["needsConfirmation"])
         self.assertTrue(por_nome["criar_acao_no_sistema"]["mutates"])
         self.assertFalse(por_nome["consultar_saude"]["mutates"])
+        # Envio de WhatsApp continua marcado como mutante independente do gating —
+        # e o que faz o cliente pedir permissao mesmo com a politica vazia.
+        self.assertTrue(por_nome["schedule_whatsapp_message"]["mutates"])
 
     def test_tool_pura_executa(self):
         resp = self._post({

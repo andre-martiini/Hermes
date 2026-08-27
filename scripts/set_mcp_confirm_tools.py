@@ -49,10 +49,28 @@ def main() -> int:
                    help="esvazia confirm_tools: nenhuma tool exige _confirmed no MCP")
     g.add_argument("--restaurar-padrao", action="store_true",
                    help="volta a exigir confirmacao no envio de WhatsApp")
+    g.add_argument("--liberar-leitura-whatsapp", action="store_true",
+                   help="o agente passa a ler qualquer conversa (whatsapp_ingest.leitura_total)")
+    g.add_argument("--restringir-leitura-whatsapp", action="store_true",
+                   help="volta a valer a allowlist de conversas legiveis")
     g.add_argument("--mostrar", action="store_true", help="so imprime o estado atual")
     args = p.parse_args()
 
     db = _db()
+
+    if args.liberar_leitura_whatsapp or args.restringir_leitura_whatsapp:
+        liberar = bool(args.liberar_leitura_whatsapp)
+        alvo = db.collection("system").document("settings")
+        atual = ((alvo.get().to_dict() or {}).get("whatsapp_ingest") or {})
+        print(f"leitura_total antes: {atual.get('leitura_total')!r}")
+        alvo.set({"whatsapp_ingest": {"leitura_total": liberar}}, merge=True)
+        print(f"leitura_total agora: {liberar!r}")
+        if liberar:
+            print()
+            print("O agente pode abrir qualquer conversa. A allowlist fica intacta: "
+                  "desligar devolve o comportamento restrito, sem deploy.")
+        return 0
+
     ref = db.collection("system").document("mcp_access")
     atual = (ref.get().to_dict() or {}).get("confirm_tools")
     print(f"confirm_tools antes: {atual!r}"
