@@ -236,35 +236,42 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
       </div>
 
       <div className={cardClass}>
-        <ToggleRow
-          label="Triagem automática do WhatsApp"
-          desc="Análise automática de conversas com proposta de vínculo a ações via Telegram. Complementa a Caixa de Entrada (consolidação manual). A captura pelo worker e a lista de conversas abaixo continuam ativas independentemente."
-          enabled={data.whatsapp_ingest.enabled}
-          onToggle={() => toggle('whatsapp_ingest')}
-        />
+        {/* Captura, leitura e envio NÃO dependem da triagem — nem no código
+            (só `triage_whatsapp_messages` lê `whatsapp_ingest.enabled`), nem
+            aqui. Estes dois interruptores ficaram um dia dentro do bloco
+            condicional da triagem: desligá-la escondia exatamente os controles
+            que precisavam continuar ligados. */}
+        <div className="space-y-3">
+          <ToggleRow
+            label="Capturar todas as conversas"
+            desc="Guarda toda conversa do WhatsApp, sem lista. Independe da triagem automática. Exige reiniciar o worker local para valer."
+            enabled={data.whatsapp_ingest.capturar_todos}
+            onToggle={toggleCapturarTodos}
+          />
+          <ToggleRow
+            label="Claude pode ler e enviar em qualquer conversa"
+            desc="Libera a leitura sem depender da lista abaixo. É ferramenta sob demanda, acionada quando você pergunta — não varredura. Independe da triagem. Desligar devolve a lista, que fica intacta enquanto isso."
+            enabled={data.whatsapp_ingest.leitura_total}
+            onToggle={toggleLeituraTotal}
+          />
+        </div>
 
-        {data.whatsapp_ingest.enabled && (
-          <div className={`pt-3 border-t border-dashed space-y-3 ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'}`}>
+        <div className={`pt-3 border-t border-dashed space-y-3 ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'}`}>
+          <ToggleRow
+            label="Triagem automática do WhatsApp"
+            desc="Análise automática de conversas com proposta de vínculo a ações, avisando no Telegram e no Hermes. Desligar não afeta captura, leitura nem envio — só para de gerar as sugestões."
+            enabled={data.whatsapp_ingest.enabled}
+            onToggle={() => toggle('whatsapp_ingest')}
+          />
+          {data.whatsapp_ingest.enabled && (
             <ToggleRow
-              label="Capturar todas as conversas"
-              desc="Guarda toda conversa do WhatsApp, sem lista. Não dá acesso de leitura ao Claude: isso continua sendo decidido conversa a conversa na Caixa de Entrada. Guardar é uma coisa; deixar um agente ler é outra."
-              enabled={data.whatsapp_ingest.capturar_todos}
-              onToggle={toggleCapturarTodos}
-            />
-            <ToggleRow
-              label="Claude pode ler todas as conversas"
-              desc="Libera a leitura em qualquer conversa, sem depender da lista abaixo. É ferramenta sob demanda, acionada quando você pergunta — não varredura. Desligar devolve a lista, que fica intacta enquanto isso."
-              enabled={data.whatsapp_ingest.leitura_total}
-              onToggle={toggleLeituraTotal}
-            />
-            <ToggleRow
-              label="Só chats vinculados a ações"
-              desc="Analisa apenas conversas vinculadas manualmente a alguma ação (na tela da ação). Conversas sem vínculo seguem capturadas para a Caixa de Entrada, mas não geram análise de IA nem sugestões."
+              label="Triar só chats vinculados a ações"
+              desc="A triagem analisa apenas conversas vinculadas manualmente a alguma ação (na tela da ação). As demais seguem capturadas, mas não geram sugestão."
               enabled={data.whatsapp_ingest.linked_chats_only}
               onToggle={toggleLinkedOnly}
             />
-          </div>
-        )}
+          )}
+        </div>
 
         <div className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider ${data.whatsapp_worker.online ? 'text-emerald-500' : (isDarkTheme ? 'text-slate-500' : 'text-slate-400')}`}>
           <span className={`w-2 h-2 rounded-full ${data.whatsapp_worker.online ? 'bg-emerald-500' : 'bg-slate-400'}`} />
