@@ -3,9 +3,15 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Tarefa, AppSettings, PoolItem, ConhecimentoItem, Acompanhamento, ActionPlanItem,
-  ChatMessage, BaseConhecimento, formatDate, formatDateLocalISO, TaskReminder, WhatsappVinculo
+  ChatMessage, BaseConhecimento, formatDate, formatDateLocalISO, TaskReminder, WhatsappVinculo,
+  SubtarefaEstado
 } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
+import {
+  CORES_ETAPA, ESTADOS, HACHURA_ETAPA, ROTULO_ESTADO, comEstado, contarSubtarefas,
+  derivarLane, estaFeita, estadoDaSubtarefa, visualDaEtapa, visualDaSubtarefa
+} from '../utils/subtarefas';
+import { hojeISO } from '../utils/ganttLayout';
 import { buildDiaryRichNote, ensureHttpUrl, getRenamedFileName, parseDiaryRichNote } from '../utils/diaryEntries';
 import { isOperationalArea, STRATEGIC_AREA_OPTIONS } from '../utils/strategicAreas';
 import { buildRecordedAudioBlob, transcribeAudioViaStorage } from '../utils/audioTranscription';
@@ -726,6 +732,10 @@ export const TaskExecutionView = ({
   // Plan history viewer (Feature 5)
   const [showPlanHistory, setShowPlanHistory] = useState(false);
   const [showCompletedPlanItems, setShowCompletedPlanItems] = useState(false);
+  // Etapa com o seletor de estado aberto, e o rascunho do "de quem" enquanto
+  // ele está sendo digitado (só vira gravação no Enter ou ao sair do campo).
+  const [estadoMenuItemId, setEstadoMenuItemId] = useState<string | null>(null);
+  const [aguardandoDeDraft, setAguardandoDeDraft] = useState('');
 
   useEffect(() => {
     setShowCompletedPlanItems(false);
@@ -854,20 +864,29 @@ export const TaskExecutionView = ({
 
 
 
-  const progressPercent = useMemo(() => {
-    const items = currentTaskData.plano_acao || [];
-    if (items.length === 0) return 0;
-    const done = items.filter(i => i.completed).length;
-    return Math.round((done / items.length) * 100);
-  }, [currentTaskData.plano_acao]);
+  // Dia de referência do atraso das etapas, igual ao do Gantt. Recalcular a
+  // cada render é barato e evita a tela virar o dia com o valor de ontem.
+  const hoje = hojeISO();
+
+  // O progresso e os dois grupos leem `estaFeita`, não `completed` cru: uma
+  // etapa marcada pelo agente tem `estado`, e é ele que manda quando existe.
+  const [planItemsFeitos, planItemsTotal] = useMemo(
+    () => contarSubtarefas(currentTaskData.plano_acao),
+    [currentTaskData.plano_acao]
+  );
+
+  const progressPercent = useMemo(
+    () => (planItemsTotal === 0 ? 0 : Math.round((planItemsFeitos / planItemsTotal) * 100)),
+    [planItemsFeitos, planItemsTotal]
+  );
 
   const pendingPlanItems = useMemo(
-    () => (currentTaskData.plano_acao || []).filter(item => !item.completed),
+    () => (currentTaskData.plano_acao || []).filter(item => !estaFeita(item)),
     [currentTaskData.plano_acao]
   );
 
   const completedPlanItems = useMemo(
-    () => (currentTaskData.plano_acao || []).filter(item => item.completed),
+    () => (currentTaskData.plano_acao || []).filter(item => estaFeita(item)),
     [currentTaskData.plano_acao]
   );
 
@@ -1028,47 +1047,85 @@ export const TaskExecutionView = ({
     window.addEventListener('mouseup', onMouseUp);
   };
 
-  // ─── Checklist Toggle (with auto-diary entry) ─────────────────
-  const handleToggleChecklistItem = (itemId: string) => {
+  // ─── Estado da etapa (o mesmo que o Gantt desenha) ────────────
+  /**
+   * Marca o estado de uma subtarefa e grava o plano inteiro.
+   *
+   * Até 27/08/2026 a tela só sabia ligar e desligar `completed`. Como a leitura
+   * (`estadoDaSubtarefa`, `subtarefas.estado_de`) só deduz de `completed`
+   * quando não há `estado`, marcar aqui uma etapa que o agente já tinha posto
+   * em `em_andamento` deixava as duas versões divergentes — a tela riscava, o
+   * Gantt continuava mostrando a etapa aberta. `comEstado` escreve os dois.
+   *
+   * A faixa de execução vai junto porque ela é derivada das etapas: é o que faz
+   * "aguardando terceiro" marcado aqui chegar ao planejador de notificações,
+   * que lê o campo gravado, sem esperar a virada do dia.
+   */
+  const handleSetPlanItemEstado = (
+    itemId: string,
+    estado: SubtarefaEstado,
+    aguardandoDe?: string
+  ) => {
     const items = currentTaskData.plano_acao || [];
     const item = items.find(i => i.id === itemId);
     if (!item) return;
-    const newCompleted = !item.completed;
-    const updated = items.map(i => i.id === itemId ? { ...i, completed: newCompleted } : i);
+    const anterior = estadoDaSubtarefa(item);
+    const quem = String(aguardandoDe ?? item.aguardando_de ?? '').trim();
+    if (anterior === estado && quem === String(item.aguardando_de || '').trim()) return;
+
+    const updated = items.map(i => i.id === itemId ? comEstado(i, estado, aguardandoDe) : i);
     const sorted = [
-      ...updated.filter(i => i.completed),
-      ...updated.filter(i => !i.completed)
+      ...updated.filter(i => estaFeita(i)),
+      ...updated.filter(i => !estaFeita(i))
     ];
 
+    // O diário registra o que tem consequência: conclusão (e o seu desfazer) e
+    // espera por terceiro. Ir de pendente para em andamento não vira entrada —
+    // seria uma linha por clique, e a cor da bolinha já diz.
     let updatedAcompanhamento = [...(currentTaskData.acompanhamento || [])];
+    const notaConclusao = `✅ Sistema: Subtarefa "${item.text}" concluída.`;
 
-    if (newCompleted) {
-      const systemEntry: Acompanhamento = {
-        data: new Date().toISOString(),
-        nota: `✅ Sistema: Subtarefa "${item.text}" concluída.`
-      };
-      updatedAcompanhamento.push(systemEntry);
-    } else {
-      const targetNote = `✅ Sistema: Subtarefa "${item.text}" concluída.`;
-      const lastIndex = updatedAcompanhamento.map(e => e.nota).lastIndexOf(targetNote);
+    if (estado === 'feito') {
+      updatedAcompanhamento.push({ data: new Date().toISOString(), nota: notaConclusao });
+    } else if (anterior === 'feito') {
+      const lastIndex = updatedAcompanhamento.map(e => e.nota).lastIndexOf(notaConclusao);
       if (lastIndex !== -1) {
         updatedAcompanhamento.splice(lastIndex, 1);
       }
     }
 
-    const allCompleted = sorted.length > 0 && sorted.every(i => i.completed);
+    if (estado === 'aguardando_terceiro') {
+      updatedAcompanhamento.push({
+        data: new Date().toISOString(),
+        nota: `⏳ Sistema: Subtarefa "${item.text}" aguardando ${quem || 'terceiro'}.`
+      });
+    }
+
+    const allCompleted = sorted.length > 0 && sorted.every(i => estaFeita(i));
 
     onSave(task.id, {
       plano_acao: sorted,
       acompanhamento: updatedAcompanhamento,
+      execution_lane: derivarLane(sorted, currentTaskData.execution_lane),
       ...(allCompleted && { status: 'concluído' })
     });
 
     if (allCompleted) {
       showToast('Status atualizado para Concluído!', 'success');
     }
+  };
 
-
+  /**
+   * Atalho de sempre: clicar na etapa conclui, clicar de novo reabre.
+   *
+   * Reabrir devolve para `pendente`, não para `em_andamento` — o clique diz que
+   * a etapa não está pronta, não que voltou a ser trabalhada. Quem quiser o
+   * outro estado marca no seletor.
+   */
+  const handleToggleChecklistItem = (itemId: string) => {
+    const item = (currentTaskData.plano_acao || []).find(i => i.id === itemId);
+    if (!item) return;
+    handleSetPlanItemEstado(itemId, estaFeita(item) ? 'pendente' : 'feito');
   };
 
   const openReminderModal = (reminder?: TaskReminder) => {
@@ -1873,10 +1930,11 @@ export const TaskExecutionView = ({
     const successMsg: ChatMessage = { role: 'assistant', content: '✅ Plano de ação atualizado com sucesso!' };
     const newHistory = [...updatedMessages, successMsg];
 
-    const allCompleted = appliedPlan.length > 0 && appliedPlan.every(i => i.completed);
+    const allCompleted = appliedPlan.length > 0 && appliedPlan.every(i => estaFeita(i));
 
     onSave(task.id, {
       plano_acao: appliedPlan,
+      execution_lane: derivarLane(appliedPlan, currentTaskData.execution_lane),
       plano_acao_historico: updatedHistory,
       chat_history: newHistory,
       ...(allCompleted && { status: 'concluído' })
@@ -2076,12 +2134,13 @@ export const TaskExecutionView = ({
 
   const savePlanDraft = () => {
     const sorted = [
-      ...planDraft.filter(i => i.completed),
-      ...planDraft.filter(i => !i.completed)
+      ...planDraft.filter(i => estaFeita(i)),
+      ...planDraft.filter(i => !estaFeita(i))
     ];
-    const allCompleted = sorted.length > 0 && sorted.every(i => i.completed);
-    onSave(task.id, { 
+    const allCompleted = sorted.length > 0 && sorted.every(i => estaFeita(i));
+    onSave(task.id, {
       plano_acao: sorted,
+      execution_lane: derivarLane(sorted, currentTaskData.execution_lane),
       ...(allCompleted && { status: 'concluído' })
     });
     setShowPlanModal(false);
@@ -2137,9 +2196,10 @@ export const TaskExecutionView = ({
       const updatedHistory = currentPlan.length > 0
         ? [...existingHistory.slice(-4), { data: new Date().toISOString(), items: currentPlan }]
         : existingHistory;
-      const allCompleted = insightState.planoProposto.length > 0 && insightState.planoProposto.every(i => i.completed);
-      onSave(task.id, { 
-        plano_acao: insightState.planoProposto, 
+      const allCompleted = insightState.planoProposto.length > 0 && insightState.planoProposto.every(i => estaFeita(i));
+      onSave(task.id, {
+        plano_acao: insightState.planoProposto,
+        execution_lane: derivarLane(insightState.planoProposto, currentTaskData.execution_lane),
         plano_acao_historico: updatedHistory,
         ...(allCompleted && { status: 'concluído' })
       });
@@ -2310,30 +2370,135 @@ export const TaskExecutionView = ({
     return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 font-sans';
   };
 
-  const renderPlanItem = (item: ActionPlanItem) => (
-    <button
-      key={item.id}
-      onClick={() => handleToggleChecklistItem(item.id)}
-      className={`w-full flex items-start gap-3 p-2.5 rounded-lg text-left transition-all group ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
-    >
-      <div className={`w-4 h-4 mt-0.5 rounded-lg border-2 flex items-center justify-center shrink-0 transition-all ${item.completed
-        ? 'bg-emerald-500 border-emerald-500'
-        : isDark ? 'border-white/30 group-hover:border-emerald-400' : 'border-slate-300 group-hover:border-emerald-500'
-        }`}>
-        {item.completed && (
-          <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
-          </svg>
+  /**
+   * Uma etapa do plano.
+   *
+   * A bolinha é a mesma linguagem do Gantt — cor por estado, hachura para a
+   * espera, vermelho quando a data própria já passou — e clicar nela abre os
+   * quatro estados. O texto continua com o atalho antigo: um clique conclui,
+   * outro reabre.
+   */
+  const renderPlanItem = (item: ActionPlanItem) => {
+    const estado = estadoDaSubtarefa(item);
+    const visual = visualDaSubtarefa(item, hoje);
+    const cor = CORES_ETAPA[visual];
+    const feito = estado === 'feito';
+    const seletorAberto = estadoMenuItemId === item.id;
+    const dataPrevista = String(item.data_prevista || '').trim().slice(0, 10);
+
+    return (
+      <div
+        key={item.id}
+        className={`rounded-lg transition-all ${seletorAberto ? (isDark ? 'bg-white/5' : 'bg-slate-50') : ''}`}
+      >
+        <div className={`flex items-start gap-2.5 rounded-lg p-2.5 transition-all group ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}>
+          <button
+            type="button"
+            onClick={() => {
+              setAguardandoDeDraft(seletorAberto ? '' : String(item.aguardando_de || ''));
+              setEstadoMenuItemId(seletorAberto ? null : item.id);
+            }}
+            aria-expanded={seletorAberto}
+            title={`${cor.rotulo} — clique para mudar o estado`}
+            className={`mt-0.5 shrink-0 w-4 h-4 rounded-full border flex items-center justify-center transition-all hover:scale-110 ${cor.fundo} ${cor.borda}`}
+            style={visual === 'aguardando' ? HACHURA_ETAPA : undefined}
+          >
+            {feito && (
+              <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleToggleChecklistItem(item.id)}
+            title={feito ? 'Reabrir a etapa' : 'Concluir a etapa'}
+            className="flex-1 min-w-0 text-left"
+          >
+            <span className={`block text-xs font-medium leading-snug transition-all font-sans ${feito
+              ? isDark ? 'text-white/30 line-through' : 'text-slate-300 line-through'
+              : isDark ? 'text-white/80' : 'text-slate-700'
+              }`}>
+              {item.text}
+            </span>
+            {(dataPrevista || item.aguardando_de) && (
+              <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                {dataPrevista && (
+                  <span className={`text-[9px] font-bold uppercase tracking-wider font-sans ${visual === 'atrasada' ? 'text-rose-500' : mutedText}`}>
+                    {formatDate(dataPrevista)}
+                  </span>
+                )}
+                {item.aguardando_de && (
+                  <span className={`text-[9px] font-bold uppercase tracking-wider font-sans ${CORES_ETAPA.aguardando.texto}`}>
+                    aguardando {item.aguardando_de}
+                  </span>
+                )}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {seletorAberto && (
+          <div className={`mx-2.5 mb-2 rounded-lg border p-1.5 ${isDark ? 'border-white/10 bg-black/20' : 'border-[#e5e7eb] bg-white'}`}>
+            <div className="grid grid-cols-2 gap-1">
+              {ESTADOS.map(opcao => {
+                const corOpcao = CORES_ETAPA[visualDaEtapa(opcao, false)];
+                const atual = opcao === estado;
+                return (
+                  <button
+                    key={opcao}
+                    type="button"
+                    onClick={() => {
+                      if (opcao === 'aguardando_terceiro') {
+                        setAguardandoDeDraft(String(item.aguardando_de || ''));
+                        handleSetPlanItemEstado(item.id, opcao, item.aguardando_de);
+                        return;
+                      }
+                      handleSetPlanItemEstado(item.id, opcao);
+                      setEstadoMenuItemId(null);
+                    }}
+                    className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-left transition-all border ${atual
+                      ? isDark ? 'border-white/25 bg-white/10' : 'border-slate-300 bg-slate-100'
+                      : isDark ? 'border-transparent hover:bg-white/5' : 'border-transparent hover:bg-slate-50'
+                      }`}
+                  >
+                    <span
+                      className={`shrink-0 w-2 h-2 rounded-full border ${corOpcao.fundo} ${corOpcao.borda}`}
+                      style={opcao === 'aguardando_terceiro' ? HACHURA_ETAPA : undefined}
+                    />
+                    <span className={`text-[9px] font-bold uppercase tracking-wider font-sans ${atual ? (isDark ? 'text-white' : 'text-slate-900') : mutedText}`}>
+                      {ROTULO_ESTADO[opcao]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {estado === 'aguardando_terceiro' && (
+              <input
+                value={aguardandoDeDraft}
+                onChange={e => setAguardandoDeDraft(e.target.value)}
+                onBlur={() => handleSetPlanItemEstado(item.id, 'aguardando_terceiro', aguardandoDeDraft)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSetPlanItemEstado(item.id, 'aguardando_terceiro', aguardandoDeDraft);
+                    setEstadoMenuItemId(null);
+                  }
+                }}
+                placeholder="Aguardando de quem?"
+                className={`mt-1.5 w-full rounded-lg border px-2 py-1.5 text-[10px] font-medium outline-none font-sans ${isDark
+                  ? 'border-white/10 bg-white/5 text-white placeholder:text-white/25'
+                  : 'border-[#e5e7eb] bg-white text-slate-700 placeholder:text-slate-400'
+                  }`}
+              />
+            )}
+          </div>
         )}
       </div>
-      <span className={`text-xs font-medium leading-snug transition-all font-sans ${item.completed
-        ? isDark ? 'text-white/30 line-through' : 'text-slate-300 line-through'
-        : isDark ? 'text-white/80' : 'text-slate-700'
-        }`}>
-        {item.text}
-      </span>
-    </button>
-  );
+    );
+  };
 
   // ─── Columns visibility (mobile tabs) ────────────────────────
   const showMapa = mobileTab === 'mapa';
@@ -2648,7 +2813,7 @@ export const TaskExecutionView = ({
                         </div>
                         <div className="flex items-center gap-2">
                           <span className={`text-[9px] font-black font-sans ${progressPercent === 100 ? 'text-emerald-500' : mutedText}`}>
-                            {(currentTaskData.plano_acao || []).filter(i => i.completed).length}/{(currentTaskData.plano_acao || []).length}
+                            {planItemsFeitos}/{planItemsTotal}
                           </span>
                           <button
                             onClick={openPlanModal}
@@ -2698,7 +2863,7 @@ export const TaskExecutionView = ({
                                 <div className="flex items-center gap-2">
                                   <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
                                   <span className={`text-[9px] font-bold uppercase tracking-wider font-sans ${isDark ? 'text-blue-300' : 'text-blue-600'}`}>
-                                    Em andamento
+                                    Em aberto
                                   </span>
                                 </div>
                                 <span className={`text-[9px] font-bold font-sans ${mutedText}`}>
@@ -2710,7 +2875,7 @@ export const TaskExecutionView = ({
                                 pendingPlanItems.map(renderPlanItem)
                               ) : (
                                 <p className={`px-2.5 py-2 text-[10px] font-medium font-sans ${mutedText}`}>
-                                  Nenhuma etapa em andamento.
+                                  Nenhuma etapa em aberto.
                                 </p>
                               )}
                             </div>
@@ -2789,7 +2954,10 @@ export const TaskExecutionView = ({
                                   </div>
                                   <button
                                     onClick={() => {
-                                      onSave(task.id, { plano_acao: version.items });
+                                      onSave(task.id, {
+                                        plano_acao: version.items,
+                                        execution_lane: derivarLane(version.items, currentTaskData.execution_lane),
+                                      });
                                       setShowPlanHistory(false);
                                       showToast('Plano restaurado!', 'success');
                                     }}
@@ -3455,15 +3623,16 @@ export const TaskExecutionView = ({
                   {/* Toggle Index / Completed Badge */}
                   <button
                     onClick={() => {
-                      const newCompleted = !item.completed;
-                      const updated = planDraft.map(i => i.id === item.id ? { ...i, completed: newCompleted } : i);
+                      const updated = planDraft.map(i => i.id === item.id
+                        ? comEstado(i, estaFeita(i) ? 'pendente' : 'feito')
+                        : i);
                       const sorted = [
-                        ...updated.filter(i => i.completed),
-                        ...updated.filter(i => !i.completed)
+                        ...updated.filter(i => estaFeita(i)),
+                        ...updated.filter(i => !estaFeita(i))
                       ];
                       setPlanDraft(sorted);
                     }}
-                    title={item.completed ? "Marcar como não concluído" : "Marcar como concluído"}
+                    title={estaFeita(item) ? "Marcar como não concluído" : "Marcar como concluído"}
                     className={`mt-1 shrink-0 w-5 h-5 rounded-lg flex items-center justify-center text-[9px] font-black transition-all ${item.completed ? 'bg-emerald-500 text-white' : isDark ? 'bg-white/10 text-white/40 hover:bg-white/20' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'}`}
                   >
                     {item.completed ? <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : idx + 1}

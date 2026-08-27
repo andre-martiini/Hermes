@@ -13,6 +13,7 @@ import { detectAreaFromTitle, callScrapeSipac } from '../../utils/helpers';
 import { isOperationalArea, STRATEGIC_AREA_OPTIONS } from '../../utils/strategicAreas';
 import { WysiwygEditor } from '../ui/UIComponents';
 import { buildRecordedAudioBlob, transcribeAudioViaStorage } from '../../utils/audioTranscription';
+import { comEstado, estaFeita } from '../../utils/subtarefas';
 
 type ThemeMode = 'system' | 'dark' | 'light';
 
@@ -1199,7 +1200,11 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
   };
 
   const toggleChecklistItem = (id: string) => {
-    setPlanoAcao(planoAcao.map(item => item.id === id ? { ...item, completed: !item.completed } : item));
+    // Passa pelo contrato da subtarefa: mexer só em `completed` deixaria para
+    // trás o `estado`, que é o que o Gantt e o agente leem.
+    setPlanoAcao(planoAcao.map(item => item.id === id
+      ? comEstado(item, estaFeita(item) ? 'pendente' : 'feito')
+      : item));
   };
 
   return (
@@ -1747,7 +1752,11 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
   };
 
   const toggleChecklistItem = (id: string) => {
-    setPlanoAcao(planoAcao.map(item => item.id === id ? { ...item, completed: !item.completed } : item));
+    // Passa pelo contrato da subtarefa: mexer só em `completed` deixaria para
+    // trás o `estado`, que é o que o Gantt e o agente leem.
+    setPlanoAcao(planoAcao.map(item => item.id === id
+      ? comEstado(item, estaFeita(item) ? 'pendente' : 'feito')
+      : item));
   };
 
   return (

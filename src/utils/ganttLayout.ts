@@ -1,5 +1,8 @@
 import { Tarefa, formatDateLocalISO } from '../../types';
 import { hasValidTaskDate, isCompletedStatus, isStandbyStatus, normalizeStatus } from './helpers';
+import { estadoDaSubtarefa, textoDaSubtarefa, visualDaEtapa } from './subtarefas';
+import type { EtapaVisual } from './subtarefas';
+import type { SubtarefaEstado } from '../../types';
 
 /**
  * Layout do gráfico de Gantt das ações.
@@ -39,8 +42,8 @@ import { hasValidTaskDate, isCompletedStatus, isStandbyStatus, normalizeStatus }
 
 export type GanttScale = 'dia' | 'semana' | 'mes';
 
-/** Espelha `subtarefas.ESTADOS` no backend (functions/subtarefas.py). */
-export type GanttEtapaEstado = 'pendente' | 'em_andamento' | 'aguardando_terceiro' | 'feito';
+/** O mesmo estado da subtarefa, com o nome que o Gantt usa. */
+export type GanttEtapaEstado = SubtarefaEstado;
 
 export interface GanttEtapa {
   id: string;
@@ -170,18 +173,6 @@ const dataDoCampo = (valor: unknown): string => {
 };
 
 /**
- * Estado da etapa, deduzido de `completed` quando ainda não existir — a mesma
- * regra de `subtarefas.estado_de` no backend, que é o que dispensa migração das
- * etapas anteriores a 26/08/2026.
- */
-const estadoDaEtapa = (item: any): GanttEtapaEstado => {
-  const bruto = String(item?.estado || '').trim().toLowerCase();
-  if (bruto === 'pendente' || bruto === 'em_andamento'
-    || bruto === 'aguardando_terceiro' || bruto === 'feito') return bruto;
-  return item?.completed ? 'feito' : 'pendente';
-};
-
-/**
  * Etapas posicionáveis do plano.
  *
  * Devolve vazio quando nenhuma etapa tem data própria: nesse caso todas
@@ -195,9 +186,9 @@ export const extrairEtapas = (task: Tarefa, hoje: string): GanttEtapa[] => {
 
   const etapas: GanttEtapa[] = [];
   plano.forEach((item: any, i: number) => {
-    const texto = String(item?.text || item?.texto || '').trim();
+    const texto = textoDaSubtarefa(item);
     if (!texto) return;
-    const estado = estadoDaEtapa(item);
+    const estado = estadoDaSubtarefa(item);
     const data = dataDoCampo(item?.data_prevista);
     etapas.push({
       id: String(item?.id || `etapa-${i}`),
@@ -399,20 +390,12 @@ export const statusVisualDaLinha = (linha: GanttRow): GanttStatusVisual => {
   return 'andamento';
 };
 
-export type GanttEtapaVisual = 'feito' | 'aguardando' | 'atrasada' | 'em_andamento' | 'pendente';
+export type GanttEtapaVisual = EtapaVisual;
 
 /**
- * Aparência do marcador da etapa.
- *
- * `aguardando_terceiro` vem **antes** de `atrasada` de propósito: etapa parada
- * esperando outra pessoa passou da data sem que ninguém tenha procrastinado, e
- * pintá-la de atrasada seria a mesma confusão que o contador de degradação
- * fazia antes de 26/08/2026.
+ * Aparência do marcador da etapa. A precedência mora em `visualDaEtapa`, que é
+ * a mesma usada pelo plano de ação no detalhamento da ação — as duas telas
+ * pintam a etapa pela mesma regra.
  */
-export const statusVisualDaEtapa = (etapa: GanttEtapa): GanttEtapaVisual => {
-  if (etapa.concluida) return 'feito';
-  if (etapa.estado === 'aguardando_terceiro') return 'aguardando';
-  if (etapa.atrasada) return 'atrasada';
-  if (etapa.estado === 'em_andamento') return 'em_andamento';
-  return 'pendente';
-};
+export const statusVisualDaEtapa = (etapa: GanttEtapa): GanttEtapaVisual =>
+  visualDaEtapa(etapa.estado, etapa.atrasada);

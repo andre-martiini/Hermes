@@ -15,6 +15,7 @@ import {
   statusVisualDaEtapa,
   statusVisualDaLinha,
 } from '../utils/ganttLayout';
+import { CORES_ETAPA, HACHURA_ETAPA, ROTULO_ESTADO } from '../utils/subtarefas';
 
 /**
  * Gráfico de Gantt das ações.
@@ -47,27 +48,6 @@ const CORES = {
   atrasada: { barra: 'bg-rose-500', borda: 'border-rose-600', texto: 'text-rose-600', rotulo: 'Atrasada' },
   standby: { barra: 'bg-amber-500', borda: 'border-amber-600', texto: 'text-amber-600', rotulo: 'Stand-by' },
   andamento: { barra: 'bg-blue-500', borda: 'border-blue-600', texto: 'text-blue-600', rotulo: 'Em andamento' },
-} as const;
-
-const CORES_ETAPA = {
-  feito: { fundo: 'bg-emerald-500', borda: 'border-emerald-700', rotulo: 'Etapa concluída' },
-  aguardando: { fundo: 'bg-amber-400', borda: 'border-amber-600', rotulo: 'Aguardando terceiro' },
-  atrasada: { fundo: 'bg-rose-500', borda: 'border-rose-700', rotulo: 'Etapa atrasada' },
-  em_andamento: { fundo: 'bg-blue-500', borda: 'border-blue-700', rotulo: 'Etapa em andamento' },
-  pendente: { fundo: 'bg-slate-300', borda: 'border-slate-500', rotulo: 'Etapa pendente' },
-} as const;
-
-const ROTULO_ESTADO: Record<GanttEtapa['estado'], string> = {
-  feito: 'concluída',
-  em_andamento: 'em andamento',
-  aguardando_terceiro: 'aguardando terceiro',
-  pendente: 'pendente',
-};
-
-/** Hachura da etapa em espera — a diferença tem que sobreviver ao daltonismo. */
-const HACHURA = {
-  backgroundImage:
-    'repeating-linear-gradient(45deg, transparent 0 3px, rgba(255,255,255,0.55) 3px 6px)',
 } as const;
 
 const ALTURA_ACAO = 44;
@@ -236,7 +216,7 @@ export const GanttView = ({
                     >
                       <span
                         className={`shrink-0 w-2 h-2 rounded-full border ${cor.fundo} ${cor.borda}`}
-                        style={statusVisualDaEtapa(etapa) === 'aguardando' ? HACHURA : undefined}
+                        style={statusVisualDaEtapa(etapa) === 'aguardando' ? HACHURA_ETAPA : undefined}
                       />
                       <span className={`text-[10px] leading-tight truncate ${corTextoFraco}`}>{etapa.texto}</span>
                     </div>
@@ -346,7 +326,7 @@ export const GanttView = ({
                       >
                         {left && (
                           <span
-                            style={{ left, ...(visualEtapa === 'aguardando' ? HACHURA : {}) }}
+                            style={{ left, ...(visualEtapa === 'aguardando' ? HACHURA_ETAPA : {}) }}
                             className={`absolute top-1/2 z-10 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full border ${cor.fundo} ${cor.borda}`}
                             title={`${etapa.texto}\n${formatDate(etapa.data)} · ${ROTULO_ESTADO[etapa.estado]}`}
                           />
@@ -413,7 +393,7 @@ export const GanttView = ({
                         return (
                           <span
                             key={etapa.id}
-                            style={{ left, ...(visualEtapa === 'aguardando' ? HACHURA : {}) }}
+                            style={{ left, ...(visualEtapa === 'aguardando' ? HACHURA_ETAPA : {}) }}
                             className={`absolute top-1/2 z-20 -translate-y-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full border ${corEtapa.fundo} ${corEtapa.borda}`}
                             title={`${etapa.texto}\n${formatDate(etapa.data)} · ${ROTULO_ESTADO[etapa.estado]}`}
                           />
@@ -457,7 +437,7 @@ export const GanttView = ({
           Etapa
         </span>
         <span className={`flex items-center gap-2 text-[9px] font-black uppercase tracking-widest ${corTextoFraco}`}>
-          <span className="w-2 h-2 rounded-full border bg-amber-400 border-amber-600" style={HACHURA} />
+          <span className="w-2 h-2 rounded-full border bg-amber-400 border-amber-600" style={HACHURA_ETAPA} />
           Aguardando terceiro
         </span>
         <span className={`flex items-center gap-2 text-[9px] font-black uppercase tracking-widest ${corTextoFraco}`}>
