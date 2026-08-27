@@ -84,7 +84,7 @@ export const HermesModal = ({ isOpen, title, message, type, onConfirm, onCancel,
 interface AutomationSettingsData {
   email_action_linker: { enabled: boolean };
   personal_diary: { enabled: boolean };
-  whatsapp_ingest: { enabled: boolean; linked_chats_only: boolean; chats_allowlist: string[]; capturar_todos: boolean };
+  whatsapp_ingest: { enabled: boolean; linked_chats_only: boolean; chats_allowlist: string[]; capturar_todos: boolean; leitura_total: boolean };
   whatsapp_auto_send_enabled: boolean;
   whatsapp_worker: { online: boolean; last_seen: string | null };
 }
@@ -135,6 +135,13 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
     const enabled = !data[key].enabled;
     setData({ ...data, [key]: { ...data[key], enabled } });
     save({ [key]: { enabled } });
+  };
+
+  const toggleLeituraTotal = () => {
+    if (!data) return;
+    const leitura_total = !data.whatsapp_ingest.leitura_total;
+    setData({ ...data, whatsapp_ingest: { ...data.whatsapp_ingest, leitura_total } });
+    save({ whatsapp_ingest: { leitura_total } });
   };
 
   const toggleCapturarTodos = () => {
@@ -243,6 +250,12 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
               desc="Guarda toda conversa do WhatsApp, sem lista. Não dá acesso de leitura ao Claude: isso continua sendo decidido conversa a conversa na Caixa de Entrada. Guardar é uma coisa; deixar um agente ler é outra."
               enabled={data.whatsapp_ingest.capturar_todos}
               onToggle={toggleCapturarTodos}
+            />
+            <ToggleRow
+              label="Claude pode ler todas as conversas"
+              desc="Libera a leitura em qualquer conversa, sem depender da lista abaixo. É ferramenta sob demanda, acionada quando você pergunta — não varredura. Desligar devolve a lista, que fica intacta enquanto isso."
+              enabled={data.whatsapp_ingest.leitura_total}
+              onToggle={toggleLeituraTotal}
             />
             <ToggleRow
               label="Só chats vinculados a ações"
