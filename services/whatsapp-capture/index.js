@@ -53,14 +53,31 @@ let isProcessingOutbox = false;
 let isSyncingChats = false;
 let lastChatsSyncMs = 0;
 const CHATS_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
+// Recuperação com `capturar_todos`: só chats mexidos nesta janela (ou com não
+// lidas) entram, e no máximo este tanto por passagem.
+const RECOVERY_JANELA_DIAS = 7;
+const RECOVERY_MAX_CHATS = 150;
 const CHATS_READY_DELAY_MS = 60_000; // 60s
 
 // --- Configuração ao vivo (system/settings.whatsapp_ingest / whatsapp_auto_send_enabled) ---
-// Por padrão a allowlist é vazia — o worker não captura NADA até o usuário habilitar
-// explicitamente as conversas desejadas. Captura indiscriminada de todo chat/grupo é
-// ruído, custo e exposição desnecessária (ver docs/okf/propostas/automacoes-canais-e-diario-pessoal.md).
+//
+// Duas decisões diferentes, que até 27/08/2026 eram a mesma:
+//
+//   capturar_todos    o worker guarda TODA conversa, sem lista
+//   chats_allowlist   quais conversas o agente (MCP) pode LER
+//
+// Elas viviam no mesmo campo, e isso escondia uma consequência: ligar a captura
+// em todos os contatos daria ao Claude, de uma vez, leitura das 450 conversas
+// individuais. Guardar é um risco; deixar um agente ler é outro.
+//
+// Com `capturar_todos` ligado, a allowlist deixa de governar a captura e passa a
+// significar só "o agente pode ler" — que é o que a Caixa de Entrada mostra como
+// conversa monitorada. Desligado, o comportamento é o de antes: allowlist vazia
+// captura NADA, porque captura indiscriminada é ruído, custo e exposição
+// (ver docs/okf/propostas/automacoes-canais-e-diario-pessoal.md).
 let chatsAllowlist = new Set();
 let allowlistLoaded = false;
+let capturarTodos = false;
 let autoSendEnabled = false;
 
 db.collection('system').doc('settings').onSnapshot((snap) => {
@@ -68,10 +85,18 @@ db.collection('system').doc('settings').onSnapshot((snap) => {
     const ingestCfg = data.whatsapp_ingest || {};
     const list = Array.isArray(ingestCfg.chats_allowlist) ? ingestCfg.chats_allowlist : [];
     chatsAllowlist = new Set(list);
+    capturarTodos = !!ingestCfg.capturar_todos;
     allowlistLoaded = true;
     autoSendEnabled = !!data.whatsapp_auto_send_enabled;
-    console.log(`[Config] Allowlist: ${chatsAllowlist.size} chat(s). Envio automático: ${autoSendEnabled}.`);
+    console.log(`[Config] Captura total: ${capturarTodos}. Leitura pelo agente: `
+        + `${chatsAllowlist.size} chat(s). Envio automático: ${autoSendEnabled}.`);
 }, (err) => console.error('[Config] Falha ao observar system/settings:', err));
+
+/** Se este chat deve ser capturado. Fecha por omissão enquanto a config não chega. */
+function deveCapturar(chatId) {
+    if (!allowlistLoaded) return false;
+    return capturarTodos || chatsAllowlist.has(chatId);
+}
 
 async function resolveDefaultTelegramChatId() {
     try {
@@ -457,7 +482,7 @@ async function handleMessage(message) {
             return;
         }
 
-        if (!allowlistLoaded || !chatsAllowlist.has(chatId)) {
+        if (!deveCapturar(chatId)) {
             return;
         }
 
@@ -535,6 +560,48 @@ async function getLastStoredTimestampMs(chatId) {
     return ts && typeof ts.toMillis === 'function' ? ts.toMillis() : 0;
 }
 
+/**
+ * Quais chats a recuperação do boot deve varrer.
+ *
+ * Com allowlist, são os chats da lista — poucos, e todos interessam.
+ *
+ * Com `capturar_todos`, varrer os ~700 chats conhecidos custaria mais de meia
+ * hora só de pausa entre eles, e a esmagadora maioria não tem nada de novo:
+ * na medição de 27/08/2026, 130 de 697 tiveram atividade em duas semanas. Então
+ * o alvo passa a ser quem o WhatsApp diz ter mexido recentemente, ou tem não
+ * lida — que é onde as mensagens perdidas de fato estão.
+ */
+async function alvosDaRecuperacao() {
+    if (!capturarTodos) return [...chatsAllowlist];
+
+    const corteMs = Date.now() - RECOVERY_JANELA_DIAS * 24 * 60 * 60 * 1000;
+    try {
+        const todos = await client.getChats();
+        const alvos = [];
+        for (const chat of Array.isArray(todos) ? todos : []) {
+            const chatId = chat?.id?._serialized || (typeof chat?.id === 'string' ? chat.id : null);
+            if (!chatId) continue;
+            const ultimaMs = Number(chat?.lastMessage?.timestamp || chat?.timestamp || 0) * 1000;
+            const naoLidas = Number(chat?.unreadCount) || 0;
+            if (naoLidas > 0 || (ultimaMs && ultimaMs >= corteMs)) alvos.push(chatId);
+        }
+        // A allowlist entra sempre: são as conversas que o agente lê, e um buraco
+        // ali é mais caro do que num chat qualquer.
+        for (const chatId of chatsAllowlist) {
+            if (!alvos.includes(chatId)) alvos.push(chatId);
+        }
+        if (alvos.length > RECOVERY_MAX_CHATS) {
+            console.warn(`[Recovery] ${alvos.length} chats elegíveis; varrendo os `
+                + `primeiros ${RECOVERY_MAX_CHATS}. O restante entra na próxima passagem.`);
+            return alvos.slice(0, RECOVERY_MAX_CHATS);
+        }
+        return alvos;
+    } catch (e) {
+        console.error('[Recovery] Falha ao listar chats; caindo na allowlist:', e.message || e);
+        return [...chatsAllowlist];
+    }
+}
+
 async function recoverMissedMessages() {
     if (!isClientReady || isRecoveringMissed) return;
     if (!allowlistLoaded) {
@@ -543,8 +610,9 @@ async function recoverMissedMessages() {
         setTimeout(recoverMissedMessages, 60_000);
         return;
     }
-    if (chatsAllowlist.size === 0) {
-        console.log('[Recovery] Allowlist vazia — nada a recuperar.');
+    const alvos = await alvosDaRecuperacao();
+    if (alvos.length === 0) {
+        console.log('[Recovery] Nenhum chat a recuperar.');
         return;
     }
 
@@ -554,8 +622,8 @@ async function recoverMissedMessages() {
     let chatsBackfilled = 0;
     let totalStored = 0;
     try {
-        console.log(`[Recovery] Verificando ${chatsAllowlist.size} chat(s) monitorado(s) por mensagens perdidas...`);
-        for (const chatId of chatsAllowlist) {
+        console.log(`[Recovery] Verificando ${alvos.length} chat(s) por mensagens perdidas...`);
+        for (const chatId of alvos) {
             if (!isClientReady) break; // desconectou no meio; o próximo ready recomeça
             try {
                 const chat = await client.getChatById(chatId);
@@ -610,8 +678,8 @@ async function handleSyncRequest(requestId, data) {
             await ref.set({ status: 'error', error: 'worker_not_ready', updated_at: admin.firestore.Timestamp.now() }, { merge: true });
             return;
         }
-        // Mesma allowlist da captura ao vivo — não busca histórico de chat fora dela.
-        if (!allowlistLoaded || !chatsAllowlist.has(chatId)) {
+        // Mesmo critério da captura ao vivo — não busca histórico de chat que não é capturado.
+        if (!deveCapturar(chatId)) {
             await ref.set({ status: 'skipped', error: 'chat_not_monitored', updated_at: admin.firestore.Timestamp.now() }, { merge: true });
             return;
         }

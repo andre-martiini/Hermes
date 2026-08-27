@@ -377,5 +377,66 @@ class TestConversaoDeData(unittest.TestCase):
         self.assertIsNotNone(wa._para_datahora("2026-08-01").tzinfo)
 
 
+class TestCapturaNaoEhLeitura(unittest.TestCase):
+    """Capturar tudo não pode virar ler tudo (27/08/2026).
+
+    Até esta data a `chats_allowlist` fazia as duas coisas. Ligar captura geral
+    daria ao agente, de uma vez, leitura das 450 conversas individuais — e isso
+    aconteceria sem ninguém decidir, como efeito colateral de outro pedido.
+    """
+
+    def _db_captura_total(self):
+        db = _db_padrao()
+        db._cols["system"] = _Colecao({"settings": {
+            "whatsapp_ingest": {"chats_allowlist": [MONITORADO], "capturar_todos": True},
+        }})
+        return db
+
+    def test_captura_total_nao_libera_leitura(self):
+        ctx = _Ctx(self._db_captura_total())
+        with self.assertRaises(wa.WhatsAppNaoMonitorado):
+            wa.ler_mensagens(ctx, {"chat_id": LIVRE})
+
+    def test_captura_total_nao_libera_consolidacao(self):
+        ctx = _Ctx(self._db_captura_total())
+        with self.assertRaises(wa.WhatsAppNaoMonitorado):
+            wa.consolidar(ctx, {"chat_id": LIVRE, "desde": "2026-08-01"})
+
+    def test_captura_total_nao_libera_transcript_antigo(self):
+        ctx = _Ctx(self._db_captura_total())
+        snap = _Snap("j", {"chat_id": LIVRE, "status": "completed",
+                           "transcript_literal": "conversa inteira"})
+        with self.assertRaises(wa.WhatsAppNaoMonitorado):
+            wa._formatar_consolidacao(ctx, snap, True)
+
+    def test_a_lista_continua_valendo_para_quem_esta_nela(self):
+        ctx = _Ctx(self._db_captura_total())
+        self.assertEqual(wa.ler_mensagens(ctx, {"chat_id": MONITORADO})["total"], 5)
+
+    def test_listagem_distingue_capturada_de_monitorada(self):
+        ctx = _Ctx(self._db_captura_total())
+        r = wa.listar_conversas(ctx, {"apenas_monitoradas": False})
+        por_id = {c["chat_id"]: c for c in r["conversas"]}
+        self.assertTrue(por_id[LIVRE]["capturada"], "o Hermes está guardando")
+        self.assertFalse(por_id[LIVRE]["monitorada"], "mas o agente não lê")
+        self.assertTrue(por_id[MONITORADO]["capturada"])
+        self.assertTrue(por_id[MONITORADO]["monitorada"])
+
+    def test_sem_captura_total_capturada_espelha_monitorada(self):
+        ctx = _Ctx(_db_padrao())
+        r = wa.listar_conversas(ctx, {"apenas_monitoradas": False})
+        for c in r["conversas"]:
+            self.assertEqual(c["capturada"], c["monitorada"])
+
+    def test_observacao_avisa_que_capturada_nao_e_legivel(self):
+        """Sem o aviso, o agente lê 'capturada: true' e insiste no caminho errado."""
+        ctx = _Ctx(self._db_captura_total())
+        self.assertIn("capturada≠legível", wa.listar_conversas(ctx, {})["observacao"])
+
+    def test_flag_de_captura_e_lida_do_lugar_certo(self):
+        self.assertTrue(wa._captura_total(self._db_captura_total()))
+        self.assertFalse(wa._captura_total(_db_padrao()))
+
+
 if __name__ == "__main__":
     unittest.main()

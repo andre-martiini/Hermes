@@ -84,7 +84,7 @@ export const HermesModal = ({ isOpen, title, message, type, onConfirm, onCancel,
 interface AutomationSettingsData {
   email_action_linker: { enabled: boolean };
   personal_diary: { enabled: boolean };
-  whatsapp_ingest: { enabled: boolean; linked_chats_only: boolean; chats_allowlist: string[] };
+  whatsapp_ingest: { enabled: boolean; linked_chats_only: boolean; chats_allowlist: string[]; capturar_todos: boolean };
   whatsapp_auto_send_enabled: boolean;
   whatsapp_worker: { online: boolean; last_seen: string | null };
 }
@@ -135,6 +135,13 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
     const enabled = !data[key].enabled;
     setData({ ...data, [key]: { ...data[key], enabled } });
     save({ [key]: { enabled } });
+  };
+
+  const toggleCapturarTodos = () => {
+    if (!data) return;
+    const capturar_todos = !data.whatsapp_ingest.capturar_todos;
+    setData({ ...data, whatsapp_ingest: { ...data.whatsapp_ingest, capturar_todos } });
+    save({ whatsapp_ingest: { capturar_todos } });
   };
 
   const toggleLinkedOnly = () => {
@@ -230,7 +237,13 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
         />
 
         {data.whatsapp_ingest.enabled && (
-          <div className={`pt-3 border-t border-dashed ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'}`}>
+          <div className={`pt-3 border-t border-dashed space-y-3 ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'}`}>
+            <ToggleRow
+              label="Capturar todas as conversas"
+              desc="Guarda toda conversa do WhatsApp, sem lista. Não dá acesso de leitura ao Claude: isso continua sendo decidido conversa a conversa na Caixa de Entrada. Guardar é uma coisa; deixar um agente ler é outra."
+              enabled={data.whatsapp_ingest.capturar_todos}
+              onToggle={toggleCapturarTodos}
+            />
             <ToggleRow
               label="Só chats vinculados a ações"
               desc="Analisa apenas conversas vinculadas manualmente a alguma ação (na tela da ação). Conversas sem vínculo seguem capturadas para a Caixa de Entrada, mas não geram análise de IA nem sugestões."
@@ -252,7 +265,7 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
 
         <div className={`space-y-1 pt-3 border-t border-dashed ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'}`}>
           <label className={`text-[9px] font-bold uppercase tracking-wider block ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>
-            Conversas capturadas (uma por linha — ID do chat, ex.: 5527999999999@c.us ou algo@g.us)
+            Conversas que o Claude pode ler (uma por linha — ID do chat, ex.: 5527999999999@c.us ou algo@g.us)
           </label>
           <textarea
             value={allowlistText}

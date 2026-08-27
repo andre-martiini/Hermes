@@ -12,18 +12,30 @@ recorte, disparar a consolidacao e ler o resultado inteiro.
 ## A allowlist manda
 
 Toda leitura de conteudo aqui exige que o chat esteja em
-`system/settings.whatsapp_ingest.chats_allowlist` — a mesma lista que ja governa
-o que o worker captura.
+`system/settings.whatsapp_ingest.chats_allowlist`.
 
 A decisao e do dono do sistema (2026-08-26) e o motivo importa: conversa de
 WhatsApp e o dado mais sensivel do Hermes, e envolve terceiros que nao sabem que
-ha um agente lendo. Herdar a allowlist existente, em vez de criar um segundo
-criterio de acesso, significa que so ha uma decisao a manter — e ela ja esta
-tomada, chat a chat, na Caixa de Entrada.
+ha um agente lendo.
+
+## Capturar e ler sao decisoes separadas (27/08/2026)
+
+Ate 27/08 a allowlist fazia as duas coisas: dizia o que o worker guardava e o
+que o agente podia ler. Quando o dono pediu captura ativa em todos os contatos,
+isso apareceu — ligar a captura geral daria ao agente, de uma vez, leitura das
+450 conversas individuais. Nao era o pedido.
+
+Agora sao dois campos:
+
+    whatsapp_ingest.capturar_todos     o worker guarda TODA conversa
+    whatsapp_ingest.chats_allowlist    o que o agente pode ler
+
+Guardar e um risco (armazenamento); deixar um agente ler e outro (uso). Manter
+os dois no mesmo interruptor obrigava a aceitar os dois juntos.
 
 `listar_conversas` e a unica que enxerga alem da allowlist, e de proposito:
 listar nome de conversa nao e ler conteudo, e sem isso nao da para descobrir o
-que existe para monitorar.
+que existe para liberar.
 """
 
 from __future__ import annotations
@@ -49,11 +61,21 @@ class WhatsAppNaoMonitorado(Exception):
     """Chat fora da allowlist. Nao e erro de uso: e o limite funcionando."""
 
 
-def _allowlist(db) -> set[str]:
+def _config_ingest(db) -> dict:
     snap = db.collection("system").document("settings").get()
     dados = (snap.to_dict() or {}) if snap.exists else {}
-    bruto = (dados.get("whatsapp_ingest") or {}).get("chats_allowlist") or []
+    return dados.get("whatsapp_ingest") or {}
+
+
+def _allowlist(db) -> set[str]:
+    """Conversas que o agente pode ler. Nao e a lista do que se captura."""
+    bruto = _config_ingest(db).get("chats_allowlist") or []
     return {str(x).strip() for x in bruto if str(x).strip()}
+
+
+def _captura_total(db) -> bool:
+    """Se o worker esta guardando toda conversa, e nao so as da allowlist."""
+    return bool(_config_ingest(db).get("capturar_todos"))
 
 
 def _exigir_monitorado(db, chat_id: str) -> None:
@@ -86,6 +108,7 @@ def listar_conversas(ctx, args: dict) -> dict:
     sem isso nao ha como descobrir o que poderia ser monitorado.
     """
     monitoradas = _allowlist(ctx.db)
+    captura_total = _captura_total(ctx.db)
     apenas_monitoradas = args.get("apenas_monitoradas")
     apenas_monitoradas = True if apenas_monitoradas is None else bool(apenas_monitoradas)
     limite = max(1, min(int(args.get("limite") or 60), 200))
@@ -101,7 +124,11 @@ def listar_conversas(ctx, args: dict) -> dict:
             "chat_id": chat_id,
             "chat_name": dados.get("chat_name") or chat_id,
             "grupo": bool(dados.get("is_group")),
+            # `monitorada` = o agente pode ler. `capturada` = o Hermes esta
+            # guardando. Sao coisas distintas desde 27/08/2026, e confundi-las
+            # faria o agente achar que tem acesso ao que so esta armazenado.
             "monitorada": monitorada,
+            "capturada": captura_total or monitorada,
             "ultima_atividade": _iso(dados.get("last_activity_ts")),
         })
 
@@ -111,9 +138,13 @@ def listar_conversas(ctx, args: dict) -> dict:
         "total": len(conversas),
         "monitoradas": sum(1 for c in conversas if c["monitorada"]),
         "conversas": conversas[:limite],
-        "observacao": ("Só conversas monitoradas permitem ler mensagens ou consolidar."
-                       if apenas_monitoradas else
-                       "monitorada=false: aparece na lista, mas o conteúdo não é acessível."),
+        "observacao": (
+            "Só conversas monitoradas permitem ler mensagens ou consolidar."
+            + (" O Hermes está capturando todas as conversas, mas capturada≠legível: "
+               "peça ao dono para habilitar a leitura na Caixa de Entrada."
+               if captura_total else "")
+            if apenas_monitoradas else
+            "monitorada=false: aparece na lista, mas o conteúdo não é acessível."),
     }
 
 

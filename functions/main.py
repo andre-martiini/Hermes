@@ -13445,6 +13445,9 @@ def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
             "enabled": bool(wa_cfg.get("enabled", False)),
             "linked_chats_only": bool(wa_cfg.get("linked_chats_only", True)),
             "chats_allowlist": list(wa_cfg.get("chats_allowlist") or []),
+            # `capturar_todos` guarda toda conversa; `chats_allowlist` diz o que
+            # o agente pode ler. Separados em 27/08/2026 — ver whatsapp_tools.
+            "capturar_todos": bool(wa_cfg.get("capturar_todos", False)),
         },
         "whatsapp_auto_send_enabled": bool(data.get("whatsapp_auto_send_enabled", False)),
         "whatsapp_worker": _serialize_whatsapp_worker_heartbeat(db),
@@ -13479,6 +13482,8 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
             wa_updates["linked_chats_only"] = bool(wa_cfg["linked_chats_only"])
         if "chats_allowlist" in wa_cfg and isinstance(wa_cfg["chats_allowlist"], list):
             wa_updates["chats_allowlist"] = [str(x).strip() for x in wa_cfg["chats_allowlist"] if str(x).strip()]
+        if "capturar_todos" in wa_cfg:
+            wa_updates["capturar_todos"] = bool(wa_cfg["capturar_todos"])
         if wa_updates:
             updates["whatsapp_ingest"] = wa_updates
 
@@ -13495,7 +13500,12 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
 
 @https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)
 def toggleWhatsappChatMonitored(req: https_fn.CallableRequest) -> dict:
-    """Adiciona ou remove um chat da allowlist de captura ao vivo do WhatsApp (system/settings.whatsapp_ingest.chats_allowlist)."""
+    """Adiciona ou remove um chat da lista de conversas que o agente pode ler
+    (system/settings.whatsapp_ingest.chats_allowlist).
+
+    Desde 27/08/2026 esta lista NAO governa mais a captura quando
+    `capturar_todos` esta ligado: o worker guarda tudo, e o que se decide aqui e
+    o que o Claude pode abrir. Ver `functions/tools/whatsapp_tools.py`."""
     _require_internal_user(req)
     req_data = req.data if isinstance(req.data, dict) else {}
     chat_id = str(req_data.get("chat_id") or "").strip()
