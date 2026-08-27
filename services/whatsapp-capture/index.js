@@ -57,6 +57,10 @@ const CHATS_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
 // lidas) entram, e no máximo este tanto por passagem.
 const RECOVERY_JANELA_DIAS = 7;
 const RECOVERY_MAX_CHATS = 150;
+// Resolução de telefone por chat: quantos contatos novos resolver por sincronização.
+// Cada um é uma chamada ao WhatsApp Web, então o primeiro passe fatia o trabalho
+// e os seguintes só pegam o que apareceu depois.
+const CONTATOS_POR_SYNC = 120;
 const CHATS_READY_DELAY_MS = 60_000; // 60s
 
 // --- Configuração ao vivo (system/settings.whatsapp_ingest / whatsapp_auto_send_enabled) ---
@@ -163,6 +167,19 @@ async function syncChatRegistry() {
             return;
         }
 
+        // Quem já tem telefone resolvido não é perguntado de novo. Sem isto,
+        // seriam ~450 chamadas ao WhatsApp Web a cada 6h para redescobrir o
+        // mesmo número.
+        const jaComNumero = new Set();
+        try {
+            const existentes = await db.collection('whatsapp_chats')
+                .where('contact_number', '!=', null).select().get();
+            existentes.forEach((d) => jaComNumero.add(d.id));
+        } catch (e) {
+            console.warn('[Chats] Não foi possível listar chats já resolvidos:', e.message || e);
+        }
+        let resolvidos = 0;
+
         const BATCH_SIZE = 450;
         let batch = db.batch();
         let countInBatch = 0;
@@ -189,6 +206,29 @@ async function syncChatRegistry() {
                     last_synced_at: admin.firestore.FieldValue.serverTimestamp(),
                 };
 
+                // O telefone precisa vir daqui porque o chat_id deixou de tê-lo:
+                // o WhatsApp migrou os contatos individuais para `@lid`, um
+                // identificador que não deriva do número. Sem isto,
+                // `linkWhatsappContacts` compara os últimos 8 dígitos de um ID
+                // opaco com um telefone de verdade e não casa nada — na medição
+                // de 27/08/2026, 450 chats `@lid` contra 0 vínculos possíveis.
+                if (!isGroup && !jaComNumero.has(chatId) && resolvidos < CONTATOS_POR_SYNC) {
+                    try {
+                        const contato = await chat.getContact();
+                        const numero = String(contato?.number || contato?.id?.user || '')
+                            .replace(/\D/g, '');
+                        if (numero.length >= 8) {
+                            data.contact_number = numero;
+                            data.contact_number_resolved_at =
+                                admin.firestore.FieldValue.serverTimestamp();
+                            resolvidos++;
+                        }
+                    } catch (contatoErr) {
+                        // Contato apagado ou sem número visível: segue sem o campo,
+                        // e a próxima sincronização tenta de novo.
+                    }
+                }
+
                 batch.set(docRef, data, { merge: true });
                 countInBatch++;
                 totalSaved++;
@@ -208,7 +248,8 @@ async function syncChatRegistry() {
         }
 
         lastChatsSyncMs = Date.now();
-        console.log(`[Chats] Registro sincronizado: ${totalSaved} chat(s) salvos/atualizados.`);
+        console.log(`[Chats] Registro sincronizado: ${totalSaved} chat(s) salvos/atualizados`
+            + `, ${resolvidos} telefone(s) resolvido(s).`);
     } catch (err) {
         console.error('[Chats] Erro ao sincronizar registro de chats:', err);
     } finally {
@@ -854,3 +895,35 @@ function reportFatal(kind, err) {
 }
 process.on('unhandledRejection', (reason) => reportFatal('unhandledRejection', reason));
 process.on('uncaughtException', (err) => reportFatal('uncaughtException', err));
+
+// --- Desligamento limpo ---
+//
+// Até 27/08/2026 não havia nenhum: parar o worker matava o processo com o
+// Chromium do puppeteer ainda segurando o perfil do LocalAuth. É de onde vem o
+// EBUSY que já obrigou a reautenticar por QR — e reautenticar exige o celular
+// do dono, então uma parada suja custa muito mais do que parece.
+//
+// `client.destroy()` fecha o browser e solta o lock. O timeout existe porque
+// travar no desligamento seria o mesmo problema com outro nome: passados
+// alguns segundos, sai de qualquer jeito.
+let desligando = false;
+async function desligar(sinal) {
+    if (desligando) return;
+    desligando = true;
+    console.log(`[Shutdown] ${sinal} recebido — fechando o cliente do WhatsApp...`);
+    const prazo = setTimeout(() => {
+        console.warn('[Shutdown] Tempo esgotado ao fechar; saindo assim mesmo.');
+        process.exit(1);
+    }, 15_000);
+    try {
+        await client.destroy();
+        console.log('[Shutdown] Cliente fechado, sessão preservada.');
+    } catch (e) {
+        console.error('[Shutdown] Falha ao fechar o cliente:', e?.message || e);
+    } finally {
+        clearTimeout(prazo);
+        process.exit(0);
+    }
+}
+process.on('SIGINT', () => desligar('SIGINT'));
+process.on('SIGTERM', () => desligar('SIGTERM'));

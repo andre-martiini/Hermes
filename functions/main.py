@@ -14485,24 +14485,30 @@ def linkWhatsappContacts(req: https_fn.CallableRequest) -> dict:
     _require_internal_user(req)
     db = get_db()
     from collections import defaultdict
-    from phone_utils import last8, chat_id_last8
+    from phone_utils import last8, chat_id_last8, whatsapp_chat_last8
 
-    # 1. Carrega chats individuais (@c.us) do registro whatsapp_chats (e allowlist como fallback)
+    # 1. Carrega chats individuais do registro whatsapp_chats (e allowlist como fallback).
+    #    O telefone vem de `contact_number`, resolvido pelo worker: desde a
+    #    migracao do WhatsApp para `@lid`, o chat_id nao contem mais o numero.
     chats_by_last8: dict[str, list[dict]] = defaultdict(list)
     seen_chat_ids: set[str] = set()
+    sem_numero_resolvido = 0
 
     for doc in db.collection("whatsapp_chats").limit(3000).stream():
         d = doc.to_dict() or {}
         cid = str(d.get("chat_id") or doc.id).strip()
-        if not cid.endswith("@c.us"):
+        if d.get("is_group") or cid.endswith("@g.us") or cid.endswith("@broadcast"):
             continue
         seen_chat_ids.add(cid)
-        l8 = chat_id_last8(cid)
+        l8 = whatsapp_chat_last8(cid, d.get("contact_number"))
         if l8:
             chats_by_last8[l8].append({
                 "chat_id": cid,
                 "chat_name": str(d.get("chat_name") or cid).strip() or cid,
             })
+        else:
+            # `@lid` sem telefone resolvido ainda — o worker preenche aos poucos.
+            sem_numero_resolvido += 1
 
     # Fallback allowlist para chats ainda não persistidos no registro
     settings_doc = db.collection("system").document("settings").get()
@@ -14592,6 +14598,7 @@ def linkWhatsappContacts(req: https_fn.CallableRequest) -> dict:
         "sem_match": sem_match,
         "sem_telefone": sem_telefone,
         "ja_vinculados": ja_vinculados,
+        "chats_sem_numero_resolvido": sem_numero_resolvido,
         "total_contatos_avaliados": len(vinculados) + len(ambiguos) + sem_match + sem_telefone + ja_vinculados,
     }
 

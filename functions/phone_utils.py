@@ -37,3 +37,22 @@ def chat_id_last8(chat_id: str | None) -> str:
         return ""
     number_part = chat_str.split("@", 1)[0]
     return last8(number_part)
+
+def whatsapp_chat_last8(chat_id: str | None, contact_number: str | None = None) -> str:
+    """Ultimos 8 digitos do telefone de um chat individual, venha de onde vier.
+
+    Ate 2026 o proprio `chat_id` carregava o numero (`5527999999999@c.us`), e
+    extrair dali bastava. O WhatsApp migrou os contatos individuais para `@lid`
+    — um identificador que **nao deriva do telefone**. Na varredura de
+    27/08/2026 havia 450 chats `@lid` e apenas 2 `@c.us`, um deles a conta do
+    sistema: comparar os digitos de um `@lid` com um telefone real nao casava
+    nada, e o vinculo automatico rendia zero.
+
+    O numero passou a ser resolvido pelo worker (`chat.getContact()`) e gravado
+    em `whatsapp_chats.contact_number`. Esta funcao prefere esse campo e mantem
+    o `@c.us` como caminho legado, para os chats antigos continuarem casando.
+    """
+    do_campo = last8(contact_number)
+    if do_campo:
+        return do_campo
+    return chat_id_last8(chat_id)
