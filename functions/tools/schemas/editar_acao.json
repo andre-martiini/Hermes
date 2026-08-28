@@ -1,6 +1,6 @@
 {
   "name": "editar_acao",
-  "description": "Edita uma ação diretamente, sem o passo de preparação. Para excluir uma ação use alteracoes={\"status\": \"excluído\"}",
+  "description": "Edita uma ação diretamente, sem o passo de preparação. Passe os campos em alteracoes={\"data_limite\": \"2026-09-01\"} — os campos soltos no nível de cima também são aceitos. Devolve campos_alterados. Para excluir uma ação use alteracoes={\"status\": \"excluído\"}",
   "parameters": {
     "type": "object",
     "properties": {
@@ -14,8 +14,7 @@
       }
     },
     "required": [
-      "task_id",
-      "alteracoes"
+      "task_id"
     ]
   }
 }

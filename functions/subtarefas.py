@@ -360,3 +360,16 @@ def aplicar_degradacao(plano, data_limite_acao: str | None) -> tuple[list[dict],
         else:
             saida.append(item)
     return saida, degradada, True
+
+def esvaziaria_o_plano(plano_atual, plano_final) -> bool:
+    """Se aplicar `plano_final` apagaria um plano que existia.
+
+    Em 28/08/2026 uma chamada de `editar_plano_acao` com o nome de parametro
+    errado (`plano_acao` em vez de `novo_plano`) chegou com a lista nova vazia.
+    O merge fez o que foi mandado — devolveu `[]` — e seis etapas sumiram, com
+    retorno "OK". Apagar tudo por engano e barato de causar e caro de desfazer,
+    entao passa a exigir intencao explicita.
+    """
+    tinha = any(isinstance(p, dict) and texto_de(p) for p in (plano_atual or []))
+    ficaria = any(isinstance(p, dict) and texto_de(p) for p in (plano_final or []))
+    return tinha and not ficaria

@@ -9544,6 +9544,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 # data prevista e contador no primeiro ajuste de texto.
                 plano_final = subtarefas.mesclar_plano(plano_atual, novo_plano)
 
+                # Mesma guarda do canal MCP: apagar um plano existente exige
+                # intenção explícita, não pode ser efeito de uma lista vazia.
+                if subtarefas.esvaziaria_o_plano(plano_atual, plano_final):
+                    return (f"ERRO|A alteração apagaria as {len(plano_atual)} etapa(s) do "
+                            "plano e nada foi gravado. Envie as etapas em `novo_plano`.")
+
                 nota = f"[Copiloto Hermes] Plano de ação atualizado: {justificativa_diario}"
                 avisos = subtarefas.inconsistencias(plano_final, task_data.get('prazo_final'))
                 if avisos:

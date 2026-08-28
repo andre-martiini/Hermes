@@ -1,6 +1,6 @@
 {
   "name": "editar_plano_acao",
-  "description": "Atualiza o plano de ação de uma tarefa existente. Também é a forma de marcar o estado de uma etapa (em andamento, aguardando terceiro, feita) e de dar data própria a cada uma. Campos omitidos preservam o valor atual da etapa — não a apagam.",
+  "description": "Atualiza o plano de ação de uma tarefa existente. Também é a forma de marcar o estado de uma etapa (em andamento, aguardando terceiro, feita) e de dar data própria a cada uma. Campos omitidos preservam o valor atual da etapa — não a apagam. ATENÇÃO: as etapas vão em novo_plano — enviar lista vazia é recusado, não apaga o plano.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -28,7 +28,12 @@
             },
             "estado": {
               "type": "string",
-              "enum": ["pendente", "em_andamento", "aguardando_terceiro", "feito"],
+              "enum": [
+                "pendente",
+                "em_andamento",
+                "aguardando_terceiro",
+                "feito"
+              ],
               "description": "Estado da etapa. Padrão 'pendente'"
             },
             "aguardando_de": {
@@ -36,7 +41,9 @@
               "description": "De quem se espera, quando estado='aguardando_terceiro'. Ex.: 'colegas do MAGO', 'Iris / Assuntos Estudantis'"
             }
           },
-          "required": ["text"]
+          "required": [
+            "text"
+          ]
         }
       },
       "justificativa_diario": {
@@ -44,6 +51,10 @@
         "description": "Justificativa que será gravada no diário"
       }
     },
-    "required": ["task_id", "novo_plano", "justificativa_diario"]
+    "required": [
+      "task_id",
+      "novo_plano",
+      "justificativa_diario"
+    ]
   }
 }

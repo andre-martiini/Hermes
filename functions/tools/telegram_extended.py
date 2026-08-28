@@ -189,12 +189,24 @@ def execute(tool_name: str, slots: dict, db) -> str:
 
     if tool_name == "salvar_pop_global":
         titulo = str(slots.get("titulo") or "").strip()
-        instrucao = str(slots.get("instrucao_sistema") or "").strip()
+        # `instrucao` e `conteudo` sao os nomes que quem chama tenta primeiro; o
+        # canonico e `instrucao_sistema`. Recusar sem dizer QUAL campo faltava
+        # fazia a segunda tentativa repetir o mesmo erro.
+        instrucao = str(slots.get("instrucao_sistema") or slots.get("instrucao")
+                        or slots.get("conteudo") or "").strip()
         gatilhos = slots.get("gatilhos") or []
         if not titulo:
-            return json.dumps({"status": "error", "reason": "titulo_obrigatorio"}, ensure_ascii=False)
+            return json.dumps({"status": "error", "reason": "titulo_obrigatorio",
+                               "campo_esperado": "titulo"}, ensure_ascii=False)
         if not instrucao:
-            return json.dumps({"status": "error", "reason": "instrucao_obrigatoria"}, ensure_ascii=False)
+            return json.dumps({
+                "status": "error",
+                "reason": "instrucao_obrigatoria",
+                "campo_esperado": "instrucao_sistema",
+                "detalhe": ("O texto do procedimento vai em `instrucao_sistema` "
+                            "(aceita tambem `instrucao` ou `conteudo`). "
+                            f"Recebi apenas: {sorted(k for k in slots if slots.get(k))}."),
+            }, ensure_ascii=False)
         gatilhos_clean = []
         seen = set()
         for item in gatilhos:
@@ -325,8 +337,13 @@ def execute(tool_name: str, slots: dict, db) -> str:
         import subtarefas
 
         task_id = str(slots.get("task_id") or "")
-        novo_plano = slots.get("novo_plano") or []
-        justificativa = str(slots.get("justificativa_diario") or "").strip()
+        # Apelidos aceitos porque sao os nomes que quem chama tenta primeiro —
+        # e chamar com `plano_acao=` fazia `novo_plano` chegar vazio, o que
+        # apagava o plano inteiro sem reclamar.
+        novo_plano = (slots.get("novo_plano") or slots.get("plano_acao")
+                      or slots.get("etapas") or [])
+        justificativa = str(slots.get("justificativa_diario")
+                            or slots.get("motivo") or "").strip()
         task_ref = db.collection("tarefas").document(task_id)
         task_doc = task_ref.get()
         if not task_doc.exists:
@@ -340,6 +357,18 @@ def execute(tool_name: str, slots: dict, db) -> str:
         # completed} literal — apagando estado, data prevista e contador da
         # subtarefa no primeiro ajuste de texto.
         plano_final = subtarefas.mesclar_plano(plano_atual, novo_plano)
+
+        # Recusa em vez de apagar. Esvaziar um plano existente e sempre possivel
+        # de propósito — mas exige dizer isso, nao acontecer por um parametro
+        # com nome errado.
+        if subtarefas.esvaziaria_o_plano(plano_atual, plano_final):
+            if not slots.get("confirmar_esvaziar"):
+                return ("ERRO|A alteracao apagaria as "
+                        f"{len(plano_atual)} etapa(s) do plano e nada foi gravado. "
+                        "Se o plano veio vazio, confira o nome do parametro: as etapas "
+                        "vao em `novo_plano` (lista de objetos {text, data_prevista?, "
+                        "estado?}). Para apagar o plano de proposito, repita com "
+                        "confirmar_esvaziar=true.")
 
         # Inconsistência de data sinaliza, não bloqueia — e vai para o diário em
         # vez do retorno: o valor de retorno é lido pelo modelo, que tem

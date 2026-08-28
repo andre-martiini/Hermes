@@ -736,11 +736,13 @@ def criar_acao_no_sistema(
         except Exception as e:
             print(f"[hermes_tools] Erro ao reagendar iterativo: {e}")
 
-        plano_convertido = [
-            {"id": str(_uuid.uuid4())[:8], "text": str(passo), "completed": False}
-            for passo in (args.get("plano_acao") or [])
-            if str(passo).strip()
-        ]
+        # `str(passo)` num objeto dava o repr do dicionario: uma etapa enviada
+        # como {"texto": ..., "data_prevista": ...} virava a string
+        # "{'texto': ..., 'data_prevista': ...}" dentro do plano. Duas outras
+        # copias desta conversao ja usavam `converter_plano`; esta, que e a do
+        # MCP, tinha ficado para tras.
+        import subtarefas as _sub
+        plano_convertido = _sub.converter_plano(args.get("plano_acao"))
 
         tags = args.get("tags") or []
         source_knowledge_id = None
@@ -1217,6 +1219,28 @@ def acompanhar_processo_sipac(ctx: ToolContext, args: dict):
 # 4. Callables existentes expostas como tool (aplicam as propostas `preparar_*`)
 # ---------------------------------------------------------------------------
 
+def _mensagem_de_erro(exc: Exception, origem: str = "") -> str:
+    """Uma mensagem de erro que nunca sai vazia.
+
+    `https_fn.HttpsError` nao implementa `__str__` util: a mensagem fica em
+    `.message` e o `str()` volta vazio. Em 28/08/2026 tres chamadas de
+    `editar_acao` responderam `{"erro": ""}` e nada foi gravado — quem leu
+    concluiu que a edicao tinha passado.
+    """
+    for atributo in ("message", "detail", "args"):
+        valor = getattr(exc, atributo, None)
+        if isinstance(valor, (list, tuple)):
+            valor = "; ".join(str(v) for v in valor if str(v).strip())
+        texto = str(valor or "").strip()
+        if texto:
+            return f"{type(exc).__name__}: {texto}" + (f" (em {origem})" if origem else "")
+    codigo = getattr(exc, "code", None)
+    return (f"{type(exc).__name__} sem mensagem"
+            + (f", codigo {codigo}" if codigo else "")
+            + (f" (em {origem})" if origem else "")
+            + " — a operacao NAO foi aplicada.")
+
+
 def _via_callable(nome_callable: str, mapear=None):
     """Expoe uma Cloud Function callable como tool.
 
@@ -1236,7 +1260,10 @@ def _via_callable(nome_callable: str, mapear=None):
                 getattr(main, nome_callable), data, uid=ctx.user_uid, token={"uid": ctx.user_uid}
             )
         except Exception as exc:
-            return {"erro": str(exc)}
+            # `str(exc)` era vazio para `HttpsError`, que guarda o texto em
+            # `.message` — a tool respondia {"erro": ""} e quem lia entendia que
+            # nao havia erro. Um erro sem mensagem e pior que uma excecao.
+            return {"erro": _mensagem_de_erro(exc, nome_callable)}
 
     return handler
 
@@ -1282,16 +1309,45 @@ def _map_confirmar_reagendamento(ctx: ToolContext, args: dict):
 # As `preparar_*` continuam existindo para a web.
 
 
+# Campos que uma acao aceita editar. Fora daqui, nada e gravado.
+_CAMPOS_EDITAVEIS = (
+    "titulo", "descricao", "data_limite", "prazo_final", "horario_inicio",
+    "horario_fim", "status", "tags", "area_tematica", "tipo_acao", "notas",
+    "projeto", "estrategia_objetivo_id",
+)
+
+
 def editar_acao(ctx: ToolContext, args: dict):
     """Aplica a edicao direto, sem passar por preparar_edicao_acao.
 
     Sem `snapshot_ts`: aquela checagem protege contra a acao mudar entre a
     geracao do card e o clique do usuario, e aqui nao ha intervalo nenhum.
+
+    Aceita `alteracoes={"data_limite": ...}` e tambem os campos soltos no nivel
+    de cima. O schema pede o aninhado, mas chamar com `data_limite=...` direto e
+    a leitura natural do nome da tool — e ate 28/08/2026 essa chamada era aceita
+    em silencio, sem alterar nada e respondendo com erro vazio.
     """
-    return _via_callable("confirmarEdicaoAcao", _map_confirmar_edicao_acao)(ctx, {
+    alteracoes = dict(args.get("alteracoes") or {})
+    for campo in _CAMPOS_EDITAVEIS:
+        if campo in args and campo not in alteracoes and args[campo] is not None:
+            alteracoes[campo] = args[campo]
+
+    if not alteracoes:
+        return {"erro": ("Nenhum campo para alterar. Passe `alteracoes` como um mapa "
+                         "campo -> novo valor (ex.: alteracoes={\"data_limite\": "
+                         "\"2026-09-01\"}), ou os campos direto na chamada. "
+                         f"Campos aceitos: {', '.join(_CAMPOS_EDITAVEIS)}."),
+                "task_id": args.get("task_id"), "aplicado": False}
+
+    resultado = _via_callable("confirmarEdicaoAcao", _map_confirmar_edicao_acao)(ctx, {
         "task_id": args.get("task_id"),
-        "alteracoes": args.get("alteracoes") or {},
+        "alteracoes": alteracoes,
     })
+    # Dizer o que mudou, para o retorno descrever o efeito e nao so a operacao.
+    if isinstance(resultado, dict) and "erro" not in resultado:
+        resultado.setdefault("campos_alterados", sorted(alteracoes.keys()))
+    return resultado
 
 
 def editar_acoes_em_lote(ctx: ToolContext, args: dict):

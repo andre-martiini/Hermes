@@ -486,5 +486,94 @@ class TestEscritaDireta(unittest.TestCase):
         self.assertFalse(registry.needs_confirmation("obter_estado_atual"))
 
 
+class TestRetornoNaoMenteSobreOEfeito(unittest.TestCase):
+    """Os três bugs de 28/08/2026 tinham a mesma forma: retorno sem efeito.
+
+    `editar_acao` respondia `{"erro": ""}` e não gravava nada. String vazia é
+    lida como "sem erro", então quem chamou relatou ao dono que a edição tinha
+    passado. Um erro sem mensagem é pior que uma exceção.
+    """
+
+    def test_erro_nunca_sai_vazio(self):
+        class SemMensagem(Exception):
+            def __str__(self):
+                return ""
+
+        msg = hermes_tools._mensagem_de_erro(SemMensagem(), "confirmarEdicaoAcao")
+        self.assertTrue(msg.strip())
+        self.assertIn("NAO foi aplicada", msg)
+        self.assertIn("confirmarEdicaoAcao", msg)
+
+    def test_httpserror_tem_a_mensagem_em_message(self):
+        """`HttpsError` guarda o texto em `.message`; `str()` volta vazio."""
+        class FakeHttpsError(Exception):
+            def __init__(self):
+                super().__init__()
+                self.message = "Tarefa não encontrada."
+
+            def __str__(self):
+                return ""
+
+        msg = hermes_tools._mensagem_de_erro(FakeHttpsError())
+        self.assertIn("Tarefa não encontrada.", msg)
+
+    def test_editar_acao_sem_campo_algum_recusa_com_orientacao(self):
+        """Chamada sem `alteracoes` e sem campo solto não pode virar erro vazio."""
+        r = hermes_tools.editar_acao(_CtxVazio(), {"task_id": "abc"})
+        self.assertFalse(r["aplicado"])
+        self.assertIn("alteracoes", r["erro"])
+        self.assertIn("data_limite", r["erro"])
+
+    def test_campo_solto_vira_alteracao(self):
+        """`editar_acao(task_id=..., data_limite=...)` é a leitura natural do nome
+        da tool, e era aceita em silêncio sem alterar nada."""
+        capturado = {}
+
+        def _falso(nome, mapear=None):
+            def handler(ctx, args):
+                capturado.update(args)
+                return {"success": True}
+            return handler
+
+        original = hermes_tools._via_callable
+        hermes_tools._via_callable = _falso
+        try:
+            r = hermes_tools.editar_acao(_CtxVazio(), {
+                "task_id": "abc", "data_limite": "2026-09-01", "notas": "nota"})
+        finally:
+            hermes_tools._via_callable = original
+
+        self.assertEqual(capturado["alteracoes"],
+                         {"data_limite": "2026-09-01", "notas": "nota"})
+        self.assertEqual(r["campos_alterados"], ["data_limite", "notas"])
+
+    def test_campo_desconhecido_nao_entra(self):
+        """Só os campos editáveis viram alteração — o resto é ruído da chamada."""
+        capturado = {}
+
+        def _falso(nome, mapear=None):
+            def handler(ctx, args):
+                capturado.update(args)
+                return {"success": True}
+            return handler
+
+        original = hermes_tools._via_callable
+        hermes_tools._via_callable = _falso
+        try:
+            hermes_tools.editar_acao(_CtxVazio(), {
+                "task_id": "abc", "data_limite": "2026-09-01", "campo_inventado": "x"})
+        finally:
+            hermes_tools._via_callable = original
+        self.assertEqual(capturado["alteracoes"], {"data_limite": "2026-09-01"})
+
+
+class _CtxVazio:
+    user_uid = "uid"
+    session_id = None
+    task_id = None
+    canal = "mcp"
+    db = None
+
+
 if __name__ == "__main__":
     unittest.main()

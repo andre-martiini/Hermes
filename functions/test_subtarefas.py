@@ -360,5 +360,61 @@ class TestCasoDeTesteDaEspecificacao(unittest.TestCase):
         self.assertEqual(st.data_prevista_de(plano[1], "2026-08-27", plano), "2026-08-27")
 
 
+class TestGuardaContraEsvaziamento(unittest.TestCase):
+    """Apagar um plano inteiro não pode ser efeito colateral de parâmetro errado.
+
+    Em 28/08/2026 uma chamada usou `plano_acao=` onde a tool espera `novo_plano=`.
+    A lista nova chegou vazia, o merge fez o que foi mandado, seis etapas sumiram
+    — e o retorno foi "OK". Perda de dado silenciosa é o pior desfecho possível
+    de uma escrita.
+    """
+
+    def test_esvaziar_plano_existente_e_detectado(self):
+        atual = [_etapa("a"), _etapa("b")]
+        self.assertTrue(st.esvaziaria_o_plano(atual, []))
+
+    def test_plano_que_ja_era_vazio_nao_dispara(self):
+        """Sem etapas antes, não há o que perder."""
+        self.assertFalse(st.esvaziaria_o_plano([], []))
+
+    def test_substituir_por_outras_etapas_nao_dispara(self):
+        atual = [_etapa("a")]
+        self.assertFalse(st.esvaziaria_o_plano(atual, [_etapa("nova")]))
+
+    def test_reduzir_sem_zerar_nao_dispara(self):
+        atual = [_etapa("a"), _etapa("b"), _etapa("c")]
+        self.assertFalse(st.esvaziaria_o_plano(atual, [_etapa("a")]))
+
+    def test_etapa_so_com_espaco_conta_como_vazio(self):
+        """Uma lista de etapas sem texto apaga o plano tanto quanto uma lista vazia."""
+        atual = [_etapa("a")]
+        self.assertTrue(st.esvaziaria_o_plano(atual, [{"id": "x", "text": "   "}]))
+
+
+class TestObjetoNaCriacaoDoPlano(unittest.TestCase):
+    """Etapa enviada como objeto não pode virar o repr do dicionário.
+
+    `str({"texto": ...})` gravava "{'texto': ..., 'data_prevista': ...}" como se
+    fosse o texto da etapa. A conversão existia em três lugares e um deles — o do
+    MCP — ficou para trás quando os outros dois foram corrigidos.
+    """
+
+    def test_objeto_com_chave_texto_e_desempacotado(self):
+        plano = st.converter_plano([{"texto": "Obter as planilhas",
+                                     "data_prevista": "2026-08-28",
+                                     "estado": "pendente"}])
+        self.assertEqual(plano[0]["text"], "Obter as planilhas")
+        self.assertEqual(plano[0]["data_prevista"], "2026-08-28")
+        self.assertNotIn("{", plano[0]["text"])
+
+    def test_objeto_com_chave_text_tambem(self):
+        plano = st.converter_plano([{"text": "Montar a comparação"}])
+        self.assertEqual(plano[0]["text"], "Montar a comparação")
+
+    def test_string_e_objeto_na_mesma_lista(self):
+        plano = st.converter_plano(["passo solto", {"texto": "passo objeto"}])
+        self.assertEqual([p["text"] for p in plano], ["passo solto", "passo objeto"])
+
+
 if __name__ == "__main__":
     unittest.main()
