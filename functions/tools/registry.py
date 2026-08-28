@@ -86,6 +86,7 @@ _CATALOG: dict[str, str] = {
     "ler_mensagens_whatsapp": "Le as mensagens de uma conversa monitorada, para escolher o recorte",
     "consolidar_whatsapp": "Consolida um recorte de mensagens: transcreve midia e sintetiza resumo e itens de acao",
     "ler_consolidacao_whatsapp": "Le uma consolidacao inteira, ou as mais recentes de uma conversa",
+    "consultar_envio_whatsapp": "Estado real de uma mensagem enfileirada: enviada, na fila ou falhou",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {

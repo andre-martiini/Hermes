@@ -498,5 +498,61 @@ class TestLeituraTotal(unittest.TestCase):
         self.assertFalse(wa._leitura_total(_db_padrao()))
 
 
+class TestConsultarEnvio(unittest.TestCase):
+    """Enfileirar não é enviar — e sem esta consulta não havia como saber.
+
+    Em 28/08/2026 dois envios foram aceitos, falharam no worker por destino
+    inválido, e o agente afirmou ao dono que tinha mandado. A tool devolvia
+    "agendada com sucesso" e o estado real ficava só no Firestore.
+    """
+
+    def _ctx(self, docs):
+        db = _db_padrao()
+        db._cols[wa.COL_OUTBOX] = _Colecao(docs)
+        return _Ctx(db)
+
+    def test_enviada_traz_destino_real_e_id(self):
+        """O worker resolve o número, então o destino final pode diferir do pedido."""
+        ctx = self._ctx({"j1": {"status": "sent", "to_number": "+5527998754054",
+                                "sent_to": "5527998754054@c.us", "wa_message_id": "ABC",
+                                "content": "oi"}})
+        r = wa.consultar_envio(ctx, {"job_id": "j1"})
+        self.assertEqual(r["status"], "sent")
+        self.assertEqual(r["destino_pedido"], "+5527998754054")
+        self.assertEqual(r["destino_real"], "5527998754054@c.us")
+        self.assertEqual(r["wa_message_id"], "ABC")
+
+    def test_falha_traz_o_motivo(self):
+        ctx = self._ctx({"j2": {"status": "failed", "to_number": "+5527998754054",
+                                "error_message": "o numero nao esta no WhatsApp",
+                                "attempts": 1, "content": "oi"}})
+        r = wa.consultar_envio(ctx, {"job_id": "j2"})
+        self.assertEqual(r["status"], "failed")
+        self.assertIn("nao esta no WhatsApp", r["erro"])
+        self.assertEqual(r["tentativas"], 1)
+
+    def test_pendente_avisa_para_nao_afirmar_entrega(self):
+        """É o caso que gerou o problema: o agente precisa ser barrado no texto."""
+        ctx = self._ctx({"j3": {"status": "pending", "to_number": "+55279", "content": "oi"}})
+        r = wa.consultar_envio(ctx, {"job_id": "j3"})
+        self.assertIn("NAO diga", r["message"])
+
+    def test_job_inexistente_nao_estoura(self):
+        r = wa.consultar_envio(self._ctx({}), {"job_id": "sumiu"})
+        self.assertEqual(r["status"], "not_found")
+
+    def test_sem_job_id_lista_os_recentes(self):
+        ctx = self._ctx({f"j{i}": {"status": "sent", "to_number": f"+552799900{i}",
+                                   "content": "x", "created_at": f"2026-08-2{i}"}
+                         for i in range(3)})
+        r = wa.consultar_envio(ctx, {})
+        self.assertEqual(len(r["envios"]), 3)
+
+    def test_conteudo_vem_truncado(self):
+        """A fila guarda a mensagem inteira; a consulta não precisa devolvê-la."""
+        ctx = self._ctx({"j": {"status": "sent", "to_number": "+55", "content": "z" * 500}})
+        self.assertLessEqual(len(wa.consultar_envio(ctx, {"job_id": "j"})["trecho"]), 80)
+
+
 if __name__ == "__main__":
     unittest.main()

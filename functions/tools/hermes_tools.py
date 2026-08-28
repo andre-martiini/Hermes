@@ -1456,6 +1456,7 @@ _HANDLERS: dict = {
     "ler_mensagens_whatsapp": _whatsapp("ler_mensagens"),
     "consolidar_whatsapp": _whatsapp("consolidar"),
     "ler_consolidacao_whatsapp": _whatsapp("ler_consolidacao"),
+    "consultar_envio_whatsapp": _whatsapp("consultar_envio"),
     "anexar_arquivo": anexar_arquivo,
     "preparar_upload": preparar_upload,
     "remover_anexo": remover_anexo,

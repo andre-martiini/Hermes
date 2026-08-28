@@ -45,6 +45,7 @@ from datetime import datetime, timezone
 COL_CHATS = "whatsapp_chats"
 COL_MENSAGENS = "whatsapp_messages"
 COL_CONSOLIDACOES = "whatsapp_consolidacoes"
+COL_OUTBOX = "whatsapp_outbox"
 
 # Mesmo teto de `whatsapp_consolidation.MAX_MESSAGES_PER_JOB`. Replicado aqui
 # para a recusa sair antes de criar o job, com mensagem util, em vez de o
@@ -343,3 +344,54 @@ def _formatar_consolidacao(ctx, snap, incluir_transcript: bool) -> dict:
         saida["transcript_literal"] = transcript[:LIMITE_TRANSCRIPT_CHARS]
         saida["transcript_truncado"] = len(transcript) > LIMITE_TRANSCRIPT_CHARS
     return saida
+
+def consultar_envio(ctx, args: dict) -> dict:
+    """Estado real de uma mensagem enfileirada por `schedule_whatsapp_message`.
+
+    Existe porque enfileirar nao e enviar. Em 28/08/2026 dois envios foram
+    aceitos, falharam no worker por destino invalido, e o agente afirmou ao dono
+    que tinha mandado — nao havia como saber. Sem esta consulta, todo envio e
+    uma afirmacao sem prova.
+
+    Sem `job_id`, devolve os envios mais recentes: serve para descobrir se algo
+    esta encalhado sem precisar guardar o id de cada um.
+    """
+    from google.cloud import firestore as gcf
+
+    def formatar(snap):
+        d = snap.to_dict() or {}
+        saida = {
+            "job_id": snap.id,
+            "status": d.get("status"),
+            "destino_pedido": d.get("to_number"),
+            "agendado_para": _iso(d.get("scheduled_for")),
+            "tentativas": int(d.get("attempts") or 0),
+            "trecho": str(d.get("content") or "")[:80],
+        }
+        if d.get("status") == "sent":
+            saida["enviado_em"] = _iso(d.get("sent_at"))
+            # Para onde foi de fato: o worker resolve o numero e pode acabar num
+            # JID diferente do que se pediu.
+            saida["destino_real"] = d.get("sent_to")
+            saida["wa_message_id"] = d.get("wa_message_id")
+        if d.get("status") == "failed":
+            saida["falhou_em"] = _iso(d.get("failed_at"))
+            saida["erro"] = d.get("error_message")
+            saida["erro_origem"] = d.get("error_origem")
+        if d.get("status") == "pending":
+            saida["message"] = ("Ainda na fila — NAO diga ao usuario que a mensagem "
+                                "foi enviada. Consulte de novo depois do horario agendado.")
+        return saida
+
+    job_id = str(args.get("job_id") or "").strip()
+    if job_id:
+        snap = ctx.db.collection(COL_OUTBOX).document(job_id).get()
+        if not snap.exists:
+            return {"erro": f"Envio '{job_id}' nao encontrado.", "status": "not_found"}
+        return formatar(snap)
+
+    limite = max(1, min(int(args.get("limite") or 5), 20))
+    consulta = (ctx.db.collection(COL_OUTBOX)
+                .order_by("created_at", direction=gcf.Query.DESCENDING)
+                .limit(limite))
+    return {"envios": [formatar(s) for s in consulta.stream()]}

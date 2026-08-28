@@ -805,6 +805,36 @@ cron.schedule('*/5 * * * *', async () => {
     }
 });
 
+/**
+ * Para onde a mensagem vai de fato.
+ *
+ * A versao anterior colava `@c.us` no que viesse: `+5527998754054` virava
+ * `+5527998754054@c.us`, e JID do WhatsApp nao leva `+`. Foi o que derrubou os
+ * dois envios de 28/08/2026 — aceitos na fila, recusados no envio, com a
+ * excecao minificada `t: t` como unica explicacao.
+ *
+ * `client.getNumberId` e a resolucao da propria biblioteca: consulta se o
+ * numero existe no WhatsApp e devolve o WID correto. Resolve de uma vez o `+`,
+ * variacoes de formatacao e o nono digito — e, quando o numero nao esta no
+ * WhatsApp, diz isso em vez de falhar sem motivo legivel.
+ */
+async function resolverDestino(toNumber) {
+    const bruto = String(toNumber || '').trim();
+    if (/@(c\.us|g\.us|lid|broadcast)$/.test(bruto)) return bruto;
+
+    const digitos = bruto.replace(/[^0-9]/g, '');
+    if (digitos.length < 8) {
+        throw new Error(`numero de destino invalido: "${toNumber}"`);
+    }
+
+    const wid = await client.getNumberId(digitos);
+    if (!wid) {
+        throw new Error(
+            `o numero ${digitos} nao esta no WhatsApp (ou nao pode ser verificado agora)`);
+    }
+    return wid._serialized;
+}
+
 async function claimOutboxMessage(doc) {
     const lockId = `${process.pid}-${Date.now()}-${doc.id}`;
     const claimed = await db.runTransaction(async (tx) => {
@@ -886,25 +916,34 @@ cron.schedule('* * * * *', async () => {
             const content = data.content;
 
             try {
-                // Ensure the number is formatted correctly (e.g. 5527999999999@c.us)
-                const formattedNumber = toNumber.includes('@c.us') || toNumber.includes('@g.us') ? toNumber : `${toNumber}@c.us`;
+                const destino = await resolverDestino(toNumber);
+                const enviada = await client.sendMessage(destino, content);
 
-                await client.sendMessage(formattedNumber, content);
-
-                // Update status to sent
                 await doc.ref.update({
                     status: 'sent',
                     sent_at: admin.firestore.Timestamp.now(),
+                    // Guarda para onde foi de verdade e o id da mensagem: sem isso,
+                    // "enviada" e uma afirmacao sem prova.
+                    sent_to: destino,
+                    wa_message_id: enviada?.id?.id || null,
+                    error_message: admin.firestore.FieldValue.delete(),
                     updated_at: admin.firestore.Timestamp.now()
                 });
-                console.log(`Message sent to ${toNumber}`);
+                console.log(`Message sent to ${toNumber} (${destino})`);
 
             } catch (error) {
-                // Log failure
+                // A excecao do WhatsApp Web vem minificada — o erro real das duas
+                // tentativas de 28/08 era literalmente `t: t`, inutil para quem le.
+                // Guardar tambem o nome e a pilha da origem torna a proxima
+                // investigacao possivel sem precisar do log do processo.
+                const detalhe = error?.message || String(error);
                 console.error(`Failed to send message to ${toNumber}:`, error);
                 await doc.ref.update({
                     status: 'failed',
-                    error_message: error.message || 'Unknown error',
+                    error_message: detalhe.length > 2 ? detalhe
+                        : `WhatsApp Web recusou o envio (erro minificado "${detalhe}") — `
+                          + 'geralmente destino invalido ou numero fora do WhatsApp.',
+                    error_origem: String(error?.stack || '').split(/\r?\n/)[1]?.trim() || null,
                     failed_at: admin.firestore.Timestamp.now(),
                     updated_at: admin.firestore.Timestamp.now()
                 });

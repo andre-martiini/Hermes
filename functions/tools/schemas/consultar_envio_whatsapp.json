@@ -1,0 +1,18 @@
+{
+  "name": "consultar_envio_whatsapp",
+  "description": "Estado REAL de uma mensagem de WhatsApp enfileirada por schedule_whatsapp_message: enviada, ainda na fila ou falhou (com o motivo). Enfileirar não é enviar — chame esta tool antes de afirmar ao usuário que uma mensagem foi entregue. Sem job_id, devolve os envios mais recentes.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "job_id": {
+        "type": "string",
+        "description": "ID devolvido por schedule_whatsapp_message. Se omitido, lista os envios mais recentes"
+      },
+      "limite": {
+        "type": "integer",
+        "description": "Quantos envios recentes listar quando job_id é omitido (padrão 5, teto 20)"
+      }
+    },
+    "required": []
+  }
+}
