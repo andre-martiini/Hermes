@@ -71,6 +71,7 @@ _CATALOG: dict[str, str] = {
     "editar_acoes_em_lote": "Edita varias acoes de uma vez, diretamente",
     "reagendar_acoes_em_lote": "Redistribui acoes por dias uteis e ja aplica",
     "obter_estado_atual": "Panorama do dia numa chamada: acoes, agenda, janelas livres e pendencias",
+    "obter_acao": "Uma acao inteira e SEM TRUNCAMENTO: descricao, notas, plano completo e diario",
     # Ingestao de arquivo: sem ela, anexo so entrava por link de algo que ja
     # estava no Drive, e comprovante nascido fora dele ficava orfao.
     "anexar_arquivo": "Anexa um arquivo a uma acao: grava no Drive, vincula e escreve no diario",

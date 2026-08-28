@@ -1498,6 +1498,85 @@ def obter_estado_atual(ctx: ToolContext, args: dict):
         return {"erro": f"Falha ao montar o estado atual: {exc}"}
 
 
+def obter_acao(ctx: ToolContext, args: dict):
+    """Uma acao inteira, sem corte. O oposto de `consultar_historico_acoes`.
+
+    A busca existe para achar entre muitas, e por isso corta cada campo em 200
+    caracteres (`busca_grafo.py`). Isso serve para relatar status e nao serve
+    para reparar dado: em 28/08/2026 um plano corrompido nao pode ser corrigido
+    pelo MCP porque regravar a partir do texto truncado apagaria o que nao
+    estava visivel — perda silenciosa, exatamente o que se estava corrigindo.
+
+    Aqui nada e truncado. O diario vem limitado por padrao porque cresce sem
+    teto (ha acao com 35 entradas), mas o limite e explicito e ajustavel.
+    """
+    task_id = str(args.get("task_id") or ctx.task_id or "").strip()
+    if not task_id:
+        return {"erro": "Informe task_id."}
+
+    snap = ctx.db.collection("tarefas").document(task_id).get()
+    if not snap.exists:
+        return {"erro": f"Acao '{task_id}' nao encontrada.", "status": "not_found"}
+
+    import subtarefas
+
+    d = snap.to_dict() or {}
+    plano = d.get("plano_acao") or []
+    feitas, totais = subtarefas.contar(plano)
+    limite_diario = max(0, min(int(args.get("limite_diario") or 20), 200))
+    acomp = [e for e in (d.get("acompanhamento") or []) if isinstance(e, dict)]
+
+    etapas = []
+    for i in plano:
+        if not isinstance(i, dict) or not subtarefas.texto_de(i):
+            continue
+        etapa = {
+            "id": i.get("id"),
+            "texto": subtarefas.texto_de(i),   # inteiro, sem corte
+            "estado": subtarefas.estado_de(i),
+            "data_prevista": subtarefas.data_prevista_de(i, d.get("data_limite"), plano) or None,
+        }
+        if i.get("aguardando_de"):
+            etapa["aguardando_de"] = i["aguardando_de"]
+        if int(i.get("degradation_count") or 0):
+            etapa["degradation_count"] = int(i["degradation_count"])
+        etapas.append(etapa)
+
+    return {
+        "id": snap.id,
+        "titulo": d.get("titulo"),
+        "descricao": d.get("descricao") or "",
+        "notas": d.get("notas") or "",
+        "status": d.get("status"),
+        "area_tematica": d.get("area_tematica"),
+        "projeto": d.get("projeto"),
+        "data_limite": d.get("data_limite"),
+        "data_inicio": d.get("data_inicio"),
+        "prazo_final": d.get("prazo_final"),
+        "horario_inicio": d.get("horario_inicio"),
+        "horario_fim": d.get("horario_fim"),
+        "tags": d.get("tags") or [],
+        "execution_lane": subtarefas.derivar_lane(plano, d.get("execution_lane")),
+        "degradation_count": subtarefas.degradacao_da_acao(plano, d.get("degradation_count")),
+        "estrategia_objetivo_id": d.get("estrategia_objetivo_id"),
+        "plano_acao": etapas,
+        "etapas_feitas": feitas,
+        "etapas_totais": totais,
+        "anexos": [
+            {"nome": x.get("nome"), "link": x.get("valor") or x.get("link"),
+             "drive_file_id": x.get("drive_file_id")}
+            for x in (d.get("pool_dados") or [])
+            if isinstance(x, dict) and x.get("tipo") == "arquivo"
+        ],
+        "diario": [{"data": str(e.get("data")), "nota": e.get("nota")}
+                   for e in acomp[-limite_diario:]] if limite_diario else [],
+        "diario_total": len(acomp),
+        "observacao": ("Campos completos, sem truncamento. O diário traz as "
+                       f"{min(limite_diario, len(acomp))} entradas mais recentes de "
+                       f"{len(acomp)}; use limite_diario para ver mais."),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Registro
 # ---------------------------------------------------------------------------
@@ -1555,6 +1634,7 @@ _HANDLERS: dict = {
     "editar_acoes_em_lote": editar_acoes_em_lote,
     "reagendar_acoes_em_lote": reagendar_acoes_em_lote,
     "obter_estado_atual": obter_estado_atual,
+    "obter_acao": obter_acao,
     "listar_conversas_whatsapp": _whatsapp("listar_conversas"),
     "ler_mensagens_whatsapp": _whatsapp("ler_mensagens"),
     "consolidar_whatsapp": _whatsapp("consolidar"),

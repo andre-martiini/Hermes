@@ -479,5 +479,47 @@ class TestPlanoDegenerado(unittest.TestCase):
         self.assertIsNone(st.parece_degenerado([]))
 
 
+class TestCriacaoComObjetos(unittest.TestCase):
+    """O teste que o relato pediu: criar com 7 etapas grava 7 etapas íntegras.
+
+    Antes da correção, `str()` no objeto gravava o repr inteiro como se fosse o
+    texto — `"{'text': '...', 'estado': 'pendente'}"` — e `estado` e
+    `aguardando_de` nunca chegavam aos campos próprios: toda etapa virava
+    pendente comum.
+    """
+
+    def _sete(self, chave):
+        return [{chave: f"Etapa {i} com texto longo o suficiente para ser real",
+                 "estado": "pendente"} for i in range(1, 8)]
+
+    def test_sete_objetos_com_chave_text(self):
+        plano = st.converter_plano(self._sete("text"))
+        self.assertEqual(len(plano), 7)
+        self.assertTrue(all(p["text"].startswith("Etapa ") for p in plano))
+        self.assertTrue(all("{" not in p["text"] for p in plano), "gravou o repr")
+
+    def test_sete_objetos_com_chave_texto(self):
+        """As duas grafias aparecem nas chamadas; nenhuma pode ser stringificada."""
+        plano = st.converter_plano(self._sete("texto"))
+        self.assertEqual(len(plano), 7)
+        self.assertTrue(all("{" not in p["text"] for p in plano))
+
+    def test_campos_auxiliares_vao_para_os_campos_proprios(self):
+        plano = st.converter_plano([{
+            "text": "Publicar e pedir validação",
+            "estado": "aguardando_terceiro",
+            "aguardando_de": "desenvolvedor",
+            "data_prevista": "2026-08-31",
+        }])
+        self.assertEqual(plano[0]["estado"], "aguardando_terceiro")
+        self.assertEqual(plano[0]["aguardando_de"], "desenvolvedor")
+        self.assertEqual(plano[0]["data_prevista"], "2026-08-31")
+        self.assertFalse(plano[0]["completed"])
+
+    def test_estado_invalido_no_objeto_nao_vira_estado(self):
+        plano = st.converter_plano([{"text": "a", "estado": "quase_pronto"}])
+        self.assertEqual(plano[0]["estado"], "pendente")
+
+
 if __name__ == "__main__":
     unittest.main()

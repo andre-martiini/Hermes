@@ -1,0 +1,18 @@
+{
+  "name": "obter_acao",
+  "description": "Devolve UMA ação por completo e SEM TRUNCAMENTO: título, descrição, notas, plano de ação com o texto íntegro de cada etapa (e estado, data prevista, aguardando_de), anexos e diário. Use esta quando precisar do conteúdo exato — consultar_historico_acoes serve para achar entre muitas e corta cada campo em 200 caracteres, o que torna impossível reparar ou reescrever um campo a partir dela.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "ID da ação. Se omitido, usa a ação em contexto no canal"
+      },
+      "limite_diario": {
+        "type": "integer",
+        "description": "Quantas entradas de diário trazer, das mais recentes (padrão 20, teto 200)"
+      }
+    },
+    "required": []
+  }
+}
