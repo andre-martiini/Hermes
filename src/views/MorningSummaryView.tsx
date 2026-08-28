@@ -93,6 +93,13 @@ const FILA_LABEL: Record<string, string> = {
     contas: 'Contas vencendo',
 };
 
+const ROTAS_VALIDAS: MorningSummaryRoute[] = ['gallery', 'finance', 'saude', 'diario', 'strategy', 'whatsapp', 'contacts', 'dashboard'];
+
+// Fila que não tem tela precisa dizer onde a coisa acontece de verdade.
+const FILA_NOTA: Record<string, string> = {
+    notificacoes_ia: 'Chegam pelo Telegram no horário de cada uma — é lá que você marca útil ou dispensa.',
+};
+
 const FILA_ICONE: Record<string, string> = {
     sugestoes_vinculo: '🔗',
     fusoes_contatos: '👥',
@@ -346,8 +353,7 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
     );
 
     const irPara = (rota: string) => {
-        const validas: MorningSummaryRoute[] = ['gallery', 'finance', 'saude', 'diario', 'strategy', 'whatsapp', 'contacts', 'dashboard'];
-        if (validas.includes(rota as MorningSummaryRoute)) onNavigate?.(rota as MorningSummaryRoute);
+        if (ROTAS_VALIDAS.includes(rota as MorningSummaryRoute)) onNavigate?.(rota as MorningSummaryRoute);
     };
 
     if (isLoading) {
@@ -624,14 +630,21 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                             <ul className="space-y-2.5">
                                 {filasComItens.map(([chave, fila]) => {
                                     const amostra = fila?.amostra || [];
+                                    // Fila sem rota não vira botão. Um card clicável que leva
+                                    // para a tela inicial faz o usuário procurar o que não
+                                    // existe — era o caso das notificações da IA, que são
+                                    // entregues e decididas no Telegram, sem tela nenhuma.
+                                    const temDestino = ROTAS_VALIDAS.includes(fila.rota as MorningSummaryRoute);
+                                    const Wrapper = temDestino ? 'button' : 'div';
                                     return (
                                         <li key={chave}>
-                                            <button
-                                                type="button"
-                                                onClick={() => irPara(fila.rota)}
+                                            <Wrapper
+                                                {...(temDestino
+                                                    ? { type: 'button' as const, onClick: () => irPara(fila.rota) }
+                                                    : {})}
                                                 className={`w-full text-left px-3 py-2.5 rounded-xl border transition-colors ${
-                                                    isDark ? 'border-[#2a313d] hover:bg-[#0f1520]' : 'border-slate-100 hover:bg-slate-50'
-                                                }`}
+                                                    isDark ? 'border-[#2a313d]' : 'border-slate-100'
+                                                } ${temDestino ? (isDark ? 'hover:bg-[#0f1520]' : 'hover:bg-slate-50') : ''}`}
                                             >
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-base leading-none">{FILA_ICONE[chave] || '•'}</span>
@@ -650,7 +663,12 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                                                         ))}
                                                     </ul>
                                                 )}
-                                            </button>
+                                                {!temDestino && FILA_NOTA[chave] && (
+                                                    <p className={`mt-1.5 text-[11px] ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>
+                                                        {FILA_NOTA[chave]}
+                                                    </p>
+                                                )}
+                                            </Wrapper>
                                         </li>
                                     );
                                 })}

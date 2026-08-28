@@ -404,6 +404,13 @@ def _calcular_janelas_livres(eventos: list) -> list:
 
 
 def _fila(total: int, amostra: list, rota: str) -> dict:
+    """Uma fila do painel "Esperando voce decidir".
+
+    `rota` vazia significa que a fila **nao tem tela** — o card e informativo e
+    nao deve virar botao. Ate 28/08/2026 toda fila levava a alguma rota, e as
+    que nao tinham destino real usavam "dashboard": o clique ia para a tela
+    inicial, e o usuario ficava procurando o que nao existia.
+    """
     return {"total": total, "amostra": amostra[:AMOSTRA_FILA], "rota": rota}
 
 
@@ -449,7 +456,12 @@ def _coletar_filas(db, hoje: str) -> dict:
             # ai_notification_planner.propor_notificacao.
             "quando": _ts_local_hhmm((d.to_dict() or {}).get("send_at")),
         } for d in docs]
-        filas["notificacoes_ia"] = _fila(len(docs), amostra, "dashboard")
+        # Sem rota: estas notificacoes NAO tem tela. Elas sao entregues pelo
+        # Telegram no horario de `send_at`, e a decisao (util/dispensar) acontece
+        # nos botoes da propria mensagem. Apontar para "dashboard" fazia o card
+        # parecer clicavel e levava o usuario para a tela inicial, que nao tem
+        # nada a ver com elas.
+        filas["notificacoes_ia"] = _fila(len(docs), amostra, "")
     except Exception as exc:
         print(f"[ResumoMatinal] Falha ao consultar scheduled_notifications: {exc}")
 
