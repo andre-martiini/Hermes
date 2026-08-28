@@ -32,6 +32,7 @@ entram nesse caminho e nao precisam de migracao.
 from __future__ import annotations
 
 import difflib
+import json
 import uuid
 
 PENDENTE = "pendente"
@@ -265,7 +266,7 @@ def normalizar(item, *, id_existente: str | None = None) -> dict | None:
 def converter_plano(plano) -> list[dict]:
     """Plano recem-criado: lista de strings ou de objetos vira lista canonica."""
     saida = []
-    for item in (plano or []):
+    for item in normalizar_entrada_plano(plano):
         norm = normalizar(item)
         if norm:
             saida.append(norm)
@@ -284,6 +285,7 @@ def mesclar_plano(plano_atual, novo_plano) -> list[dict]:
     Campos vindos no item novo tem precedencia sobre os herdados: quem edita
     esta dizendo o que quer.
     """
+    novo_plano = normalizar_entrada_plano(novo_plano)
     atual = [p for p in (plano_atual or []) if isinstance(p, dict)]
     por_id = {p.get("id"): p for p in atual if p.get("id")}
     textos = [texto_de(p) for p in atual]
@@ -373,3 +375,60 @@ def esvaziaria_o_plano(plano_atual, plano_final) -> bool:
     tinha = any(isinstance(p, dict) and texto_de(p) for p in (plano_atual or []))
     ficaria = any(isinstance(p, dict) and texto_de(p) for p in (plano_final or []))
     return tinha and not ficaria
+
+class PlanoInvalido(ValueError):
+    """Entrada que nao descreve um plano. Recusar e melhor que gravar o que der."""
+
+
+# Etapa de 1 ou 2 caracteres nunca e conteudo real; e o sintoma de uma string
+# iterada como lista. Acima desta proporcao, o plano inteiro e recusado.
+_PROPORCAO_DEGENERADA = 0.5
+
+
+def normalizar_entrada_plano(valor):
+    """Aceita lista, ou o JSON de uma lista, e recusa o resto.
+
+    Em 28/08/2026 um plano chegou como a **string** `'["Baixar as propostas", ...]'`.
+    `mesclar_plano` iterava sobre ela, e em Python iterar uma string percorre
+    caracteres: a acao terminou com ~800 etapas de um caractere — `"["`, `'"'`,
+    `"B"`, `"a"`... A escrita respondeu OK.
+
+    Uma etapa de um caractere nao tem caso legitimo, entao o erro certo aqui e
+    recusar, nao adivinhar.
+    """
+    if valor is None:
+        return []
+    if isinstance(valor, str):
+        texto = valor.strip()
+        if not texto:
+            return []
+        try:
+            valor = json.loads(texto)
+        except (ValueError, TypeError) as exc:
+            raise PlanoInvalido(
+                "O plano veio como texto e nao e JSON valido. Envie uma LISTA de "
+                "etapas (ex.: novo_plano=[{\"text\": \"primeira etapa\"}]), nao "
+                f"uma string. Recebido: {texto[:80]!r}") from exc
+    if isinstance(valor, dict):
+        valor = [valor]
+    if not isinstance(valor, (list, tuple)):
+        raise PlanoInvalido(
+            f"O plano precisa ser uma lista de etapas; veio {type(valor).__name__}.")
+    return list(valor)
+
+
+def parece_degenerado(plano) -> str | None:
+    """Descreve por que um plano e obviamente lixo, ou `None` se estiver bom.
+
+    Serve de ultima barreira: mesmo que o parse passe, um plano majoritariamente
+    feito de etapas de um caractere so pode ter vindo de uma string iterada.
+    """
+    itens = [texto_de(i) for i in (plano or []) if isinstance(i, dict)]
+    itens = [x for x in itens if x]
+    if not itens:
+        return None
+    curtas = sum(1 for x in itens if len(x) <= 2)
+    if curtas / len(itens) > _PROPORCAO_DEGENERADA:
+        return (f"{curtas} de {len(itens)} etapas tem 1 ou 2 caracteres — isso e o "
+                "sintoma de uma string iterada como lista, nao um plano.")
+    return None

@@ -416,5 +416,68 @@ class TestObjetoNaCriacaoDoPlano(unittest.TestCase):
         self.assertEqual([p["text"] for p in plano], ["passo solto", "passo objeto"])
 
 
+class TestPlanoQueChegaComoString(unittest.TestCase):
+    """Iterar uma string percorre CARACTERES — e foi o que aconteceu.
+
+    Em 28/08/2026 o plano chegou como '["Baixar as propostas", ...]' e a ação
+    terminou com ~800 etapas de um caractere: "[", '"', "B", "a"... A escrita
+    respondeu OK. Antes disso o mesmo parâmetro era ignorado e o plano ficava
+    vazio; ou seja, as duas formas de errar já aconteceram na mesma tool.
+    """
+
+    def test_json_de_lista_e_convertido(self):
+        plano = st.converter_plano('["Baixar as propostas", "Extrair de cada planilha"]')
+        self.assertEqual([p["text"] for p in plano],
+                         ["Baixar as propostas", "Extrair de cada planilha"])
+
+    def test_json_de_objetos_tambem(self):
+        plano = st.converter_plano('[{"texto": "Baixar", "estado": "pendente"}]')
+        self.assertEqual(plano[0]["text"], "Baixar")
+        self.assertEqual(plano[0]["estado"], "pendente")
+
+    def test_string_que_nao_e_json_e_recusada(self):
+        """Adivinhar aqui produziria uma etapa gigante ou 800 minúsculas."""
+        with self.assertRaises(st.PlanoInvalido) as erro:
+            st.converter_plano("Baixar as propostas e extrair")
+        self.assertIn("LISTA", str(erro.exception))
+
+    def test_numero_e_recusado(self):
+        with self.assertRaises(st.PlanoInvalido):
+            st.converter_plano(42)
+
+    def test_objeto_solto_vira_lista_de_um(self):
+        plano = st.converter_plano({"texto": "etapa única"})
+        self.assertEqual([p["text"] for p in plano], ["etapa única"])
+
+    def test_sete_etapas_gravam_sete_etapas_integras(self):
+        """O teste que o relato pediu."""
+        entrada = [f"Etapa número {i} com texto suficientemente longo" for i in range(1, 8)]
+        plano = st.converter_plano(entrada)
+        self.assertEqual(len(plano), 7)
+        self.assertEqual([p["text"] for p in plano], entrada)
+
+
+class TestPlanoDegenerado(unittest.TestCase):
+    """Última barreira: plano de etapas de um caractere é sempre lixo."""
+
+    def test_etapas_de_um_caractere_sao_detectadas(self):
+        plano = [_etapa(c) for c in '["Baixar']
+        self.assertIsNotNone(st.parece_degenerado(plano))
+
+    def test_plano_normal_passa(self):
+        plano = st.converter_plano(["Primeira etapa do plano", "Segunda etapa do plano"])
+        self.assertIsNone(st.parece_degenerado(plano))
+
+    def test_uma_etapa_curta_entre_varias_nao_dispara(self):
+        """Abreviação legítima não pode bloquear a escrita."""
+        plano = st.converter_plano(["OK", "Etapa com texto de verdade",
+                                    "Outra etapa com texto", "Mais uma etapa longa"])
+        self.assertIsNone(st.parece_degenerado(plano))
+
+    def test_plano_vazio_nao_e_degenerado(self):
+        """Vazio é problema de outra guarda, não desta."""
+        self.assertIsNone(st.parece_degenerado([]))
+
+
 if __name__ == "__main__":
     unittest.main()

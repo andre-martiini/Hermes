@@ -356,7 +356,17 @@ def execute(tool_name: str, slots: dict, db) -> str:
         # e em `main.py`, e as duas remontavam cada etapa como {id, text,
         # completed} literal — apagando estado, data prevista e contador da
         # subtarefa no primeiro ajuste de texto.
-        plano_final = subtarefas.mesclar_plano(plano_atual, novo_plano)
+        try:
+            plano_final = subtarefas.mesclar_plano(plano_atual, novo_plano)
+        except subtarefas.PlanoInvalido as exc:
+            return f"ERRO|{exc} Nada foi gravado."
+
+        # Ultima barreira: mesmo com parse bem-sucedido, plano feito de etapas
+        # de um caractere so pode ter vindo de string iterada.
+        degenerado = subtarefas.parece_degenerado(plano_final)
+        if degenerado:
+            return (f"ERRO|{degenerado} Nada foi gravado; o plano anterior "
+                    f"({len(plano_atual)} etapa(s)) esta preservado.")
 
         # Recusa em vez de apagar. Esvaziar um plano existente e sempre possivel
         # de propósito — mas exige dizer isso, nao acontecer por um parametro

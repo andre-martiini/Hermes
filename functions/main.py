@@ -9542,7 +9542,15 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 # `tools/telegram_extended.py`, e as duas cópias remontavam a
                 # etapa como {id, text, completed} literal — apagando estado,
                 # data prevista e contador no primeiro ajuste de texto.
-                plano_final = subtarefas.mesclar_plano(plano_atual, novo_plano)
+                try:
+                    plano_final = subtarefas.mesclar_plano(plano_atual, novo_plano)
+                except subtarefas.PlanoInvalido as exc:
+                    return f"ERRO|{exc} Nada foi gravado."
+
+                degenerado = subtarefas.parece_degenerado(plano_final)
+                if degenerado:
+                    return (f"ERRO|{degenerado} Nada foi gravado; o plano anterior "
+                            f"({len(plano_atual)} etapa(s)) está preservado.")
 
                 # Mesma guarda do canal MCP: apagar um plano existente exige
                 # intenção explícita, não pode ser efeito de uma lista vazia.
@@ -11963,7 +11971,14 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
 
         _set_card_status(db_ref, 'completed')
         print(f"[confirmarEdicaoAcao] task_id={task_id} atualizado: {list(updates.keys())}")
-        return {'status': 'completed'}
+        # Devolve o que foi REALMENTE aplicado. Quem chama informava os campos
+        # que pediu, e eles divergiam do diário: pedir `data_limite` também
+        # move `data_inicio`, e o retorno não contava isso.
+        return {
+            'status': 'completed',
+            'campos_alterados': [k for k in updates
+                                 if k not in ('data_atualizacao', 'data_conclusao')],
+        }
 
     except https_fn.HttpsError:
         raise

@@ -1344,9 +1344,35 @@ def editar_acao(ctx: ToolContext, args: dict):
         "task_id": args.get("task_id"),
         "alteracoes": alteracoes,
     })
-    # Dizer o que mudou, para o retorno descrever o efeito e nao so a operacao.
-    if isinstance(resultado, dict) and "erro" not in resultado:
-        resultado.setdefault("campos_alterados", sorted(alteracoes.keys()))
+    if not isinstance(resultado, dict) or "erro" in resultado:
+        return resultado
+
+    # `campos_alterados` vem da callable, que sabe o que de fato gravou —
+    # pedir `data_limite` tambem move `data_inicio`. O que se pediu fica em
+    # `campos_pedidos`, para a diferenca ser visivel em vez de contraditoria.
+    resultado.setdefault("campos_alterados", sorted(alteracoes.keys()))
+    resultado["campos_pedidos"] = sorted(alteracoes.keys())
+
+    # `motivo_adiamento` era aceito e descartado em silencio. Numa acao adiada
+    # 33 vezes, e a unica informacao que explica o porque — vira linha de
+    # diario, que e onde ela fica junto do resto da historia da acao.
+    motivo = str(args.get("motivo_adiamento") or args.get("motivo") or "").strip()
+    if motivo and ctx.db:
+        try:
+            from datetime import datetime, timezone
+
+            from google.cloud import firestore as gcf
+
+            ctx.db.collection("tarefas").document(str(args.get("task_id"))).update({
+                "acompanhamento": gcf.ArrayUnion([{
+                    "data": datetime.now(timezone.utc).isoformat(),
+                    "nota": f"[Copiloto Hermes] Motivo do ajuste: {motivo}",
+                }])
+            })
+            resultado["motivo_registrado"] = True
+        except Exception as exc:  # noqa: BLE001
+            resultado["motivo_registrado"] = False
+            resultado["aviso"] = f"A edicao foi aplicada, mas o motivo nao foi gravado: {exc}"
     return resultado
 
 

@@ -11,6 +11,69 @@
       "alteracoes": {
         "type": "object",
         "description": "Mapa campo -> novo valor. Campos aceitos: titulo, descricao, data_limite, prazo_final, horario_inicio, horario_fim, status, tags, area_tematica, tipo_acao, notas"
+      },
+      "titulo": {
+        "type": "string",
+        "description": "Novo título. Atalho para alteracoes.titulo"
+      },
+      "descricao": {
+        "type": "string",
+        "description": "Nova descrição. Atalho para alteracoes.descricao"
+      },
+      "data_limite": {
+        "type": "string",
+        "description": "Nova data de execução (YYYY-MM-DD). Atalho para alteracoes.data_limite"
+      },
+      "prazo_final": {
+        "type": "string",
+        "description": "Novo prazo final (YYYY-MM-DD). Atalho para alteracoes.prazo_final"
+      },
+      "horario_inicio": {
+        "type": "string",
+        "description": "HH:MM. Atalho para alteracoes.horario_inicio"
+      },
+      "horario_fim": {
+        "type": "string",
+        "description": "HH:MM. Atalho para alteracoes.horario_fim"
+      },
+      "status": {
+        "type": "string",
+        "description": "em andamento | stand-by | concluído | excluído. Atalho para alteracoes.status"
+      },
+      "area_tematica": {
+        "type": "string",
+        "description": "Nova área temática. Atalho para alteracoes.area_tematica"
+      },
+      "tipo_acao": {
+        "type": "string",
+        "description": "fast | deep. Atalho para alteracoes.tipo_acao"
+      },
+      "notas": {
+        "type": "string",
+        "description": "Novo texto das notas (substitui o anterior). Atalho para alteracoes.notas"
+      },
+      "projeto": {
+        "type": "string",
+        "description": "Novo projeto. Atalho para alteracoes.projeto"
+      },
+      "estrategia_objetivo_id": {
+        "type": "string",
+        "description": "ID do objetivo estratégico a vincular. Atalho para alteracoes.estrategia_objetivo_id"
+      },
+      "tags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Novas tags (substitui as anteriores). Atalho para alteracoes.tags"
+      },
+      "motivo_adiamento": {
+        "type": "string",
+        "description": "Por que a ação está sendo ajustada. Vira uma linha no diário da ação — é o que explica um adiamento depois. Aceita também 'motivo'"
+      },
+      "motivo": {
+        "type": "string",
+        "description": "Apelido de motivo_adiamento"
       }
     },
     "required": [

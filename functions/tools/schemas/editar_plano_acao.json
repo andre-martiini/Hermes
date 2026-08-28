@@ -49,12 +49,32 @@
       "justificativa_diario": {
         "type": "string",
         "description": "Justificativa que será gravada no diário"
+      },
+      "plano_acao": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "Apelido de novo_plano. Precisa ser uma LISTA, não uma string JSON"
+      },
+      "etapas": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "Apelido de novo_plano"
+      },
+      "motivo": {
+        "type": "string",
+        "description": "Apelido de justificativa_diario"
+      },
+      "confirmar_esvaziar": {
+        "type": "boolean",
+        "description": "Só com true um plano existente pode ser zerado"
       }
     },
     "required": [
-      "task_id",
-      "novo_plano",
-      "justificativa_diario"
+      "task_id"
     ]
   }
 }
