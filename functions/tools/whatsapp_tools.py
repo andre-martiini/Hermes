@@ -47,6 +47,14 @@ COL_MENSAGENS = "whatsapp_messages"
 COL_CONSOLIDACOES = "whatsapp_consolidacoes"
 COL_OUTBOX = "whatsapp_outbox"
 
+# O cron do outbox roda de minuto em minuto, entao a entrega acontece ate ~60s
+# depois do horario agendado. Passado este limite sem sair do `pending`, algo
+# esta errado — o worker caiu, travou, ou nunca viu o job.
+ATRASO_SUSPEITO_SEG = 180
+
+# Sem sinal do worker por mais que isto, ele nao esta processando fila nenhuma.
+WORKER_OFFLINE_SEG = 300
+
 # Mesmo teto de `whatsapp_consolidation.MAX_MESSAGES_PER_JOB`. Replicado aqui
 # para a recusa sair antes de criar o job, com mensagem util, em vez de o
 # trigger falhar depois.
@@ -356,7 +364,12 @@ def consultar_envio(ctx, args: dict) -> dict:
     Sem `job_id`, devolve os envios mais recentes: serve para descobrir se algo
     esta encalhado sem precisar guardar o id de cada um.
     """
+    from datetime import datetime, timezone
+
     from google.cloud import firestore as gcf
+
+    agora = datetime.now(timezone.utc)
+    worker = _estado_do_worker(ctx.db, agora)
 
     def formatar(snap):
         d = snap.to_dict() or {}
@@ -364,6 +377,7 @@ def consultar_envio(ctx, args: dict) -> dict:
             "job_id": snap.id,
             "status": d.get("status"),
             "destino_pedido": d.get("to_number"),
+            "enfileirado_em": _iso(d.get("created_at")),
             "agendado_para": _iso(d.get("scheduled_for")),
             "tentativas": int(d.get("attempts") or 0),
             "trecho": str(d.get("content") or "")[:80],
@@ -379,8 +393,28 @@ def consultar_envio(ctx, args: dict) -> dict:
             saida["erro"] = d.get("error_message")
             saida["erro_origem"] = d.get("error_origem")
         if d.get("status") == "pending":
-            saida["message"] = ("Ainda na fila — NAO diga ao usuario que a mensagem "
-                                "foi enviada. Consulte de novo depois do horario agendado.")
+            # Um `pending` que passou da hora nao e "esperando": e um envio
+            # encalhado. Sem esta distincao ele fica "na fila" para sempre, que
+            # foi o que aconteceu com os envios de 28/08 antes do diagnostico.
+            atraso = _atraso_segundos(d.get("scheduled_for"), agora)
+            saida["atrasado_seg"] = atraso
+            if atraso is not None and atraso > ATRASO_SUSPEITO_SEG:
+                saida["status_efetivo"] = "encalhado"
+                saida["message"] = (
+                    f"ENCALHADO: passou {atraso // 60} min do horario e nao saiu. "
+                    + (f"O worker local esta offline (ultimo sinal ha "
+                       f"{worker['ha_segundos'] // 60} min) — ele e quem entrega, "
+                       "entao nada sai enquanto nao voltar."
+                       if not worker["online"] else
+                       "O worker esta online, entao o problema e neste envio "
+                       "especifico. Verifique o log do worker.")
+                    + " NAO diga ao usuario que a mensagem foi enviada.")
+            else:
+                saida["message"] = (
+                    "Ainda na fila — NAO diga ao usuario que a mensagem foi enviada. "
+                    "A entrega acontece em ate ~60s depois do horario agendado "
+                    "(o worker varre a fila a cada minuto); consulte de novo depois disso.")
+        saida["worker"] = worker
         return saida
 
     job_id = str(args.get("job_id") or "").strip()
@@ -395,3 +429,35 @@ def consultar_envio(ctx, args: dict) -> dict:
                 .order_by("created_at", direction=gcf.Query.DESCENDING)
                 .limit(limite))
     return {"envios": [formatar(s) for s in consulta.stream()]}
+
+def _estado_do_worker(db, agora) -> dict:
+    """Se o worker local esta vivo. Ele e quem entrega — sem ele, nada sai.
+
+    Vai junto de toda consulta de envio porque e a explicacao mais provavel
+    para uma mensagem que nao chega: a fila aceita sempre, quem falha e a ponta.
+    """
+    try:
+        snap = db.collection("system").document("whatsapp_worker").get()
+        d = (snap.to_dict() or {}) if snap.exists else {}
+    except Exception:  # noqa: BLE001
+        return {"online": None, "ha_segundos": None,
+                "observacao": "nao foi possivel ler o heartbeat do worker"}
+
+    visto = d.get("last_seen")
+    if not hasattr(visto, "timestamp"):
+        return {"online": False, "ha_segundos": None,
+                "observacao": "worker nunca reportou heartbeat"}
+
+    ha = int((agora - visto).total_seconds())
+    return {
+        "online": ha <= WORKER_OFFLINE_SEG,
+        "ha_segundos": ha,
+        "ultimo_sinal": _iso(visto),
+        "pronto": bool(d.get("ready")),
+    }
+
+
+def _atraso_segundos(agendado, agora) -> int | None:
+    if not hasattr(agendado, "timestamp"):
+        return None
+    return max(0, int((agora - agendado).total_seconds()))

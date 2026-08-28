@@ -498,6 +498,64 @@ class TestLeituraTotal(unittest.TestCase):
         self.assertFalse(wa._leitura_total(_db_padrao()))
 
 
+class TestEnvioEncalhado(unittest.TestCase):
+    """`pending` que passou da hora não é "esperando": é encalhado.
+
+    Foi o que aconteceu em 28/08 antes do diagnóstico — as mensagens ficavam na
+    fila e ninguém sabia dizer se estavam a caminho ou perdidas. Sem esta
+    distinção o agente relata "na fila" indefinidamente, que é uma meia-verdade
+    pior que um erro.
+    """
+
+    def _ctx(self, minutos_atras, worker_ha_seg):
+        from datetime import datetime, timedelta, timezone
+        agora = datetime.now(timezone.utc)
+        db = _db_padrao()
+        db._cols[wa.COL_OUTBOX] = _Colecao({"j": {
+            "status": "pending", "to_number": "+5527998754054", "content": "oi",
+            "created_at": agora - timedelta(minutes=minutos_atras + 1),
+            "scheduled_for": agora - timedelta(minutes=minutos_atras),
+        }})
+        db._cols["system"] = _Colecao({
+            "settings": {"whatsapp_ingest": {"chats_allowlist": [MONITORADO]}},
+            "whatsapp_worker": {"last_seen": agora - timedelta(seconds=worker_ha_seg),
+                                "ready": True},
+        })
+        return _Ctx(db)
+
+    def test_recem_enfileirado_e_so_espera(self):
+        r = wa.consultar_envio(self._ctx(0, 30), {"job_id": "j"})
+        self.assertNotIn("status_efetivo", r)
+        self.assertIn("60s", r["message"])
+
+    def test_passou_da_hora_vira_encalhado(self):
+        r = wa.consultar_envio(self._ctx(10, 30), {"job_id": "j"})
+        self.assertEqual(r["status_efetivo"], "encalhado")
+        self.assertIn("NAO diga", r["message"])
+
+    def test_encalhado_com_worker_offline_aponta_a_causa(self):
+        """A explicação mais provável para não chegar é o worker fora do ar."""
+        r = wa.consultar_envio(self._ctx(10, 3600), {"job_id": "j"})
+        self.assertFalse(r["worker"]["online"])
+        self.assertIn("offline", r["message"])
+
+    def test_encalhado_com_worker_online_aponta_o_envio(self):
+        r = wa.consultar_envio(self._ctx(10, 30), {"job_id": "j"})
+        self.assertTrue(r["worker"]["online"])
+        self.assertIn("este envio", r["message"].replace("neste", "este"))
+
+    def test_estado_do_worker_acompanha_toda_consulta(self):
+        """É a pergunta seguinte em qualquer investigação; vem sem ser pedida."""
+        r = wa.consultar_envio(self._ctx(0, 30), {"job_id": "j"})
+        self.assertIn("worker", r)
+        self.assertIn("ha_segundos", r["worker"])
+
+    def test_carimbo_de_enfileiramento_vem_junto(self):
+        r = wa.consultar_envio(self._ctx(0, 30), {"job_id": "j"})
+        self.assertIsNotNone(r["enfileirado_em"])
+        self.assertIsNotNone(r["agendado_para"])
+
+
 class TestConsultarEnvio(unittest.TestCase):
     """Enfileirar não é enviar — e sem esta consulta não havia como saber.
 

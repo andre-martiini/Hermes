@@ -1,6 +1,6 @@
 {
   "name": "consultar_envio_whatsapp",
-  "description": "Estado REAL de uma mensagem de WhatsApp enfileirada por schedule_whatsapp_message: enviada, ainda na fila ou falhou (com o motivo). Enfileirar não é enviar — chame esta tool antes de afirmar ao usuário que uma mensagem foi entregue. Sem job_id, devolve os envios mais recentes.",
+  "description": "Estado REAL de uma mensagem de WhatsApp enfileirada por schedule_whatsapp_message. Devolve: status (pending/sent/failed), motivo em caso de falha, carimbos de enfileiramento e de entrega, destinatário pedido e destino real, e o estado do worker local — que é quem entrega. Enfileirar não é enviar: chame esta tool antes de afirmar ao usuário que uma mensagem foi entregue. A entrega sai em até ~60s depois do horário agendado; passado isso, um envio ainda pending vem marcado como 'encalhado' com a causa provável. Sem job_id, lista os envios mais recentes.",
   "parameters": {
     "type": "object",
     "properties": {
