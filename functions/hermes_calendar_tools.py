@@ -110,16 +110,94 @@ def consultar_eventos(
     return events
 
 
-def formatar_eventos_para_llm(events: list[dict]) -> str:
-    """Formats event list into a compact human-readable string for the LLM."""
+def consultar_eventos_multi(
+    calendar_service,
+    calendar_ids,
+    data_inicio: str,
+    data_fim: str,
+) -> tuple[list[dict], list[str]]:
+    """Eventos de VARIAS agendas, unidos e ordenados. Devolve (eventos, falhas).
+
+    Existe porque consultar uma agenda so era o mesmo que nao consultar. Ate
+    28/08/2026 `consultar_agenda` e `encontrar_slot_livre` liam apenas a agenda
+    dedicada do Hermes (`...@group.calendar.google.com`), onde estao somente os
+    eventos que o proprio Hermes cria. Os compromissos reais do dono vivem na
+    `primary`.
+
+    O efeito era pior que uma falha: a semana de 31/08 a 06/09 tinha 35
+    compromissos e a consulta devolvia 1 — o unico criado pelo Hermes. Uma
+    agenda que responde "vazio" leva a conclusoes opostas as de uma que responde
+    "nao sei", e foi assim que uma reuniao existente foi reportada ao dono como
+    inexistente.
+
+    As falhas voltam separadas de proposito: quem responde ao usuario precisa
+    distinguir "nao ha compromissos" de "nao consegui ver os compromissos".
+    Uma agenda que falhe nao derruba a consulta.
+    """
+    vistos: set = set()
+    eventos: list[dict] = []
+    falhas: list[str] = []
+
+    for cid in (calendar_ids or []):
+        if not cid:
+            continue
+        try:
+            for ev in consultar_eventos(calendar_service, cid, data_inicio, data_fim):
+                # Um mesmo compromisso pode estar em mais de uma agenda (convite
+                # aceito, agenda compartilhada). A chave e o que o usuario
+                # enxerga, nao o id, que difere entre agendas.
+                chave = (ev.get("data"), ev.get("inicio"), ev.get("fim"),
+                         (ev.get("titulo") or "").strip().lower())
+                if chave in vistos:
+                    continue
+                vistos.add(chave)
+                ev["calendar_id"] = cid
+                eventos.append(ev)
+        except Exception as exc:  # noqa: BLE001
+            falhas.append(f"{cid}: {exc}")
+
+    eventos.sort(key=lambda e: (e.get("data") or "", e.get("inicio") or ""))
+    return eventos, falhas
+
+
+def formatar_eventos_para_llm(
+    events: list[dict],
+    *,
+    periodo: tuple[str, str] | None = None,
+    agendas: list[str] | None = None,
+    falhas: list[str] | None = None,
+) -> str:
+    """Formata a lista para o LLM, dizendo o que foi de fato consultado.
+
+    O rodape com fonte, intervalo e numero de agendas existe porque "nenhum
+    evento" e "nao consegui ler a agenda" levam a decisoes opostas, e ate
+    28/08/2026 as duas coisas saiam com o mesmo texto. Sem ele, quem le nao tem
+    como saber se o dia esta livre ou se a consulta e que estava cega.
+    """
+    lines: list[str] = []
     if not events:
-        return "Nenhum evento encontrado no período."
-    lines = ["EVENTOS NA AGENDA:"]
+        lines.append("Nenhum evento encontrado no período.")
+    else:
+        lines.append("EVENTOS NA AGENDA:")
     for ev in events:
         inicio = ev["inicio"] or "dia inteiro"
         fim_str = f"–{ev['fim']}" if ev["fim"] else ""
         tag = " [HERMES]" if ev["hermes_id"] else ""
         lines.append(f"• {ev['data']} {inicio}{fim_str} — {ev['titulo']}{tag}")
+
+    rodape: list[str] = []
+    if periodo:
+        rodape.append(f"período consultado: {periodo[0]} a {periodo[1]}")
+    if agendas:
+        rodape.append(f"{len(agendas)} agenda(s) do Google consultada(s)")
+    if falhas:
+        rodape.append(
+            f"ATENÇÃO: {len(falhas)} agenda(s) NÃO puderam ser lidas "
+            f"({'; '.join(falhas)[:200]}) — a lista acima pode estar incompleta; "
+            "não trate como agenda vazia")
+    if rodape:
+        lines.append("")
+        lines.append("(fonte: API do Google Calendar; " + "; ".join(rodape) + ")")
     return "\n".join(lines)
 
 
@@ -167,9 +245,13 @@ def encontrar_proximo_slot(
         start_date = date.today()
 
     end_date = start_date + timedelta(days=SEARCH_WINDOW_DAYS)
-    all_events = consultar_eventos(
-        calendar_service, calendar_id,
-        start_date.isoformat(), end_date.isoformat()
+    # `calendar_id` aceita uma agenda ou varias. Com uma so, o slot era calculado
+    # sobre um calendario que continha apenas eventos do proprio Hermes — quase
+    # tudo parecia livre, e a ferramenta propunha trabalho por cima de
+    # compromisso real. Era o mais perigoso dos dois defeitos de 28/08/2026.
+    ids = [calendar_id] if isinstance(calendar_id, str) else list(calendar_id or [])
+    all_events, _falhas = consultar_eventos_multi(
+        calendar_service, ids, start_date.isoformat(), end_date.isoformat()
     )
 
     events_by_date: dict[str, list] = defaultdict(list)

@@ -227,37 +227,58 @@ def _calculadora(ctx: ToolContext, args: dict):
 
 
 def _consultar_agenda(ctx: ToolContext, args: dict):
+    """Compromissos do periodo, de TODAS as agendas sincronizadas.
+
+    Ate 28/08/2026 esta tool consultava so `get_target_calendar_id` — a agenda
+    dedicada onde o Hermes escreve. Os compromissos reais do dono ficam na
+    `primary`, entao a resposta trazia apenas o que o proprio Hermes tinha
+    criado: numa semana com 35 compromissos, devolveu 1. Uma reuniao existente
+    foi reportada como inexistente por causa disso.
+    """
     try:
-        from main import get_calendar_service, get_target_calendar_id
+        from main import get_calendar_service, get_sync_calendar_ids
         import hermes_calendar_tools as hc_tools
 
         c_service = get_calendar_service()
-        c_id = get_target_calendar_id(ctx.db)
-        if not c_service or not c_id:
+        ids = get_sync_calendar_ids(ctx.db)
+        if not c_service or not ids:
             return "Google Calendar nao configurado."
-        events = hc_tools.consultar_eventos(
-            c_service, c_id, args.get("data_inicio"), args.get("data_fim")
-        )
-        return hc_tools.formatar_eventos_para_llm(events)
+        inicio, fim = args.get("data_inicio"), args.get("data_fim")
+        events, falhas = hc_tools.consultar_eventos_multi(c_service, ids, inicio, fim)
+        return hc_tools.formatar_eventos_para_llm(
+            events, periodo=(inicio, fim), agendas=ids, falhas=falhas)
     except Exception as e:
-        return f"Erro ao consultar agenda: {e}"
+        # A falha precisa ser inconfundivel: um erro lido como "agenda vazia"
+        # faz propor trabalho por cima de compromisso real.
+        return (f"ERRO ao consultar agenda: {e}. NAO trate isto como agenda vazia — "
+                "a consulta falhou e os compromissos do periodo sao desconhecidos.")
 
 
 def _encontrar_slot_livre(ctx: ToolContext, args: dict):
+    """Proximo horario livre, olhando TODAS as agendas sincronizadas.
+
+    Mesmo defeito de `_consultar_agenda` e com consequencia pior: calcular
+    tempo livre sobre uma agenda que so tem eventos do Hermes faz quase tudo
+    parecer vago, e a proposta cai por cima de compromisso real.
+    """
     try:
-        from main import get_calendar_service, get_target_calendar_id
+        from main import get_calendar_service, get_sync_calendar_ids
         import hermes_calendar_tools as hc_tools
 
         c_service = get_calendar_service()
-        c_id = get_target_calendar_id(ctx.db)
-        if not c_service or not c_id:
+        ids = get_sync_calendar_ids(ctx.db)
+        if not c_service or not ids:
             return "Erro: Google Calendar nao configurado."
         slot = hc_tools.encontrar_proximo_slot(
-            c_service, c_id, args.get("a_partir_de"), int(args.get("duracao_min") or 30)
+            c_service, ids, args.get("a_partir_de"), int(args.get("duracao_min") or 30)
         )
-        return json.dumps(slot, ensure_ascii=False) if slot else "Nenhum slot livre encontrado."
+        if not slot:
+            return "Nenhum slot livre encontrado."
+        slot["agendas_consultadas"] = len(ids)
+        return json.dumps(slot, ensure_ascii=False)
     except Exception as e:
-        return f"Erro ao buscar slot livre: {e}"
+        return (f"ERRO ao buscar slot livre: {e}. NAO trate isto como "
+                "disponibilidade — a agenda nao pode ser lida.")
 
 
 def _consultar_saude(ctx: ToolContext, args: dict):
