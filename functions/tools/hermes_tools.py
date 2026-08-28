@@ -1577,6 +1577,12 @@ def obter_acao(ctx: ToolContext, args: dict):
     }
 
 
+def _registrar_saude(ctx: ToolContext, args: dict):
+    from tools.registrar_saude import registrar
+
+    return registrar(ctx, args)
+
+
 # ---------------------------------------------------------------------------
 # Registro
 # ---------------------------------------------------------------------------
@@ -1596,6 +1602,7 @@ _HANDLERS: dict = {
     "consultar_agenda": _consultar_agenda,
     "encontrar_slot_livre": _encontrar_slot_livre,
     "consultar_saude": _consultar_saude,
+    "registrar_saude": _registrar_saude,
     "consultar_dados_cadastrais": _consultar_dados_cadastrais,
     "buscar_e_analisar_email": _buscar_e_analisar_email,
     "schedule_whatsapp_message": _schedule_whatsapp_message,

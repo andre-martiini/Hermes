@@ -1,0 +1,46 @@
+{
+  "name": "registrar_saude",
+  "description": "Registra no módulo Saúde o que o USUÁRIO DECLAROU sobre o próprio dia. Nunca preencha por estimativa, inferência ou memória de conversa: peso, dor e sono só o usuário pode informar, e um valor inventado contamina a média de 7 dias e a projeção da meta sem que ninguém perceba. Grava nas mesmas coleções que a interface web usa, é idempotente por dia e por campo (registrar de novo atualiza, não duplica), e recusa valor fora de faixa plausível em vez de gravar. Pelo menos um campo além da data é obrigatório.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "data": {
+        "type": "string",
+        "description": "YYYY-MM-DD. Padrão: hoje. Data futura é recusada"
+      },
+      "peso": {
+        "type": "number",
+        "description": "Peso em kg (30 a 300). Fecha a rotina de pesagem do dia"
+      },
+      "cintura": {
+        "type": "number",
+        "description": "Circunferência da cintura em cm (40 a 200)"
+      },
+      "calorias": {
+        "type": "integer",
+        "description": "Calorias do dia (0 a 20000)"
+      },
+      "dor_manha": {
+        "type": "integer",
+        "description": "Dor ao acordar, 0 a 10. Fecha o check-in da manhã"
+      },
+      "dor_noite": {
+        "type": "integer",
+        "description": "Dor no fim do dia, 0 a 10. Fecha o check-in da noite"
+      },
+      "dor_pos_caminhada": {
+        "type": "integer",
+        "description": "Dor depois da caminhada, 0 a 10"
+      },
+      "sono_qualidade": {
+        "type": "integer",
+        "description": "Qualidade do sono, 1 a 5 — a mesma escala do check-in. Não existe registro de horas de sono"
+      },
+      "acordou_com_dor": {
+        "type": "boolean",
+        "description": "Se acordou com dor"
+      }
+    },
+    "required": []
+  }
+}

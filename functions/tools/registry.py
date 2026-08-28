@@ -44,7 +44,10 @@ _CATALOG: dict[str, str] = {
     "registrar_interacao_contato": "Registra interação silenciosa no histórico de um contato (sem confirmação)",
     # Tools que ja existiam como closure no copiloto web mas nunca tinham entrado
     # no catalogo — entraram junto com a migracao para tools/hermes_tools.py.
-    "consultar_saude": "Consulta dados de saude do usuario: peso, passos, calorias, sono e dor",
+    # A descricao antiga prometia "passos" e "sono", que nao existem no modelo:
+    # o que ha e caminhada em km, calorias, qualidade do sono e dor.
+    "consultar_saude": "Consulta dados de saude: peso, cintura, caminhada, calorias, qualidade do sono e dor",
+    "registrar_saude": "Registra o que o USUARIO declarou de saude no dia: peso, cintura, dor, sono",
     "consultar_dados_cadastrais": "Consulta dados cadastrais pessoais (documentos, contato, familia, formacao, carreira, banco, plano de saude)",
     "registrar_no_diario": "Registra uma entrada livre no diario de bordo de uma acao",
     "gerar_imagem": "Gera uma imagem a partir de uma descricao textual e devolve a URL publica",
