@@ -72,3 +72,7 @@ OBSIDIAN_VIEW/
 ORIGINAIS_HERMES/
 repositorios_auxiliares/
 
+
+# Rascunho local: logs de dev-server, .pyc, backups pontuais de configuração.
+# Nunca foi para o repositório e não deve ir.
+tmp/
