@@ -169,6 +169,45 @@ describe('MorningSummaryView', () => {
         expect(screen.queryByText('Contas vencendo')).toBeNull();
     });
 
+    it('fila sem tela sai de "Esperando você decidir" e vai para "O que vem por aí"', async () => {
+        // Notificação da IA em `pending` não espera o dono — espera a hora dela,
+        // e chega pelo Telegram. Ficar ao lado das fusões de contato sugeria uma
+        // pendência que não existe, e o card ainda levava para a tela inicial.
+        snapshotData = fixture({
+            filas: {
+                sugestoes_vinculo: { total: 2, amostra: [{ titulo: 'Ofício 231/2026' }], rota: 'dashboard' },
+                notificacoes_ia: {
+                    total: 2,
+                    amostra: [{ titulo: 'Artigo do MAGO: agosto acaba em 3 dias', quando: '07:30' }],
+                    rota: '',
+                },
+            },
+        } as any);
+        render(<MorningSummaryView />);
+
+        const decidir = within(await secao('Esperando você decidir'));
+        expect(decidir.getByText('Sugestões de vínculo')).toBeDefined();
+        expect(decidir.queryByText('Notificações na fila')).toBeNull();
+
+        const porVir = within(await secao('O que vem por aí'));
+        expect(porVir.getByText('Notificações na fila')).toBeDefined();
+        // O horário já vinha no payload e nunca era exibido — é o que responde
+        // "quando isso chega".
+        expect(porVir.getByText('07:30')).toBeDefined();
+        expect(porVir.getByText(/Chegam pelo Telegram/)).toBeDefined();
+    });
+
+    it('fila sem tela não é clicável', async () => {
+        snapshotData = fixture({
+            filas: {
+                notificacoes_ia: { total: 1, amostra: [{ titulo: 'x', quando: '08:00' }], rota: '' },
+            },
+        } as any);
+        render(<MorningSummaryView />);
+        const porVir = within(await secao('O que vem por aí'));
+        expect(porVir.queryByRole('button')).toBeNull();
+    });
+
     it('mostra a meta parada com o tempo sem movimento', async () => {
         render(<MorningSummaryView />);
         expect(await screen.findByText('Terminar o mestrado')).toBeDefined();

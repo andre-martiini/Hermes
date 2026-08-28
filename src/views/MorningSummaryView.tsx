@@ -347,6 +347,18 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
             .filter(([chave, f]) => chave in FILA_LABEL && (f as ResumoFila)?.total > 0),
         [filas],
     );
+    // "Esperando você decidir" só vale para o que de fato espera uma decisão.
+    // Notificação da IA em `pending` não espera o dono — espera a hora dela, e
+    // chega pelo Telegram. Estar na mesma seção das fusões de contato e das
+    // contas vencendo sugeria uma pendência que não existe.
+    const filasDeDecisao = useMemo(
+        () => filasComItens.filter(([, f]) => ROTAS_VALIDAS.includes((f as ResumoFila).rota as MorningSummaryRoute)),
+        [filasComItens],
+    );
+    const filasInformativas = useMemo(
+        () => filasComItens.filter(([, f]) => !ROTAS_VALIDAS.includes((f as ResumoFila).rota as MorningSummaryRoute)),
+        [filasComItens],
+    );
     const cargaMax = useMemo(
         () => Math.max(1, ...(cargaSemana).map((d) => d.total || 0)),
         [cargaSemana],
@@ -624,11 +636,11 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
 
                     {/* Pendências */}
                     <Secao titulo="Esperando você decidir" isDark={isDark}>
-                        {filasComItens.length === 0 ? (
+                        {filasDeDecisao.length === 0 ? (
                             <Vazio isDark={isDark}>Nenhuma fila parada. Tudo decidido.</Vazio>
                         ) : (
                             <ul className="space-y-2.5">
-                                {filasComItens.map(([chave, fila]) => {
+                                {filasDeDecisao.map(([chave, fila]) => {
                                     const amostra = fila?.amostra || [];
                                     // Fila sem rota não vira botão. Um card clicável que leva
                                     // para a tela inicial faz o usuário procurar o que não
@@ -675,6 +687,49 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                             </ul>
                         )}
                     </Secao>
+
+                    {/* O que vem por aí — nada aqui espera decisão do usuário. */}
+                    {filasInformativas.length > 0 && (
+                        <Secao titulo="O que vem por aí" isDark={isDark}>
+                            <ul className="space-y-2.5">
+                                {filasInformativas.map(([chave, fila]) => (
+                                    <li
+                                        key={chave}
+                                        className={`px-3 py-2.5 rounded-xl border ${
+                                            isDark ? 'border-[#2a313d]' : 'border-slate-100'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-base leading-none">{FILA_ICONE[chave] || '•'}</span>
+                                            <span className="text-sm font-medium flex-1 min-w-0">{FILA_LABEL[chave] || chave}</span>
+                                            <span className={`text-sm font-black tabular-nums ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                                {fila.total}
+                                            </span>
+                                        </div>
+                                        {(fila.amostra || []).length > 0 && (
+                                            <ul className={`mt-1.5 space-y-0.5 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                                                {(fila.amostra || []).map((item, i) => (
+                                                    <li key={i} className="flex gap-2">
+                                                        {/* O horário já vinha no payload e nunca era mostrado —
+                                                            é justamente o que responde "quando isso chega". */}
+                                                        {item.quando && (
+                                                            <span className="shrink-0 font-mono tabular-nums">{item.quando}</span>
+                                                        )}
+                                                        <span className="truncate">{item.titulo}</span>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                        {FILA_NOTA[chave] && (
+                                            <p className={`mt-1.5 text-[11px] ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>
+                                                {FILA_NOTA[chave]}
+                                            </p>
+                                        )}
+                                    </li>
+                                ))}
+                            </ul>
+                        </Secao>
+                    )}
 
                     {/* Estratégia */}
                     <Secao
