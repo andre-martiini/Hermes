@@ -38,6 +38,43 @@ const HISTORY_STORAGE_KEY = 'hermes_meeting_history_v1';
 const SYSTEM_AUDIO_SILENCE_WARNING_MS = 12000;
 const SYSTEM_AUDIO_ACTIVITY_THRESHOLD = 0.004;
 const DEEPGRAM_STORAGE_KEY = 'DEEPGRAM_API_KEY';
+/**
+ * Traduz o fechamento do WebSocket do Deepgram em algo acionável.
+ *
+ * Antes, qualquer queda virava "verifique a chave do Deepgram ou a conexão" —
+ * a mesma frase para chave revogada, internet caída, crédito no fim e áudio em
+ * formato recusado. Em 28/08/2026 isso custou uma investigação inteira: a chave
+ * ESTAVA configurada, com formato correto, e o Deepgram a recusava com 401.
+ * "Configurada" e "válida" pareciam a mesma coisa, e a mensagem não separava.
+ *
+ * Os códigos vêm da faixa 4000+ do Deepgram e dos códigos padrão de WebSocket.
+ */
+const motivoDaQueda = (code: number, reason: string): string => {
+  const detalhe = reason?.trim() ? ` (${reason.trim()})` : '';
+  switch (code) {
+    case 4001:
+      return `a chave do Deepgram foi REJEITADA${detalhe}. Ela existe, mas não é aceita — `
+        + 'gere outra em console.deepgram.com › API Keys.';
+    case 4000:
+      return `o Deepgram recusou os parâmetros da conexão${detalhe}.`;
+    case 4008:
+      return `o Deepgram não recebeu áudio a tempo e encerrou${detalhe} — `
+        + 'verifique se a aba compartilhada está com som.';
+    case 4009:
+      return `o formato do áudio enviado não foi aceito${detalhe}.`;
+    case 4010:
+    case 4029:
+      return `limite ou crédito da conta Deepgram esgotado${detalhe}.`;
+    case 1006:
+      return 'a conexão caiu sem resposta do servidor — rede, proxy ou firewall '
+        + 'bloqueando wss://api.deepgram.com.';
+    case 1011:
+      return `erro interno do Deepgram${detalhe}; tente de novo em instantes.`;
+    default:
+      return `a conexão fechou com código ${code}${detalhe}.`;
+  }
+};
+
 const DEEPGRAM_CONFIG_COLLECTION = 'public_configs';
 const DEEPGRAM_CONFIG_DOC = 'integracoes';
 const LIVE_CONTEXT_MAX_CHARS = 9000;
@@ -161,6 +198,11 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
 
   // Chave Deepgram: env → localStorage → Firestore (public_configs/integracoes)
   const [deepgramKey, setDeepgramKey] = useState<string | null>(null);
+  // Verde por existir chave dizia "configurada", e quem lia entendia
+  // "funcionando". Em 28/08/2026 a chave estava presente e o Deepgram a
+  // recusava com 401 — o indicador seguia verde, e a hipotese certa foi a
+  // ultima a ser testada. Uma rejeicao agora apaga o verde.
+  const [chaveRejeitada, setChaveRejeitada] = useState(false);
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [keyDraft, setKeyDraft] = useState('');
   const [showKeyValue, setShowKeyValue] = useState(false);
@@ -281,6 +323,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
     }
     localStorage.setItem(DEEPGRAM_STORAGE_KEY, trimmed);
     setDeepgramKey(trimmed);
+    setChaveRejeitada(false);
     setShowKeyModal(false);
     setKeyDraft('');
     try {
@@ -618,7 +661,8 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
       micWs.onclose = event => {
         if (!event.wasClean) {
           console.error('Conexão com Deepgram (microfone) encerrada inesperadamente:', event.code, event.reason);
-          showToast('A transcrição do seu microfone caiu (verifique a chave do Deepgram ou a conexão).', 'error');
+          showToast(`Transcrição do microfone caiu: ${motivoDaQueda(event.code, event.reason)}`, 'error');
+          if (event.code === 4001) setChaveRejeitada(true);
         }
       };
 
@@ -657,7 +701,8 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
         systemWs.onclose = event => {
           if (!event.wasClean) {
             console.error('Conexão com Deepgram (áudio da reunião) encerrada inesperadamente:', event.code, event.reason);
-            showToast('A transcrição do áudio da reunião caiu (verifique a chave do Deepgram ou a conexão).', 'error');
+            showToast(`Transcrição do áudio da reunião caiu: ${motivoDaQueda(event.code, event.reason)}`, 'error');
+          if (event.code === 4001) setChaveRejeitada(true);
           }
         };
 
@@ -1051,13 +1096,20 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
           <button
             onClick={() => { setKeyDraft(''); setShowKeyValue(false); setShowKeyModal(true); }}
             className={`flex h-10 items-center gap-2 rounded-xl border px-3 text-[10px] font-bold uppercase tracking-wider transition-all ${ghostButtonClass}`}
-            title={deepgramKey ? 'Chave Deepgram configurada — clique para alterar' : 'Configurar chave Deepgram'}
+            title={
+              chaveRejeitada
+                ? 'Chave Deepgram REJEITADA pelo Deepgram — clique para trocar'
+                : deepgramKey ? 'Chave Deepgram configurada — clique para alterar'
+                : 'Configurar chave Deepgram'
+            }
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
             </svg>
             <span className="hidden sm:inline">Chave API</span>
-            <span className={`h-2 w-2 rounded-full ${deepgramKey ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+            <span className={`h-2 w-2 rounded-full ${
+              chaveRejeitada ? 'bg-rose-500 animate-pulse' : deepgramKey ? 'bg-emerald-500' : 'bg-rose-500'
+            }`} />
           </button>
           <button
             onClick={() => setShowHistoryPanel(true)}
