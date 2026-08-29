@@ -25,8 +25,12 @@ export const CATEGORIA_POUPANCA = 'Poupança';
  * A gramática decimal que os dois lados aceitam, escrita uma vez e idêntica em
  * `functions/bolso_aquisicoes.py`. Não é a sintaxe numérica do JavaScript nem a
  * do Python: é a intersecção delas, deliberadamente.
+ *
+ * `[0-9]` e não `\d` pelo mesmo motivo do outro lado: em padrão de `str` o `\d`
+ * do Python casa dígito decimal UNICODE e `float("١")` devolve 1.0, enquanto o
+ * `\d` do ECMAScript é só ASCII. Escrito assim, os dois leem a mesma coisa.
  */
-const DECIMAL = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
+const DECIMAL = /^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$/;
 
 /**
  * O que o Firestore devolveu, lido como número por UMA gramática só.
@@ -225,6 +229,10 @@ export function resumoDoBolso<T extends MetaBolso>(
             const alvo = numero(meta.targetAmount);
             return {
                 ...meta,
+                // Normalizado na saída, junto com `currentAmount`: quem consome
+                // formata este campo e não tem por que repetir a gramática para
+                // descobrir se o Firestore guardou "8000" ou 8000.
+                targetAmount: alvo,
                 currentAmount: centavos(atual) / 100,
                 coberturaPct: alvo > 0 ? umaCasa(Math.min(100, (atual / alvo) * 100)) : 0,
                 cabeNaFila: cabe.get(meta.id) ?? false,

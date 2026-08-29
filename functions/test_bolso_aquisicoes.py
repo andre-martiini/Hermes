@@ -171,8 +171,10 @@ class TestEmpateDePrioridade(unittest.TestCase):
 #   "Infinity"  float da inf,  Number da Infinity — nenhum dos dois serve
 #   "1e400"     os dois dao infinito sem levantar
 #   "abc"       float levanta sem ninguem pegar
+#   "\u0661"       digito arabe-indico: o `\\d` do Python casa e `float` da 1.0,
+#               o `\\d` do ECMAScript nao casa. Dai `[0-9]` explicito nos dois.
 GRAMATICA_RECUSA = ["0x1", "1_0", "NaN", "Infinity", "1e400", "abc", "", "  ",
-                    "R$ 5", "5,5", None, True, False]
+                    "R$ 5", "5,5", "\u0661", "\u0661\u0662", None, True, False]
 GRAMATICA_ACEITA = [("500", 500.0), (" 2 ", 2.0), ("+2", 2.0), ("-3", -3.0),
                     (".5", 0.5), ("5.", 5.0), ("1e3", 1000.0), (500, 500.0),
                     (2.5, 2.5), (0, 0.0)]
@@ -202,6 +204,15 @@ class TestUmaGramaticaSo(unittest.TestCase):
         for bruto in GRAMATICA_RECUSA:
             with self.subTest(bruto=bruto):
                 self.assertEqual(ba.centavos(bruto), 0)
+
+    def test_target_sai_normalizado_para_quem_formata(self):
+        """`main.py` faz `f"{targetAmount:.2f}"`, que LEVANTA com uma string."""
+        metas = [{"id": "x", "targetAmount": "8000", "priority": 1, "status": "active"}]
+        settings = {"emergencyReserveCurrent": 0, "emergencyReserveTarget": 0,
+                    "investmentReserveCurrent": 1000}
+        r = ba.resumo(metas, settings, [])
+        self.assertEqual(r["metas"][0]["targetAmount"], 8000.0)
+        self.assertEqual("R$ {:.2f}".format(r["metas"][0]["targetAmount"]), "R$ 8000.00")
 
     def test_conta_mal_gravada_nao_contamina_o_cofre(self):
         settings = {"emergencyReserveCurrent": 0, "emergencyReserveTarget": 0,

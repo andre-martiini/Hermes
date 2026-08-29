@@ -84,8 +84,10 @@ describe('cobertura individual — os números que a tela já mostrava', () => {
 //   'Infinity'  float dá inf,  Number dá Infinity — nenhum dos dois serve
 //   '1e400'     os dois dão infinito sem erro
 //   'abc'       float levanta sem ninguém pegar
+//   '١'         dígito árabe-índico: o `\d` do Python casa e `float` dá 1.0, o
+//               `\d` do ECMAScript não casa. Daí `[0-9]` explícito nos dois.
 const GRAMATICA_RECUSA: unknown[] = ['0x1', '1_0', 'NaN', 'Infinity', '1e400', 'abc',
-    '', '  ', 'R$ 5', '5,5', null, true, false];
+    '', '  ', 'R$ 5', '5,5', '\u0661', '\u0661\u0662', null, true, false];
 const GRAMATICA_ACEITA: [unknown, number][] = [['500', 500], [' 2 ', 2], ['+2', 2],
     ['-3', -3], ['.5', 0.5], ['5.', 5], ['1e3', 1000], [500, 500], [2.5, 2.5], [0, 0]];
 
@@ -113,6 +115,12 @@ describe('uma gramática só', () => {
         for (const bruto of GRAMATICA_RECUSA) {
             expect(centavos(bruto), String(bruto)).toBe(0);
         }
+    });
+
+    it('target sai normalizado para quem formata', () => {
+        // Do lado Python, `f"{targetAmount:.2f}"` LEVANTA com uma string.
+        const metas = [{ id: 'x', targetAmount: '8000' as any, priority: 1, status: 'active' }];
+        expect(resumoDoBolso(metas, SETTINGS, []).metas[0].targetAmount).toBe(8000);
     });
 
     it('conta mal gravada não contamina o cofre', () => {

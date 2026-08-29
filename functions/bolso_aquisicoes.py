@@ -30,7 +30,12 @@ CATEGORIA_POUPANCA = "Poupança"
 # A gramatica decimal que os dois lados aceitam, escrita uma vez e identica em
 # `src/utils/bolsoAquisicoes.ts`. Nao e a sintaxe numerica do Python nem a do
 # JavaScript: e a interseccao delas, deliberadamente.
-_DECIMAL = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")
+#
+# `[0-9]` e nao `\d`: em padrao de `str` o `\d` do Python casa digito decimal
+# UNICODE, e `float("\u0661")` devolve 1.0 — enquanto o `\d` do ECMAScript e so
+# ASCII e o mesmo texto cairia no padrao do outro lado. A mesma divergencia,
+# entrando por dentro da regex que existe para elimina-la.
+_DECIMAL = re.compile(r"^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$")
 
 
 def numero(valor, padrao: float = 0.0) -> float:
@@ -187,6 +192,11 @@ def resumo(metas, settings: dict, contas_do_mes) -> dict:
         alvo = numero(meta.get("targetAmount"))
         enriquecidas.append({
             **meta,
+            # Normalizado na saida, junto com `currentAmount`. Quem le a tool
+            # formata este campo — `main.py` faz `f"{...:.2f}"`, que LEVANTA com
+            # uma string — e nao tem por que repetir a gramatica para descobrir
+            # se o Firestore guardou "8000" ou 8000.
+            "targetAmount": alvo,
             # Calculado na leitura, e nao lido do documento: o campo gravado
             # ficava defasado porque so era atualizado quando a meta era editada.
             "currentAmount": centavos(atual) / 100,
