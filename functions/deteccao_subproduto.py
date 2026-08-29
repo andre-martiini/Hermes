@@ -485,17 +485,38 @@ class HistoricoIndisponivel(Exception):
     """A base de sugestoes nao pode ser lida agora."""
 
 
-def _carregar_sugestoes(db) -> list[dict]:
-    """Levanta em vez de devolver lista vazia quando a leitura falha.
+def _carregar_sugestoes(db, hoje: str) -> list[dict]:
+    """O historico que sustenta as duas regras, sem teto de vida arbitrario.
 
-    Historico vazio nao e um estado neutro aqui: e o estado em que o teto do mes
-    parece zerado e nenhuma acao parece decidida. Uma falha de Firestore viraria
-    permissao para estourar o limite e para repropor o que o usuario ja marcou
-    como "nunca". A trava tem de falhar fechada.
+    Um `limit` sobre a colecao inteira e uma bomba-relogio: passado o corte, um
+    registro `nunca` cai fora da leitura e a acao volta a ser candidata, quebrando
+    a permanencia que o card promete. Entao a busca e por recorte com significado,
+    e nao por quantidade:
+
+    - todo `nunca`, para sempre — e o que da permanencia a decisao;
+    - todo `pendente` e `aceita`, de qualquer epoca — quem ja esta na fila nao e
+      perguntado de novo;
+    - tudo deste mes, para a contagem do teto.
+
+    Levanta em vez de devolver lista vazia quando a leitura falha. Historico vazio
+    nao e um estado neutro aqui: e o estado em que o teto parece zerado e nenhuma
+    acao parece decidida — um erro transitorio viraria permissao para estourar o
+    limite e repropor o que ja foi recusado para sempre. A trava falha fechada.
     """
+    from firebase_admin import firestore as _fs
+
     try:
-        return [{**(d.to_dict() or {}), "id": d.id}
-                for d in db.collection(COL_ELEVACOES).limit(400).stream()]
+        col = db.collection(COL_ELEVACOES)
+        recortes = (
+            col.where(filter=_fs.FieldFilter("status", "==", STATUS_NUNCA)),
+            col.where(filter=_fs.FieldFilter("status", "in", [STATUS_PENDENTE, STATUS_ACEITA])),
+            col.where(filter=_fs.FieldFilter("criada_em", ">=", f"{_mes(hoje)}-01")),
+        )
+        por_id = {}
+        for recorte in recortes:
+            for d in recorte.stream():
+                por_id[d.id] = {**(d.to_dict() or {}), "id": d.id}
+        return list(por_id.values())
     except Exception as exc:
         raise HistoricoIndisponivel(str(exc)) from exc
 
@@ -508,7 +529,7 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
     que nenhuma sugestao poderia sair de qualquer forma.
     """
     try:
-        sugestoes = _carregar_sugestoes(db)
+        sugestoes = _carregar_sugestoes(db, hoje)
     except HistoricoIndisponivel as exc:
         print(f"[Elevacao] Historico indisponivel, rodada abortada: {exc}")
         return {"rodar": False, "motivo": "historico_indisponivel"}
@@ -657,7 +678,8 @@ DECISOES = {
 }
 
 
-def decidir(db, sugestao_id: str, decisao: str, hoje: str) -> dict:
+def decidir(db, sugestao_id: str, decisao: str, hoje: str,
+            devolver_vaga=None) -> dict:
     """Aplica a decisao do usuario sobre uma elevacao sugerida.
 
     Sem esta funcao o detector e inerte: as sugestoes aparecem na fila e nao ha
@@ -666,8 +688,15 @@ def decidir(db, sugestao_id: str, decisao: str, hoje: str) -> dict:
 
     Aceitar NAO cria a acao aqui. A criacao passa por `criar_acao_no_sistema`,
     que e quem sabe area tematica, deduplicacao e agenda; duplicar isso daria uma
-    acao meia-boca gravada por um caminho paralelo. O retorno traz o rascunho
-    pronto para essa chamada, com o vinculo estrategico ja preenchido.
+    acao meia-boca gravada por um caminho paralelo.
+
+    E o vinculo com o objetivo NAO vai na criacao, vai num `editar_acao` logo
+    depois. Nao e capricho: nao existe um caminho de criacao de acao no Hermes,
+    existem quatro reimplementacoes — handler compartilhado, adaptador do
+    copiloto web, callable legada do Telegram, e o fluxo de confirmacao do
+    Telegram com seu proprio callback montando um terceiro documento. Um campo
+    novo passado na criacao funciona numa porta e some nas outras, em silencio.
+    Dois passos explicitos valem mais que um campo que so as vezes chega.
     """
     alvo = DECISOES.get(str(decisao or "").strip().lower())
     if not alvo:
@@ -685,16 +714,25 @@ def decidir(db, sugestao_id: str, decisao: str, hoje: str) -> dict:
     resposta = {"ok": True, "status": alvo, "sugestao_id": str(sugestao_id)}
 
     if alvo == STATUS_NUNCA:
+        # "Nunca" e ajuste de escopo, nao interrupcao gasta: devolve a vaga do
+        # mes. Sem isto, tres sugestoes recusadas para sempre bloqueariam o resto
+        # do mes — contradizendo a regra que `elevacoes_do_mes` ja aplica na
+        # leitura, e deixando as duas contagens discordando entre si.
+        (devolver_vaga or _devolver_vaga)(db, str(dados.get("criada_em") or hoje))
         resposta["detalhe"] = (
-            f'"{dados.get("titulo_acao")}" nao sera mais sugerida para elevacao.')
+            f'"{dados.get("titulo_acao")}" nao sera mais sugerida para elevacao, '
+            "e a vaga do mes volta a ficar disponivel.")
     elif alvo == STATUS_ADIADA:
         resposta["detalhe"] = (
             "Adiada. A acao volta a ser candidata numa proxima varredura — "
             "'agora nao' e sobre o momento, nao sobre a acao.")
     else:
         resposta["detalhe"] = (
-            "Aceita. Crie a acao com criar_acao_no_sistema usando o rascunho abaixo; "
-            "ele ja vem com o vinculo estrategico preenchido.")
+            "Aceita. Sao DOIS passos: crie a acao com criar_acao_no_sistema usando o "
+            "rascunho abaixo e, com o id devolvido, chame editar_acao passando "
+            f'estrategia_objetivo_id="{dados.get("objetivo_id")}" para vincular ao '
+            f'objetivo "{dados.get("nome_objetivo")}". Sem o segundo passo a acao nasce '
+            "solta, e o vinculo era o que a tornava uma elevacao.")
         resposta["rascunho_da_acao"] = {
             "titulo": str(dados.get("ativo_possivel") or "")[:120],
             "descricao": (
@@ -703,9 +741,35 @@ def decidir(db, sugestao_id: str, decisao: str, hoje: str) -> dict:
                 f'Passo que falta: {dados.get("passo_que_falta")}\n'
                 f'Custo estimado: {dados.get("custo_estimado")}'
             ),
+        }
+        resposta["vincular_depois"] = {
+            "tool": "editar_acao",
             "estrategia_objetivo_id": dados.get("objetivo_id"),
+            "objetivo": dados.get("nome_objetivo"),
         }
     return resposta
+
+
+def _devolver_vaga(db, criada_em: str) -> None:
+    """Decrementa o contador do mes em que a sugestao foi criada.
+
+    O mes vem da sugestao, e nao de hoje: recusar em setembro uma sugestao de
+    agosto nao pode abrir vaga em setembro.
+    """
+    from firebase_admin import firestore as _fs
+
+    contador = _contador_do_mes(db, criada_em)
+
+    @_fs.transactional
+    def _txn(transaction):
+        snap = contador.get(transaction=transaction)
+        atual = (snap.to_dict() or {}).get("count", 0) if snap.exists else 0
+        transaction.set(contador, {"count": max(0, int(atual or 0) - 1)}, merge=True)
+
+    try:
+        _txn(db.transaction())
+    except Exception as exc:
+        print(f"[Elevacao] Falha ao devolver vaga do mes: {exc}")
 
 
 def listar_pendentes(db, limite: int = 20) -> dict:

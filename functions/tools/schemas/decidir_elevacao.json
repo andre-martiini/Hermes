@@ -1,6 +1,6 @@
 {
   "name": "decidir_elevacao",
-  "description": "Aplica a decisao do usuario sobre uma elevacao sugerida. Sempre confirme com ele antes de chamar. 'nunca' e definitivo para aquela acao e existe para o sistema nao repetir a mesma sugestao; 'adiar' e sobre o momento, e a acao volta a ser candidata depois. 'aceitar' NAO cria a acao: devolve um rascunho com o vinculo estrategico preenchido, para voce criar com criar_acao_no_sistema.",
+  "description": "Aplica a decisao do usuario sobre uma elevacao sugerida. Sempre confirme com ele antes de chamar. 'nunca' e definitivo para aquela acao e existe para o sistema nao repetir a mesma sugestao, e devolve a vaga do mes; 'adiar' e sobre o momento, e a acao volta a ser candidata depois. 'aceitar' NAO cria a acao: devolve um rascunho para criar_acao_no_sistema e, em 'vincular_depois', o estrategia_objetivo_id para um editar_acao logo em seguida. Sao dois passos de proposito — o vinculo passado na criacao nao chega por todos os caminhos de entrada, entao vincular depois e o unico jeito de ele valer sempre.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -13,6 +13,9 @@
         "description": "aceitar, adiar ou nunca."
       }
     },
-    "required": ["sugestao_id", "decisao"]
+    "required": [
+      "sugestao_id",
+      "decisao"
+    ]
   }
 }

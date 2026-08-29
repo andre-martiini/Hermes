@@ -470,7 +470,7 @@ class TestFalhaDeLeituraFechaAPorta(unittest.TestCase):
 
     def test_carregar_levanta_em_vez_de_devolver_vazio(self):
         with self.assertRaises(ds.HistoricoIndisponivel):
-            ds._carregar_sugestoes(self._DbQuebrado())
+            ds._carregar_sugestoes(self._DbQuebrado(), HOJE)
 
     def test_rodada_e_abortada_e_nao_roda_sem_historico(self):
         r = ds.preparar_rodada(self._DbQuebrado(), HOJE, [])
@@ -507,7 +507,7 @@ class TestADecisaoDoUsuario(unittest.TestCase):
 
     def test_nunca_e_definitivo_e_tira_a_acao_das_proximas_varreduras(self):
         db = self._db_com_pendente()
-        r = ds.decidir(db, "s1", "nunca", HOJE)
+        r = ds.decidir(db, "s1", "nunca", HOJE, devolver_vaga=lambda *a: None)
         self.assertEqual(r["status"], ds.STATUS_NUNCA)
         gravada = db.cols[ds.COL_ELEVACOES].dados["s1"]
         decididas = ds.acoes_ja_decididas([gravada])
@@ -521,17 +521,30 @@ class TestADecisaoDoUsuario(unittest.TestCase):
         self.assertEqual(len(ds.candidatas(
             [_tarefa(id="sispnaes", pool_dados=[_anexo("X.md")])], decididas, HOJE)), 1)
 
-    def test_aceitar_devolve_rascunho_com_o_vinculo_preenchido(self):
-        """Nao cria a acao aqui: quem sabe area, dedup e agenda e criar_acao_no_sistema."""
+    def test_aceitar_devolve_rascunho_e_o_vinculo_em_separado(self):
+        """Dois passos: criar por criar_acao_no_sistema, vincular por editar_acao.
+
+        O vinculo NAO vai no rascunho de criacao de proposito. Nao existe um
+        caminho de criacao de acao no Hermes — existem quatro reimplementacoes, e
+        um campo novo passado ali funciona numa porta e some nas outras, em
+        silencio. Vincular depois e o unico jeito de ele valer sempre.
+        """
         r = ds.decidir(self._db_com_pendente(), "s1", "aceitar", HOJE)
         rascunho = r["rascunho_da_acao"]
-        self.assertEqual(rascunho["estrategia_objetivo_id"], "intel")
+        self.assertNotIn("estrategia_objetivo_id", rascunho)
         self.assertIn("HANDOFF-SISPNAES.md", rascunho["descricao"])
         self.assertTrue(rascunho["titulo"])
+        self.assertEqual(r["vincular_depois"]["estrategia_objetivo_id"], "intel")
+        self.assertEqual(r["vincular_depois"]["tool"], "editar_acao")
+
+    def test_o_detalhe_avisa_que_sem_o_segundo_passo_a_acao_nasce_solta(self):
+        r = ds.decidir(self._db_com_pendente(), "s1", "aceitar", HOJE)
+        self.assertIn("editar_acao", r["detalhe"])
+        self.assertIn("solta", r["detalhe"])
 
     def test_decidir_duas_vezes_nao_sobrescreve(self):
         db = self._db_com_pendente()
-        ds.decidir(db, "s1", "nunca", HOJE)
+        ds.decidir(db, "s1", "nunca", HOJE, devolver_vaga=lambda *a: None)
         segunda = ds.decidir(db, "s1", "aceitar", HOJE)
         self.assertFalse(segunda["ok"])
         self.assertEqual(db.cols[ds.COL_ELEVACOES].dados["s1"]["status"], ds.STATUS_NUNCA)
@@ -543,6 +556,34 @@ class TestADecisaoDoUsuario(unittest.TestCase):
 
     def test_sugestao_inexistente_nao_finge_sucesso(self):
         self.assertFalse(ds.decidir(self._db_com_pendente(), "nao-existe", "aceitar", HOJE)["ok"])
+
+    def test_nunca_devolve_a_vaga_do_mes(self):
+        """"Nunca" e ajuste de escopo, nao interrupcao gasta.
+
+        Sem devolver a vaga, tres recusas definitivas bloqueariam o resto do mes —
+        e as duas contagens (o contador gravado e `elevacoes_do_mes`) passariam a
+        discordar entre si.
+        """
+        chamadas = []
+        ds.decidir(self._db_com_pendente(), "s1", "nunca", HOJE,
+                   devolver_vaga=lambda db, criada_em: chamadas.append(criada_em))
+        self.assertEqual(chamadas, [HOJE])
+
+    def test_a_vaga_volta_para_o_mes_da_sugestao_e_nao_para_o_de_hoje(self):
+        """Recusar em setembro uma sugestao de agosto nao abre vaga em setembro."""
+        db = self._db_com_pendente()
+        db.cols[ds.COL_ELEVACOES].dados["s1"]["criada_em"] = "2026-07-15"
+        chamadas = []
+        ds.decidir(db, "s1", "nunca", "2026-08-29",
+                   devolver_vaga=lambda db_, criada_em: chamadas.append(criada_em))
+        self.assertEqual(chamadas, ["2026-07-15"])
+
+    def test_adiar_nao_devolve_vaga(self):
+        """Adiada interrompeu; a vaga fica gasta ate o mes virar."""
+        chamadas = []
+        ds.decidir(self._db_com_pendente(), "s1", "adiar", HOJE,
+                   devolver_vaga=lambda db, criada_em: chamadas.append(criada_em))
+        self.assertEqual(chamadas, [])
 
     def test_listar_traz_so_pendentes_com_o_id_para_decidir(self):
         db = self._db_com_pendente()

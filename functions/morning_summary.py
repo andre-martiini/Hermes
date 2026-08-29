@@ -432,8 +432,14 @@ def _coletar_filas(db, hoje: str) -> dict:
         print(f"[ResumoMatinal] Falha ao consultar email_action_suggestions: {exc}")
 
     # Elevacoes sugeridas: o trabalho ja feito que rende um ativo se alguem
-    # perguntar. Entra como fila porque e exatamente isso — uma decisao pendente
-    # que so existe dentro de uma tela, e que sem superficie ninguem ve.
+    # perguntar.
+    #
+    # Rota VAZIA, de proposito: nao existe tela que liste elevacoes nem que ofereca
+    # aceitar, adiar ou nunca — isso se decide pelo copiloto, com
+    # `decidir_elevacao`. Apontar para "strategy" tornaria o card clicavel e
+    # levaria a uma tela sem a fila e sem a decisao, que e exatamente o erro
+    # descrito no docstring de `_fila` algumas linhas acima: fila sem destino real
+    # usando uma rota qualquer, e o usuario procurando o que nao existe.
     try:
         docs = [d.to_dict() or {} for d in db.collection("elevacoes_sugeridas")
                 .where(filter=firestore.FieldFilter("status", "==", "pendente")).limit(20).stream()]
@@ -441,7 +447,7 @@ def _coletar_filas(db, hoje: str) -> dict:
             amostra = [{"titulo": d.get("titulo_acao") or "(sem título)",
                         "ativo": d.get("ativo_possivel") or "",
                         "objetivo": d.get("nome_objetivo") or ""} for d in docs]
-            filas["elevacoes"] = _fila(len(docs), amostra, "strategy")
+            filas["elevacoes"] = _fila(len(docs), amostra, "")
     except Exception as exc:
         print(f"[ResumoMatinal] Falha ao consultar elevacoes_sugeridas: {exc}")
 
