@@ -670,6 +670,35 @@ class TestAdiarCumpreOQueOCardPromete(unittest.TestCase):
         rodada = ds.preparar_rodada(db, "2026-08-29", [])
         self.assertNotIn("antiga", [c["task_id"] for c in rodada.get("candidatos") or []])
 
+    def test_adiadas_acumuladas_nao_travam_o_marcador(self):
+        """Uma correcao travando a outra, e o modo de falha e permanente.
+
+        A releitura por id devolve concluidas antigas a `candidatos`. Elas nao
+        carregam marca de passivo, entao a guarda do marcador as trataria como
+        concluidas da janela — e como "adiada" nao expira, elas se ACUMULAM.
+        Bastariam algumas para o marcador nunca mais avancar, e dai a janela
+        cresceria ate bater no teto de documentos.
+
+        Nao podem segurar: elas voltam pelo `task_id` da sugestao, entao o
+        marcador nao as alcanca de qualquer forma.
+        """
+        db = _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        # Mais adiadas concluidas do que cabe no recorte do prompt.
+        for i in range(ds.LIMITE_CANDIDATAS + 4):
+            db.collection("tarefas").dados[f"ad{i}"] = _tarefa(
+                id=f"ad{i}", status="concluído", data_conclusao="2024-01-01",
+                data_atualizacao="2024-01-01", pool_dados=[_anexo("Doc.md")])
+            db.collection(ds.COL_ELEVACOES).dados[f"s{i}"] = {
+                "task_id": f"ad{i}", "status": ds.STATUS_ADIADA,
+                "criada_em": "2026-01-10"}
+        ds.marcar_varredura(db, "2026-08-01")
+        ds.avancar_passivo(db, "2023-01-01|zzz", False, None)
+        rodada = ds.preparar_rodada(db, "2026-08-29", [])
+        self.assertTrue(rodada["pode_marcar"])
+
     def test_acao_apagada_nao_derruba_a_rodada(self):
         db = self._db("concluído")
         del db.cols["tarefas"].dados["antiga"]

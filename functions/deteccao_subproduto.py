@@ -523,7 +523,8 @@ def marcar_varredura(db, hoje: str) -> None:
     - a rodada parou antes de olhar candidata (historico ou marcador
       indisponivel, semana cheia, teto do mes, nenhum objetivo elegivel);
     - a consulta de concluidas falhou por falta do indice;
-    - havia mais conclusoes na janela do que o teto por consulta.
+    - havia mais conclusoes, ou mais concluidas mexidas desde o corte, do que o
+      teto por consulta.
 
     Nos tres, avancar apagaria conclusoes que ninguem avaliou — e apagaria de
     forma definitiva, porque a janela seguinte comeca depois delas.
@@ -978,10 +979,16 @@ def viu_todas_as_concluidas(candidatos, limite: int = LIMITE_CANDIDATAS) -> bool
     Candidata de passivo tambem nao segura: ela nao vem da janela e nao depende
     do marcador — tem cursor proprio. Confundir os dois travaria o marcador para
     sempre, porque quase sempre sobra passivo.
+
+    Nem a readmitida por "adiar", pelo mesmo motivo e por um pior: ela volta pelo
+    `task_id` da sugestao, entao o marcador nao a alcanca. E como adiada nao
+    expira, elas se ACUMULAM em `candidatos` — bastariam algumas concluidas
+    adiadas para o marcador nunca mais avancar. Uma correcao travando a outra.
     """
     return not any(
         str((c.get("tarefa") or {}).get("status")) == STATUS_CONCLUIDO
         and not c.get("passivo")
+        and not c.get("readmitida")
         for c in (candidatos or [])[limite:]
     )
 
@@ -1034,9 +1041,17 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
     # Uniao por id — uma acao viva adiada vem pelos dois caminhos, e candidata
     # repetida viraria dossie repetido no mesmo prompt.
     por_id = {t["id"]: t for t in tarefas}
+    so_por_id = set()
     for t in tarefas_adiadas(db, sugestoes):
-        por_id.setdefault(t["id"], t)
+        if t["id"] not in por_id:
+            por_id[t["id"]] = t
+            so_por_id.add(t["id"])
     candidatos = candidatas(list(por_id.values()), decididas, hoje)
+    # Quem so chegou pela releitura por id nao veio da janela, e por isso nao pode
+    # segurar o marcador — ela volta pelo id na proxima rodada de qualquer jeito.
+    for c in candidatos:
+        if c["task_id"] in so_por_id:
+            c["readmitida"] = True
     # "Ate aqui esta tudo avaliado" e o que o marcador significa, e ele so avanca
     # quando isso for verdade de ponta a ponta: a busca precisa ter trazido a
     # janela inteira, E o prompt precisa ter mostrado toda concluida que veio.
