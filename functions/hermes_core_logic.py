@@ -4804,6 +4804,7 @@ def _process_telegram_message(db, data: dict):
         tags: list[str] = None,
         notas: str = "",
         plano_acao: list[str] = None,
+        estrategia_objetivo_id: str = None,
         horario_inicio: str = None,
         horario_fim: str = None,
         recorrencia_mensal: bool = False,
@@ -4909,6 +4910,11 @@ def _process_telegram_message(db, data: dict):
             "data_criacao": now_iso,
             "data_atualizacao": now_iso,
             "origem_ingestao": "telegram",
+            # Vinculo estrategico: sem ele aqui, acao criada por este canal nasce
+            # solta enquanto a criada pelo MCP nasce vinculada — a mesma tool
+            # gravando coisas diferentes conforme a porta de entrada.
+            **({"estrategia_objetivo_id": str(estrategia_objetivo_id).strip()}
+               if str(estrategia_objetivo_id or "").strip() else {}),
             "acompanhamento": [],
             "sync_status": "new",
         }

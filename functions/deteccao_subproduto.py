@@ -402,7 +402,24 @@ def _contador_do_mes(db, hoje: str):
             .collection("mensal").document(_mes(hoje)))
 
 
-def reservar_no_firestore(db, hoje: str, teto: int, ref, payload: dict) -> bool:
+def id_da_reserva(hoje: str, task_id: str) -> str:
+    """Id deterministico por acao e mes.
+
+    Se o modelo emitir duas propostas para a MESMA acao na mesma resposta, as
+    duas validam contra o mesmo conjunto de candidatas e o contador so serializa
+    a contagem — sairiam dois cards para a mesma acao, consumindo duas vagas, e
+    marcar "nunca" num deixaria o outro pendente, contradizendo a permanencia que
+    o card promete. Com id deterministico a segunda colide e e recusada.
+
+    O mes entra na chave porque a acao volta a ser candidata depois de adiada;
+    dentro do mesmo mes ela nao volta, o que e desejado — insistir na mesma acao
+    gastaria o teto de tres em uma so.
+    """
+    return f"{_mes(hoje)}__{task_id}"
+
+
+def reservar_no_firestore(db, hoje: str, teto: int, ref, payload: dict,
+                          ja_no_mes: int = 0) -> bool:
     """Confere o teto do mes e grava a sugestao na MESMA transacao.
 
     `claude_provider.run_tool_loop` executa as tool calls de uma rodada em
@@ -420,8 +437,15 @@ def reservar_no_firestore(db, hoje: str, teto: int, ref, payload: dict) -> bool:
 
     @_fs.transactional
     def _txn(transaction):
+        # A sugestao ja existir e resposta: id deterministico por acao e mes.
+        if ref.get(transaction=transaction).exists:
+            return False
         snap = contador.get(transaction=transaction)
-        atual = (snap.to_dict() or {}).get("count", 0) if snap.exists else 0
+        gravado = (snap.to_dict() or {}).get("count", 0) if snap.exists else 0
+        # O contador nasceu depois das sugestoes. Enquanto ele nao existir — no
+        # primeiro deploy, ou se o documento se perder — zero seria uma licenca
+        # para recomecar a contagem do mes do zero com sugestoes ja na base.
+        atual = max(int(gravado or 0), int(ja_no_mes or 0))
         if atual >= teto:
             return False
         transaction.set(contador, {"count": atual + 1, "atualizado_em": hoje}, merge=True)
@@ -437,7 +461,7 @@ def reservar_no_firestore(db, hoje: str, teto: int, ref, payload: dict) -> bool:
 
 def registrar_sugestao(db, sugestao: dict, hoje: str, titulo_acao: str,
                        nome_objetivo: str, teto: int = TETO_POR_MES,
-                       reservar=reservar_no_firestore) -> str | None:
+                       reservar=reservar_no_firestore, ja_no_mes: int = 0) -> str | None:
     """Grava a sugestao se ainda houver vaga no mes. None quando nao ha.
 
     `reservar` e uma costura: a atomicidade e o ponto, e testa-la de verdade
@@ -445,7 +469,7 @@ def registrar_sugestao(db, sugestao: dict, hoje: str, titulo_acao: str,
     camada — que vaga negada nao vira sugestao gravada, e que o payload sai
     completo — sem testar a biblioteca do Google.
     """
-    ref = db.collection(COL_ELEVACOES).document()
+    ref = db.collection(COL_ELEVACOES).document(id_da_reserva(hoje, sugestao["task_id"]))
     payload = {
         **sugestao,
         "status": STATUS_PENDENTE,
@@ -454,7 +478,7 @@ def registrar_sugestao(db, sugestao: dict, hoje: str, titulo_acao: str,
         "nome_objetivo": nome_objetivo,
         "resumo": resumo_para_o_usuario(sugestao, titulo_acao, nome_objetivo),
     }
-    return ref.id if reservar(db, hoje, teto, ref, payload) else None
+    return ref.id if reservar(db, hoje, teto, ref, payload, ja_no_mes) else None
 
 
 class HistoricoIndisponivel(Exception):
@@ -511,6 +535,7 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
     return {
         "rodar": True,
         "restantes": veredito["restantes"],
+        "ja_no_mes": elevacoes_do_mes(sugestoes, hoje),
         "objetivos": objetivos,
         "candidatos": candidatos,
     }
@@ -518,6 +543,8 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
 
 def _ferramenta_propor(db, hoje: str, rodada: dict, aceitas: list,
                       reservar=reservar_no_firestore):
+    """`rodada["ja_no_mes"]` vem do historico lido em `preparar_rodada`, e e o
+    piso da contagem: o contador transacional pode nao existir ainda."""
     """A tool de escrita. A validacao mora AQUI, e nao na confianca no modelo.
 
     O teto e a lista de objetivos validos sao conferidos no momento da gravacao:
@@ -538,6 +565,7 @@ def _ferramenta_propor(db, hoje: str, rodada: dict, aceitas: list,
         sugestao_id = registrar_sugestao(
             db, sugestao, hoje, titulos[sugestao["task_id"]],
             str(objetivo.get("objetivoMacro") or ""), reservar=reservar,
+            ja_no_mes=int(rodada.get("ja_no_mes") or 0),
         )
         if not sugestao_id:
             return {"aceita": False, "motivo": "teto do mes ja atingido"}

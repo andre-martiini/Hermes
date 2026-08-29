@@ -290,6 +290,9 @@ class _Colecao:
     def limit(self, _n):
         return self
 
+    def where(self, *_a, **_kw):
+        return self
+
     def stream(self):
         return [_Snap(self.dados, i) for i in list(self.dados)]
 
@@ -326,8 +329,9 @@ class TestAGravacaoNaoConfiaNoModelo(unittest.TestCase):
         """Reserva falsa com N vagas — a atomicidade real e do Firestore."""
         estado = {"restam": vagas}
 
-        def reservar(db, hoje, teto, ref, payload):
-            if estado["restam"] <= 0:
+        def reservar(db, hoje, teto, ref, payload, ja_no_mes=0):
+            # Espelha o contrato da reserva real: id ja usado e recusa.
+            if estado["restam"] <= 0 or ref.get().exists:
                 return False
             estado["restam"] -= 1
             ref.set(payload)
@@ -367,12 +371,39 @@ class TestAGravacaoNaoConfiaNoModelo(unittest.TestCase):
         self.assertEqual(db.cols.get(ds.COL_ELEVACOES, _Colecao()).dados, {})
 
     def test_a_reserva_e_quem_decide_e_nao_a_contagem_local(self):
+        """Duas acoes distintas, uma vaga contada localmente: quem manda e a reserva."""
+        rodada = self._rodada(restantes=1)
+        rodada["candidatos"].append({
+            "task_id": "outra", "tarefa": _tarefa(id="outra", titulo="Outra acao"),
+            "corpo": {"documentos": [], "etapas_feitas": 3,
+                      "tem_texto_pronto": False, "caracteres_diario": 0}})
         db, aceitas = _Db(), []
-        _, fmap = ds._ferramenta_propor(db, HOJE, self._rodada(restantes=1), aceitas,
-                                        reservar=self._reserva(2))
+        _, fmap = ds._ferramenta_propor(db, HOJE, rodada, aceitas, reservar=self._reserva(2))
         self.assertTrue(fmap["propor_elevacao"](**TestAPropostaDaIA.BASE)["aceita"])
-        self.assertTrue(fmap["propor_elevacao"](**TestAPropostaDaIA.BASE)["aceita"])
+        self.assertTrue(fmap["propor_elevacao"](
+            **{**TestAPropostaDaIA.BASE, "task_id": "outra"})["aceita"])
         self.assertEqual(len(aceitas), 2)
+
+    def test_duas_propostas_para_a_mesma_acao_nao_viram_dois_cards(self):
+        """Id deterministico por acao e mes: a segunda colide e e recusada.
+
+        Sem isso sairiam dois cards para a mesma acao, gastando duas das tres
+        vagas do mes, e marcar "nunca" num deixaria o outro pendente — o oposto
+        da permanencia que o card promete.
+        """
+        db, aceitas = _Db(), []
+        _, fmap = ds._ferramenta_propor(db, HOJE, self._rodada(), aceitas,
+                                        reservar=self._reserva(5))
+        self.assertTrue(fmap["propor_elevacao"](**TestAPropostaDaIA.BASE)["aceita"])
+        segunda = fmap["propor_elevacao"](**TestAPropostaDaIA.BASE)
+        self.assertFalse(segunda["aceita"])
+        self.assertEqual(len(db.cols[ds.COL_ELEVACOES].dados), 1)
+        self.assertEqual(len(aceitas), 1)
+
+    def test_o_id_da_reserva_separa_acao_e_mes(self):
+        self.assertNotEqual(ds.id_da_reserva("2026-08-29", "t1"),
+                            ds.id_da_reserva("2026-09-01", "t1"))
+        self.assertNotEqual(ds.id_da_reserva(HOJE, "t1"), ds.id_da_reserva(HOJE, "t2"))
 
     def test_objetivo_inventado_nao_grava(self):
         db = _Db()
@@ -385,6 +416,44 @@ class TestAGravacaoNaoConfiaNoModelo(unittest.TestCase):
 
     def test_justificativa_generica_nao_grava(self):
         self.assertFalse(self._propor(_Db(), self._rodada(), [], justificativa="Ajuda.")["aceita"])
+
+
+class TestOContadorNaoRecomecaDoZero(unittest.TestCase):
+    """O contador transacional nasceu depois das sugestoes.
+
+    Enquanto ele nao existir — primeiro deploy, ou documento perdido — ler zero
+    seria licenca para recomecar a contagem do mes com sugestoes ja na base: com
+    duas gravadas, mais tres caberiam sob um teto de tres.
+    """
+
+    def test_a_rodada_leva_a_contagem_do_historico_como_piso(self):
+        db = _Db()
+        col = db.collection(ds.COL_ELEVACOES)
+        for i in (1, 2):
+            col.dados[f"s{i}"] = {"task_id": f"t{i}", "criada_em": HOJE,
+                                  "status": ds.STATUS_PENDENTE}
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade", "pilar": "intelectual", "status": "ativo"}
+        db.collection("tarefas").dados["nova"] = {
+            "titulo": "Nova", "status": "em andamento",
+            "pool_dados": [_anexo("X.md")], "acompanhamento": [], "plano_acao": []}
+        rodada = ds.preparar_rodada(db, HOJE, [])
+        self.assertTrue(rodada["rodar"])
+        self.assertEqual(rodada["ja_no_mes"], 2)
+        self.assertEqual(rodada["restantes"], ds.TETO_POR_MES - 2)
+
+    def test_o_piso_chega_na_reserva(self):
+        recebido = {}
+
+        def reservar(db, hoje, teto, ref, payload, ja_no_mes=0):
+            recebido["ja_no_mes"] = ja_no_mes
+            return True
+
+        rodada = TestAGravacaoNaoConfiaNoModelo()._rodada()
+        rodada["ja_no_mes"] = 2
+        _, fmap = ds._ferramenta_propor(_Db(), HOJE, rodada, [], reservar=reservar)
+        fmap["propor_elevacao"](**TestAPropostaDaIA.BASE)
+        self.assertEqual(recebido["ja_no_mes"], 2)
 
 
 class TestFalhaDeLeituraFechaAPorta(unittest.TestCase):
