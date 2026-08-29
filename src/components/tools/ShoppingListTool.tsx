@@ -39,6 +39,13 @@ interface AssistantMutationPreview {
   payload: Record<string, any>;
 }
 
+/** Itens que o servidor criou apontando um possivel duplicado ja cadastrado. */
+const contarDuplicatas = (dados: { parecidos?: unknown[]; created?: Array<{ parecidos?: unknown[] }> } | null) => {
+  if (!dados) return 0;
+  const noLote = (dados.created || []).filter(item => (item.parecidos || []).length > 0).length;
+  return noLote + ((dados.parecidos || []).length > 0 ? 1 : 0);
+};
+
 export const ShoppingListTool = ({
   onBack,
   showToast,
@@ -76,6 +83,15 @@ export const ShoppingListTool = ({
   const [isPurchasedSectionOpen, setIsPurchasedSectionOpen] = useState(false);
   const [assistantStatus, setAssistantStatus] = useState<'idle' | 'applying' | 'applied' | 'cancelled' | 'error'>('idle');
   const [assistantError, setAssistantError] = useState('');
+  // O servidor devolve `detalhe` (o que de fato gravou) e, na importacao, os
+  // `parecidos` de cada item criado. Descartar isso e mostrar um toast generico
+  // deixava a duplicata de grafia — "muçarela" com "Mussarela" ja no cadastro —
+  // acontecer em silencio justamente pela web, que e onde o usuario esta.
+  const [assistantResultado, setAssistantResultado] = useState<{
+    detalhe?: string;
+    parecidos?: Array<{ item_id: string; nome: string; categoria: string }>;
+    created?: Array<{ nome: string; parecidos?: Array<{ item_id: string; nome: string; categoria: string }> }>;
+  } | null>(null);
   // Antes do primeiro snapshot o catalogo esta vazio, e todo card do copiloto
   // preve o efeito a partir dele: `create` mostraria criacao onde o servidor vai
   // reaproveitar item existente, e a importacao contaria como novo o que ja
@@ -544,6 +560,18 @@ export const ShoppingListTool = ({
     return true;
   }, [assistantAction, assistantPreview, catalogoCarregado]);
 
+  const duplicatasProvaveis = useMemo(() => {
+    if (!assistantResultado) return [];
+    const pares: Array<{ nome: string; parecido: { item_id: string; nome: string; categoria: string } }> = [];
+    (assistantResultado.created || []).forEach(item => {
+      (item.parecidos || []).slice(0, 1).forEach(parecido => pares.push({ nome: item.nome, parecido }));
+    });
+    (assistantResultado.parecidos || []).slice(0, 1).forEach(parecido => {
+      pares.push({ nome: String(assistantPreview?.payload?.nome || ''), parecido });
+    });
+    return pares;
+  }, [assistantPreview, assistantResultado]);
+
   const applyAssistantAction = async () => {
     if (!assistantPreview || !canConfirmAssistantAction) return;
     setAssistantStatus('applying');
@@ -551,9 +579,17 @@ export const ShoppingListTool = ({
 
     try {
       const fn = httpsCallable(functions, 'mutateShoppingList');
-      await fn(assistantPreview.payload);
+      const resposta = await fn(assistantPreview.payload);
+      const dados = (resposta?.data ?? {}) as NonNullable<typeof assistantResultado>;
+      setAssistantResultado(dados);
       setAssistantStatus('applied');
-      showToast('Alteracao aplicada na lista de compras.', 'success');
+      const duplicatas = contarDuplicatas(dados);
+      showToast(
+        duplicatas > 0
+          ? `Aplicado, mas ${duplicatas} item(ns) podem ja existir com outro nome — veja o card.`
+          : 'Alteracao aplicada na lista de compras.',
+        duplicatas > 0 ? 'info' : 'success',
+      );
     } catch (error: any) {
       console.error(error);
       const message = error?.message || 'Erro ao aplicar alteracao na lista.';
@@ -597,6 +633,28 @@ export const ShoppingListTool = ({
           {assistantError && (
             <div className="bg-rose-50 border border-rose-100 rounded-none-none px-4 py-3 text-sm font-semibold text-rose-600">
               {assistantError}
+            </div>
+          )}
+
+          {assistantStatus === 'applied' && assistantResultado?.detalhe && (
+            <div className="bg-white border border-emerald-100 rounded-none-none px-4 py-3 text-sm font-semibold text-slate-700">
+              {assistantResultado.detalhe}
+            </div>
+          )}
+
+          {assistantStatus === 'applied' && duplicatasProvaveis.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-none-none px-4 py-3 space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">
+                Pode ser duplicata do que ja existe
+              </p>
+              {duplicatasProvaveis.map(({ nome, parecido }) => (
+                <p key={`${nome}-${parecido.item_id}`} className="text-sm font-semibold text-slate-700">
+                  "{nome}" parece "{parecido.nome}" ({parecido.categoria})
+                </p>
+              ))}
+              <p className="text-[11px] font-semibold text-amber-700">
+                Nada foi unido automaticamente. Confira no Cadastro e apague o que sobrou, se for o caso.
+              </p>
             </div>
           )}
 

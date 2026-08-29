@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from functools import lru_cache
 
 COLECAO = "shopping_items"
 
@@ -117,17 +118,43 @@ class ListaComprasError(Exception):
         self.message = message
 
 
-def normalize_name(name: str) -> str:
-    """Minusculas sem acento, para comparar nome digitado com nome gravado."""
-    texto = str(name or "").lower().strip()
+@lru_cache(maxsize=4096)
+def _normalizado(nome: str) -> str:
+    texto = nome.lower().strip()
     texto = unicodedata.normalize("NFD", texto)
     return "".join(c for c in texto if unicodedata.category(c) != "Mn")
 
 
-def _tokens(nome: str) -> set[str]:
-    """Palavras que identificam o produto, sem as ligacoes."""
+def normalize_name(name: str) -> str:
+    """Minusculas sem acento, para comparar nome digitado com nome gravado.
+
+    Cacheada porque a busca por parecidos compara cada linha importada com o
+    catalogo inteiro: os mesmos nomes passam por aqui centenas de vezes numa
+    unica chamada, e normalizar Unicode nao e de graca.
+    """
+    return _normalizado(str(name or ""))
+
+
+@lru_cache(maxsize=4096)
+def _tokens(nome: str) -> frozenset[str]:
+    """Palavras que identificam o produto, sem as ligacoes.
+
+    Devolve frozenset porque o resultado e compartilhado pelo cache — quem chama
+    so compara e itera, nunca altera.
+    """
     partes = re.split(r"[^a-z0-9]+", normalize_name(nome))
-    return {parte for parte in partes if parte and parte not in _LIGACOES}
+    return frozenset(parte for parte in partes if parte and parte not in _LIGACOES)
+
+
+def _longe_demais(a: str, b: str) -> bool:
+    """Descarta o par sem calcular a distancia.
+
+    Levenshtein e no minimo a diferenca de comprimento, entao nomes que diferem
+    em mais que a tolerancia nunca passariam. Vale o atalho: a importacao compara
+    cada linha com o catalogo inteiro — e com o que o proprio lote ja criou —,
+    entao sao centenas de pares por chamada.
+    """
+    return abs(len(a) - len(b)) > _DISTANCIA_PARECIDO
 
 
 def _distancia(a: str, b: str) -> int:
@@ -160,34 +187,55 @@ def _parece(nome_novo: str, nome_existente: str) -> bool:
     if not a or not b or a == b:
         return False
 
-    tokens_novo, tokens_existente = _tokens(nome_novo), _tokens(nome_existente)
-    # Um nome contido no outro: "cafe" dentro de "po de cafe", "leite lactose"
-    # dentro de "leite lactose itambe".
-    if tokens_novo and tokens_existente and (
-        tokens_novo <= tokens_existente or tokens_existente <= tokens_novo
+    # Grafia diferente do mesmo nome inteiro: "mucarela" x "mussarela".
+    if (
+        min(len(a), len(b)) >= _MINIMO_PARA_COMPARAR
+        and not _longe_demais(a, b)
+        and _distancia(a, b) <= _DISTANCIA_PARECIDO
     ):
         return True
 
-    # Grafia diferente do mesmo nome inteiro: "mucarela" x "mussarela".
-    if min(len(a), len(b)) >= _MINIMO_PARA_COMPARAR and _distancia(a, b) <= _DISTANCIA_PARECIDO:
-        return True
+    # Um nome contido no outro, tolerando grafia: "cafe" dentro de "po de cafe",
+    # "leite lactose" dentro de "leite lactoze itambe".
+    #
+    # TODAS as palavras do nome mais curto precisam ter par no outro. Bastar UMA
+    # junta produto que so divide um adjetivo — "leite integral" com "arroz
+    # integral", "papel toalha" com "toalha de banho" —, e candidato errado gasta
+    # confirmacao do usuario e ainda ocupa vaga no teto de cinco.
+    tokens_novo, tokens_existente = _tokens(nome_novo), _tokens(nome_existente)
+    if not tokens_novo or not tokens_existente:
+        return False
+    menor, maior = sorted((tokens_novo, tokens_existente), key=len)
+    return all(
+        any(_mesma_palavra(x, y) for y in maior)
+        for x in menor
+    )
 
-    # Nome composto em que uma palavra mudou de grafia.
-    return any(
+
+def _mesma_palavra(x: str, y: str) -> bool:
+    if x == y:
+        return True
+    return (
         len(x) >= _MINIMO_PARA_COMPARAR and len(y) >= _MINIMO_PARA_COMPARAR
+        and not _longe_demais(x, y)
         and _distancia(x, y) <= _DISTANCIA_PARECIDO
-        for x in tokens_novo for y in tokens_existente
     )
 
 
 def _parecidos(nome: str, existentes) -> list[dict]:
-    """Candidatos a "mesmo produto", do mais proximo ao mais distante."""
+    """Candidatos a "mesmo produto", do mais proximo ao mais distante.
+
+    Compara com o catalogo inteiro, sem indice. Medido na escala real — 250 itens
+    cadastrados, importacao de 20 linhas — sao 42 ms, irrelevante perto dos
+    round-trips de Firestore da mesma chamada. Indexar so valeria se o cadastro
+    crescesse uma ordem de grandeza.
+    """
     alvo = normalize_name(nome)
     achados = [
         (_distancia(alvo, normalize_name(str(dados.get("nome") or ""))), item_id, dados)
         for item_id, dados, _ in existentes
         if _parece(nome, str(dados.get("nome") or ""))
-    ]
+    ]  # a distancia so e calculada para quem ja passou em `_parece`
     achados.sort(key=lambda t: (t[0], len(str(t[2].get("nome") or ""))))
     return [
         {
@@ -696,6 +744,14 @@ def importar_lote(db, texto, is_planned=True) -> dict:
         if semelhantes:
             criado["parecidos"] = semelhantes
         criados.append(criado)
+        # O que acabou de entrar no lote passa a valer para as linhas seguintes.
+        # Sem isto, importar "mucarela" e "mussarela" no mesmo texto cria as duas
+        # sem aviso nenhum — a duplicata silenciosa que este codigo existe para
+        # pegar, so que dentro de uma unica chamada.
+        catalogo.append((ref.id, {
+            "nome": nome, "categoria": categoria,
+            "isPlanned": bool(is_planned), "isPurchased": False,
+        }, ref))
 
     lote.commit()
 

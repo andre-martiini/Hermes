@@ -255,6 +255,26 @@ class TestCatalogoComNomesDeGente(unittest.TestCase):
         self.assertEqual(r["parecidos"][0]["nome"], "Mussarela")
         self.assertIn("Mussarela", r["detalhe"])
 
+    def test_duas_grafias_no_mesmo_texto_nao_passam_batidas(self):
+        """O catalogo lido antes do loop nao ve o que o proprio lote acabou de criar.
+
+        Sem isso, "mucarela" e "mussarela" na mesma importacao viram dois itens
+        sem aviso nenhum — a duplicata silenciosa que este codigo existe para
+        pegar, dentro de uma unica chamada.
+        """
+        db = _db_com()
+        r = lc.mutar(db, "import_batch", {"importText": "muçarela\nmussarela"})
+        self.assertEqual(r["com_parecido"], 1)
+        self.assertEqual(r["created"][1]["parecidos"][0]["nome"], "muçarela")
+        self.assertIn("podem ser duplicata", r["detalhe"])
+
+    def test_parecido_de_dentro_do_lote_traz_item_id_utilizavel(self):
+        db = _db_com()
+        r = lc.mutar(db, "import_batch", {"importText": "muçarela\nmussarela"})
+        apontado = r["created"][1]["parecidos"][0]["item_id"]
+        self.assertEqual(apontado, r["created"][0]["item_id"])
+        self.assertTrue(any(i["item_id"] == apontado for i in lc.consultar(db)["itens"]))
+
     def test_o_parecido_nao_e_aplicado_sozinho(self):
         """Levantar candidato nunca pode virar decisao: quem escolhe e o usuario."""
         antes = {i["item_id"]: dict(i) for i in lc.consultar(self.db)["itens"]}
@@ -282,6 +302,23 @@ class TestQuandoDoisNomesSaoOMesmoProduto(unittest.TestCase):
                      ("detergente", "Desinfetante"), ("sal", "Sol")):
             with self.subTest(a=a, b=b):
                 self.assertFalse(lc._parece(a, b), f"{a!r} casou com {b!r}")
+
+    def test_adjetivo_em_comum_nao_faz_dois_produtos(self):
+        """Bastar UMA palavra junta o que so divide um qualificador.
+
+        Candidato errado gasta confirmacao do usuario e ainda ocupa vaga no teto
+        de cinco, empurrando para fora o parecido que importava.
+        """
+        for a, b in (("leite integral", "arroz integral"),
+                     ("sabão líquido", "detergente líquido"),
+                     ("papel toalha", "toalha de banho"),
+                     ("queijo ralado", "coco ralado")):
+            with self.subTest(a=a, b=b):
+                self.assertFalse(lc._parece(a, b), f"{a!r} casou com {b!r}")
+
+    def test_grafia_errada_dentro_de_nome_composto_ainda_casa(self):
+        """A exigencia de casar todas as palavras nao pode matar o caso util."""
+        self.assertTrue(lc._parece("leite sem lactose", "Leite sem lactoze Itambé"))
 
     def test_nome_igual_nao_e_parecido_e_sim_o_proprio(self):
         self.assertFalse(lc._parece("queijo", "Queijo"))
