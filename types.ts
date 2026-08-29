@@ -425,6 +425,13 @@ export interface EstrategiaPessoal {
         valorAtual: number;
         valorObjetivo: number;
         unidade: string;
+        /**
+         * Fonte automática que alimenta a métrica (`peso`, `cintura`). Vazio é
+         * resposta — significa "sem fonte", e o painel diz isso em vez de exibir
+         * zero. Toda escrita de `metricaAlvo` precisa preservar este campo: o
+         * Firestore substitui o mapa inteiro, e omiti-lo desliga a fonte sem aviso.
+         */
+        fonte?: string;
     };
     historicoMetrica?: Array<{
         id: string;
@@ -1300,7 +1307,11 @@ export interface ResumoMeta {
     id: string;
     pilar?: EstrategiaPilar;
     pilar_label?: string;
-    /** false para o pilar `saude`, executado pelos registros do módulo Saúde e não por ações. */
+    /**
+     * false quando o objetivo é servido por dado que o sistema já coleta, e não
+     * por ações vinculadas — hoje o pilar `saude`. Objetivo assim fica fora de
+     * toda sugestão de vínculo e de elevação.
+     */
     gerida_por_acoes: boolean;
     objetivo: string;
     status?: EstrategiaStatus;
@@ -1309,6 +1320,16 @@ export interface ResumoMeta {
     ultimo_movimento: string | null;
     dias_parada: number | null;
     progresso_pct: number | null;
+    /**
+     * De onde veio o número. `sem_fonte` é o caso que o painel confundia com
+     * zero: métrica numérica que ninguém alimenta. `null` quando o objetivo não
+     * tem métrica nenhuma.
+     */
+    progresso_origem?: 'automatica' | 'manual' | 'sem_fonte' | null;
+    /** Fonte automática ligada à métrica (`peso`, `cintura`), quando há uma. */
+    metrica_fonte?: string | null;
+    /** Valor efetivamente usado no cálculo, para o painel poder exibi-lo. */
+    valor_atual?: number | null;
     unidade: string | null;
     marcos_abertos: number;
     marcos_total: number;

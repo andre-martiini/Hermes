@@ -38,7 +38,9 @@ escrita nem obter os `item_id` que `update` e `delete` exigem.
 
 from __future__ import annotations
 
+import re
 import unicodedata
+from functools import lru_cache
 
 COLECAO = "shopping_items"
 
@@ -54,6 +56,28 @@ _LIMITE_CONSULTA_PADRAO = 200
 MOTIVO_JA_EXISTE = "ja_existe"
 MOTIVO_DUPLICADO_NO_TEXTO = "duplicado_no_texto"
 MOTIVO_NOME_VAZIO = "nome_vazio"
+
+# Quantos candidatos parecidos acompanham um item criado. O catalogo real tem
+# ~250 itens; devolver todos os que se parecem com "leite" seria ruido.
+_LIMITE_PARECIDOS = 5
+
+# Distancia de edicao tolerada entre dois nomes para chama-los parecidos. Dois
+# caracteres cobrem a troca de grafia que motivou isto ("mucarela" x
+# "mussarela") sem casar produtos diferentes.
+_DISTANCIA_PARECIDO = 2
+
+# Abaixo disto a distancia de edicao nao diz nada: "sal" e "sol" distam 1.
+_MINIMO_PARA_COMPARAR = 5
+
+# Palavras que ligam o nome mas nao o identificam. Sem tira-las, "leite sem
+# lactose" e "leite de coco" compartilhariam um token a toa.
+_LIGACOES = {"de", "do", "da", "dos", "das", "sem", "com", "e", "em", "para", "no", "na"}
+
+# "sem" e "com" ligam a frase como as outras, mas invertem o produto: "leite sem
+# lactose" e "leite com lactose" sao coisas opostas. Sem tratar isso, os dois
+# ficam com os mesmos tokens (as ligacoes saem) E a distancia de edicao entre os
+# nomes inteiros e exatamente 2 — os dois criterios erram junto.
+_POLARIDADE = {"sem", "com"}
 
 ACOES = ("create", "update", "delete", "import_batch", "clear_planning", "finalize")
 
@@ -100,11 +124,152 @@ class ListaComprasError(Exception):
         self.message = message
 
 
-def normalize_name(name: str) -> str:
-    """Minusculas sem acento, para comparar nome digitado com nome gravado."""
-    texto = str(name or "").lower().strip()
+@lru_cache(maxsize=4096)
+def _normalizado(nome: str) -> str:
+    texto = nome.lower().strip()
     texto = unicodedata.normalize("NFD", texto)
     return "".join(c for c in texto if unicodedata.category(c) != "Mn")
+
+
+def normalize_name(name: str) -> str:
+    """Minusculas sem acento, para comparar nome digitado com nome gravado.
+
+    Cacheada porque a busca por parecidos compara cada linha importada com o
+    catalogo inteiro: os mesmos nomes passam por aqui centenas de vezes numa
+    unica chamada, e normalizar Unicode nao e de graca.
+    """
+    return _normalizado(str(name or ""))
+
+
+@lru_cache(maxsize=4096)
+def _tokens(nome: str) -> frozenset[str]:
+    """Palavras que identificam o produto, sem as ligacoes.
+
+    Devolve frozenset porque o resultado e compartilhado pelo cache — quem chama
+    so compara e itera, nunca altera.
+    """
+    partes = re.split(r"[^a-z0-9]+", normalize_name(nome))
+    return frozenset(parte for parte in partes if parte and parte not in _LIGACOES)
+
+
+def _longe_demais(a: str, b: str) -> bool:
+    """Descarta o par sem calcular a distancia.
+
+    Levenshtein e no minimo a diferenca de comprimento, entao nomes que diferem
+    em mais que a tolerancia nunca passariam. Vale o atalho: a importacao compara
+    cada linha com o catalogo inteiro — e com o que o proprio lote ja criou —,
+    entao sao centenas de pares por chamada.
+    """
+    return abs(len(a) - len(b)) > _DISTANCIA_PARECIDO
+
+
+def _distancia(a: str, b: str) -> int:
+    """Levenshtein. Nome de produto e curto; nao vale uma dependencia por isto."""
+    if a == b:
+        return 0
+    anterior = list(range(len(b) + 1))
+    for i, ca in enumerate(a, start=1):
+        atual = [i]
+        for j, cb in enumerate(b, start=1):
+            atual.append(min(anterior[j] + 1, atual[j - 1] + 1, anterior[j - 1] + (ca != cb)))
+        anterior = atual
+    return anterior[-1]
+
+
+def _parece(nome_novo: str, nome_existente: str) -> bool:
+    """Dois nomes que provavelmente sao o mesmo produto escrito de outro jeito.
+
+    O catalogo real tem ~250 itens com nomes de gente: "Mussarela" com dois
+    esses, "Cafe" onde a lista escrita a mao diz "po de cafe", "Leite sem
+    lactose Itambe" onde ela diz "leite sem lactose". A deduplicacao por
+    igualdade exata nao ve nenhum desses, e cada importacao sujava o cadastro
+    com uma variante nova do mesmo produto.
+
+    Isto NAO decide nada: so levanta candidatos para quem chamou conferir com o
+    usuario. Casar por semelhanca sozinho erraria feio — "queijo" viraria
+    "queijo ricota" — e lista de compras nao perdoa erro silencioso.
+    """
+    a, b = normalize_name(nome_novo), normalize_name(nome_existente)
+    if not a or not b or a == b:
+        return False
+
+    if _polaridade_conflita(nome_novo, nome_existente):
+        return False
+
+    # Grafia diferente do mesmo nome inteiro: "mucarela" x "mussarela".
+    if (
+        min(len(a), len(b)) >= _MINIMO_PARA_COMPARAR
+        and not _longe_demais(a, b)
+        and _distancia(a, b) <= _DISTANCIA_PARECIDO
+    ):
+        return True
+
+    # Um nome contido no outro, tolerando grafia: "cafe" dentro de "po de cafe",
+    # "leite lactose" dentro de "leite lactoze itambe".
+    #
+    # TODAS as palavras do nome mais curto precisam ter par no outro. Bastar UMA
+    # junta produto que so divide um adjetivo — "leite integral" com "arroz
+    # integral", "papel toalha" com "toalha de banho" —, e candidato errado gasta
+    # confirmacao do usuario e ainda ocupa vaga no teto de cinco.
+    tokens_novo, tokens_existente = _tokens(nome_novo), _tokens(nome_existente)
+    if not tokens_novo or not tokens_existente:
+        return False
+    menor, maior = sorted((tokens_novo, tokens_existente), key=len)
+    return all(
+        any(_mesma_palavra(x, y) for y in maior)
+        for x in menor
+    )
+
+
+def _polaridade_conflita(um: str, outro: str) -> bool:
+    """Um nome nega o que o outro afirma.
+
+    So o par sem/com conta como conflito. "cafe" x "cafe sem acucar" segue
+    candidato — ali falta qualificador, nao ha contradicao —, e quem decide e o
+    usuario. O que nao pode e apontar como duplicata dois produtos opostos.
+    """
+    palavras_um = set(re.split(r"[^a-z0-9]+", normalize_name(um))) & _POLARIDADE
+    palavras_outro = set(re.split(r"[^a-z0-9]+", normalize_name(outro))) & _POLARIDADE
+    return (
+        ("sem" in palavras_um and "com" in palavras_outro)
+        or ("com" in palavras_um and "sem" in palavras_outro)
+    )
+
+
+def _mesma_palavra(x: str, y: str) -> bool:
+    if x == y:
+        return True
+    return (
+        len(x) >= _MINIMO_PARA_COMPARAR and len(y) >= _MINIMO_PARA_COMPARAR
+        and not _longe_demais(x, y)
+        and _distancia(x, y) <= _DISTANCIA_PARECIDO
+    )
+
+
+def _parecidos(nome: str, existentes) -> list[dict]:
+    """Candidatos a "mesmo produto", do mais proximo ao mais distante.
+
+    Compara com o catalogo inteiro, sem indice. Medido na escala real — 250 itens
+    cadastrados, importacao de 20 linhas — sao 42 ms, irrelevante perto dos
+    round-trips de Firestore da mesma chamada. Indexar so valeria se o cadastro
+    crescesse uma ordem de grandeza.
+    """
+    alvo = normalize_name(nome)
+    achados = [
+        (_distancia(alvo, normalize_name(str(dados.get("nome") or ""))), item_id, dados)
+        for item_id, dados, _ in existentes
+        if _parece(nome, str(dados.get("nome") or ""))
+    ]  # a distancia so e calculada para quem ja passou em `_parece`
+    achados.sort(key=lambda t: (t[0], len(str(t[2].get("nome") or ""))))
+    return [
+        {
+            "item_id": item_id,
+            "nome": dados.get("nome") or "",
+            "categoria": dados.get("categoria") or CATEGORIA_PADRAO,
+            "isPlanned": bool(dados.get("isPlanned")),
+        }
+        for _, item_id, dados in achados[:_LIMITE_PARECIDOS]
+    ]
 
 
 def _payload(dados) -> dict:
@@ -347,9 +512,12 @@ def criar(db, dados) -> dict:
     if entrada.get("ordem") is not None:
         payload["ordem"] = _ordem(entrada.get("ordem"))
 
+    # Levantado antes da escrita, senao o proprio item novo entraria na lista.
+    semelhantes = _parecidos(nome, _todos(db))
+
     ref = db.collection(COLECAO).document()
     ref.set(payload)
-    return {
+    resposta = {
         "success": True,
         "id": ref.id,
         "ja_existia": False,
@@ -357,6 +525,14 @@ def criar(db, dados) -> dict:
         "item": _item_publico(ref.id, payload),
         "detalhe": _detalhe_criado(nome, planejado, comprado),
     }
+    if semelhantes:
+        resposta["parecidos"] = semelhantes
+        resposta["detalhe"] += (
+            f' Atencao: ja existe "{semelhantes[0]["nome"]}"'
+            f' ({semelhantes[0]["categoria"]}) no cadastro — confirme com o usuario'
+            " se nao sao o mesmo produto."
+        )
+    return resposta
 
 
 def _detalhe_criado(nome: str, planejado: bool, comprado: bool) -> str:
@@ -526,9 +702,10 @@ def importar_lote(db, texto, is_planned=True) -> dict:
     if not str(texto or "").strip():
         raise ListaComprasError("invalid_argument", "Texto de importacao e obrigatorio.")
 
+    catalogo = _todos(db)
     existentes = {
         normalize_name(str(dados.get("nome") or "")): (item_id, dados, ref)
-        for item_id, dados, ref in _todos(db)
+        for item_id, dados, ref in catalogo
     }
 
     lote = _Lote(db)
@@ -584,13 +761,28 @@ def importar_lote(db, texto, is_planned=True) -> dict:
             "isPlanned": bool(is_planned),
             "isPurchased": False,
         })
-        criados.append(nome)
+        # O id sai do `document()`, antes do commit: quem chamou consegue agir
+        # sobre o item recem-criado sem uma segunda consulta.
+        criado = {"nome": nome, "item_id": ref.id}
+        semelhantes = _parecidos(nome, catalogo)
+        if semelhantes:
+            criado["parecidos"] = semelhantes
+        criados.append(criado)
+        # O que acabou de entrar no lote passa a valer para as linhas seguintes.
+        # Sem isto, importar "mucarela" e "mussarela" no mesmo texto cria as duas
+        # sem aviso nenhum — a duplicata silenciosa que este codigo existe para
+        # pegar, so que dentro de uma unica chamada.
+        catalogo.append((ref.id, {
+            "nome": nome, "categoria": categoria,
+            "isPlanned": bool(is_planned), "isPurchased": False,
+        }, ref))
 
     lote.commit()
 
     planejados_agora = (
         (len(criados) if is_planned else 0) + len(marcados_agora) + len(ja_planejados)
     )
+    com_parecido = [c for c in criados if c.get("parecidos")]
     return {
         "success": True,
         "created": criados,
@@ -599,15 +791,17 @@ def importar_lote(db, texto, is_planned=True) -> dict:
         "total_ignorados": len(ignorados),
         "planejados": planejados_agora,
         "isPlanned": bool(is_planned),
+        "com_parecido": len(com_parecido),
         "detalhe": _detalhe_importacao(
             criados, marcados_agora, ja_planejados, seguem_fora,
-            ignorados, planejados_agora, bool(is_planned),
+            ignorados, planejados_agora, bool(is_planned), com_parecido,
         ),
     }
 
 
 def _detalhe_importacao(
-    criados, marcados_agora, ja_planejados, seguem_fora, ignorados, planejados, is_planned
+    criados, marcados_agora, ja_planejados, seguem_fora, ignorados, planejados, is_planned,
+    com_parecido=(),
 ) -> str:
     """Texto para o assistente repassar na hora.
 
@@ -646,7 +840,22 @@ def _detalhe_importacao(
         if planejados
         else "Nenhum item desta importacao esta planejado: nada aparece na tela de compras."
     )
-    return "; ".join(partes) + ". " + fecho
+    # O aviso de parecido precisa estar AQUI: `detalhe` e o que o assistente le e
+    # repassa. Deixa-lo so no campo estruturado faria a duplicata passar batido,
+    # que e o jeito de o cadastro juntar "Mussarela" e "mucarela" sem ninguem ver.
+    alerta = ""
+    if com_parecido:
+        pares = "; ".join(
+            f'"{c["nome"]}" parece "{c["parecidos"][0]["nome"]}"'
+            f' ({c["parecidos"][0]["categoria"]})'
+            for c in com_parecido
+        )
+        alerta = (
+            f" Atencao: {len(com_parecido)} item(ns) criado(s) podem ser duplicata do que"
+            f" ja existe — {pares}. Confirme com o usuario antes de deixar assim;"
+            " os `parecidos` de cada item trazem o item_id para corrigir."
+        )
+    return "; ".join(partes) + ". " + fecho + alerta
 
 
 def limpar_planejamento(db, acao="clear_planning") -> dict:

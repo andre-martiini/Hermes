@@ -17,6 +17,20 @@ PILARES = {'carreira', 'financas', 'saude', 'intelectual', 'estilo_vida'}
 STATUS_VALUES = {'ativo', 'concluido', 'revisar'}
 TIPOS = {'absoluta', 'relativa_qualitativa'}
 
+# Fontes que o proprio sistema ja alimenta. Uma meta numerica ligada a uma delas
+# le o valor de la em vez de depender de alguem lembrar de atualizar `valorAtual`.
+FONTES_METRICA = {'peso', 'cintura'}
+
+
+def _fonte_valida(fonte) -> str:
+    """Nome de fonte reconhecida, ou vazio.
+
+    Vazio significa "sem fonte automatica" — e o painel diz isso em vez de exibir
+    zero, porque zero afirma "nao andou nada" e nao "ninguem esta medindo".
+    """
+    limpa = str(fonte or "").strip().lower()
+    return limpa if limpa in FONTES_METRICA else ""
+
 
 def novo_id_estrategia(prefixo: str) -> str:
     return f"{prefixo}-{int(time.time() * 1000)}-{str(uuid.uuid4())[:6]}"
@@ -51,6 +65,8 @@ def criar_objetivo_estrategico(
     metrica_valor_atual: float | None = None,
     metrica_valor_objetivo: float | None = None,
     metrica_unidade: str = "",
+    metrica_fonte: str = "",
+    gerida_por_acoes: bool | None = None,
 ) -> dict:
     if not user_uid:
         return {"status": "error", "reason": "auth_required"}
@@ -89,6 +105,11 @@ def criar_objetivo_estrategico(
         "marcos": marcos_obj,
         "diretrizesDerivadas": diretrizes_clean,
         "status": status_norm,
+        # Quem serve este objetivo: acoes vinculadas, ou dado que o sistema ja
+        # coleta. Gravada, e nao deduzida do pilar, para um objetivo novo
+        # orientado a dado nascer fora das funcionalidades de vinculo sem que
+        # ninguem edite uma lista de excecoes no codigo.
+        "gerida_por_acoes": (pilar_norm != "saude") if gerida_por_acoes is None else bool(gerida_por_acoes),
         "timestamp": firestore.SERVER_TIMESTAMP,
     }
 
@@ -101,6 +122,7 @@ def criar_objetivo_estrategico(
             "valorAtual": val_atual,
             "valorObjetivo": val_obj,
             "unidade": str(metrica_unidade or "").strip(),
+            "fonte": _fonte_valida(metrica_fonte),
         }
 
     ref = db.collection('estrategia_pessoal').document()
@@ -121,6 +143,8 @@ def editar_objetivo_estrategico(
     metrica_valor_atual: float | None = None,
     metrica_valor_objetivo: float | None = None,
     metrica_unidade: str | None = None,
+    metrica_fonte: str | None = None,
+    gerida_por_acoes: bool | None = None,
 ) -> dict:
     ref, data = carregar_objetivo_estrategico(db, user_uid, objetivo_id)
     if not ref:
@@ -146,10 +170,15 @@ def editar_objetivo_estrategico(
         if not dz:
             return {"status": "error", "reason": "diretrizes_nao_podem_ficar_vazias"}
         updates["diretrizesDerivadas"] = dz
+    if gerida_por_acoes is not None:
+        updates["gerida_por_acoes"] = bool(gerida_por_acoes)
 
     # Métrica: só aplica se o objetivo é/torna-se absoluto
     tipo_final = updates.get("tipoMeta", data.get("tipoMeta"))
-    if tipo_final == "absoluta" and any(v is not None for v in [metrica_valor_inicial, metrica_valor_atual, metrica_valor_objetivo, metrica_unidade]):
+    # `metrica_fonte` precisa estar aqui: ligar ou desligar a fonte de uma meta ja
+    # existente e feito com ele sozinho, e sem a entrada na guarda a chamada
+    # devolvia `noop` sem nunca chegar na atribuicao abaixo.
+    if tipo_final == "absoluta" and any(v is not None for v in [metrica_valor_inicial, metrica_valor_atual, metrica_valor_objetivo, metrica_unidade, metrica_fonte]):
         metrica = dict(data.get("metricaAlvo") or {})
         if metrica_valor_inicial is not None:
             metrica["valorInicial"] = float(metrica_valor_inicial)
@@ -159,10 +188,13 @@ def editar_objetivo_estrategico(
             metrica["valorObjetivo"] = float(metrica_valor_objetivo)
         if metrica_unidade is not None:
             metrica["unidade"] = str(metrica_unidade).strip()
+        if metrica_fonte is not None:
+            metrica["fonte"] = _fonte_valida(metrica_fonte)
         metrica.setdefault("valorInicial", 0)
         metrica.setdefault("valorAtual", 0)
         metrica.setdefault("valorObjetivo", 0)
         metrica.setdefault("unidade", "")
+        metrica.setdefault("fonte", "")
         updates["metricaAlvo"] = metrica
 
     if not updates:

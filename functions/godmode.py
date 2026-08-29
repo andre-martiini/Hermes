@@ -230,11 +230,14 @@ def _build_tools(
         metrica_valor_atual: float | None = None,
         metrica_valor_objetivo: float | None = None,
         metrica_unidade: str = "",
+        metrica_fonte: str = "",
+        gerida_por_acoes: bool = None,
     ) -> dict:
         return strategy_tools.criar_objetivo_estrategico(
             db, user_uid, objetivoMacro, pilar, tipoMeta, status,
             diretrizes, indicadores, marcos,
             metrica_valor_inicial, metrica_valor_atual, metrica_valor_objetivo, metrica_unidade,
+            metrica_fonte, gerida_por_acoes,
         )
 
     def editar_objetivo_estrategico(
@@ -248,10 +251,13 @@ def _build_tools(
         metrica_valor_atual: float | None = None,
         metrica_valor_objetivo: float | None = None,
         metrica_unidade: str | None = None,
+        metrica_fonte: str | None = None,
+        gerida_por_acoes: bool | None = None,
     ) -> dict:
         return strategy_tools.editar_objetivo_estrategico(
             db, user_uid, objetivo_id, objetivoMacro, pilar, tipoMeta, status,
             diretrizes, metrica_valor_inicial, metrica_valor_atual, metrica_valor_objetivo, metrica_unidade,
+            metrica_fonte, gerida_por_acoes,
         )
 
     def gerenciar_item_estrategico(
@@ -579,6 +585,8 @@ def _build_tools(
                     "metrica_valor_atual": {"type": "number", "description": "Só para tipoMeta 'absoluta'."},
                     "metrica_valor_objetivo": {"type": "number", "description": "Só para tipoMeta 'absoluta'."},
                     "metrica_unidade": {"type": "string", "description": "Só para tipoMeta 'absoluta'."},
+                    "metrica_fonte": {"type": "string", "description": "metrica_fonte: fonte automatica que alimenta a metrica ('peso' ou 'cintura'; vazio = sem fonte, e o painel diz isso em vez de exibir zero)."},
+                    "gerida_por_acoes": {"type": "boolean", "description": "gerida_por_acoes: false marca o objetivo servido por dado coletado, e nao por acoes vinculadas. Objetivo assim fica FORA de toda sugestao de vinculo e de elevacao."},
                 },
                 "required": ["objetivoMacro", "diretrizes"],
             },
@@ -607,6 +615,8 @@ def _build_tools(
                     "metrica_valor_atual": {"type": "number"},
                     "metrica_valor_objetivo": {"type": "number"},
                     "metrica_unidade": {"type": "string"},
+                    "metrica_fonte": {"type": "string", "description": "metrica_fonte: fonte automatica que alimenta a metrica ('peso' ou 'cintura'; vazio = sem fonte, e o painel diz isso em vez de exibir zero)."},
+                    "gerida_por_acoes": {"type": "boolean", "description": "gerida_por_acoes: false marca o objetivo servido por dado coletado, e nao por acoes vinculadas. Objetivo assim fica FORA de toda sugestao de vinculo e de elevacao."},
                 },
                 "required": ["objetivo_id"],
             },

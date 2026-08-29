@@ -1,6 +1,6 @@
 {
   "name": "mutar_lista_compras",
-  "description": "Cria, atualiza, remove ou importa itens da lista de compras interna. Use consultar_lista_compras para obter os item_id que update e delete exigem.",
+  "description": "Cria, atualiza, remove ou importa itens da lista de compras interna. Use consultar_lista_compras para obter os item_id que update e delete exigem. Toda escrita devolve 'detalhe', um texto que descreve o que de fato foi gravado — repasse-o em vez de mandar o usuario conferir na tela.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -14,7 +14,7 @@
       },
       "nome": {
         "type": "string",
-        "description": "Nome do item. Em create, nome ja existente nao e recusado: o item existente recebe os campos informados na chamada (inclusive isPlanned) e o retorno traz ja_existia: true com o item_id dele."
+        "description": "Nome do item. Em create, nome ja existente nao e recusado: o item existente recebe os campos informados na chamada (inclusive isPlanned) e o retorno traz ja_existia: true com o item_id dele. Create so acrescenta — nunca tira do planejamento nem desfaz compra; para isso use update. Se o nome for novo mas parecido com algum ja cadastrado, o retorno traz 'parecidos' junto do item criado."
       },
       "categoria": {
         "type": "string",
@@ -42,9 +42,11 @@
       },
       "importText": {
         "type": "string",
-        "description": "Texto bruto para importacao em lote, uma linha por item, no formato 'Nome' ou 'Nome|Categoria'. Linha cujo nome ja existe nao e descartada em silencio: o item existente entra no planejamento e aparece em 'ignorados' com o motivo e o item_id."
+        "description": "Texto bruto para importacao em lote, uma linha por item, no formato 'Nome' ou 'Nome|Categoria'. Linha cujo nome ja existe nao e descartada em silencio: o item existente entra no planejamento e aparece em 'ignorados' com o motivo e o item_id. O retorno traz 'created' como lista de {nome, item_id}, e cada item criado cujo nome pareca com algum ja cadastrado ('mucarela' x 'Mussarela', 'po de cafe' x 'Cafe') vem com 'parecidos': candidatos com item_id e categoria. O item E criado assim mesmo — os candidatos existem para voce confirmar com o usuario, nao para decidir sozinho."
       }
     },
-    "required": ["action"]
+    "required": [
+      "action"
+    ]
   }
 }

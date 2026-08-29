@@ -115,6 +115,11 @@ def _db_com(*itens, planejados=False):
     return db
 
 
+def _criados(resultado):
+    """`created` virou lista de objetos com item_id; os testes olham os nomes."""
+    return [item["nome"] for item in resultado["created"]]
+
+
 def _nomes_planejados(db):
     return sorted(
         item["nome"] for item in lc.consultar(db, filtro="planejados")["itens"]
@@ -181,7 +186,7 @@ class TestCriterioDeAceite(unittest.TestCase):
         lc.mutar(self.db, "clear_planning", {})
         r = lc.mutar(self.db, "import_batch", {"importText": LISTA_DA_SEMANA})
 
-        self.assertEqual(r["created"], ["leite sem lactose", "muçarela", "queijo"])
+        self.assertEqual(_criados(r), ["leite sem lactose", "muçarela", "queijo"])
         self.assertEqual(
             [(i["nome"], i["motivo"]) for i in r["ignorados"]],
             [("manteiga", lc.MOTIVO_JA_EXISTE), ("pó de café", lc.MOTIVO_JA_EXISTE)],
@@ -189,6 +194,168 @@ class TestCriterioDeAceite(unittest.TestCase):
         for ignorado in r["ignorados"]:
             self.assertTrue(ignorado["item_id"], "ignorado sem item_id para agir em cima")
             self.assertTrue(ignorado["planejado"], "item que ja existia ficou fora da tela")
+
+
+class TestCatalogoComNomesDeGente(unittest.TestCase):
+    """Cadastro real tem ~250 itens com nomes escritos por gente.
+
+    A deduplicacao por igualdade exata nao ve "Mussarela" quando a lista escrita
+    a mao diz "mucarela", nem "Cafe" quando ela diz "po de cafe". Cada importacao
+    sujava o cadastro com uma variante nova do mesmo produto — em "Geral", longe
+    da categoria certa.
+
+    A resposta NAO e casar por semelhanca sozinho: "queijo" viraria "queijo
+    ricota" e lista de compras nao perdoa erro silencioso. E levantar os
+    candidatos com seus `item_id` para quem chamou decidir com o usuario.
+    """
+
+    CATALOGO = ("Manteiga", "Queijo", "Mussarela", "Café", "Leite sem lactose Itambé")
+
+    def setUp(self):
+        self.db = _db_com(*self.CATALOGO)
+
+    def test_criterio_de_aceite_com_o_catalogo_real(self):
+        lc.mutar(self.db, "clear_planning", {})
+        r = lc.mutar(self.db, "import_batch", {"importText": LISTA_DA_SEMANA})
+
+        self.assertEqual(len(lc.consultar(self.db, filtro="planejados")["itens"]), 5)
+        self.assertEqual(
+            [(i["nome"], i["motivo"], bool(i["item_id"])) for i in r["ignorados"]],
+            [("Manteiga", lc.MOTIVO_JA_EXISTE, True), ("Queijo", lc.MOTIVO_JA_EXISTE, True)],
+        )
+        for criado in r["created"]:
+            self.assertTrue(criado["item_id"], f"item criado sem id: {criado}")
+
+    def test_todo_item_criado_aponta_o_parecido_com_item_id(self):
+        r = lc.mutar(self.db, "import_batch", {"importText": LISTA_DA_SEMANA})
+        parecido_de = {c["nome"]: c.get("parecidos", []) for c in r["created"]}
+
+        self.assertEqual(parecido_de["muçarela"][0]["nome"], "Mussarela")
+        self.assertEqual(parecido_de["pó de café"][0]["nome"], "Café")
+        self.assertEqual(parecido_de["leite sem lactose"][0]["nome"], "Leite sem lactose Itambé")
+        for nome, candidatos in parecido_de.items():
+            self.assertTrue(candidatos[0]["item_id"], f"parecido de {nome} sem item_id")
+
+    def test_o_aviso_de_duplicata_chega_no_detalhe(self):
+        """Aviso so no campo estruturado passa batido: `detalhe` e o que se repassa."""
+        r = lc.mutar(self.db, "import_batch", {"importText": LISTA_DA_SEMANA})
+        self.assertEqual(r["com_parecido"], 3)
+        self.assertIn("podem ser duplicata", r["detalhe"])
+        self.assertIn("Mussarela", r["detalhe"])
+
+    def test_item_sem_parecido_nao_ganha_o_campo(self):
+        r = lc.mutar(self.db, "import_batch", {"importText": "sabão em pó"})
+        self.assertNotIn("parecidos", r["created"][0])
+        self.assertEqual(r["com_parecido"], 0)
+        self.assertNotIn("podem ser duplicata", r["detalhe"])
+
+    def test_create_avulso_tambem_avisa(self):
+        r = lc.mutar(self.db, "create", {"nome": "muçarela", "isPlanned": True})
+        self.assertTrue(r["criado"])
+        self.assertEqual(r["parecidos"][0]["nome"], "Mussarela")
+        self.assertIn("Mussarela", r["detalhe"])
+
+    def test_duas_grafias_no_mesmo_texto_nao_passam_batidas(self):
+        """O catalogo lido antes do loop nao ve o que o proprio lote acabou de criar.
+
+        Sem isso, "mucarela" e "mussarela" na mesma importacao viram dois itens
+        sem aviso nenhum — a duplicata silenciosa que este codigo existe para
+        pegar, dentro de uma unica chamada.
+        """
+        db = _db_com()
+        r = lc.mutar(db, "import_batch", {"importText": "muçarela\nmussarela"})
+        self.assertEqual(r["com_parecido"], 1)
+        self.assertEqual(r["created"][1]["parecidos"][0]["nome"], "muçarela")
+        self.assertIn("podem ser duplicata", r["detalhe"])
+
+    def test_parecido_de_dentro_do_lote_traz_item_id_utilizavel(self):
+        db = _db_com()
+        r = lc.mutar(db, "import_batch", {"importText": "muçarela\nmussarela"})
+        apontado = r["created"][1]["parecidos"][0]["item_id"]
+        self.assertEqual(apontado, r["created"][0]["item_id"])
+        self.assertTrue(any(i["item_id"] == apontado for i in lc.consultar(db)["itens"]))
+
+    def test_o_parecido_nao_e_aplicado_sozinho(self):
+        """Levantar candidato nunca pode virar decisao: quem escolhe e o usuario."""
+        antes = {i["item_id"]: dict(i) for i in lc.consultar(self.db)["itens"]}
+        lc.mutar(self.db, "import_batch", {"importText": "muçarela"})
+        for item in lc.consultar(self.db)["itens"]:
+            if item["item_id"] in antes:
+                self.assertEqual(
+                    item["nome"], antes[item["item_id"]]["nome"],
+                    "a importacao renomeou um item existente por semelhanca",
+                )
+
+
+class TestQuandoDoisNomesSaoOMesmoProduto(unittest.TestCase):
+    """A regra de semelhanca sozinha, nos pares que importam."""
+
+    def test_reconhece_variacao_de_grafia(self):
+        self.assertTrue(lc._parece("muçarela", "Mussarela"))
+
+    def test_reconhece_nome_contido_no_outro(self):
+        self.assertTrue(lc._parece("pó de café", "Café"))
+        self.assertTrue(lc._parece("leite sem lactose", "Leite sem lactose Itambé"))
+
+    def test_nao_confunde_produtos_diferentes(self):
+        for a, b in (("manteiga", "Margarina"), ("arroz", "Feijão"),
+                     ("detergente", "Desinfetante"), ("sal", "Sol")):
+            with self.subTest(a=a, b=b):
+                self.assertFalse(lc._parece(a, b), f"{a!r} casou com {b!r}")
+
+    def test_adjetivo_em_comum_nao_faz_dois_produtos(self):
+        """Bastar UMA palavra junta o que so divide um qualificador.
+
+        Candidato errado gasta confirmacao do usuario e ainda ocupa vaga no teto
+        de cinco, empurrando para fora o parecido que importava.
+        """
+        for a, b in (("leite integral", "arroz integral"),
+                     ("sabão líquido", "detergente líquido"),
+                     ("papel toalha", "toalha de banho"),
+                     ("queijo ralado", "coco ralado")):
+            with self.subTest(a=a, b=b):
+                self.assertFalse(lc._parece(a, b), f"{a!r} casou com {b!r}")
+
+    def test_sem_e_com_nao_sao_o_mesmo_produto(self):
+        """Os dois criterios erram junto aqui, entao a checagem vem antes deles.
+
+        Removidas as ligacoes, "leite sem lactose" e "leite com lactose" ficam
+        com tokens identicos; e a distancia entre os nomes inteiros e exatamente
+        2, dentro da tolerancia. Apontar um como duplicata do outro mandaria o
+        usuario juntar produtos opostos.
+        """
+        for a, b in (("leite com lactose", "leite sem lactose"),
+                     ("café com açúcar", "café sem açúcar"),
+                     ("arroz com sal", "arroz sem sal")):
+            with self.subTest(a=a, b=b):
+                self.assertFalse(lc._parece(a, b), f"{a!r} casou com {b!r}")
+
+    def test_falta_de_qualificador_nao_e_contradicao(self):
+        """So sem-contra-com e conflito; qualificador ausente segue candidato."""
+        self.assertTrue(lc._parece("café", "café sem açúcar"))
+        self.assertTrue(lc._parece("leite sem lactose", "leite sem lactose integral"))
+
+    def test_grafia_errada_dentro_de_nome_composto_ainda_casa(self):
+        """A exigencia de casar todas as palavras nao pode matar o caso util."""
+        self.assertTrue(lc._parece("leite sem lactose", "Leite sem lactoze Itambé"))
+
+    def test_nome_igual_nao_e_parecido_e_sim_o_proprio(self):
+        self.assertFalse(lc._parece("queijo", "Queijo"))
+
+    def test_ligacoes_nao_aproximam_produtos(self):
+        """Sem tirar 'de'/'sem', qualquer par com essas palavras casaria."""
+        self.assertFalse(lc._parece("pão de forma", "creme de leite"))
+
+    def test_candidatos_vem_do_mais_proximo(self):
+        """Quem chama le o primeiro; a variante mais proxima tem de estar la."""
+        db = _db_com("Mussarela fatiada ralada", "Mussarela")
+        parecidos = lc._parecidos("muçarela", lc._todos(db))
+        self.assertEqual([p["nome"] for p in parecidos], ["Mussarela", "Mussarela fatiada ralada"])
+
+    def test_lista_de_candidatos_tem_teto(self):
+        """Com ~250 itens, tudo que parece "leite" viraria ruido."""
+        db = _db_com(*[f"Leite tipo {n}" for n in range(12)])
+        self.assertLessEqual(len(lc._parecidos("leite", lc._todos(db))), lc._LIMITE_PARECIDOS)
 
 
 class TestImportacao(unittest.TestCase):
@@ -214,7 +381,7 @@ class TestImportacao(unittest.TestCase):
     def test_linha_repetida_no_texto_tem_motivo_proprio(self):
         db = _db_com()
         r = lc.mutar(db, "import_batch", {"importText": "queijo\nQueijo"})
-        self.assertEqual(r["created"], ["queijo"])
+        self.assertEqual(_criados(r), ["queijo"])
         self.assertEqual(
             [i["motivo"] for i in r["ignorados"]], [lc.MOTIVO_DUPLICADO_NO_TEXTO]
         )
@@ -222,19 +389,19 @@ class TestImportacao(unittest.TestCase):
     def test_linha_sem_nome_e_reportada_e_nao_criada(self):
         db = _db_com()
         r = lc.mutar(db, "import_batch", {"importText": "|Frios\nqueijo"})
-        self.assertEqual(r["created"], ["queijo"])
+        self.assertEqual(_criados(r), ["queijo"])
         self.assertEqual([i["motivo"] for i in r["ignorados"]], [lc.MOTIVO_NOME_VAZIO])
 
     def test_linha_em_branco_nao_vira_item_nem_ruido(self):
         db = _db_com()
         r = lc.mutar(db, "import_batch", {"importText": "queijo\n\n   \nmanteiga"})
-        self.assertEqual(r["created"], ["queijo", "manteiga"])
+        self.assertEqual(_criados(r), ["queijo", "manteiga"])
         self.assertEqual(r["ignorados"], [])
 
     def test_nome_repetido_ignora_acento_e_caixa(self):
         db = _db_com("Pó de Café")
         r = lc.mutar(db, "import_batch", {"importText": "po de cafe"})
-        self.assertEqual(r["created"], [])
+        self.assertEqual(_criados(r), [])
         self.assertEqual(lc.consultar(db)["total"], 1, "criou um duplicado do mesmo item")
 
     def test_texto_vazio_e_erro_explicito(self):
