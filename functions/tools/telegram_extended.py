@@ -659,105 +659,17 @@ def execute(tool_name: str, slots: dict, db) -> str:
         return json.dumps({"success": True}, ensure_ascii=False)
 
     if tool_name == "mutar_lista_compras":
-        from security_portals import _normalize_name
+        # A logica vive em `tools/lista_compras.py`, a unica copia: a callable
+        # `mutateShoppingList` da web delega para la tambem. Enquanto eram duas
+        # implementacoes, elas divergiram — e foi a copia daqui que criava item
+        # de importacao fora do planejamento, invisivel na tela de compras.
+        from tools import lista_compras
 
-        action = str(slots.get("action") or "").strip()
-        item_id = str(slots.get("item_id") or slots.get("itemId") or "").strip()
-        allowed_actions = {"create", "update", "delete", "import_batch", "clear_planning", "finalize"}
-        if action not in allowed_actions:
-            return "Acao invalida."
-        if action == "create":
-            nome = str(slots.get("nome") or "").strip()
-            if not nome:
-                return "Nome do item e obrigatorio."
-            nome_norm = _normalize_name(nome)
-            for snap in db.collection("shopping_items").stream():
-                item = snap.to_dict() or {}
-                if _normalize_name(str(item.get("nome") or "")) == nome_norm:
-                    return "Ja existe um item com esse nome."
-            payload = {
-                "nome": nome,
-                "categoria": str(slots.get("categoria") or "Geral").strip() or "Geral",
-                "quantidade": str(slots.get("quantidade") or "1").strip() or "1",
-                "unit": str(slots.get("unit") or "un").strip() or "un",
-                "isPlanned": bool(slots.get("isPlanned")),
-                "isPurchased": bool(slots.get("isPurchased")),
-            }
-            if payload["isPurchased"]:
-                payload["isPlanned"] = True
-            ordem = slots.get("ordem")
-            if ordem is not None:
-                payload["ordem"] = int(ordem)
-            ref = db.collection("shopping_items").document()
-            ref.set(payload)
-            return json.dumps({"success": True, "id": ref.id}, ensure_ascii=False)
-        if action == "update":
-            if not item_id:
-                return "item_id obrigatorio."
-            ref = db.collection("shopping_items").document(item_id)
-            snap = ref.get()
-            if not snap.exists:
-                return "Item nao encontrado."
-            current = snap.to_dict() or {}
-            updates = {}
-            for field in ("nome", "categoria", "quantidade", "unit", "ordem", "isPlanned", "isPurchased"):
-                if field in slots:
-                    updates[field] = slots.get(field)
-            if "nome" in updates:
-                updates["nome"] = str(updates["nome"]).strip()
-            if "categoria" in updates:
-                updates["categoria"] = str(updates["categoria"]).strip() or "Geral"
-            if "quantidade" in updates:
-                updates["quantidade"] = str(updates["quantidade"]).strip() or "1"
-            if "unit" in updates:
-                updates["unit"] = str(updates["unit"]).strip() or "un"
-            if "ordem" in updates and updates["ordem"] is not None:
-                updates["ordem"] = int(updates["ordem"])
-            if "isPurchased" in updates and updates["isPurchased"]:
-                updates["isPlanned"] = True
-            elif "isPurchased" in updates and not updates["isPurchased"] and "isPlanned" not in updates:
-                updates["isPlanned"] = bool(current.get("isPlanned"))
-            if "isPlanned" in updates and not updates["isPlanned"]:
-                updates["isPurchased"] = False
-            if not updates:
-                return "Nenhum campo valido para atualizar."
-            ref.update(updates)
-            return json.dumps({"success": True, "id": item_id}, ensure_ascii=False)
-        if action == "delete":
-            if not item_id:
-                return "item_id obrigatorio."
-            db.collection("shopping_items").document(item_id).delete()
-            return json.dumps({"success": True, "id": item_id}, ensure_ascii=False)
-        if action == "import_batch":
-            raw_text = str(slots.get("importText") or slots.get("import_text") or "").strip()
-            if not raw_text:
-                return "Texto de importacao obrigatorio."
-            existing_names = {_normalize_name(str((snap.to_dict() or {}).get("nome") or "")) for snap in db.collection("shopping_items").stream()}
-            batch = db.batch()
-            created = 0
-            for line in raw_text.splitlines():
-                cleaned = line.strip()
-                if not cleaned:
-                    continue
-                nome, categoria = [part.strip() for part in cleaned.split("|", 1)] if "|" in cleaned else [cleaned, "Geral"]
-                nome_norm = _normalize_name(nome)
-                if not nome or nome_norm in existing_names:
-                    continue
-                existing_names.add(nome_norm)
-                ref = db.collection("shopping_items").document()
-                batch.set(ref, {"nome": nome, "categoria": categoria or "Geral", "quantidade": "1", "unit": "un", "isPlanned": False, "isPurchased": False})
-                created += 1
-            batch.commit()
-            return json.dumps({"success": True, "created": created}, ensure_ascii=False)
-        batch = db.batch()
-        affected = 0
-        for snap in db.collection("shopping_items").stream():
-            item = snap.to_dict() or {}
-            if item.get("isPlanned") or item.get("isPurchased"):
-                batch.update(snap.reference, {"isPlanned": False, "isPurchased": False})
-                affected += 1
-        batch.commit()
-        return json.dumps({"success": True, "affected": affected}, ensure_ascii=False)
+        try:
+            resultado = lista_compras.mutar(db, slots.get("action"), slots)
+        except lista_compras.ListaComprasError as erro:
+            return erro.message
+        return json.dumps(resultado, ensure_ascii=False)
 
     if tool_name == "obter_projeto_bolsas_publico":
         project_id = str(slots.get("project_id") or slots.get("projectId") or "").strip()

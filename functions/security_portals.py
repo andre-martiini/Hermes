@@ -7,6 +7,7 @@ import secrets
 from firebase_functions import https_fn, options
 from firebase_admin import firestore, get_app, initialize_app
 from gemini_cost_controls import GEMINI_STRUCTURED_MODEL, generate_content_logged
+from tools import lista_compras
 
 
 
@@ -222,24 +223,17 @@ def parse_json_response(raw_text):
     return json.loads(cleaned)
 
 
-def _normalize_name(name: str) -> str:
-    """Lowercase + remove acentos para comparação tolerante."""
-    import unicodedata
-    name = name.lower().strip()
-    name = unicodedata.normalize('NFD', name)
-    name = ''.join(c for c in name if unicodedata.category(c) != 'Mn')
-    return name
+# Um normalizador so para o projeto inteiro: a comparação tolerante de nomes
+# vive em `tools/lista_compras.py`, junto de quem mais depende dela.
+_normalize_name = lista_compras.normalize_name
 
-
-def _shopping_item_ref(db, item_id: str):
-    ref = db.collection('shopping_items').document(str(item_id))
-    snap = ref.get()
-    if not snap.exists:
-        raise https_fn.HttpsError(
-            code=https_fn.FunctionsErrorCode.NOT_FOUND,
-            message="Item nao encontrado."
-        )
-    return ref, snap.to_dict() or {}
+# `ListaComprasError.code` -> código da callable. A tradução é a única coisa que
+# a borda web ainda precisa saber sobre a lista de compras.
+_ERRO_LISTA = {
+    'invalid_argument': https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+    'not_found': https_fn.FunctionsErrorCode.NOT_FOUND,
+    'already_exists': https_fn.FunctionsErrorCode.ALREADY_EXISTS,
+}
 
 
 @https_fn.on_call(
@@ -652,181 +646,12 @@ def mutateShoppingList(req: https_fn.CallableRequest):
     require_authenticated(req)
 
     data = req.data or {}
-    action = str(data.get('action') or '').strip()
-    item_id = str(data.get('itemId') or '').strip()
     db = get_db()
 
-    allowed_actions = {'create', 'update', 'delete', 'import_batch', 'clear_planning', 'finalize'}
-    if action not in allowed_actions:
-        raise https_fn.HttpsError(
-            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
-            message="Acao invalida."
-        )
-
-    if action == 'create':
-        nome = str(data.get('nome') or '').strip()
-        if not nome:
-            raise https_fn.HttpsError(
-                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
-                message="Nome do item e obrigatorio."
-            )
-
-        nome_norm = _normalize_name(nome)
-        for snap in db.collection('shopping_items').stream():
-            item = snap.to_dict() or {}
-            if _normalize_name(str(item.get('nome') or '')) == nome_norm:
-                raise https_fn.HttpsError(
-                    code=https_fn.FunctionsErrorCode.ALREADY_EXISTS,
-                    message="Ja existe um item com esse nome."
-                )
-
-        is_planned = bool(data.get('isPlanned'))
-        is_purchased = bool(data.get('isPurchased'))
-        if is_purchased:
-            is_planned = True
-
-        payload = {
-            'nome': nome,
-            'categoria': str(data.get('categoria') or 'Geral').strip() or 'Geral',
-            'quantidade': str(data.get('quantidade') or '1').strip() or '1',
-            'unit': str(data.get('unit') or 'un').strip() or 'un',
-            'isPlanned': is_planned,
-            'isPurchased': is_purchased,
-        }
-
-        ordem = data.get('ordem')
-        if ordem is not None:
-            try:
-                payload['ordem'] = int(ordem)
-            except Exception:
-                raise https_fn.HttpsError(
-                    code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
-                    message="Ordem invalida."
-                )
-
-        ref = db.collection('shopping_items').document()
-        ref.set(payload)
-        return {'success': True, 'id': ref.id}
-
-    if action == 'update':
-        if not item_id:
-            raise https_fn.HttpsError(
-                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
-                message="itemId e obrigatorio."
-            )
-
-        ref, current = _shopping_item_ref(db, item_id)
-        updates = {}
-
-        if 'nome' in data:
-            nome = str(data.get('nome') or '').strip()
-            if not nome:
-                raise https_fn.HttpsError(
-                    code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
-                    message="Nome invalido."
-                )
-            nome_norm = _normalize_name(nome)
-            for snap in db.collection('shopping_items').stream():
-                if snap.id == item_id:
-                    continue
-                item = snap.to_dict() or {}
-                if _normalize_name(str(item.get('nome') or '')) == nome_norm:
-                    raise https_fn.HttpsError(
-                        code=https_fn.FunctionsErrorCode.ALREADY_EXISTS,
-                        message="Ja existe outro item com esse nome."
-                    )
-            updates['nome'] = nome
-
-        if 'categoria' in data:
-            updates['categoria'] = str(data.get('categoria') or '').strip() or 'Geral'
-        if 'quantidade' in data:
-            updates['quantidade'] = str(data.get('quantidade') or '').strip() or '1'
-        if 'unit' in data:
-            updates['unit'] = str(data.get('unit') or '').strip() or 'un'
-        if 'ordem' in data:
-            try:
-                updates['ordem'] = int(data.get('ordem'))
-            except Exception:
-                raise https_fn.HttpsError(
-                    code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
-                    message="Ordem invalida."
-                )
-        if 'isPlanned' in data:
-            updates['isPlanned'] = bool(data.get('isPlanned'))
-            if not updates['isPlanned']:
-                updates['isPurchased'] = False
-        if 'isPurchased' in data:
-            updates['isPurchased'] = bool(data.get('isPurchased'))
-            if updates['isPurchased']:
-                updates['isPlanned'] = True
-            elif 'isPlanned' not in updates:
-                updates['isPlanned'] = bool(current.get('isPlanned'))
-
-        if not updates:
-            raise https_fn.HttpsError(
-                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
-                message="Nenhum campo valido para atualizar."
-            )
-
-        ref.update(updates)
-        return {'success': True, 'id': item_id}
-
-    if action == 'delete':
-        if not item_id:
-            raise https_fn.HttpsError(
-                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
-                message="itemId e obrigatorio."
-            )
-        ref, _ = _shopping_item_ref(db, item_id)
-        ref.delete()
-        return {'success': True, 'id': item_id}
-
-    if action == 'import_batch':
-        raw_text = str(data.get('importText') or '').strip()
-        if not raw_text:
-            raise https_fn.HttpsError(
-                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
-                message="Texto de importacao e obrigatorio."
-            )
-
-        existing_names = {
-            _normalize_name(str((snap.to_dict() or {}).get('nome') or ''))
-            for snap in db.collection('shopping_items').stream()
-        }
-        batch = db.batch()
-        created = 0
-        for line in raw_text.splitlines():
-            cleaned = line.strip()
-            if not cleaned:
-                continue
-            nome, categoria = [part.strip() for part in cleaned.split('|', 1)] if '|' in cleaned else [cleaned, 'Geral']
-            nome_norm = _normalize_name(nome)
-            if not nome or nome_norm in existing_names:
-                continue
-            existing_names.add(nome_norm)
-            ref = db.collection('shopping_items').document()
-            batch.set(ref, {
-                'nome': nome,
-                'categoria': categoria or 'Geral',
-                'quantidade': '1',
-                'unit': 'un',
-                'isPlanned': False,
-                'isPurchased': False,
-            })
-            created += 1
-
-        batch.commit()
-        return {'success': True, 'created': created}
-
-    batch = db.batch()
-    affected = 0
-    for snap in db.collection('shopping_items').stream():
-        item = snap.to_dict() or {}
-        if item.get('isPlanned') or item.get('isPurchased'):
-            batch.update(snap.reference, {'isPlanned': False, 'isPurchased': False})
-            affected += 1
-    batch.commit()
-    return {'success': True, 'affected': affected}
+    try:
+        return lista_compras.mutar(db, data.get('action'), data)
+    except lista_compras.ListaComprasError as erro:
+        raise https_fn.HttpsError(code=_ERRO_LISTA[erro.code], message=erro.message)
 
 
 @https_fn.on_call(

@@ -3,6 +3,12 @@ import { httpsCallable } from 'firebase/functions';
 import { collection, onSnapshot, addDoc, deleteDoc, updateDoc, doc, writeBatch, setDoc } from 'firebase/firestore';
 import { db, functions } from '@/firebase';
 import { ShoppingItem } from '@/types';
+import {
+  flagsResultantes,
+  linhaFlag,
+  linhasImportaveis,
+  normalizeShoppingText,
+} from '@/src/utils/shoppingTransitions';
 
 type ShoppingAssistantAction = 'view' | 'create' | 'update' | 'delete' | 'import_batch' | 'clear_planning' | 'finalize';
 
@@ -32,13 +38,6 @@ interface AssistantMutationPreview {
   action: ShoppingAssistantAction;
   payload: Record<string, any>;
 }
-
-const normalizeShoppingText = (value?: string | null) =>
-  (value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim();
 
 export const ShoppingListTool = ({
   onBack,
@@ -77,11 +76,17 @@ export const ShoppingListTool = ({
   const [isPurchasedSectionOpen, setIsPurchasedSectionOpen] = useState(false);
   const [assistantStatus, setAssistantStatus] = useState<'idle' | 'applying' | 'applied' | 'cancelled' | 'error'>('idle');
   const [assistantError, setAssistantError] = useState('');
+  // Antes do primeiro snapshot o catalogo esta vazio, e todo card do copiloto
+  // preve o efeito a partir dele: `create` mostraria criacao onde o servidor vai
+  // reaproveitar item existente, e a importacao contaria como novo o que ja
+  // existe. Confirmar so depois de carregar.
+  const [catalogoCarregado, setCatalogoCarregado] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'shopping_items'), (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ShoppingItem));
       setItems(data);
+      setCatalogoCarregado(true);
     });
     return () => unsubscribe();
   }, []);
@@ -340,22 +345,41 @@ export const ShoppingListTool = ({
 
     if (assistantAction === 'import_batch') {
       const rawText = (initialImportText || '').trim();
-      const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
+      // Contar linha nao serve: o servidor descarta nome vazio e nome repetido
+      // dentro do proprio texto. Como o resultado da callable e jogado fora e a
+      // UI so mostra um toast generico, este card e a unica previsao que o
+      // usuario ve — entao ele aplica a mesma regra de `_parse_linhas`.
+      const { nomes: importaveis, descartadas } = linhasImportaveis(rawText);
+      const jaNoCadastro = importaveis.filter((nome: string) =>
+        items.some(item => normalizeShoppingText(item.nome) === normalizeShoppingText(nome))).length;
+      const novos = importaveis.length - jaNoCadastro;
+      const sobra = descartadas > 0
+        ? ` ${descartadas} linha(s) ficam de fora: repetida(s) no texto ou sem nome.`
+        : '';
+      // Sem repassar `isPlanned`, o servidor aplica o padrao (planejar) e a
+      // importacao so-para-o-cadastro que o schema anuncia nao existiria pela web.
+      const planejaImportacao = isPlanned !== false;
       return {
         title: 'Importacao em lote proposta',
-        description: lines.length > 0
-          ? `${lines.length} linha(s) serao processadas apos sua confirmacao.`
-          : 'Nenhuma linha valida foi enviada para importacao.',
-        lines: lines.slice(0, 6),
+        description: importaveis.length === 0
+          ? 'Nenhuma linha valida foi enviada para importacao.'
+          : planejaImportacao
+            ? `${importaveis.length} item(ns) entram no planejamento: ${novos} novo(s) e ${jaNoCadastro} que ja estava(m) no cadastro.${sobra}`
+            : `${novos} item(ns) novo(s) entram so no cadastro, sem planejamento — nao aparecem na aba Comprar. ${jaNoCadastro} ja existia(m) e fica(m) como esta(o).${sobra}`,
+        lines: importaveis.slice(0, 6),
         action: assistantAction,
-        payload: { action: 'import_batch', importText: rawText },
+        payload: {
+          action: 'import_batch',
+          importText: rawText,
+          ...(isPlanned !== undefined ? { isPlanned } : {}),
+        },
       };
     }
 
     if (assistantAction === 'clear_planning') {
       return {
         title: 'Limpeza de planejamento proposta',
-        description: 'Todos os itens planejados ou comprados da rodada atual serao resetados.',
+        description: 'Os itens planejados ou comprados voltam a ficar sem planejamento. Nenhum item e excluido do cadastro.',
         lines: [`Itens afetados agora: ${items.filter(item => item.isPlanned || item.isPurchased).length}`],
         action: assistantAction,
         payload: { action: 'clear_planning' },
@@ -379,27 +403,57 @@ export const ShoppingListTool = ({
       const nextUnit = String(unit || 'un').trim() || 'un';
       const nextIsPlanned = Boolean(isPlanned);
       const nextIsPurchased = Boolean(isPurchased);
+      const jaCadastrado = items.find(item => normalizeShoppingText(item.nome) === normalizeShoppingText(nextNome));
+      // Sobre item que ja existe `create` e aditivo, e marcar como comprado
+      // arrasta o planejamento junto. Calcular o par pela regra do servidor e o
+      // que impede o card de prometer um estado e o banco gravar outro.
+      const finalCriar = flagsResultantes(
+        jaCadastrado ?? { isPlanned: false, isPurchased: false },
+        isPlanned, isPurchased, true,
+      );
+      const mostraPlanejado = jaCadastrado
+        && (isPlanned !== undefined || finalCriar.planejado !== jaCadastrado.isPlanned);
+      const mostraComprado = jaCadastrado
+        && (isPurchased !== undefined || finalCriar.comprado !== jaCadastrado.isPurchased);
       return {
         title: 'Criacao de item proposta',
-        description: nextNome ? `O item "${nextNome}" sera criado na lista.` : 'Falta o nome do item para criar.',
-        lines: [
-          `Nome: ${nextNome || 'Nao informado'}`,
-          `Categoria: ${nextCategoria}`,
-          `Quantidade: ${nextQuantidade}`,
-          `Unidade: ${nextUnit}`,
-          `Planejado: ${nextIsPlanned ? 'Sim' : 'Nao'}`,
-          `Comprado: ${nextIsPurchased ? 'Sim' : 'Nao'}`,
-          ...(typeof ordem === 'number' ? [`Ordem: ${ordem}`] : []),
-        ],
+        description: !nextNome
+          ? 'Falta o nome do item para criar.'
+          : jaCadastrado
+            ? `"${jaCadastrado.nome}" ja esta no cadastro: em vez de duplicar, o item atual recebe o que o copiloto informou.`
+            : `O item "${nextNome}" sera criado na lista.`,
+        lines: jaCadastrado
+          ? [
+              `Nome: ${jaCadastrado.nome}`,
+              ...(categoria !== undefined ? [`Categoria: ${jaCadastrado.categoria} -> ${nextCategoria}`] : []),
+              ...(quantidade !== undefined ? [`Quantidade: ${jaCadastrado.quantidade} -> ${nextQuantidade}`] : []),
+              ...(unit !== undefined ? [`Unidade: ${jaCadastrado.unit} -> ${nextUnit}`] : []),
+              ...(mostraPlanejado ? [linhaFlag('Planejado', jaCadastrado.isPlanned, finalCriar.planejado, true)] : []),
+              ...(mostraComprado ? [linhaFlag('Comprado', jaCadastrado.isPurchased, finalCriar.comprado, true)] : []),
+              ...(typeof ordem === 'number' ? [`Ordem: ${ordem}`] : []),
+            ]
+          : [
+              `Nome: ${nextNome || 'Nao informado'}`,
+              `Categoria: ${nextCategoria}`,
+              `Quantidade: ${nextQuantidade}`,
+              `Unidade: ${nextUnit}`,
+              `Planejado: ${finalCriar.planejado ? 'Sim' : 'Nao'}`,
+              `Comprado: ${finalCriar.comprado ? 'Sim' : 'Nao'}`,
+              ...(typeof ordem === 'number' ? [`Ordem: ${ordem}`] : []),
+            ],
         action: assistantAction,
+        // So vai no payload o que o copiloto informou de fato. Nome ja
+        // cadastrado reaproveita o item existente, e mandar o default da UI
+        // apagaria a categoria, a quantidade ou a unidade que o usuario ajustou
+        // na tela. Para item novo os mesmos defaults sao aplicados no servidor.
         payload: {
           action: 'create',
           nome: nextNome,
-          categoria: nextCategoria,
-          quantidade: nextQuantidade,
-          unit: nextUnit,
-          isPlanned: nextIsPlanned,
-          isPurchased: nextIsPurchased,
+          ...(categoria !== undefined ? { categoria: nextCategoria } : {}),
+          ...(quantidade !== undefined ? { quantidade: nextQuantidade } : {}),
+          ...(unit !== undefined ? { unit: nextUnit } : {}),
+          ...(isPlanned !== undefined ? { isPlanned: nextIsPlanned } : {}),
+          ...(isPurchased !== undefined ? { isPurchased: nextIsPurchased } : {}),
           ...(typeof ordem === 'number' ? { ordem } : {}),
         },
       };
@@ -447,13 +501,23 @@ export const ShoppingListTool = ({
       diffLines.push(`Unidade: ${target?.unit || '—'} -> ${unit}`);
       payload.unit = unit;
     }
-    if (isPlanned !== undefined) {
-      diffLines.push(`Planejado: ${target?.isPlanned ? 'Sim' : 'Nao'} -> ${isPlanned ? 'Sim' : 'Nao'}`);
-      payload.isPlanned = isPlanned;
-    }
-    if (isPurchased !== undefined) {
-      diffLines.push(`Comprado: ${target?.isPurchased ? 'Sim' : 'Nao'} -> ${isPurchased ? 'Sim' : 'Nao'}`);
-      payload.isPurchased = isPurchased;
+    if (isPlanned !== undefined || isPurchased !== undefined) {
+      // Em `update` a flag pedida vale, mas arrasta a outra: desplanejar tira o
+      // comprado, e marcar comprado planeja. As duas linhas saem do estado final
+      // para o card nao mostrar so metade do efeito.
+      const atualFlags = {
+        isPlanned: Boolean(target?.isPlanned),
+        isPurchased: Boolean(target?.isPurchased),
+      };
+      const finalFlags = flagsResultantes(atualFlags, isPlanned, isPurchased, false);
+      if (isPlanned !== undefined || finalFlags.planejado !== atualFlags.isPlanned) {
+        diffLines.push(linhaFlag('Planejado', atualFlags.isPlanned, finalFlags.planejado, false));
+      }
+      if (isPurchased !== undefined || finalFlags.comprado !== atualFlags.isPurchased) {
+        diffLines.push(linhaFlag('Comprado', atualFlags.isPurchased, finalFlags.comprado, false));
+      }
+      if (isPlanned !== undefined) payload.isPlanned = isPlanned;
+      if (isPurchased !== undefined) payload.isPurchased = isPurchased;
     }
     if (ordem !== undefined) {
       diffLines.push(`Ordem: ${target?.ordem ?? '—'} -> ${ordem}`);
@@ -473,11 +537,12 @@ export const ShoppingListTool = ({
 
   const canConfirmAssistantAction = useMemo(() => {
     if (!assistantPreview) return false;
+    if (!catalogoCarregado) return false;
     if (assistantAction === 'create') return Boolean(assistantPreview.payload.nome);
     if (assistantAction === 'update' || assistantAction === 'delete') return Boolean(assistantPreview.payload.itemId);
     if (assistantAction === 'import_batch') return Boolean(assistantPreview.payload.importText);
     return true;
-  }, [assistantAction, assistantPreview]);
+  }, [assistantAction, assistantPreview, catalogoCarregado]);
 
   const applyAssistantAction = async () => {
     if (!assistantPreview || !canConfirmAssistantAction) return;

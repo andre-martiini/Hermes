@@ -52,6 +52,7 @@ SECTOR_TOOLS: dict[str, list[str]] = {
     Sector.AQUISICOES: [
         "obter_portal_compras_publico",
         "mutar_portal_compras_publico",
+        "consultar_lista_compras",
         "mutar_lista_compras",
     ],
     Sector.PROJETOS: [

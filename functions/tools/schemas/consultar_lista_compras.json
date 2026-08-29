@@ -1,0 +1,22 @@
+{
+  "name": "consultar_lista_compras",
+  "description": "Le a lista de compras: devolve cada item com seu item_id, nome, categoria, quantidade, unidade e os estados isPlanned/isPurchased. E a unica origem dos item_id que mutar_lista_compras exige em update e delete, e a forma de conferir o efeito de uma escrita sem pedir ao usuario que abra a tela.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "filtro": {
+        "type": "string",
+        "description": "Recorte da lista: 'todos' (padrao, o cadastro inteiro), 'planejados' (o que aparece na tela de compras), 'pendentes' (planejado e ainda nao comprado), 'comprados' ou 'nao_planejados'. As contagens total/planejados/comprados do retorno descrevem sempre a lista inteira, nao o recorte."
+      },
+      "busca": {
+        "type": "string",
+        "description": "Filtra por trecho do nome ou da categoria, ignorando acento e caixa."
+      },
+      "limite": {
+        "type": "integer",
+        "description": "Maximo de itens no retorno. Padrao 200; se houver mais, o retorno marca truncado."
+      }
+    },
+    "required": []
+  }
+}
