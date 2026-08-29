@@ -1303,6 +1303,15 @@ export interface ResumoFila {
     rota: string;
 }
 
+export interface ResumoAvisoDoSistema {
+    id: string;
+    gravidade: 'atencao';
+    titulo: string;
+    detalhe: string;
+    /** Data em que o sistema entrou nesse estado. */
+    desde?: string | null;
+}
+
 export interface ResumoMeta {
     id: string;
     pilar?: EstrategiaPilar;
@@ -1352,6 +1361,13 @@ export interface ResumoMatinal {
     prazos_duros: ResumoPrazoDuro[];
     carga_semana: Array<{ data: string; total: number }>;
     filas: Record<string, ResumoFila>;
+    /**
+     * Avisos sobre o próprio Hermes — algo que parou de funcionar direito e que,
+     * sem esta superfície, só existiria num log de Cloud Function. Fora de
+     * `filas` de propósito: fila é decisão esperando o usuário e conta em
+     * `contadores.pendencias`; isto não é decisão nenhuma.
+     */
+    avisos_do_sistema?: ResumoAvisoDoSistema[];
     saude: {
         rotinas_hoje: Array<{
             titulo: string;

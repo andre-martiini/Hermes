@@ -471,6 +471,24 @@ def marcar_varredura(db, hoje: str) -> None:
         print(f"[Elevacao] Falha ao gravar o marcador de varredura: {exc}")
 
 
+def marcar_degradacao(db, hoje: str, motivo: str) -> None:
+    """Grava — ou limpa — o aviso de que a varredura rodou sem as concluidas.
+
+    E estado, nao evento: fica no documento ate uma varredura completa limpar.
+    Vai para o resumo matinal porque e la que o usuario olha; morrer no log seria
+    o mesmo que nao avisar, e o modo degradado e silencioso por natureza — a
+    varredura roda, nao da erro, e so deixa de ver o melhor caso.
+    """
+    try:
+        _marcador_de_varredura(db).set(
+            {"varredura_degradada": (
+                {"data": str(hoje)[:10], "motivo": "indice_ausente", "detalhe": motivo}
+                if motivo else None)},
+            merge=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Elevacao] Falha ao gravar o estado da varredura: {exc}")
+
+
 def _filtro(campo: str, op: str, valor):
     """`FieldFilter` num lugar so, para o filtro morar na consulta e nao no `for`.
 
@@ -621,6 +639,10 @@ def _tarefas_da_varredura(db, corte: str) -> list[dict]:
     a varredura segue so com as vivas, avisando: e melhor perder as concluidas
     numa rodada do que a rodada inteira.
 
+    Devolve `(tarefas, degradacao)`. `degradacao` vazia e a rodada completa; com
+    texto, e o erro que tirou as concluidas — quem chama grava isso, porque um
+    modo degradado que so existe no log e um modo degradado que ninguem ve.
+
     `data_conclusao` e gravado como ISO nos quatro caminhos que concluem acao
     (index.tsx no web, confirmarEdicaoAcao e confirmarEdicaoEmLote no backend, e
     a callable do Telegram), entao a comparacao lexicografica com um corte
@@ -642,7 +664,8 @@ def _tarefas_da_varredura(db, corte: str) -> list[dict]:
     except Exception as exc:  # noqa: BLE001
         print(f"[Elevacao] Concluidas fora desta rodada ({exc}). Indice composto "
               "(status, data_conclusao) publicado?")
-    return list(por_id.values())
+        return list(por_id.values()), str(exc)[:200]
+    return list(por_id.values()), ""
 
 
 def preparar_rodada(db, hoje: str, carga_semana) -> dict:
@@ -673,7 +696,8 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
         print(f"[Elevacao] Sem marcador de varredura anterior; conclusoes contadas "
               f"a partir de {corte} ({DIAS_TETO_VARREDURA} dias). O que foi "
               f"concluido antes disso e passivo, e nao entra por aqui.")
-    tarefas = _tarefas_da_varredura(db, corte)
+    tarefas, degradacao = _tarefas_da_varredura(db, corte)
+    marcar_degradacao(db, hoje, degradacao)
     candidatos = candidatas(tarefas, acoes_ja_decididas(sugestoes), hoje)
     if not candidatos:
         # Olhou e nao achou: a varredura cumpriu o papel, entao o marcador avanca.

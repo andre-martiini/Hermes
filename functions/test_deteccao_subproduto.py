@@ -329,6 +329,106 @@ class TestOMarcadorSoAvancaQuandoOlhou(unittest.TestCase):
         self.assertTrue(rodada["olhou"])
 
 
+class TestJanelaRelidaNaoRepeteCard(unittest.TestCase):
+    """A outra ponta da janela ancorada.
+
+    Quando o marcador NAO avanca — teto do mes, semana cheia, falha do modelo —
+    a rodada seguinte rele a mesma janela de propósito, para nao perder nada. Se
+    a deduplicacao nao alcancasse o que ja esta pendente na fila, o mecanismo que
+    evita perda passaria a produzir card repetido, que e o jeito mais rapido de o
+    usuario parar de ler a fila.
+
+    A garantia esta em dois lugares que precisam valer juntos: `_carregar_sugestoes`
+    traz TODA pendente e aceita, de qualquer epoca (sem recorte de data), e
+    `candidatas` corta por esse conjunto.
+    """
+
+    def _db(self, status_da_sugestao):
+        db = _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        db.collection("tarefas").dados["sispnaes"] = _tarefa(
+            id="sispnaes", status="em andamento", pool_dados=[_anexo("HANDOFF.md")])
+        db.collection(ds.COL_ELEVACOES).dados["s1"] = {
+            "task_id": "sispnaes", "status": status_da_sugestao,
+            "criada_em": "2026-07-05"}
+        return db
+
+    def test_pendente_de_outro_mes_ainda_bloqueia_a_releitura(self):
+        """O recorte de pendentes nao tem limite de data justamente para isto."""
+        rodada = ds.preparar_rodada(self._db(ds.STATUS_PENDENTE), HOJE, [])
+        self.assertFalse(rodada["rodar"])
+        self.assertEqual(rodada["motivo"], "nenhuma_acao_com_corpo")
+
+    def test_aceita_tambem_bloqueia(self):
+        rodada = ds.preparar_rodada(self._db(ds.STATUS_ACEITA), HOJE, [])
+        self.assertEqual(rodada["motivo"], "nenhuma_acao_com_corpo")
+
+    def test_adiada_volta_porque_agora_nao_e_sobre_o_momento(self):
+        rodada = ds.preparar_rodada(self._db(ds.STATUS_ADIADA), HOJE, [])
+        self.assertTrue(rodada["rodar"])
+        self.assertEqual([c["task_id"] for c in rodada["candidatos"]], ["sispnaes"])
+
+
+class TestOModoDegradadoNaoMorreNoLog(unittest.TestCase):
+    """Varredura sem o indice roda, nao da erro, e so deixa de ver o melhor caso.
+
+    Silenciosa por natureza — e por isso o estado fica gravado, para o resumo
+    matinal mostrar. Log nao e aviso.
+    """
+
+    def _db_sem_indice(self):
+        class _RecorteQuebrado(_Recorte):
+            def where(self, *a, **kw):
+                f = kw.get("filter")
+                if f is not None and f.field_path == "data_conclusao":
+                    raise RuntimeError("indice composto ausente")
+                r = _Recorte.where(self, *a, **kw)
+                return _RecorteQuebrado(r._dados, r._ids, r._n)
+
+        class _ColQuebrada(_Colecao):
+            def where(self, *a, **kw):
+                r = _Colecao.where(self, *a, **kw)
+                return _RecorteQuebrado(r._dados, r._ids, r._n)
+
+        db = _Db()
+        db.cols["tarefas"] = _ColQuebrada()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        return db
+
+    @staticmethod
+    def _estado(db):
+        return (ds._marcador_de_varredura(db).get().to_dict() or {}).get("varredura_degradada")
+
+    def test_a_rodada_sem_indice_grava_o_aviso(self):
+        db = self._db_sem_indice()
+        ds.preparar_rodada(db, HOJE, [])
+        estado = self._estado(db)
+        self.assertEqual(estado["motivo"], "indice_ausente")
+        self.assertEqual(estado["data"], HOJE)
+
+    def test_a_rodada_completa_limpa_o_aviso(self):
+        """E estado, nao evento: fica ate uma varredura completa desligar."""
+        db = self._db_sem_indice()
+        ds.preparar_rodada(db, HOJE, [])
+        self.assertIsNotNone(self._estado(db))
+
+        db.cols["tarefas"] = _Colecao()
+        ds.preparar_rodada(db, HOJE, [])
+        self.assertIsNone(self._estado(db))
+
+    def test_o_aviso_nao_impede_a_rodada(self):
+        """Perder as concluidas numa rodada e melhor que perder a rodada."""
+        db = self._db_sem_indice()
+        db.cols["tarefas"].dados["viva"] = _tarefa(
+            id="viva", status="em andamento", pool_dados=[_anexo("X.md")])
+        rodada = ds.preparar_rodada(db, HOJE, [])
+        self.assertTrue(rodada["rodar"])
+
+
 class TestAsConcluidasEntramNaVarredura(unittest.TestCase):
     """O caso que sumia era o melhor: acao terminada na semana e a que com mais
     certeza deixou documento, diario e etapas prontas. O docstring de
@@ -346,43 +446,57 @@ class TestAsConcluidasEntramNaVarredura(unittest.TestCase):
     def test_concluida_dentro_da_janela_entra(self):
         db = self._db_com({"id": "a", "status": "concluído",
                            "data_conclusao": "2026-08-28T10:00:00Z"})
-        self.assertEqual([t["id"] for t in ds._tarefas_da_varredura(db, "2026-08-23")], ["a"])
+        tarefas, degradacao = ds._tarefas_da_varredura(db, "2026-08-23")
+        self.assertEqual([t["id"] for t in tarefas], ["a"])
+        self.assertEqual(degradacao, "")
 
     def test_concluida_antes_do_corte_fica_de_fora(self):
         db = self._db_com({"id": "a", "status": "concluído",
                            "data_conclusao": "2026-08-01"})
-        self.assertEqual(ds._tarefas_da_varredura(db, "2026-08-23"), [])
+        self.assertEqual(ds._tarefas_da_varredura(db, "2026-08-23")[0], [])
 
     def test_concluida_sem_data_e_passivo_e_nao_regressao(self):
         db = self._db_com({"id": "a", "status": "concluído"})
-        self.assertEqual(ds._tarefas_da_varredura(db, "2026-08-23"), [])
+        self.assertEqual(ds._tarefas_da_varredura(db, "2026-08-23")[0], [])
 
     def test_as_vivas_continuam_entrando(self):
         db = self._db_com({"id": "viva", "status": "em andamento"},
                           {"id": "parada", "status": "stand-by"},
                           {"id": "velha", "status": "concluído",
                            "data_conclusao": "2020-01-01"})
-        self.assertEqual(sorted(t["id"] for t in ds._tarefas_da_varredura(db, "2026-08-23")),
+        self.assertEqual(sorted(t["id"] for t in ds._tarefas_da_varredura(db, "2026-08-23")[0]),
                          ["parada", "viva"])
 
     def test_cancelada_nunca_entra(self):
         db = self._db_com({"id": "a", "status": "cancelada",
                            "data_conclusao": "2026-08-28"})
-        self.assertEqual(ds._tarefas_da_varredura(db, "2026-08-23"), [])
+        self.assertEqual(ds._tarefas_da_varredura(db, "2026-08-23")[0], [])
 
     def test_sem_o_indice_a_rodada_segue_com_as_vivas(self):
         """Perder as concluidas numa rodada e melhor que perder a rodada."""
-        class _ColQuebrada(_Colecao):
+        class _RecorteQuebrado(_Recorte):
+            """Levanta no filtro de `data_conclusao`, como o Firestore faz sem o
+            indice composto. Precisa ser no `_Recorte` e nao na colecao: o
+            segundo `where` da cadeia ja e chamado no recorte."""
+
             def where(self, *a, **kw):
                 f = kw.get("filter")
                 if f is not None and f.field_path == "data_conclusao":
-                    raise RuntimeError("indice ausente")
-                return super().where(*a, **kw)
+                    raise RuntimeError("indice composto ausente")
+                r = _Recorte.where(self, *a, **kw)
+                return _RecorteQuebrado(r._dados, r._ids, r._n)
+
+        class _ColQuebrada(_Colecao):
+            def where(self, *a, **kw):
+                r = _Colecao.where(self, *a, **kw)
+                return _RecorteQuebrado(r._dados, r._ids, r._n)
 
         db = _Db()
         db.cols["tarefas"] = _ColQuebrada()
         db.cols["tarefas"].dados["viva"] = {"id": "viva", "status": "em andamento"}
-        self.assertEqual([t["id"] for t in ds._tarefas_da_varredura(db, "2026-08-23")], ["viva"])
+        tarefas, degradacao = ds._tarefas_da_varredura(db, "2026-08-23")
+        self.assertEqual([t["id"] for t in tarefas], ["viva"])
+        self.assertIn("indice", degradacao)
 
 
 class _Snap:

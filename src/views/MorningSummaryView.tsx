@@ -341,6 +341,7 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
     const prazosDuros = resumo?.prazos_duros || [];
     const cargaSemana = resumo?.carga_semana || [];
     const filas = resumo?.filas || {};
+    const avisos = resumo?.avisos_do_sistema || [];
     const saude = resumo?.saude || { rotinas_hoje: [], pesagem_registrada: false, cintura_registrada: false, checkin_manha: false, checkin_noite: false, peso: null, dor_ontem: null, ultimo_registro: null };
     const estrategia = resumo?.estrategia || { metas: [], paradas: [], servidas_hoje: 0, total_geridas_por_acoes: 0 };
     const ontem = resumo?.ontem || { concluidas: [], diario: null };
@@ -700,6 +701,47 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                             </ul>
                         )}
                     </Secao>
+
+                    {/* O Hermes avisando de si mesmo. Vem antes de "O que vem por aí"
+                        porque é sobre o sistema estar rodando pela metade — e um modo
+                        degradado silencioso (roda, não dá erro, só vê menos) não tem
+                        outra superfície além desta. Sem rota: não há tela que resolva,
+                        a correção é publicar o índice. */}
+                    {avisos.length > 0 && (
+                        <Secao titulo="Avisos do sistema" isDark={isDark}>
+                            <ul className="space-y-2.5">
+                                {avisos.map((aviso) => (
+                                    <li
+                                        key={aviso.id}
+                                        className={`px-3 py-2.5 rounded-xl border ${
+                                            isDark
+                                                ? 'border-amber-500/30 bg-amber-500/5'
+                                                : 'border-amber-200 bg-amber-50'
+                                        }`}
+                                    >
+                                        <div className="flex items-start gap-2">
+                                            <span className="text-base leading-none mt-0.5">⚠️</span>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-medium">{aviso.titulo}</p>
+                                                <p className={`mt-1 text-xs leading-relaxed ${
+                                                    isDark ? 'text-slate-400' : 'text-slate-500'
+                                                }`}>
+                                                    {aviso.detalhe}
+                                                </p>
+                                                {aviso.desde && (
+                                                    <p className={`mt-1 text-xs tabular-nums ${
+                                                        isDark ? 'text-slate-500' : 'text-slate-400'
+                                                    }`}>
+                                                        Desde {aviso.desde}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </li>
+                                ))}
+                            </ul>
+                        </Secao>
+                    )}
 
                     {/* O que vem por aí — nada aqui espera decisão do usuário. */}
                     {filasInformativas.length > 0 && (

@@ -414,6 +414,37 @@ def _fila(total: int, amostra: list, rota: str) -> dict:
     return {"total": total, "amostra": amostra[:AMOSTRA_FILA], "rota": rota}
 
 
+def _coletar_avisos_do_sistema(db) -> list[dict]:
+    """Coisas do proprio Hermes que pararam de funcionar direito.
+
+    Nao e fila: fila e decisao esperando o usuario, e entra na contagem de
+    pendencias. Isto e outra coisa — o sistema avisando que esta rodando pela
+    metade. Sem uma superficie assim, um modo degradado silencioso (roda, nao da
+    erro, so ve menos) so existiria num log que ninguem le.
+    """
+    avisos = []
+    try:
+        snap = db.collection("system_usage").document("elevacoes_sugeridas").get()
+        degradada = (snap.to_dict() or {}).get("varredura_degradada") if snap.exists else None
+    except Exception as exc:
+        print(f"[ResumoMatinal] Falha ao consultar o estado da varredura: {exc}")
+        return avisos
+
+    if isinstance(degradada, dict) and degradada.get("motivo") == "indice_ausente":
+        avisos.append({
+            "id": "elevacao_sem_indice",
+            "gravidade": "atencao",
+            "titulo": "A varredura de elevações rodou sem as ações concluídas",
+            "detalhe": (
+                "Falta o índice composto `tarefas (status, data_conclusao)` no Firestore. "
+                "A varredura continua rodando com as ações em andamento, mas trabalho "
+                "concluído na semana — que é o caso mais forte, porque é o que mais deixa "
+                "documento pronto — não vira sugestão até o índice ser publicado."),
+            "desde": degradada.get("data"),
+        })
+    return avisos
+
+
 def _coletar_filas(db, hoje: str) -> dict:
     """As decisões pendentes que hoje só existem dentro de uma tela específica."""
     filas = {}
@@ -1065,6 +1096,7 @@ def build_morning_summary(db, date_str: str | None = None) -> dict:
     acoes = _coletar_acoes(db, hoje)
     agenda = _coletar_agenda(db, hoje)
     filas = _coletar_filas(db, hoje)
+    avisos_do_sistema = _coletar_avisos_do_sistema(db)
     saude = _coletar_saude(db, hoje, ontem)
     # Depende de `saude`: o pilar saúde não é gerido por ações, seu movimento vem
     # dos registros do módulo Saúde.
@@ -1101,6 +1133,9 @@ def build_morning_summary(db, date_str: str | None = None) -> dict:
         "prazos_duros": acoes["prazos_duros"],
         "carga_semana": acoes["carga_semana"],
         "filas": filas,
+        # Fora de `filas` de proposito: aviso do sistema nao e decisao pendente e
+        # nao pode entrar na contagem de `pendencias`.
+        "avisos_do_sistema": avisos_do_sistema,
         "saude": saude,
         "estrategia": estrategia,
         "ontem": ontem_data,
