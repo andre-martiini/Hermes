@@ -328,6 +328,108 @@ class TestEstrategia(unittest.TestCase):
         }})
         self.assertEqual(_coletar_estrategia(db, HOJE, {}, {})["metas"][0]["progresso_pct"], 50)
 
+    def test_meta_de_peso_le_a_pesagem_em_vez_do_valor_congelado(self):
+        """O caso que originou isto: painel marcando 0% com o peso caindo todo dia.
+
+        `metricaAlvo.valorAtual` guarda o valor de quando o objetivo foi criado e
+        nunca era sincronizado com `health_weights`. 95 kg -> 80 kg com 93,6 kg
+        medidos hoje sao 9% do caminho, nao zero.
+        """
+        db = _FakeDb({"estrategia_pessoal": {
+            "m1": {
+                "objetivoMacro": "Sair de 95kg para 80kg", "pilar": "saude", "status": "ativo",
+                "metricaAlvo": {"valorInicial": 95, "valorAtual": 95, "valorObjetivo": 80, "unidade": "kg"},
+            },
+        }})
+        meta = _coletar_estrategia(db, HOJE, {}, {}, medicoes={"peso": 93.6})["metas"][0]
+        self.assertEqual(meta["progresso_pct"], 9)
+        self.assertEqual(meta["progresso_origem"], "automatica")
+        self.assertEqual(meta["metrica_fonte"], "peso")
+        self.assertEqual(meta["valor_atual"], 93.6)
+
+    def test_metrica_sem_fonte_diz_que_nao_sabe_em_vez_de_zero(self):
+        """Zero afirma "nao andou nada"; sem fonte e "ninguem esta medindo"."""
+        db = _FakeDb({"estrategia_pessoal": {
+            "m1": {
+                "objetivoMacro": "Cobrir custos com bolsas", "pilar": "financas", "status": "ativo",
+                "metricaAlvo": {"valorInicial": 0, "valorAtual": 0, "valorObjetivo": 100,
+                                "unidade": "% de cobertura"},
+            },
+        }})
+        meta = _coletar_estrategia(db, HOJE, {}, {})["metas"][0]
+        self.assertIsNone(meta["progresso_pct"])
+        self.assertEqual(meta["progresso_origem"], "sem_fonte")
+        self.assertIsNone(meta["metrica_fonte"])
+
+    def test_valor_mexido_na_mao_continua_valendo(self):
+        """Sem fonte automatica, mas alguem mantem o numero: nao e "sem fonte"."""
+        db = _FakeDb({"estrategia_pessoal": {
+            "m1": {
+                "objetivoMacro": "Publicar 10 artigos", "pilar": "intelectual", "status": "ativo",
+                "metricaAlvo": {"valorInicial": 0, "valorAtual": 4, "valorObjetivo": 10, "unidade": "artigos"},
+            },
+        }})
+        meta = _coletar_estrategia(db, HOJE, {}, {})["metas"][0]
+        self.assertEqual((meta["progresso_pct"], meta["progresso_origem"]), (40, "manual"))
+
+    def test_meta_sem_metrica_nao_finge_ter_indicador(self):
+        db = _FakeDb({"estrategia_pessoal": {
+            "m1": {"objetivoMacro": "Ser referencia", "pilar": "carreira", "status": "ativo"},
+        }})
+        meta = _coletar_estrategia(db, HOJE, {}, {})["metas"][0]
+        self.assertIsNone(meta["progresso_pct"])
+        self.assertIsNone(meta["progresso_origem"])
+
+    def test_pesagem_ausente_hoje_nao_derruba_para_sem_fonte(self):
+        """Sem medicao no periodo, vale o ultimo valor anotado — nao "nao sei"."""
+        db = _FakeDb({"estrategia_pessoal": {
+            "m1": {
+                "objetivoMacro": "Sair de 95kg para 80kg", "pilar": "saude", "status": "ativo",
+                "metricaAlvo": {"valorInicial": 95, "valorAtual": 94, "valorObjetivo": 80, "unidade": "kg"},
+            },
+        }})
+        meta = _coletar_estrategia(db, HOJE, {}, {}, medicoes={})["metas"][0]
+        self.assertEqual(meta["progresso_origem"], "manual")
+        self.assertEqual(meta["progresso_pct"], 7)
+
+
+class TestFlagDeMetaGeridaPorAcoes(unittest.TestCase):
+    """A exclusao e pela flag do objetivo, nao por lista fixa de nomes de pilar.
+
+    Toda funcionalidade de vinculo, sugestao ou elevacao le esta flag para saber
+    quem NAO entra. Enquanto ela fosse `pilar != "saude"`, um objetivo novo
+    orientado a dado nasceria dentro dessas funcionalidades, e a unica forma de
+    tira-lo seria editar codigo.
+    """
+
+    def _meta(self, **campos):
+        base = {"objetivoMacro": "Meta", "pilar": "carreira", "status": "ativo"}
+        base.update(campos)
+        return _coletar_estrategia(_FakeDb({"estrategia_pessoal": {"m1": base}}),
+                                   HOJE, {}, {})["metas"][0]
+
+    def test_flag_gravada_manda_sobre_o_pilar(self):
+        self.assertFalse(self._meta(pilar="carreira", gerida_por_acoes=False)["gerida_por_acoes"])
+        self.assertTrue(self._meta(pilar="saude", gerida_por_acoes=True)["gerida_por_acoes"])
+
+    def test_sem_flag_gravada_deriva_do_pilar(self):
+        """Objetivo criado antes do campo existir continua se comportando igual."""
+        self.assertTrue(self._meta(pilar="intelectual")["gerida_por_acoes"])
+        self.assertFalse(self._meta(pilar="saude")["gerida_por_acoes"])
+
+    def test_meta_orientada_a_dado_fica_fora_do_denominador(self):
+        db = _FakeDb({"estrategia_pessoal": {
+            "m1": {"objetivoMacro": "Por dado", "pilar": "financas", "status": "ativo",
+                   "gerida_por_acoes": False},
+            "m2": {"objetivoMacro": "Por acao", "pilar": "carreira", "status": "ativo"},
+        }})
+        est = _coletar_estrategia(db, HOJE, {"m2": [{"titulo": "x"}]}, {})
+        self.assertEqual(est["total_geridas_por_acoes"], 1)
+        self.assertEqual(est["servidas_hoje"], 1)
+
+
+class TestMovimentoDaMeta(unittest.TestCase):
+
     def test_registro_de_marco_conta_como_movimento(self):
         """Uma meta pode se mexer sem nenhuma ação vinculada — via marco ou métrica."""
         db = _FakeDb({"estrategia_pessoal": {

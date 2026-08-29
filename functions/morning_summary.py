@@ -693,23 +693,104 @@ def _coletar_saude(db, hoje: str, ontem: str) -> dict:
     return saude
 
 
+# Métrica cuja fonte o sistema já alimenta sozinho. A chave é gravada em
+# `metricaAlvo.fonte`; o valor vem de `medicoes`, montado a partir do módulo Saúde.
+_FONTES_AUTOMATICAS = {"peso", "cintura"}
+
+
+def _fonte_da_metrica(data: dict, metrica: dict) -> str | None:
+    """Qual fonte automática alimenta esta métrica, se alguma.
+
+    `metricaAlvo.fonte` manda. Sem ela, deriva do que já existe na base — meta de
+    saúde em kg é peso, em cm é cintura —, para os objetivos criados antes deste
+    campo não precisarem de migração para voltarem a mostrar progresso real.
+    """
+    fonte = str(metrica.get("fonte") or "").strip().lower()
+    if fonte in _FONTES_AUTOMATICAS:
+        return fonte
+    if fonte:
+        return None
+    if str(data.get("pilar") or "") != "saude":
+        return None
+    unidade = str(metrica.get("unidade") or "").strip().lower()
+    if unidade in ("kg", "quilo", "quilos"):
+        return "peso"
+    if unidade in ("cm", "centimetro", "centimetros"):
+        return "cintura"
+    return None
+
+
+def _progresso_da_meta(data: dict, medicoes: dict) -> dict:
+    """Progresso de uma meta numérica, dizendo DE ONDE saiu o número.
+
+    O painel mostrava 0% para a meta de peso enquanto o usuário pesava todo dia:
+    `metricaAlvo.valorAtual` guardava o valor de quando a meta foi criada e nunca
+    era sincronizado com `health_weights`. Zero e "não sei" apareciam iguais, e um
+    indicador que erra sobre o que o próprio sistema já sabe não sustenta nada
+    construído em cima dele.
+
+    Três origens, distintas de propósito:
+
+    - `automatica`: a fonte está ligada e tem medição — o número é o real de hoje.
+    - `manual`: não há fonte, mas o valor foi mexido desde a criação; vale o que
+      o usuário anotou.
+    - `sem_fonte`: métrica numérica que ninguém alimenta. Devolve progresso nulo,
+      NUNCA zero: exibir 0% aqui afirma "não andou nada", que é diferente de
+      "ninguém está medindo".
+    """
+    metrica = data.get("metricaAlvo") or {}
+    if not metrica:
+        return {"progresso_pct": None, "progresso_origem": None,
+                "metrica_fonte": None, "valor_atual": None}
+
+    try:
+        ini = float(metrica.get("valorInicial") or 0)
+        obj = float(metrica.get("valorObjetivo") or 0)
+        registrado = float(metrica.get("valorAtual") or 0)
+    except (TypeError, ValueError):
+        return {"progresso_pct": None, "progresso_origem": "sem_fonte",
+                "metrica_fonte": None, "valor_atual": None}
+
+    fonte = _fonte_da_metrica(data, metrica)
+    medido = medicoes.get(fonte) if fonte else None
+
+    if medido is not None:
+        atual, origem = float(medido), "automatica"
+    elif metrica.get("valorAtual") is not None and registrado != ini:
+        # Valor mexido desde a criação: alguém mantém isto na mão.
+        atual, origem = registrado, "manual"
+    elif data.get("historicoMetrica"):
+        atual, origem = registrado, "manual"
+    else:
+        return {"progresso_pct": None, "progresso_origem": "sem_fonte",
+                "metrica_fonte": fonte, "valor_atual": None}
+
+    progresso = None
+    if obj != ini:
+        progresso = round(max(0.0, min(1.0, (atual - ini) / (obj - ini))) * 100)
+    return {"progresso_pct": progresso, "progresso_origem": origem,
+            "metrica_fonte": fonte, "valor_atual": atual}
+
+
 def _coletar_estrategia(db, hoje: str, acoes_por_meta: dict, movimento_por_meta: dict,
-                       movimento_saude: str | None = None) -> dict:
+                       movimento_saude: str | None = None,
+                       medicoes: dict | None = None) -> dict:
     """
     Projeta o dia contra as metas: quantas ações de hoje servem cada uma, e há
     quantos dias cada meta não vê movimento.
 
-    Nem todo pilar é gerido por ações. O pilar `saude` é executado inteiramente
-    pelos registros do módulo Saúde (pesagem, cintura, check-ins, log diário) —
-    cobrar dele uma ação vinculada em `tarefas` é cobrar a coisa errada, e
-    produz a afirmação falsa "parada há N dias" num dia em que o usuário se
-    pesou de manhã. Para essas metas o movimento vem de `movimento_saude`, e
-    elas ficam fora da conta de "metas que recebem trabalho hoje".
+    Nem toda meta é gerida por ações. `gerida_por_acoes: false` marca a meta
+    servida por dado — hoje o pilar `saude`, executado pelos registros do módulo
+    (pesagem, cintura, check-ins) — e cobrar dela uma ação vinculada é cobrar a
+    coisa errada: produz a afirmação falsa "parada há N dias" num dia em que o
+    usuário se pesou de manhã. Para essas metas o movimento vem de
+    `movimento_saude`, e elas ficam fora da conta de "metas que recebem trabalho
+    hoje".
 
-    Fica em aberto um problema estrutural do módulo Estratégia, mais amplo que
-    este resumo: `metricaAlvo.valorAtual` das metas absolutas nunca é
-    sincronizado com a fonte real do dado (o peso vive em `health_weights`),
-    então `progresso_pct` pode estar defasado.
+    A flag é lida do objetivo, não deduzida do nome do pilar: um objetivo novo
+    orientado a dado precisa nascer fora das funcionalidades de vínculo sem que
+    ninguém edite uma lista de exceções. A derivação por pilar continua como
+    valor padrão para os objetivos gravados antes do campo existir.
     """
     metas = []
     try:
@@ -738,7 +819,9 @@ def _coletar_estrategia(db, hoje: str, acoes_por_meta: dict, movimento_por_meta:
                         movimentos.append(_data_valida(reg.get("data")))
 
         pilar = str(data.get("pilar") or "")
-        gerida_por_acoes = pilar != "saude"
+        gravada = data.get("gerida_por_acoes")
+        # Derivação por pilar só enquanto o objetivo não tem a flag gravada.
+        gerida_por_acoes = bool(gravada) if gravada is not None else pilar != "saude"
         if not gerida_por_acoes and movimento_saude:
             movimentos.append(movimento_saude)
 
@@ -747,13 +830,7 @@ def _coletar_estrategia(db, hoje: str, acoes_por_meta: dict, movimento_por_meta:
 
         marcos = [m for m in (data.get("marcos") or []) if isinstance(m, dict)]
         metrica = data.get("metricaAlvo") or {}
-        progresso = None
-        if metrica:
-            ini = float(metrica.get("valorInicial") or 0)
-            atual = float(metrica.get("valorAtual") or 0)
-            obj = float(metrica.get("valorObjetivo") or 0)
-            if obj != ini:
-                progresso = round(max(0.0, min(1.0, (atual - ini) / (obj - ini))) * 100)
+        progresso = _progresso_da_meta(data, medicoes or {})
 
         acoes = acoes_por_meta.get(doc.id) or []
         metas.append({
@@ -767,7 +844,11 @@ def _coletar_estrategia(db, hoje: str, acoes_por_meta: dict, movimento_por_meta:
             "titulos_hoje": [a["titulo"] for a in acoes][:AMOSTRA_FILA],
             "ultimo_movimento": ultimo or None,
             "dias_parada": dias_parada,
-            "progresso_pct": progresso,
+            "progresso_pct": progresso["progresso_pct"],
+            # Diz de onde saiu o numero — ou que ninguem o alimenta.
+            "progresso_origem": progresso["progresso_origem"],
+            "metrica_fonte": progresso["metrica_fonte"],
+            "valor_atual": progresso["valor_atual"],
             "unidade": metrica.get("unidade") or None,
             "marcos_abertos": len([m for m in marcos if not m.get("concluido")]),
             "marcos_total": len(marcos),
@@ -934,8 +1015,15 @@ def build_morning_summary(db, date_str: str | None = None) -> dict:
     saude = _coletar_saude(db, hoje, ontem)
     # Depende de `saude`: o pilar saúde não é gerido por ações, seu movimento vem
     # dos registros do módulo Saúde.
+    # O modulo Saude ja mediu hoje; a meta de peso passa a ler DESSE numero em vez
+    # do `valorAtual` congelado na criacao do objetivo.
+    medicoes = {
+        "peso": (saude.get("peso") or {}).get("ultimo"),
+        "cintura": (saude.get("cintura") or {}).get("ultimo"),
+    }
     estrategia = _coletar_estrategia(db, hoje, acoes["acoes_por_meta"],
-                                     acoes["movimento_por_meta"], saude["ultimo_registro"])
+                                     acoes["movimento_por_meta"], saude["ultimo_registro"],
+                                     medicoes={k: v for k, v in medicoes.items() if v})
     ontem_data = _coletar_ontem(db, ontem)
     perfil = _coletar_perfil(db)
     foco = _escolher_foco(acoes, estrategia, hoje)

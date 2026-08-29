@@ -253,6 +253,45 @@ describe('MorningSummaryView', () => {
         expect(est.getByText('Nenhuma meta é executada por ações.')).toBeDefined();
     });
 
+    it('meta de peso mostra o valor medido junto do percentual', async () => {
+        const metaPeso = {
+            id: 'ms', pilar: 'saude' as const, pilar_label: 'Saúde', objetivo: 'Sair de 95kg para 80kg',
+            gerida_por_acoes: false, acoes_hoje: 0, titulos_hoje: [], ultimo_movimento: hoje,
+            dias_parada: 0, progresso_pct: 9, progresso_origem: 'automatica' as const,
+            metrica_fonte: 'peso', valor_atual: 93.6, unidade: 'kg',
+            marcos_abertos: 3, marcos_total: 5,
+        };
+        // Meta orientada a dado nunca tem acao hoje, entao so aparece via `paradas`
+        // — que no backend e sempre um subconjunto de `metas`.
+        snapshotData = fixture({
+            estrategia: { metas: [metaPeso], paradas: [metaPeso], servidas_hoje: 0, total_geridas_por_acoes: 0 },
+        });
+        render(<MorningSummaryView />);
+        const est = within(await secao('O que isso constrói'));
+        expect(est.getByText(/9%/)).toBeDefined();
+        expect(est.getByText(/93\.6 kg/)).toBeDefined();
+    });
+
+    it('metrica sem fonte diz que nao ha fonte, em vez de sumir ou mostrar zero', async () => {
+        // Zero afirma "nao andou nada"; a ausencia some da tela. Nenhum dos dois
+        // e a verdade quando ninguem esta alimentando o indicador.
+        const metaSemFonte = {
+            id: 'mf', pilar: 'financas' as const, pilar_label: 'Finanças',
+            objetivo: 'Cobrir custos adicionais com bolsas',
+            gerida_por_acoes: true, acoes_hoje: 1, titulos_hoje: ['Renovar bolsa'], ultimo_movimento: hoje,
+            dias_parada: 0, progresso_pct: null, progresso_origem: 'sem_fonte' as const,
+            metrica_fonte: null, valor_atual: null, unidade: '% de cobertura',
+            marcos_abertos: 2, marcos_total: 2,
+        };
+        snapshotData = fixture({
+            estrategia: { metas: [metaSemFonte], paradas: [], servidas_hoje: 1, total_geridas_por_acoes: 1 },
+        });
+        render(<MorningSummaryView />);
+        const est = within(await secao('O que isso constrói'));
+        expect(est.getByText(/sem fonte ligada/)).toBeDefined();
+        expect(est.queryByText(/0%/)).toBeNull();
+    });
+
     it('abre a ação ao clicar num foco', async () => {
         const onOpenTask = vi.fn();
         render(<MorningSummaryView onOpenTask={onOpenTask} />);

@@ -46,6 +46,14 @@
       "metrica_unidade": {
         "type": "string",
         "description": "Unidade da métrica"
+      },
+      "metrica_fonte": {
+        "type": "string",
+        "description": "Fonte automatica que alimenta a metrica: 'peso', 'cintura' ou vazio para desligar."
+      },
+      "gerida_por_acoes": {
+        "type": "boolean",
+        "description": "Se o objetivo e servido por acoes vinculadas ou por dado coletado. Com false ele fica fora de toda sugestao de vinculo e de elevacao."
       }
     },
     "required": [

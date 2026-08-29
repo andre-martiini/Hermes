@@ -56,6 +56,14 @@
       "metrica_unidade": {
         "type": "string",
         "description": "Unidade da métrica"
+      },
+      "metrica_fonte": {
+        "type": "string",
+        "description": "Fonte automatica que alimenta a metrica: 'peso' ou 'cintura'. Sem ela o indicador nao inventa numero — reporta que nao ha fonte ligada, em vez de exibir zero."
+      },
+      "gerida_por_acoes": {
+        "type": "boolean",
+        "description": "Se o objetivo e servido por acoes vinculadas (padrao) ou por dado que o sistema ja coleta. Objetivo com false fica FORA de toda sugestao de vinculo e de elevacao: ele e servido por telemetria, e propor acao para ele polui a fila e falseia o progresso. Padrao: false para o pilar saude, true para os demais."
       }
     },
     "required": [

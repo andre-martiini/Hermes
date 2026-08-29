@@ -241,7 +241,18 @@ const MetaLinha: React.FC<{ meta: ResumoMeta; isDark: boolean }> = ({ meta, isDa
                 : meta.dias_parada === 0
                 ? 'Registro de hoje já lançado'
                 : `Sem registro há ${meta.dias_parada} dia(s)`}
-            {meta.progresso_pct !== null && meta.progresso_pct !== undefined && <span className="ml-2 tabular-nums">· {meta.progresso_pct}%</span>}
+            {meta.progresso_pct !== null && meta.progresso_pct !== undefined
+                ? <span className="ml-2 tabular-nums">
+                    · {meta.progresso_pct}%
+                    {meta.valor_atual !== null && meta.valor_atual !== undefined &&
+                        ` (${meta.valor_atual}${meta.unidade ? ` ${meta.unidade}` : ''})`}
+                  </span>
+                // Metrica numerica que ninguem alimenta. Antes sumia da tela, e o
+                // painel deixava a impressao de que a meta nao tinha indicador —
+                // ou pior, exibia 0%, que afirma "nao andou nada".
+                : meta.progresso_origem === 'sem_fonte'
+                ? <span className="ml-2 opacity-70">· sem fonte ligada</span>
+                : null}
             {(meta.marcos_total ?? 0) > 0 && <span className="ml-2 tabular-nums">· {(meta.marcos_total ?? 0) - (meta.marcos_abertos ?? 0)}/{meta.marcos_total} marcos</span>}
         </div>
         {meta.progresso_pct !== null && meta.progresso_pct !== undefined && (
