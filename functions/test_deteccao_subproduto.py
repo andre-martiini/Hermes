@@ -538,6 +538,43 @@ class TestJanelaMaiorQueOTetoDaConsulta(unittest.TestCase):
         self.assertTrue(ds.preparar_rodada(self._db(ds.LIMITE_TAREFAS), HOJE, [])["rodar"])
 
 
+class TestConcluidaQueGanhaCorpoDepois(unittest.TestCase):
+    """Acao concluida PODE ganhar corpo depois, e sem isto sumiria para sempre.
+
+    Nao ha guarda de status em `anexar_arquivo` nem na tela de execucao, que
+    grava `pool_dados` direto. E o caso e plausivel exatamente aqui: escrever o
+    handoff depois de fechar a acao.
+
+    A janela nao a alcanca (`data_conclusao` nao mudou) e o cursor do passivo ja
+    passou por ela quando estava vazia. `data_atualizacao` e o unico campo que
+    reflete o anexo novo — dai o terceiro recorte.
+    """
+
+    def _db(self, data_atualizacao):
+        db = _Db()
+        db.collection("tarefas").dados["antiga"] = _tarefa(
+            id="antiga", status="concluído",
+            data_conclusao="2024-03-01",
+            data_atualizacao=data_atualizacao,
+            pool_dados=[_anexo("Handoff.md")])
+        return db
+
+    def test_mexida_depois_do_corte_volta_a_ser_vista(self):
+        tarefas, _inc = ds._tarefas_da_varredura(self._db("2026-08-28"), "2026-08-23")
+        self.assertEqual([t["id"] for t in tarefas], ["antiga"])
+
+    def test_intocada_continua_fora_da_janela(self):
+        """Senao o terceiro recorte traria o passivo inteiro pela porta da janela."""
+        tarefas, _inc = ds._tarefas_da_varredura(self._db("2024-03-01"), "2026-08-23")
+        self.assertEqual(tarefas, [])
+
+    def test_nao_duplica_com_a_consulta_da_janela(self):
+        db = self._db("2026-08-28")
+        db.cols["tarefas"].dados["antiga"]["data_conclusao"] = "2026-08-28"
+        tarefas, _inc = ds._tarefas_da_varredura(db, "2026-08-23")
+        self.assertEqual(len(tarefas), 1)
+
+
 class TestOPassivoEntraPorCota(unittest.TestCase):
     """618 concluidas de passivo, 124 com corpo. De uma vez, fila ilegivel.
 

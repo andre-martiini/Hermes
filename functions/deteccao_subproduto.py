@@ -673,8 +673,10 @@ def _tarefas_da_varredura(db, corte: str) -> list[dict]:
     de todos: acao terminada na semana e a que com mais certeza deixou documento,
     diario e etapas prontas.
 
-    Sao duas consultas porque `status in [...] OR (status == concluido AND
-    data_conclusao >= corte)` nao existe no Firestore. A segunda depende do
+    Sao tres consultas porque o Firestore nao faz OR entre elas: as vivas, as
+    concluidas dentro da janela, e as concluidas ANTIGAS que foram mexidas desde
+    o corte — estas ultimas porque acao concluida pode ganhar corpo depois, e sem
+    o terceiro recorte elas sumiriam para sempre. A segunda depende do
     indice composto (`status`, `data_conclusao`) declarado em
     `firestore.indexes.json` — se ele nao estiver publicado, a consulta levanta e
     a varredura segue so com as vivas, avisando: e melhor perder as concluidas
@@ -715,6 +717,27 @@ def _tarefas_da_varredura(db, corte: str) -> list[dict]:
         return list(por_id.values()), "indice_ausente"
     for d in concluidas:
         por_id[d.id] = {**(d.to_dict() or {}), "id": d.id}
+
+    # Terceiro recorte: concluida ANTIGA que foi mexida desde o corte.
+    #
+    # Acao concluida pode ganhar corpo depois — anexar_arquivo nao tem guarda de
+    # status, e a tela de execucao grava `pool_dados` direto. E o caso e
+    # plausivel justamente aqui: escrever o handoff depois de fechar a acao.
+    #
+    # Sem isto, essas acoes some para sempre: a janela olha `data_conclusao`, que
+    # nao mudou, e o cursor do passivo ja passou por elas quando ainda estavam
+    # vazias. `data_atualizacao` e o unico campo que reflete o anexo novo.
+    try:
+        for d in (db.collection("tarefas")
+                  .where(filter=_filtro("status", "==", STATUS_CONCLUIDO))
+                  .where(filter=_filtro("data_atualizacao", ">=", corte))
+                  .limit(LIMITE_TAREFAS).stream()):
+            por_id[d.id] = {**(d.to_dict() or {}), "id": d.id}
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Elevacao] Concluidas mexidas fora desta rodada ({exc}). Indice "
+              "composto (status, data_atualizacao) publicado?")
+        return list(por_id.values()), "indice_ausente"
+
     if len(concluidas) >= LIMITE_TAREFAS:
         print(f"[Elevacao] Mais de {LIMITE_TAREFAS} conclusoes desde {corte}; a "
               "rodada viu so uma parte.")
