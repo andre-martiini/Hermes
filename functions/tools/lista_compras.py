@@ -319,7 +319,7 @@ def criar(db, dados) -> dict:
     existente = _achar_por_nome(db, nome)
     if existente:
         item_id, atual, ref = existente
-        updates = _updates_informados(entrada, atual, incluir_nome=False)
+        updates = _updates_informados(_intencao_aditiva(entrada), atual, incluir_nome=False)
         if updates:
             ref.update(updates)
         final = {**atual, **updates}
@@ -359,6 +359,20 @@ def criar(db, dados) -> dict:
             f'"{nome}" criado e ja planejado.' if planejado
             else f'"{nome}" criado no cadastro, sem planejamento — nao aparece na tela de compras.'
         ),
+    }
+
+
+def _intencao_aditiva(entrada: dict) -> dict:
+    """Tira de `create` o poder de desmarcar o que ja existe.
+
+    `create` so acrescenta intencao: quem quer tirar do planejamento ou desfazer
+    uma compra chama `update`. Sem esta regra um chamador que preenche o payload
+    inteiro — e o card da web preenche, com `Geral`/`1`/`un` e flags falsas para
+    tudo que o copiloto omitiu — desplanejaria o item ao tentar cria-lo de novo.
+    """
+    return {
+        chave: valor for chave, valor in entrada.items()
+        if chave not in ("isPlanned", "isPurchased") or valor
     }
 
 
@@ -495,7 +509,12 @@ def importar_lote(db, texto, is_planned=True) -> dict:
     criados: list[str] = []
     ignorados: list[dict] = []
     vistos: set[str] = set()
-    planejados_agora = 0
+    # Tres destinos distintos para item que ja existia, porque o texto do
+    # `detalhe` tem de dizer o que de fato aconteceu com cada um: passou a
+    # planejado agora, ja estava planejado antes, ou segue fora do planejamento.
+    marcados_agora: list[str] = []
+    ja_planejados: list[str] = []
+    seguem_fora: list[str] = []
 
     for linha, nome, categoria in linhas:
         if not nome:
@@ -511,16 +530,21 @@ def importar_lote(db, texto, is_planned=True) -> dict:
         anterior = existentes.get(chave)
         if anterior:
             item_id, dados, ref = anterior
+            gravado = dados.get("nome") or nome
             ja_planejado = bool(dados.get("isPlanned"))
             planejado = ja_planejado or bool(is_planned)
-            if planejado and not ja_planejado:
+            if ja_planejado:
+                ja_planejados.append(gravado)
+            elif planejado:
                 lote.update(ref, {"isPlanned": True})
-            if planejado:
-                planejados_agora += 1
+                marcados_agora.append(gravado)
+            else:
+                seguem_fora.append(gravado)
             ignorados.append({
-                "nome": dados.get("nome") or nome,
+                "nome": gravado,
                 "motivo": MOTIVO_JA_EXISTE,
                 "item_id": item_id,
+                "ja_planejado": ja_planejado,
                 "planejado": planejado,
             })
             continue
@@ -535,11 +559,12 @@ def importar_lote(db, texto, is_planned=True) -> dict:
             "isPurchased": False,
         })
         criados.append(nome)
-        if is_planned:
-            planejados_agora += 1
 
     lote.commit()
 
+    planejados_agora = (
+        (len(criados) if is_planned else 0) + len(marcados_agora) + len(ja_planejados)
+    )
     return {
         "success": True,
         "created": criados,
@@ -548,17 +573,42 @@ def importar_lote(db, texto, is_planned=True) -> dict:
         "total_ignorados": len(ignorados),
         "planejados": planejados_agora,
         "isPlanned": bool(is_planned),
-        "detalhe": _detalhe_importacao(criados, ignorados, planejados_agora, bool(is_planned)),
+        "detalhe": _detalhe_importacao(
+            criados, marcados_agora, ja_planejados, seguem_fora,
+            ignorados, planejados_agora, bool(is_planned),
+        ),
     }
 
 
-def _detalhe_importacao(criados, ignorados, planejados, is_planned) -> str:
-    partes = [f"{len(criados)} item(ns) criado(s)"]
-    ja_existiam = [i for i in ignorados if i["motivo"] == MOTIVO_JA_EXISTE]
-    if ja_existiam:
-        nomes = ", ".join(str(i["nome"]) for i in ja_existiam)
-        marcados = " e foi(ram) marcado(s) como planejado(s)" if is_planned else ""
-        partes.append(f"{len(ja_existiam)} ja estava(m) na lista ({nomes}){marcados}")
+def _detalhe_importacao(
+    criados, marcados_agora, ja_planejados, seguem_fora, ignorados, planejados, is_planned
+) -> str:
+    """Texto para o assistente repassar na hora.
+
+    Cada trecho sai do que aconteceu de fato, nunca do flag do pedido: importar
+    com `isPlanned: false` uma lista cujos itens ja estavam planejados nao pode
+    dizer que nada esta planejado, e item que ja estava planejado nao foi
+    "marcado" por esta importacao.
+    """
+    partes = [
+        f"{len(criados)} item(ns) criado(s)"
+        + (" e ja planejado(s)" if criados and is_planned else " so no cadastro" if criados else "")
+    ]
+    if marcados_agora:
+        partes.append(
+            f"{len(marcados_agora)} ja existia(m) e passou(aram) a planejado(s) "
+            f"({', '.join(marcados_agora)})"
+        )
+    if ja_planejados:
+        partes.append(
+            f"{len(ja_planejados)} ja estava(m) na lista e ja planejado(s) "
+            f"({', '.join(ja_planejados)})"
+        )
+    if seguem_fora:
+        partes.append(
+            f"{len(seguem_fora)} ja estava(m) no cadastro e segue(m) sem planejamento "
+            f"({', '.join(seguem_fora)})"
+        )
     duplicados = [i for i in ignorados if i["motivo"] == MOTIVO_DUPLICADO_NO_TEXTO]
     if duplicados:
         partes.append(f"{len(duplicados)} repetido(s) no proprio texto")
@@ -567,8 +617,8 @@ def _detalhe_importacao(criados, ignorados, planejados, is_planned) -> str:
         partes.append(f"{len(vazios)} linha(s) sem nome")
     fecho = (
         f"{planejados} item(ns) desta importacao estao planejados e aparecem na tela de compras."
-        if is_planned
-        else "Nada foi planejado: os itens entraram so no cadastro e nao aparecem na tela de compras."
+        if planejados
+        else "Nenhum item desta importacao esta planejado: nada aparece na tela de compras."
     )
     return "; ".join(partes) + ". " + fecho
 

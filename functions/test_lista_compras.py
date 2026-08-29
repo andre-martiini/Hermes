@@ -204,7 +204,7 @@ class TestImportacao(unittest.TestCase):
         r = lc.mutar(db, "import_batch", {"importText": "manteiga", "isPlanned": False})
         self.assertEqual(_nomes_planejados(db), [])
         self.assertEqual(r["planejados"], 0)
-        self.assertIn("nao aparecem na tela", r["detalhe"])
+        self.assertIn("nada aparece na tela de compras", r["detalhe"])
 
     def test_categoria_depois_da_barra(self):
         db = _db_com()
@@ -248,6 +248,34 @@ class TestImportacao(unittest.TestCase):
         col.dados["id1"].update({"isPlanned": True, "isPurchased": True})
         lc.mutar(db, "import_batch", {"importText": "manteiga"})
         self.assertTrue(col.dados["id1"]["isPurchased"])
+
+    def test_detalhe_nao_nega_planejamento_que_existe(self):
+        """`isPlanned: false` sobre item ja planejado nao deixa a tela vazia — nem o texto pode dizer que sim."""
+        db = _db_com("manteiga", planejados=True)
+        r = lc.mutar(db, "import_batch", {"importText": "manteiga", "isPlanned": False})
+        self.assertEqual(r["planejados"], 1)
+        self.assertNotIn("Nenhum item desta importacao esta planejado", r["detalhe"])
+        self.assertIn("1 item(ns) desta importacao estao planejados", r["detalhe"])
+
+    def test_detalhe_nao_diz_que_marcou_o_que_ja_estava_marcado(self):
+        db = _db_com("manteiga", planejados=True)
+        r = lc.mutar(db, "import_batch", {"importText": "manteiga"})
+        self.assertIn("ja planejado(s)", r["detalhe"])
+        self.assertNotIn("passou(aram) a planejado", r["detalhe"])
+        self.assertTrue(r["ignorados"][0]["ja_planejado"])
+
+    def test_detalhe_separa_quem_passou_a_planejado_agora(self):
+        db = _db_com("manteiga", "queijo")
+        db.collection(lc.COLECAO).dados["id2"]["isPlanned"] = True
+        r = lc.mutar(db, "import_batch", {"importText": "manteiga\nqueijo"})
+        self.assertIn("1 ja existia(m) e passou(aram) a planejado(s) (manteiga)", r["detalhe"])
+        self.assertIn("1 ja estava(m) na lista e ja planejado(s) (queijo)", r["detalhe"])
+
+    def test_detalhe_aponta_quem_ficou_fora_do_planejamento(self):
+        db = _db_com("manteiga")
+        r = lc.mutar(db, "import_batch", {"importText": "manteiga", "isPlanned": False})
+        self.assertIn("segue(m) sem planejamento (manteiga)", r["detalhe"])
+        self.assertIn("Nenhum item desta importacao esta planejado", r["detalhe"])
 
     def test_acima_do_limite_do_batch_grava_tudo(self):
         """Firestore recusa mais de 500 escritas por commit."""
@@ -317,6 +345,40 @@ class TestCriarComNomeExistente(unittest.TestCase):
         db = _db_com()
         r = lc.mutar(db, "create", {"nome": "muçarela"})
         self.assertIn("nao aparece na tela de compras", r["detalhe"])
+
+    def test_create_nunca_desmarca_o_que_ja_existe(self):
+        """`create` so acrescenta intencao; tirar do planejamento e trabalho de `update`.
+
+        O card da web monta o payload inteiro, preenchendo com `Geral`/`1`/`un` e
+        flags falsas tudo que o copiloto omitiu. Sem esta regra, "cria manteiga"
+        desplanejava a manteiga que ja estava na lista.
+        """
+        db = _db_com("manteiga", planejados=True)
+        db.collection(lc.COLECAO).dados["id1"]["isPurchased"] = True
+        lc.mutar(db, "create", {"nome": "manteiga", "isPlanned": False, "isPurchased": False})
+        item = lc.consultar(db)["itens"][0]
+        self.assertEqual((item["isPlanned"], item["isPurchased"]), (True, True))
+
+    def test_payload_do_card_da_web_nao_apaga_o_que_o_usuario_ajustou(self):
+        """Regressao do que o card enviava: defaults de UI em todos os campos."""
+        db = _db_com("manteiga")
+        db.collection(lc.COLECAO).dados["id1"].update({
+            "categoria": "Frios", "quantidade": "3", "unit": "kg", "isPlanned": True,
+        })
+        # O card so manda um campo quando o copiloto informou aquele campo.
+        lc.mutar(db, "create", {"action": "create", "nome": "manteiga"})
+        self.assertEqual(
+            db.collection(lc.COLECAO).dados["id1"],
+            {"nome": "manteiga", "categoria": "Frios", "quantidade": "3",
+             "unit": "kg", "isPlanned": True, "isPurchased": False},
+        )
+
+    def test_campo_informado_de_fato_ainda_e_aplicado(self):
+        db = _db_com("manteiga")
+        db.collection(lc.COLECAO).dados["id1"]["quantidade"] = "3"
+        r = lc.mutar(db, "create", {"nome": "manteiga", "quantidade": "5", "isPlanned": True})
+        self.assertEqual(sorted(r["atualizado"]), ["isPlanned", "quantidade"])
+        self.assertEqual(db.collection(lc.COLECAO).dados["id1"]["quantidade"], "5")
 
     def test_nome_vazio_continua_recusado(self):
         with self.assertRaises(lc.ListaComprasError) as ctx:

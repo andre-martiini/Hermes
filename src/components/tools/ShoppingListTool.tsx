@@ -379,27 +379,46 @@ export const ShoppingListTool = ({
       const nextUnit = String(unit || 'un').trim() || 'un';
       const nextIsPlanned = Boolean(isPlanned);
       const nextIsPurchased = Boolean(isPurchased);
+      const jaCadastrado = items.find(item => normalizeShoppingText(item.nome) === normalizeShoppingText(nextNome));
       return {
         title: 'Criacao de item proposta',
-        description: nextNome ? `O item "${nextNome}" sera criado na lista.` : 'Falta o nome do item para criar.',
-        lines: [
-          `Nome: ${nextNome || 'Nao informado'}`,
-          `Categoria: ${nextCategoria}`,
-          `Quantidade: ${nextQuantidade}`,
-          `Unidade: ${nextUnit}`,
-          `Planejado: ${nextIsPlanned ? 'Sim' : 'Nao'}`,
-          `Comprado: ${nextIsPurchased ? 'Sim' : 'Nao'}`,
-          ...(typeof ordem === 'number' ? [`Ordem: ${ordem}`] : []),
-        ],
+        description: !nextNome
+          ? 'Falta o nome do item para criar.'
+          : jaCadastrado
+            ? `"${jaCadastrado.nome}" ja esta no cadastro: em vez de duplicar, o item atual recebe o que o copiloto informou.`
+            : `O item "${nextNome}" sera criado na lista.`,
+        lines: jaCadastrado
+          ? [
+              `Nome: ${jaCadastrado.nome}`,
+              ...(categoria !== undefined ? [`Categoria: ${jaCadastrado.categoria} -> ${nextCategoria}`] : []),
+              ...(quantidade !== undefined ? [`Quantidade: ${jaCadastrado.quantidade} -> ${nextQuantidade}`] : []),
+              ...(unit !== undefined ? [`Unidade: ${jaCadastrado.unit} -> ${nextUnit}`] : []),
+              ...(isPlanned !== undefined ? [`Planejado: ${jaCadastrado.isPlanned ? 'Sim' : 'Nao'} -> ${nextIsPlanned ? 'Sim' : 'Nao'}`] : []),
+              ...(isPurchased !== undefined ? [`Comprado: ${jaCadastrado.isPurchased ? 'Sim' : 'Nao'} -> ${nextIsPurchased ? 'Sim' : 'Nao'}`] : []),
+              ...(typeof ordem === 'number' ? [`Ordem: ${ordem}`] : []),
+            ]
+          : [
+              `Nome: ${nextNome || 'Nao informado'}`,
+              `Categoria: ${nextCategoria}`,
+              `Quantidade: ${nextQuantidade}`,
+              `Unidade: ${nextUnit}`,
+              `Planejado: ${nextIsPlanned ? 'Sim' : 'Nao'}`,
+              `Comprado: ${nextIsPurchased ? 'Sim' : 'Nao'}`,
+              ...(typeof ordem === 'number' ? [`Ordem: ${ordem}`] : []),
+            ],
         action: assistantAction,
+        // So vai no payload o que o copiloto informou de fato. Nome ja
+        // cadastrado reaproveita o item existente, e mandar o default da UI
+        // apagaria a categoria, a quantidade ou a unidade que o usuario ajustou
+        // na tela. Para item novo os mesmos defaults sao aplicados no servidor.
         payload: {
           action: 'create',
           nome: nextNome,
-          categoria: nextCategoria,
-          quantidade: nextQuantidade,
-          unit: nextUnit,
-          isPlanned: nextIsPlanned,
-          isPurchased: nextIsPurchased,
+          ...(categoria !== undefined ? { categoria: nextCategoria } : {}),
+          ...(quantidade !== undefined ? { quantidade: nextQuantidade } : {}),
+          ...(unit !== undefined ? { unit: nextUnit } : {}),
+          ...(isPlanned !== undefined ? { isPlanned: nextIsPlanned } : {}),
+          ...(isPurchased !== undefined ? { isPurchased: nextIsPurchased } : {}),
           ...(typeof ordem === 'number' ? { ordem } : {}),
         },
       };
