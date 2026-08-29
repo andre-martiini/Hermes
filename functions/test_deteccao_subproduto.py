@@ -254,6 +254,137 @@ class TestAPropostaDaIA(unittest.TestCase):
         self.assertEqual(self._validar(custo_estimado="")["custo_estimado"], "nao estimado")
 
 
+class TestAJanelaDasConclusoes(unittest.TestCase):
+    """De quando contar as conclusoes, e por que nao e uma janela fixa.
+
+    Janela fixa a partir de hoje perde o intervalo inteiro quando uma varredura
+    falha ou e pulada — e perde em silencio, que e o pior jeito de perder.
+    Ancorada na ultima bem-sucedida, ela cresce sozinha para cobrir o buraco.
+    """
+
+    def test_ancora_na_ultima_varredura_e_nao_em_hoje_menos_sete(self):
+        corte, motivo = ds.janela_de_conclusao("2026-08-23", "2026-08-30")
+        self.assertEqual(corte, "2026-08-23")
+        self.assertEqual(motivo, "")
+
+    def test_varredura_pulada_faz_a_janela_crescer(self):
+        """O caso que motiva tudo: domingo falhou, o domingo seguinte tem de cobrir os dois."""
+        corte, _ = ds.janela_de_conclusao("2026-08-16", "2026-08-30")
+        self.assertEqual(corte, "2026-08-16")
+
+    def test_sem_marcador_o_teto_de_dias_segura_o_passivo(self):
+        """Primeira rodada nao pode significar "desde sempre"."""
+        corte, motivo = ds.janela_de_conclusao("", "2026-08-30")
+        self.assertEqual(corte, "2026-08-23")
+        self.assertEqual(motivo, "sem_marcador")
+
+    def test_o_corte_por_falta_de_marcador_e_dito_e_nao_silencioso(self):
+        """Perder conclusoes pode ser aceitavel; perder sem avisar nao e."""
+        self.assertTrue(ds.janela_de_conclusao(None, "2026-08-30")[1])
+
+    def test_a_hora_do_marcador_nao_atrapalha_a_comparacao(self):
+        corte, _ = ds.janela_de_conclusao("2026-08-23T18:00:00Z", "2026-08-30")
+        self.assertEqual(corte, "2026-08-23")
+
+
+class TestOMarcadorSoAvancaQuandoOlhou(unittest.TestCase):
+    """Marcador avancado sem olhar apaga o intervalo para sempre.
+
+    E o mesmo defeito que a janela ancorada existe para evitar, so que pela
+    outra ponta: se "semana cheia" avancasse o marcador, as conclusoes daquela
+    semana nunca mais seriam candidatas.
+    """
+
+    def test_o_marcador_volta_do_firestore(self):
+        db = _Db()
+        ds.marcar_varredura(db, "2026-08-30")
+        self.assertEqual(ds.ultima_varredura(db), "2026-08-30")
+
+    def test_marcador_ausente_e_vazio_e_nao_erro(self):
+        self.assertEqual(ds.ultima_varredura(_Db()), "")
+
+    def test_falha_de_leitura_cai_no_teto_e_nao_no_passivo(self):
+        """Vazio e o lado seguro: olhar de menos repete no domingo seguinte."""
+        class _DbQuebrado:
+            def collection(self, _n):
+                raise RuntimeError("indisponivel")
+        self.assertEqual(ds.ultima_varredura(_DbQuebrado()), "")
+
+    def test_semana_cheia_nao_marca_que_olhou(self):
+        """`rodar_deteccao` so avanca o marcador com `olhou`; aqui ele nao vem."""
+        db = _Db()
+        cheia = [{"data": HOJE, "total": ds.SEMANA_CHEIA_ACOES + 1}]
+        rodada = ds.preparar_rodada(db, HOJE, cheia)
+        self.assertFalse(rodada["rodar"])
+        self.assertFalse(rodada.get("olhou"))
+
+    def test_nenhuma_acao_com_corpo_avanca_porque_olhou(self):
+        """Olhou e nao achou: nada foi perdido, entao a janela nao precisa crescer."""
+        db = _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        rodada = ds.preparar_rodada(db, HOJE, [])
+        self.assertEqual(rodada["motivo"], "nenhuma_acao_com_corpo")
+        self.assertTrue(rodada["olhou"])
+
+
+class TestAsConcluidasEntramNaVarredura(unittest.TestCase):
+    """O caso que sumia era o melhor: acao terminada na semana e a que com mais
+    certeza deixou documento, diario e etapas prontas. O docstring de
+    `candidatas` sempre disse que conclusao nao filtra; a consulta a removia
+    antes de ela ser chamada.
+    """
+
+    @staticmethod
+    def _db_com(*tarefas):
+        db = _Db()
+        for i, t in enumerate(tarefas):
+            db.collection("tarefas").dados[t.get("id") or f"t{i}"] = t
+        return db
+
+    def test_concluida_dentro_da_janela_entra(self):
+        db = self._db_com({"id": "a", "status": "concluído",
+                           "data_conclusao": "2026-08-28T10:00:00Z"})
+        self.assertEqual([t["id"] for t in ds._tarefas_da_varredura(db, "2026-08-23")], ["a"])
+
+    def test_concluida_antes_do_corte_fica_de_fora(self):
+        db = self._db_com({"id": "a", "status": "concluído",
+                           "data_conclusao": "2026-08-01"})
+        self.assertEqual(ds._tarefas_da_varredura(db, "2026-08-23"), [])
+
+    def test_concluida_sem_data_e_passivo_e_nao_regressao(self):
+        db = self._db_com({"id": "a", "status": "concluído"})
+        self.assertEqual(ds._tarefas_da_varredura(db, "2026-08-23"), [])
+
+    def test_as_vivas_continuam_entrando(self):
+        db = self._db_com({"id": "viva", "status": "em andamento"},
+                          {"id": "parada", "status": "stand-by"},
+                          {"id": "velha", "status": "concluído",
+                           "data_conclusao": "2020-01-01"})
+        self.assertEqual(sorted(t["id"] for t in ds._tarefas_da_varredura(db, "2026-08-23")),
+                         ["parada", "viva"])
+
+    def test_cancelada_nunca_entra(self):
+        db = self._db_com({"id": "a", "status": "cancelada",
+                           "data_conclusao": "2026-08-28"})
+        self.assertEqual(ds._tarefas_da_varredura(db, "2026-08-23"), [])
+
+    def test_sem_o_indice_a_rodada_segue_com_as_vivas(self):
+        """Perder as concluidas numa rodada e melhor que perder a rodada."""
+        class _ColQuebrada(_Colecao):
+            def where(self, *a, **kw):
+                f = kw.get("filter")
+                if f is not None and f.field_path == "data_conclusao":
+                    raise RuntimeError("indice ausente")
+                return super().where(*a, **kw)
+
+        db = _Db()
+        db.cols["tarefas"] = _ColQuebrada()
+        db.cols["tarefas"].dados["viva"] = {"id": "viva", "status": "em andamento"}
+        self.assertEqual([t["id"] for t in ds._tarefas_da_varredura(db, "2026-08-23")], ["viva"])
+
+
 class _Snap:
     def __init__(self, col, doc_id):
         self._col, self.id = col, doc_id
@@ -268,8 +399,11 @@ class _Ref:
         self._col, self.id = col, doc_id
         self._subcols = {}
 
-    def set(self, dados):
-        self._col[self.id] = dict(dados)
+    def set(self, dados, merge=False):
+        if merge:
+            self._col.setdefault(self.id, {}).update(dados)
+        else:
+            self._col[self.id] = dict(dados)
 
     def get(self, transaction=None):
         return _Snap(self._col, self.id)

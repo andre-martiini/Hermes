@@ -71,7 +71,17 @@ SEMANA_CHEIA_ACOES = int(os.environ.get("ELEVACAO_SEMANA_CHEIA", "25"))
 CORPO_MIN_CARACTERES_DIARIO = int(os.environ.get("ELEVACAO_MIN_DIARIO", "1200"))
 CORPO_MIN_ETAPAS_FEITAS = int(os.environ.get("ELEVACAO_MIN_ETAPAS", "3"))
 
+# Quantos dias a varredura olha para tras quando nao ha varredura anterior
+# registrada. O normal e olhar desde a ultima bem-sucedida; este e o teto do
+# caso sem marcador. Existe para o PASSIVO — tudo que ja foi concluido antes
+# deste recurso subir — nao entrar pela porta semanal: isso e decisao separada,
+# que depende de volume.
+DIAS_TETO_VARREDURA = int(os.environ.get("ELEVACAO_DIAS_VARREDURA", "7"))
+
 MOTIVOS_ESCASSEZ = ("repetivel", "raro", "ja_escrito")
+
+# Com acento, que e como o status e gravado e normalizado em todos os caminhos.
+STATUS_CONCLUIDO = "concluído"
 
 MODELO = os.environ.get("ELEVACAO_MODEL", "claude-fable-5")
 MODELO_FALLBACK = os.environ.get("ELEVACAO_FALLBACK_MODEL", "claude-opus-4-8")
@@ -397,6 +407,70 @@ _SCHEMA_PROPOSTA = {
 }
 
 
+def _dias_antes(hoje: str, dias: int) -> str:
+    from datetime import date, timedelta
+
+    ano, mes, dia = (int(x) for x in str(hoje)[:10].split("-"))
+    return (date(ano, mes, dia) - timedelta(days=dias)).isoformat()
+
+
+def janela_de_conclusao(ultima_varredura, hoje: str) -> tuple[str, str]:
+    """De quando contar as conclusoes, e por que o corte esta onde esta.
+
+    A ancora e a ultima varredura bem-sucedida, e nao uma janela fixa a partir de
+    hoje. A diferenca aparece quando uma varredura falha ou e pulada: com janela
+    fixa de 7 dias, a rodada seguinte olha so os ultimos 7 dias e o intervalo
+    perdido some — e some em silencio, que e o pior jeito de perder. Ancorada na
+    ultima bem-sucedida, a janela cresce sozinha para cobrir o buraco.
+
+    O teto de `DIAS_TETO_VARREDURA` vale para o caso em que NAO ha varredura
+    anterior registrada — primeira rodada, ou marcador perdido. Ali "desde a
+    ultima" significaria "desde sempre", e o passivo inteiro entraria pela porta
+    semanal. O passivo e uma decisao separada, que depende de volume.
+
+    Devolve `(corte, motivo)`. `motivo` e "" quando a ancora e a varredura
+    anterior, e "sem_marcador" quando o teto foi usado por falta dela — quem
+    chama registra isso, porque um corte que ninguem ve e exatamente o que esta
+    funcao existe para evitar.
+    """
+    if not ultima_varredura:
+        return _dias_antes(hoje, DIAS_TETO_VARREDURA), "sem_marcador"
+    return str(ultima_varredura)[:10], ""
+
+
+def _marcador_de_varredura(db):
+    return db.collection("system_usage").document(COL_ELEVACOES)
+
+
+def ultima_varredura(db) -> str:
+    """A data da ultima varredura que chegou a olhar as candidatas.
+
+    Falha de leitura devolve vazio, e vazio cai no teto de dias — o lado seguro:
+    olhar de menos repete no domingo seguinte, olhar de mais traria o passivo
+    inteiro numa rodada que ninguem pediu.
+    """
+    try:
+        snap = _marcador_de_varredura(db).get()
+        return str((snap.to_dict() or {}).get("ultima_varredura") or "") if snap.exists else ""
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Elevacao] Falha ao ler o marcador de varredura: {exc}")
+        return ""
+
+
+def marcar_varredura(db, hoje: str) -> None:
+    """Avanca o marcador — so quando a rodada de fato olhou as candidatas.
+
+    Uma rodada que parou antes disso (historico indisponivel, semana cheia, teto
+    do mes) nao viu conclusao nenhuma; avancar o marcador ali apagaria a semana
+    para sempre. E o que a rodada nao olhou tem de continuar elegivel.
+    """
+    try:
+        _marcador_de_varredura(db).set(
+            {"ultima_varredura": str(hoje)[:10]}, merge=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Elevacao] Falha ao gravar o marcador de varredura: {exc}")
+
+
 def _filtro(campo: str, op: str, valor):
     """`FieldFilter` num lugar so, para o filtro morar na consulta e nao no `for`.
 
@@ -531,6 +605,46 @@ def _carregar_sugestoes(db, hoje: str) -> list[dict]:
         raise HistoricoIndisponivel(str(exc)) from exc
 
 
+def _tarefas_da_varredura(db, corte: str) -> list[dict]:
+    """As acoes vivas mais as concluidas desde o corte.
+
+    As concluidas precisam entrar. O docstring de `candidatas` sempre disse que
+    conclusao nao filtra — "o momento certo e quando a acao ganha corpo" — mas a
+    consulta as removia antes de ela ser chamada, e o caso perdido era o melhor
+    de todos: acao terminada na semana e a que com mais certeza deixou documento,
+    diario e etapas prontas.
+
+    Sao duas consultas porque `status in [...] OR (status == concluido AND
+    data_conclusao >= corte)` nao existe no Firestore. A segunda depende do
+    indice composto (`status`, `data_conclusao`) declarado em
+    `firestore.indexes.json` — se ele nao estiver publicado, a consulta levanta e
+    a varredura segue so com as vivas, avisando: e melhor perder as concluidas
+    numa rodada do que a rodada inteira.
+
+    `data_conclusao` e gravado como ISO nos quatro caminhos que concluem acao
+    (index.tsx no web, confirmarEdicaoAcao e confirmarEdicaoEmLote no backend, e
+    a callable do Telegram), entao a comparacao lexicografica com um corte
+    `AAAA-MM-DD` vale tanto para "2026-08-22" quanto para
+    "2026-08-22T10:00:00Z". Acao antiga sem o campo simplesmente nao casa — e
+    passivo, nao regressao.
+    """
+    por_id = {}
+    for d in (db.collection("tarefas")
+              .where(filter=_filtro("status", "in", ["em andamento", "stand-by"]))
+              .limit(150).stream()):
+        por_id[d.id] = {**(d.to_dict() or {}), "id": d.id}
+    try:
+        for d in (db.collection("tarefas")
+                  .where(filter=_filtro("status", "==", STATUS_CONCLUIDO))
+                  .where(filter=_filtro("data_conclusao", ">=", corte))
+                  .limit(150).stream()):
+            por_id[d.id] = {**(d.to_dict() or {}), "id": d.id}
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Elevacao] Concluidas fora desta rodada ({exc}). Indice composto "
+              "(status, data_conclusao) publicado?")
+    return list(por_id.values())
+
+
 def preparar_rodada(db, hoje: str, carga_semana) -> dict:
     """Tudo que se decide sem IA: se vale rodar, e sobre o que.
 
@@ -554,14 +668,17 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
     if not objetivos:
         return {"rodar": False, "motivo": "nenhum_objetivo_elegivel"}
 
-    tarefas = [
-        {**(d.to_dict() or {}), "id": d.id}
-        for d in db.collection("tarefas")
-        .where("status", "in", ["em andamento", "stand-by"]).limit(150).stream()
-    ]
+    corte, motivo_do_corte = janela_de_conclusao(ultima_varredura(db), hoje)
+    if motivo_do_corte:
+        print(f"[Elevacao] Sem marcador de varredura anterior; conclusoes contadas "
+              f"a partir de {corte} ({DIAS_TETO_VARREDURA} dias). O que foi "
+              f"concluido antes disso e passivo, e nao entra por aqui.")
+    tarefas = _tarefas_da_varredura(db, corte)
     candidatos = candidatas(tarefas, acoes_ja_decididas(sugestoes), hoje)
     if not candidatos:
-        return {"rodar": False, "motivo": "nenhuma_acao_com_corpo"}
+        # Olhou e nao achou: a varredura cumpriu o papel, entao o marcador avanca.
+        # Nao avancar aqui faria a janela crescer sem parar num sistema saudavel.
+        return {"rodar": False, "motivo": "nenhuma_acao_com_corpo", "olhou": True}
 
     return {
         "rodar": True,
@@ -569,6 +686,7 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
         "ja_no_mes": elevacoes_do_mes(sugestoes, hoje),
         "objetivos": objetivos,
         "candidatos": candidatos,
+        "corte_conclusao": corte,
     }
 
 
@@ -649,6 +767,12 @@ def rodar_deteccao(db, hoje: str, carga_semana, claude_key: str) -> dict:
 
     rodada = preparar_rodada(db, hoje, carga_semana)
     if not rodada["rodar"]:
+        # O marcador so avanca quando a rodada chegou a olhar as candidatas.
+        # "Semana cheia" e "teto do mes" nao olharam nada: avancar ali apagaria
+        # em silencio as conclusoes daquele intervalo, que e o modo de perda que
+        # a janela ancorada existe para impedir.
+        if rodada.get("olhou"):
+            marcar_varredura(db, hoje)
         print(f"[Elevacao] Nada a fazer hoje: {rodada.get('motivo')}")
         return {"rodou": False, "motivo": rodada.get("motivo")}
 
@@ -670,11 +794,17 @@ def rodar_deteccao(db, hoje: str, carga_semana, claude_key: str) -> dict:
         )
     except Exception as exc:
         print(f"[Elevacao] Falha na chamada ao modelo: {exc}")
+        # Sem avancar o marcador: as candidatas desta rodada nao foram julgadas,
+        # e tem de continuar elegiveis na proxima.
         return {"rodou": False, "motivo": "falha_no_modelo"}
 
+    marcar_varredura(db, hoje)
     print(f"[Elevacao] Rodada concluida. propostas={len(aceitas)} "
-          f"candidatas={len(rodada['candidatos'])} resumo={resultado['text'][:200]!r}")
-    return {"rodou": True, "propostas": aceitas, "candidatas": len(rodada["candidatos"])}
+          f"candidatas={len(rodada['candidatos'])} "
+          f"conclusoes_desde={rodada.get('corte_conclusao')} "
+          f"resumo={resultado['text'][:200]!r}")
+    return {"rodou": True, "propostas": aceitas,
+            "candidatas": len(rodada["candidatos"])}
 
 
 # ---------------------------------------------------------------------------
