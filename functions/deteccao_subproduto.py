@@ -83,6 +83,11 @@ MOTIVOS_ESCASSEZ = ("repetivel", "raro", "ja_escrito")
 # Com acento, que e como o status e gravado e normalizado em todos os caminhos.
 STATUS_CONCLUIDO = "concluído"
 
+# Teto de documentos por consulta da varredura. Quando o de concluidas bate no
+# teto, a rodada nao viu tudo que havia na janela — e o marcador nao pode avancar
+# por cima do que ela nao viu.
+LIMITE_TAREFAS = int(os.environ.get("ELEVACAO_LIMITE_TAREFAS", "150"))
+
 MODELO = os.environ.get("ELEVACAO_MODEL", "claude-fable-5")
 MODELO_FALLBACK = os.environ.get("ELEVACAO_FALLBACK_MODEL", "claude-opus-4-8")
 MAX_TOKENS = int(os.environ.get("ELEVACAO_MAX_TOKENS", "2048"))
@@ -442,27 +447,43 @@ def _marcador_de_varredura(db):
     return db.collection("system_usage").document(COL_ELEVACOES)
 
 
+class MarcadorIndisponivel(Exception):
+    """O marcador da varredura nao pode ser lido agora."""
+
+
 def ultima_varredura(db) -> str:
     """A data da ultima varredura que chegou a olhar as candidatas.
 
-    Falha de leitura devolve vazio, e vazio cai no teto de dias — o lado seguro:
-    olhar de menos repete no domingo seguinte, olhar de mais traria o passivo
-    inteiro numa rodada que ninguem pediu.
+    Documento ausente devolve vazio; falha de LEITURA levanta. A diferenca e o
+    que separa duas situacoes que parecem iguais e nao sao: sem marcador, a
+    janela cai no teto de dias e nao ha nada anterior a perder; com marcador
+    ilegivel, a janela tambem cairia no teto — mas ai existe um intervalo real
+    entre o marcador verdadeiro e o teto, e a rodada terminaria gravando hoje por
+    cima dele, descartando aquelas conclusoes para sempre.
+
+    Vazio nao e "o lado seguro" enquanto o marcador avanca no fim da rodada. Ou a
+    leitura vale, ou a rodada nao acontece.
     """
     try:
         snap = _marcador_de_varredura(db).get()
-        return str((snap.to_dict() or {}).get("ultima_varredura") or "") if snap.exists else ""
     except Exception as exc:  # noqa: BLE001
-        print(f"[Elevacao] Falha ao ler o marcador de varredura: {exc}")
-        return ""
+        raise MarcadorIndisponivel(str(exc)) from exc
+    return str((snap.to_dict() or {}).get("ultima_varredura") or "") if snap.exists else ""
 
 
 def marcar_varredura(db, hoje: str) -> None:
-    """Avanca o marcador — so quando a rodada de fato olhou as candidatas.
+    """Avanca o marcador — so quando a rodada avaliou a janela INTEIRA.
 
-    Uma rodada que parou antes disso (historico indisponivel, semana cheia, teto
-    do mes) nao viu conclusao nenhuma; avancar o marcador ali apagaria a semana
-    para sempre. E o que a rodada nao olhou tem de continuar elegivel.
+    "Ate aqui esta tudo avaliado" e o que o marcador significa, e por isso ele nao
+    avanca em nenhuma destas:
+
+    - a rodada parou antes de olhar candidata (historico ou marcador
+      indisponivel, semana cheia, teto do mes, nenhum objetivo elegivel);
+    - a consulta de concluidas falhou por falta do indice;
+    - havia mais conclusoes na janela do que o teto por consulta.
+
+    Nos tres, avancar apagaria conclusoes que ninguem avaliou — e apagaria de
+    forma definitiva, porque a janela seguinte comeca depois delas.
     """
     try:
         _marcador_de_varredura(db).set(
@@ -472,18 +493,21 @@ def marcar_varredura(db, hoje: str) -> None:
 
 
 def marcar_degradacao(db, hoje: str, motivo: str) -> None:
-    """Grava — ou limpa — o aviso de que a varredura rodou sem as concluidas.
+    """Grava — ou limpa — o aviso de que a varredura viu so parte da janela.
+
+    Dois motivos chegam aqui: `indice_ausente` (a consulta de concluidas
+    levantou) e `limite_atingido` (havia mais conclusoes do que o teto por
+    consulta). Os dois sao silenciosos — a varredura roda, nao levanta, e so ve
+    menos — e nos dois o marcador fica parado.
 
     E estado, nao evento: fica no documento ate uma varredura completa limpar.
     Vai para o resumo matinal porque e la que o usuario olha; morrer no log seria
-    o mesmo que nao avisar, e o modo degradado e silencioso por natureza — a
-    varredura roda, nao da erro, e so deixa de ver o melhor caso.
+    o mesmo que nao avisar.
     """
     try:
         _marcador_de_varredura(db).set(
             {"varredura_degradada": (
-                {"data": str(hoje)[:10], "motivo": "indice_ausente", "detalhe": motivo}
-                if motivo else None)},
+                {"data": str(hoje)[:10], "motivo": motivo} if motivo else None)},
             merge=True)
     except Exception as exc:  # noqa: BLE001
         print(f"[Elevacao] Falha ao gravar o estado da varredura: {exc}")
@@ -639,9 +663,17 @@ def _tarefas_da_varredura(db, corte: str) -> list[dict]:
     a varredura segue so com as vivas, avisando: e melhor perder as concluidas
     numa rodada do que a rodada inteira.
 
-    Devolve `(tarefas, degradacao)`. `degradacao` vazia e a rodada completa; com
-    texto, e o erro que tirou as concluidas — quem chama grava isso, porque um
-    modo degradado que so existe no log e um modo degradado que ninguem ve.
+    Devolve `(tarefas, incompleta)`. `incompleta` vazia significa que a rodada viu
+    TODA a janela; com valor, viu so uma parte, e diz qual e o motivo:
+
+    - `indice_ausente`: a consulta de concluidas levantou;
+    - `limite_atingido`: havia mais conclusoes na janela do que o teto por
+      consulta, entao sobrou coisa que esta rodada nao avaliou.
+
+    Nos dois casos o marcador NAO pode avancar: ele significa "ate aqui esta tudo
+    avaliado", e avancar por cima do que a rodada nao viu descarta aquelas
+    conclusoes para sempre. E os dois viram aviso, porque sao silenciosos —
+    a varredura roda, nao levanta, e so ve menos.
 
     `data_conclusao` e gravado como ISO nos quatro caminhos que concluem acao
     (index.tsx no web, confirmarEdicaoAcao e confirmarEdicaoEmLote no backend, e
@@ -653,18 +685,23 @@ def _tarefas_da_varredura(db, corte: str) -> list[dict]:
     por_id = {}
     for d in (db.collection("tarefas")
               .where(filter=_filtro("status", "in", ["em andamento", "stand-by"]))
-              .limit(150).stream()):
+              .limit(LIMITE_TAREFAS).stream()):
         por_id[d.id] = {**(d.to_dict() or {}), "id": d.id}
     try:
-        for d in (db.collection("tarefas")
-                  .where(filter=_filtro("status", "==", STATUS_CONCLUIDO))
-                  .where(filter=_filtro("data_conclusao", ">=", corte))
-                  .limit(150).stream()):
-            por_id[d.id] = {**(d.to_dict() or {}), "id": d.id}
+        concluidas = list(db.collection("tarefas")
+                          .where(filter=_filtro("status", "==", STATUS_CONCLUIDO))
+                          .where(filter=_filtro("data_conclusao", ">=", corte))
+                          .limit(LIMITE_TAREFAS).stream())
     except Exception as exc:  # noqa: BLE001
         print(f"[Elevacao] Concluidas fora desta rodada ({exc}). Indice composto "
               "(status, data_conclusao) publicado?")
-        return list(por_id.values()), str(exc)[:200]
+        return list(por_id.values()), "indice_ausente"
+    for d in concluidas:
+        por_id[d.id] = {**(d.to_dict() or {}), "id": d.id}
+    if len(concluidas) >= LIMITE_TAREFAS:
+        print(f"[Elevacao] Mais de {LIMITE_TAREFAS} conclusoes desde {corte}; a "
+              "rodada viu so uma parte.")
+        return list(por_id.values()), "limite_atingido"
     return list(por_id.values()), ""
 
 
@@ -691,18 +728,31 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
     if not objetivos:
         return {"rodar": False, "motivo": "nenhum_objetivo_elegivel"}
 
-    corte, motivo_do_corte = janela_de_conclusao(ultima_varredura(db), hoje)
+    try:
+        marcador = ultima_varredura(db)
+    except MarcadorIndisponivel as exc:
+        # Mesma logica do historico: sem saber onde a janela comeca, a rodada nao
+        # pode terminar gravando onde ela acaba.
+        print(f"[Elevacao] Marcador indisponivel, rodada abortada: {exc}")
+        return {"rodar": False, "motivo": "marcador_indisponivel"}
+
+    corte, motivo_do_corte = janela_de_conclusao(marcador, hoje)
     if motivo_do_corte:
         print(f"[Elevacao] Sem marcador de varredura anterior; conclusoes contadas "
               f"a partir de {corte} ({DIAS_TETO_VARREDURA} dias). O que foi "
               f"concluido antes disso e passivo, e nao entra por aqui.")
-    tarefas, degradacao = _tarefas_da_varredura(db, corte)
-    marcar_degradacao(db, hoje, degradacao)
+    tarefas, incompleta = _tarefas_da_varredura(db, corte)
+    marcar_degradacao(db, hoje, incompleta)
+    # O marcador significa "ate aqui esta tudo avaliado". Se a rodada viu so parte
+    # da janela, avancar apagaria o resto para sempre — inclusive depois de o
+    # indice ser publicado, que e o pior jeito de a correcao chegar tarde demais.
+    pode_marcar = not incompleta
     candidatos = candidatas(tarefas, acoes_ja_decididas(sugestoes), hoje)
     if not candidatos:
         # Olhou e nao achou: a varredura cumpriu o papel, entao o marcador avanca.
         # Nao avancar aqui faria a janela crescer sem parar num sistema saudavel.
-        return {"rodar": False, "motivo": "nenhuma_acao_com_corpo", "olhou": True}
+        return {"rodar": False, "motivo": "nenhuma_acao_com_corpo",
+                "pode_marcar": pode_marcar}
 
     return {
         "rodar": True,
@@ -711,6 +761,7 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
         "objetivos": objetivos,
         "candidatos": candidatos,
         "corte_conclusao": corte,
+        "pode_marcar": pode_marcar,
     }
 
 
@@ -795,7 +846,7 @@ def rodar_deteccao(db, hoje: str, carga_semana, claude_key: str) -> dict:
         # "Semana cheia" e "teto do mes" nao olharam nada: avancar ali apagaria
         # em silencio as conclusoes daquele intervalo, que e o modo de perda que
         # a janela ancorada existe para impedir.
-        if rodada.get("olhou"):
+        if rodada.get("pode_marcar"):
             marcar_varredura(db, hoje)
         print(f"[Elevacao] Nada a fazer hoje: {rodada.get('motivo')}")
         return {"rodou": False, "motivo": rodada.get("motivo")}
@@ -822,7 +873,8 @@ def rodar_deteccao(db, hoje: str, carga_semana, claude_key: str) -> dict:
         # e tem de continuar elegiveis na proxima.
         return {"rodou": False, "motivo": "falha_no_modelo"}
 
-    marcar_varredura(db, hoje)
+    if rodada.get("pode_marcar"):
+        marcar_varredura(db, hoje)
     print(f"[Elevacao] Rodada concluida. propostas={len(aceitas)} "
           f"candidatas={len(rodada['candidatos'])} "
           f"conclusoes_desde={rodada.get('corte_conclusao')} "

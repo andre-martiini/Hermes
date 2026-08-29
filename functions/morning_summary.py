@@ -414,6 +414,30 @@ def _fila(total: int, amostra: list, rota: str) -> dict:
     return {"total": total, "amostra": amostra[:AMOSTRA_FILA], "rota": rota}
 
 
+# Os dois jeitos de a varredura de elevações ver só parte da janela. Enquanto um
+# deles estiver gravado, o marcador fica parado — então o intervalo não se perde,
+# mas também não anda: é isso que estes avisos existem para tornar visível.
+_AVISOS_DE_VARREDURA = {
+    "indice_ausente": {
+        "titulo": "A varredura de elevações rodou sem as ações concluídas",
+        "detalhe": (
+            "Falta o índice composto `tarefas (status, data_conclusao)` no Firestore. "
+            "A varredura continua rodando com as ações em andamento, mas trabalho "
+            "concluído — que é o caso mais forte, porque é o que mais deixa documento "
+            "pronto — não vira sugestão até o índice ser publicado. Nada se perde: a "
+            "janela não avança enquanto isso."),
+    },
+    "limite_atingido": {
+        "titulo": "A varredura de elevações viu só parte do período",
+        "detalhe": (
+            "Há mais ações concluídas no período do que a varredura lê de uma vez. Ela "
+            "avaliou uma parte e não avançou a janela, então nada se perde — mas também "
+            "não anda sozinho: o acúmulo precisa de uma decisão sobre passar o passivo "
+            "de uma vez."),
+    },
+}
+
+
 def _coletar_avisos_do_sistema(db) -> list[dict]:
     """Coisas do proprio Hermes que pararam de funcionar direito.
 
@@ -430,16 +454,14 @@ def _coletar_avisos_do_sistema(db) -> list[dict]:
         print(f"[ResumoMatinal] Falha ao consultar o estado da varredura: {exc}")
         return avisos
 
-    if isinstance(degradada, dict) and degradada.get("motivo") == "indice_ausente":
+    motivo = degradada.get("motivo") if isinstance(degradada, dict) else None
+    texto = _AVISOS_DE_VARREDURA.get(motivo)
+    if texto:
         avisos.append({
-            "id": "elevacao_sem_indice",
+            "id": f"elevacao_{motivo}",
             "gravidade": "atencao",
-            "titulo": "A varredura de elevações rodou sem as ações concluídas",
-            "detalhe": (
-                "Falta o índice composto `tarefas (status, data_conclusao)` no Firestore. "
-                "A varredura continua rodando com as ações em andamento, mas trabalho "
-                "concluído na semana — que é o caso mais forte, porque é o que mais deixa "
-                "documento pronto — não vira sugestão até o índice ser publicado."),
+            "titulo": texto["titulo"],
+            "detalhe": texto["detalhe"],
             "desde": degradada.get("data"),
         })
     return avisos

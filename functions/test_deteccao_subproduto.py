@@ -303,20 +303,44 @@ class TestOMarcadorSoAvancaQuandoOlhou(unittest.TestCase):
     def test_marcador_ausente_e_vazio_e_nao_erro(self):
         self.assertEqual(ds.ultima_varredura(_Db()), "")
 
-    def test_falha_de_leitura_cai_no_teto_e_nao_no_passivo(self):
-        """Vazio e o lado seguro: olhar de menos repete no domingo seguinte."""
+    def test_falha_de_leitura_levanta_em_vez_de_virar_vazio(self):
+        """Ausente e ilegivel parecem iguais e nao sao.
+
+        Sem marcador nao ha intervalo anterior a perder. Com marcador ilegivel ha:
+        a janela cairia no teto de dias, a rodada terminaria gravando hoje, e tudo
+        entre o marcador verdadeiro e o teto sumiria para sempre.
+        """
         class _DbQuebrado:
             def collection(self, _n):
                 raise RuntimeError("indisponivel")
-        self.assertEqual(ds.ultima_varredura(_DbQuebrado()), "")
+        with self.assertRaises(ds.MarcadorIndisponivel):
+            ds.ultima_varredura(_DbQuebrado())
 
-    def test_semana_cheia_nao_marca_que_olhou(self):
-        """`rodar_deteccao` so avanca o marcador com `olhou`; aqui ele nao vem."""
+    def test_marcador_ilegivel_aborta_a_rodada(self):
+        class _DbQuebrado(_Db):
+            def collection(self, nome):
+                if nome == "system_usage":
+                    raise RuntimeError("indisponivel")
+                return super().collection(nome)
+
+        db = _DbQuebrado()
+        # Com objetivo elegivel, para a rodada chegar ate a leitura do marcador em
+        # vez de sair antes por falta de objetivo.
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        rodada = ds.preparar_rodada(db, HOJE, [])
+        self.assertFalse(rodada["rodar"])
+        self.assertEqual(rodada["motivo"], "marcador_indisponivel")
+        self.assertFalse(rodada.get("pode_marcar"))
+
+    def test_semana_cheia_nao_libera_o_marcador(self):
+        """`rodar_deteccao` so avanca com `pode_marcar`; aqui ele nao vem."""
         db = _Db()
         cheia = [{"data": HOJE, "total": ds.SEMANA_CHEIA_ACOES + 1}]
         rodada = ds.preparar_rodada(db, HOJE, cheia)
         self.assertFalse(rodada["rodar"])
-        self.assertFalse(rodada.get("olhou"))
+        self.assertFalse(rodada.get("pode_marcar"))
 
     def test_nenhuma_acao_com_corpo_avanca_porque_olhou(self):
         """Olhou e nao achou: nada foi perdido, entao a janela nao precisa crescer."""
@@ -326,7 +350,7 @@ class TestOMarcadorSoAvancaQuandoOlhou(unittest.TestCase):
             "gerida_por_acoes": True}
         rodada = ds.preparar_rodada(db, HOJE, [])
         self.assertEqual(rodada["motivo"], "nenhuma_acao_com_corpo")
-        self.assertTrue(rodada["olhou"])
+        self.assertTrue(rodada["pode_marcar"])
 
 
 class TestJanelaRelidaNaoRepeteCard(unittest.TestCase):
@@ -420,6 +444,24 @@ class TestOModoDegradadoNaoMorreNoLog(unittest.TestCase):
         ds.preparar_rodada(db, HOJE, [])
         self.assertIsNone(self._estado(db))
 
+    def test_rodada_degradada_nao_libera_o_marcador(self):
+        """O pior jeito de a correcao chegar tarde demais.
+
+        Sem isto, a rodada sem indice avancaria o marcador para hoje. Publicar o
+        indice depois nao adiantaria: a janela seguinte comeca depois das
+        conclusoes que a rodada degradada nunca viu, e elas somem para sempre.
+        """
+        db = self._db_sem_indice()
+        db.cols["tarefas"].dados["viva"] = _tarefa(
+            id="viva", status="em andamento", pool_dados=[_anexo("X.md")])
+        self.assertFalse(ds.preparar_rodada(db, HOJE, [])["pode_marcar"])
+
+    def test_degradada_sem_candidata_tambem_nao_libera(self):
+        """"Olhou e nao achou" so vale quando olhou a janela inteira."""
+        rodada = ds.preparar_rodada(self._db_sem_indice(), HOJE, [])
+        self.assertEqual(rodada["motivo"], "nenhuma_acao_com_corpo")
+        self.assertFalse(rodada["pode_marcar"])
+
     def test_o_aviso_nao_impede_a_rodada(self):
         """Perder as concluidas numa rodada e melhor que perder a rodada."""
         db = self._db_sem_indice()
@@ -427,6 +469,44 @@ class TestOModoDegradadoNaoMorreNoLog(unittest.TestCase):
             id="viva", status="em andamento", pool_dados=[_anexo("X.md")])
         rodada = ds.preparar_rodada(db, HOJE, [])
         self.assertTrue(rodada["rodar"])
+
+
+class TestJanelaMaiorQueOTetoDaConsulta(unittest.TestCase):
+    """Mais conclusoes na janela do que a consulta traz.
+
+    Acontece depois de varias varreduras puladas, ou num passivo grande. A rodada
+    avalia uma pagina e nada indica que havia mais — entao, se o marcador
+    avancasse, as conclusoes que sobraram ficariam fora de TODA janela futura.
+    """
+
+    def _db(self, quantas):
+        db = _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        for i in range(quantas):
+            db.collection("tarefas").dados[f"c{i}"] = _tarefa(
+                id=f"c{i}", status="concluído", data_conclusao="2026-08-28",
+                pool_dados=[_anexo("X.md")])
+        return db
+
+    def test_bater_no_teto_nao_libera_o_marcador(self):
+        db = self._db(ds.LIMITE_TAREFAS)
+        self.assertFalse(ds.preparar_rodada(db, HOJE, [])["pode_marcar"])
+
+    def test_abaixo_do_teto_libera(self):
+        db = self._db(3)
+        self.assertTrue(ds.preparar_rodada(db, HOJE, [])["pode_marcar"])
+
+    def test_o_truncamento_vira_aviso_e_nao_so_log(self):
+        db = self._db(ds.LIMITE_TAREFAS)
+        ds.preparar_rodada(db, HOJE, [])
+        estado = (ds._marcador_de_varredura(db).get().to_dict() or {}).get("varredura_degradada")
+        self.assertEqual(estado["motivo"], "limite_atingido")
+
+    def test_a_rodada_continua_com_o_que_deu_para_ver(self):
+        """Ver parte e melhor que nao ver nada; o que nao pode e dizer que viu tudo."""
+        self.assertTrue(ds.preparar_rodada(self._db(ds.LIMITE_TAREFAS), HOJE, [])["rodar"])
 
 
 class TestAsConcluidasEntramNaVarredura(unittest.TestCase):
