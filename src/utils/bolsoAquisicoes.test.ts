@@ -129,13 +129,15 @@ describe('empate de prioridade', () => {
         // levanta ValueError nos dois e cai para 99. `'2'` não serve de fixture
         // aqui: o JavaScript coage numericamente e os dois lados concordam.
         const metas = [
+            { id: 'nan', targetAmount: 600, priority: 'NaN' as any, status: 'active' },
             { id: 'vazio', targetAmount: 600, priority: '' as any, status: 'active' },
             { id: 'alta', targetAmount: 600, priority: 'alta' as any, status: 'active' },
+            { id: 'inf', targetAmount: 600, priority: 'Infinity' as any, status: 'active' },
             { id: 'nulo', targetAmount: 600, priority: null as any, status: 'active' },
             { id: 'um', targetAmount: 600, priority: 1, status: 'active' },
         ];
         expect(resumoDoBolso(metas, SETTINGS, []).metas.map(m => m.id))
-            .toEqual(['um', 'alta', 'nulo', 'vazio']);
+            .toEqual(['um', 'alta', 'inf', 'nan', 'nulo', 'vazio']);
     });
 
     it('prioridade ausente vai para o fim', () => {

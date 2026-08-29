@@ -99,9 +99,19 @@ def _ordem(meta: dict) -> tuple:
     exatamente assim que o desempate reintroduziu a divergencia que ele veio
     fechar. Ver `compararMetas` em `src/utils/bolsoAquisicoes.ts`.
     """
+    import math
+
     try:
         prioridade = float(meta.get("priority"))
     except (TypeError, ValueError):
+        prioridade = 99.0
+    # `float("NaN")` e `float("Infinity")` NAO levantam — passam pelo except e
+    # chegam aqui como nan e inf. Com nan a chave e incomparavel (toda comparacao
+    # da False) e a ordem final passa a depender da ordem de ENTRADA, que e
+    # exatamente o que o desempate existe para eliminar; com inf o item vai para
+    # depois do 99, enquanto o lado TypeScript rejeita os dois com
+    # `Number.isFinite` e usa 99. Sem esta linha, os dois lados discordam.
+    if not math.isfinite(prioridade):
         prioridade = 99.0
     return (prioridade, str(meta.get("id") or ""))
 

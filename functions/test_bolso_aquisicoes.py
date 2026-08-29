@@ -143,12 +143,15 @@ class TestEmpateDePrioridade(unittest.TestCase):
         com int derruba a tool inteira. `_ordem` coage e cai para 99; o sort de
         fora foi removido, e este teste fixa a razao de a ordenacao viver aqui.
         """
-        metas = [{"id": "vazio", "targetAmount": 600, "priority": "", "status": "active"},
+        metas = [{"id": "nan", "targetAmount": 600, "priority": "NaN", "status": "active"},
+                 {"id": "vazio", "targetAmount": 600, "priority": "", "status": "active"},
                  {"id": "alta", "targetAmount": 600, "priority": "alta", "status": "active"},
+                 {"id": "inf", "targetAmount": 600, "priority": "Infinity", "status": "active"},
                  {"id": "nulo", "targetAmount": 600, "priority": None, "status": "active"},
                  {"id": "um", "targetAmount": 600, "priority": 1, "status": "active"}]
         r = ba.resumo(metas, self.SETTINGS, [])
-        self.assertEqual([m["id"] for m in r["metas"]], ["um", "alta", "nulo", "vazio"])
+        self.assertEqual([m["id"] for m in r["metas"]],
+                         ["um", "alta", "inf", "nan", "nulo", "vazio"])
 
     def test_prioridade_ausente_vai_para_o_fim(self):
         metas = [{"id": "sem", "targetAmount": 600, "status": "active"},
