@@ -6040,8 +6040,15 @@ const App: React.FC = () => {
                   <FinanceView
                     transactions={financeTransactions}
                     goals={(() => {
+                      // Filtrado pelo mês em exibição. A assinatura de
+                      // `fixed_bills` é sem filtro (index.tsx:1249), então somar
+                      // tudo incluía a poupança de todos os meses já registrados
+                      // — e `consultar_financas_v2` consulta só o mês pedido, de
+                      // modo que a tela e o MCP discordariam pelo caminho que
+                      // este PR existe para fechar.
                       const totalSavings = fixedBills
-                        .filter(b => b.category === 'Poupança' && b.isPaid)
+                        .filter(b => b.month === currentMonth && b.year === currentYear
+                                     && b.category === 'Poupança' && b.isPaid)
                         .reduce((acc, curr) => acc + curr.amount, 0);
                       const emergencyCurrent = financeSettings.emergencyReserveCurrent || 0;
                       const isEmergencyFull = emergencyCurrent >= (financeSettings.emergencyReserveTarget || 0);
@@ -6064,8 +6071,15 @@ const App: React.FC = () => {
                       current: financeSettings.emergencyReserveCurrent || 0
                     }}
                     bolsoAquisicoes={(() => {
+                      // Filtrado pelo mês em exibição. A assinatura de
+                      // `fixed_bills` é sem filtro (index.tsx:1249), então somar
+                      // tudo incluía a poupança de todos os meses já registrados
+                      // — e `consultar_financas_v2` consulta só o mês pedido, de
+                      // modo que a tela e o MCP discordariam pelo caminho que
+                      // este PR existe para fechar.
                       const totalSavings = fixedBills
-                        .filter(b => b.category === 'Poupança' && b.isPaid)
+                        .filter(b => b.month === currentMonth && b.year === currentYear
+                                     && b.category === 'Poupança' && b.isPaid)
                         .reduce((acc, curr) => acc + curr.amount, 0);
                       const emergencyCurrent = financeSettings.emergencyReserveCurrent || 0;
                       const isEmergencyFull = emergencyCurrent >= (financeSettings.emergencyReserveTarget || 0);

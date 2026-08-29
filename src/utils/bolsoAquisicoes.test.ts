@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { bolso, resumoDoBolso } from './bolsoAquisicoes';
+import { bolso, resumoDoBolso, centavos } from './bolsoAquisicoes';
 
 /**
  * A MESMA fixture de `functions/test_bolso_aquisicoes.py`, com os números reais
@@ -69,6 +69,35 @@ describe('cobertura individual — os números que a tela já mostrava', () => {
             [{ id: 'x', targetAmount: 500, priority: 1, status: 'completed', currentAmount: 480 }],
             SETTINGS, CONTAS);
         expect(r.metas[0].currentAmount).toBe(480);
+    });
+});
+
+describe('dinheiro não é float', () => {
+    // Os MESMOS casos de `functions/test_bolso_aquisicoes.py`. Se um lado mudar
+    // de convenção, o outro quebra.
+
+    it('fronteira exata não vira "não cabe"', () => {
+        // 0,10 + 0,70 dá 0.7999999999999999 em float; a meta de 0,80 cabe.
+        const settings = { emergencyReserveCurrent: 0, emergencyReserveTarget: 0, investmentReserveCurrent: 0.1 };
+        const contas = [{ category: 'Poupança', amount: 0.7, isPaid: true }];
+        const metas = [{ id: 'x', targetAmount: 0.8, priority: 1, status: 'active' }];
+        const r = resumoDoBolso(metas, settings, contas);
+        expect(r.bolso).toBe(0.8);
+        expect(r.metas[0].coberturaPct).toBe(100);
+        expect(r.metas[0].cabeNaFila).toBe(true);
+        expect(r.itensQueCabem).toBe(1);
+    });
+
+    it('empate no arredondamento vai para cima', () => {
+        // `round` do Python iria para PAR e o JavaScript para cima: 12,25 -> 12,3.
+        const settings = { emergencyReserveCurrent: 0, emergencyReserveTarget: 0, investmentReserveCurrent: 49 };
+        const metas = [{ id: 'x', targetAmount: 400, priority: 1, status: 'active' }];
+        expect(resumoDoBolso(metas, settings, []).metas[0].coberturaPct).toBe(12.3);
+    });
+
+    it('centavos arredondam meio-para-cima', () => {
+        expect(centavos(0.005)).toBe(1);
+        expect(centavos(0.015)).toBe(2);
     });
 });
 

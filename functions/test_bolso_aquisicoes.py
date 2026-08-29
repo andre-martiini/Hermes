@@ -85,6 +85,38 @@ class TestACoberturaBateComATela(unittest.TestCase):
         self.assertEqual(r["metas"][0]["currentAmount"], 480)
 
 
+class TestDinheiroNaoEFloat(unittest.TestCase):
+    """Os dois jeitos de a aritmetica reintroduzir a divergencia entre linguagens.
+
+    Estes casos existem no arquivo espelho com os MESMOS numeros. Se um lado
+    mudar de convencao, o outro quebra.
+    """
+
+    def test_fronteira_exata_nao_vira_nao_cabe(self):
+        """0,10 + 0,70 da 0.7999999999999999 em float; a meta de 0,80 cabe."""
+        settings = {"emergencyReserveCurrent": 0, "emergencyReserveTarget": 0,
+                    "investmentReserveCurrent": 0.1}
+        contas = [{"category": "Poupança", "amount": 0.7, "isPaid": True}]
+        metas = [{"id": "x", "targetAmount": 0.8, "priority": 1, "status": "active"}]
+        r = ba.resumo(metas, settings, contas)
+        self.assertEqual(r["bolso_aquisicoes"], 0.8)
+        self.assertEqual(r["metas"][0]["cobertura_pct"], 100.0)
+        self.assertTrue(r["metas"][0]["cabe_na_fila"])
+        self.assertEqual(r["itens_que_cabem_no_bolso"], 1)
+
+    def test_empate_no_arredondamento_vai_para_cima(self):
+        """`round` do Python iria para PAR e o JavaScript para cima: 12,25 -> 12,3."""
+        settings = {"emergencyReserveCurrent": 0, "emergencyReserveTarget": 0,
+                    "investmentReserveCurrent": 49}
+        metas = [{"id": "x", "targetAmount": 400, "priority": 1, "status": "active"}]
+        r = ba.resumo(metas, settings, [])
+        self.assertEqual(r["metas"][0]["cobertura_pct"], 12.3)
+
+    def test_centavos_arredondam_meio_para_cima(self):
+        self.assertEqual(ba.centavos(0.005), 1)
+        self.assertEqual(ba.centavos(0.015), 2)
+
+
 class TestAsCoberturasNaoSaoSomaveis(unittest.TestCase):
     """O defeito que dois itens a 100% ao mesmo tempo escondem.
 

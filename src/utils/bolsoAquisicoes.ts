@@ -21,6 +21,29 @@
 
 export const CATEGORIA_POUPANCA = 'Poupança';
 
+/**
+ * Reais para centavos inteiros, com meio-para-cima.
+ *
+ * Duas razões, e as duas já morderam:
+ *
+ * - Dinheiro em float compara errado na fronteira. Reserva 0,10 mais poupança
+ *   0,70 dá 0.7999999999999999, e uma meta de 0,80 aparece como 100% coberta e
+ *   ao mesmo tempo "não cabe".
+ * - `round` do Python arredonda meio-para-PAR e o do JavaScript arredonda
+ *   meio-para-cima. Como a regra vive nas duas linguagens, a mesma entrada daria
+ *   números diferentes nos dois lados — a divergência que este módulo existe
+ *   para eliminar. O arredondamento é explícito e igual nos dois, e não o padrão
+ *   de cada linguagem.
+ */
+export function centavos(valor: number | undefined | null): number {
+    return Math.floor((valor || 0) * 100 + 0.5);
+}
+
+/** Uma casa decimal, meio-para-cima — igual ao lado Python. */
+function umaCasa(valor: number): number {
+    return Math.floor(valor * 10 + 0.5) / 10;
+}
+
 export interface MetaBolso {
     id: string;
     targetAmount: number;
@@ -48,13 +71,13 @@ export interface SettingsBolso {
  * para a emergência, e não para desejo de compra.
  */
 export function bolso(settings: SettingsBolso, contasDoMes: ContaDoMes[]): number {
-    const emergenciaAtual = settings.emergencyReserveCurrent || 0;
-    const emergenciaAlvo = settings.emergencyReserveTarget || 0;
+    const emergenciaAtual = centavos(settings.emergencyReserveCurrent);
+    const emergenciaAlvo = centavos(settings.emergencyReserveTarget);
     const poupado = (contasDoMes || [])
         .filter(c => c.category === CATEGORIA_POUPANCA && c.isPaid)
-        .reduce((acc, c) => acc + (c.amount || 0), 0);
-    const investimento = settings.investmentReserveCurrent || 0;
-    return investimento + (emergenciaAtual >= emergenciaAlvo ? poupado : 0);
+        .reduce((acc, c) => acc + centavos(c.amount), 0);
+    const investimento = centavos(settings.investmentReserveCurrent);
+    return (investimento + (emergenciaAtual >= emergenciaAlvo ? poupado : 0)) / 100;
 }
 
 /**
@@ -63,8 +86,8 @@ export function bolso(settings: SettingsBolso, contasDoMes: ContaDoMes[]): numbe
  */
 export function cobertura(meta: MetaBolso, disponivel: number): number {
     if (meta.status === 'completed') return meta.currentAmount || 0;
-    const alvo = meta.targetAmount || 0;
-    return alvo > 0 ? Math.min(alvo, disponivel) : 0;
+    const alvo = centavos(meta.targetAmount);
+    return alvo > 0 ? Math.min(alvo, centavos(disponivel)) / 100 : 0;
 }
 
 export interface MetaComCobertura extends MetaBolso {
@@ -99,31 +122,34 @@ export function resumoDoBolso(
         .filter(m => m.status !== 'completed')
         .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
 
+    // Em centavos inteiros: somar floats e comparar com o bolso erra na
+    // fronteira exata, marcando como "não cabe" um item que cabe por zero.
+    const teto = centavos(disponivel);
     const cabe = new Map<string, boolean>();
     let acumulado = 0;
     let itensQueCabem = 0;
     for (const meta of ativas) {
-        const alvo = meta.targetAmount || 0;
+        const alvo = centavos(meta.targetAmount);
         if (alvo <= 0) {
             cabe.set(meta.id, false);
             continue;
         }
         acumulado += alvo;
-        const entra = acumulado <= disponivel;
+        const entra = acumulado <= teto;
         cabe.set(meta.id, entra);
         if (entra) itensQueCabem += 1;
     }
 
     return {
-        bolso: disponivel,
+        bolso: centavos(disponivel) / 100,
         itensQueCabem,
         metas: (metas || []).map(meta => {
             const atual = cobertura(meta, disponivel);
             const alvo = meta.targetAmount || 0;
             return {
                 ...meta,
-                currentAmount: atual,
-                coberturaPct: alvo > 0 ? Math.min(100, (atual / alvo) * 100) : 0,
+                currentAmount: centavos(atual) / 100,
+                coberturaPct: alvo > 0 ? umaCasa(Math.min(100, (atual / alvo) * 100)) : 0,
                 cabeNaFila: cabe.get(meta.id) ?? false,
             };
         }),

@@ -25,6 +25,33 @@ interface precisa dar, e por isso `cobertura_da_fila` existe.
 CATEGORIA_POUPANCA = "Poupança"
 
 
+def centavos(valor) -> int:
+    """Reais para centavos inteiros, com meio-para-cima.
+
+    Duas razoes, e as duas ja morderam:
+
+    - Dinheiro em float compara errado na fronteira. Reserva 0,10 mais poupanca
+      0,70 da 0.7999999999999999, e uma meta de 0,80 aparece como 100% coberta e
+      ao mesmo tempo "nao cabe". Acumular e comparar em centavos inteiros elimina
+      a classe toda.
+    - `round` do Python arredonda meio-para-PAR e o do JavaScript arredonda
+      meio-para-cima. Como a regra vive nas duas linguagens, a mesma entrada
+      daria numeros diferentes nos dois lados — exatamente a divergencia que
+      este modulo existe para eliminar. Entao o arredondamento e explicito e
+      igual dos dois lados, e nao o padrao de cada linguagem.
+    """
+    import math
+
+    return int(math.floor(float(valor or 0) * 100 + 0.5))
+
+
+def _uma_casa(valor: float) -> float:
+    """Uma casa decimal, meio-para-cima — como o JavaScript, e nao como o Python."""
+    import math
+
+    return math.floor(valor * 10 + 0.5) / 10
+
+
 def bolso(settings: dict, contas_do_mes) -> float:
     """Quanto ha disponivel para aquisicoes.
 
@@ -33,14 +60,14 @@ def bolso(settings: dict, contas_do_mes) -> float:
     poupanca do mes com emergencia incompleta esta indo para a emergencia, e nao
     para desejo de compra.
     """
-    emergencia_atual = float(settings.get("emergencyReserveCurrent") or 0)
-    emergencia_alvo = float(settings.get("emergencyReserveTarget") or 0)
+    emergencia_atual = centavos(settings.get("emergencyReserveCurrent"))
+    emergencia_alvo = centavos(settings.get("emergencyReserveTarget"))
     poupado = sum(
-        float(c.get("amount") or 0) for c in (contas_do_mes or [])
+        centavos(c.get("amount")) for c in (contas_do_mes or [])
         if c.get("category") == CATEGORIA_POUPANCA and c.get("isPaid")
     )
-    investimento = float(settings.get("investmentReserveCurrent") or 0)
-    return investimento + (poupado if emergencia_atual >= emergencia_alvo else 0.0)
+    investimento = centavos(settings.get("investmentReserveCurrent"))
+    return (investimento + (poupado if emergencia_atual >= emergencia_alvo else 0)) / 100
 
 
 def cobertura(meta: dict, disponivel: float) -> float:
@@ -51,8 +78,8 @@ def cobertura(meta: dict, disponivel: float) -> float:
     """
     if str(meta.get("status") or "") == "completed":
         return float(meta.get("currentAmount") or 0)
-    alvo = float(meta.get("targetAmount") or 0)
-    return min(alvo, disponivel) if alvo > 0 else 0.0
+    alvo = centavos(meta.get("targetAmount"))
+    return min(alvo, centavos(disponivel)) / 100 if alvo > 0 else 0.0
 
 
 def _prioridade(meta: dict) -> float:
@@ -75,14 +102,17 @@ def cobertura_da_fila(metas, disponivel: float) -> dict:
     ativas = [m for m in (metas or []) if str(m.get("status") or "") != "completed"]
     ativas.sort(key=_prioridade)
 
-    cabe, acumulado, quantos = {}, 0.0, 0
+    # Em centavos inteiros: somar floats e comparar com o bolso erra na fronteira
+    # exata, marcando como "nao cabe" um item que cabe por zero.
+    teto = centavos(disponivel)
+    cabe, acumulado, quantos = {}, 0, 0
     for meta in ativas:
-        alvo = float(meta.get("targetAmount") or 0)
+        alvo = centavos(meta.get("targetAmount"))
         if alvo <= 0:
             cabe[str(meta.get("id"))] = False
             continue
         acumulado += alvo
-        entra = acumulado <= disponivel
+        entra = acumulado <= teto
         cabe[str(meta.get("id"))] = entra
         if entra:
             quantos += 1
@@ -101,12 +131,12 @@ def resumo(metas, settings: dict, contas_do_mes) -> dict:
             **meta,
             # Calculado na leitura, e nao lido do documento: o campo gravado
             # ficava defasado porque so era atualizado quando a meta era editada.
-            "currentAmount": round(atual, 2),
-            "cobertura_pct": round(min(100.0, atual / alvo * 100), 1) if alvo > 0 else 0.0,
+            "currentAmount": centavos(atual) / 100,
+            "cobertura_pct": _uma_casa(min(100.0, atual / alvo * 100)) if alvo > 0 else 0.0,
             "cabe_na_fila": fila["cabe_na_fila"].get(str(meta.get("id")), False),
         })
     return {
-        "bolso_aquisicoes": round(disponivel, 2),
+        "bolso_aquisicoes": centavos(disponivel) / 100,
         "itens_que_cabem_no_bolso": fila["itens_que_cabem"],
         "metas": enriquecidas,
     }
