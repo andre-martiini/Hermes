@@ -13,6 +13,7 @@ frase; tudo que decide QUANDO e SE perguntar e deterministico de proposito — o
 teto nao pode depender do humor do modelo.
 """
 
+import os
 import unittest
 
 import deteccao_subproduto as ds
@@ -469,6 +470,34 @@ class TestOModoDegradadoNaoMorreNoLog(unittest.TestCase):
             id="viva", status="em andamento", pool_dados=[_anexo("X.md")])
         rodada = ds.preparar_rodada(db, HOJE, [])
         self.assertTrue(rodada["rodar"])
+
+
+class TestTodoCaminhoQueConcluiGravaAData(unittest.TestCase):
+    """A varredura le `data_conclusao`; quem conclui sem gravar cria um buraco.
+
+    Acao concluida sem a data sai da consulta de vivas e nao entra na de
+    concluidas: some da varredura para sempre, e some em silencio — o status fica
+    certo, so a data falta.
+
+    Ja aconteceu com a ponte de voz, que eu tinha deixado de fora ao enumerar os
+    caminhos. A checagem e estatica e por texto porque a ponte e outro servico,
+    sem suite de teste e sem importar daqui; imperfeita, mas quebra se alguem
+    tirar a gravacao de volta, que e o que interessa.
+    """
+
+    @staticmethod
+    def _fonte(caminho):
+        alvo = os.path.join(os.path.dirname(os.path.dirname(__file__)), caminho)
+        with open(alvo, encoding="utf-8") as f:
+            return f.read()
+
+    def test_a_ponte_de_voz_grava_data_conclusao(self):
+        fonte = self._fonte(os.path.join("hermes-voice-bridge", "task_tools.py"))
+        inicio = fonte.index("def _mudar_status_acao")
+        corpo = fonte[inicio:inicio + 3000]
+        self.assertIn("data_conclusao", corpo,
+                      "A ponte de voz voltou a concluir acao sem gravar data_conclusao; "
+                      "essas acoes ficam invisiveis para a varredura de elevacao.")
 
 
 class TestJanelaMaiorQueOTetoDaConsulta(unittest.TestCase):
