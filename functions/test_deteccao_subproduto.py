@@ -693,19 +693,70 @@ class TestOCardDizQuandoOTrabalhoAconteceu(unittest.TestCase):
         "justificativa": "O handoff ja e o texto do relato.",
     }
 
-    def test_o_card_de_passivo_diz_a_data(self):
+    def test_o_card_de_trabalho_antigo_diz_a_data(self):
         texto = ds.resumo_para_o_usuario(self.BASE, "Handoff", "Autoridade",
-                                         concluida_em="2024-03-01", passivo=True)
+                                         concluida_em="2024-03-01", antigo=True)
         self.assertIn("trabalho antigo", texto)
         self.assertIn("2024-03-01", texto)
+
+    def test_antigo_vem_da_data_e_nao_da_lista_de_origem(self):
+        """O buraco que a marca `passivo` deixava aberto.
+
+        O terceiro recorte traz concluida antiga mexida desde o corte, e ela
+        chega pela lista da JANELA — `passivo` False. Se a ressalva dependesse da
+        origem, uma acao de 2024 com anexo novo seria apresentada como trabalho
+        desta semana.
+        """
+        janela_antiga = {"task_id": "x", "tarefa": {"data_conclusao": "2024-03-01"}}
+        self.assertEqual(ds._idade_da_acao(janela_antiga, "2026-08-23"),
+                         ("2024-03-01", True))
+
+    def test_concluida_dentro_da_janela_nao_e_antiga(self):
+        recente = {"task_id": "x", "tarefa": {"data_conclusao": "2026-08-28"}}
+        self.assertEqual(ds._idade_da_acao(recente, "2026-08-23")[1], False)
+
+    def test_acao_viva_nao_tem_idade_de_conclusao(self):
+        viva = {"task_id": "x", "tarefa": {"status": "em andamento"}}
+        self.assertEqual(ds._idade_da_acao(viva, "2026-08-23"), ("", False))
 
     def test_o_card_da_semana_nao_ganha_ressalva(self):
         texto = ds.resumo_para_o_usuario(self.BASE, "Handoff", "Autoridade")
         self.assertNotIn("trabalho antigo", texto)
 
-    def test_passivo_sem_data_ainda_avisa_que_e_antigo(self):
-        texto = ds.resumo_para_o_usuario(self.BASE, "Handoff", "Autoridade", passivo=True)
+    def test_antigo_sem_data_ainda_avisa(self):
+        texto = ds.resumo_para_o_usuario(self.BASE, "Handoff", "Autoridade", antigo=True)
         self.assertIn("trabalho antigo", texto)
+
+    def test_a_rodada_marca_como_antiga_a_candidata_da_JANELA(self):
+        """Ponta a ponta, porque foi aqui que a ligacao faltou.
+
+        Testar `_idade_da_acao` sozinha nao prova nada sobre o card: o defeito
+        estava em `_ferramenta_propor` usar a origem da lista em vez da data. Esta
+        candidata vem de `candidatos` (a janela, via terceiro recorte) e e de
+        2024 — o card TEM de avisar.
+        """
+        gravado = {}
+
+        def _reservar(db, hoje, teto, ref, payload, ja_no_mes=0):
+            gravado.update(payload)
+            return True
+
+        rodada = {
+            "restantes": 3, "ja_no_mes": 0, "corte_conclusao": "2026-08-23",
+            "objetivos": [{"id": "intel", "objetivoMacro": "Autoridade intelectual"}],
+            "candidatos": [{
+                "task_id": "antiga",
+                "tarefa": _tarefa(id="antiga", titulo="Handoff", status="concluído",
+                                  data_conclusao="2024-03-01"),
+                "corpo": {"documentos": ["H.md"], "etapas_feitas": 0,
+                          "tem_texto_pronto": True, "caracteres_diario": 0},
+            }],
+            "passivo": [],
+        }
+        _tools, mapa = ds._ferramenta_propor(_Db(), HOJE, rodada, [], reservar=_reservar)
+        mapa["propor_elevacao"](**self.BASE)
+        self.assertTrue(gravado["antigo"])
+        self.assertIn("trabalho antigo", gravado["resumo"])
 
     def test_a_sugestao_gravada_guarda_quando_aconteceu(self):
         """Gravado, e nao deduzido depois: a fila e o card leem daqui."""
@@ -716,19 +767,19 @@ class TestOCardDizQuandoOTrabalhoAconteceu(unittest.TestCase):
             return True
 
         ds.registrar_sugestao(_Db(), dict(self.BASE), HOJE, "Handoff", "Autoridade",
-                              reservar=_reservar, concluida_em="2024-03-01", passivo=True)
+                              reservar=_reservar, concluida_em="2024-03-01", antigo=True)
         self.assertEqual(gravado["concluida_em"], "2024-03-01")
-        self.assertTrue(gravado["passivo"])
+        self.assertTrue(gravado["antigo"])
 
     def test_a_fila_devolve_o_contexto_temporal(self):
         db = _Db()
         db.collection(ds.COL_ELEVACOES).dados["s1"] = {
             **self.BASE, "status": ds.STATUS_PENDENTE, "criada_em": HOJE,
             "titulo_acao": "Handoff", "nome_objetivo": "Autoridade",
-            "concluida_em": "2024-03-01", "passivo": True, "resumo": "x"}
+            "concluida_em": "2024-03-01", "antigo": True, "resumo": "x"}
         sugestao = ds.listar_pendentes(db)["sugestoes"][0]
         self.assertEqual(sugestao["concluida_em"], "2024-03-01")
-        self.assertTrue(sugestao["passivo"])
+        self.assertTrue(sugestao["antigo"])
 
 
 class TestConcluidaQueGanhaCorpoDepois(unittest.TestCase):

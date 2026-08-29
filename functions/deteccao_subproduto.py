@@ -369,8 +369,27 @@ def montar_dossie(candidata: dict, limite_diario: int = 4000) -> dict:
     }
 
 
+def _idade_da_acao(candidata: dict, corte: str) -> tuple:
+    """`(concluida_em, antigo)` — e "antigo" sai da DATA, nao da lista de origem.
+
+    A marca `passivo` diz de qual lista a candidata veio; nao e a mesma coisa que
+    a idade do trabalho. O terceiro recorte traz concluidas antigas mexidas desde
+    o corte, e elas chegam pela lista da janela: uma acao de 2024 com anexo novo
+    e candidata da janela, `passivo` False, e o card diria nada sobre a idade.
+
+    O corte da janela e a fronteira certa porque ja e a definicao de "desta
+    varredura": conclusao anterior a ele e trabalho que o usuario pode nao
+    lembrar, tenha vindo por onde tiver vindo.
+    """
+    concluida_em = str((candidata.get("tarefa") or {}).get("data_conclusao") or "")[:10]
+    if not concluida_em:
+        # Acao viva nao tem idade de conclusao — nao ha o que ressalvar.
+        return "", False
+    return concluida_em, bool(corte) and concluida_em < corte
+
+
 def resumo_para_o_usuario(sugestao: dict, titulo_acao: str, nome_objetivo: str,
-                          concluida_em: str = "", passivo: bool = False) -> str:
+                          concluida_em: str = "", antigo: bool = False) -> str:
     """O texto do card. Nao e "considere transformar isso em artigo".
 
     Cada linha responde uma pergunta que o usuario faria antes de aceitar: o que
@@ -378,7 +397,7 @@ def resumo_para_o_usuario(sugestao: dict, titulo_acao: str, nome_objetivo: str,
     quanto custa. Sugestao vaga e recusada sem leitura.
     """
     idade = ""
-    if passivo:
+    if antigo:
         # Sem esta linha o card apresenta trabalho antigo como se fosse desta
         # semana, e o usuario aceita sem saber o que esta aceitando.
         idade = (f" (trabalho antigo, concluido em {concluida_em})" if concluida_em
@@ -614,7 +633,7 @@ def reservar_no_firestore(db, hoje: str, teto: int, ref, payload: dict,
 def registrar_sugestao(db, sugestao: dict, hoje: str, titulo_acao: str,
                        nome_objetivo: str, teto: int = TETO_POR_MES,
                        reservar=reservar_no_firestore, ja_no_mes: int = 0,
-                       concluida_em: str = "", passivo: bool = False) -> str | None:
+                       concluida_em: str = "", antigo: bool = False) -> str | None:
     """Grava a sugestao se ainda houver vaga no mes. None quando nao ha.
 
     `reservar` e uma costura: a atomicidade e o ponto, e testa-la de verdade
@@ -632,9 +651,11 @@ def registrar_sugestao(db, sugestao: dict, hoje: str, titulo_acao: str,
         # Quando o trabalho aconteceu, gravado e nao deduzido: e o que separa
         # "fiz isso esta semana" de "fiz isso ha dois anos" na hora de decidir.
         "concluida_em": concluida_em or None,
-        "passivo": bool(passivo),
+        # `antigo` e sobre a IDADE do trabalho, e nao sobre a lista de origem:
+        # concluida de 2024 mexida ontem chega pela janela, nao pelo passivo.
+        "antigo": bool(antigo),
         "resumo": resumo_para_o_usuario(sugestao, titulo_acao, nome_objetivo,
-                                        concluida_em=concluida_em, passivo=passivo),
+                                        concluida_em=concluida_em, antigo=antigo),
     }
     return ref.id if reservar(db, hoje, teto, ref, payload, ja_no_mes) else None
 
@@ -1076,9 +1097,8 @@ def _ferramenta_propor(db, hoje: str, rodada: dict, aceitas: list,
     # faz o usuario aceitar sem saber o que esta aceitando. Instruir o modelo a
     # dizer isso na justificativa nao basta — neste modulo a validacao mora na
     # gravacao, e nao na confianca no prompt.
-    quando = {c["task_id"]: (str(c["tarefa"].get("data_conclusao") or "")[:10],
-                             bool(c.get("passivo")))
-              for c in todas}
+    corte = str(rodada.get("corte_conclusao") or "")[:10]
+    quando = {c["task_id"]: _idade_da_acao(c, corte) for c in todas}
 
     def propor_elevacao(**kwargs) -> dict:
         sugestao = validar_proposta(kwargs, set(objetivos_por_id), set(titulos))
@@ -1087,12 +1107,12 @@ def _ferramenta_propor(db, hoje: str, rodada: dict, aceitas: list,
         objetivo = objetivos_por_id[sugestao["objetivo_id"]]
         # O teto e conferido dentro da transacao, e nao aqui: esta funcao roda em
         # paralelo com as outras tool calls da mesma rodada.
-        concluida_em, e_passivo = quando.get(sugestao["task_id"], ("", False))
+        concluida_em, e_antigo = quando.get(sugestao["task_id"], ("", False))
         sugestao_id = registrar_sugestao(
             db, sugestao, hoje, titulos[sugestao["task_id"]],
             str(objetivo.get("objetivoMacro") or ""), reservar=reservar,
             ja_no_mes=int(rodada.get("ja_no_mes") or 0),
-            concluida_em=concluida_em, passivo=e_passivo,
+            concluida_em=concluida_em, antigo=e_antigo,
         )
         if not sugestao_id:
             return {"aceita": False, "motivo": "teto do mes ja atingido"}
@@ -1382,7 +1402,7 @@ def listar_pendentes(db, limite: int = 20) -> dict:
             "resumo": dados.get("resumo"),
             "criada_em": dados.get("criada_em"),
             "concluida_em": dados.get("concluida_em"),
-            "passivo": bool(dados.get("passivo")),
+            "antigo": bool(dados.get("antigo")),
         })
     pendentes.sort(key=lambda s: str(s.get("criada_em") or ""))
     return {"total": len(pendentes), "sugestoes": pendentes[:limite]}
