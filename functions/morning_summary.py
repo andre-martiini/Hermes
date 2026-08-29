@@ -427,6 +427,13 @@ _AVISOS_DE_VARREDURA = {
             "pronto — não vira sugestão até o índice ser publicado. Nada se perde: a "
             "janela não avança enquanto isso."),
     },
+    "candidatas_demais": {
+        "titulo": "A varredura de elevações teve mais candidatas do que consegue avaliar",
+        "detalhe": (
+            "Sobraram ações concluídas fora do recorte que vai para o modelo, então a "
+            "janela não avançou — nada se perde, mas o período fica parado até o "
+            "acúmulo baixar. Decidir as sugestões pendentes é o que destrava."),
+    },
     "limite_atingido": {
         "titulo": "A varredura de elevações viu só parte do período",
         "detalhe": (

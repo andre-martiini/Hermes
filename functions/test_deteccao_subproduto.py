@@ -509,6 +509,57 @@ class TestJanelaMaiorQueOTetoDaConsulta(unittest.TestCase):
         self.assertTrue(ds.preparar_rodada(self._db(ds.LIMITE_TAREFAS), HOJE, [])["rodar"])
 
 
+class TestORecorteDoPromptTambemSeguraOMarcador(unittest.TestCase):
+    """`mensagem_da_rodada` mostra so as primeiras N candidatas.
+
+    O marcador nao pode dizer "tudo avaliado" por cima do que o modelo nunca viu.
+    Mas a espera e assimetrica de proposito: viva que sobra volta sozinha na
+    proxima rodada (a consulta dela e por status, sem data); concluida que sobra
+    so existe dentro da janela, e a janela anda com o marcador.
+    """
+
+    @staticmethod
+    def _candidatos(status_da_sobra):
+        vistas = [{"task_id": f"v{i}", "tarefa": {"status": "em andamento"}}
+                  for i in range(ds.LIMITE_CANDIDATAS)]
+        return vistas + [{"task_id": "sobra", "tarefa": {"status": status_da_sobra}}]
+
+    def test_concluida_fora_do_recorte_segura_o_marcador(self):
+        self.assertFalse(ds.viu_todas_as_concluidas(self._candidatos("concluído")))
+
+    def test_viva_fora_do_recorte_nao_segura(self):
+        """Travar aqui pararia o marcador em toda semana movimentada."""
+        self.assertTrue(ds.viu_todas_as_concluidas(self._candidatos("em andamento")))
+
+    def test_dentro_do_limite_nada_segura(self):
+        dentro = [{"task_id": "c", "tarefa": {"status": "concluído"}}]
+        self.assertTrue(ds.viu_todas_as_concluidas(dentro))
+
+    def test_sem_candidata_nenhuma_nao_segura(self):
+        self.assertTrue(ds.viu_todas_as_concluidas([]))
+
+    def test_a_rodada_inteira_respeita_isso(self):
+        db = _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        # Vivas com diario grande vao para a frente da ordenacao; a concluida com
+        # anexo de texto tambem tem corpo, mas fica na sobra por volume de diario.
+        for i in range(ds.LIMITE_CANDIDATAS):
+            db.collection("tarefas").dados[f"v{i}"] = _tarefa(
+                id=f"v{i}", status="em andamento",
+                pool_dados=[_anexo("Doc.md")],
+                acompanhamento=[{"nota": "x" * 5000}])
+        db.collection("tarefas").dados["c"] = _tarefa(
+            id="c", status="concluído", data_conclusao="2026-08-28",
+            pool_dados=[_anexo("Handoff.md")])
+        rodada = ds.preparar_rodada(db, HOJE, [])
+        self.assertTrue(rodada["rodar"])
+        self.assertFalse(rodada["pode_marcar"])
+        estado = (ds._marcador_de_varredura(db).get().to_dict() or {}).get("varredura_degradada")
+        self.assertEqual(estado["motivo"], "candidatas_demais")
+
+
 class TestAsConcluidasEntramNaVarredura(unittest.TestCase):
     """O caso que sumia era o melhor: acao terminada na semana e a que com mais
     certeza deixou documento, diario e etapas prontas. O docstring de

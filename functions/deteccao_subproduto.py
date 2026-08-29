@@ -88,6 +88,10 @@ STATUS_CONCLUIDO = "concluído"
 # por cima do que ela nao viu.
 LIMITE_TAREFAS = int(os.environ.get("ELEVACAO_LIMITE_TAREFAS", "150"))
 
+# Quantas candidatas o modelo ve numa rodada. Recorte de prompt, nao de busca: as
+# candidatas ja vem ordenadas com as de texto pronto na frente.
+LIMITE_CANDIDATAS = int(os.environ.get("ELEVACAO_LIMITE_CANDIDATAS", "8"))
+
 MODELO = os.environ.get("ELEVACAO_MODEL", "claude-fable-5")
 MODELO_FALLBACK = os.environ.get("ELEVACAO_FALLBACK_MODEL", "claude-opus-4-8")
 MAX_TOKENS = int(os.environ.get("ELEVACAO_MAX_TOKENS", "2048"))
@@ -705,6 +709,27 @@ def _tarefas_da_varredura(db, corte: str) -> list[dict]:
     return list(por_id.values()), ""
 
 
+def viu_todas_as_concluidas(candidatos, limite: int = LIMITE_CANDIDATAS) -> bool:
+    """Se alguma candidata CONCLUIDA ficou fora do que o modelo viu.
+
+    A assimetria e o ponto. `mensagem_da_rodada` mostra so as primeiras `limite`
+    candidatas, e as que sobram nao correm o mesmo risco:
+
+    - acao viva sobrando volta sozinha na proxima rodada, porque a consulta dela
+      e por status e nao tem data nenhuma;
+    - acao concluida sobrando so existe dentro da janela, e a janela anda com o
+      marcador. Se ele avancar, ela nunca mais e candidata.
+
+    Entao o marcador espera pelas concluidas e nao pelas vivas. Exigir todas
+    travaria o marcador em qualquer semana movimentada, que e o caso normal, e
+    nao o defeituoso.
+    """
+    return not any(
+        str((c.get("tarefa") or {}).get("status")) == STATUS_CONCLUIDO
+        for c in (candidatos or [])[limite:]
+    )
+
+
 def preparar_rodada(db, hoje: str, carga_semana) -> dict:
     """Tudo que se decide sem IA: se vale rodar, e sobre o que.
 
@@ -742,12 +767,14 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
               f"a partir de {corte} ({DIAS_TETO_VARREDURA} dias). O que foi "
               f"concluido antes disso e passivo, e nao entra por aqui.")
     tarefas, incompleta = _tarefas_da_varredura(db, corte)
-    marcar_degradacao(db, hoje, incompleta)
-    # O marcador significa "ate aqui esta tudo avaliado". Se a rodada viu so parte
-    # da janela, avancar apagaria o resto para sempre — inclusive depois de o
-    # indice ser publicado, que e o pior jeito de a correcao chegar tarde demais.
-    pode_marcar = not incompleta
     candidatos = candidatas(tarefas, acoes_ja_decididas(sugestoes), hoje)
+    # "Ate aqui esta tudo avaliado" e o que o marcador significa, e ele so avanca
+    # quando isso for verdade de ponta a ponta: a busca precisa ter trazido a
+    # janela inteira, E o prompt precisa ter mostrado toda concluida que veio.
+    if not incompleta and not viu_todas_as_concluidas(candidatos):
+        incompleta = "candidatas_demais"
+    marcar_degradacao(db, hoje, incompleta)
+    pode_marcar = not incompleta
     if not candidatos:
         # Olhou e nao achou: a varredura cumpriu o papel, entao o marcador avanca.
         # Nao avancar aqui faria a janela crescer sem parar num sistema saudavel.
@@ -805,7 +832,7 @@ def _ferramenta_propor(db, hoje: str, rodada: dict, aceitas: list,
     return tools, {"propor_elevacao": propor_elevacao}
 
 
-def mensagem_da_rodada(rodada: dict, limite_candidatos: int = 8) -> str:
+def mensagem_da_rodada(rodada: dict, limite_candidatos: int = LIMITE_CANDIDATAS) -> str:
     """O que o modelo ve: os objetivos elegiveis e o material de cada candidata."""
     import json
 

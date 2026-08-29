@@ -597,6 +597,13 @@ class TestAvisosDoSistema(unittest.TestCase):
         self.assertIn("parte do período", avisos[0]["titulo"])
         self.assertIn("passivo", avisos[0]["detalhe"])
 
+    def test_candidatas_demais_tambem_vira_aviso(self):
+        """O terceiro jeito de ver so parte: o recorte que vai para o modelo."""
+        avisos = _coletar_avisos_do_sistema(self._db(
+            {"varredura_degradada": {"data": "2026-08-24", "motivo": "candidatas_demais"}}))
+        self.assertEqual(len(avisos), 1)
+        self.assertIn("destrava", avisos[0]["detalhe"])
+
     def test_motivo_desconhecido_nao_vira_aviso_vazio(self):
         """Melhor nao avisar do que avisar sem dizer o que houve."""
         self.assertEqual(_coletar_avisos_do_sistema(self._db(
