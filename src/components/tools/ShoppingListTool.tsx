@@ -40,6 +40,41 @@ const normalizeShoppingText = (value?: string | null) =>
     .toLowerCase()
     .trim();
 
+/**
+ * Espelha `_resolver_flags` de `functions/tools/lista_compras.py`: comprado
+ * implica planejado, e desplanejar tira o comprado. O card precisa da MESMA
+ * regra do servidor porque so mostra a verdade quem calcula o estado final —
+ * prever flag por flag faz o card prometer transicoes que o servidor refaz.
+ *
+ * `aditivo` e o modo de `create` sobre item que ja existe: flag falsa e
+ * descartada, entao o pedido so acrescenta.
+ */
+const flagsResultantes = (
+  atual: { isPlanned: boolean; isPurchased: boolean },
+  pedidoPlanejado: boolean | undefined,
+  pedidoComprado: boolean | undefined,
+  aditivo: boolean,
+) => {
+  if (aditivo) {
+    const comprado = atual.isPurchased || pedidoComprado === true;
+    return { planejado: atual.isPlanned || pedidoPlanejado === true || comprado, comprado };
+  }
+  let planejado = pedidoPlanejado !== undefined ? pedidoPlanejado : atual.isPlanned;
+  let comprado = pedidoComprado !== undefined ? pedidoComprado : atual.isPurchased;
+  if (comprado && !planejado) {
+    if (pedidoPlanejado !== undefined && pedidoComprado === undefined) comprado = false;
+    else planejado = true;
+  }
+  if (!planejado) comprado = false;
+  return { planejado, comprado };
+};
+
+const linhaFlag = (rotulo: string, atual: boolean, final: boolean, aditivo: boolean) => {
+  if (atual !== final) return `${rotulo}: ${atual ? 'Sim' : 'Nao'} -> ${final ? 'Sim' : 'Nao'}`;
+  if (atual && aditivo) return `${rotulo}: Sim (segue igual — "criar" nunca desmarca)`;
+  return `${rotulo}: ${atual ? 'Sim' : 'Nao'} (segue igual)`;
+};
+
 export const ShoppingListTool = ({
   onBack,
   showToast,
@@ -341,14 +376,23 @@ export const ShoppingListTool = ({
     if (assistantAction === 'import_batch') {
       const rawText = (initialImportText || '').trim();
       const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
+      // Sem repassar `isPlanned`, o servidor aplica o padrao (planejar) e a
+      // importacao so-para-o-cadastro que o schema anuncia nao existiria pela web.
+      const planejaImportacao = isPlanned !== false;
       return {
         title: 'Importacao em lote proposta',
-        description: lines.length > 0
-          ? `${lines.length} linha(s) serao importadas e ja entram no planejamento. Nome que ja existe nao vira item novo: o item atual e que passa a planejado.`
-          : 'Nenhuma linha valida foi enviada para importacao.',
+        description: lines.length === 0
+          ? 'Nenhuma linha valida foi enviada para importacao.'
+          : planejaImportacao
+            ? `${lines.length} linha(s) serao importadas e ja entram no planejamento. Nome que ja existe nao vira item novo: o item atual e que passa a planejado.`
+            : `${lines.length} linha(s) entram so no cadastro, sem planejamento — nao aparecem na aba Comprar. Nome que ja existe fica como esta.`,
         lines: lines.slice(0, 6),
         action: assistantAction,
-        payload: { action: 'import_batch', importText: rawText },
+        payload: {
+          action: 'import_batch',
+          importText: rawText,
+          ...(isPlanned !== undefined ? { isPlanned } : {}),
+        },
       };
     }
 
@@ -380,13 +424,17 @@ export const ShoppingListTool = ({
       const nextIsPlanned = Boolean(isPlanned);
       const nextIsPurchased = Boolean(isPurchased);
       const jaCadastrado = items.find(item => normalizeShoppingText(item.nome) === normalizeShoppingText(nextNome));
-      // Sobre item que ja existe, `create` so acrescenta: pedir isPlanned/isPurchased
-      // falso nao desmarca nada no servidor. O card tem de dizer isso, senao
-      // promete um "Sim -> Nao" que confirmar nao produz.
-      const linhaFlag = (rotulo: string, atual: boolean, pedido: boolean) => {
-        if (!pedido) return `${rotulo}: ${atual ? 'Sim' : 'Nao'} (segue igual — "criar" nunca desmarca)`;
-        return atual ? `${rotulo}: Sim (ja estava)` : `${rotulo}: Nao -> Sim`;
-      };
+      // Sobre item que ja existe `create` e aditivo, e marcar como comprado
+      // arrasta o planejamento junto. Calcular o par pela regra do servidor e o
+      // que impede o card de prometer um estado e o banco gravar outro.
+      const finalCriar = flagsResultantes(
+        jaCadastrado ?? { isPlanned: false, isPurchased: false },
+        isPlanned, isPurchased, true,
+      );
+      const mostraPlanejado = jaCadastrado
+        && (isPlanned !== undefined || finalCriar.planejado !== jaCadastrado.isPlanned);
+      const mostraComprado = jaCadastrado
+        && (isPurchased !== undefined || finalCriar.comprado !== jaCadastrado.isPurchased);
       return {
         title: 'Criacao de item proposta',
         description: !nextNome
@@ -400,8 +448,8 @@ export const ShoppingListTool = ({
               ...(categoria !== undefined ? [`Categoria: ${jaCadastrado.categoria} -> ${nextCategoria}`] : []),
               ...(quantidade !== undefined ? [`Quantidade: ${jaCadastrado.quantidade} -> ${nextQuantidade}`] : []),
               ...(unit !== undefined ? [`Unidade: ${jaCadastrado.unit} -> ${nextUnit}`] : []),
-              ...(isPlanned !== undefined ? [linhaFlag('Planejado', jaCadastrado.isPlanned, nextIsPlanned)] : []),
-              ...(isPurchased !== undefined ? [linhaFlag('Comprado', jaCadastrado.isPurchased, nextIsPurchased)] : []),
+              ...(mostraPlanejado ? [linhaFlag('Planejado', jaCadastrado.isPlanned, finalCriar.planejado, true)] : []),
+              ...(mostraComprado ? [linhaFlag('Comprado', jaCadastrado.isPurchased, finalCriar.comprado, true)] : []),
               ...(typeof ordem === 'number' ? [`Ordem: ${ordem}`] : []),
             ]
           : [
@@ -409,8 +457,8 @@ export const ShoppingListTool = ({
               `Categoria: ${nextCategoria}`,
               `Quantidade: ${nextQuantidade}`,
               `Unidade: ${nextUnit}`,
-              `Planejado: ${nextIsPlanned ? 'Sim' : 'Nao'}`,
-              `Comprado: ${nextIsPurchased ? 'Sim' : 'Nao'}`,
+              `Planejado: ${finalCriar.planejado ? 'Sim' : 'Nao'}`,
+              `Comprado: ${finalCriar.comprado ? 'Sim' : 'Nao'}`,
               ...(typeof ordem === 'number' ? [`Ordem: ${ordem}`] : []),
             ],
         action: assistantAction,
@@ -473,13 +521,23 @@ export const ShoppingListTool = ({
       diffLines.push(`Unidade: ${target?.unit || '—'} -> ${unit}`);
       payload.unit = unit;
     }
-    if (isPlanned !== undefined) {
-      diffLines.push(`Planejado: ${target?.isPlanned ? 'Sim' : 'Nao'} -> ${isPlanned ? 'Sim' : 'Nao'}`);
-      payload.isPlanned = isPlanned;
-    }
-    if (isPurchased !== undefined) {
-      diffLines.push(`Comprado: ${target?.isPurchased ? 'Sim' : 'Nao'} -> ${isPurchased ? 'Sim' : 'Nao'}`);
-      payload.isPurchased = isPurchased;
+    if (isPlanned !== undefined || isPurchased !== undefined) {
+      // Em `update` a flag pedida vale, mas arrasta a outra: desplanejar tira o
+      // comprado, e marcar comprado planeja. As duas linhas saem do estado final
+      // para o card nao mostrar so metade do efeito.
+      const atualFlags = {
+        isPlanned: Boolean(target?.isPlanned),
+        isPurchased: Boolean(target?.isPurchased),
+      };
+      const finalFlags = flagsResultantes(atualFlags, isPlanned, isPurchased, false);
+      if (isPlanned !== undefined || finalFlags.planejado !== atualFlags.isPlanned) {
+        diffLines.push(linhaFlag('Planejado', atualFlags.isPlanned, finalFlags.planejado, false));
+      }
+      if (isPurchased !== undefined || finalFlags.comprado !== atualFlags.isPurchased) {
+        diffLines.push(linhaFlag('Comprado', atualFlags.isPurchased, finalFlags.comprado, false));
+      }
+      if (isPlanned !== undefined) payload.isPlanned = isPlanned;
+      if (isPurchased !== undefined) payload.isPurchased = isPurchased;
     }
     if (ordem !== undefined) {
       diffLines.push(`Ordem: ${target?.ordem ?? '—'} -> ${ordem}`);

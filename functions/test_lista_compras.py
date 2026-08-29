@@ -406,6 +406,55 @@ class TestCriarComNomeExistente(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "invalid_argument")
 
 
+class TestTextoBateComOGravado(unittest.TestCase):
+    """Varredura: nenhum `detalhe` pode afirmar o que o banco nao mostra.
+
+    Tres passes de review acharam, um por vez, ramos em que o texto devolvido
+    divergia da escrita — ora omitindo um campo, ora anunciando marcacao que nao
+    houve. Em vez de tapar mais um buraco por vez, isto percorre as combinacoes e
+    confere o texto contra o estado final. E a guarda que fecha a classe.
+    """
+
+    def _create(self, existente, pedido):
+        db = _db_com() if existente is None else _db_com("manteiga")
+        if existente:
+            db.collection(lc.COLECAO).dados["id1"].update(existente)
+        antes = dict(db.collection(lc.COLECAO).dados.get("id1") or {})
+        r = lc.mutar(db, "create", {"nome": "manteiga", **pedido})
+        depois = list(db.collection(lc.COLECAO).dados.values())[0]
+        return antes, depois, r
+
+    def test_create_descreve_toda_marca_que_passou_a_valer(self):
+        existentes = (None, {}, {"isPlanned": True}, {"isPlanned": True, "isPurchased": True})
+        pedidos = (
+            {}, {"isPlanned": True}, {"isPurchased": True},
+            {"isPlanned": False}, {"isPlanned": False, "isPurchased": True},
+        )
+        for existente in existentes:
+            for pedido in pedidos:
+                with self.subTest(existente=existente, pedido=pedido):
+                    antes, depois, r = self._create(existente, pedido)
+                    detalhe = r["detalhe"].lower()
+                    if depois["isPurchased"] and not antes.get("isPurchased"):
+                        self.assertIn("comprad", detalhe, r["detalhe"])
+                    if depois["isPlanned"] and not antes.get("isPlanned"):
+                        self.assertIn("planej", detalhe, r["detalhe"])
+                    if antes and depois == antes:
+                        self.assertIn("nada mudou", detalhe, r["detalhe"])
+
+    def test_importacao_conta_planejados_igual_ao_banco(self):
+        for is_planned in (True, False):
+            with self.subTest(isPlanned=is_planned):
+                db = _db_com("manteiga", "queijo")
+                db.collection(lc.COLECAO).dados["id2"]["isPlanned"] = True
+                r = lc.mutar(db, "import_batch", {
+                    "importText": "manteiga\nqueijo\nleite", "isPlanned": is_planned,
+                })
+                planejados = {i["nome"] for i in lc.consultar(db, filtro="planejados")["itens"]}
+                enviados = {"manteiga", "queijo", "leite"}
+                self.assertEqual(r["planejados"], len(planejados & enviados))
+
+
 class TestAtualizarERemover(unittest.TestCase):
 
     def test_update_sem_id_aponta_a_saida(self):

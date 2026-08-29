@@ -355,11 +355,22 @@ def criar(db, dados) -> dict:
         "ja_existia": False,
         "criado": True,
         "item": _item_publico(ref.id, payload),
-        "detalhe": (
-            f'"{nome}" criado e ja planejado.' if planejado
-            else f'"{nome}" criado no cadastro, sem planejamento — nao aparece na tela de compras.'
-        ),
+        "detalhe": _detalhe_criado(nome, planejado, comprado),
     }
+
+
+def _detalhe_criado(nome: str, planejado: bool, comprado: bool) -> str:
+    """Sai das duas flags finais, nao so do planejamento.
+
+    Criar ja como comprado grava `isPurchased` e, pela invariante, tambem
+    `isPlanned` — dizer apenas "criado e ja planejado" esconde metade do que foi
+    gravado de quem so le o texto.
+    """
+    if comprado:
+        return f'"{nome}" criado ja como comprado — e, por consequencia, planejado.'
+    if planejado:
+        return f'"{nome}" criado e ja planejado.'
+    return f'"{nome}" criado no cadastro, sem planejamento — nao aparece na tela de compras.'
 
 
 def _intencao_aditiva(entrada: dict) -> dict:
