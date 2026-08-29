@@ -100,25 +100,22 @@ primeiro**, classificando-os em três grupos antes de qualquer mudança de compo
 **Não implementar nada** de fechamento de marco até essa auditoria voltar — o desenho depende do que
 a auditoria encontrar, e implementar antes é escolher o desenho no escuro.
 
-**Detector de subproduto: ações concluídas fora da varredura.** A consulta semanal filtra
-`status in ["em andamento", "stand-by"]`, então uma ação concluída durante a semana nunca gera
-elevação — justamente o caso mais forte, porque é a que com mais certeza deixou documento, diário e
-etapas prontas. O docstring de `candidatas` já declara que *não* filtra por conclusão; a consulta
-acima dela revoga isso. Achado pelo Codex no PR #131 e deliberadamente não corrigido lá, por três
-razões que continuam valendo:
+**Detector de subproduto: o passivo de ações concluídas.** A varredura semanal **já vê** as ações
+concluídas — a janela é "desde a última varredura bem-sucedida", ancorada e não fixa, para que uma
+varredura falha ou pulada não perca o intervalo em silêncio. O teto de `ELEVACAO_DIAS_VARREDURA`
+(7 dias) vale só quando não há varredura anterior registrada, justamente para o passivo não entrar
+pela porta semanal.
 
-1. **Índice composto.** `status == "concluído"` com recorte temporal é igualdade + range em campos
-   diferentes. `tarefas` hoje tem um único índice composto (`reminder_sent`/`reminder_at`), então
-   isso exige `firestore.indexes.json` e deploy do índice **antes** do código.
-2. **Campo de corte não confiável.** `data_conclusao` é gravado por três caminhos diferentes, e
-   `knowledge_graph.py` já assume que pode faltar. Escolher entre `data_conclusao` e
-   `data_atualizacao` muda quais ações entram.
-3. **A janela é decisão de produto.** As concluídas são a maior parte de `tarefas` com o tempo. Sete
-   dias casa com a cadência semanal da varredura, mas é escolha do André.
+O que **continua parado** é o passivo: tudo que foi concluído antes disso subir. A decisão depende
+de volume — uma passagem única sobre um passivo grande deixa a fila ilegível, e fila que ninguém lê
+mata o módulo. `scripts/contar_concluidas_sem_vinculo.py` dá o número, separando o total das que têm
+corpo (que é o recorte que decide: quantos cards a fila receberia de fato). O número não sai de uma
+consulta porque o Firestore não consulta ausência de campo.
 
-Recomendação para quando isto for retomado: segunda consulta por `status == "concluído"` filtrada
-por `data_conclusao >= hoje-7`, com o índice declarado antes e `data_conclusao` conferido nos três
-caminhos de escrita primeiro.
+**Dependência de deploy:** o índice composto `tarefas (status, data_conclusao)`, declarado em
+`firestore.indexes.json`, precisa estar publicado antes do código subir. Se faltar, a varredura
+segue só com as ações vivas e avisa no log — perder as concluídas numa rodada é melhor que perder a
+rodada, mas é perda.
 
 ## Verificações em produção
 
