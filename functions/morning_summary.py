@@ -54,6 +54,8 @@ from datetime import datetime, timedelta, timezone
 from firebase_admin import firestore
 from firebase_functions import https_fn, scheduler_fn, options
 
+import os
+
 import subtarefas
 
 VERSAO = "v1"
@@ -78,6 +80,21 @@ _DIAS_SEMANA = [
     "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
     "sexta-feira", "sábado", "domingo",
 ]
+
+def _pilar(valor) -> str:
+    """Pilar comparável: minúsculas e sem acento.
+
+    Só importa nos documentos legados, que são justamente os que não têm
+    `gerida_por_acoes` gravada e por isso dependem da derivação por pilar — e são
+    os que podem ter grafia livre. `.lower()` sozinho não basta: "Saúde" vira
+    "saúde", que continua diferente de "saude".
+    """
+    import unicodedata
+
+    bruto = str(valor or "").strip().lower()
+    return "".join(c for c in unicodedata.normalize("NFD", bruto)
+                   if unicodedata.category(c) != "Mn")
+
 
 _PILAR_LABEL = {
     "carreira": "Carreira",
@@ -412,6 +429,95 @@ def _fila(total: int, amostra: list, rota: str) -> dict:
     inicial, e o usuario ficava procurando o que nao existia.
     """
     return {"total": total, "amostra": amostra[:AMOSTRA_FILA], "rota": rota}
+
+
+# Os dois jeitos de a varredura de elevações ver só parte da janela. Enquanto um
+# deles estiver gravado, o marcador fica parado — então o intervalo não se perde,
+# mas também não anda: é isso que estes avisos existem para tornar visível.
+_AVISOS_DE_VARREDURA = {
+    "indice_ausente": {
+        "titulo": "A varredura de elevações rodou sem as ações concluídas",
+        "detalhe": (
+            "Falta o índice composto `tarefas (status, data_conclusao)` no Firestore. "
+            "A varredura continua rodando com as ações em andamento, mas trabalho "
+            "concluído — que é o caso mais forte, porque é o que mais deixa documento "
+            "pronto — não vira sugestão até o índice ser publicado. Nada se perde: a "
+            "janela não avança enquanto isso."),
+    },
+    "candidatas_demais": {
+        "titulo": "A varredura de elevações teve mais candidatas do que consegue avaliar",
+        "detalhe": (
+            "Sobraram ações concluídas fora do recorte que vai para o modelo, então a "
+            "janela não avançou — nada se perde, mas o período fica parado até o "
+            "acúmulo baixar. Decidir as sugestões pendentes é o que destrava."),
+    },
+    "limite_atingido": {
+        "titulo": "A varredura de elevações viu só parte do período",
+        "detalhe": (
+            "Há mais ações concluídas no período do que a varredura lê de uma vez. Ela "
+            "avaliou uma parte e não avançou a janela, então nada se perde — mas também "
+            "não anda sozinho: o acúmulo precisa de uma decisão sobre passar o passivo "
+            "de uma vez."),
+    },
+}
+
+
+def _coletar_passivo_de_elevacao(db) -> dict | None:
+    """Onde a recuperação do passivo está: quanto falta e quanto sai por rodada.
+
+    Não é fila (não espera decisão) e não é aviso (nada está errado) — é uma
+    esteira andando devagar de propósito, e sem número visível ninguém sabe
+    quando mandar parar. Mandar parar é como este caminho termina.
+
+    O número é gravado pela varredura, que roda uma vez por semana; ler aqui
+    seria uma agregação por dia para um dado que muda por semana.
+    """
+    try:
+        snap = db.collection("system_usage").document("elevacoes_sugeridas").get()
+    except Exception as exc:
+        print(f"[ResumoMatinal] Falha ao consultar o passivo de elevação: {exc}")
+        return None
+    if not snap.exists:
+        return None
+    dados = snap.to_dict() or {}
+    if not dados.get("passivo_cursor"):
+        return None
+    return {
+        # `None` quando a contagem falhou: melhor não mostrar número do que um errado.
+        "restantes": dados.get("passivo_restantes"),
+        "cota_por_rodada": int(os.environ.get("ELEVACAO_COTA_PASSIVO", "10")),
+        "ate": str(dados.get("passivo_cursor") or "").split("|")[0] or None,
+        "esgotou": bool(dados.get("passivo_esgotou")),
+    }
+
+
+def _coletar_avisos_do_sistema(db) -> list[dict]:
+    """Coisas do proprio Hermes que pararam de funcionar direito.
+
+    Nao e fila: fila e decisao esperando o usuario, e entra na contagem de
+    pendencias. Isto e outra coisa — o sistema avisando que esta rodando pela
+    metade. Sem uma superficie assim, um modo degradado silencioso (roda, nao da
+    erro, so ve menos) so existiria num log que ninguem le.
+    """
+    avisos = []
+    try:
+        snap = db.collection("system_usage").document("elevacoes_sugeridas").get()
+        degradada = (snap.to_dict() or {}).get("varredura_degradada") if snap.exists else None
+    except Exception as exc:
+        print(f"[ResumoMatinal] Falha ao consultar o estado da varredura: {exc}")
+        return avisos
+
+    motivo = degradada.get("motivo") if isinstance(degradada, dict) else None
+    texto = _AVISOS_DE_VARREDURA.get(motivo)
+    if texto:
+        avisos.append({
+            "id": f"elevacao_{motivo}",
+            "gravidade": "atencao",
+            "titulo": texto["titulo"],
+            "detalhe": texto["detalhe"],
+            "desde": degradada.get("data"),
+        })
+    return avisos
 
 
 def _coletar_filas(db, hoje: str) -> dict:
@@ -763,7 +869,7 @@ def _fonte_da_metrica(data: dict, metrica: dict) -> str | None:
     if "fonte" in metrica:
         gravada = str(metrica.get("fonte") or "").strip().lower()
         return gravada if gravada in _FONTES_AUTOMATICAS else None
-    if str(data.get("pilar") or "") != "saude":
+    if _pilar(data.get("pilar")) != "saude":
         return None
     unidade = str(metrica.get("unidade") or "").strip().lower()
     if unidade in ("kg", "quilo", "quilos"):
@@ -874,7 +980,7 @@ def _coletar_estrategia(db, hoje: str, acoes_por_meta: dict, movimento_por_meta:
         pilar = str(data.get("pilar") or "")
         gravada = data.get("gerida_por_acoes")
         # Derivação por pilar só enquanto o objetivo não tem a flag gravada.
-        gerida_por_acoes = bool(gravada) if gravada is not None else pilar != "saude"
+        gerida_por_acoes = bool(gravada) if gravada is not None else _pilar(pilar) != "saude"
         if not gerida_por_acoes and movimento_saude:
             movimentos.append(movimento_saude)
 
@@ -1065,6 +1171,8 @@ def build_morning_summary(db, date_str: str | None = None) -> dict:
     acoes = _coletar_acoes(db, hoje)
     agenda = _coletar_agenda(db, hoje)
     filas = _coletar_filas(db, hoje)
+    avisos_do_sistema = _coletar_avisos_do_sistema(db)
+    passivo_elevacao = _coletar_passivo_de_elevacao(db)
     saude = _coletar_saude(db, hoje, ontem)
     # Depende de `saude`: o pilar saúde não é gerido por ações, seu movimento vem
     # dos registros do módulo Saúde.
@@ -1101,6 +1209,11 @@ def build_morning_summary(db, date_str: str | None = None) -> dict:
         "prazos_duros": acoes["prazos_duros"],
         "carga_semana": acoes["carga_semana"],
         "filas": filas,
+        # Fora de `filas` de proposito: aviso do sistema nao e decisao pendente e
+        # nao pode entrar na contagem de `pendencias`.
+        "avisos_do_sistema": avisos_do_sistema,
+        # Fora de `filas` e fora de `avisos`: não espera decisão e não é defeito.
+        "passivo_elevacao": passivo_elevacao,
         "saude": saude,
         "estrategia": estrategia,
         "ontem": ontem_data,

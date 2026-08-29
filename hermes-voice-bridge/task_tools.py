@@ -681,11 +681,22 @@ def _mudar_status_acao(task_id: str, novo_status: str, justificativa: str) -> di
         "data": now_iso,
         "nota": f"[Copiloto de Voz] Status alterado de '{status_anterior}' para '{normalizado}': {justificativa.strip()}",
     }
-    task_ref.update({
+    # `data_conclusao` acompanha o status, como nos outros caminhos que concluem
+    # acao (o handler central de index.tsx, confirmarEdicaoAcao,
+    # confirmarEdicaoEmLote, a callable do Telegram e a sincronizacao do Google
+    # Tasks). Sem isto, acao concluida por voz sai da consulta de vivas e nao
+    # entra na de concluidas: some da varredura de elevacao para sempre, e some
+    # em silencio, porque o status fica certo e so a data falta.
+    atualizacao = {
         "status": normalizado,
         "data_atualizacao": now_iso,
         "acompanhamento": gc_firestore.ArrayUnion([diary_entry]),
-    })
+    }
+    if normalizado == "concluído" and status_anterior != "concluído":
+        atualizacao["data_conclusao"] = now_iso
+    elif normalizado != "concluído" and status_anterior == "concluído":
+        atualizacao["data_conclusao"] = None
+    task_ref.update(atualizacao)
     return {"status": "ok", "task_id": task_id, "status_anterior": status_anterior, "novo_status": normalizado}
 
 

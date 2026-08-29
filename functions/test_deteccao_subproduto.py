@@ -13,6 +13,7 @@ frase; tudo que decide QUANDO e SE perguntar e deterministico de proposito — o
 teto nao pode depender do humor do modelo.
 """
 
+import os
 import unittest
 
 import deteccao_subproduto as ds
@@ -254,6 +255,939 @@ class TestAPropostaDaIA(unittest.TestCase):
         self.assertEqual(self._validar(custo_estimado="")["custo_estimado"], "nao estimado")
 
 
+class TestAJanelaDasConclusoes(unittest.TestCase):
+    """De quando contar as conclusoes, e por que nao e uma janela fixa.
+
+    Janela fixa a partir de hoje perde o intervalo inteiro quando uma varredura
+    falha ou e pulada — e perde em silencio, que e o pior jeito de perder.
+    Ancorada na ultima bem-sucedida, ela cresce sozinha para cobrir o buraco.
+    """
+
+    def test_ancora_na_ultima_varredura_e_nao_em_hoje_menos_sete(self):
+        corte, motivo = ds.janela_de_conclusao("2026-08-23", "2026-08-30")
+        self.assertEqual(corte, "2026-08-23")
+        self.assertEqual(motivo, "")
+
+    def test_varredura_pulada_faz_a_janela_crescer(self):
+        """O caso que motiva tudo: domingo falhou, o domingo seguinte tem de cobrir os dois."""
+        corte, _ = ds.janela_de_conclusao("2026-08-16", "2026-08-30")
+        self.assertEqual(corte, "2026-08-16")
+
+    def test_sem_marcador_o_teto_de_dias_segura_o_passivo(self):
+        """Primeira rodada nao pode significar "desde sempre"."""
+        corte, motivo = ds.janela_de_conclusao("", "2026-08-30")
+        self.assertEqual(corte, "2026-08-23")
+        self.assertEqual(motivo, "sem_marcador")
+
+    def test_o_corte_por_falta_de_marcador_e_dito_e_nao_silencioso(self):
+        """Perder conclusoes pode ser aceitavel; perder sem avisar nao e."""
+        self.assertTrue(ds.janela_de_conclusao(None, "2026-08-30")[1])
+
+    def test_a_hora_do_marcador_nao_atrapalha_a_comparacao(self):
+        corte, _ = ds.janela_de_conclusao("2026-08-23T18:00:00Z", "2026-08-30")
+        self.assertEqual(corte, "2026-08-23")
+
+
+class TestOMarcadorSoAvancaQuandoOlhou(unittest.TestCase):
+    """Marcador avancado sem olhar apaga o intervalo para sempre.
+
+    E o mesmo defeito que a janela ancorada existe para evitar, so que pela
+    outra ponta: se "semana cheia" avancasse o marcador, as conclusoes daquela
+    semana nunca mais seriam candidatas.
+    """
+
+    def test_o_marcador_volta_do_firestore(self):
+        db = _Db()
+        ds.marcar_varredura(db, "2026-08-30")
+        self.assertEqual(ds.ultima_varredura(db), "2026-08-30")
+
+    def test_marcador_ausente_e_vazio_e_nao_erro(self):
+        self.assertEqual(ds.ultima_varredura(_Db()), "")
+
+    def test_falha_de_leitura_levanta_em_vez_de_virar_vazio(self):
+        """Ausente e ilegivel parecem iguais e nao sao.
+
+        Sem marcador nao ha intervalo anterior a perder. Com marcador ilegivel ha:
+        a janela cairia no teto de dias, a rodada terminaria gravando hoje, e tudo
+        entre o marcador verdadeiro e o teto sumiria para sempre.
+        """
+        class _DbQuebrado:
+            def collection(self, _n):
+                raise RuntimeError("indisponivel")
+        with self.assertRaises(ds.MarcadorIndisponivel):
+            ds.ultima_varredura(_DbQuebrado())
+
+    def test_marcador_ilegivel_aborta_a_rodada(self):
+        class _DbQuebrado(_Db):
+            def collection(self, nome):
+                if nome == "system_usage":
+                    raise RuntimeError("indisponivel")
+                return super().collection(nome)
+
+        db = _DbQuebrado()
+        # Com objetivo elegivel, para a rodada chegar ate a leitura do marcador em
+        # vez de sair antes por falta de objetivo.
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        rodada = ds.preparar_rodada(db, HOJE, [])
+        self.assertFalse(rodada["rodar"])
+        self.assertEqual(rodada["motivo"], "marcador_indisponivel")
+        self.assertFalse(rodada.get("pode_marcar"))
+
+    def test_semana_cheia_nao_libera_o_marcador(self):
+        """`rodar_deteccao` so avanca com `pode_marcar`; aqui ele nao vem."""
+        db = _Db()
+        cheia = [{"data": HOJE, "total": ds.SEMANA_CHEIA_ACOES + 1}]
+        rodada = ds.preparar_rodada(db, HOJE, cheia)
+        self.assertFalse(rodada["rodar"])
+        self.assertFalse(rodada.get("pode_marcar"))
+
+    def test_nenhuma_acao_com_corpo_avanca_porque_olhou(self):
+        """Olhou e nao achou: nada foi perdido, entao a janela nao precisa crescer."""
+        db = _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        rodada = ds.preparar_rodada(db, HOJE, [])
+        self.assertEqual(rodada["motivo"], "nenhuma_acao_com_corpo")
+        self.assertTrue(rodada["pode_marcar"])
+
+
+class TestJanelaRelidaNaoRepeteCard(unittest.TestCase):
+    """A outra ponta da janela ancorada.
+
+    Quando o marcador NAO avanca — teto do mes, semana cheia, falha do modelo —
+    a rodada seguinte rele a mesma janela de propósito, para nao perder nada. Se
+    a deduplicacao nao alcancasse o que ja esta pendente na fila, o mecanismo que
+    evita perda passaria a produzir card repetido, que e o jeito mais rapido de o
+    usuario parar de ler a fila.
+
+    A garantia esta em dois lugares que precisam valer juntos: `_carregar_sugestoes`
+    traz TODA pendente e aceita, de qualquer epoca (sem recorte de data), e
+    `candidatas` corta por esse conjunto.
+    """
+
+    def _db(self, status_da_sugestao):
+        db = _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        db.collection("tarefas").dados["sispnaes"] = _tarefa(
+            id="sispnaes", status="em andamento", pool_dados=[_anexo("HANDOFF.md")])
+        db.collection(ds.COL_ELEVACOES).dados["s1"] = {
+            "task_id": "sispnaes", "status": status_da_sugestao,
+            "criada_em": "2026-07-05"}
+        return db
+
+    def test_pendente_de_outro_mes_ainda_bloqueia_a_releitura(self):
+        """O recorte de pendentes nao tem limite de data justamente para isto."""
+        rodada = ds.preparar_rodada(self._db(ds.STATUS_PENDENTE), HOJE, [])
+        self.assertFalse(rodada["rodar"])
+        self.assertEqual(rodada["motivo"], "nenhuma_acao_com_corpo")
+
+    def test_aceita_tambem_bloqueia(self):
+        rodada = ds.preparar_rodada(self._db(ds.STATUS_ACEITA), HOJE, [])
+        self.assertEqual(rodada["motivo"], "nenhuma_acao_com_corpo")
+
+    def test_adiada_volta_porque_agora_nao_e_sobre_o_momento(self):
+        rodada = ds.preparar_rodada(self._db(ds.STATUS_ADIADA), HOJE, [])
+        self.assertTrue(rodada["rodar"])
+        self.assertEqual([c["task_id"] for c in rodada["candidatos"]], ["sispnaes"])
+
+
+class TestOModoDegradadoNaoMorreNoLog(unittest.TestCase):
+    """Varredura sem o indice roda, nao da erro, e so deixa de ver o melhor caso.
+
+    Silenciosa por natureza — e por isso o estado fica gravado, para o resumo
+    matinal mostrar. Log nao e aviso.
+    """
+
+    def _db_sem_indice(self):
+        class _RecorteQuebrado(_Recorte):
+            def where(self, *a, **kw):
+                f = kw.get("filter")
+                if f is not None and f.field_path == "data_conclusao":
+                    raise RuntimeError("indice composto ausente")
+                r = _Recorte.where(self, *a, **kw)
+                return _RecorteQuebrado(r._dados, r._ids, r._n)
+
+        class _ColQuebrada(_Colecao):
+            def where(self, *a, **kw):
+                r = _Colecao.where(self, *a, **kw)
+                return _RecorteQuebrado(r._dados, r._ids, r._n)
+
+        db = _Db()
+        db.cols["tarefas"] = _ColQuebrada()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        return db
+
+    @staticmethod
+    def _estado(db):
+        return (ds._marcador_de_varredura(db).get().to_dict() or {}).get("varredura_degradada")
+
+    def test_a_rodada_sem_indice_grava_o_aviso(self):
+        db = self._db_sem_indice()
+        ds.preparar_rodada(db, HOJE, [])
+        estado = self._estado(db)
+        self.assertEqual(estado["motivo"], "indice_ausente")
+        self.assertEqual(estado["data"], HOJE)
+
+    def test_a_rodada_completa_limpa_o_aviso(self):
+        """E estado, nao evento: fica ate uma varredura completa desligar."""
+        db = self._db_sem_indice()
+        ds.preparar_rodada(db, HOJE, [])
+        self.assertIsNotNone(self._estado(db))
+
+        db.cols["tarefas"] = _Colecao()
+        ds.preparar_rodada(db, HOJE, [])
+        self.assertIsNone(self._estado(db))
+
+    def test_rodada_degradada_nao_libera_o_marcador(self):
+        """O pior jeito de a correcao chegar tarde demais.
+
+        Sem isto, a rodada sem indice avancaria o marcador para hoje. Publicar o
+        indice depois nao adiantaria: a janela seguinte comeca depois das
+        conclusoes que a rodada degradada nunca viu, e elas somem para sempre.
+        """
+        db = self._db_sem_indice()
+        db.cols["tarefas"].dados["viva"] = _tarefa(
+            id="viva", status="em andamento", pool_dados=[_anexo("X.md")])
+        self.assertFalse(ds.preparar_rodada(db, HOJE, [])["pode_marcar"])
+
+    def test_degradada_sem_candidata_tambem_nao_libera(self):
+        """"Olhou e nao achou" so vale quando olhou a janela inteira."""
+        rodada = ds.preparar_rodada(self._db_sem_indice(), HOJE, [])
+        self.assertEqual(rodada["motivo"], "nenhuma_acao_com_corpo")
+        self.assertFalse(rodada["pode_marcar"])
+
+    def test_o_aviso_nao_impede_a_rodada(self):
+        """Perder as concluidas numa rodada e melhor que perder a rodada."""
+        db = self._db_sem_indice()
+        db.cols["tarefas"].dados["viva"] = _tarefa(
+            id="viva", status="em andamento", pool_dados=[_anexo("X.md")])
+        rodada = ds.preparar_rodada(db, HOJE, [])
+        self.assertTrue(rodada["rodar"])
+
+
+class TestTodoCaminhoQueConcluiGravaAData(unittest.TestCase):
+    """A varredura le `data_conclusao`; quem conclui sem gravar cria um buraco.
+
+    Acao concluida sem a data sai da consulta de vivas e nao entra na de
+    concluidas: some da varredura para sempre, e some em silencio — o status fica
+    certo, so a data falta.
+
+    Ja aconteceu com a ponte de voz, que eu tinha deixado de fora ao enumerar os
+    caminhos. A checagem e estatica e por texto porque a ponte e outro servico,
+    sem suite de teste e sem importar daqui; imperfeita, mas quebra se alguem
+    tirar a gravacao de volta, que e o que interessa.
+    """
+
+    @staticmethod
+    def _fonte(caminho):
+        alvo = os.path.join(os.path.dirname(os.path.dirname(__file__)), caminho)
+        with open(alvo, encoding="utf-8") as f:
+            return f.read()
+
+    def test_a_ponte_de_voz_grava_data_conclusao(self):
+        fonte = self._fonte(os.path.join("hermes-voice-bridge", "task_tools.py"))
+        inicio = fonte.index("def _mudar_status_acao")
+        corpo = fonte[inicio:inicio + 3000]
+        self.assertIn("data_conclusao", corpo,
+                      "A ponte de voz voltou a concluir acao sem gravar data_conclusao; "
+                      "essas acoes ficam invisiveis para a varredura de elevacao.")
+
+
+class TestJanelaMaiorQueOTetoDaConsulta(unittest.TestCase):
+    """Mais conclusoes na janela do que a consulta traz.
+
+    Acontece depois de varias varreduras puladas, ou num passivo grande. A rodada
+    avalia uma pagina e nada indica que havia mais — entao, se o marcador
+    avancasse, as conclusoes que sobraram ficariam fora de TODA janela futura.
+    """
+
+    def _db(self, quantas):
+        db = _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        for i in range(quantas):
+            db.collection("tarefas").dados[f"c{i}"] = _tarefa(
+                id=f"c{i}", status="concluído", data_conclusao="2026-08-28",
+                pool_dados=[_anexo("X.md")])
+        return db
+
+    def test_bater_no_teto_nao_libera_o_marcador(self):
+        db = self._db(ds.LIMITE_TAREFAS)
+        self.assertFalse(ds.preparar_rodada(db, HOJE, [])["pode_marcar"])
+
+    def test_abaixo_do_teto_libera(self):
+        db = self._db(3)
+        self.assertTrue(ds.preparar_rodada(db, HOJE, [])["pode_marcar"])
+
+    def test_o_truncamento_vira_aviso_e_nao_so_log(self):
+        db = self._db(ds.LIMITE_TAREFAS)
+        ds.preparar_rodada(db, HOJE, [])
+        estado = (ds._marcador_de_varredura(db).get().to_dict() or {}).get("varredura_degradada")
+        self.assertEqual(estado["motivo"], "limite_atingido")
+
+    def test_a_rodada_continua_com_o_que_deu_para_ver(self):
+        """Ver parte e melhor que nao ver nada; o que nao pode e dizer que viu tudo."""
+        self.assertTrue(ds.preparar_rodada(self._db(ds.LIMITE_TAREFAS), HOJE, [])["rodar"])
+
+
+class TestAPropostaDePassivoEAceita(unittest.TestCase):
+    """A cota so serve para alguma coisa se a proposta de passivo puder ser gravada.
+
+    `validar_proposta` confere o `task_id` contra o conjunto de candidatas da
+    rodada. Se esse conjunto sair so de `candidatos`, todo id de passivo e
+    recusado como inexistente — a cota inteira vira no-op, e o cursor avanca por
+    cima, descartando aquelas acoes em silencio. E a mesma falha de sempre: fonte
+    nova que nao atravessa todos os consumidores.
+    """
+
+    def _rodada(self):
+        return {
+            "restantes": 3,
+            "ja_no_mes": 0,
+            "objetivos": [{"id": "intel", "objetivoMacro": "Autoridade intelectual",
+                           "pilar": "intelectual"}],
+            "candidatos": [],
+            "passivo": [{
+                "task_id": "antiga", "passivo": True,
+                "tarefa": _tarefa(id="antiga", titulo="Handoff de 2024",
+                                  status="concluído"),
+                "corpo": {"documentos": ["H.md"], "etapas_feitas": 0,
+                          "tem_texto_pronto": True, "caracteres_diario": 0},
+            }],
+        }
+
+    def test_o_id_de_passivo_e_valido_para_a_ferramenta(self):
+        gravadas = []
+        _tools, mapa = ds._ferramenta_propor(
+            _Db(), HOJE, self._rodada(), gravadas,
+            reservar=lambda *a, **k: (True, ""))
+        r = mapa["propor_elevacao"](
+            task_id="antiga", objetivo_id="intel", motivo_escassez="ja_escrito",
+            o_que_ja_existe="handoff pronto", passo_que_falta="publicar",
+            custo_estimado="uma tarde", ativo_possivel="Relato de experiencia",
+            justificativa="O handoff ja e o texto do relato.")
+        self.assertNotIn("erro", str(r).lower())
+        # `aceitas` guarda o id da reserva, que carrega o mes e a acao.
+        self.assertEqual(gravadas, [ds.id_da_reserva(HOJE, "antiga")])
+
+
+class TestAContagemDoQueFaltaDoPassivo(unittest.TestCase):
+    """`restantes` e o numero que decide quando mandar parar. Errado, nao serve.
+
+    O cursor carrega `data|task_id` justamente por causa de empate de data.
+    Contar o dia inteiro do cursor incluiria ele proprio e as irmas ja
+    percorridas, e o numero ficaria travado num valor que nunca desce.
+    """
+
+    def _db(self):
+        db = _Db()
+        for i in range(4):
+            db.collection("tarefas").dados[f"a{i}"] = {
+                "status": "concluído", "data_conclusao": "2026-05-10"}
+        for i in range(3):
+            db.collection("tarefas").dados[f"b{i}"] = {
+                "status": "concluído", "data_conclusao": "2026-04-01"}
+        return db
+
+    def test_conta_so_o_que_esta_atras_do_cursor(self):
+        # Cursor em a1: sobram a0 (mesmo dia, id menor) e os tres de abril.
+        self.assertEqual(ds.contar_passivo(self._db(), "2026-05-10|a1", "2026-08-29"), 4)
+
+    def test_o_cursor_e_as_irmas_ja_passadas_nao_contam(self):
+        """Com o dia inteiro contado seriam 7; a2 e a3 ja passaram."""
+        self.assertNotEqual(ds.contar_passivo(self._db(), "2026-05-10|a3", "2026-08-29"), 7)
+
+    def test_no_fim_do_caminho_o_numero_zera(self):
+        self.assertEqual(ds.contar_passivo(self._db(), "2026-04-01|b0", "2026-08-29"), 0)
+
+
+class TestAdiarCumpreOQueOCardPromete(unittest.TestCase):
+    """"Agora nao e sobre o momento, nao sobre a acao" — inclusive para concluida.
+
+    Para acao viva a promessa se cumpria sozinha: a consulta dela e por status.
+    Para concluida nao: o marcador ja passou da `data_conclusao` e o cursor do
+    passivo ja passou da chave dela. "Adiar" virava "nunca" em silencio, que e o
+    oposto do que `decidir` responde ao usuario.
+
+    A sugestao adiada e a unica fonte que sobrevive aos dois cursores, porque
+    guarda o `task_id` — e id nao depende de janela.
+    """
+
+    def _db(self, status_da_acao, data_conclusao="2024-05-05"):
+        db = _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        db.collection("tarefas").dados["antiga"] = _tarefa(
+            id="antiga", status=status_da_acao, data_conclusao=data_conclusao,
+            data_atualizacao=data_conclusao, pool_dados=[_anexo("Handoff.md")])
+        db.collection(ds.COL_ELEVACOES).dados["s1"] = {
+            "task_id": "antiga", "status": ds.STATUS_ADIADA, "criada_em": "2026-01-10"}
+        return db
+
+    def test_concluida_adiada_volta_mesmo_fora_da_janela(self):
+        db = self._db("concluído")
+        # Cursor do passivo ja passou por ela, e a janela comeca depois dela.
+        ds.avancar_passivo(db, "2024-01-01|zzz", False, None)
+        ds.marcar_varredura(db, "2026-08-01")
+        rodada = ds.preparar_rodada(db, "2026-08-29", [])
+        self.assertIn("antiga", [c["task_id"] for c in rodada["candidatos"]])
+
+    def test_nao_duplica_quando_vem_pelos_dois_caminhos(self):
+        """Acao viva adiada chega pela consulta E pela releitura."""
+        rodada = ds.preparar_rodada(self._db("em andamento"), "2026-08-29", [])
+        self.assertEqual([c["task_id"] for c in rodada["candidatos"]], ["antiga"])
+
+    def test_a_releitura_e_so_das_adiadas(self):
+        """Testado na fonte, e nao no fim.
+
+        No fim, `acoes_ja_decididas` tambem barra `nunca` e `pendente`, entao um
+        filtro frouxo aqui passaria despercebido — e voltaria a trazer do banco
+        acao que ninguem pediu.
+        """
+        db = self._db("concluído")
+        for status in (ds.STATUS_NUNCA, ds.STATUS_PENDENTE, ds.STATUS_ACEITA):
+            self.assertEqual(
+                ds.tarefas_adiadas(db, [{"task_id": "antiga", "status": status}]), [],
+                f"status {status} nao devia ser relido")
+        self.assertEqual(
+            [t["id"] for t in ds.tarefas_adiadas(
+                db, [{"task_id": "antiga", "status": ds.STATUS_ADIADA}])],
+            ["antiga"])
+
+    def test_nunca_continua_sem_voltar_na_rodada(self):
+        db = self._db("concluído")
+        db.cols[ds.COL_ELEVACOES].dados["s1"]["status"] = ds.STATUS_NUNCA
+        ds.marcar_varredura(db, "2026-08-01")
+        rodada = ds.preparar_rodada(db, "2026-08-29", [])
+        self.assertNotIn("antiga", [c["task_id"] for c in rodada.get("candidatos") or []])
+
+    def test_adiadas_acumuladas_nao_travam_o_marcador(self):
+        """Uma correcao travando a outra, e o modo de falha e permanente.
+
+        A releitura por id devolve concluidas antigas a `candidatos`. Elas nao
+        carregam marca de passivo, entao a guarda do marcador as trataria como
+        concluidas da janela — e como "adiada" nao expira, elas se ACUMULAM.
+        Bastariam algumas para o marcador nunca mais avancar, e dai a janela
+        cresceria ate bater no teto de documentos.
+
+        Nao podem segurar: elas voltam pelo `task_id` da sugestao, entao o
+        marcador nao as alcanca de qualquer forma.
+        """
+        db = _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        # Mais adiadas concluidas do que cabe no recorte do prompt.
+        for i in range(ds.LIMITE_CANDIDATAS + 4):
+            db.collection("tarefas").dados[f"ad{i}"] = _tarefa(
+                id=f"ad{i}", status="concluído", data_conclusao="2024-01-01",
+                data_atualizacao="2024-01-01", pool_dados=[_anexo("Doc.md")])
+            db.collection(ds.COL_ELEVACOES).dados[f"s{i}"] = {
+                "task_id": f"ad{i}", "status": ds.STATUS_ADIADA,
+                "criada_em": "2026-01-10"}
+        ds.marcar_varredura(db, "2026-08-01")
+        ds.avancar_passivo(db, "2023-01-01|zzz", False, None)
+        rodada = ds.preparar_rodada(db, "2026-08-29", [])
+        self.assertTrue(rodada["pode_marcar"])
+
+    def test_acao_apagada_nao_derruba_a_rodada(self):
+        db = self._db("concluído")
+        del db.cols["tarefas"].dados["antiga"]
+        self.assertEqual(ds.tarefas_adiadas(db, [
+            {"task_id": "antiga", "status": ds.STATUS_ADIADA}]), [])
+
+
+class TestOCardDizQuandoOTrabalhoAconteceu(unittest.TestCase):
+    """Sugestao de passivo apresentada igual a de trabalho desta semana engana.
+
+    O material de 2024 vale o mesmo, mas a decisao nao e a mesma: o usuario pode
+    nem lembrar da acao. Instruir o modelo a situar isso na justificativa nao
+    basta — neste modulo a validacao mora na gravacao, e nao na confianca no
+    prompt, e foi assim que o teto e a lista de objetivos foram tratados.
+    """
+
+    BASE = {
+        "task_id": "antiga", "objetivo_id": "intel", "motivo_escassez": "ja_escrito",
+        "o_que_ja_existe": "handoff pronto", "passo_que_falta": "publicar",
+        "custo_estimado": "uma tarde", "ativo_possivel": "Relato de experiencia",
+        "justificativa": "O handoff ja e o texto do relato.",
+    }
+
+    def test_o_card_de_trabalho_antigo_diz_a_data(self):
+        texto = ds.resumo_para_o_usuario(self.BASE, "Handoff", "Autoridade",
+                                         concluida_em="2024-03-01", antigo=True)
+        self.assertIn("trabalho antigo", texto)
+        self.assertIn("2024-03-01", texto)
+
+    def test_antigo_vem_da_data_e_nao_da_lista_de_origem(self):
+        """O buraco que a marca `passivo` deixava aberto.
+
+        O terceiro recorte traz concluida antiga mexida desde o corte, e ela
+        chega pela lista da JANELA — `passivo` False. Se a ressalva dependesse da
+        origem, uma acao de 2024 com anexo novo seria apresentada como trabalho
+        desta semana.
+        """
+        janela_antiga = {"task_id": "x", "tarefa": {"data_conclusao": "2024-03-01"}}
+        self.assertEqual(ds._idade_da_acao(janela_antiga, "2026-08-23"),
+                         ("2024-03-01", True))
+
+    def test_adiada_antiga_que_volta_por_id_tambem_e_marcada(self):
+        """Segundo caminho pelo qual a origem mentiria sobre a idade.
+
+        A releitura por id nao carrega marca de lista nenhuma — a acao adiada
+        entra em `candidatos` como qualquer outra. Se a ressalva dependesse da
+        origem, uma concluida de 2024 readmitida por "adiar" voltaria ao card sem
+        aviso, e o usuario a leria como trabalho da semana pela segunda vez.
+        """
+        readmitida = {"task_id": "antiga",
+                      "tarefa": {"status": "concluído", "data_conclusao": "2024-05-05"}}
+        self.assertEqual(ds._idade_da_acao(readmitida, "2026-08-23")[1], True)
+
+    def test_concluida_dentro_da_janela_nao_e_antiga(self):
+        recente = {"task_id": "x", "tarefa": {"data_conclusao": "2026-08-28"}}
+        self.assertEqual(ds._idade_da_acao(recente, "2026-08-23")[1], False)
+
+    def test_acao_viva_nao_tem_idade_de_conclusao(self):
+        viva = {"task_id": "x", "tarefa": {"status": "em andamento"}}
+        self.assertEqual(ds._idade_da_acao(viva, "2026-08-23"), ("", False))
+
+    def test_o_card_da_semana_nao_ganha_ressalva(self):
+        texto = ds.resumo_para_o_usuario(self.BASE, "Handoff", "Autoridade")
+        self.assertNotIn("trabalho antigo", texto)
+
+    def test_antigo_sem_data_ainda_avisa(self):
+        texto = ds.resumo_para_o_usuario(self.BASE, "Handoff", "Autoridade", antigo=True)
+        self.assertIn("trabalho antigo", texto)
+
+    def test_a_rodada_marca_como_antiga_a_candidata_da_JANELA(self):
+        """Ponta a ponta, porque foi aqui que a ligacao faltou.
+
+        Testar `_idade_da_acao` sozinha nao prova nada sobre o card: o defeito
+        estava em `_ferramenta_propor` usar a origem da lista em vez da data. Esta
+        candidata vem de `candidatos` (a janela, via terceiro recorte) e e de
+        2024 — o card TEM de avisar.
+        """
+        gravado = {}
+
+        def _reservar(db, hoje, teto, ref, payload, ja_no_mes=0):
+            gravado.update(payload)
+            return True, ""
+
+        rodada = {
+            "restantes": 3, "ja_no_mes": 0, "corte_conclusao": "2026-08-23",
+            "objetivos": [{"id": "intel", "objetivoMacro": "Autoridade intelectual"}],
+            "candidatos": [{
+                "task_id": "antiga",
+                "tarefa": _tarefa(id="antiga", titulo="Handoff", status="concluído",
+                                  data_conclusao="2024-03-01"),
+                "corpo": {"documentos": ["H.md"], "etapas_feitas": 0,
+                          "tem_texto_pronto": True, "caracteres_diario": 0},
+            }],
+            "passivo": [],
+        }
+        _tools, mapa = ds._ferramenta_propor(_Db(), HOJE, rodada, [], reservar=_reservar)
+        mapa["propor_elevacao"](**self.BASE)
+        self.assertTrue(gravado["antigo"])
+        self.assertIn("trabalho antigo", gravado["resumo"])
+
+    def test_a_sugestao_gravada_guarda_quando_aconteceu(self):
+        """Gravado, e nao deduzido depois: a fila e o card leem daqui."""
+        gravado = {}
+
+        def _reservar(db, hoje, teto, ref, payload, ja_no_mes=0):
+            gravado.update(payload)
+            return True, ""
+
+        ds.registrar_sugestao(_Db(), dict(self.BASE), HOJE, "Handoff", "Autoridade",
+                              reservar=_reservar, concluida_em="2024-03-01", antigo=True)
+        self.assertEqual(gravado["concluida_em"], "2024-03-01")
+        self.assertTrue(gravado["antigo"])
+
+    def test_a_fila_devolve_o_contexto_temporal(self):
+        db = _Db()
+        db.collection(ds.COL_ELEVACOES).dados["s1"] = {
+            **self.BASE, "status": ds.STATUS_PENDENTE, "criada_em": HOJE,
+            "titulo_acao": "Handoff", "nome_objetivo": "Autoridade",
+            "concluida_em": "2024-03-01", "antigo": True, "resumo": "x"}
+        sugestao = ds.listar_pendentes(db)["sugestoes"][0]
+        self.assertEqual(sugestao["concluida_em"], "2024-03-01")
+        self.assertTrue(sugestao["antigo"])
+
+
+class TestConcluidaQueGanhaCorpoDepois(unittest.TestCase):
+    """Acao concluida PODE ganhar corpo depois, e sem isto sumiria para sempre.
+
+    Nao ha guarda de status em `anexar_arquivo` nem na tela de execucao, que
+    grava `pool_dados` direto. E o caso e plausivel exatamente aqui: escrever o
+    handoff depois de fechar a acao.
+
+    A janela nao a alcanca (`data_conclusao` nao mudou) e o cursor do passivo ja
+    passou por ela quando estava vazia. `data_atualizacao` e o unico campo que
+    reflete o anexo novo — dai o terceiro recorte.
+    """
+
+    def _db(self, data_atualizacao):
+        db = _Db()
+        db.collection("tarefas").dados["antiga"] = _tarefa(
+            id="antiga", status="concluído",
+            data_conclusao="2024-03-01",
+            data_atualizacao=data_atualizacao,
+            pool_dados=[_anexo("Handoff.md")])
+        return db
+
+    def test_mexida_depois_do_corte_volta_a_ser_vista(self):
+        tarefas, _inc = ds._tarefas_da_varredura(self._db("2026-08-28"), "2026-08-23")
+        self.assertEqual([t["id"] for t in tarefas], ["antiga"])
+
+    def test_intocada_continua_fora_da_janela(self):
+        """Senao o terceiro recorte traria o passivo inteiro pela porta da janela."""
+        tarefas, _inc = ds._tarefas_da_varredura(self._db("2024-03-01"), "2026-08-23")
+        self.assertEqual(tarefas, [])
+
+    def test_truncamento_do_terceiro_recorte_tambem_segura_o_marcador(self):
+        """O teto vale para os DOIS recortes de concluidas.
+
+        Conferir so o primeiro deixaria a rodada se declarar completa com o
+        terceiro truncado — e as omitidas ficariam invisiveis para sempre: a
+        atualizacao delas e anterior ao marcador novo, e o cursor do passivo ja
+        passou por elas.
+        """
+        db = _Db()
+        for i in range(ds.LIMITE_TAREFAS):
+            db.collection("tarefas").dados[f"m{i:04d}"] = _tarefa(
+                id=f"m{i:04d}", status="concluído",
+                data_conclusao="2020-01-01", data_atualizacao="2026-08-28")
+        _tarefas, incompleta = ds._tarefas_da_varredura(db, "2026-08-23")
+        self.assertEqual(incompleta, "limite_atingido")
+
+    def test_nao_duplica_com_a_consulta_da_janela(self):
+        db = self._db("2026-08-28")
+        db.cols["tarefas"].dados["antiga"]["data_conclusao"] = "2026-08-28"
+        tarefas, _inc = ds._tarefas_da_varredura(db, "2026-08-23")
+        self.assertEqual(len(tarefas), 1)
+
+
+class TestAsDuasRecusasDaReservaSaoDiferentes(unittest.TestCase):
+    """Colisao de id nao e teto, e dizer teto nas duas desliga a rodada.
+
+    O id da reserva e `{mes}__{task_id}` de proposito: uma acao adiada dentro do
+    mesmo mes colide, e isso e o comportamento desejado. Mas se o modelo ouvir
+    "teto do mes ja atingido" nessa colisao, ele para de propor no resto da
+    rodada — com vaga sobrando e candidata sobrando.
+    """
+
+    def _mapa(self, db, vagas, aceitas):
+        rodada = TestAGravacaoNaoConfiaNoModelo()._rodada()
+        _tools, mapa = ds._ferramenta_propor(
+            db, HOJE, rodada, aceitas,
+            reservar=TestAGravacaoNaoConfiaNoModelo._reserva(vagas))
+        return mapa["propor_elevacao"]
+
+    def test_colisao_manda_tentar_outra_e_diz_que_ha_vaga(self):
+        db = _Db()
+        propor = self._mapa(db, vagas=3, aceitas=[])
+        propor(**TestAPropostaDaIA.BASE)
+        r = self._mapa(db, vagas=3, aceitas=[])(**TestAPropostaDaIA.BASE)
+        self.assertFalse(r["aceita"])
+        self.assertIn("ja foi sugerida", r["motivo"])
+        self.assertIn("vaga", r["motivo"])
+        self.assertNotIn("teto", r["motivo"])
+
+    def test_teto_encerra_a_rodada(self):
+        r = self._mapa(_Db(), vagas=0, aceitas=[])(**TestAPropostaDaIA.BASE)
+        self.assertFalse(r["aceita"])
+        self.assertIn("teto", r["motivo"])
+        self.assertIn("nao proponha mais", r["motivo"])
+
+    def test_a_reserva_devolve_o_motivo_e_nao_um_booleano(self):
+        db = _Db()
+        reserva = TestAGravacaoNaoConfiaNoModelo._reserva(1)
+        ref = db.collection(ds.COL_ELEVACOES).document("x")
+        self.assertEqual(reserva(db, HOJE, 3, ref, {"a": 1}), (True, ""))
+        self.assertEqual(reserva(db, HOJE, 3, ref, {"a": 1}),
+                         (False, ds.MOTIVO_JA_SUGERIDA))
+
+
+class TestPilarLegadoComAcento(unittest.TestCase):
+    """O unico desfecho que o modulo diz que nao pode acontecer.
+
+    A derivacao por pilar so vale onde `gerida_por_acoes` nao esta gravada — ou
+    seja, nos documentos legados, que sao os de grafia livre. Um "Saúde"
+    acentuado caia no else e o objetivo de saude virava elegivel.
+
+    `.lower()` sozinho nao resolveria: "Saúde" vira "saúde", que continua
+    diferente de "saude".
+    """
+
+    def test_grafias_do_pilar_saude_ficam_todas_de_fora(self):
+        for grafia in ("saude", "Saude", "SAUDE", "Saúde", "saúde", " Saúde "):
+            self.assertEqual(
+                ds.objetivos_elegiveis([{"id": "m1", "pilar": grafia,
+                                         "objetivoMacro": "Sair de 95 para 80"}]),
+                [], f"grafia {grafia!r} devia ficar de fora")
+
+    def test_outro_pilar_continua_entrando(self):
+        self.assertEqual(
+            [o["id"] for o in ds.objetivos_elegiveis(
+                [{"id": "m1", "pilar": "Intelectual", "objetivoMacro": "Autoridade"}])],
+            ["m1"])
+
+    def test_a_flag_gravada_continua_vencendo_a_derivacao(self):
+        """Pela flag, nao pelo nome — a regra transversal nao muda."""
+        self.assertEqual(
+            [o["id"] for o in ds.objetivos_elegiveis(
+                [{"id": "m1", "pilar": "Saúde", "objetivoMacro": "X",
+                  "gerida_por_acoes": True}])],
+            ["m1"])
+
+
+class TestOPassivoEntraPorCota(unittest.TestCase):
+    """618 concluidas de passivo, 124 com corpo. De uma vez, fila ilegivel.
+
+    A cota caminha do mais recente para o mais antigo, com cursor proprio, e
+    soma-se as concluidas da janela em vagas separadas do prompt.
+    """
+
+    def _db(self, quantas=30, com_corpo=True, ano="2026"):
+        db = _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        for i in range(quantas):
+            db.collection("tarefas").dados[f"p{i:03d}"] = _tarefa(
+                id=f"p{i:03d}", status="concluído",
+                data_conclusao=f"{ano}-01-{(i % 28) + 1:02d}",
+                pool_dados=[_anexo("Doc.md")] if com_corpo else [])
+        return db
+
+    def test_a_cota_limita_quantas_saem_por_rodada(self):
+        rodada = ds.preparar_rodada(self._db(), "2026-08-29", [])
+        self.assertEqual(len(rodada["passivo"]), ds.COTA_PASSIVO)
+
+    def test_vem_do_mais_recente_para_o_mais_antigo(self):
+        rodada = ds.preparar_rodada(self._db(), "2026-08-29", [])
+        datas = [c["tarefa"]["data_conclusao"] for c in rodada["passivo"]]
+        self.assertEqual(datas, sorted(datas, reverse=True))
+
+    def test_a_rodada_seguinte_continua_de_onde_parou(self):
+        db = self._db()
+        primeira = ds.preparar_rodada(db, "2026-08-29", [])
+        ds.avancar_passivo(db, primeira["passivo_cursor"], False, None)
+        segunda = ds.preparar_rodada(db, "2026-08-29", [])
+        ids_1 = {c["task_id"] for c in primeira["passivo"]}
+        ids_2 = {c["task_id"] for c in segunda["passivo"]}
+        self.assertEqual(ids_1 & ids_2, set())
+
+    def test_sem_corpo_nao_gasta_cota_e_nao_volta(self):
+        """As 494 sem corpo levariam um ano para passar se gastassem cota.
+
+        A cota e de CANDIDATAS, nao de documentos lidos: a rodada atravessa o que
+        nao tem corpo para chegar no que tem. Aqui ha 25 sem corpo na frente e
+        uma com corpo atras — se o descarte gastasse cota, ela nao seria
+        alcancada nesta rodada.
+        """
+        db = _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        for i in range(25):
+            db.collection("tarefas").dados[f"vazia{i:03d}"] = _tarefa(
+                id=f"vazia{i:03d}", status="concluído",
+                data_conclusao=f"2026-03-{i + 1:02d}", pool_dados=[])
+        db.collection("tarefas").dados["fundo"] = _tarefa(
+            id="fundo", status="concluído", data_conclusao="2026-01-01",
+            pool_dados=[_anexo("Handoff.md")])
+        rodada = ds.preparar_rodada(db, "2026-08-29", [])
+        self.assertEqual([c["task_id"] for c in rodada["passivo"]], ["fundo"])
+
+    def test_o_cursor_anda_sobre_o_que_foi_descartado(self):
+        """Concluida sem corpo nao ganha corpo depois: voltar nela e caminhar no lugar."""
+        db = self._db(quantas=12, com_corpo=False)
+        primeira = ds.preparar_rodada(db, "2026-08-29", [])
+        self.assertTrue(primeira["passivo_cursor"])
+        ds.avancar_passivo(db, primeira["passivo_cursor"], False, None)
+        tarefas, _c, _e = ds._passivo(db, "2026-08-29",
+                                      ds.cursor_do_passivo(db), ds.COTA_PASSIVO, {})
+        self.assertEqual(tarefas, [])
+
+    def test_o_passivo_nao_segura_o_marcador_da_janela(self):
+        """Cursor proprio. Confundir os dois travaria o marcador para sempre."""
+        rodada = ds.preparar_rodada(self._db(), "2026-08-29", [])
+        self.assertTrue(rodada["pode_marcar"])
+
+    def test_o_prompt_reserva_vagas_para_o_passivo(self):
+        """Somar e cortar faria o passivo perder toda disputa de ordenacao."""
+        db = self._db()
+        for i in range(ds.LIMITE_CANDIDATAS + 5):
+            db.collection("tarefas").dados[f"v{i}"] = _tarefa(
+                id=f"v{i}", status="em andamento", pool_dados=[_anexo("X.md")])
+        rodada = ds.preparar_rodada(db, "2026-08-29", [])
+        mensagem = ds.mensagem_da_rodada(rodada)
+        self.assertEqual(mensagem.count('"passivo": true'), ds.COTA_PASSIVO)
+        self.assertIn("marcadas como passivo", mensagem)
+
+    def test_ja_decidida_nao_gasta_cota(self):
+        db = self._db()
+        decididas = [{"task_id": f"p{i:03d}", "status": ds.STATUS_NUNCA} for i in range(5)]
+        db.collection(ds.COL_ELEVACOES).dados = {
+            f"s{i}": {**d, "criada_em": "2026-01-01"} for i, d in enumerate(decididas)}
+        rodada = ds.preparar_rodada(db, "2026-08-29", [])
+        self.assertEqual(len(rodada["passivo"]), ds.COTA_PASSIVO)
+        for c in rodada["passivo"]:
+            self.assertNotIn(c["task_id"], {d["task_id"] for d in decididas})
+
+    def test_sem_corte_por_ano(self):
+        """A ordem decrescente ja entrega primeiro o que tem valor; nao ha filtro."""
+        rodada = ds.preparar_rodada(self._db(quantas=12, ano="2015"), "2026-08-29", [])
+        self.assertEqual(len(rodada["passivo"]), ds.COTA_PASSIVO)
+
+    def test_o_cursor_desempata_por_id(self):
+        """Varias acoes na mesma data: cursor so de data pularia as irmas."""
+        db = self._db()
+        for i in range(6):
+            db.collection("tarefas").dados[f"empate{i}"] = _tarefa(
+                id=f"empate{i}", status="concluído", data_conclusao="2026-02-10",
+                pool_dados=[_anexo("Doc.md")])
+        vistos = set()
+        cursor = ""
+        for _ in range(8):
+            tarefas, cursor, _esg = ds._passivo(db, "2026-08-29", cursor, 3, {})
+            for t in tarefas:
+                self.assertNotIn(t["id"], vistos)
+                vistos.add(t["id"])
+        self.assertGreaterEqual(len({v for v in vistos if v.startswith("empate")}), 5)
+
+
+class TestORecorteDoPromptTambemSeguraOMarcador(unittest.TestCase):
+    """`mensagem_da_rodada` mostra so as primeiras N candidatas.
+
+    O marcador nao pode dizer "tudo avaliado" por cima do que o modelo nunca viu.
+    Mas a espera e assimetrica de proposito: viva que sobra volta sozinha na
+    proxima rodada (a consulta dela e por status, sem data); concluida que sobra
+    so existe dentro da janela, e a janela anda com o marcador.
+    """
+
+    @staticmethod
+    def _candidatos(status_da_sobra):
+        vistas = [{"task_id": f"v{i}", "tarefa": {"status": "em andamento"}}
+                  for i in range(ds.LIMITE_CANDIDATAS)]
+        return vistas + [{"task_id": "sobra", "tarefa": {"status": status_da_sobra}}]
+
+    def test_concluida_fora_do_recorte_segura_o_marcador(self):
+        self.assertFalse(ds.viu_todas_as_concluidas(self._candidatos("concluído")))
+
+    def test_viva_fora_do_recorte_nao_segura(self):
+        """Travar aqui pararia o marcador em toda semana movimentada."""
+        self.assertTrue(ds.viu_todas_as_concluidas(self._candidatos("em andamento")))
+
+    def test_dentro_do_limite_nada_segura(self):
+        dentro = [{"task_id": "c", "tarefa": {"status": "concluído"}}]
+        self.assertTrue(ds.viu_todas_as_concluidas(dentro))
+
+    def test_sem_candidata_nenhuma_nao_segura(self):
+        self.assertTrue(ds.viu_todas_as_concluidas([]))
+
+    def test_a_rodada_inteira_respeita_isso(self):
+        db = _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        # Vivas com diario grande vao para a frente da ordenacao; a concluida com
+        # anexo de texto tambem tem corpo, mas fica na sobra por volume de diario.
+        for i in range(ds.LIMITE_CANDIDATAS):
+            db.collection("tarefas").dados[f"v{i}"] = _tarefa(
+                id=f"v{i}", status="em andamento",
+                pool_dados=[_anexo("Doc.md")],
+                acompanhamento=[{"nota": "x" * 5000}])
+        db.collection("tarefas").dados["c"] = _tarefa(
+            id="c", status="concluído", data_conclusao="2026-08-28",
+            pool_dados=[_anexo("Handoff.md")])
+        rodada = ds.preparar_rodada(db, HOJE, [])
+        self.assertTrue(rodada["rodar"])
+        self.assertFalse(rodada["pode_marcar"])
+        estado = (ds._marcador_de_varredura(db).get().to_dict() or {}).get("varredura_degradada")
+        self.assertEqual(estado["motivo"], "candidatas_demais")
+
+
+class TestAsConcluidasEntramNaVarredura(unittest.TestCase):
+    """O caso que sumia era o melhor: acao terminada na semana e a que com mais
+    certeza deixou documento, diario e etapas prontas. O docstring de
+    `candidatas` sempre disse que conclusao nao filtra; a consulta a removia
+    antes de ela ser chamada.
+    """
+
+    @staticmethod
+    def _db_com(*tarefas):
+        db = _Db()
+        for i, t in enumerate(tarefas):
+            db.collection("tarefas").dados[t.get("id") or f"t{i}"] = t
+        return db
+
+    def test_concluida_dentro_da_janela_entra(self):
+        db = self._db_com({"id": "a", "status": "concluído",
+                           "data_conclusao": "2026-08-28T10:00:00Z"})
+        tarefas, degradacao = ds._tarefas_da_varredura(db, "2026-08-23")
+        self.assertEqual([t["id"] for t in tarefas], ["a"])
+        self.assertEqual(degradacao, "")
+
+    def test_concluida_antes_do_corte_fica_de_fora(self):
+        db = self._db_com({"id": "a", "status": "concluído",
+                           "data_conclusao": "2026-08-01"})
+        self.assertEqual(ds._tarefas_da_varredura(db, "2026-08-23")[0], [])
+
+    def test_concluida_sem_data_e_passivo_e_nao_regressao(self):
+        db = self._db_com({"id": "a", "status": "concluído"})
+        self.assertEqual(ds._tarefas_da_varredura(db, "2026-08-23")[0], [])
+
+    def test_as_vivas_continuam_entrando(self):
+        db = self._db_com({"id": "viva", "status": "em andamento"},
+                          {"id": "parada", "status": "stand-by"},
+                          {"id": "velha", "status": "concluído",
+                           "data_conclusao": "2020-01-01"})
+        self.assertEqual(sorted(t["id"] for t in ds._tarefas_da_varredura(db, "2026-08-23")[0]),
+                         ["parada", "viva"])
+
+    def test_cancelada_nunca_entra(self):
+        db = self._db_com({"id": "a", "status": "cancelada",
+                           "data_conclusao": "2026-08-28"})
+        self.assertEqual(ds._tarefas_da_varredura(db, "2026-08-23")[0], [])
+
+    def test_sem_o_indice_a_rodada_segue_com_as_vivas(self):
+        """Perder as concluidas numa rodada e melhor que perder a rodada."""
+        class _RecorteQuebrado(_Recorte):
+            """Levanta no filtro de `data_conclusao`, como o Firestore faz sem o
+            indice composto. Precisa ser no `_Recorte` e nao na colecao: o
+            segundo `where` da cadeia ja e chamado no recorte."""
+
+            def where(self, *a, **kw):
+                f = kw.get("filter")
+                if f is not None and f.field_path == "data_conclusao":
+                    raise RuntimeError("indice composto ausente")
+                r = _Recorte.where(self, *a, **kw)
+                return _RecorteQuebrado(r._dados, r._ids, r._n)
+
+        class _ColQuebrada(_Colecao):
+            def where(self, *a, **kw):
+                r = _Colecao.where(self, *a, **kw)
+                return _RecorteQuebrado(r._dados, r._ids, r._n)
+
+        db = _Db()
+        db.cols["tarefas"] = _ColQuebrada()
+        db.cols["tarefas"].dados["viva"] = {"id": "viva", "status": "em andamento"}
+        tarefas, degradacao = ds._tarefas_da_varredura(db, "2026-08-23")
+        self.assertEqual([t["id"] for t in tarefas], ["viva"])
+        self.assertIn("indice", degradacao)
+
+
 class _Snap:
     def __init__(self, col, doc_id):
         self._col, self.id = col, doc_id
@@ -268,8 +1202,11 @@ class _Ref:
         self._col, self.id = col, doc_id
         self._subcols = {}
 
-    def set(self, dados):
-        self._col[self.id] = dict(dados)
+    def set(self, dados, merge=False):
+        if merge:
+            self._col.setdefault(self.id, {}).update(dados)
+        else:
+            self._col[self.id] = dict(dados)
 
     def get(self, transaction=None):
         return _Snap(self._col, self.id)
@@ -361,11 +1298,35 @@ class _Recorte:
                 return atual in valor
             if op == ">=":
                 return atual is not None and str(atual) >= str(valor)
+            if op == "<=":
+                return atual is not None and str(atual) <= str(valor)
+            if op == "<":
+                return atual is not None and str(atual) < str(valor)
             raise AssertionError(f"operador nao suportado pelo fake: {op}")
         return _Recorte(self._dados, [i for i in self._ids if passa(i)], self._n)
 
     def limit(self, n):
         return _Recorte(self._dados, self._ids, n)
+
+    def order_by(self, campo, direction="ASCENDING"):
+        ordenados = sorted(
+            self._ids,
+            key=lambda i: str((self._dados.get(i) or {}).get(campo) or ""),
+            reverse=(direction == "DESCENDING"))
+        return _Recorte(self._dados, ordenados, self._n)
+
+    def count(self):
+        total = len(self._ids)
+
+        class _Agregado:
+            value = total
+
+        class _Resultado:
+            @staticmethod
+            def get():
+                return [[_Agregado()]]
+
+        return _Resultado()
 
     def stream(self):
         ids = self._ids if self._n is None else self._ids[:self._n]
@@ -405,12 +1366,15 @@ class TestAGravacaoNaoConfiaNoModelo(unittest.TestCase):
         estado = {"restam": vagas}
 
         def reservar(db, hoje, teto, ref, payload, ja_no_mes=0):
-            # Espelha o contrato da reserva real: id ja usado e recusa.
-            if estado["restam"] <= 0 or ref.get().exists:
-                return False
+            # Espelha o contrato da reserva real, inclusive a distincao entre as
+            # duas recusas — que e justamente o que o codigo precisa acertar.
+            if ref.get().exists:
+                return False, ds.MOTIVO_JA_SUGERIDA
+            if estado["restam"] <= 0:
+                return False, ds.MOTIVO_TETO
             estado["restam"] -= 1
             ref.set(payload)
-            return True
+            return True, ""
 
         return reservar
 
@@ -522,7 +1486,7 @@ class TestOContadorNaoRecomecaDoZero(unittest.TestCase):
 
         def reservar(db, hoje, teto, ref, payload, ja_no_mes=0):
             recebido["ja_no_mes"] = ja_no_mes
-            return True
+            return True, ""
 
         rodada = TestAGravacaoNaoConfiaNoModelo()._rodada()
         rodada["ja_no_mes"] = 2

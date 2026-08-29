@@ -163,6 +163,72 @@ describe('MorningSummaryView', () => {
         expect(screen.queryByText(/não foram escolhidas para hoje/)).toBeNull();
     });
 
+    it('mostra o aviso de varredura degradada, que sem esta tela só existiria num log', async () => {
+        // A varredura de elevações sem o índice composto roda, não dá erro, e só
+        // deixa de ver as ações concluídas — o melhor caso. Silenciosa por
+        // natureza: se não aparecer aqui, não aparece em lugar nenhum.
+        snapshotData = fixture({
+            avisos_do_sistema: [{
+                id: 'elevacao_sem_indice',
+                gravidade: 'atencao',
+                titulo: 'A varredura de elevações rodou sem as ações concluídas',
+                detalhe: 'Falta o índice composto `tarefas (status, data_conclusao)` no Firestore.',
+                desde: '2026-08-24',
+            }],
+        });
+        render(<MorningSummaryView />);
+        const aviso = within(await secao('Avisos do sistema'));
+        expect(aviso.getByText('A varredura de elevações rodou sem as ações concluídas')).toBeDefined();
+        expect(aviso.getByText(/data_conclusao/)).toBeDefined();
+        expect(aviso.getByText('Desde 2026-08-24')).toBeDefined();
+    });
+
+    it('não inventa a seção de avisos quando não há nenhum', async () => {
+        render(<MorningSummaryView />);
+        await screen.findByText('Foco de hoje');
+        expect(screen.queryByText('Avisos do sistema')).toBeNull();
+    });
+
+    it('aviso do sistema não entra na contagem de pendências', async () => {
+        // Fila é decisão esperando o usuário; isto é o sistema avisando de si.
+        snapshotData = fixture({
+            avisos_do_sistema: [{
+                id: 'elevacao_sem_indice', gravidade: 'atencao',
+                titulo: 'Varredura degradada', detalhe: 'Índice ausente.', desde: '2026-08-24',
+            }],
+        });
+        render(<MorningSummaryView />);
+        await screen.findByText('Avisos do sistema');
+        const pendencias = within(await secao('Esperando você decidir'));
+        expect(pendencias.queryByText('Varredura degradada')).toBeNull();
+    });
+
+    it('mostra quanto falta do passivo, porque é quem lê que manda parar', async () => {
+        snapshotData = fixture({
+            passivo_elevacao: { restantes: 480, cota_por_rodada: 10, ate: '2026-03-15', esgotou: false },
+        });
+        render(<MorningSummaryView />);
+        const bloco = within(await secao('Recuperando trabalho antigo'));
+        expect(bloco.getByText(/480 ação\(ões\) antiga\(s\)/)).toBeDefined();
+        expect(bloco.getByText(/já chegou em 2026-03-15/)).toBeDefined();
+    });
+
+    it('contagem indisponível não vira zero', async () => {
+        // Zero diria "acabou", que é o oposto de "não consegui contar".
+        snapshotData = fixture({
+            passivo_elevacao: { restantes: null, cota_por_rodada: 10, ate: null, esgotou: false },
+        });
+        render(<MorningSummaryView />);
+        const bloco = within(await secao('Recuperando trabalho antigo'));
+        expect(bloco.getByText(/não foi possível contar/)).toBeDefined();
+    });
+
+    it('não mostra a esteira quando não há passivo em curso', async () => {
+        render(<MorningSummaryView />);
+        await screen.findByText('Foco de hoje');
+        expect(screen.queryByText('Recuperando trabalho antigo')).toBeNull();
+    });
+
     it('lista só as filas com itens e esconde as zeradas', async () => {
         render(<MorningSummaryView />);
         expect(await screen.findByText('Sugestões de vínculo')).toBeDefined();

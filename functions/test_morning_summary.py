@@ -23,6 +23,8 @@ from morning_summary import (
     _escolher_foco,
     _js_weekday,
     _coletar_estrategia,
+    _coletar_avisos_do_sistema,
+    _coletar_passivo_de_elevacao,
     _ultima_medida,
     _shift,
 )
@@ -38,9 +40,13 @@ class _FakeDoc:
     def __init__(self, doc_id, data):
         self.id = doc_id
         self._data = data
+        self.exists = data is not None
 
     def to_dict(self):
-        return dict(self._data)
+        return dict(self._data or {})
+
+    def get(self):
+        return self
 
 
 class _FakeQuery:
@@ -74,6 +80,18 @@ class _FakeQuery:
         return _FakeQuery([d for d in self._docs if keep(d)])
 
     def limit(self, _n):
+        return self
+
+    def document(self, doc_id):
+        """Leitura por id. `exists` False quando o id nao esta na colecao — e a
+        diferenca entre "documento ausente" e "documento vazio", que importa
+        para quem le estado gravado."""
+        for d in self._docs:
+            if d.id == str(doc_id):
+                return d
+        return _FakeDoc(str(doc_id), None)
+
+    def get(self):
         return self
 
     def stream(self):
@@ -542,6 +560,106 @@ class TestPilarSaude(unittest.TestCase):
                                   movimento_saude=HOJE)
         self.assertFalse(est["metas"][0]["gerida_por_acoes"] is True and est["paradas"] == [])
         self.assertEqual([m["objetivo"] for m in est["paradas"]], ["Sair de 95kg para 80kg"])
+
+
+class TestPassivoDeElevacao(unittest.TestCase):
+    """A esteira do passivo precisa dizer onde está.
+
+    Ela anda devagar de propósito — 10 por rodada — e termina quando o usuário
+    manda parar. Sem número visível ninguém sabe quando mandar.
+    """
+
+    @staticmethod
+    def _db(estado):
+        return _FakeDb({"system_usage": {"elevacoes_sugeridas": estado}})
+
+    def test_sem_cursor_nao_mostra_nada(self):
+        """Antes da primeira varredura não há esteira para reportar."""
+        self.assertIsNone(_coletar_passivo_de_elevacao(self._db({})))
+
+    def test_mostra_quanto_falta_e_ate_onde_chegou(self):
+        p = _coletar_passivo_de_elevacao(self._db({
+            "passivo_cursor": "2026-03-15|abc", "passivo_restantes": 480}))
+        self.assertEqual(p["restantes"], 480)
+        self.assertEqual(p["ate"], "2026-03-15")
+
+    def test_contagem_indisponivel_vira_nulo_e_nao_zero(self):
+        """Zero diria "acabou", que é o oposto de "não consegui contar"."""
+        p = _coletar_passivo_de_elevacao(self._db({
+            "passivo_cursor": "2026-03-15|abc", "passivo_restantes": None}))
+        self.assertIsNone(p["restantes"])
+
+    def test_esgotado_e_estado_proprio(self):
+        p = _coletar_passivo_de_elevacao(self._db({
+            "passivo_cursor": "2015-01-01|z", "passivo_restantes": 0,
+            "passivo_esgotou": True}))
+        self.assertTrue(p["esgotou"])
+
+    def test_falha_de_leitura_nao_derruba_o_resumo(self):
+        class _DbQuebrado:
+            def collection(self, _n):
+                raise RuntimeError("indisponivel")
+        self.assertIsNone(_coletar_passivo_de_elevacao(_DbQuebrado()))
+
+
+class TestAvisosDoSistema(unittest.TestCase):
+    """Um modo degradado silencioso precisa de superficie, senao nao existe.
+
+    A varredura de elevacoes sem o indice composto roda, nao da erro, e so deixa
+    de ver as acoes concluidas — o melhor caso. Isso so aparecia num log de Cloud
+    Function, que ninguem le.
+
+    O aviso fica FORA de `filas` de proposito, para nao entrar na contagem de
+    `pendencias`: fila e decisao esperando o usuario, e isto e o sistema avisando
+    de si mesmo. Essa parte nao tem teste porque `build_morning_summary` importa
+    `googleapiclient`, que nao existe fora do venv de deploy — a separacao esta
+    garantida pela estrutura (chave propria no retorno) e anotada no codigo.
+    """
+
+    @staticmethod
+    def _db(estado):
+        return _FakeDb({"system_usage": {"elevacoes_sugeridas": estado}})
+
+    def test_sem_degradacao_nao_inventa_aviso(self):
+        self.assertEqual(_coletar_avisos_do_sistema(self._db({})), [])
+
+    def test_indice_ausente_vira_aviso_com_a_data(self):
+        avisos = _coletar_avisos_do_sistema(self._db(
+            {"varredura_degradada": {"data": "2026-08-24", "motivo": "indice_ausente"}}))
+        self.assertEqual(len(avisos), 1)
+        self.assertEqual(avisos[0]["desde"], "2026-08-24")
+        self.assertIn("data_conclusao", avisos[0]["detalhe"])
+
+    def test_limite_atingido_tambem_vira_aviso(self):
+        """O outro jeito de ver so parte: mais conclusoes do que a consulta le."""
+        avisos = _coletar_avisos_do_sistema(self._db(
+            {"varredura_degradada": {"data": "2026-08-24", "motivo": "limite_atingido"}}))
+        self.assertEqual(len(avisos), 1)
+        self.assertIn("parte do período", avisos[0]["titulo"])
+        self.assertIn("passivo", avisos[0]["detalhe"])
+
+    def test_candidatas_demais_tambem_vira_aviso(self):
+        """O terceiro jeito de ver so parte: o recorte que vai para o modelo."""
+        avisos = _coletar_avisos_do_sistema(self._db(
+            {"varredura_degradada": {"data": "2026-08-24", "motivo": "candidatas_demais"}}))
+        self.assertEqual(len(avisos), 1)
+        self.assertIn("destrava", avisos[0]["detalhe"])
+
+    def test_motivo_desconhecido_nao_vira_aviso_vazio(self):
+        """Melhor nao avisar do que avisar sem dizer o que houve."""
+        self.assertEqual(_coletar_avisos_do_sistema(self._db(
+            {"varredura_degradada": {"data": "2026-08-24", "motivo": "coisa_nova"}})), [])
+
+    def test_estado_limpo_desliga_o_aviso(self):
+        self.assertEqual(
+            _coletar_avisos_do_sistema(self._db({"varredura_degradada": None})), [])
+
+    def test_falha_de_leitura_nao_derruba_o_resumo(self):
+        class _DbQuebrado:
+            def collection(self, _n):
+                raise RuntimeError("indisponivel")
+        self.assertEqual(_coletar_avisos_do_sistema(_DbQuebrado()), [])
+
 
 
 class TestRotinasVerificaveis(unittest.TestCase):
