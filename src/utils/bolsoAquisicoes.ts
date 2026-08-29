@@ -33,6 +33,24 @@ export const CATEGORIA_POUPANCA = 'Poupança';
 const DECIMAL = /^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$/;
 
 /**
+ * O espaço ao redor também é explícito, e não delegado ao `trim()`/`strip()` de
+ * cada linguagem: os dois conjuntos NÃO coincidem, e divergem nos DOIS sentidos.
+ * `str.strip()` do Python remove U+0085 e U+001C..U+001F, que o `trim()` não
+ * remove; o `trim()` remove U+FEFF, que o Python não remove. Com `"\u00851"` o
+ * MCP leria 1 e a tela leria 0. Este é o conjunto que os dois concordam.
+ */
+const ESPACO = /^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g;
+
+/**
+ * Teto do que vira centavo. Acima de 2**53-1 centavos o inteiro exato do Python
+ * e o double daqui param de coincidir, e antes disso `1e307 * 100` estoura para
+ * infinito — onde o `math.floor` do outro lado LEVANTA e o `Math.floor` daqui
+ * devolve Infinity em silêncio. São ~90 trilhões de reais: o que passar disso
+ * não é dinheiro, é dado corrompido.
+ */
+const MAX_CENTAVOS = 9007199254740991;
+
+/**
  * O que o Firestore devolveu, lido como número por UMA gramática só.
  *
  * Existe porque `Number()` e `float()` aceitam conjuntos DIFERENTES de texto, e
@@ -56,8 +74,8 @@ const DECIMAL = /^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$/;
  */
 export function numero(valor: unknown, padrao = 0): number {
     if (typeof valor === 'number') return Number.isFinite(valor) ? valor : padrao;
-    if (typeof valor === 'string' && DECIMAL.test(valor.trim())) {
-        const convertido = Number(valor.trim());
+    if (typeof valor === 'string' && DECIMAL.test(valor.replace(ESPACO, ''))) {
+        const convertido = Number(valor.replace(ESPACO, ''));
         // `Number('1e400')` dá Infinity sem erro nenhum.
         return Number.isFinite(convertido) ? convertido : padrao;
     }
@@ -81,9 +99,15 @@ export function numero(valor: unknown, padrao = 0): number {
  * A leitura do valor passa por `numero`, e não por coerção direta: sem isso uma
  * conta gravada como "abc" ou "NaN" virava NaN e contaminava o cofre inteiro,
  * enquanto do lado Python o mesmo valor levantava e derrubava a tool.
+ *
+ * O teto é conferido ANTES da multiplicação: `"1e307"` é finito e passa pela
+ * gramática, mas `1e307 * 100` estoura para Infinity, que aqui se propaga em
+ * silêncio e do lado Python levanta `OverflowError`.
  */
 export function centavos(valor: unknown): number {
-    return Math.floor(numero(valor) * 100 + 0.5);
+    const reais = numero(valor);
+    if (Math.abs(reais) * 100 > MAX_CENTAVOS) return 0;
+    return Math.floor(reais * 100 + 0.5);
 }
 
 /** Uma casa decimal, meio-para-cima — igual ao lado Python. */

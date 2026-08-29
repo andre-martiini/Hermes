@@ -173,8 +173,15 @@ class TestEmpateDePrioridade(unittest.TestCase):
 #   "abc"       float levanta sem ninguem pegar
 #   "\u0661"       digito arabe-indico: o `\\d` do Python casa e `float` da 1.0,
 #               o `\\d` do ECMAScript nao casa. Dai `[0-9]` explicito nos dois.
+#   "\u00851"      espaco que o `strip()` do Python remove e o `trim()` do
+#               ECMAScript nao — e "\ufeff1" e o inverso. Dai o conjunto de
+#               espaco tambem ser explicito nos dois.
+#   "1e307"     passa pela gramatica e e finito, mas x100 estoura: `math.floor`
+#               LEVANTA e o `Math.floor` devolve Infinity.
 GRAMATICA_RECUSA = ["0x1", "1_0", "NaN", "Infinity", "1e400", "abc", "", "  ",
-                    "R$ 5", "5,5", "\u0661", "\u0661\u0662", None, True, False]
+                    "R$ 5", "5,5", "\u0661", "\u0661\u0662",
+                    "\u00851", "\ufeff1", "1\u0085", "\u001c1",
+                    None, True, False]
 GRAMATICA_ACEITA = [("500", 500.0), (" 2 ", 2.0), ("+2", 2.0), ("-3", -3.0),
                     (".5", 0.5), ("5.", 5.0), ("1e3", 1000.0), (500, 500.0),
                     (2.5, 2.5), (0, 0.0)]
@@ -204,6 +211,16 @@ class TestUmaGramaticaSo(unittest.TestCase):
         for bruto in GRAMATICA_RECUSA:
             with self.subTest(bruto=bruto):
                 self.assertEqual(ba.centavos(bruto), 0)
+
+    def test_valor_que_estoura_o_centavo_nao_derruba_nem_contamina(self):
+        """"1e307" e finito e passa pela gramatica; x100 nao cabe em centavo."""
+        for bruto in ["1e307", 1e307, -1e307, "9e306"]:
+            with self.subTest(bruto=bruto):
+                self.assertEqual(ba.centavos(bruto), 0)
+        # Um valor grande porem sao continua convertendo: o teto recusa o
+        # absurdo, e nao dinheiro. Um trilhao de reais e cem trilhoes de
+        # centavos, bem abaixo de 2**53-1.
+        self.assertEqual(ba.centavos(1_000_000_000_000), 100_000_000_000_000)
 
     def test_target_sai_normalizado_para_quem_formata(self):
         """`main.py` faz `f"{targetAmount:.2f}"`, que LEVANTA com uma string."""

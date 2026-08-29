@@ -86,8 +86,13 @@ describe('cobertura individual — os números que a tela já mostrava', () => {
 //   'abc'       float levanta sem ninguém pegar
 //   '١'         dígito árabe-índico: o `\d` do Python casa e `float` dá 1.0, o
 //               `\d` do ECMAScript não casa. Daí `[0-9]` explícito nos dois.
+//   '\u00851'    espaço que o `strip()` do Python remove e o `trim()` daqui não —
+//               e '\ufeff1' é o inverso. Daí o conjunto de espaço também ser
+//               explícito nos dois.
 const GRAMATICA_RECUSA: unknown[] = ['0x1', '1_0', 'NaN', 'Infinity', '1e400', 'abc',
-    '', '  ', 'R$ 5', '5,5', '\u0661', '\u0661\u0662', null, true, false];
+    '', '  ', 'R$ 5', '5,5', '\u0661', '\u0661\u0662',
+    '\u00851', '\ufeff1', '1\u0085', '\u001c1',
+    null, true, false];
 const GRAMATICA_ACEITA: [unknown, number][] = [['500', 500], [' 2 ', 2], ['+2', 2],
     ['-3', -3], ['.5', 0.5], ['5.', 5], ['1e3', 1000], [500, 500], [2.5, 2.5], [0, 0]];
 
@@ -115,6 +120,16 @@ describe('uma gramática só', () => {
         for (const bruto of GRAMATICA_RECUSA) {
             expect(centavos(bruto), String(bruto)).toBe(0);
         }
+    });
+
+    it('valor que estoura o centavo não contamina o cofre', () => {
+        // '1e307' é finito e passa pela gramática; x100 estoura para Infinity
+        // aqui e levanta OverflowError do lado Python.
+        for (const bruto of ['1e307', 1e307, -1e307, '9e306']) {
+            expect(centavos(bruto), String(bruto)).toBe(0);
+        }
+        // O teto recusa o absurdo, não dinheiro: um trilhão de reais converte.
+        expect(centavos(1_000_000_000_000)).toBe(100_000_000_000_000);
     });
 
     it('target sai normalizado para quem formata', () => {

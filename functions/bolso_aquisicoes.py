@@ -37,6 +37,21 @@ CATEGORIA_POUPANCA = "Poupança"
 # entrando por dentro da regex que existe para elimina-la.
 _DECIMAL = re.compile(r"^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$")
 
+# O espaco ao redor tambem tem de ser explicito, e nao delegado ao `strip()` de
+# cada linguagem: os dois conjuntos NAO coincidem, e divergem nos DOIS sentidos.
+# `str.strip()` do Python remove U+0085 e U+001C..U+001F, que o `trim()` do
+# ECMAScript nao remove; o `trim()` remove U+FEFF, que o Python nao remove. Com
+# " \u00851" o Python leria 1 e a tela leria 0. Este e o conjunto que os dois
+# concordam, escrito uma vez.
+_ESPACO = " \t\n\r\f\v"
+
+# Teto do que vira centavo. Acima de 2**53-1 centavos o inteiro exato do Python e
+# o double do JavaScript param de coincidir, e antes disso `1e307 * 100` estoura
+# para infinito — onde `math.floor` LEVANTA e o `Math.floor` devolve Infinity em
+# silencio. Sao ~90 trilhoes de reais: nenhum valor real chega perto, e o que
+# chegar nao e dinheiro, e sim dado corrompido.
+_MAX_CENTAVOS = 9007199254740991
+
 
 def numero(valor, padrao: float = 0.0) -> float:
     """O que o Firestore devolveu, lido como numero por UMA gramatica so.
@@ -66,8 +81,8 @@ def numero(valor, padrao: float = 0.0) -> float:
         return padrao
     if isinstance(valor, (int, float)):
         return float(valor) if math.isfinite(valor) else padrao
-    if isinstance(valor, str) and _DECIMAL.match(valor.strip()):
-        convertido = float(valor.strip())
+    if isinstance(valor, str) and _DECIMAL.match(valor.strip(_ESPACO)):
+        convertido = float(valor.strip(_ESPACO))
         # `float("1e400")` da inf sem levantar.
         return convertido if math.isfinite(convertido) else padrao
     return padrao
@@ -90,8 +105,16 @@ def centavos(valor) -> int:
 
     A leitura do valor passa por `numero`, e nao por `float()` direto: sem isso
     uma conta gravada como "abc" ou "NaN" levantava aqui e derrubava a tool.
+
+    O teto tem de ser conferido ANTES da multiplicacao: "1e307" e finito e passa
+    pela gramatica, mas `1e307 * 100` estoura para infinito, e ai `math.floor`
+    levanta `OverflowError` e derruba a tool — enquanto o `Math.floor` do outro
+    lado devolve Infinity e contamina o cofre em silencio.
     """
-    return int(math.floor(numero(valor) * 100 + 0.5))
+    reais = numero(valor)
+    if abs(reais) * 100 > _MAX_CENTAVOS:
+        return 0
+    return int(math.floor(reais * 100 + 0.5))
 
 
 def _uma_casa(valor: float) -> float:
