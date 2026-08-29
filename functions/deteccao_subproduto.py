@@ -397,6 +397,18 @@ _SCHEMA_PROPOSTA = {
 }
 
 
+def _filtro(campo: str, op: str, valor):
+    """`FieldFilter` num lugar so, para o filtro morar na consulta e nao no `for`.
+
+    Filtrar depois de ler significa ler um recorte arbitrario e procurar dentro
+    dele: passado o limite, o que interessa pode estar todo fora. Este modulo ja
+    teve esse defeito em duas leituras diferentes.
+    """
+    from firebase_admin import firestore as _fs
+
+    return _fs.FieldFilter(campo, op, valor)
+
+
 def _contador_do_mes(db, hoje: str):
     return (db.collection("system_usage").document("elevacoes_sugeridas")
             .collection("mensal").document(_mes(hoje)))
@@ -503,14 +515,12 @@ def _carregar_sugestoes(db, hoje: str) -> list[dict]:
     acao parece decidida — um erro transitorio viraria permissao para estourar o
     limite e repropor o que ja foi recusado para sempre. A trava falha fechada.
     """
-    from firebase_admin import firestore as _fs
-
     try:
         col = db.collection(COL_ELEVACOES)
         recortes = (
-            col.where(filter=_fs.FieldFilter("status", "==", STATUS_NUNCA)),
-            col.where(filter=_fs.FieldFilter("status", "in", [STATUS_PENDENTE, STATUS_ACEITA])),
-            col.where(filter=_fs.FieldFilter("criada_em", ">=", f"{_mes(hoje)}-01")),
+            col.where(filter=_filtro("status", "==", STATUS_NUNCA)),
+            col.where(filter=_filtro("status", "in", [STATUS_PENDENTE, STATUS_ACEITA])),
+            col.where(filter=_filtro("criada_em", ">=", f"{_mes(hoje)}-01")),
         )
         por_id = {}
         for recorte in recortes:
@@ -814,16 +824,25 @@ def _aplicar_decisao(db, ref, alvo: str, hoje: str) -> tuple:
 
 
 def listar_pendentes(db, limite: int = 20) -> dict:
-    """As elevacoes esperando decisao, com o resumo que o usuario le."""
+    """As elevacoes esperando decisao, com o resumo que o usuario le.
+
+    O filtro de status vai no Firestore, e nao depois da leitura. Limitar a
+    colecao inteira e so entao procurar as pendentes funciona ate a colecao
+    crescer: passado o corte, o recorte lido pode ser todo de sugestoes ja
+    decididas, e esta tool responde "nao ha decisoes pendentes" enquanto o resumo
+    matinal — que consulta por status — mostra que ha. Com o filtro na consulta o
+    limite passa a se aplicar so ao que interessa, e o que interessa e limitado
+    pelo teto mensal.
+    """
     try:
-        docs = list(db.collection(COL_ELEVACOES).limit(200).stream())
+        docs = list(db.collection(COL_ELEVACOES)
+                    .where(filter=_filtro("status", "==", STATUS_PENDENTE))
+                    .limit(200).stream())
     except Exception as exc:
         return {"total": 0, "sugestoes": [], "erro": str(exc)}
     pendentes = []
     for d in docs:
         dados = d.to_dict() or {}
-        if str(dados.get("status")) != STATUS_PENDENTE:
-            continue
         pendentes.append({
             "sugestao_id": d.id,
             "acao": dados.get("titulo_acao"),

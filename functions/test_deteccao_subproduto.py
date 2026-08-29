@@ -323,14 +323,53 @@ class _Colecao:
         ref._subcols = self._subcols.setdefault(doc_id, {})
         return ref
 
-    def limit(self, _n):
-        return self
+    def limit(self, n):
+        return _Recorte(self.dados, list(self.dados), n)
 
-    def where(self, *_a, **_kw):
-        return self
+    def where(self, *a, **kw):
+        return _Recorte(self.dados, list(self.dados), None).where(*a, **kw)
 
     def stream(self):
         return [_Snap(self.dados, i) for i in list(self.dados)]
+
+
+class _Recorte:
+    """Consulta falsa que aplica `where` ANTES de `limit`, como o Firestore.
+
+    A versao anterior deste fake ignorava os filtros e devolvia a colecao
+    inteira. Um teste em cima dele nao distinguiria filtrar na consulta de
+    filtrar depois de ler — que e exatamente o defeito que estes testes
+    precisam pegar.
+    """
+
+    def __init__(self, dados, ids, n):
+        self._dados, self._ids, self._n = dados, ids, n
+
+    def where(self, *a, **kw):
+        f = kw.get("filter")
+        if f is not None:
+            campo, op, valor = f.field_path, f.op_string, f.value
+        else:
+            # A forma posicional antiga (`where("status", "in", [...])`) ainda e
+            # usada na consulta de tarefas; o fake aceita as duas.
+            campo, op, valor = a[0], a[1], a[2]
+        def passa(doc_id):
+            atual = (self._dados.get(doc_id) or {}).get(campo)
+            if op == "==":
+                return atual == valor
+            if op == "in":
+                return atual in valor
+            if op == ">=":
+                return atual is not None and str(atual) >= str(valor)
+            raise AssertionError(f"operador nao suportado pelo fake: {op}")
+        return _Recorte(self._dados, [i for i in self._ids if passa(i)], self._n)
+
+    def limit(self, n):
+        return _Recorte(self._dados, self._ids, n)
+
+    def stream(self):
+        ids = self._ids if self._n is None else self._ids[:self._n]
+        return [_Snap(self._dados, i) for i in ids]
 
 
 class _Db:
@@ -658,6 +697,28 @@ class TestADecisaoDoUsuario(unittest.TestCase):
         r = ds.decidir(self._db_com_pendente(), "s1", "nunca", HOJE, aplicar=_explode)
         self.assertFalse(r["ok"])
         self.assertIn("indisponivel", r["erro"])
+
+    def test_listar_acha_a_pendente_no_meio_de_um_historico_grande(self):
+        """O filtro tem de estar na consulta, nao no `for` depois da leitura.
+
+        Filtrando depois, o limite se aplica a colecao inteira: passado o corte,
+        o recorte lido pode ser todo de sugestoes ja decididas, e esta tool
+        responde "nao ha decisoes pendentes" enquanto o resumo matinal — que
+        consulta por status — mostra que ha. As duas superficies discordando
+        sobre a mesma fila e pior que nao ter a segunda.
+        """
+        db = _Db()
+        col = db.collection(ds.COL_ELEVACOES)
+        # As decididas entram ANTES da pendente: se o limite valesse sobre a
+        # colecao inteira, a pendente ficaria fora do recorte lido. Com a
+        # pendente inserida primeiro o teste passaria dos dois jeitos.
+        for i in range(400):
+            col.dados[f"velha{i}"] = {"status": ds.STATUS_NUNCA, "criada_em": "2025-01-01",
+                                      "titulo_acao": f"antiga {i}"}
+        col.dados["s1"] = self._db_com_pendente().cols[ds.COL_ELEVACOES].dados["s1"]
+        r = ds.listar_pendentes(db)
+        self.assertEqual(r["total"], 1)
+        self.assertEqual(r["sugestoes"][0]["sugestao_id"], "s1")
 
     def test_listar_traz_so_pendentes_com_o_id_para_decidir(self):
         db = self._db_com_pendente()
