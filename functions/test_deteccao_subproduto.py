@@ -711,6 +711,18 @@ class TestOCardDizQuandoOTrabalhoAconteceu(unittest.TestCase):
         self.assertEqual(ds._idade_da_acao(janela_antiga, "2026-08-23"),
                          ("2024-03-01", True))
 
+    def test_adiada_antiga_que_volta_por_id_tambem_e_marcada(self):
+        """Segundo caminho pelo qual a origem mentiria sobre a idade.
+
+        A releitura por id nao carrega marca de lista nenhuma — a acao adiada
+        entra em `candidatos` como qualquer outra. Se a ressalva dependesse da
+        origem, uma concluida de 2024 readmitida por "adiar" voltaria ao card sem
+        aviso, e o usuario a leria como trabalho da semana pela segunda vez.
+        """
+        readmitida = {"task_id": "antiga",
+                      "tarefa": {"status": "concluído", "data_conclusao": "2024-05-05"}}
+        self.assertEqual(ds._idade_da_acao(readmitida, "2026-08-23")[1], True)
+
     def test_concluida_dentro_da_janela_nao_e_antiga(self):
         recente = {"task_id": "x", "tarefa": {"data_conclusao": "2026-08-28"}}
         self.assertEqual(ds._idade_da_acao(recente, "2026-08-23")[1], False)
