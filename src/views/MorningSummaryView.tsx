@@ -342,6 +342,7 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
     const cargaSemana = resumo?.carga_semana || [];
     const filas = resumo?.filas || {};
     const avisos = resumo?.avisos_do_sistema || [];
+    const passivo = resumo?.passivo_elevacao || null;
     const saude = resumo?.saude || { rotinas_hoje: [], pesagem_registrada: false, cintura_registrada: false, checkin_manha: false, checkin_noite: false, peso: null, dor_ontem: null, ultimo_registro: null };
     const estrategia = resumo?.estrategia || { metas: [], paradas: [], servidas_hoje: 0, total_geridas_por_acoes: 0 };
     const ontem = resumo?.ontem || { concluidas: [], diario: null };
@@ -740,6 +741,35 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                                     </li>
                                 ))}
                             </ul>
+                        </Secao>
+                    )}
+
+                    {/* A esteira do passivo de elevação. Sem rota e sem contagem em
+                        "pendências": não espera decisão nenhuma hoje — mas precisa ser
+                        visível, porque quem decide quando parar é quem está lendo. */}
+                    {passivo && (
+                        <Secao titulo="Recuperando trabalho antigo" isDark={isDark}>
+                            <div className={`px-3 py-2.5 rounded-xl border ${
+                                isDark ? 'border-[#2a313d]' : 'border-slate-100'
+                            }`}>
+                                {passivo.esgotou ? (
+                                    <p className="text-sm">
+                                        Passivo percorrido até o fim. Nada mais para recuperar.
+                                    </p>
+                                ) : (
+                                    <>
+                                        <p className="text-sm">
+                                            {passivo.restantes === null || passivo.restantes === undefined
+                                                ? 'Ações antigas ainda por percorrer (não foi possível contar).'
+                                                : `${passivo.restantes} ação(ões) antiga(s) ainda por percorrer`}
+                                        </p>
+                                        <p className={`mt-1 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                                            {passivo.cota_por_rodada} por varredura, da mais recente para a mais antiga
+                                            {passivo.ate ? ` · já chegou em ${passivo.ate}` : ''}
+                                        </p>
+                                    </>
+                                )}
+                            </div>
                         </Secao>
                     )}
 

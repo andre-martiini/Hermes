@@ -24,6 +24,7 @@ from morning_summary import (
     _js_weekday,
     _coletar_estrategia,
     _coletar_avisos_do_sistema,
+    _coletar_passivo_de_elevacao,
     _ultima_medida,
     _shift,
 )
@@ -559,6 +560,46 @@ class TestPilarSaude(unittest.TestCase):
                                   movimento_saude=HOJE)
         self.assertFalse(est["metas"][0]["gerida_por_acoes"] is True and est["paradas"] == [])
         self.assertEqual([m["objetivo"] for m in est["paradas"]], ["Sair de 95kg para 80kg"])
+
+
+class TestPassivoDeElevacao(unittest.TestCase):
+    """A esteira do passivo precisa dizer onde está.
+
+    Ela anda devagar de propósito — 10 por rodada — e termina quando o usuário
+    manda parar. Sem número visível ninguém sabe quando mandar.
+    """
+
+    @staticmethod
+    def _db(estado):
+        return _FakeDb({"system_usage": {"elevacoes_sugeridas": estado}})
+
+    def test_sem_cursor_nao_mostra_nada(self):
+        """Antes da primeira varredura não há esteira para reportar."""
+        self.assertIsNone(_coletar_passivo_de_elevacao(self._db({})))
+
+    def test_mostra_quanto_falta_e_ate_onde_chegou(self):
+        p = _coletar_passivo_de_elevacao(self._db({
+            "passivo_cursor": "2026-03-15|abc", "passivo_restantes": 480}))
+        self.assertEqual(p["restantes"], 480)
+        self.assertEqual(p["ate"], "2026-03-15")
+
+    def test_contagem_indisponivel_vira_nulo_e_nao_zero(self):
+        """Zero diria "acabou", que é o oposto de "não consegui contar"."""
+        p = _coletar_passivo_de_elevacao(self._db({
+            "passivo_cursor": "2026-03-15|abc", "passivo_restantes": None}))
+        self.assertIsNone(p["restantes"])
+
+    def test_esgotado_e_estado_proprio(self):
+        p = _coletar_passivo_de_elevacao(self._db({
+            "passivo_cursor": "2015-01-01|z", "passivo_restantes": 0,
+            "passivo_esgotou": True}))
+        self.assertTrue(p["esgotou"])
+
+    def test_falha_de_leitura_nao_derruba_o_resumo(self):
+        class _DbQuebrado:
+            def collection(self, _n):
+                raise RuntimeError("indisponivel")
+        self.assertIsNone(_coletar_passivo_de_elevacao(_DbQuebrado()))
 
 
 class TestAvisosDoSistema(unittest.TestCase):

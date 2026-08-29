@@ -538,6 +538,123 @@ class TestJanelaMaiorQueOTetoDaConsulta(unittest.TestCase):
         self.assertTrue(ds.preparar_rodada(self._db(ds.LIMITE_TAREFAS), HOJE, [])["rodar"])
 
 
+class TestOPassivoEntraPorCota(unittest.TestCase):
+    """618 concluidas de passivo, 124 com corpo. De uma vez, fila ilegivel.
+
+    A cota caminha do mais recente para o mais antigo, com cursor proprio, e
+    soma-se as concluidas da janela em vagas separadas do prompt.
+    """
+
+    def _db(self, quantas=30, com_corpo=True, ano="2026"):
+        db = _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        for i in range(quantas):
+            db.collection("tarefas").dados[f"p{i:03d}"] = _tarefa(
+                id=f"p{i:03d}", status="concluído",
+                data_conclusao=f"{ano}-01-{(i % 28) + 1:02d}",
+                pool_dados=[_anexo("Doc.md")] if com_corpo else [])
+        return db
+
+    def test_a_cota_limita_quantas_saem_por_rodada(self):
+        rodada = ds.preparar_rodada(self._db(), "2026-08-29", [])
+        self.assertEqual(len(rodada["passivo"]), ds.COTA_PASSIVO)
+
+    def test_vem_do_mais_recente_para_o_mais_antigo(self):
+        rodada = ds.preparar_rodada(self._db(), "2026-08-29", [])
+        datas = [c["tarefa"]["data_conclusao"] for c in rodada["passivo"]]
+        self.assertEqual(datas, sorted(datas, reverse=True))
+
+    def test_a_rodada_seguinte_continua_de_onde_parou(self):
+        db = self._db()
+        primeira = ds.preparar_rodada(db, "2026-08-29", [])
+        ds.avancar_passivo(db, primeira["passivo_cursor"], False, None)
+        segunda = ds.preparar_rodada(db, "2026-08-29", [])
+        ids_1 = {c["task_id"] for c in primeira["passivo"]}
+        ids_2 = {c["task_id"] for c in segunda["passivo"]}
+        self.assertEqual(ids_1 & ids_2, set())
+
+    def test_sem_corpo_nao_gasta_cota_e_nao_volta(self):
+        """As 494 sem corpo levariam um ano para passar se gastassem cota.
+
+        A cota e de CANDIDATAS, nao de documentos lidos: a rodada atravessa o que
+        nao tem corpo para chegar no que tem. Aqui ha 25 sem corpo na frente e
+        uma com corpo atras — se o descarte gastasse cota, ela nao seria
+        alcancada nesta rodada.
+        """
+        db = _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        for i in range(25):
+            db.collection("tarefas").dados[f"vazia{i:03d}"] = _tarefa(
+                id=f"vazia{i:03d}", status="concluído",
+                data_conclusao=f"2026-03-{i + 1:02d}", pool_dados=[])
+        db.collection("tarefas").dados["fundo"] = _tarefa(
+            id="fundo", status="concluído", data_conclusao="2026-01-01",
+            pool_dados=[_anexo("Handoff.md")])
+        rodada = ds.preparar_rodada(db, "2026-08-29", [])
+        self.assertEqual([c["task_id"] for c in rodada["passivo"]], ["fundo"])
+
+    def test_o_cursor_anda_sobre_o_que_foi_descartado(self):
+        """Concluida sem corpo nao ganha corpo depois: voltar nela e caminhar no lugar."""
+        db = self._db(quantas=12, com_corpo=False)
+        primeira = ds.preparar_rodada(db, "2026-08-29", [])
+        self.assertTrue(primeira["passivo_cursor"])
+        ds.avancar_passivo(db, primeira["passivo_cursor"], False, None)
+        tarefas, _c, _e = ds._passivo(db, "2026-08-29",
+                                      ds.cursor_do_passivo(db), ds.COTA_PASSIVO, {})
+        self.assertEqual(tarefas, [])
+
+    def test_o_passivo_nao_segura_o_marcador_da_janela(self):
+        """Cursor proprio. Confundir os dois travaria o marcador para sempre."""
+        rodada = ds.preparar_rodada(self._db(), "2026-08-29", [])
+        self.assertTrue(rodada["pode_marcar"])
+
+    def test_o_prompt_reserva_vagas_para_o_passivo(self):
+        """Somar e cortar faria o passivo perder toda disputa de ordenacao."""
+        db = self._db()
+        for i in range(ds.LIMITE_CANDIDATAS + 5):
+            db.collection("tarefas").dados[f"v{i}"] = _tarefa(
+                id=f"v{i}", status="em andamento", pool_dados=[_anexo("X.md")])
+        rodada = ds.preparar_rodada(db, "2026-08-29", [])
+        mensagem = ds.mensagem_da_rodada(rodada)
+        self.assertEqual(mensagem.count('"passivo": true'), ds.COTA_PASSIVO)
+        self.assertIn("marcadas como passivo", mensagem)
+
+    def test_ja_decidida_nao_gasta_cota(self):
+        db = self._db()
+        decididas = [{"task_id": f"p{i:03d}", "status": ds.STATUS_NUNCA} for i in range(5)]
+        db.collection(ds.COL_ELEVACOES).dados = {
+            f"s{i}": {**d, "criada_em": "2026-01-01"} for i, d in enumerate(decididas)}
+        rodada = ds.preparar_rodada(db, "2026-08-29", [])
+        self.assertEqual(len(rodada["passivo"]), ds.COTA_PASSIVO)
+        for c in rodada["passivo"]:
+            self.assertNotIn(c["task_id"], {d["task_id"] for d in decididas})
+
+    def test_sem_corte_por_ano(self):
+        """A ordem decrescente ja entrega primeiro o que tem valor; nao ha filtro."""
+        rodada = ds.preparar_rodada(self._db(quantas=12, ano="2015"), "2026-08-29", [])
+        self.assertEqual(len(rodada["passivo"]), ds.COTA_PASSIVO)
+
+    def test_o_cursor_desempata_por_id(self):
+        """Varias acoes na mesma data: cursor so de data pularia as irmas."""
+        db = self._db()
+        for i in range(6):
+            db.collection("tarefas").dados[f"empate{i}"] = _tarefa(
+                id=f"empate{i}", status="concluído", data_conclusao="2026-02-10",
+                pool_dados=[_anexo("Doc.md")])
+        vistos = set()
+        cursor = ""
+        for _ in range(8):
+            tarefas, cursor, _esg = ds._passivo(db, "2026-08-29", cursor, 3, {})
+            for t in tarefas:
+                self.assertNotIn(t["id"], vistos)
+                vistos.add(t["id"])
+        self.assertGreaterEqual(len({v for v in vistos if v.startswith("empate")}), 5)
+
+
 class TestORecorteDoPromptTambemSeguraOMarcador(unittest.TestCase):
     """`mensagem_da_rodada` mostra so as primeiras N candidatas.
 
@@ -769,11 +886,33 @@ class _Recorte:
                 return atual in valor
             if op == ">=":
                 return atual is not None and str(atual) >= str(valor)
+            if op == "<=":
+                return atual is not None and str(atual) <= str(valor)
             raise AssertionError(f"operador nao suportado pelo fake: {op}")
         return _Recorte(self._dados, [i for i in self._ids if passa(i)], self._n)
 
     def limit(self, n):
         return _Recorte(self._dados, self._ids, n)
+
+    def order_by(self, campo, direction="ASCENDING"):
+        ordenados = sorted(
+            self._ids,
+            key=lambda i: str((self._dados.get(i) or {}).get(campo) or ""),
+            reverse=(direction == "DESCENDING"))
+        return _Recorte(self._dados, ordenados, self._n)
+
+    def count(self):
+        total = len(self._ids)
+
+        class _Agregado:
+            value = total
+
+        class _Resultado:
+            @staticmethod
+            def get():
+                return [[_Agregado()]]
+
+        return _Resultado()
 
     def stream(self):
         ids = self._ids if self._n is None else self._ids[:self._n]

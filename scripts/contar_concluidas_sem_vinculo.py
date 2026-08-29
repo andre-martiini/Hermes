@@ -14,7 +14,12 @@ contar do lado de ca.
 
 So le. Nao grava nada.
 
-Uso: python scripts/contar_concluidas_sem_vinculo.py
+Uso: python scripts/contar_concluidas_sem_vinculo.py [--listar ANO[,ANO...]]
+
+Com --listar, imprime titulo, area, data e se tem corpo das concluidas daqueles
+anos. Serve para conferir se sao acoes reais antes de deixa-las entrar na fila:
+concluida de 2015 num sistema que comecou depois cheira a dado migrado ou a data
+retroagida, e sugestao em cima disso e ruido que gasta a confianca do modulo.
 """
 import sys
 from collections import Counter
@@ -70,15 +75,33 @@ def tem_corpo(dados):
     return sum(1 for p in (dados.get('plano_acao') or []) if feita(p)) >= 3
 
 
+def anos_pedidos():
+    for i, arg in enumerate(sys.argv):
+        if arg == '--listar' and i + 1 < len(sys.argv):
+            return {a.strip() for a in sys.argv[i + 1].split(',') if a.strip()}
+    return set()
+
+
 def main():
     db = init_db()
+    listar = anos_pedidos()
     total = com_vinculo = sem_vinculo = sem_vinculo_com_corpo = 0
     sem_data = 0
     por_ano = Counter()
+    listadas = []
 
     for doc in db.collection('tarefas').where('status', '==', STATUS_CONCLUIDO).stream():
         dados = doc.to_dict() or {}
         total += 1
+        if listar and str(dados.get('data_conclusao') or '')[:4] in listar:
+            listadas.append((
+                str(dados.get('data_conclusao') or '')[:10],
+                doc.id,
+                str(dados.get('titulo') or '(sem titulo)'),
+                str(dados.get('area_tematica') or dados.get('area') or '-'),
+                'com corpo' if tem_corpo(dados) else 'sem corpo',
+                str(dados.get('data_criacao') or '')[:10],
+            ))
         if tem_vinculo(dados):
             com_vinculo += 1
             continue
@@ -100,8 +123,16 @@ def main():
         print('\nPassivo por ano de conclusao:')
         for ano in sorted(por_ano):
             print(f'  {ano}: {por_ano[ano]}')
-    print('\nO numero que decide a passagem unica e "com corpo": e quantos cards a '
-          'fila receberia se o passivo entrasse de uma vez.')
+    print('\nO numero que decide o ritmo e "com corpo": e quantos cards a fila '
+          'receberia se o passivo entrasse de uma vez.')
+
+    if listar:
+        print(f'\nConcluidas de {", ".join(sorted(listar))} ({len(listadas)}):')
+        print(f'  {"conclusao":<12} {"criacao":<12} {"corpo":<10} {"area":<12} titulo')
+        for data, task_id, titulo, area, corpo, criacao in sorted(listadas):
+            print(f'  {data:<12} {criacao:<12} {corpo:<10} {area[:12]:<12} {titulo[:70]}')
+        print('\nConfira se sao acoes reais. Data de conclusao muito anterior a de '
+              'criacao e sinal de retroacao ou migracao.')
     return 0
 
 

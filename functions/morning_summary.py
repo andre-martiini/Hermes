@@ -54,6 +54,8 @@ from datetime import datetime, timedelta, timezone
 from firebase_admin import firestore
 from firebase_functions import https_fn, scheduler_fn, options
 
+import os
+
 import subtarefas
 
 VERSAO = "v1"
@@ -443,6 +445,35 @@ _AVISOS_DE_VARREDURA = {
             "de uma vez."),
     },
 }
+
+
+def _coletar_passivo_de_elevacao(db) -> dict | None:
+    """Onde a recuperação do passivo está: quanto falta e quanto sai por rodada.
+
+    Não é fila (não espera decisão) e não é aviso (nada está errado) — é uma
+    esteira andando devagar de propósito, e sem número visível ninguém sabe
+    quando mandar parar. Mandar parar é como este caminho termina.
+
+    O número é gravado pela varredura, que roda uma vez por semana; ler aqui
+    seria uma agregação por dia para um dado que muda por semana.
+    """
+    try:
+        snap = db.collection("system_usage").document("elevacoes_sugeridas").get()
+    except Exception as exc:
+        print(f"[ResumoMatinal] Falha ao consultar o passivo de elevação: {exc}")
+        return None
+    if not snap.exists:
+        return None
+    dados = snap.to_dict() or {}
+    if not dados.get("passivo_cursor"):
+        return None
+    return {
+        # `None` quando a contagem falhou: melhor não mostrar número do que um errado.
+        "restantes": dados.get("passivo_restantes"),
+        "cota_por_rodada": int(os.environ.get("ELEVACAO_COTA_PASSIVO", "10")),
+        "ate": str(dados.get("passivo_cursor") or "").split("|")[0] or None,
+        "esgotou": bool(dados.get("passivo_esgotou")),
+    }
 
 
 def _coletar_avisos_do_sistema(db) -> list[dict]:
@@ -1126,6 +1157,7 @@ def build_morning_summary(db, date_str: str | None = None) -> dict:
     agenda = _coletar_agenda(db, hoje)
     filas = _coletar_filas(db, hoje)
     avisos_do_sistema = _coletar_avisos_do_sistema(db)
+    passivo_elevacao = _coletar_passivo_de_elevacao(db)
     saude = _coletar_saude(db, hoje, ontem)
     # Depende de `saude`: o pilar saúde não é gerido por ações, seu movimento vem
     # dos registros do módulo Saúde.
@@ -1165,6 +1197,8 @@ def build_morning_summary(db, date_str: str | None = None) -> dict:
         # Fora de `filas` de proposito: aviso do sistema nao e decisao pendente e
         # nao pode entrar na contagem de `pendencias`.
         "avisos_do_sistema": avisos_do_sistema,
+        # Fora de `filas` e fora de `avisos`: não espera decisão e não é defeito.
+        "passivo_elevacao": passivo_elevacao,
         "saude": saude,
         "estrategia": estrategia,
         "ontem": ontem_data,

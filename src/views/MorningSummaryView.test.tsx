@@ -203,6 +203,32 @@ describe('MorningSummaryView', () => {
         expect(pendencias.queryByText('Varredura degradada')).toBeNull();
     });
 
+    it('mostra quanto falta do passivo, porque é quem lê que manda parar', async () => {
+        snapshotData = fixture({
+            passivo_elevacao: { restantes: 480, cota_por_rodada: 10, ate: '2026-03-15', esgotou: false },
+        });
+        render(<MorningSummaryView />);
+        const bloco = within(await secao('Recuperando trabalho antigo'));
+        expect(bloco.getByText(/480 ação\(ões\) antiga\(s\)/)).toBeDefined();
+        expect(bloco.getByText(/já chegou em 2026-03-15/)).toBeDefined();
+    });
+
+    it('contagem indisponível não vira zero', async () => {
+        // Zero diria "acabou", que é o oposto de "não consegui contar".
+        snapshotData = fixture({
+            passivo_elevacao: { restantes: null, cota_por_rodada: 10, ate: null, esgotou: false },
+        });
+        render(<MorningSummaryView />);
+        const bloco = within(await secao('Recuperando trabalho antigo'));
+        expect(bloco.getByText(/não foi possível contar/)).toBeDefined();
+    });
+
+    it('não mostra a esteira quando não há passivo em curso', async () => {
+        render(<MorningSummaryView />);
+        await screen.findByText('Foco de hoje');
+        expect(screen.queryByText('Recuperando trabalho antigo')).toBeNull();
+    });
+
     it('lista só as filas com itens e esconde as zeradas', async () => {
         render(<MorningSummaryView />);
         expect(await screen.findByText('Sugestões de vínculo')).toBeDefined();

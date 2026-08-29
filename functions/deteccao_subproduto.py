@@ -92,6 +92,19 @@ LIMITE_TAREFAS = int(os.environ.get("ELEVACAO_LIMITE_TAREFAS", "150"))
 # candidatas ja vem ordenadas com as de texto pronto na frente.
 LIMITE_CANDIDATAS = int(os.environ.get("ELEVACAO_LIMITE_CANDIDATAS", "8"))
 
+# O passivo — tudo que foi concluido antes de a varredura por janela existir —
+# entra por cota, e nao de uma vez. Sao 618 acoes, 124 com corpo: 124 cards de
+# uma vez e fila ilegivel, e fila que ninguem le mata o modulo. Entao a cota
+# caminha do mais recente para o mais antigo, somada as concluidas da janela
+# normal, e o usuario manda parar quando as propostas ficarem inuteis — o que
+# faz as mais antigas provavelmente nunca chegarem, de proposito.
+COTA_PASSIVO = int(os.environ.get("ELEVACAO_COTA_PASSIVO", "10"))
+
+# Quantos documentos de passivo a rodada pode LER para juntar a cota. A maioria
+# nao tem corpo e nunca seria candidata; sem esta folga a cota seria gasta com
+# documento que ja nasce descartado, e o passivo util levaria um ano para passar.
+LEITURA_PASSIVO = int(os.environ.get("ELEVACAO_LEITURA_PASSIVO", "200"))
+
 MODELO = os.environ.get("ELEVACAO_MODEL", "claude-fable-5")
 MODELO_FALLBACK = os.environ.get("ELEVACAO_FALLBACK_MODEL", "claude-opus-4-8")
 MAX_TOKENS = int(os.environ.get("ELEVACAO_MAX_TOKENS", "2048"))
@@ -709,6 +722,136 @@ def _tarefas_da_varredura(db, corte: str) -> list[dict]:
     return list(por_id.values()), ""
 
 
+def cursor_do_passivo(db) -> str:
+    """Ate onde o passivo ja foi caminhado. Vazio = ainda nao comecou.
+
+    Guardado como `"data|task_id"`. O id entra por causa de empate: varias acoes
+    podem ter a mesma `data_conclusao` (as gravadas so com data, sem hora), e um
+    cursor so de data pularia as irmas da ultima servida.
+    """
+    try:
+        snap = _marcador_de_varredura(db).get()
+    except Exception as exc:  # noqa: BLE001
+        raise MarcadorIndisponivel(str(exc)) from exc
+    return str((snap.to_dict() or {}).get("passivo_cursor") or "") if snap.exists else ""
+
+
+def _chave(data_conclusao, task_id: str) -> tuple:
+    return (str(data_conclusao or ""), str(task_id or ""))
+
+
+def _cursor_para_chave(cursor: str, corte: str) -> tuple:
+    """Onde o passivo continua. Sem cursor, comeca na borda da janela normal.
+
+    O passivo e por definicao o que a janela nao alcanca, entao o inicio do
+    caminho e o proprio `corte` — nao ha corte por ano. A ordem decrescente ja
+    entrega primeiro o que tem valor.
+    """
+    if not cursor:
+        return _chave(corte, "")
+    data, _, task_id = str(cursor).partition("|")
+    return _chave(data, task_id)
+
+
+def _passivo(db, corte: str, cursor: str, cota: int, decididas: dict) -> tuple:
+    """A cota do passivo desta rodada, do mais recente para o mais antigo.
+
+    Devolve `(tarefas, novo_cursor, esgotou)`.
+
+    A cota e de CANDIDATAS, e nao de documentos lidos: das 618 concluidas do
+    passivo, so 124 tem corpo. Gastar a cota com documento que `candidatas` vai
+    descartar faria o passivo util levar um ano para passar. Entao a rodada le
+    ate `LEITURA_PASSIVO` documentos para juntar `cota` com corpo.
+
+    O cursor anda sobre tudo que foi LIDO, inclusive o que nao tem corpo: acao
+    concluida sem corpo nao vai ganhar corpo depois, entao voltar nela toda
+    semana seria caminhar no lugar.
+    """
+    limite_chave = _cursor_para_chave(cursor, corte)
+    try:
+        docs = list(db.collection("tarefas")
+                    .where(filter=_filtro("status", "==", STATUS_CONCLUIDO))
+                    .where(filter=_filtro("data_conclusao", "<=", limite_chave[0]))
+                    .order_by("data_conclusao", direction="DESCENDING")
+                    .limit(LEITURA_PASSIVO).stream())
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Elevacao] Passivo fora desta rodada ({exc}). Indice composto "
+              "(status, data_conclusao) publicado?")
+        return [], cursor, False
+
+    # O `<=` da consulta traz de volta a propria ultima servida e as irmas de
+    # mesma data que ja passaram; o corte fino por (data, id) e aqui.
+    # A ordenacao fina por (data, id) e feita aqui, e nao na consulta: o Firestore
+    # ordena so por `data_conclusao`, e dentro de uma mesma data a ordem entre
+    # documentos nao e definida. Sem isto o cursor por (data, id) compararia
+    # contra uma ordem que a consulta nao garante, e acoes de mesma data seriam
+    # servidas duas vezes ou puladas.
+    #
+    # Fica um limite conhecido: se um unico dia tiver mais conclusoes do que a
+    # pagina inteira, o desempate nao alcanca as que ficaram fora da pagina.
+    adiante = sorted(
+        ({**(d.to_dict() or {}), "id": d.id} for d in docs),
+        key=lambda t: _chave(t.get("data_conclusao"), t["id"]), reverse=True)
+    adiante = [t for t in adiante
+               if _chave(t.get("data_conclusao"), t["id"]) < limite_chave]
+
+    escolhidas, ultimo_lido = [], None
+    for tarefa in adiante:
+        ultimo_lido = tarefa
+        if tarefa["id"] not in decididas and corpo_da_acao(tarefa):
+            escolhidas.append(tarefa)
+            if len(escolhidas) >= cota:
+                break
+
+    if ultimo_lido is None:
+        return [], cursor, True
+    novo = "|".join(_chave(ultimo_lido.get("data_conclusao"), ultimo_lido["id"]))
+    # Esgotou so quando a leitura inteira coube nesta rodada: se veio pagina
+    # cheia, ha mais atras dela.
+    esgotou = len(docs) < LEITURA_PASSIVO and len(escolhidas) < cota
+    return escolhidas, novo, esgotou
+
+
+def avancar_passivo(db, cursor, esgotou, restantes) -> None:
+    """Guarda ate onde o passivo caminhou, e quanto sobrou.
+
+    `restantes` fica gravado em vez de ser contado na hora pelo resumo matinal:
+    a contagem e uma agregacao no Firestore, e o resumo roda todo dia enquanto a
+    varredura roda uma vez por semana. O numero e "onde eu estava na ultima
+    varredura", que e exatamente a pergunta.
+    """
+    if not cursor:
+        return
+    try:
+        _marcador_de_varredura(db).set({
+            "passivo_cursor": str(cursor),
+            "passivo_restantes": restantes,
+            "passivo_esgotou": bool(esgotou),
+        }, merge=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Elevacao] Falha ao gravar o cursor do passivo: {exc}")
+
+
+def contar_passivo(db, cursor: str, corte: str):
+    """Quantas concluidas ainda estao atras do cursor. `None` quando nao da para contar.
+
+    Vai para o resumo matinal, e nao so para o log: uma cota que caminha sem
+    dizer quanto falta nao deixa ninguem decidir quando mandar parar — e mandar
+    parar e exatamente como este caminho termina.
+
+    `None` e honesto: melhor a tela nao mostrar numero do que mostrar um errado.
+    """
+    limite = _cursor_para_chave(cursor, corte)[0]
+    try:
+        consulta = (db.collection("tarefas")
+                    .where(filter=_filtro("status", "==", STATUS_CONCLUIDO))
+                    .where(filter=_filtro("data_conclusao", "<=", limite)))
+        return int(consulta.count().get()[0][0].value)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Elevacao] Nao foi possivel contar o passivo: {exc}")
+        return None
+
+
 def viu_todas_as_concluidas(candidatos, limite: int = LIMITE_CANDIDATAS) -> bool:
     """Se alguma candidata CONCLUIDA ficou fora do que o modelo viu.
 
@@ -723,9 +866,14 @@ def viu_todas_as_concluidas(candidatos, limite: int = LIMITE_CANDIDATAS) -> bool
     Entao o marcador espera pelas concluidas e nao pelas vivas. Exigir todas
     travaria o marcador em qualquer semana movimentada, que e o caso normal, e
     nao o defeituoso.
+
+    Candidata de passivo tambem nao segura: ela nao vem da janela e nao depende
+    do marcador — tem cursor proprio. Confundir os dois travaria o marcador para
+    sempre, porque quase sempre sobra passivo.
     """
     return not any(
         str((c.get("tarefa") or {}).get("status")) == STATUS_CONCLUIDO
+        and not c.get("passivo")
         for c in (candidatos or [])[limite:]
     )
 
@@ -761,13 +909,20 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
         print(f"[Elevacao] Marcador indisponivel, rodada abortada: {exc}")
         return {"rodar": False, "motivo": "marcador_indisponivel"}
 
+    try:
+        cursor_passivo = cursor_do_passivo(db)
+    except MarcadorIndisponivel as exc:
+        print(f"[Elevacao] Marcador indisponivel, rodada abortada: {exc}")
+        return {"rodar": False, "motivo": "marcador_indisponivel"}
+
     corte, motivo_do_corte = janela_de_conclusao(marcador, hoje)
     if motivo_do_corte:
         print(f"[Elevacao] Sem marcador de varredura anterior; conclusoes contadas "
               f"a partir de {corte} ({DIAS_TETO_VARREDURA} dias). O que foi "
               f"concluido antes disso e passivo, e nao entra por aqui.")
+    decididas = acoes_ja_decididas(sugestoes)
     tarefas, incompleta = _tarefas_da_varredura(db, corte)
-    candidatos = candidatas(tarefas, acoes_ja_decididas(sugestoes), hoje)
+    candidatos = candidatas(tarefas, decididas, hoje)
     # "Ate aqui esta tudo avaliado" e o que o marcador significa, e ele so avanca
     # quando isso for verdade de ponta a ponta: a busca precisa ter trazido a
     # janela inteira, E o prompt precisa ter mostrado toda concluida que veio.
@@ -775,11 +930,21 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
         incompleta = "candidatas_demais"
     marcar_degradacao(db, hoje, incompleta)
     pode_marcar = not incompleta
-    if not candidatos:
+
+    # O passivo entra por fora da janela e com vagas proprias no prompt, para nao
+    # disputar espaco com o trabalho da semana — que e o mais fresco e o que o
+    # usuario lembra de ter feito.
+    passivo_tarefas, cursor_novo, passivo_esgotou = _passivo(
+        db, corte, cursor_passivo, COTA_PASSIVO, decididas)
+    passivo = [{**c, "passivo": True}
+               for c in candidatas(passivo_tarefas, decididas, hoje)]
+
+    if not candidatos and not passivo:
         # Olhou e nao achou: a varredura cumpriu o papel, entao o marcador avanca.
         # Nao avancar aqui faria a janela crescer sem parar num sistema saudavel.
         return {"rodar": False, "motivo": "nenhuma_acao_com_corpo",
-                "pode_marcar": pode_marcar}
+                "pode_marcar": pode_marcar, "passivo_cursor": cursor_novo,
+                "passivo_esgotou": passivo_esgotou}
 
     return {
         "rodar": True,
@@ -787,6 +952,9 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
         "ja_no_mes": elevacoes_do_mes(sugestoes, hoje),
         "objetivos": objetivos,
         "candidatos": candidatos,
+        "passivo": passivo,
+        "passivo_cursor": cursor_novo,
+        "passivo_esgotou": passivo_esgotou,
         "corte_conclusao": corte,
         "pode_marcar": pode_marcar,
     }
@@ -833,7 +1001,11 @@ def _ferramenta_propor(db, hoje: str, rodada: dict, aceitas: list,
 
 
 def mensagem_da_rodada(rodada: dict, limite_candidatos: int = LIMITE_CANDIDATAS) -> str:
-    """O que o modelo ve: os objetivos elegiveis e o material de cada candidata."""
+    """O que o modelo ve: os objetivos elegiveis e o material de cada candidata.
+
+    As candidatas de passivo vem marcadas e em vagas proprias — sao trabalho
+    antigo, e o modelo precisa saber disso para calibrar a proposta.
+    """
     import json
 
     objetivos = [
@@ -842,11 +1014,19 @@ def mensagem_da_rodada(rodada: dict, limite_candidatos: int = LIMITE_CANDIDATAS)
          "diretrizes": (o.get("diretrizesDerivadas") or [])[:4]}
         for o in rodada["objetivos"]
     ]
+    # Vagas separadas de proposito. Somar as duas listas e cortar faria o passivo
+    # — que e sempre mais antigo — perder toda disputa de ordenacao contra o
+    # trabalho da semana, e a cota nunca sairia do lugar.
     dossies = [montar_dossie(c) for c in rodada["candidatos"][:limite_candidatos]]
+    dossies += [{**montar_dossie(c), "passivo": True}
+                for c in (rodada.get("passivo") or [])]
     return (
         "Objetivos estrategicos que podem receber elevacao:\n"
         f"{json.dumps(objetivos, ensure_ascii=False, indent=1)}\n\n"
-        "Acoes que ganharam corpo e ainda nao foram perguntadas:\n"
+        "Acoes que ganharam corpo e ainda nao foram perguntadas. As marcadas como "
+        "passivo sao trabalho antigo, recuperado aos poucos — o material vale o "
+        "mesmo, mas o usuario pode ja nem lembrar delas, entao a frase de "
+        "justificativa precisa situar quando aquilo aconteceu:\n"
         f"{json.dumps(dossies, ensure_ascii=False, indent=1)}\n\n"
         f"Voce pode propor no maximo {rodada['restantes']} elevacao(oes) nesta rodada. "
         "Proponha menos, ou nenhuma, se o material nao sustentar."
@@ -875,6 +1055,9 @@ def rodar_deteccao(db, hoje: str, carga_semana, claude_key: str) -> dict:
         # a janela ancorada existe para impedir.
         if rodada.get("pode_marcar"):
             marcar_varredura(db, hoje)
+        if rodada.get("passivo_cursor"):
+            avancar_passivo(db, rodada["passivo_cursor"], rodada.get("passivo_esgotou"),
+                            contar_passivo(db, rodada["passivo_cursor"], hoje))
         print(f"[Elevacao] Nada a fazer hoje: {rodada.get('motivo')}")
         return {"rodou": False, "motivo": rodada.get("motivo")}
 
@@ -902,6 +1085,12 @@ def rodar_deteccao(db, hoje: str, carga_semana, claude_key: str) -> dict:
 
     if rodada.get("pode_marcar"):
         marcar_varredura(db, hoje)
+    # O cursor do passivo anda por conta propria: ele nao depende da janela, e as
+    # candidatas de passivo tem vaga garantida no prompt, entao o que a rodada
+    # leu foi de fato oferecido ao modelo.
+    avancar_passivo(db, rodada.get("passivo_cursor"), rodada.get("passivo_esgotou"),
+                    contar_passivo(db, rodada.get("passivo_cursor") or "",
+                                   rodada.get("corte_conclusao") or hoje))
     print(f"[Elevacao] Rodada concluida. propostas={len(aceitas)} "
           f"candidatas={len(rodada['candidatos'])} "
           f"conclusoes_desde={rodada.get('corte_conclusao')} "

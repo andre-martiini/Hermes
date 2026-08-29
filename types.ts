@@ -1303,6 +1303,15 @@ export interface ResumoFila {
     rota: string;
 }
 
+export interface ResumoPassivoElevacao {
+    /** `null` quando a contagem falhou — nunca 0, que diria "acabou". */
+    restantes: number | null;
+    cota_por_rodada: number;
+    /** Data da conclusão mais antiga já percorrida. */
+    ate: string | null;
+    esgotou: boolean;
+}
+
 export interface ResumoAvisoDoSistema {
     id: string;
     gravidade: 'atencao';
@@ -1368,6 +1377,12 @@ export interface ResumoMatinal {
      * `contadores.pendencias`; isto não é decisão nenhuma.
      */
     avisos_do_sistema?: ResumoAvisoDoSistema[];
+    /**
+     * A esteira de recuperação do passivo de elevação. Não é fila (não espera
+     * decisão) nem aviso (nada está errado) — anda devagar de propósito e
+     * termina quando o usuário manda parar, o que exige ver quanto falta.
+     */
+    passivo_elevacao?: ResumoPassivoElevacao | null;
     saude: {
         rotinas_hoje: Array<{
             titulo: string;
