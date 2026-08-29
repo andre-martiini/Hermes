@@ -3,6 +3,12 @@ import { httpsCallable } from 'firebase/functions';
 import { collection, onSnapshot, addDoc, deleteDoc, updateDoc, doc, writeBatch, setDoc } from 'firebase/firestore';
 import { db, functions } from '@/firebase';
 import { ShoppingItem } from '@/types';
+import {
+  flagsResultantes,
+  linhaFlag,
+  linhasImportaveis,
+  normalizeShoppingText,
+} from '@/src/utils/shoppingTransitions';
 
 type ShoppingAssistantAction = 'view' | 'create' | 'update' | 'delete' | 'import_batch' | 'clear_planning' | 'finalize';
 
@@ -32,48 +38,6 @@ interface AssistantMutationPreview {
   action: ShoppingAssistantAction;
   payload: Record<string, any>;
 }
-
-const normalizeShoppingText = (value?: string | null) =>
-  (value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim();
-
-/**
- * Espelha `_resolver_flags` de `functions/tools/lista_compras.py`: comprado
- * implica planejado, e desplanejar tira o comprado. O card precisa da MESMA
- * regra do servidor porque so mostra a verdade quem calcula o estado final —
- * prever flag por flag faz o card prometer transicoes que o servidor refaz.
- *
- * `aditivo` e o modo de `create` sobre item que ja existe: flag falsa e
- * descartada, entao o pedido so acrescenta.
- */
-const flagsResultantes = (
-  atual: { isPlanned: boolean; isPurchased: boolean },
-  pedidoPlanejado: boolean | undefined,
-  pedidoComprado: boolean | undefined,
-  aditivo: boolean,
-) => {
-  if (aditivo) {
-    const comprado = atual.isPurchased || pedidoComprado === true;
-    return { planejado: atual.isPlanned || pedidoPlanejado === true || comprado, comprado };
-  }
-  let planejado = pedidoPlanejado !== undefined ? pedidoPlanejado : atual.isPlanned;
-  let comprado = pedidoComprado !== undefined ? pedidoComprado : atual.isPurchased;
-  if (comprado && !planejado) {
-    if (pedidoPlanejado !== undefined && pedidoComprado === undefined) comprado = false;
-    else planejado = true;
-  }
-  if (!planejado) comprado = false;
-  return { planejado, comprado };
-};
-
-const linhaFlag = (rotulo: string, atual: boolean, final: boolean, aditivo: boolean) => {
-  if (atual !== final) return `${rotulo}: ${atual ? 'Sim' : 'Nao'} -> ${final ? 'Sim' : 'Nao'}`;
-  if (atual && aditivo) return `${rotulo}: Sim (segue igual — "criar" nunca desmarca)`;
-  return `${rotulo}: ${atual ? 'Sim' : 'Nao'} (segue igual)`;
-};
 
 export const ShoppingListTool = ({
   onBack,
@@ -112,11 +76,17 @@ export const ShoppingListTool = ({
   const [isPurchasedSectionOpen, setIsPurchasedSectionOpen] = useState(false);
   const [assistantStatus, setAssistantStatus] = useState<'idle' | 'applying' | 'applied' | 'cancelled' | 'error'>('idle');
   const [assistantError, setAssistantError] = useState('');
+  // Antes do primeiro snapshot o catalogo esta vazio, e todo card do copiloto
+  // preve o efeito a partir dele: `create` mostraria criacao onde o servidor vai
+  // reaproveitar item existente, e a importacao contaria como novo o que ja
+  // existe. Confirmar so depois de carregar.
+  const [catalogoCarregado, setCatalogoCarregado] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'shopping_items'), (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ShoppingItem));
       setItems(data);
+      setCatalogoCarregado(true);
     });
     return () => unsubscribe();
   }, []);
@@ -375,18 +345,28 @@ export const ShoppingListTool = ({
 
     if (assistantAction === 'import_batch') {
       const rawText = (initialImportText || '').trim();
-      const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
+      // Contar linha nao serve: o servidor descarta nome vazio e nome repetido
+      // dentro do proprio texto. Como o resultado da callable e jogado fora e a
+      // UI so mostra um toast generico, este card e a unica previsao que o
+      // usuario ve — entao ele aplica a mesma regra de `_parse_linhas`.
+      const { nomes: importaveis, descartadas } = linhasImportaveis(rawText);
+      const jaNoCadastro = importaveis.filter((nome: string) =>
+        items.some(item => normalizeShoppingText(item.nome) === normalizeShoppingText(nome))).length;
+      const novos = importaveis.length - jaNoCadastro;
+      const sobra = descartadas > 0
+        ? ` ${descartadas} linha(s) ficam de fora: repetida(s) no texto ou sem nome.`
+        : '';
       // Sem repassar `isPlanned`, o servidor aplica o padrao (planejar) e a
       // importacao so-para-o-cadastro que o schema anuncia nao existiria pela web.
       const planejaImportacao = isPlanned !== false;
       return {
         title: 'Importacao em lote proposta',
-        description: lines.length === 0
+        description: importaveis.length === 0
           ? 'Nenhuma linha valida foi enviada para importacao.'
           : planejaImportacao
-            ? `${lines.length} linha(s) serao importadas e ja entram no planejamento. Nome que ja existe nao vira item novo: o item atual e que passa a planejado.`
-            : `${lines.length} linha(s) entram so no cadastro, sem planejamento — nao aparecem na aba Comprar. Nome que ja existe fica como esta.`,
-        lines: lines.slice(0, 6),
+            ? `${importaveis.length} item(ns) entram no planejamento: ${novos} novo(s) e ${jaNoCadastro} que ja estava(m) no cadastro.${sobra}`
+            : `${novos} item(ns) novo(s) entram so no cadastro, sem planejamento — nao aparecem na aba Comprar. ${jaNoCadastro} ja existia(m) e fica(m) como esta(o).${sobra}`,
+        lines: importaveis.slice(0, 6),
         action: assistantAction,
         payload: {
           action: 'import_batch',
@@ -557,11 +537,12 @@ export const ShoppingListTool = ({
 
   const canConfirmAssistantAction = useMemo(() => {
     if (!assistantPreview) return false;
+    if (!catalogoCarregado) return false;
     if (assistantAction === 'create') return Boolean(assistantPreview.payload.nome);
     if (assistantAction === 'update' || assistantAction === 'delete') return Boolean(assistantPreview.payload.itemId);
     if (assistantAction === 'import_batch') return Boolean(assistantPreview.payload.importText);
     return true;
-  }, [assistantAction, assistantPreview]);
+  }, [assistantAction, assistantPreview, catalogoCarregado]);
 
   const applyAssistantAction = async () => {
     if (!assistantPreview || !canConfirmAssistantAction) return;
