@@ -254,12 +254,27 @@ class TestAPropostaDaIA(unittest.TestCase):
         self.assertEqual(self._validar(custo_estimado="")["custo_estimado"], "nao estimado")
 
 
+class _Snap:
+    def __init__(self, col, doc_id):
+        self._col, self.id = col, doc_id
+        self.exists = doc_id in col
+
+    def to_dict(self):
+        return dict(self._col.get(self.id) or {})
+
+
 class _Ref:
     def __init__(self, col, doc_id):
         self._col, self.id = col, doc_id
 
     def set(self, dados):
         self._col[self.id] = dict(dados)
+
+    def get(self):
+        return _Snap(self._col, self.id)
+
+    def update(self, dados):
+        self._col[self.id].update(dados)
 
 
 class _Colecao:
@@ -270,7 +285,13 @@ class _Colecao:
         if doc_id is None:
             self._seq += 1
             doc_id = f"s{self._seq}"
-        return _Ref(self.dados, doc_id)
+        return _Ref(self.dados, str(doc_id))
+
+    def limit(self, _n):
+        return self
+
+    def stream(self):
+        return [_Snap(self.dados, i) for i in list(self.dados)]
 
 
 class _Db:
@@ -342,6 +363,70 @@ class TestAMensagemDoModelo(unittest.TestCase):
         self.assertIn("Autoridade intelectual", msg)
         self.assertIn("HANDOFF-SISPNAES.md", msg)
         self.assertIn("no maximo 2", msg)
+
+
+class TestADecisaoDoUsuario(unittest.TestCase):
+    """Sem alca o detector e inerte: a sugestao aparece e nao ha como responder.
+
+    As tres saidas do card sao o que impede o recurso de virar barulho — "nunca"
+    acima de tudo, porque sem ela o sistema repete a mesma sugestao.
+    """
+
+    def _db_com_pendente(self):
+        db = _Db()
+        db.collection(ds.COL_ELEVACOES).dados["s1"] = {
+            **TestAPropostaDaIA.BASE, "status": ds.STATUS_PENDENTE, "criada_em": HOJE,
+            "titulo_acao": "Ciclo Sispnaes 2026", "nome_objetivo": "Autoridade intelectual",
+            "resumo": "resumo",
+        }
+        return db
+
+    def test_nunca_e_definitivo_e_tira_a_acao_das_proximas_varreduras(self):
+        db = self._db_com_pendente()
+        r = ds.decidir(db, "s1", "nunca", HOJE)
+        self.assertEqual(r["status"], ds.STATUS_NUNCA)
+        gravada = db.cols[ds.COL_ELEVACOES].dados["s1"]
+        decididas = ds.acoes_ja_decididas([gravada])
+        self.assertEqual(decididas["sispnaes"], ds.STATUS_NUNCA)
+
+    def test_adiar_devolve_a_acao_para_a_fila_depois(self):
+        db = self._db_com_pendente()
+        ds.decidir(db, "s1", "adiar", HOJE)
+        gravada = db.cols[ds.COL_ELEVACOES].dados["s1"]
+        decididas = ds.acoes_ja_decididas([gravada])
+        self.assertEqual(len(ds.candidatas(
+            [_tarefa(id="sispnaes", pool_dados=[_anexo("X.md")])], decididas, HOJE)), 1)
+
+    def test_aceitar_devolve_rascunho_com_o_vinculo_preenchido(self):
+        """Nao cria a acao aqui: quem sabe area, dedup e agenda e criar_acao_no_sistema."""
+        r = ds.decidir(self._db_com_pendente(), "s1", "aceitar", HOJE)
+        rascunho = r["rascunho_da_acao"]
+        self.assertEqual(rascunho["estrategia_objetivo_id"], "intel")
+        self.assertIn("HANDOFF-SISPNAES.md", rascunho["descricao"])
+        self.assertTrue(rascunho["titulo"])
+
+    def test_decidir_duas_vezes_nao_sobrescreve(self):
+        db = self._db_com_pendente()
+        ds.decidir(db, "s1", "nunca", HOJE)
+        segunda = ds.decidir(db, "s1", "aceitar", HOJE)
+        self.assertFalse(segunda["ok"])
+        self.assertEqual(db.cols[ds.COL_ELEVACOES].dados["s1"]["status"], ds.STATUS_NUNCA)
+
+    def test_decisao_invalida_lista_as_validas(self):
+        r = ds.decidir(self._db_com_pendente(), "s1", "talvez", HOJE)
+        self.assertFalse(r["ok"])
+        self.assertIn("nunca", r["erro"])
+
+    def test_sugestao_inexistente_nao_finge_sucesso(self):
+        self.assertFalse(ds.decidir(self._db_com_pendente(), "nao-existe", "aceitar", HOJE)["ok"])
+
+    def test_listar_traz_so_pendentes_com_o_id_para_decidir(self):
+        db = self._db_com_pendente()
+        db.collection(ds.COL_ELEVACOES).dados["s2"] = {
+            "status": ds.STATUS_NUNCA, "titulo_acao": "Outra", "criada_em": HOJE}
+        r = ds.listar_pendentes(db)
+        self.assertEqual(r["total"], 1)
+        self.assertEqual(r["sugestoes"][0]["sugestao_id"], "s1")
 
 
 class TestOTextoDoCard(unittest.TestCase):

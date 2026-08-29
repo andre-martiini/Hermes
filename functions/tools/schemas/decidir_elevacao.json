@@ -1,0 +1,18 @@
+{
+  "name": "decidir_elevacao",
+  "description": "Aplica a decisao do usuario sobre uma elevacao sugerida. Sempre confirme com ele antes de chamar. 'nunca' e definitivo para aquela acao e existe para o sistema nao repetir a mesma sugestao; 'adiar' e sobre o momento, e a acao volta a ser candidata depois. 'aceitar' NAO cria a acao: devolve um rascunho com o vinculo estrategico preenchido, para voce criar com criar_acao_no_sistema.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "sugestao_id": {
+        "type": "string",
+        "description": "Id da sugestao, vindo de consultar_elevacoes_sugeridas."
+      },
+      "decisao": {
+        "type": "string",
+        "description": "aceitar, adiar ou nunca."
+      }
+    },
+    "required": ["sugestao_id", "decisao"]
+  }
+}

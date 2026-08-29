@@ -36,6 +36,11 @@ _CATALOG: dict[str, str] = {
     # item_id e nao havia de onde tira-lo. E nao dava para conferir o efeito da
     # propria escrita sem pedir ao usuario que abrisse a tela.
     "consultar_lista_compras": "Le a lista de compras com o item_id de cada item, o que esta planejado e o que ja foi comprado",
+    # Detector de subproduto: o trabalho ja feito que rende um ativo com um passo
+    # a mais. Sem a alca de decisao as sugestoes ficam na fila sem resposta, e a
+    # que mais importa e "nunca" — sem ela o sistema repete e vira barulho.
+    "consultar_elevacoes_sugeridas": "Lista as elevacoes sugeridas que esperam decisao, com o material que ja existe e o objetivo servido",
+    "decidir_elevacao": "Aceita, adia ou descarta para sempre uma elevacao sugerida",
     "obter_projeto_bolsas_publico": "Consulta dados publicos de um projeto de bolsas por ID",
     "registrar_inscricao_bolsa_publica": "Registra uma inscricao publica em um projeto de bolsas",
     "consultar_financas_v2": "Consulta detalhada do financeiro interno: rendas, obrigações, metas e transações",
@@ -107,6 +112,7 @@ _NEEDS_CONFIRMATION: set[str] = {
     "resolver_conflito_procedimento",
     "registrar_transacao_financeira_publica",
     "mutar_lista_compras",
+    "decidir_elevacao",
     "mutar_portal_compras_publico",
     "registrar_inscricao_bolsa_publica",
     "registrar_item_financeiro_v2",

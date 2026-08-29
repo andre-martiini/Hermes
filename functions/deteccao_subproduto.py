@@ -552,3 +552,88 @@ def rodar_deteccao(db, hoje: str, carga_semana, claude_key: str) -> dict:
     print(f"[Elevacao] Rodada concluida. propostas={len(aceitas)} "
           f"candidatas={len(rodada['candidatos'])} resumo={resultado['text'][:200]!r}")
     return {"rodou": True, "propostas": aceitas, "candidatas": len(rodada["candidatos"])}
+
+
+# ---------------------------------------------------------------------------
+# A alca: aceitar, adiar, nunca
+# ---------------------------------------------------------------------------
+
+DECISOES = {
+    "aceitar": STATUS_ACEITA,
+    "adiar": STATUS_ADIADA,
+    "nunca": STATUS_NUNCA,
+}
+
+
+def decidir(db, sugestao_id: str, decisao: str, hoje: str) -> dict:
+    """Aplica a decisao do usuario sobre uma elevacao sugerida.
+
+    Sem esta funcao o detector e inerte: as sugestoes aparecem na fila e nao ha
+    como responder. As tres saidas do card sao a razao de ele nao virar barulho —
+    principalmente "nunca", porque sem ela o sistema repete a mesma sugestao.
+
+    Aceitar NAO cria a acao aqui. A criacao passa por `criar_acao_no_sistema`,
+    que e quem sabe area tematica, deduplicacao e agenda; duplicar isso daria uma
+    acao meia-boca gravada por um caminho paralelo. O retorno traz o rascunho
+    pronto para essa chamada, com o vinculo estrategico ja preenchido.
+    """
+    alvo = DECISOES.get(str(decisao or "").strip().lower())
+    if not alvo:
+        return {"ok": False, "erro": f"Decisao invalida. Use: {', '.join(DECISOES)}."}
+
+    ref = db.collection(COL_ELEVACOES).document(str(sugestao_id))
+    snap = ref.get()
+    if not snap.exists:
+        return {"ok": False, "erro": "Sugestao nao encontrada."}
+    dados = snap.to_dict() or {}
+    if str(dados.get("status")) != STATUS_PENDENTE:
+        return {"ok": False, "erro": f"Sugestao ja estava como '{dados.get('status')}'."}
+
+    ref.update({"status": alvo, "decidida_em": hoje})
+    resposta = {"ok": True, "status": alvo, "sugestao_id": str(sugestao_id)}
+
+    if alvo == STATUS_NUNCA:
+        resposta["detalhe"] = (
+            f'"{dados.get("titulo_acao")}" nao sera mais sugerida para elevacao.')
+    elif alvo == STATUS_ADIADA:
+        resposta["detalhe"] = (
+            "Adiada. A acao volta a ser candidata numa proxima varredura — "
+            "'agora nao' e sobre o momento, nao sobre a acao.")
+    else:
+        resposta["detalhe"] = (
+            "Aceita. Crie a acao com criar_acao_no_sistema usando o rascunho abaixo; "
+            "ele ja vem com o vinculo estrategico preenchido.")
+        resposta["rascunho_da_acao"] = {
+            "titulo": str(dados.get("ativo_possivel") or "")[:120],
+            "descricao": (
+                f'Elevacao da acao "{dados.get("titulo_acao")}".\n'
+                f'O que ja existe: {dados.get("o_que_ja_existe")}\n'
+                f'Passo que falta: {dados.get("passo_que_falta")}\n'
+                f'Custo estimado: {dados.get("custo_estimado")}'
+            ),
+            "estrategia_objetivo_id": dados.get("objetivo_id"),
+        }
+    return resposta
+
+
+def listar_pendentes(db, limite: int = 20) -> dict:
+    """As elevacoes esperando decisao, com o resumo que o usuario le."""
+    try:
+        docs = list(db.collection(COL_ELEVACOES).limit(200).stream())
+    except Exception as exc:
+        return {"total": 0, "sugestoes": [], "erro": str(exc)}
+    pendentes = []
+    for d in docs:
+        dados = d.to_dict() or {}
+        if str(dados.get("status")) != STATUS_PENDENTE:
+            continue
+        pendentes.append({
+            "sugestao_id": d.id,
+            "acao": dados.get("titulo_acao"),
+            "objetivo": dados.get("nome_objetivo"),
+            "motivo_escassez": dados.get("motivo_escassez"),
+            "resumo": dados.get("resumo"),
+            "criada_em": dados.get("criada_em"),
+        })
+    pendentes.sort(key=lambda s: str(s.get("criada_em") or ""))
+    return {"total": len(pendentes), "sugestoes": pendentes[:limite]}
