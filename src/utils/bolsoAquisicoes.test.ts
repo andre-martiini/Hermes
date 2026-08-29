@@ -97,6 +97,30 @@ describe('empate de prioridade', () => {
         expect(cabe(metas)).toEqual({ a: true, z: false });
     });
 
+    it('caixa mista desempata por ordinal, e não por locale', () => {
+        // O caso que `localeCompare` errava: ele põe 'a' antes de 'B', e o Python
+        // põe 'B' antes de 'a'. Id do Firestore mistura as duas caixas, então com
+        // o bolso cobrindo só uma das metas cada lado apontaria uma diferente.
+        // Os MESMOS ids e números estão no arquivo espelho.
+        const metas = [
+            { id: 'a1', targetAmount: 600, priority: 2, status: 'active' },
+            { id: 'B1', targetAmount: 600, priority: 2, status: 'active' },
+        ];
+        expect(cabe(metas)).toEqual({ B1: true, a1: false });
+    });
+
+    it('a ordem devolvida é a ordem em que a fila foi avaliada', () => {
+        // Se o consumidor reordenasse por fora, os selos de "cabe" apareceriam
+        // fora de ordem em relação à lista lida. O módulo devolve ordenado.
+        const metas = [
+            { id: 'a1', targetAmount: 600, priority: 2, status: 'active' },
+            { id: 'B1', targetAmount: 600, priority: 2, status: 'active' },
+            { id: 'z', targetAmount: 600, priority: 1, status: 'active' },
+        ];
+        expect(resumoDoBolso(metas, SETTINGS, []).metas.map(m => m.id))
+            .toEqual(['z', 'B1', 'a1']);
+    });
+
     it('prioridade ausente vai para o fim', () => {
         const metas = [
             { id: 'sem', targetAmount: 600, status: 'active' },

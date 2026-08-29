@@ -585,12 +585,13 @@ const FinanceView = ({
     const currentBudget = settings.monthlyBudgets?.[periodKey] || settings.monthlyBudget;
     const budgetPercentage = Math.min((currentMonthTotal / currentBudget) * 100, 100);
 
-    // A MESMA ordenação do módulo, desempate por id incluído. Sem o desempate, duas
-    // metas de mesma `priority` apareceriam na tela numa ordem e teriam sido
-    // avaliadas na fila noutra — os selos de "cabe" ficariam fora de ordem em
-    // relação à lista que o usuário está lendo.
-    const sortedGoals = [...goals].sort((a, b) =>
-        (a.priority ?? 99) - (b.priority ?? 99) || String(a.id).localeCompare(String(b.id)));
+    // Ja vem ordenado de `resumoDoBolso`, na MESMA ordem em que a fila foi
+    // avaliada. A tela nao reordena: quando reordenava, usava `localeCompare`,
+    // que ignora caixa e poe 'a' antes de 'B', enquanto o lado Python compara
+    // ordinais e poe 'B' antes de 'a'. Com ids do Firestore misturando as duas
+    // caixas, os selos de "cabe" apareceriam fora de ordem em relacao a lista
+    // lida, e a tela e o MCP apontariam metas diferentes como as que cabem.
+    const sortedGoals = goals;
 
     // O cofre, a cobertura de cada meta e a leitura da fila chegam PRONTOS de
     // `resumoDoBolso`. A tela não recalcula nenhum dos três: quando recalculava,
@@ -609,8 +610,13 @@ const FinanceView = ({
     // que cabe por zero.
     const coberto = (g: MetaDeAquisicao) =>
         centavos(g.targetAmount) > 0 && centavos(g.currentAmount) >= centavos(g.targetAmount);
-    const cobertosEmCentavos = sortedGoals
-        .filter(g => g.status !== 'completed' && coberto(g))
+    // A fila em aberto, com o MESMO critério do módulo: não concluída e com alvo
+    // maior que zero. Meta sem valor definido — que é o estado de todo desejo
+    // recém-criado, porque o botão cadastra com `targetAmount: 0` — nunca entra
+    // na conta da fila lá, e não pode ser contada como item de fila aqui.
+    const emAberto = sortedGoals.filter(g => g.status !== 'completed' && centavos(g.targetAmount) > 0);
+    const cobertosEmCentavos = emAberto
+        .filter(coberto)
         .reduce((acc, g) => acc + centavos(g.targetAmount), 0);
     const somaDosCobertos = cobertosEmCentavos / 100;
     const cobertosEstouramOCofre = cobertosEmCentavos > centavos(bolsoAquisicoes);
@@ -2120,13 +2126,19 @@ const FinanceView = ({
                                                 R$ {bolsoAquisicoes.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </span>
                                         </div>
-                                        {/* Fila vazia primeiro: sem nenhum desejo cadastrado, zero
-                                            itens que cabem não é falta de dinheiro, e dizer que o
-                                            cofre "ainda não cobre o primeiro item" seria uma
-                                            afirmação financeira falsa sobre um item inexistente. */}
+                                        {/* Zero itens que cabem tem TRÊS origens, e só uma delas é
+                                            falta de dinheiro. Sem nenhum card, ou com todos os cards
+                                            concluídos ou ainda sem valor definido, não existe primeiro
+                                            item da fila — e dizer que o cofre "ainda não cobre" seria
+                                            afirmação financeira falsa sobre um item inexistente. Por
+                                            isso a fila em aberto é medida com o mesmo critério do
+                                            módulo (não concluída e com alvo maior que zero) e não pelo
+                                            total de cards exibidos. */}
                                         <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-                                            {sortedGoals.length === 0
-                                                ? 'Nenhum desejo de compra na fila — o cofre está inteiro.'
+                                            {emAberto.length === 0
+                                                ? sortedGoals.length === 0
+                                                    ? 'Nenhum desejo de compra na fila — o cofre está inteiro.'
+                                                    : 'Nenhum desejo em aberto com valor definido — o cofre está inteiro.'
                                                 : itensQueCabemNoBolso === 0
                                                     ? 'Ainda não cobre o primeiro item da fila por inteiro.'
                                                     : `Compra ${itensQueCabemNoBolso} ${itensQueCabemNoBolso === 1 ? 'item' : 'itens'} da fila ao mesmo tempo, na ordem de prioridade.`}

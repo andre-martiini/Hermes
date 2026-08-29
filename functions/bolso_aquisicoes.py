@@ -83,7 +83,7 @@ def cobertura(meta: dict, disponivel: float) -> float:
 
 
 def _ordem(meta: dict) -> tuple:
-    """Prioridade, com o id como desempate.
+    """Prioridade, com o id como desempate — e o desempate por ORDINAL.
 
     O desempate nao e capricho. Sem ele, duas metas de mesma `priority` ficam na
     ordem de ENTRADA da lista — e os dois lados recebem a lista de fontes
@@ -91,6 +91,13 @@ def _ordem(meta: dict) -> tuple:
     cobrindo so uma das duas, cada lado diria que uma diferente cabe: a mesma
     divergencia entre linguagens que este modulo existe para eliminar, entrando
     por uma porta que a fixture nao olhava.
+
+    A comparacao de string do Python e por ordinal, e o lado TypeScript precisa
+    usar `<`/`>` e NAO `localeCompare` — que usa collation de locale e poe `'a'`
+    antes de `'B'`, enquanto aqui `'B'` (66) vem antes de `'a'` (97). Id do
+    Firestore mistura maiuscula e minuscula, entao o caso e alcancavel; foi
+    exatamente assim que o desempate reintroduziu a divergencia que ele veio
+    fechar. Ver `compararMetas` em `src/utils/bolsoAquisicoes.ts`.
     """
     try:
         prioridade = float(meta.get("priority"))
@@ -133,8 +140,11 @@ def resumo(metas, settings: dict, contas_do_mes) -> dict:
     """O bolso, a cobertura de cada meta e a leitura da fila, de uma vez."""
     disponivel = bolso(settings, contas_do_mes)
     fila = cobertura_da_fila(metas, disponivel)
+    # Ordenadas aqui, e nao por quem consome. A tela repetia este `sort` por fora
+    # e foi assim que o `localeCompare` entrou: a ordem exibida podia divergir da
+    # ordem em que a fila foi avaliada. Uma ordenacao so, e a mesma dos dois lados.
     enriquecidas = []
-    for meta in (metas or []):
+    for meta in sorted(metas or [], key=_ordem):
         atual = cobertura(meta, disponivel)
         alvo = float(meta.get("targetAmount") or 0)
         enriquecidas.append({

@@ -114,6 +114,26 @@ class TestEmpateDePrioridade(unittest.TestCase):
                  {"id": "a", "targetAmount": 600, "priority": 2, "status": "active"}]
         self.assertEqual(self._cabe(metas), {"a": True, "z": False})
 
+    def test_caixa_mista_desempata_por_ordinal(self):
+        """O caso que `localeCompare` errava do outro lado.
+
+        O JavaScript poe 'a' antes de 'B' com `localeCompare`; o Python poe 'B'
+        antes de 'a'. Id do Firestore mistura as duas caixas, entao com o bolso
+        cobrindo so uma das metas cada lado apontaria uma diferente. Os MESMOS
+        ids e numeros estao no arquivo espelho.
+        """
+        metas = [{"id": "a1", "targetAmount": 600, "priority": 2, "status": "active"},
+                 {"id": "B1", "targetAmount": 600, "priority": 2, "status": "active"}]
+        self.assertEqual(self._cabe(metas), {"B1": True, "a1": False})
+
+    def test_a_ordem_devolvida_e_a_ordem_em_que_a_fila_foi_avaliada(self):
+        """Quem consome nao precisa reordenar — e nao deve."""
+        metas = [{"id": "a1", "targetAmount": 600, "priority": 2, "status": "active"},
+                 {"id": "B1", "targetAmount": 600, "priority": 2, "status": "active"},
+                 {"id": "z", "targetAmount": 600, "priority": 1, "status": "active"}]
+        r = ba.resumo(metas, self.SETTINGS, [])
+        self.assertEqual([m["id"] for m in r["metas"]], ["z", "B1", "a1"])
+
     def test_prioridade_ausente_vai_para_o_fim(self):
         metas = [{"id": "sem", "targetAmount": 600, "status": "active"},
                  {"id": "com", "targetAmount": 600, "priority": 1, "status": "active"}]

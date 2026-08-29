@@ -90,6 +90,30 @@ export function cobertura(meta: MetaBolso, disponivel: number): number {
     return alvo > 0 ? Math.min(alvo, centavos(disponivel)) / 100 : 0;
 }
 
+/**
+ * Prioridade, com o id como desempate — e o desempate por **ordinal**, não por
+ * `localeCompare`.
+ *
+ * `localeCompare` usa collation de locale e ignora caixa: `'a'.localeCompare('B')`
+ * dá -1, enquanto o Python compara ordinais e põe `'B'` (66) antes de `'a'` (97).
+ * Ids do Firestore são alfanuméricos com maiúscula e minúscula misturadas, então
+ * duas metas de mesma `priority` seriam ordenadas de um jeito na tela e de outro
+ * no MCP — e, com o bolso cobrindo só uma das duas, cada lado apontaria uma
+ * diferente como a que cabe. O desempate existe exatamente para eliminar essa
+ * divergência; feito com `localeCompare`, ele a reintroduzia por baixo.
+ *
+ * O limite que sobra, e é o único: `<` compara unidades UTF-16 e o Python compara
+ * code points, então os dois só divergiriam com id contendo caractere acima do
+ * BMP. Id do Firestore é `[A-Za-z0-9]`.
+ */
+export function compararMetas(a: MetaBolso, b: MetaBolso): number {
+    const porPrioridade = (a.priority ?? 99) - (b.priority ?? 99);
+    if (porPrioridade !== 0) return porPrioridade;
+    const ia = String(a.id);
+    const ib = String(b.id);
+    return ia < ib ? -1 : ia > ib ? 1 : 0;
+}
+
 /** O que o módulo acrescenta a cada meta. */
 export interface ComCobertura {
     currentAmount: number;
@@ -123,15 +147,10 @@ export function resumoDoBolso<T extends MetaBolso>(
 ): ResumoDoBolso<T> {
     const disponivel = bolso(settings, contasDoMes);
 
-    // Prioridade, com o id como desempate. Sem ele, duas metas de mesma
-    // `priority` ficam na ordem de ENTRADA — e os dois lados recebem a lista de
-    // fontes diferentes (o MCP monta do Firestore, a tela do snapshot). Com o
-    // bolso cobrindo só uma das duas, cada lado diria que uma diferente cabe.
-    const ativas = (metas || [])
-        .filter(m => m.status !== 'completed')
-        .sort((a, b) =>
-            (a.priority ?? 99) - (b.priority ?? 99)
-            || String(a.id).localeCompare(String(b.id)));
+    // Sem o desempate de `compararMetas`, duas metas de mesma `priority` ficariam
+    // na ordem de ENTRADA — e os dois lados recebem a lista de fontes diferentes
+    // (o MCP monta do Firestore, a tela do snapshot).
+    const ativas = (metas || []).filter(m => m.status !== 'completed').sort(compararMetas);
 
     // Em centavos inteiros: somar floats e comparar com o bolso erra na
     // fronteira exata, marcando como "não cabe" um item que cabe por zero.
@@ -154,7 +173,11 @@ export function resumoDoBolso<T extends MetaBolso>(
     return {
         bolso: centavos(disponivel) / 100,
         itensQueCabem,
-        metas: (metas || []).map(meta => {
+        // Ordenadas aqui, e não por quem consome. A tela repetia este `sort` por
+        // fora e foi assim que o `localeCompare` entrou: a ordem exibida podia
+        // divergir da ordem em que a fila foi avaliada, e os selos de "cabe"
+        // apareceriam fora de ordem em relação à lista lida. Uma ordenação só.
+        metas: [...(metas || [])].sort(compararMetas).map(meta => {
             const atual = cobertura(meta, disponivel);
             const alvo = meta.targetAmount || 0;
             return {
