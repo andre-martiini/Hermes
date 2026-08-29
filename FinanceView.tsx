@@ -614,8 +614,8 @@ const FinanceView = ({
     // maior que zero. Meta sem valor definido — que é o estado de todo desejo
     // recém-criado, porque o botão cadastra com `targetAmount: 0` — nunca entra
     // na conta da fila lá, e não pode ser contada como item de fila aqui.
-    const emAberto = sortedGoals.filter(g => g.status !== 'completed' && centavos(g.targetAmount) > 0);
-    const cobertosEmCentavos = emAberto
+    const filaEmAberto = sortedGoals.filter(g => g.status !== 'completed' && centavos(g.targetAmount) > 0);
+    const cobertosEmCentavos = filaEmAberto
         .filter(coberto)
         .reduce((acc, g) => acc + centavos(g.targetAmount), 0);
     const somaDosCobertos = cobertosEmCentavos / 100;
@@ -2135,7 +2135,7 @@ const FinanceView = ({
                                             módulo (não concluída e com alvo maior que zero) e não pelo
                                             total de cards exibidos. */}
                                         <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-                                            {emAberto.length === 0
+                                            {filaEmAberto.length === 0
                                                 ? sortedGoals.length === 0
                                                     ? 'Nenhum desejo de compra na fila — o cofre está inteiro.'
                                                     : 'Nenhum desejo em aberto com valor definido — o cofre está inteiro.'
@@ -2181,7 +2181,14 @@ const FinanceView = ({
                                                 // Coberto sozinho não é o mesmo que comprável junto
                                                 // com os que vêm antes na fila.
                                                 const cabe = goal.cabeNaFila;
-                                                const cobertoMasNaoCabe = isReady && !cabe;
+                                                // Meta concluida ja foi comprada: os dois selos abaixo
+                                                // falam de decisao de compra, e ela nao esta mais em
+                                                // aberto. O modulo a exclui da fila de proposito, entao
+                                                // `cabeNaFila` e falso — e sem esta condicao o item
+                                                // comprado herdava o selo ambar de "so se for este",
+                                                // oferecendo como opcao de compra o que ja foi pago.
+                                                const emAberto = goal.status !== 'completed';
+                                                const cobertoMasNaoCabe = emAberto && isReady && !cabe;
 
                                                 return (
                                                     <div
@@ -2221,9 +2228,18 @@ const FinanceView = ({
                                                                         os de prioridade acima. Sem essa distinção, vários
                                                                         selos verdes ao mesmo tempo convidam a estourar o
                                                                         cofre sem perceber. */}
-                                                                    {isReady && !cobertoMasNaoCabe && (
+                                                                    {emAberto && isReady && !cobertoMasNaoCabe && (
                                                                         <span className="text-[9px] font-extrabold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
                                                                             🛒 RECURSOS DISPONÍVEIS
+                                                                        </span>
+                                                                    )}
+                                                                    {/* O card concluído fica com o mesmo verde de um item
+                                                                        que dá para comprar. Sem um selo próprio, os dois
+                                                                        ficariam visualmente iguais depois que os selos de
+                                                                        compra saíram daqui. */}
+                                                                    {!emAberto && (
+                                                                        <span className="text-[9px] font-extrabold bg-slate-500/15 text-slate-600 dark:text-slate-300 border border-slate-500/25 px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
+                                                                            ✓ COMPRADO
                                                                         </span>
                                                                     )}
                                                                     {cobertoMasNaoCabe && (
