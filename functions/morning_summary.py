@@ -565,6 +565,29 @@ def _rotina_verificavel(rotina: dict) -> str | None:
     return None
 
 
+def _ultima_medida(db, colecao: str, campo: str, hoje: str, dias: int = 60) -> dict | None:
+    """Ultimo valor registrado numa colecao de medicao, com a data dele.
+
+    Separada de `_coletar_saude` para ser testavel: aquela importa de `main`, e um
+    teste do valor da medida nao deveria arrastar o modulo inteiro junto.
+    """
+    try:
+        medidas = sorted(
+            ((str((d.to_dict() or {}).get("date") or "")[:10], float((d.to_dict() or {}).get(campo) or 0))
+             for d in db.collection(colecao)
+             .where(filter=firestore.FieldFilter("date", ">=", _shift(hoje, -dias)))
+             .where(filter=firestore.FieldFilter("date", "<=", hoje)).stream()),
+            key=lambda m: m[0],
+        )
+    except Exception as exc:
+        print(f"[ResumoMatinal] Falha ao consultar {colecao}: {exc}")
+        return None
+    validas = [m for m in medidas if m[1] > 0]
+    if not validas:
+        return None
+    return {"ultimo": validas[-1][1], "data": validas[-1][0]}
+
+
 def _coletar_saude(db, hoje: str, ontem: str) -> dict:
     from main import _cached_doc_get
 
@@ -689,6 +712,13 @@ def _coletar_saude(db, hoje: str, ontem: str) -> dict:
     except Exception as exc:
         print(f"[ResumoMatinal] Falha ao consultar health_waist: {exc}")
 
+    # A cintura tinha so a data usada como sinal de movimento; o valor em si era
+    # descartado. Meta ligada a fonte `cintura` lia sempre None e caia no valor
+    # manual antigo — a fonte automatica que o campo anuncia nunca chegava a valer.
+    cintura = _ultima_medida(db, "health_waist", "cm", hoje, dias=60)
+    if cintura:
+        saude["cintura"] = cintura
+
     saude["ultimo_registro"] = max((c for c in candidatos if c), default=None)
     return saude
 
@@ -705,11 +735,14 @@ def _fonte_da_metrica(data: dict, metrica: dict) -> str | None:
     saúde em kg é peso, em cm é cintura —, para os objetivos criados antes deste
     campo não precisarem de migração para voltarem a mostrar progresso real.
     """
-    fonte = str(metrica.get("fonte") or "").strip().lower()
-    if fonte in _FONTES_AUTOMATICAS:
-        return fonte
-    if fonte:
-        return None
+    # Chave gravada, ainda que vazia, e resposta: significa "sem fonte", e
+    # desligar a fonte de uma meta de saude em kg tem de continuar desligada. So
+    # documento anterior ao campo cai na derivacao por unidade — depois que
+    # `criar_objetivo_estrategico` passou a gravar `fonte`, toda meta absoluta
+    # nova tem a chave, e sem esta distincao ela nasceria ligada sem ninguem pedir.
+    if "fonte" in metrica:
+        gravada = str(metrica.get("fonte") or "").strip().lower()
+        return gravada if gravada in _FONTES_AUTOMATICAS else None
     if str(data.get("pilar") or "") != "saude":
         return None
     unidade = str(metrica.get("unidade") or "").strip().lower()

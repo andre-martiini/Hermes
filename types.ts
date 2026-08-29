@@ -425,6 +425,13 @@ export interface EstrategiaPessoal {
         valorAtual: number;
         valorObjetivo: number;
         unidade: string;
+        /**
+         * Fonte automática que alimenta a métrica (`peso`, `cintura`). Vazio é
+         * resposta — significa "sem fonte", e o painel diz isso em vez de exibir
+         * zero. Toda escrita de `metricaAlvo` precisa preservar este campo: o
+         * Firestore substitui o mapa inteiro, e omiti-lo desliga a fonte sem aviso.
+         */
+        fonte?: string;
     };
     historicoMetrica?: Array<{
         id: string;

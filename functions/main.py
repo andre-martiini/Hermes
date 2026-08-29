@@ -10609,6 +10609,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             metrica_valor_atual: float = None,
             metrica_valor_objetivo: float = None,
             metrica_unidade: str = "",
+            metrica_fonte: str = "",
+            gerida_por_acoes: bool = None,
         ):
             """
             [MÓDULO ESTRATÉGIA] Cria um novo objetivo estratégico pessoal em estrategia_pessoal.
@@ -10629,6 +10631,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     db, user_uid, objetivoMacro, pilar, tipoMeta, status,
                     diretrizes, indicadores, marcos,
                     metrica_valor_inicial, metrica_valor_atual, metrica_valor_objetivo, metrica_unidade,
+                    metrica_fonte, gerida_por_acoes,
                 )
                 return json.dumps(resultado, ensure_ascii=False)
             except Exception as e:
@@ -10645,6 +10648,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             metrica_valor_atual: float = None,
             metrica_valor_objetivo: float = None,
             metrica_unidade: str = None,
+            metrica_fonte: str = None,
+            gerida_por_acoes: bool = None,
         ):
             """
             [MÓDULO ESTRATÉGIA] Edita um objetivo estratégico existente (identificado por objetivo_id, visível no snapshot da estratégia).
@@ -10657,6 +10662,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 resultado = _strategy_tools.editar_objetivo_estrategico(
                     db, user_uid, objetivo_id, objetivoMacro, pilar, tipoMeta, status,
                     diretrizes, metrica_valor_inicial, metrica_valor_atual, metrica_valor_objetivo, metrica_unidade,
+                    metrica_fonte, gerida_por_acoes,
                 )
                 return json.dumps(resultado, ensure_ascii=False)
             except Exception as e:

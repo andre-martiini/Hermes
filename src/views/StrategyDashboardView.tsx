@@ -16,6 +16,8 @@ type StrategyDraft = Omit<EstrategiaPessoal, 'id' | 'userId' | 'timestamp' | 'me
     valorAtual: number | string;
     valorObjetivo: number | string;
     unidade: string;
+    /** Preservada no rascunho para o salvamento nao desligar a fonte automatica. */
+    fonte?: string;
   };
   indicadoresSucesso?: StrategyIndicatorDraft[];
   marcos?: StrategyMilestoneDraft[];
@@ -423,6 +425,10 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
           valorAtual,
           valorObjetivo,
           unidade: String(draft.metricaAlvo?.unidade || '').trim(),
+          // O Firestore substitui o mapa inteiro. Sem repassar `fonte`, salvar o
+          // objetivo pela tela desligaria em silêncio a fonte automática ligada
+          // por tool — e o indicador voltaria ao valor congelado.
+          fonte: String(draft.metricaAlvo?.fonte || ''),
         },
       }
       : payloadBase;
@@ -479,6 +485,7 @@ export const StrategyDashboardView: React.FC<StrategyDashboardViewProps> = ({ us
           valorAtual: value,
           valorObjetivo: currentMetric.valorObjetivo,
           unidade: currentMetric.unidade || '',
+          fonte: currentMetric.fonte || '',
         },
         historicoMetrica: [...(item.historicoMetrica || []), record],
       } as any);

@@ -23,6 +23,8 @@ from morning_summary import (
     _escolher_foco,
     _js_weekday,
     _coletar_estrategia,
+    _ultima_medida,
+    _shift,
 )
 
 HOJE = "2026-08-20"  # quinta-feira
@@ -391,6 +393,69 @@ class TestEstrategia(unittest.TestCase):
         meta = _coletar_estrategia(db, HOJE, {}, {}, medicoes={})["metas"][0]
         self.assertEqual(meta["progresso_origem"], "manual")
         self.assertEqual(meta["progresso_pct"], 7)
+
+
+class TestFonteDaMetrica(unittest.TestCase):
+    """De onde o indicador tira o numero, e quando ele admite nao ter fonte."""
+
+    def _meta(self, metrica, medicoes=None, pilar="saude"):
+        db = _FakeDb({"estrategia_pessoal": {"m1": {
+            "objetivoMacro": "Meta", "pilar": pilar, "status": "ativo", "metricaAlvo": metrica,
+        }}})
+        return _coletar_estrategia(db, HOJE, {}, {}, medicoes=medicoes or {})["metas"][0]
+
+    def test_fonte_gravada_vazia_significa_desligada(self):
+        """Chave gravada vazia e resposta, nao ausencia.
+
+        `criar_objetivo_estrategico` grava `fonte` em toda meta absoluta. Sem
+        distinguir chave ausente de chave vazia, a meta nova em kg nasceria ligada
+        ao peso sem ninguem pedir — e desligar a fonte de uma meta de saude seria
+        impossivel, porque a derivacao por unidade a religaria na leitura seguinte.
+        """
+        meta = self._meta({"valorInicial": 95, "valorAtual": 95, "valorObjetivo": 80,
+                           "unidade": "kg", "fonte": ""}, medicoes={"peso": 93.6})
+        self.assertIsNone(meta["metrica_fonte"])
+        self.assertEqual(meta["progresso_origem"], "sem_fonte")
+
+    def test_sem_a_chave_deriva_da_unidade(self):
+        """Objetivo gravado antes do campo existir nao precisa de migracao."""
+        meta = self._meta({"valorInicial": 95, "valorAtual": 95, "valorObjetivo": 80,
+                           "unidade": "kg"}, medicoes={"peso": 93.6})
+        self.assertEqual(meta["metrica_fonte"], "peso")
+        self.assertEqual(meta["progresso_pct"], 9)
+
+    def test_fonte_de_cintura_le_a_medida(self):
+        meta = self._meta({"valorInicial": 110, "valorAtual": 110, "valorObjetivo": 90,
+                           "unidade": "cm", "fonte": "cintura"}, medicoes={"cintura": 104})
+        self.assertEqual((meta["progresso_pct"], meta["progresso_origem"]), (30, "automatica"))
+
+    def test_fonte_desconhecida_nao_vira_derivacao(self):
+        meta = self._meta({"valorInicial": 95, "valorAtual": 95, "valorObjetivo": 80,
+                           "unidade": "kg", "fonte": "chute"}, medicoes={"peso": 93.6})
+        self.assertIsNone(meta["metrica_fonte"])
+
+
+class TestColetaDeCintura(unittest.TestCase):
+    """O valor da cintura era descartado: so a data virava sinal de movimento.
+
+    Meta ligada a fonte `cintura` lia sempre None e caia no valor manual antigo —
+    a fonte automatica que o campo anuncia nunca chegava a valer.
+    """
+
+    def test_valor_mais_recente_de_cintura_e_coletado(self):
+        db = _FakeDb({"health_waist": {
+            "a": {"date": _shift(HOJE, -3), "cm": 106.0},
+            "b": {"date": HOJE, "cm": 104.5},
+        }})
+        medida = _ultima_medida(db, "health_waist", "cm", HOJE)
+        self.assertEqual((medida["ultimo"], medida["data"]), (104.5, HOJE))
+
+    def test_sem_registro_devolve_nada_em_vez_de_zero(self):
+        self.assertIsNone(_ultima_medida(_FakeDb({}), "health_waist", "cm", HOJE))
+
+    def test_medida_zerada_nao_conta_como_medicao(self):
+        db = _FakeDb({"health_waist": {"a": {"date": HOJE, "cm": 0}}})
+        self.assertIsNone(_ultima_medida(db, "health_waist", "cm", HOJE))
 
 
 class TestFlagDeMetaGeridaPorAcoes(unittest.TestCase):

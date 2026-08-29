@@ -175,7 +175,10 @@ def editar_objetivo_estrategico(
 
     # Métrica: só aplica se o objetivo é/torna-se absoluto
     tipo_final = updates.get("tipoMeta", data.get("tipoMeta"))
-    if tipo_final == "absoluta" and any(v is not None for v in [metrica_valor_inicial, metrica_valor_atual, metrica_valor_objetivo, metrica_unidade]):
+    # `metrica_fonte` precisa estar aqui: ligar ou desligar a fonte de uma meta ja
+    # existente e feito com ele sozinho, e sem a entrada na guarda a chamada
+    # devolvia `noop` sem nunca chegar na atribuicao abaixo.
+    if tipo_final == "absoluta" and any(v is not None for v in [metrica_valor_inicial, metrica_valor_atual, metrica_valor_objetivo, metrica_unidade, metrica_fonte]):
         metrica = dict(data.get("metricaAlvo") or {})
         if metrica_valor_inicial is not None:
             metrica["valorInicial"] = float(metrica_valor_inicial)
