@@ -106,8 +106,22 @@ export function cobertura(meta: MetaBolso, disponivel: number): number {
  * code points, então os dois só divergiriam com id contendo caractere acima do
  * BMP. Id do Firestore é `[A-Za-z0-9]`.
  */
+function prioridade(meta: MetaBolso): number {
+    // Espelha o `try: float(...) except (TypeError, ValueError): 99.0` do lado
+    // Python. `?? 99` sozinho não bastava: ele cobre `null` e ausente, mas deixa
+    // passar `priority` gravada como texto — e `'alta' - 2` dá NaN, que faz o
+    // comparador devolver NaN e o `sort` não trocar nada, enquanto o Python
+    // mandaria o item para o fim. Firestore não tipa o que grava, e este PR já
+    // encontrou duas vezes um número guardado como string.
+    const bruto = meta.priority as unknown;
+    if (bruto === null || bruto === undefined) return 99;
+    if (typeof bruto === 'string' && bruto.trim() === '') return 99;
+    const n = Number(bruto);
+    return Number.isFinite(n) ? n : 99;
+}
+
 export function compararMetas(a: MetaBolso, b: MetaBolso): number {
-    const porPrioridade = (a.priority ?? 99) - (b.priority ?? 99);
+    const porPrioridade = prioridade(a) - prioridade(b);
     if (porPrioridade !== 0) return porPrioridade;
     const ia = String(a.id);
     const ib = String(b.id);

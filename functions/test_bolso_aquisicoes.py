@@ -134,6 +134,22 @@ class TestEmpateDePrioridade(unittest.TestCase):
         r = ba.resumo(metas, self.SETTINGS, [])
         self.assertEqual([m["id"] for m in r["metas"]], ["z", "B1", "a1"])
 
+    def test_prioridade_invalida_nao_derruba_a_ordenacao(self):
+        """`priority` gravado como None ou string nao pode levantar TypeError.
+
+        O `consultar_financas_v2` tinha um `goals.sort(key=lambda x:
+        x.get("priority", 99))` proprio, antes de chamar este modulo. O default
+        do `get` nao pega `priority: None` — a chave existe — e comparar None
+        com int derruba a tool inteira. `_ordem` coage e cai para 99; o sort de
+        fora foi removido, e este teste fixa a razao de a ordenacao viver aqui.
+        """
+        metas = [{"id": "vazio", "targetAmount": 600, "priority": "", "status": "active"},
+                 {"id": "alta", "targetAmount": 600, "priority": "alta", "status": "active"},
+                 {"id": "nulo", "targetAmount": 600, "priority": None, "status": "active"},
+                 {"id": "um", "targetAmount": 600, "priority": 1, "status": "active"}]
+        r = ba.resumo(metas, self.SETTINGS, [])
+        self.assertEqual([m["id"] for m in r["metas"]], ["um", "alta", "nulo", "vazio"])
+
     def test_prioridade_ausente_vai_para_o_fim(self):
         metas = [{"id": "sem", "targetAmount": 600, "status": "active"},
                  {"id": "com", "targetAmount": 600, "priority": 1, "status": "active"}]

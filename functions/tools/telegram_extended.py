@@ -776,8 +776,6 @@ def execute(tool_name: str, slots: dict, db) -> str:
             d = doc.to_dict()
             d["id"] = doc.id
             goals.append(d)
-        goals.sort(key=lambda x: x.get("priority", 99))
-
         settings = settings_doc.to_dict() or {}
 
         # `currentAmount` e DERIVADO, e ate agora vinha gravado no documento. O
@@ -789,6 +787,14 @@ def execute(tool_name: str, slots: dict, db) -> str:
         #
         # A regra vive em `bolso_aquisicoes`, espelhada em
         # `src/utils/bolsoAquisicoes.ts`. As duas tem de dar o mesmo numero.
+        #
+        # A ordenacao tambem vem de la, e NAO daqui. Havia um `goals.sort` por
+        # prioridade nesta funcao que era morto — `resumo` reordena o que
+        # devolve — e ao mesmo tempo perigoso: `x.get("priority", 99)` nao pega
+        # o caso de `priority` gravado como `None`, porque a chave existe e o
+        # default nao se aplica, e a comparacao de `None` com `int` levanta
+        # TypeError e derruba a tool inteira. `_ordem` coage com `float()` e cai
+        # para 99 justamente por isso. Uma ordenacao so, dentro do modulo.
         import bolso_aquisicoes
 
         aquisicoes = bolso_aquisicoes.resumo(goals, settings, bills)

@@ -121,6 +121,23 @@ describe('empate de prioridade', () => {
             .toEqual(['z', 'B1', 'a1']);
     });
 
+    it('prioridade inválida cai para o fim, como no Python', () => {
+        // O mesmo caso do arquivo espelho, com os MESMOS ids. `?? 99` cobria
+        // null e ausente e deixava passar os dois que importam: `'alta' - 1` dá
+        // NaN, o comparador devolve NaN e o `sort` não troca nada; e `'' - 1` dá
+        // -1, mandando a meta sem prioridade para o PRIMEIRO lugar. O Python
+        // levanta ValueError nos dois e cai para 99. `'2'` não serve de fixture
+        // aqui: o JavaScript coage numericamente e os dois lados concordam.
+        const metas = [
+            { id: 'vazio', targetAmount: 600, priority: '' as any, status: 'active' },
+            { id: 'alta', targetAmount: 600, priority: 'alta' as any, status: 'active' },
+            { id: 'nulo', targetAmount: 600, priority: null as any, status: 'active' },
+            { id: 'um', targetAmount: 600, priority: 1, status: 'active' },
+        ];
+        expect(resumoDoBolso(metas, SETTINGS, []).metas.map(m => m.id))
+            .toEqual(['um', 'alta', 'nulo', 'vazio']);
+    });
+
     it('prioridade ausente vai para o fim', () => {
         const metas = [
             { id: 'sem', targetAmount: 600, status: 'active' },
