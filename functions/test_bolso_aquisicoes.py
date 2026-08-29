@@ -159,6 +159,58 @@ class TestEmpateDePrioridade(unittest.TestCase):
         self.assertEqual(self._cabe(metas), {"com": True, "sem": False})
 
 
+# A MESMA tabela existe em `src/utils/bolsoAquisicoes.test.ts`. Se um lado mudar
+# de gramatica, o outro quebra — que e a unica defesa que este modulo tem contra
+# as duas linguagens divergirem em silencio.
+#
+# Cada linha aqui e um texto que UMA das duas linguagens aceitaria sozinha e a
+# outra nao, ou que as duas aceitariam com resultados diferentes:
+#   "0x1"       Number da 1,   float levanta
+#   "1_0"       float da 10,   Number da NaN
+#   "NaN"       float da nan,  e math.floor levanta e derruba a tool
+#   "Infinity"  float da inf,  Number da Infinity — nenhum dos dois serve
+#   "1e400"     os dois dao infinito sem levantar
+#   "abc"       float levanta sem ninguem pegar
+GRAMATICA_RECUSA = ["0x1", "1_0", "NaN", "Infinity", "1e400", "abc", "", "  ",
+                    "R$ 5", "5,5", None, True, False]
+GRAMATICA_ACEITA = [("500", 500.0), (" 2 ", 2.0), ("+2", 2.0), ("-3", -3.0),
+                    (".5", 0.5), ("5.", 5.0), ("1e3", 1000.0), (500, 500.0),
+                    (2.5, 2.5), (0, 0.0)]
+
+
+class TestUmaGramaticaSo(unittest.TestCase):
+    """`float()` e `Number()` aceitam conjuntos diferentes de texto.
+
+    O Firestore nao tipa o que grava e este modulo ja encontrou dinheiro
+    guardado como string. Enquanto a coercao fosse a nativa de cada linguagem,
+    "uma regra nos dois lados" era so uma frase.
+    """
+
+    def test_o_que_a_gramatica_recusa_vira_o_padrao(self):
+        for bruto in GRAMATICA_RECUSA:
+            with self.subTest(bruto=bruto):
+                self.assertEqual(ba.numero(bruto), 0.0)
+                self.assertEqual(ba.numero(bruto, 99.0), 99.0)
+
+    def test_o_que_a_gramatica_aceita_e_o_mesmo_numero(self):
+        for bruto, esperado in GRAMATICA_ACEITA:
+            with self.subTest(bruto=bruto):
+                self.assertEqual(ba.numero(bruto), esperado)
+
+    def test_dinheiro_mal_gravado_nao_derruba_a_tool(self):
+        """`centavos("abc")` levantava ValueError e derrubava consultar_financas_v2."""
+        for bruto in GRAMATICA_RECUSA:
+            with self.subTest(bruto=bruto):
+                self.assertEqual(ba.centavos(bruto), 0)
+
+    def test_conta_mal_gravada_nao_contamina_o_cofre(self):
+        settings = {"emergencyReserveCurrent": 0, "emergencyReserveTarget": 0,
+                    "investmentReserveCurrent": 100}
+        contas = [{"category": "Poupança", "amount": "NaN", "isPaid": True},
+                  {"category": "Poupança", "amount": "50", "isPaid": True}]
+        self.assertEqual(ba.bolso(settings, contas), 150.0)
+
+
 class TestDinheiroNaoEFloat(unittest.TestCase):
     """Os dois jeitos de a aritmetica reintroduzir a divergencia entre linguagens.
 

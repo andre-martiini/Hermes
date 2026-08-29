@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { bolso, resumoDoBolso, centavos } from './bolsoAquisicoes';
+import { bolso, resumoDoBolso, centavos, numero } from './bolsoAquisicoes';
 
 /**
  * A MESMA fixture de `functions/test_bolso_aquisicoes.py`, com os números reais
@@ -69,6 +69,60 @@ describe('cobertura individual — os números que a tela já mostrava', () => {
             [{ id: 'x', targetAmount: 500, priority: 1, status: 'completed', currentAmount: 480 }],
             SETTINGS, CONTAS);
         expect(r.metas[0].currentAmount).toBe(480);
+    });
+});
+
+// A MESMA tabela existe em `functions/test_bolso_aquisicoes.py`. Se um lado
+// mudar de gramática, o outro quebra — a única defesa que este módulo tem contra
+// as duas linguagens divergirem em silêncio.
+//
+// Cada linha é um texto que UMA das duas linguagens aceitaria sozinha e a outra
+// não, ou que as duas aceitariam com resultados diferentes:
+//   '0x1'       Number dá 1,   float levanta
+//   '1_0'       float dá 10,   Number dá NaN
+//   'NaN'       float dá nan,  e math.floor levanta e derruba a tool
+//   'Infinity'  float dá inf,  Number dá Infinity — nenhum dos dois serve
+//   '1e400'     os dois dão infinito sem erro
+//   'abc'       float levanta sem ninguém pegar
+const GRAMATICA_RECUSA: unknown[] = ['0x1', '1_0', 'NaN', 'Infinity', '1e400', 'abc',
+    '', '  ', 'R$ 5', '5,5', null, true, false];
+const GRAMATICA_ACEITA: [unknown, number][] = [['500', 500], [' 2 ', 2], ['+2', 2],
+    ['-3', -3], ['.5', 0.5], ['5.', 5], ['1e3', 1000], [500, 500], [2.5, 2.5], [0, 0]];
+
+describe('uma gramática só', () => {
+    // `Number()` e `float()` aceitam conjuntos diferentes de texto, e o Firestore
+    // não tipa o que grava. Enquanto a coerção fosse a nativa de cada linguagem,
+    // "uma regra nos dois lados" era só uma frase.
+
+    it('o que a gramática recusa vira o padrão', () => {
+        for (const bruto of GRAMATICA_RECUSA) {
+            expect(numero(bruto), String(bruto)).toBe(0);
+            expect(numero(bruto, 99), String(bruto)).toBe(99);
+        }
+    });
+
+    it('o que a gramática aceita é o mesmo número', () => {
+        for (const [bruto, esperado] of GRAMATICA_ACEITA) {
+            expect(numero(bruto), String(bruto)).toBe(esperado);
+        }
+    });
+
+    it('dinheiro mal gravado não vira NaN', () => {
+        // Do lado Python isso levantava e derrubava a tool; deste lado o NaN se
+        // propagava em silêncio e contaminava o cofre inteiro.
+        for (const bruto of GRAMATICA_RECUSA) {
+            expect(centavos(bruto), String(bruto)).toBe(0);
+        }
+    });
+
+    it('conta mal gravada não contamina o cofre', () => {
+        const settings = { emergencyReserveCurrent: 0, emergencyReserveTarget: 0,
+                           investmentReserveCurrent: 100 };
+        const contas = [
+            { category: 'Poupança', amount: 'NaN' as any, isPaid: true },
+            { category: 'Poupança', amount: '50' as any, isPaid: true },
+        ];
+        expect(bolso(settings, contas)).toBe(150);
     });
 });
 

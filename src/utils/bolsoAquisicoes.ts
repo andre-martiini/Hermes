@@ -22,6 +22,45 @@
 export const CATEGORIA_POUPANCA = 'Poupança';
 
 /**
+ * A gramática decimal que os dois lados aceitam, escrita uma vez e idêntica em
+ * `functions/bolso_aquisicoes.py`. Não é a sintaxe numérica do JavaScript nem a
+ * do Python: é a intersecção delas, deliberadamente.
+ */
+const DECIMAL = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
+
+/**
+ * O que o Firestore devolveu, lido como número por UMA gramática só.
+ *
+ * Existe porque `Number()` e `float()` aceitam conjuntos DIFERENTES de texto, e
+ * o Firestore não tipa o que grava — este módulo já encontrou valor monetário
+ * guardado como string mais de uma vez. Confiar na coerção nativa de cada
+ * linguagem é ter duas regras achando que são uma:
+ *
+ * - `Number('0x1')` dá 1 e `float('0x1')` levanta.
+ * - `float('1_0')` dá 10 e `Number('1_0')` dá NaN.
+ * - `float('NaN')` e `float('Infinity')` passam, e aí `math.floor` levanta e
+ *   derruba a tool inteira; deste lado o NaN se propaga em silêncio e corrompe
+ *   o cofre exibido.
+ *
+ * Então nem `Number()` nem `float()` decidem: a gramática decide, e o que não
+ * casar com ela vira `padrao` nos dois lados. Zero para dinheiro, 99 para
+ * prioridade.
+ *
+ * `boolean` é recusado de propósito: em Python `bool` é subclasse de `int` e
+ * `float(True)` dá 1.0, enquanto aqui `typeof true` não é `'number'`. Aceitar
+ * levaria os dois lados a discordar de novo.
+ */
+export function numero(valor: unknown, padrao = 0): number {
+    if (typeof valor === 'number') return Number.isFinite(valor) ? valor : padrao;
+    if (typeof valor === 'string' && DECIMAL.test(valor.trim())) {
+        const convertido = Number(valor.trim());
+        // `Number('1e400')` dá Infinity sem erro nenhum.
+        return Number.isFinite(convertido) ? convertido : padrao;
+    }
+    return padrao;
+}
+
+/**
  * Reais para centavos inteiros, com meio-para-cima.
  *
  * Duas razões, e as duas já morderam:
@@ -34,9 +73,13 @@ export const CATEGORIA_POUPANCA = 'Poupança';
  *   números diferentes nos dois lados — a divergência que este módulo existe
  *   para eliminar. O arredondamento é explícito e igual nos dois, e não o padrão
  *   de cada linguagem.
+ *
+ * A leitura do valor passa por `numero`, e não por coerção direta: sem isso uma
+ * conta gravada como "abc" ou "NaN" virava NaN e contaminava o cofre inteiro,
+ * enquanto do lado Python o mesmo valor levantava e derrubava a tool.
  */
-export function centavos(valor: number | undefined | null): number {
-    return Math.floor((valor || 0) * 100 + 0.5);
+export function centavos(valor: unknown): number {
+    return Math.floor(numero(valor) * 100 + 0.5);
 }
 
 /** Uma casa decimal, meio-para-cima — igual ao lado Python. */
@@ -85,7 +128,7 @@ export function bolso(settings: SettingsBolso, contasDoMes: ContaDoMes[]): numbe
  * recalcula: o valor gravado nela é o que ela custou de fato.
  */
 export function cobertura(meta: MetaBolso, disponivel: number): number {
-    if (meta.status === 'completed') return meta.currentAmount || 0;
+    if (meta.status === 'completed') return numero(meta.currentAmount);
     const alvo = centavos(meta.targetAmount);
     return alvo > 0 ? Math.min(alvo, centavos(disponivel)) / 100 : 0;
 }
@@ -106,22 +149,8 @@ export function cobertura(meta: MetaBolso, disponivel: number): number {
  * code points, então os dois só divergiriam com id contendo caractere acima do
  * BMP. Id do Firestore é `[A-Za-z0-9]`.
  */
-function prioridade(meta: MetaBolso): number {
-    // Espelha o `try: float(...) except (TypeError, ValueError): 99.0` do lado
-    // Python. `?? 99` sozinho não bastava: ele cobre `null` e ausente, mas deixa
-    // passar `priority` gravada como texto — e `'alta' - 2` dá NaN, que faz o
-    // comparador devolver NaN e o `sort` não trocar nada, enquanto o Python
-    // mandaria o item para o fim. Firestore não tipa o que grava, e este PR já
-    // encontrou duas vezes um número guardado como string.
-    const bruto = meta.priority as unknown;
-    if (bruto === null || bruto === undefined) return 99;
-    if (typeof bruto === 'string' && bruto.trim() === '') return 99;
-    const n = Number(bruto);
-    return Number.isFinite(n) ? n : 99;
-}
-
 export function compararMetas(a: MetaBolso, b: MetaBolso): number {
-    const porPrioridade = prioridade(a) - prioridade(b);
+    const porPrioridade = numero(a.priority, 99) - numero(b.priority, 99);
     if (porPrioridade !== 0) return porPrioridade;
     const ia = String(a.id);
     const ib = String(b.id);
@@ -193,7 +222,7 @@ export function resumoDoBolso<T extends MetaBolso>(
         // apareceriam fora de ordem em relação à lista lida. Uma ordenação só.
         metas: [...(metas || [])].sort(compararMetas).map(meta => {
             const atual = cobertura(meta, disponivel);
-            const alvo = meta.targetAmount || 0;
+            const alvo = numero(meta.targetAmount);
             return {
                 ...meta,
                 currentAmount: centavos(atual) / 100,

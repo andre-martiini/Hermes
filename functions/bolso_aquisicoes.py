@@ -22,7 +22,50 @@ comprar os dois nao da. Isso nao e defeito do modelo; e informacao que a
 interface precisa dar, e por isso `cobertura_da_fila` existe.
 """
 
+import math
+import re
+
 CATEGORIA_POUPANCA = "Poupança"
+
+# A gramatica decimal que os dois lados aceitam, escrita uma vez e identica em
+# `src/utils/bolsoAquisicoes.ts`. Nao e a sintaxe numerica do Python nem a do
+# JavaScript: e a interseccao delas, deliberadamente.
+_DECIMAL = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")
+
+
+def numero(valor, padrao: float = 0.0) -> float:
+    """O que o Firestore devolveu, lido como numero por UMA gramatica so.
+
+    Existe porque `float()` e `Number()` aceitam conjuntos DIFERENTES de texto,
+    e o Firestore nao tipa o que grava — este modulo ja encontrou valor
+    monetario guardado como string mais de uma vez. Confiar na coercao nativa de
+    cada linguagem e ter duas regras achando que sao uma:
+
+    - `float("1_0")` da 10 e `Number("1_0")` da NaN.
+    - `Number("0x1")` da 1 e `float("0x1")` levanta.
+    - `float("NaN")` e `float("Infinity")` passam, e ai `math.floor` levanta e
+      derruba a tool inteira; do outro lado o NaN se propaga em silencio e
+      corrompe o cofre exibido.
+    - `float("abc")` levanta sem ninguem pegar, o que hoje derruba
+      `consultar_financas_v2` com uma conta mal gravada.
+
+    Entao nem `float()` nem `Number()` decidem: a gramatica decide, e o que nao
+    casar com ela vira `padrao` nos dois lados. Zero para dinheiro, 99 para
+    prioridade.
+
+    `bool` e recusado de proposito: em Python ele e subclasse de `int` e
+    `float(True)` da 1.0, enquanto no TypeScript `typeof true` nao e `'number'`.
+    Aceitar levaria os dois lados a discordar de novo.
+    """
+    if isinstance(valor, bool):
+        return padrao
+    if isinstance(valor, (int, float)):
+        return float(valor) if math.isfinite(valor) else padrao
+    if isinstance(valor, str) and _DECIMAL.match(valor.strip()):
+        convertido = float(valor.strip())
+        # `float("1e400")` da inf sem levantar.
+        return convertido if math.isfinite(convertido) else padrao
+    return padrao
 
 
 def centavos(valor) -> int:
@@ -39,16 +82,15 @@ def centavos(valor) -> int:
       daria numeros diferentes nos dois lados — exatamente a divergencia que
       este modulo existe para eliminar. Entao o arredondamento e explicito e
       igual dos dois lados, e nao o padrao de cada linguagem.
-    """
-    import math
 
-    return int(math.floor(float(valor or 0) * 100 + 0.5))
+    A leitura do valor passa por `numero`, e nao por `float()` direto: sem isso
+    uma conta gravada como "abc" ou "NaN" levantava aqui e derrubava a tool.
+    """
+    return int(math.floor(numero(valor) * 100 + 0.5))
 
 
 def _uma_casa(valor: float) -> float:
     """Uma casa decimal, meio-para-cima — como o JavaScript, e nao como o Python."""
-    import math
-
     return math.floor(valor * 10 + 0.5) / 10
 
 
@@ -77,7 +119,7 @@ def cobertura(meta: dict, disponivel: float) -> float:
     fato quando foi fechada, e nao uma projecao do bolso de hoje.
     """
     if str(meta.get("status") or "") == "completed":
-        return float(meta.get("currentAmount") or 0)
+        return numero(meta.get("currentAmount"))
     alvo = centavos(meta.get("targetAmount"))
     return min(alvo, centavos(disponivel)) / 100 if alvo > 0 else 0.0
 
@@ -99,21 +141,7 @@ def _ordem(meta: dict) -> tuple:
     exatamente assim que o desempate reintroduziu a divergencia que ele veio
     fechar. Ver `compararMetas` em `src/utils/bolsoAquisicoes.ts`.
     """
-    import math
-
-    try:
-        prioridade = float(meta.get("priority"))
-    except (TypeError, ValueError):
-        prioridade = 99.0
-    # `float("NaN")` e `float("Infinity")` NAO levantam — passam pelo except e
-    # chegam aqui como nan e inf. Com nan a chave e incomparavel (toda comparacao
-    # da False) e a ordem final passa a depender da ordem de ENTRADA, que e
-    # exatamente o que o desempate existe para eliminar; com inf o item vai para
-    # depois do 99, enquanto o lado TypeScript rejeita os dois com
-    # `Number.isFinite` e usa 99. Sem esta linha, os dois lados discordam.
-    if not math.isfinite(prioridade):
-        prioridade = 99.0
-    return (prioridade, str(meta.get("id") or ""))
+    return (numero(meta.get("priority"), 99.0), str(meta.get("id") or ""))
 
 
 def cobertura_da_fila(metas, disponivel: float) -> dict:
@@ -156,7 +184,7 @@ def resumo(metas, settings: dict, contas_do_mes) -> dict:
     enriquecidas = []
     for meta in sorted(metas or [], key=_ordem):
         atual = cobertura(meta, disponivel)
-        alvo = float(meta.get("targetAmount") or 0)
+        alvo = numero(meta.get("targetAmount"))
         enriquecidas.append({
             **meta,
             # Calculado na leitura, e nao lido do documento: o campo gravado
