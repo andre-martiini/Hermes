@@ -11905,7 +11905,12 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
             return {'status': 'invalidated', 'message': msg}
 
         # Aplica mudanças — somente campos whitelistados
-        _ALLOWED = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_link_optout'}
+        # A whitelist e a fronteira real da edicao: campo fora dela e descartado
+        # em silencio, e uma alteracao que so tem esse campo termina em "Nenhum
+        # campo valido". `_CAMPOS_EDITAVEIS`, em tools/hermes_tools.py, e o que
+        # anuncia ao modelo o que da para editar — as duas listas TEM de andar
+        # juntas, e `test_hermes_tools` quebra quando divergem.
+        _ALLOWED = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_link_optout', 'projeto', 'estrategia_objetivo_id'}
 
         def _normalizar_status_acao(valor):
             if valor is None:
@@ -12131,7 +12136,12 @@ def confirmarEdicaoEmLote(req: https_fn.CallableRequest):
         from datetime import datetime as _dt, timezone as _tz
 
         db_ref = get_db()
-        _ALLOWED = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_link_optout'}
+        # A whitelist e a fronteira real da edicao: campo fora dela e descartado
+        # em silencio, e uma alteracao que so tem esse campo termina em "Nenhum
+        # campo valido". `_CAMPOS_EDITAVEIS`, em tools/hermes_tools.py, e o que
+        # anuncia ao modelo o que da para editar — as duas listas TEM de andar
+        # juntas, e `test_hermes_tools` quebra quando divergem.
+        _ALLOWED = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_link_optout', 'projeto', 'estrategia_objetivo_id'}
 
         def _normalizar_status_acao(valor):
             if valor is None:
@@ -13731,6 +13741,34 @@ from monthly_recurring_actions import gerar_acoes_recorrentes_mensais
 
 # Import daily AI notification planner job
 from ai_notification_planner import ai_notification_planner_daily
+
+# Import weekly byproduct detector job
+import deteccao_subproduto
+
+
+@scheduler_fn.on_schedule(
+    # Domingo às 18h: a semana já aconteceu, e a sugestão chega antes de a próxima
+    # começar — quando ainda dá para caber a tarde que ela custa. Semanal, e não
+    # diária, porque "a ação ganhou corpo" não acontece todo dia e o teto é mensal.
+    schedule="0 18 * * 0",
+    timezone="America/Sao_Paulo",
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=300,
+)
+def detectar_subproduto_semanal(event: scheduler_fn.ScheduledEvent) -> None:
+    """Procura, no trabalho já feito, o que rende um ativo com um passo a mais."""
+    from morning_summary import _coletar_acoes, _hoje_sp
+
+    db = get_db()
+    keys_doc = _cached_doc_get(db, "system", "api_keys")
+    claude_key = (keys_doc.to_dict() or {}).get("claude_api_key") if keys_doc.exists else None
+    if not claude_key:
+        print("[Elevacao] claude_api_key não configurada em system/api_keys; abortando.")
+        return
+
+    hoje = _hoje_sp()
+    deteccao_subproduto.rodar_deteccao(
+        db, hoje, _coletar_acoes(db, hoje).get("carga_semana") or [], claude_key)
 
 # Import personal diary + weekly personality consolidation jobs
 from personal_diary import gerar_diario_pessoal, consolidar_personalidade, ajustarDiarioPessoal

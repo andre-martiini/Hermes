@@ -1,0 +1,14 @@
+{
+  "name": "consultar_elevacoes_sugeridas",
+  "description": "Lista as elevacoes sugeridas que esperam decisao: trabalho ja feito que rende um ativo com um passo a mais. Cada uma traz o sugestao_id necessario para decidir_elevacao, o que ja existe de material, o ativo possivel, o objetivo servido e o passo que falta.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "limite": {
+        "type": "integer",
+        "description": "Maximo de sugestoes no retorno. Padrao 20."
+      }
+    },
+    "required": []
+  }
+}

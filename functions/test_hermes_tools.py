@@ -567,6 +567,63 @@ class TestRetornoNaoMenteSobreOEfeito(unittest.TestCase):
         self.assertEqual(capturado["alteracoes"], {"data_limite": "2026-09-01"})
 
 
+class TestOQueSeAnunciaEditavelEDeFatoGravado(unittest.TestCase):
+    """`_CAMPOS_EDITAVEIS` promete; a whitelist da callable e quem cumpre.
+
+    `editar_acao` monta as alteracoes a partir de `_CAMPOS_EDITAVEIS` e repassa
+    para `confirmarEdicaoAcao`, que so grava o que estiver na whitelist `_ALLOWED`
+    dela. Campo que esta numa lista e nao na outra e descartado sem erro — e
+    quando ele e a unica alteracao pedida, a chamada ainda responde "Nenhum campo
+    valido", que aponta para o lugar errado.
+
+    Ja aconteceu com `estrategia_objetivo_id` e com `projeto`: os dois anunciados
+    ao modelo, nenhum dos dois gravavel. A checagem e estatica porque `main.py`
+    nao importa fora do venv de deploy — e a divergencia e textual de qualquer
+    forma, entre dois literais.
+    """
+
+    @staticmethod
+    def _whitelists_do_main() -> dict[str, set[str]]:
+        """Cada `_ALLOWED = {...}` de main.py, indexado pela funcao que o contem."""
+        caminho = os.path.join(os.path.dirname(__file__), "main.py")
+        with open(caminho, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        achados: dict[str, set[str]] = {}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            for n in ast.walk(node):
+                if (isinstance(n, ast.Assign)
+                        and len(n.targets) == 1
+                        and isinstance(n.targets[0], ast.Name)
+                        and n.targets[0].id == "_ALLOWED"
+                        and isinstance(n.value, ast.Set)):
+                    campos = {e.value for e in n.value.elts if isinstance(e, ast.Constant)}
+                    achados.setdefault(node.name, set()).update(campos)
+        return achados
+
+    def test_as_duas_whitelists_do_main_foram_encontradas(self):
+        """Se o literal mudar de forma, o teste avisa em vez de passar vazio."""
+        achados = self._whitelists_do_main()
+        self.assertIn("confirmarEdicaoAcao", achados)
+        self.assertIn("confirmarEdicaoEmLote", achados)
+
+    def test_todo_campo_anunciado_editavel_e_gravavel(self):
+        achados = self._whitelists_do_main()
+        for funcao in ("confirmarEdicaoAcao", "confirmarEdicaoEmLote"):
+            faltando = set(hermes_tools._CAMPOS_EDITAVEIS) - achados[funcao]
+            self.assertEqual(
+                faltando, set(),
+                f"{funcao} descarta em silencio campos que _CAMPOS_EDITAVEIS "
+                f"anuncia como editaveis: {sorted(faltando)}")
+
+    def test_editar_acao_aceita_o_vinculo_estrategico(self):
+        """O segundo passo de uma elevacao aceita depende deste campo especifico."""
+        self.assertIn("estrategia_objetivo_id", hermes_tools._CAMPOS_EDITAVEIS)
+        for campos in self._whitelists_do_main().values():
+            self.assertIn("estrategia_objetivo_id", campos)
+
+
 class _CtxVazio:
     user_uid = "uid"
     session_id = None

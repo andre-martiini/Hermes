@@ -103,6 +103,20 @@ def _consultar_lista_compras(ctx: ToolContext, args: dict):
         return erro.message
 
 
+def _consultar_elevacoes_sugeridas(ctx: ToolContext, args: dict):
+    import deteccao_subproduto
+
+    return deteccao_subproduto.listar_pendentes(ctx.db, limite=int(args.get("limite") or 20))
+
+
+def _decidir_elevacao(ctx: ToolContext, args: dict):
+    import deteccao_subproduto
+    from morning_summary import _hoje_sp
+
+    return deteccao_subproduto.decidir(
+        ctx.db, args.get("sugestao_id"), args.get("decisao"), _hoje_sp())
+
+
 def _agendar_lembrete_acao(ctx: ToolContext, args: dict):
     from tools.telegram_extended import execute as _execute
 
@@ -1610,6 +1624,8 @@ _HANDLERS: dict = {
 
     # Delegadas a modulos dedicados
     "consultar_lista_compras": _consultar_lista_compras,
+    "consultar_elevacoes_sugeridas": _consultar_elevacoes_sugeridas,
+    "decidir_elevacao": _decidir_elevacao,
     "consultar_historico_acoes": _consultar_historico_acoes,
     "buscar_arquivos_acervo": _buscar_arquivos_acervo,
     "buscar_contato": _buscar_contato,

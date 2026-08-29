@@ -1,0 +1,745 @@
+"""Detector de subproduto: as travas que decidem sozinhas, sem IA.
+
+O criterio de aceite do pedido esta em `TestOCasoDoHandoffSispnaes`: com o
+handoff do SISPNAES no sistema, o detector precisa levantar aquela acao. Se nao
+pegar esse caso, o criterio esta errado — foi assim que o usuario enunciou.
+
+Os demais travam as tres protecoes que impedem o recurso de virar praga: o
+momento (a acao precisa ter ganhado corpo), o teto (poucas por mes, nenhuma em
+semana cheia) e a memoria ("nunca para esta acao" e definitivo).
+
+Nada aqui chama modelo. A parte de IA e so a que julga escassez e escreve a
+frase; tudo que decide QUANDO e SE perguntar e deterministico de proposito — o
+teto nao pode depender do humor do modelo.
+"""
+
+import unittest
+
+import deteccao_subproduto as ds
+
+HOJE = "2026-08-29"
+
+
+def _tarefa(**over):
+    base = {"id": "t1", "titulo": "Acao", "acompanhamento": [], "pool_dados": [], "plano_acao": []}
+    base.update(over)
+    return base
+
+
+def _diario(caracteres: int, entradas: int = 1):
+    pedaco = "x" * max(1, caracteres // entradas)
+    return [{"data": HOJE, "nota": pedaco} for _ in range(entradas)]
+
+
+def _anexo(nome):
+    return {"tipo": "arquivo", "nome": nome, "valor": f"https://drive/{nome}"}
+
+
+def _etapas(feitas: int, total: int = 5):
+    """Forma real do plano: `text` + `completed`, como `subtarefas` le."""
+    return [{"text": f"Etapa {i}", "completed": i < feitas} for i in range(total)]
+
+
+class TestOCasoDoHandoffSispnaes(unittest.TestCase):
+    """O teste que o proprio pedido define: se nao pegar isto, o criterio esta errado.
+
+    Handoff de 12 secoes do SISPNAES para o novo desenvolvedor. O ativo — relato
+    de experiencia sobre transicao de conhecimento em TI no setor publico — ja
+    esta escrito; o custo marginal de publicar e quase zero. Era o caso mais
+    rentavel da semana e foi desperdicado por ninguem ter perguntado.
+    """
+
+    def _acao_do_handoff(self):
+        return _tarefa(
+            id="sispnaes",
+            titulo="Ciclo Sispnaes 2026",
+            pool_dados=[_anexo("HANDOFF-SISPNAES.md")],
+            acompanhamento=_diario(2000, entradas=4),
+            plano_acao=_etapas(4),
+        )
+
+    def test_o_handoff_e_levantado_como_candidato(self):
+        candidatos = ds.candidatas([self._acao_do_handoff()], {}, HOJE)
+        self.assertEqual([c["task_id"] for c in candidatos], ["sispnaes"])
+
+    def test_o_documento_escrito_e_citado_como_evidencia(self):
+        """A sugestao precisa apontar o material; sem isso perde o argumento."""
+        corpo = ds.corpo_da_acao(self._acao_do_handoff())
+        self.assertIn("HANDOFF-SISPNAES.md", corpo["documentos"])
+        self.assertTrue(corpo["tem_texto_pronto"])
+
+    def test_o_dossie_leva_o_texto_que_o_usuario_ja_escreveu(self):
+        """O ativo mora no diario: e o corpo de texto que ninguem le."""
+        dossie = ds.montar_dossie(ds.candidatas([self._acao_do_handoff()], {}, HOJE)[0])
+        self.assertEqual(dossie["titulo"], "Ciclo Sispnaes 2026")
+        self.assertGreater(len(dossie["diario"]), 1000)
+        self.assertIn("HANDOFF-SISPNAES.md", dossie["documentos"])
+
+    def test_quem_ja_tem_texto_pronto_vem_primeiro(self):
+        so_etapas = _tarefa(id="etapas", plano_acao=_etapas(4))
+        candidatos = ds.candidatas([so_etapas, self._acao_do_handoff()], {}, HOJE)
+        self.assertEqual(candidatos[0]["task_id"], "sispnaes")
+
+
+class TestOMomento(unittest.TestCase):
+    """Nao e a conclusao nem a criacao: e quando a acao ganha corpo."""
+
+    def test_acao_vazia_nao_tem_corpo(self):
+        self.assertIsNone(ds.corpo_da_acao(_tarefa()))
+
+    def test_documento_anexado_da_corpo_sozinho(self):
+        corpo = ds.corpo_da_acao(_tarefa(pool_dados=[_anexo("ROTEIRO.md")]))
+        self.assertEqual([s["tipo"] for s in corpo["sinais"]], ["documento"])
+
+    def test_diario_volumoso_da_corpo_sozinho(self):
+        corpo = ds.corpo_da_acao(_tarefa(acompanhamento=_diario(ds.CORPO_MIN_CARACTERES_DIARIO)))
+        self.assertTrue(corpo["tem_texto_pronto"])
+
+    def test_diario_curto_ainda_nao_e_corpo(self):
+        self.assertIsNone(ds.corpo_da_acao(_tarefa(acompanhamento=_diario(200))))
+
+    def test_etapas_concluidas_dao_corpo_sem_a_acao_estar_pronta(self):
+        """Acao parcialmente feita ja indica materialidade."""
+        corpo = ds.corpo_da_acao(_tarefa(plano_acao=_etapas(ds.CORPO_MIN_ETAPAS_FEITAS, total=9)))
+        self.assertIsNotNone(corpo)
+        self.assertFalse(corpo["tem_texto_pronto"])
+
+    def test_comprovante_solto_nao_e_materia_prima(self):
+        """PDF de comprovante nao vira artigo; sozinho nao da corpo."""
+        self.assertIsNone(ds.corpo_da_acao(_tarefa(pool_dados=[_anexo("comprovante.pdf")])))
+
+
+class TestContagemDeEtapas(unittest.TestCase):
+    """A contagem sai de `subtarefas`, que e quem sabe as duas grafias."""
+
+    def test_le_o_formato_novo_com_estado(self):
+        plano = [{"text": "a", "estado": "feito"}, {"text": "b", "estado": "pendente"}]
+        self.assertEqual(ds._etapas_feitas({"plano_acao": plano}), 1)
+
+    def test_le_o_formato_antigo_com_completed(self):
+        plano = [{"text": "a", "completed": True}, {"text": "b", "completed": False}]
+        self.assertEqual(ds._etapas_feitas({"plano_acao": plano}), 1)
+
+    def test_etapa_sem_texto_nao_conta(self):
+        self.assertEqual(ds._etapas_feitas({"plano_acao": [{"text": "", "completed": True}]}), 0)
+
+
+class TestOTeto(unittest.TestCase):
+    """Sem teto vira praga, e praga e desinstalada."""
+
+    def _sugestoes(self, quantas, mes="2026-08", status=ds.STATUS_PENDENTE):
+        return [{"task_id": f"t{i}", "criada_em": f"{mes}-1{i}", "status": status}
+                for i in range(quantas)]
+
+    def test_semana_cheia_bloqueia_antes_de_qualquer_chamada(self):
+        carga = [{"data": f"2026-08-{d}", "total": 5} for d in range(20, 27)]
+        r = ds.pode_rodar([], carga, HOJE)
+        self.assertEqual((r["pode"], r["motivo"]), (False, "semana_cheia"))
+
+    def test_semana_folgada_libera(self):
+        carga = [{"data": f"2026-08-{d}", "total": 1} for d in range(20, 27)]
+        self.assertTrue(ds.pode_rodar([], carga, HOJE)["pode"])
+
+    def test_teto_do_mes_bloqueia(self):
+        r = ds.pode_rodar(self._sugestoes(ds.TETO_POR_MES), [], HOJE)
+        self.assertEqual((r["pode"], r["motivo"]), (False, "teto_do_mes"))
+
+    def test_sugestao_recusada_ainda_conta_no_teto(self):
+        """Recusada interrompeu do mesmo jeito; o teto e de interrupcao."""
+        adiadas = self._sugestoes(ds.TETO_POR_MES, status=ds.STATUS_ADIADA)
+        self.assertFalse(ds.pode_rodar(adiadas, [], HOJE)["pode"])
+
+    def test_nunca_nao_ocupa_vaga_do_mes(self):
+        """"Nunca" e ajuste de escopo, nao interrupcao gasta."""
+        nunca = self._sugestoes(ds.TETO_POR_MES, status=ds.STATUS_NUNCA)
+        self.assertTrue(ds.pode_rodar(nunca, [], HOJE)["pode"])
+
+    def test_mes_anterior_nao_conta(self):
+        self.assertTrue(ds.pode_rodar(self._sugestoes(5, mes="2026-07"), [], HOJE)["pode"])
+
+
+class TestAMemoria(unittest.TestCase):
+    """Sem "nunca para esta acao" o sistema repete a mesma sugestao e vira barulho."""
+
+    def test_nunca_tira_a_acao_de_vez(self):
+        decididas = ds.acoes_ja_decididas([{"task_id": "t1", "status": ds.STATUS_NUNCA}])
+        self.assertEqual(ds.candidatas([_tarefa(pool_dados=[_anexo("X.md")])], decididas, HOJE), [])
+
+    def test_nunca_vence_status_gravado_depois(self):
+        decididas = ds.acoes_ja_decididas([
+            {"task_id": "t1", "status": ds.STATUS_NUNCA},
+            {"task_id": "t1", "status": ds.STATUS_PENDENTE},
+        ])
+        self.assertEqual(decididas["t1"], ds.STATUS_NUNCA)
+
+    def test_pendente_tambem_bloqueia(self):
+        """Propor de novo o que ja esta na fila e o jeito de o usuario parar de ler a fila."""
+        decididas = ds.acoes_ja_decididas([{"task_id": "t1", "status": ds.STATUS_PENDENTE}])
+        self.assertEqual(ds.candidatas([_tarefa(pool_dados=[_anexo("X.md")])], decididas, HOJE), [])
+
+    def test_adiada_volta_a_ser_candidata(self):
+        """"Agora nao" e sobre o momento, nao sobre a acao."""
+        decididas = ds.acoes_ja_decididas([{"task_id": "t1", "status": ds.STATUS_ADIADA}])
+        self.assertEqual(len(ds.candidatas([_tarefa(pool_dados=[_anexo("X.md")])], decididas, HOJE)), 1)
+
+
+class TestSaudeFicaDeFora(unittest.TestCase):
+    """Regra transversal: objetivo servido por dado nunca entra em candidato.
+
+    Sem a exclusao, o pilar Saude passaria a exibir progresso feito de contagem
+    de acao, concorrendo com o numero real que vem do peso — e a fila encheria de
+    caminhada, fisioterapia e consulta.
+    """
+
+    def test_objetivo_com_flag_falsa_sai(self):
+        objetivos = [
+            {"id": "saude", "pilar": "saude", "gerida_por_acoes": False, "status": "ativo"},
+            {"id": "intel", "pilar": "intelectual", "gerida_por_acoes": True, "status": "ativo"},
+        ]
+        self.assertEqual([o["id"] for o in ds.objetivos_elegiveis(objetivos)], ["intel"])
+
+    def test_exclusao_e_pela_flag_e_nao_pelo_nome_do_pilar(self):
+        """Objetivo novo orientado a dado nasce fora sem ninguem editar codigo."""
+        objetivos = [{"id": "fin", "pilar": "financas", "gerida_por_acoes": False, "status": "ativo"}]
+        self.assertEqual(ds.objetivos_elegiveis(objetivos), [])
+
+    def test_sem_flag_gravada_deriva_do_pilar(self):
+        objetivos = [{"id": "saude", "pilar": "saude", "status": "ativo"}]
+        self.assertEqual(ds.objetivos_elegiveis(objetivos), [])
+
+    def test_objetivo_concluido_nao_recebe_elevacao(self):
+        objetivos = [{"id": "x", "pilar": "carreira", "status": "concluido"}]
+        self.assertEqual(ds.objetivos_elegiveis(objetivos), [])
+
+
+class TestAPropostaDaIA(unittest.TestCase):
+    """A regra que impede o vinculo decorativo, aplicada ao que o modelo devolve."""
+
+    BASE = {
+        "task_id": "sispnaes", "objetivo_id": "intel", "motivo_escassez": "ja_escrito",
+        "ativo_possivel": "Relato de experiencia sobre transicao de conhecimento",
+        "justificativa": "O handoff ja documenta o metodo de transicao em TI publica.",
+        "o_que_ja_existe": "docs/HANDOFF-SISPNAES.md, 12 secoes",
+        "passo_que_falta": "Tirar o que e especifico do Ifes e escrever a introducao",
+        "custo_estimado": "uma tarde",
+    }
+
+    def _validar(self, **over):
+        return ds.validar_proposta({**self.BASE, **over}, {"intel"}, {"sispnaes"})
+
+    def test_proposta_completa_passa(self):
+        self.assertEqual(self._validar()["motivo_escassez"], "ja_escrito")
+
+    def test_sem_justificativa_nao_propoe(self):
+        """Se a IA nao consegue escrever a frase, nao propoe."""
+        self.assertIsNone(self._validar(justificativa=""))
+
+    def test_justificativa_generica_demais_nao_passa(self):
+        self.assertIsNone(self._validar(justificativa="Serve."))
+
+    def test_motivo_de_escassez_invalido_nao_passa(self):
+        self.assertIsNone(self._validar(motivo_escassez="parece_legal"))
+
+    def test_objetivo_fora_da_lista_nao_passa(self):
+        """Inclui o caso de a IA apontar um objetivo orientado a dado."""
+        self.assertIsNone(ds.validar_proposta(self.BASE, {"outro"}, {"sispnaes"}))
+
+    def test_acao_inventada_nao_passa(self):
+        self.assertIsNone(ds.validar_proposta(self.BASE, {"intel"}, {"outra"}))
+
+    def test_sem_o_que_ja_existe_nao_passa(self):
+        self.assertIsNone(self._validar(o_que_ja_existe=""))
+
+    def test_custo_ausente_vira_texto_honesto(self):
+        self.assertEqual(self._validar(custo_estimado="")["custo_estimado"], "nao estimado")
+
+
+class _Snap:
+    def __init__(self, col, doc_id):
+        self._col, self.id = col, doc_id
+        self.exists = doc_id in col
+
+    def to_dict(self):
+        return dict(self._col.get(self.id) or {})
+
+
+class _Ref:
+    def __init__(self, col, doc_id):
+        self._col, self.id = col, doc_id
+        self._subcols = {}
+
+    def set(self, dados):
+        self._col[self.id] = dict(dados)
+
+    def get(self, transaction=None):
+        return _Snap(self._col, self.id)
+
+    def update(self, dados):
+        self._col.setdefault(self.id, {}).update(dados)
+
+    def collection(self, nome):
+        return self._subcols.setdefault(nome, _Colecao())
+
+
+class _Transacao:
+    """Transacao falsa: aplica na hora, sem isolamento.
+
+    A atomicidade real e do Firestore e nao da para exercitar aqui. O que estes
+    testes cobrem e o corpo da transacao — a ordem das leituras e escritas, de
+    qual mes a vaga volta, e o que acontece quando a sugestao ja saiu de
+    pendente. O que se ganha por ter o corpo separado do decorador e justamente
+    poder testar essa logica sem Firestore.
+    """
+
+    def update(self, ref, dados):
+        ref.update(dados)
+
+    def set(self, ref, dados, merge=False):
+        if merge and ref.get().exists:
+            ref.update(dados)
+        else:
+            ref.set(dados)
+
+
+def _aplicar(db, ref, alvo, hoje):
+    """O `aplicar` de producao, com a transacao trocada pela falsa."""
+    return ds._corpo_da_decisao(_Transacao(), ref,
+                                lambda mes: ds._contador_do_mes(db, mes), alvo, hoje)
+
+
+class _Colecao:
+    def __init__(self):
+        self.dados, self._seq, self._subcols = {}, 0, {}
+
+    def document(self, doc_id=None):
+        if doc_id is None:
+            self._seq += 1
+            doc_id = f"s{self._seq}"
+        doc_id = str(doc_id)
+        ref = _Ref(self.dados, doc_id)
+        # As subcolecoes vivem na colecao e nao no `_Ref`, porque `document()`
+        # devolve um `_Ref` novo a cada chamada — no contador do mes, a segunda
+        # chamada precisa enxergar o que a primeira gravou.
+        ref._subcols = self._subcols.setdefault(doc_id, {})
+        return ref
+
+    def limit(self, n):
+        return _Recorte(self.dados, list(self.dados), n)
+
+    def where(self, *a, **kw):
+        return _Recorte(self.dados, list(self.dados), None).where(*a, **kw)
+
+    def stream(self):
+        return [_Snap(self.dados, i) for i in list(self.dados)]
+
+
+class _Recorte:
+    """Consulta falsa que aplica `where` ANTES de `limit`, como o Firestore.
+
+    A versao anterior deste fake ignorava os filtros e devolvia a colecao
+    inteira. Um teste em cima dele nao distinguiria filtrar na consulta de
+    filtrar depois de ler — que e exatamente o defeito que estes testes
+    precisam pegar.
+    """
+
+    def __init__(self, dados, ids, n):
+        self._dados, self._ids, self._n = dados, ids, n
+
+    def where(self, *a, **kw):
+        f = kw.get("filter")
+        if f is not None:
+            campo, op, valor = f.field_path, f.op_string, f.value
+        else:
+            # A forma posicional antiga (`where("status", "in", [...])`) ainda e
+            # usada na consulta de tarefas; o fake aceita as duas.
+            campo, op, valor = a[0], a[1], a[2]
+        def passa(doc_id):
+            atual = (self._dados.get(doc_id) or {}).get(campo)
+            if op == "==":
+                return atual == valor
+            if op == "in":
+                return atual in valor
+            if op == ">=":
+                return atual is not None and str(atual) >= str(valor)
+            raise AssertionError(f"operador nao suportado pelo fake: {op}")
+        return _Recorte(self._dados, [i for i in self._ids if passa(i)], self._n)
+
+    def limit(self, n):
+        return _Recorte(self._dados, self._ids, n)
+
+    def stream(self):
+        ids = self._ids if self._n is None else self._ids[:self._n]
+        return [_Snap(self._dados, i) for i in ids]
+
+
+class _Db:
+    def __init__(self):
+        self.cols = {}
+
+    def collection(self, nome):
+        return self.cols.setdefault(nome, _Colecao())
+
+
+class TestAGravacaoNaoConfiaNoModelo(unittest.TestCase):
+    """A validacao mora na tool de escrita, e nao no prompt.
+
+    O modelo pode alucinar um id, insistir depois do limite da rodada, ou apontar
+    um objetivo servido por dado. As tres passariam se a checagem estivesse so na
+    instrucao — e as tres gravariam sujeira que o usuario leria como sugestao.
+    """
+
+    def _rodada(self, restantes=2):
+        return {
+            "restantes": restantes,
+            "objetivos": [{"id": "intel", "objetivoMacro": "Autoridade intelectual",
+                           "pilar": "intelectual"}],
+            "candidatos": [{"task_id": "sispnaes",
+                            "tarefa": _tarefa(id="sispnaes", titulo="Ciclo Sispnaes 2026"),
+                            "corpo": {"documentos": ["HANDOFF-SISPNAES.md"], "etapas_feitas": 4,
+                                      "tem_texto_pronto": True, "caracteres_diario": 2000}}],
+        }
+
+    @staticmethod
+    def _reserva(vagas):
+        """Reserva falsa com N vagas — a atomicidade real e do Firestore."""
+        estado = {"restam": vagas}
+
+        def reservar(db, hoje, teto, ref, payload, ja_no_mes=0):
+            # Espelha o contrato da reserva real: id ja usado e recusa.
+            if estado["restam"] <= 0 or ref.get().exists:
+                return False
+            estado["restam"] -= 1
+            ref.set(payload)
+            return True
+
+        return reservar
+
+    def _propor(self, db, rodada, aceitas, vagas=9, **over):
+        _, fmap = ds._ferramenta_propor(db, HOJE, rodada, aceitas,
+                                        reservar=self._reserva(vagas))
+        return fmap["propor_elevacao"](**{**TestAPropostaDaIA.BASE, **over})
+
+    def test_proposta_boa_e_gravada_com_o_resumo_pronto(self):
+        db, aceitas = _Db(), []
+        r = self._propor(db, self._rodada(), aceitas)
+        self.assertTrue(r["aceita"])
+        gravada = db.cols[ds.COL_ELEVACOES].dados[r["sugestao_id"]]
+        self.assertEqual(gravada["status"], ds.STATUS_PENDENTE)
+        self.assertEqual(gravada["titulo_acao"], "Ciclo Sispnaes 2026")
+        self.assertIn("HANDOFF-SISPNAES.md", gravada["resumo"])
+
+    def test_vaga_negada_nao_vira_sugestao_gravada(self):
+        """O teto e conferido na reserva, e nao por contador em memoria.
+
+        As tool calls de uma rodada rodam em paralelo; um contador em memoria
+        deixaria duas threads passarem pela mesma checagem antes de qualquer uma
+        gravar. Aqui o que se verifica e o contrato desta camada: reserva negada
+        nao grava e nao entra na lista de aceitas.
+        """
+        db, aceitas = _Db(), []
+        _, fmap = ds._ferramenta_propor(db, HOJE, self._rodada(), aceitas,
+                                        reservar=self._reserva(0))
+        r = fmap["propor_elevacao"](**TestAPropostaDaIA.BASE)
+        self.assertFalse(r["aceita"])
+        self.assertIn("teto", r["motivo"])
+        self.assertEqual(aceitas, [])
+        self.assertEqual(db.cols.get(ds.COL_ELEVACOES, _Colecao()).dados, {})
+
+    def test_a_reserva_e_quem_decide_e_nao_a_contagem_local(self):
+        """Duas acoes distintas, uma vaga contada localmente: quem manda e a reserva."""
+        rodada = self._rodada(restantes=1)
+        rodada["candidatos"].append({
+            "task_id": "outra", "tarefa": _tarefa(id="outra", titulo="Outra acao"),
+            "corpo": {"documentos": [], "etapas_feitas": 3,
+                      "tem_texto_pronto": False, "caracteres_diario": 0}})
+        db, aceitas = _Db(), []
+        _, fmap = ds._ferramenta_propor(db, HOJE, rodada, aceitas, reservar=self._reserva(2))
+        self.assertTrue(fmap["propor_elevacao"](**TestAPropostaDaIA.BASE)["aceita"])
+        self.assertTrue(fmap["propor_elevacao"](
+            **{**TestAPropostaDaIA.BASE, "task_id": "outra"})["aceita"])
+        self.assertEqual(len(aceitas), 2)
+
+    def test_duas_propostas_para_a_mesma_acao_nao_viram_dois_cards(self):
+        """Id deterministico por acao e mes: a segunda colide e e recusada.
+
+        Sem isso sairiam dois cards para a mesma acao, gastando duas das tres
+        vagas do mes, e marcar "nunca" num deixaria o outro pendente — o oposto
+        da permanencia que o card promete.
+        """
+        db, aceitas = _Db(), []
+        _, fmap = ds._ferramenta_propor(db, HOJE, self._rodada(), aceitas,
+                                        reservar=self._reserva(5))
+        self.assertTrue(fmap["propor_elevacao"](**TestAPropostaDaIA.BASE)["aceita"])
+        segunda = fmap["propor_elevacao"](**TestAPropostaDaIA.BASE)
+        self.assertFalse(segunda["aceita"])
+        self.assertEqual(len(db.cols[ds.COL_ELEVACOES].dados), 1)
+        self.assertEqual(len(aceitas), 1)
+
+    def test_o_id_da_reserva_separa_acao_e_mes(self):
+        self.assertNotEqual(ds.id_da_reserva("2026-08-29", "t1"),
+                            ds.id_da_reserva("2026-09-01", "t1"))
+        self.assertNotEqual(ds.id_da_reserva(HOJE, "t1"), ds.id_da_reserva(HOJE, "t2"))
+
+    def test_objetivo_inventado_nao_grava(self):
+        db = _Db()
+        r = self._propor(db, self._rodada(), [], objetivo_id="saude")
+        self.assertFalse(r["aceita"])
+        self.assertEqual(db.cols.get(ds.COL_ELEVACOES, _Colecao()).dados, {})
+
+    def test_acao_fora_da_rodada_nao_grava(self):
+        self.assertFalse(self._propor(_Db(), self._rodada(), [], task_id="outra")["aceita"])
+
+    def test_justificativa_generica_nao_grava(self):
+        self.assertFalse(self._propor(_Db(), self._rodada(), [], justificativa="Ajuda.")["aceita"])
+
+
+class TestOContadorNaoRecomecaDoZero(unittest.TestCase):
+    """O contador transacional nasceu depois das sugestoes.
+
+    Enquanto ele nao existir — primeiro deploy, ou documento perdido — ler zero
+    seria licenca para recomecar a contagem do mes com sugestoes ja na base: com
+    duas gravadas, mais tres caberiam sob um teto de tres.
+    """
+
+    def test_a_rodada_leva_a_contagem_do_historico_como_piso(self):
+        db = _Db()
+        col = db.collection(ds.COL_ELEVACOES)
+        for i in (1, 2):
+            col.dados[f"s{i}"] = {"task_id": f"t{i}", "criada_em": HOJE,
+                                  "status": ds.STATUS_PENDENTE}
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade", "pilar": "intelectual", "status": "ativo"}
+        db.collection("tarefas").dados["nova"] = {
+            "titulo": "Nova", "status": "em andamento",
+            "pool_dados": [_anexo("X.md")], "acompanhamento": [], "plano_acao": []}
+        rodada = ds.preparar_rodada(db, HOJE, [])
+        self.assertTrue(rodada["rodar"])
+        self.assertEqual(rodada["ja_no_mes"], 2)
+        self.assertEqual(rodada["restantes"], ds.TETO_POR_MES - 2)
+
+    def test_o_piso_chega_na_reserva(self):
+        recebido = {}
+
+        def reservar(db, hoje, teto, ref, payload, ja_no_mes=0):
+            recebido["ja_no_mes"] = ja_no_mes
+            return True
+
+        rodada = TestAGravacaoNaoConfiaNoModelo()._rodada()
+        rodada["ja_no_mes"] = 2
+        _, fmap = ds._ferramenta_propor(_Db(), HOJE, rodada, [], reservar=reservar)
+        fmap["propor_elevacao"](**TestAPropostaDaIA.BASE)
+        self.assertEqual(recebido["ja_no_mes"], 2)
+
+
+class TestFalhaDeLeituraFechaAPorta(unittest.TestCase):
+    """Historico ilegivel nao e historico vazio.
+
+    Vazio e o estado em que o teto parece zerado e nenhuma acao parece decidida.
+    Uma falha de Firestore viraria permissao para estourar o limite e para
+    repropor o que o usuario marcou como "nunca". A trava falha fechada.
+    """
+
+    class _DbQuebrado:
+        def collection(self, _nome):
+            raise RuntimeError("indisponivel")
+
+    def test_carregar_levanta_em_vez_de_devolver_vazio(self):
+        with self.assertRaises(ds.HistoricoIndisponivel):
+            ds._carregar_sugestoes(self._DbQuebrado(), HOJE)
+
+    def test_rodada_e_abortada_e_nao_roda_sem_historico(self):
+        r = ds.preparar_rodada(self._DbQuebrado(), HOJE, [])
+        self.assertFalse(r["rodar"])
+        self.assertEqual(r["motivo"], "historico_indisponivel")
+
+
+class TestAMensagemDoModelo(unittest.TestCase):
+
+    def test_leva_objetivos_e_material_das_candidatas(self):
+        rodada = TestAGravacaoNaoConfiaNoModelo()._rodada()
+        rodada["candidatos"][0]["tarefa"]["acompanhamento"] = _diario(500)
+        msg = ds.mensagem_da_rodada(rodada)
+        self.assertIn("Autoridade intelectual", msg)
+        self.assertIn("HANDOFF-SISPNAES.md", msg)
+        self.assertIn("no maximo 2", msg)
+
+
+class TestADecisaoDoUsuario(unittest.TestCase):
+    """Sem alca o detector e inerte: a sugestao aparece e nao ha como responder.
+
+    As tres saidas do card sao o que impede o recurso de virar barulho — "nunca"
+    acima de tudo, porque sem ela o sistema repete a mesma sugestao.
+    """
+
+    def _db_com_pendente(self):
+        db = _Db()
+        db.collection(ds.COL_ELEVACOES).dados["s1"] = {
+            **TestAPropostaDaIA.BASE, "status": ds.STATUS_PENDENTE, "criada_em": HOJE,
+            "titulo_acao": "Ciclo Sispnaes 2026", "nome_objetivo": "Autoridade intelectual",
+            "resumo": "resumo",
+        }
+        return db
+
+    def test_nunca_e_definitivo_e_tira_a_acao_das_proximas_varreduras(self):
+        db = self._db_com_pendente()
+        r = ds.decidir(db, "s1", "nunca", HOJE, aplicar=_aplicar)
+        self.assertEqual(r["status"], ds.STATUS_NUNCA)
+        gravada = db.cols[ds.COL_ELEVACOES].dados["s1"]
+        decididas = ds.acoes_ja_decididas([gravada])
+        self.assertEqual(decididas["sispnaes"], ds.STATUS_NUNCA)
+
+    def test_adiar_devolve_a_acao_para_a_fila_depois(self):
+        db = self._db_com_pendente()
+        ds.decidir(db, "s1", "adiar", HOJE, aplicar=_aplicar)
+        gravada = db.cols[ds.COL_ELEVACOES].dados["s1"]
+        decididas = ds.acoes_ja_decididas([gravada])
+        self.assertEqual(len(ds.candidatas(
+            [_tarefa(id="sispnaes", pool_dados=[_anexo("X.md")])], decididas, HOJE)), 1)
+
+    def test_aceitar_devolve_rascunho_e_o_vinculo_em_separado(self):
+        """Dois passos: criar por criar_acao_no_sistema, vincular por editar_acao.
+
+        O vinculo NAO vai no rascunho de criacao de proposito. Nao existe um
+        caminho de criacao de acao no Hermes — existem quatro reimplementacoes, e
+        um campo novo passado ali funciona numa porta e some nas outras, em
+        silencio. Vincular depois e o unico jeito de ele valer sempre.
+        """
+        r = ds.decidir(self._db_com_pendente(), "s1", "aceitar", HOJE, aplicar=_aplicar)
+        rascunho = r["rascunho_da_acao"]
+        self.assertNotIn("estrategia_objetivo_id", rascunho)
+        self.assertIn("HANDOFF-SISPNAES.md", rascunho["descricao"])
+        self.assertTrue(rascunho["titulo"])
+        self.assertEqual(r["vincular_depois"]["estrategia_objetivo_id"], "intel")
+        self.assertEqual(r["vincular_depois"]["tool"], "editar_acao")
+
+    def test_o_detalhe_avisa_que_sem_o_segundo_passo_a_acao_nasce_solta(self):
+        r = ds.decidir(self._db_com_pendente(), "s1", "aceitar", HOJE, aplicar=_aplicar)
+        self.assertIn("editar_acao", r["detalhe"])
+        self.assertIn("solta", r["detalhe"])
+
+    def test_decidir_duas_vezes_nao_sobrescreve(self):
+        db = self._db_com_pendente()
+        ds.decidir(db, "s1", "nunca", HOJE, aplicar=_aplicar)
+        segunda = ds.decidir(db, "s1", "aceitar", HOJE, aplicar=_aplicar)
+        self.assertFalse(segunda["ok"])
+        self.assertEqual(db.cols[ds.COL_ELEVACOES].dados["s1"]["status"], ds.STATUS_NUNCA)
+
+    def test_decisao_invalida_lista_as_validas(self):
+        r = ds.decidir(self._db_com_pendente(), "s1", "talvez", HOJE, aplicar=_aplicar)
+        self.assertFalse(r["ok"])
+        self.assertIn("nunca", r["erro"])
+
+    def test_sugestao_inexistente_nao_finge_sucesso(self):
+        self.assertFalse(ds.decidir(self._db_com_pendente(), "nao-existe", "aceitar", HOJE, aplicar=_aplicar)["ok"])
+
+    @staticmethod
+    def _contador(db, data):
+        return (ds._contador_do_mes(db, data).get().to_dict() or {}).get("count")
+
+    @staticmethod
+    def _com_contador(db, data, valor):
+        ds._contador_do_mes(db, data).set({"count": valor})
+        return db
+
+    def test_nunca_devolve_a_vaga_do_mes(self):
+        """"Nunca" e ajuste de escopo, nao interrupcao gasta.
+
+        Sem devolver a vaga, tres recusas definitivas bloqueariam o resto do mes —
+        e as duas contagens (o contador gravado e `elevacoes_do_mes`) passariam a
+        discordar entre si.
+        """
+        db = self._com_contador(self._db_com_pendente(), HOJE, 3)
+        ds.decidir(db, "s1", "nunca", HOJE, aplicar=_aplicar)
+        self.assertEqual(self._contador(db, HOJE), 2)
+
+    def test_a_vaga_volta_para_o_mes_da_sugestao_e_nao_para_o_de_hoje(self):
+        """Recusar em setembro uma sugestao de agosto nao abre vaga em setembro."""
+        db = self._db_com_pendente()
+        db.cols[ds.COL_ELEVACOES].dados["s1"]["criada_em"] = "2026-07-15"
+        self._com_contador(db, "2026-07-15", 3)
+        self._com_contador(db, "2026-08-29", 1)
+        ds.decidir(db, "s1", "nunca", "2026-08-29", aplicar=_aplicar)
+        self.assertEqual(self._contador(db, "2026-07-15"), 2)
+        self.assertEqual(self._contador(db, "2026-08-29"), 1)
+
+    def test_a_vaga_devolvida_nao_deixa_o_contador_negativo(self):
+        """Contador negativo seria licenca para estourar o teto no mes seguinte."""
+        db = self._com_contador(self._db_com_pendente(), HOJE, 0)
+        ds.decidir(db, "s1", "nunca", HOJE, aplicar=_aplicar)
+        self.assertEqual(self._contador(db, HOJE), 0)
+
+    def test_adiar_nao_devolve_vaga(self):
+        """Adiada interrompeu; a vaga fica gasta ate o mes virar."""
+        db = self._com_contador(self._db_com_pendente(), HOJE, 3)
+        ds.decidir(db, "s1", "adiar", HOJE, aplicar=_aplicar)
+        self.assertEqual(self._contador(db, HOJE), 3)
+
+    def test_a_segunda_recusa_da_mesma_sugestao_nao_devolve_a_vaga_de_novo(self):
+        """A checagem de pendente e a devolucao moram na mesma transacao.
+
+        `run_tool_loop` executa as tool calls de uma rodada em paralelo. Separadas,
+        duas recusas da mesma sugestao passariam as duas pela checagem antes de
+        qualquer uma gravar, e o contador cairia duas vezes — subcontando o mes e
+        abrindo vaga que nao existe.
+        """
+        db = self._com_contador(self._db_com_pendente(), HOJE, 3)
+        primeira = ds.decidir(db, "s1", "nunca", HOJE, aplicar=_aplicar)
+        segunda = ds.decidir(db, "s1", "nunca", HOJE, aplicar=_aplicar)
+        self.assertTrue(primeira["ok"])
+        self.assertFalse(segunda["ok"])
+        self.assertEqual(self._contador(db, HOJE), 2)
+
+    def test_gravacao_que_falha_nao_e_relatada_como_decidida(self):
+        """Meio-caminho aqui prende a vaga: nao da para repetir a decisao."""
+        def _explode(*_a):
+            raise RuntimeError("indisponivel")
+
+        r = ds.decidir(self._db_com_pendente(), "s1", "nunca", HOJE, aplicar=_explode)
+        self.assertFalse(r["ok"])
+        self.assertIn("indisponivel", r["erro"])
+
+    def test_listar_acha_a_pendente_no_meio_de_um_historico_grande(self):
+        """O filtro tem de estar na consulta, nao no `for` depois da leitura.
+
+        Filtrando depois, o limite se aplica a colecao inteira: passado o corte,
+        o recorte lido pode ser todo de sugestoes ja decididas, e esta tool
+        responde "nao ha decisoes pendentes" enquanto o resumo matinal — que
+        consulta por status — mostra que ha. As duas superficies discordando
+        sobre a mesma fila e pior que nao ter a segunda.
+        """
+        db = _Db()
+        col = db.collection(ds.COL_ELEVACOES)
+        # As decididas entram ANTES da pendente: se o limite valesse sobre a
+        # colecao inteira, a pendente ficaria fora do recorte lido. Com a
+        # pendente inserida primeiro o teste passaria dos dois jeitos.
+        for i in range(400):
+            col.dados[f"velha{i}"] = {"status": ds.STATUS_NUNCA, "criada_em": "2025-01-01",
+                                      "titulo_acao": f"antiga {i}"}
+        col.dados["s1"] = self._db_com_pendente().cols[ds.COL_ELEVACOES].dados["s1"]
+        r = ds.listar_pendentes(db)
+        self.assertEqual(r["total"], 1)
+        self.assertEqual(r["sugestoes"][0]["sugestao_id"], "s1")
+
+    def test_listar_traz_so_pendentes_com_o_id_para_decidir(self):
+        db = self._db_com_pendente()
+        db.collection(ds.COL_ELEVACOES).dados["s2"] = {
+            "status": ds.STATUS_NUNCA, "titulo_acao": "Outra", "criada_em": HOJE}
+        r = ds.listar_pendentes(db)
+        self.assertEqual(r["total"], 1)
+        self.assertEqual(r["sugestoes"][0]["sugestao_id"], "s1")
+
+
+class TestOTextoDoCard(unittest.TestCase):
+
+    def test_cada_linha_responde_uma_pergunta_do_usuario(self):
+        texto = ds.resumo_para_o_usuario(
+            TestAPropostaDaIA.BASE, "Ciclo Sispnaes 2026", "Intelectual")
+        for esperado in ("O que ja existe", "Ativo possivel", "Objetivo servido",
+                         "Passo que falta", "Custo estimado"):
+            self.assertIn(esperado, texto)
+        self.assertIn("HANDOFF-SISPNAES.md", texto)
+        self.assertIn("Ciclo Sispnaes 2026", texto)
+
+
+if __name__ == "__main__":
+    unittest.main()
