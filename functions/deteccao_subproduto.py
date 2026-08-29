@@ -202,6 +202,26 @@ def semana_esta_cheia(carga_semana, limiar: int = SEMANA_CHEIA_ACOES) -> bool:
     return total >= limiar
 
 
+def _pilar(valor) -> str:
+    """Pilar comparavel: minusculas E sem acento.
+
+    A derivacao por pilar so vale enquanto o objetivo nao tem `gerida_por_acoes`
+    gravada — ou seja, exatamente nos documentos legados, que sao os que podem
+    ter grafia livre. `.lower()` sozinho nao resolve: "Saude" viraria "saude",
+    mas "Saúde" viraria "saúde", que continua diferente. E a grafia acentuada
+    circula de fato — `main.py:4534` ja precisa tratar as duas.
+
+    O desfecho errado aqui e o unico que o modulo diz que nao pode acontecer: o
+    objetivo de saude entrando como elegivel e a fila enchendo de proposta de
+    elevacao em cima de telemetria clinica.
+    """
+    import unicodedata
+
+    bruto = str(valor or "").strip().lower()
+    return "".join(c for c in unicodedata.normalize("NFD", bruto)
+                   if unicodedata.category(c) != "Mn")
+
+
 def objetivos_elegiveis(objetivos) -> list[dict]:
     """Objetivos que podem receber elevacao.
 
@@ -215,7 +235,7 @@ def objetivos_elegiveis(objetivos) -> list[dict]:
         if not isinstance(obj, dict):
             continue
         gravada = obj.get("gerida_por_acoes")
-        gerida = bool(gravada) if gravada is not None else str(obj.get("pilar") or "") != "saude"
+        gerida = bool(gravada) if gravada is not None else _pilar(obj.get("pilar")) != "saude"
         if not gerida:
             continue
         if str(obj.get("status") or "").lower() in ("concluido", "concluído", "cancelado", "arquivado"):
@@ -590,6 +610,12 @@ def id_da_reserva(hoje: str, task_id: str) -> str:
     return f"{_mes(hoje)}__{task_id}"
 
 
+# Por que a reserva falhou. Sao respostas diferentes, e nao graus da mesma.
+MOTIVO_JA_SUGERIDA = "ja_sugerida_no_mes"
+MOTIVO_TETO = "teto_do_mes"
+MOTIVO_FALHA = "falha_na_reserva"
+
+
 def reservar_no_firestore(db, hoje: str, teto: int, ref, payload: dict,
                           ja_no_mes: int = 0) -> bool:
     """Confere o teto do mes e grava a sugestao na MESMA transacao.
@@ -602,6 +628,13 @@ def reservar_no_firestore(db, hoje: str, teto: int, ref, payload: dict,
     execucao entre threads. A transacao serializa leitura e escrita mesmo entre
     threads e entre execucoes sobrepostas do agendador, porque todas disputam o
     mesmo documento contador (chave = mes).
+
+    Devolve `(ok, motivo)`, e nao um booleano, porque as duas recusas sao
+    diferentes para quem chama: colisao de id significa "esta acao ja foi
+    sugerida neste mes, tente outra", e teto significa "acabou a cota da rodada".
+    Fundidas num False so, o modelo ouvia "acabou a cota" quando havia vaga e
+    candidata sobrando — e podia parar de propor no resto da rodada por causa de
+    uma colisao esperada.
     """
     from firebase_admin import firestore as _fs
 
@@ -611,7 +644,7 @@ def reservar_no_firestore(db, hoje: str, teto: int, ref, payload: dict,
     def _txn(transaction):
         # A sugestao ja existir e resposta: id deterministico por acao e mes.
         if ref.get(transaction=transaction).exists:
-            return False
+            return False, MOTIVO_JA_SUGERIDA
         snap = contador.get(transaction=transaction)
         gravado = (snap.to_dict() or {}).get("count", 0) if snap.exists else 0
         # O contador nasceu depois das sugestoes. Enquanto ele nao existir — no
@@ -619,23 +652,27 @@ def reservar_no_firestore(db, hoje: str, teto: int, ref, payload: dict,
         # para recomecar a contagem do mes do zero com sugestoes ja na base.
         atual = max(int(gravado or 0), int(ja_no_mes or 0))
         if atual >= teto:
-            return False
+            return False, MOTIVO_TETO
         transaction.set(contador, {"count": atual + 1, "atualizado_em": hoje}, merge=True)
         transaction.set(ref, payload)
-        return True
+        return True, ""
 
     try:
-        return bool(_txn(db.transaction()))
+        return _txn(db.transaction())
     except Exception as exc:
         print(f"[Elevacao] Falha ao reservar vaga do mes: {exc}")
-        return False
+        return False, MOTIVO_FALHA
 
 
 def registrar_sugestao(db, sugestao: dict, hoje: str, titulo_acao: str,
                        nome_objetivo: str, teto: int = TETO_POR_MES,
                        reservar=reservar_no_firestore, ja_no_mes: int = 0,
-                       concluida_em: str = "", antigo: bool = False) -> str | None:
-    """Grava a sugestao se ainda houver vaga no mes. None quando nao ha.
+                       concluida_em: str = "", antigo: bool = False) -> tuple:
+    """Grava a sugestao se ainda houver vaga no mes.
+
+    Devolve `(sugestao_id, motivo)`. `sugestao_id` e None quando nao gravou, e
+    `motivo` diz qual das recusas foi — quem chama precisa da diferenca para
+    responder ao modelo sem desligar o resto da rodada.
 
     `reservar` e uma costura: a atomicidade e o ponto, e testa-la de verdade
     exigiria um Firestore. Injetando a reserva, o teste verifica o que e desta
@@ -658,7 +695,8 @@ def registrar_sugestao(db, sugestao: dict, hoje: str, titulo_acao: str,
         "resumo": resumo_para_o_usuario(sugestao, titulo_acao, nome_objetivo,
                                         concluida_em=concluida_em, antigo=antigo),
     }
-    return ref.id if reservar(db, hoje, teto, ref, payload, ja_no_mes) else None
+    ok, motivo = reservar(db, hoje, teto, ref, payload, ja_no_mes)
+    return (ref.id if ok else None), motivo
 
 
 class HistoricoIndisponivel(Exception):
@@ -1089,16 +1127,29 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
     }
 
 
+# O que o modelo ouve em cada recusa. A diferenca importa: "ja sugerida" pede
+# outra candidata, "teto" encerra a rodada. Dizer teto nas duas fazia o modelo
+# desistir do resto quando so tinha havido uma colisao esperada.
+_RECUSAS = {
+    MOTIVO_JA_SUGERIDA: ("esta acao ja foi sugerida neste mes; escolha OUTRA "
+                         "candidata — ainda ha vaga nesta rodada"),
+    MOTIVO_TETO: "teto do mes ja atingido; nao proponha mais nesta rodada",
+    MOTIVO_FALHA: ("nao foi possivel gravar agora; tente outra candidata ou "
+                   "encerre a rodada"),
+}
+
+
 def _ferramenta_propor(db, hoje: str, rodada: dict, aceitas: list,
                       reservar=reservar_no_firestore):
-    """`rodada["ja_no_mes"]` vem do historico lido em `preparar_rodada`, e e o
-    piso da contagem: o contador transacional pode nao existir ainda."""
     """A tool de escrita. A validacao mora AQUI, e nao na confianca no modelo.
 
     O teto e a lista de objetivos validos sao conferidos no momento da gravacao:
     o modelo pode alucinar um id, insistir depois do limite, ou apontar um
     objetivo servido por dado. Qualquer uma dessas passaria se a checagem
     estivesse so no prompt.
+
+    `rodada["ja_no_mes"]` vem do historico lido em `preparar_rodada`, e e o piso
+    da contagem: o contador transacional pode nao existir ainda.
     """
     objetivos_por_id = {o["id"]: o for o in rodada["objetivos"]}
     # As duas listas, e nao so `candidatos`. O passivo aparece no prompt por vaga
@@ -1123,14 +1174,14 @@ def _ferramenta_propor(db, hoje: str, rodada: dict, aceitas: list,
         # O teto e conferido dentro da transacao, e nao aqui: esta funcao roda em
         # paralelo com as outras tool calls da mesma rodada.
         concluida_em, e_antigo = quando.get(sugestao["task_id"], ("", False))
-        sugestao_id = registrar_sugestao(
+        sugestao_id, motivo = registrar_sugestao(
             db, sugestao, hoje, titulos[sugestao["task_id"]],
             str(objetivo.get("objetivoMacro") or ""), reservar=reservar,
             ja_no_mes=int(rodada.get("ja_no_mes") or 0),
             concluida_em=concluida_em, antigo=e_antigo,
         )
         if not sugestao_id:
-            return {"aceita": False, "motivo": "teto do mes ja atingido"}
+            return {"aceita": False, "motivo": _RECUSAS.get(motivo, _RECUSAS[MOTIVO_FALHA])}
         aceitas.append(sugestao_id)
         return {"aceita": True, "sugestao_id": sugestao_id}
 
@@ -1199,8 +1250,13 @@ def rodar_deteccao(db, hoje: str, carga_semana, claude_key: str) -> dict:
         if rodada.get("pode_marcar"):
             marcar_varredura(db, hoje)
         if rodada.get("passivo_cursor"):
+            # Mesmo corte do caminho de sucesso. Hoje o terceiro argumento so e
+            # lido quando o cursor esta vazio — e aqui ele nunca esta, por causa
+            # da guarda acima —, mas duas chamadas com argumentos diferentes para
+            # a mesma coisa viram contagem errada assim que a guarda mudar.
             avancar_passivo(db, rodada["passivo_cursor"], rodada.get("passivo_esgotou"),
-                            contar_passivo(db, rodada["passivo_cursor"], hoje))
+                            contar_passivo(db, rodada["passivo_cursor"],
+                                           rodada.get("corte_conclusao") or hoje))
         print(f"[Elevacao] Nada a fazer hoje: {rodada.get('motivo')}")
         return {"rodou": False, "motivo": rodada.get("motivo")}
 

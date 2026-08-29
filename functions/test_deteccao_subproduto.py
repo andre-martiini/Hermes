@@ -568,7 +568,7 @@ class TestAPropostaDePassivoEAceita(unittest.TestCase):
         gravadas = []
         _tools, mapa = ds._ferramenta_propor(
             _Db(), HOJE, self._rodada(), gravadas,
-            reservar=lambda *a, **k: True)
+            reservar=lambda *a, **k: (True, ""))
         r = mapa["propor_elevacao"](
             task_id="antiga", objetivo_id="intel", motivo_escassez="ja_escrito",
             o_que_ja_existe="handoff pronto", passo_que_falta="publicar",
@@ -780,7 +780,7 @@ class TestOCardDizQuandoOTrabalhoAconteceu(unittest.TestCase):
 
         def _reservar(db, hoje, teto, ref, payload, ja_no_mes=0):
             gravado.update(payload)
-            return True
+            return True, ""
 
         rodada = {
             "restantes": 3, "ja_no_mes": 0, "corte_conclusao": "2026-08-23",
@@ -805,7 +805,7 @@ class TestOCardDizQuandoOTrabalhoAconteceu(unittest.TestCase):
 
         def _reservar(db, hoje, teto, ref, payload, ja_no_mes=0):
             gravado.update(payload)
-            return True
+            return True, ""
 
         ds.registrar_sugestao(_Db(), dict(self.BASE), HOJE, "Handoff", "Autoridade",
                               reservar=_reservar, concluida_em="2024-03-01", antigo=True)
@@ -874,6 +874,80 @@ class TestConcluidaQueGanhaCorpoDepois(unittest.TestCase):
         db.cols["tarefas"].dados["antiga"]["data_conclusao"] = "2026-08-28"
         tarefas, _inc = ds._tarefas_da_varredura(db, "2026-08-23")
         self.assertEqual(len(tarefas), 1)
+
+
+class TestAsDuasRecusasDaReservaSaoDiferentes(unittest.TestCase):
+    """Colisao de id nao e teto, e dizer teto nas duas desliga a rodada.
+
+    O id da reserva e `{mes}__{task_id}` de proposito: uma acao adiada dentro do
+    mesmo mes colide, e isso e o comportamento desejado. Mas se o modelo ouvir
+    "teto do mes ja atingido" nessa colisao, ele para de propor no resto da
+    rodada — com vaga sobrando e candidata sobrando.
+    """
+
+    def _mapa(self, db, vagas, aceitas):
+        rodada = TestAGravacaoNaoConfiaNoModelo()._rodada()
+        _tools, mapa = ds._ferramenta_propor(
+            db, HOJE, rodada, aceitas,
+            reservar=TestAGravacaoNaoConfiaNoModelo._reserva(vagas))
+        return mapa["propor_elevacao"]
+
+    def test_colisao_manda_tentar_outra_e_diz_que_ha_vaga(self):
+        db = _Db()
+        propor = self._mapa(db, vagas=3, aceitas=[])
+        propor(**TestAPropostaDaIA.BASE)
+        r = self._mapa(db, vagas=3, aceitas=[])(**TestAPropostaDaIA.BASE)
+        self.assertFalse(r["aceita"])
+        self.assertIn("ja foi sugerida", r["motivo"])
+        self.assertIn("vaga", r["motivo"])
+        self.assertNotIn("teto", r["motivo"])
+
+    def test_teto_encerra_a_rodada(self):
+        r = self._mapa(_Db(), vagas=0, aceitas=[])(**TestAPropostaDaIA.BASE)
+        self.assertFalse(r["aceita"])
+        self.assertIn("teto", r["motivo"])
+        self.assertIn("nao proponha mais", r["motivo"])
+
+    def test_a_reserva_devolve_o_motivo_e_nao_um_booleano(self):
+        db = _Db()
+        reserva = TestAGravacaoNaoConfiaNoModelo._reserva(1)
+        ref = db.collection(ds.COL_ELEVACOES).document("x")
+        self.assertEqual(reserva(db, HOJE, 3, ref, {"a": 1}), (True, ""))
+        self.assertEqual(reserva(db, HOJE, 3, ref, {"a": 1}),
+                         (False, ds.MOTIVO_JA_SUGERIDA))
+
+
+class TestPilarLegadoComAcento(unittest.TestCase):
+    """O unico desfecho que o modulo diz que nao pode acontecer.
+
+    A derivacao por pilar so vale onde `gerida_por_acoes` nao esta gravada — ou
+    seja, nos documentos legados, que sao os de grafia livre. Um "Saúde"
+    acentuado caia no else e o objetivo de saude virava elegivel.
+
+    `.lower()` sozinho nao resolveria: "Saúde" vira "saúde", que continua
+    diferente de "saude".
+    """
+
+    def test_grafias_do_pilar_saude_ficam_todas_de_fora(self):
+        for grafia in ("saude", "Saude", "SAUDE", "Saúde", "saúde", " Saúde "):
+            self.assertEqual(
+                ds.objetivos_elegiveis([{"id": "m1", "pilar": grafia,
+                                         "objetivoMacro": "Sair de 95 para 80"}]),
+                [], f"grafia {grafia!r} devia ficar de fora")
+
+    def test_outro_pilar_continua_entrando(self):
+        self.assertEqual(
+            [o["id"] for o in ds.objetivos_elegiveis(
+                [{"id": "m1", "pilar": "Intelectual", "objetivoMacro": "Autoridade"}])],
+            ["m1"])
+
+    def test_a_flag_gravada_continua_vencendo_a_derivacao(self):
+        """Pela flag, nao pelo nome — a regra transversal nao muda."""
+        self.assertEqual(
+            [o["id"] for o in ds.objetivos_elegiveis(
+                [{"id": "m1", "pilar": "Saúde", "objetivoMacro": "X",
+                  "gerida_por_acoes": True}])],
+            ["m1"])
 
 
 class TestOPassivoEntraPorCota(unittest.TestCase):
@@ -1292,12 +1366,15 @@ class TestAGravacaoNaoConfiaNoModelo(unittest.TestCase):
         estado = {"restam": vagas}
 
         def reservar(db, hoje, teto, ref, payload, ja_no_mes=0):
-            # Espelha o contrato da reserva real: id ja usado e recusa.
-            if estado["restam"] <= 0 or ref.get().exists:
-                return False
+            # Espelha o contrato da reserva real, inclusive a distincao entre as
+            # duas recusas — que e justamente o que o codigo precisa acertar.
+            if ref.get().exists:
+                return False, ds.MOTIVO_JA_SUGERIDA
+            if estado["restam"] <= 0:
+                return False, ds.MOTIVO_TETO
             estado["restam"] -= 1
             ref.set(payload)
-            return True
+            return True, ""
 
         return reservar
 
@@ -1409,7 +1486,7 @@ class TestOContadorNaoRecomecaDoZero(unittest.TestCase):
 
         def reservar(db, hoje, teto, ref, payload, ja_no_mes=0):
             recebido["ja_no_mes"] = ja_no_mes
-            return True
+            return True, ""
 
         rodada = TestAGravacaoNaoConfiaNoModelo()._rodada()
         rodada["ja_no_mes"] = 2

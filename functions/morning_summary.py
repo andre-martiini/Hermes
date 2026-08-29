@@ -81,6 +81,21 @@ _DIAS_SEMANA = [
     "sexta-feira", "sábado", "domingo",
 ]
 
+def _pilar(valor) -> str:
+    """Pilar comparável: minúsculas e sem acento.
+
+    Só importa nos documentos legados, que são justamente os que não têm
+    `gerida_por_acoes` gravada e por isso dependem da derivação por pilar — e são
+    os que podem ter grafia livre. `.lower()` sozinho não basta: "Saúde" vira
+    "saúde", que continua diferente de "saude".
+    """
+    import unicodedata
+
+    bruto = str(valor or "").strip().lower()
+    return "".join(c for c in unicodedata.normalize("NFD", bruto)
+                   if unicodedata.category(c) != "Mn")
+
+
 _PILAR_LABEL = {
     "carreira": "Carreira",
     "financas": "Finanças",
@@ -854,7 +869,7 @@ def _fonte_da_metrica(data: dict, metrica: dict) -> str | None:
     if "fonte" in metrica:
         gravada = str(metrica.get("fonte") or "").strip().lower()
         return gravada if gravada in _FONTES_AUTOMATICAS else None
-    if str(data.get("pilar") or "") != "saude":
+    if _pilar(data.get("pilar")) != "saude":
         return None
     unidade = str(metrica.get("unidade") or "").strip().lower()
     if unidade in ("kg", "quilo", "quilos"):
@@ -965,7 +980,7 @@ def _coletar_estrategia(db, hoje: str, acoes_por_meta: dict, movimento_por_meta:
         pilar = str(data.get("pilar") or "")
         gravada = data.get("gerida_por_acoes")
         # Derivação por pilar só enquanto o objetivo não tem a flag gravada.
-        gerida_por_acoes = bool(gravada) if gravada is not None else pilar != "saude"
+        gerida_por_acoes = bool(gravada) if gravada is not None else _pilar(pilar) != "saude"
         if not gerida_por_acoes and movimento_saude:
             movimentos.append(movimento_saude)
 
