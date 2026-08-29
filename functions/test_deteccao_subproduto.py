@@ -609,6 +609,74 @@ class TestAContagemDoQueFaltaDoPassivo(unittest.TestCase):
         self.assertEqual(ds.contar_passivo(self._db(), "2026-04-01|b0", "2026-08-29"), 0)
 
 
+class TestAdiarCumpreOQueOCardPromete(unittest.TestCase):
+    """"Agora nao e sobre o momento, nao sobre a acao" — inclusive para concluida.
+
+    Para acao viva a promessa se cumpria sozinha: a consulta dela e por status.
+    Para concluida nao: o marcador ja passou da `data_conclusao` e o cursor do
+    passivo ja passou da chave dela. "Adiar" virava "nunca" em silencio, que e o
+    oposto do que `decidir` responde ao usuario.
+
+    A sugestao adiada e a unica fonte que sobrevive aos dois cursores, porque
+    guarda o `task_id` — e id nao depende de janela.
+    """
+
+    def _db(self, status_da_acao, data_conclusao="2024-05-05"):
+        db = _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        db.collection("tarefas").dados["antiga"] = _tarefa(
+            id="antiga", status=status_da_acao, data_conclusao=data_conclusao,
+            data_atualizacao=data_conclusao, pool_dados=[_anexo("Handoff.md")])
+        db.collection(ds.COL_ELEVACOES).dados["s1"] = {
+            "task_id": "antiga", "status": ds.STATUS_ADIADA, "criada_em": "2026-01-10"}
+        return db
+
+    def test_concluida_adiada_volta_mesmo_fora_da_janela(self):
+        db = self._db("concluído")
+        # Cursor do passivo ja passou por ela, e a janela comeca depois dela.
+        ds.avancar_passivo(db, "2024-01-01|zzz", False, None)
+        ds.marcar_varredura(db, "2026-08-01")
+        rodada = ds.preparar_rodada(db, "2026-08-29", [])
+        self.assertIn("antiga", [c["task_id"] for c in rodada["candidatos"]])
+
+    def test_nao_duplica_quando_vem_pelos_dois_caminhos(self):
+        """Acao viva adiada chega pela consulta E pela releitura."""
+        rodada = ds.preparar_rodada(self._db("em andamento"), "2026-08-29", [])
+        self.assertEqual([c["task_id"] for c in rodada["candidatos"]], ["antiga"])
+
+    def test_a_releitura_e_so_das_adiadas(self):
+        """Testado na fonte, e nao no fim.
+
+        No fim, `acoes_ja_decididas` tambem barra `nunca` e `pendente`, entao um
+        filtro frouxo aqui passaria despercebido — e voltaria a trazer do banco
+        acao que ninguem pediu.
+        """
+        db = self._db("concluído")
+        for status in (ds.STATUS_NUNCA, ds.STATUS_PENDENTE, ds.STATUS_ACEITA):
+            self.assertEqual(
+                ds.tarefas_adiadas(db, [{"task_id": "antiga", "status": status}]), [],
+                f"status {status} nao devia ser relido")
+        self.assertEqual(
+            [t["id"] for t in ds.tarefas_adiadas(
+                db, [{"task_id": "antiga", "status": ds.STATUS_ADIADA}])],
+            ["antiga"])
+
+    def test_nunca_continua_sem_voltar_na_rodada(self):
+        db = self._db("concluído")
+        db.cols[ds.COL_ELEVACOES].dados["s1"]["status"] = ds.STATUS_NUNCA
+        ds.marcar_varredura(db, "2026-08-01")
+        rodada = ds.preparar_rodada(db, "2026-08-29", [])
+        self.assertNotIn("antiga", [c["task_id"] for c in rodada.get("candidatos") or []])
+
+    def test_acao_apagada_nao_derruba_a_rodada(self):
+        db = self._db("concluído")
+        del db.cols["tarefas"].dados["antiga"]
+        self.assertEqual(ds.tarefas_adiadas(db, [
+            {"task_id": "antiga", "status": ds.STATUS_ADIADA}]), [])
+
+
 class TestOCardDizQuandoOTrabalhoAconteceu(unittest.TestCase):
     """Sugestao de passivo apresentada igual a de trabalho desta semana engana.
 
@@ -692,6 +760,22 @@ class TestConcluidaQueGanhaCorpoDepois(unittest.TestCase):
         """Senao o terceiro recorte traria o passivo inteiro pela porta da janela."""
         tarefas, _inc = ds._tarefas_da_varredura(self._db("2024-03-01"), "2026-08-23")
         self.assertEqual(tarefas, [])
+
+    def test_truncamento_do_terceiro_recorte_tambem_segura_o_marcador(self):
+        """O teto vale para os DOIS recortes de concluidas.
+
+        Conferir so o primeiro deixaria a rodada se declarar completa com o
+        terceiro truncado — e as omitidas ficariam invisiveis para sempre: a
+        atualizacao delas e anterior ao marcador novo, e o cursor do passivo ja
+        passou por elas.
+        """
+        db = _Db()
+        for i in range(ds.LIMITE_TAREFAS):
+            db.collection("tarefas").dados[f"m{i:04d}"] = _tarefa(
+                id=f"m{i:04d}", status="concluído",
+                data_conclusao="2020-01-01", data_atualizacao="2026-08-28")
+        _tarefas, incompleta = ds._tarefas_da_varredura(db, "2026-08-23")
+        self.assertEqual(incompleta, "limite_atingido")
 
     def test_nao_duplica_com_a_consulta_da_janela(self):
         db = self._db("2026-08-28")

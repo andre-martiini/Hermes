@@ -654,6 +654,9 @@ def _carregar_sugestoes(db, hoje: str) -> list[dict]:
     - todo `nunca`, para sempre — e o que da permanencia a decisao;
     - todo `pendente` e `aceita`, de qualquer epoca — quem ja esta na fila nao e
       perguntado de novo;
+    - todo `adiada`, de qualquer epoca — nao para bloquear (adiada volta a ser
+      candidata de proposito), mas porque e a unica fonte que lembra QUAIS acoes
+      voltar a oferecer depois que os cursores passaram por elas;
     - tudo deste mes, para a contagem do teto.
 
     Levanta em vez de devolver lista vazia quando a leitura falha. Historico vazio
@@ -665,7 +668,8 @@ def _carregar_sugestoes(db, hoje: str) -> list[dict]:
         col = db.collection(COL_ELEVACOES)
         recortes = (
             col.where(filter=_filtro("status", "==", STATUS_NUNCA)),
-            col.where(filter=_filtro("status", "in", [STATUS_PENDENTE, STATUS_ACEITA])),
+            col.where(filter=_filtro("status", "in",
+                                     [STATUS_PENDENTE, STATUS_ACEITA, STATUS_ADIADA])),
             col.where(filter=_filtro("criada_em", ">=", f"{_mes(hoje)}-01")),
         )
         por_id = {}
@@ -741,19 +745,24 @@ def _tarefas_da_varredura(db, corte: str) -> list[dict]:
     # nao mudou, e o cursor do passivo ja passou por elas quando ainda estavam
     # vazias. `data_atualizacao` e o unico campo que reflete o anexo novo.
     try:
-        for d in (db.collection("tarefas")
-                  .where(filter=_filtro("status", "==", STATUS_CONCLUIDO))
-                  .where(filter=_filtro("data_atualizacao", ">=", corte))
-                  .limit(LIMITE_TAREFAS).stream()):
-            por_id[d.id] = {**(d.to_dict() or {}), "id": d.id}
+        mexidas = list(db.collection("tarefas")
+                       .where(filter=_filtro("status", "==", STATUS_CONCLUIDO))
+                       .where(filter=_filtro("data_atualizacao", ">=", corte))
+                       .limit(LIMITE_TAREFAS).stream())
     except Exception as exc:  # noqa: BLE001
         print(f"[Elevacao] Concluidas mexidas fora desta rodada ({exc}). Indice "
               "composto (status, data_atualizacao) publicado?")
         return list(por_id.values()), "indice_ausente"
+    for d in mexidas:
+        por_id[d.id] = {**(d.to_dict() or {}), "id": d.id}
 
-    if len(concluidas) >= LIMITE_TAREFAS:
-        print(f"[Elevacao] Mais de {LIMITE_TAREFAS} conclusoes desde {corte}; a "
-              "rodada viu so uma parte.")
+    # O teto vale para os DOIS recortes de concluidas. Conferir so o primeiro
+    # deixaria a rodada se declarar completa com o terceiro truncado, e as
+    # omitidas ficariam invisiveis para sempre: a atualizacao delas e anterior ao
+    # marcador novo, e o cursor do passivo ja passou por elas.
+    if len(concluidas) >= LIMITE_TAREFAS or len(mexidas) >= LIMITE_TAREFAS:
+        print(f"[Elevacao] Mais de {LIMITE_TAREFAS} conclusoes ou atualizacoes "
+              f"desde {corte}; a rodada viu so uma parte.")
         return list(por_id.values()), "limite_atingido"
     return list(por_id.values()), ""
 
@@ -787,6 +796,39 @@ def _cursor_para_chave(cursor: str, corte: str) -> tuple:
         return _chave(corte, "")
     data, _, task_id = str(cursor).partition("|")
     return _chave(data, task_id)
+
+
+def tarefas_adiadas(db, sugestoes, limite: int = 50) -> list[dict]:
+    """As acoes que o usuario adiou, buscadas por id.
+
+    `decidir(..., "adiar")` promete que "agora nao e sobre o momento, nao sobre a
+    acao". Para acao viva a promessa se cumpre sozinha: a consulta dela e por
+    status e ela reaparece na rodada seguinte. Para acao CONCLUIDA nao se cumpria:
+    o marcador ja tinha passado da `data_conclusao` dela, e o cursor do passivo ja
+    tinha passado da chave dela — entao "adiar" virava "nunca" em silencio,
+    exatamente o oposto do que o card diz.
+
+    A sugestao adiada e a unica fonte que sobrevive aos dois cursores, porque ela
+    guarda o `task_id`. Buscar por id nao depende de janela nenhuma.
+    """
+    ids = []
+    for s in sugestoes or []:
+        if not isinstance(s, dict) or str(s.get("status")) != STATUS_ADIADA:
+            continue
+        task_id = str(s.get("task_id") or "").strip()
+        if task_id and task_id not in ids:
+            ids.append(task_id)
+
+    tarefas = []
+    for task_id in ids[:limite]:
+        try:
+            snap = db.collection("tarefas").document(task_id).get()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Elevacao] Falha ao reler a acao adiada {task_id}: {exc}")
+            continue
+        if snap.exists:
+            tarefas.append({**(snap.to_dict() or {}), "id": snap.id})
+    return tarefas
 
 
 def _passivo(db, corte: str, cursor: str, cota: int, decididas: dict) -> tuple:
@@ -967,7 +1009,13 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
               f"concluido antes disso e passivo, e nao entra por aqui.")
     decididas = acoes_ja_decididas(sugestoes)
     tarefas, incompleta = _tarefas_da_varredura(db, corte)
-    candidatos = candidatas(tarefas, decididas, hoje)
+    # As adiadas voltam por id, e nao por janela: os cursores ja passaram por elas.
+    # Uniao por id — uma acao viva adiada vem pelos dois caminhos, e candidata
+    # repetida viraria dossie repetido no mesmo prompt.
+    por_id = {t["id"]: t for t in tarefas}
+    for t in tarefas_adiadas(db, sugestoes):
+        por_id.setdefault(t["id"], t)
+    candidatos = candidatas(list(por_id.values()), decididas, hoje)
     # "Ate aqui esta tudo avaliado" e o que o marcador significa, e ele so avanca
     # quando isso for verdade de ponta a ponta: a busca precisa ter trazido a
     # janela inteira, E o prompt precisa ter mostrado toda concluida que veio.
