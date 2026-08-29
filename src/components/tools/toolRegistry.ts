@@ -70,7 +70,7 @@ export const toolsRegistry: ToolMetadata[] = [
                 },
                 isPlanned: {
                     type: 'boolean',
-                    description: 'Se o item deve ficar marcado para a etapa de planejamento.'
+                    description: 'Se o item deve ficar marcado para a etapa de planejamento — e o que faz o item aparecer na aba Comprar. Em import_batch o padrao ja e planejar; passe false para so alimentar o cadastro.'
                 },
                 isPurchased: {
                     type: 'boolean',

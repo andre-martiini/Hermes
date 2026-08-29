@@ -32,6 +32,10 @@ _CATALOG: dict[str, str] = {
     "obter_portal_compras_publico": "Lista itens do portal publico de compras",
     "mutar_portal_compras_publico": "Executa acoes simples no portal publico de compras",
     "mutar_lista_compras": "Cria, atualiza, remove ou importa itens da lista de compras interna",
+    # Sem a leitura, `update` e `delete` eram inuteis pelo MCP: os dois exigem
+    # item_id e nao havia de onde tira-lo. E nao dava para conferir o efeito da
+    # propria escrita sem pedir ao usuario que abrisse a tela.
+    "consultar_lista_compras": "Le a lista de compras com o item_id de cada item, o que esta planejado e o que ja foi comprado",
     "obter_projeto_bolsas_publico": "Consulta dados publicos de um projeto de bolsas por ID",
     "registrar_inscricao_bolsa_publica": "Registra uma inscricao publica em um projeto de bolsas",
     "consultar_financas_v2": "Consulta detalhada do financeiro interno: rendas, obrigações, metas e transações",

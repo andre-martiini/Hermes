@@ -344,7 +344,7 @@ export const ShoppingListTool = ({
       return {
         title: 'Importacao em lote proposta',
         description: lines.length > 0
-          ? `${lines.length} linha(s) serao processadas apos sua confirmacao.`
+          ? `${lines.length} linha(s) serao importadas e ja entram no planejamento. Nome que ja existe nao vira item novo: o item atual e que passa a planejado.`
           : 'Nenhuma linha valida foi enviada para importacao.',
         lines: lines.slice(0, 6),
         action: assistantAction,
@@ -355,7 +355,7 @@ export const ShoppingListTool = ({
     if (assistantAction === 'clear_planning') {
       return {
         title: 'Limpeza de planejamento proposta',
-        description: 'Todos os itens planejados ou comprados da rodada atual serao resetados.',
+        description: 'Os itens planejados ou comprados voltam a ficar sem planejamento. Nenhum item e excluido do cadastro.',
         lines: [`Itens afetados agora: ${items.filter(item => item.isPlanned || item.isPurchased).length}`],
         action: assistantAction,
         payload: { action: 'clear_planning' },

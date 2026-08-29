@@ -14,7 +14,7 @@ nunca reescrever:
    os dois aliases.
 2. **Delegacao a modulos dedicados** (`strategy_tools`, `health_tools`,
    `dados_cadastrais`, `hermes_calendar_tools`, `busca_grafo`, `busca_acervo`,
-   `whatsapp_ingest`, ...) — 16 tools.
+   `whatsapp_ingest`, `lista_compras`, ...) — 17 tools.
 3. **Implementacao extraida da closure** — so as ~11 tools que nao existiam em
    nenhum outro lugar. As closures correspondentes em `main.py` passam a
    delegar para ca, entao isto NAO e duplicacao: e a unica copia.
@@ -86,6 +86,21 @@ def _registrar_item_financeiro_v2(ctx: ToolContext, args: dict):
     # o copiloto web e o Telegram gravam "Geral" fixo. Mesmo contrato aqui.
     slots = {**args, "categoria": "Geral"}
     return _execute("registrar_item_financeiro_v2", slots, ctx.db)
+
+
+def _consultar_lista_compras(ctx: ToolContext, args: dict):
+    """Contraparte de leitura de `mutar_lista_compras`, na mesma unica copia."""
+    from tools import lista_compras
+
+    try:
+        return lista_compras.consultar(
+            ctx.db,
+            filtro=args.get("filtro"),
+            busca=args.get("busca"),
+            limite=args.get("limite"),
+        )
+    except lista_compras.ListaComprasError as erro:
+        return erro.message
 
 
 def _agendar_lembrete_acao(ctx: ToolContext, args: dict):
@@ -1594,6 +1609,7 @@ _HANDLERS: dict = {
     "agendar_lembrete_acao": _agendar_lembrete_acao,
 
     # Delegadas a modulos dedicados
+    "consultar_lista_compras": _consultar_lista_compras,
     "consultar_historico_acoes": _consultar_historico_acoes,
     "buscar_arquivos_acervo": _buscar_arquivos_acervo,
     "buscar_contato": _buscar_contato,

@@ -1,20 +1,20 @@
 {
   "name": "mutar_lista_compras",
-  "description": "Cria, atualiza, remove ou importa itens da lista de compras interna",
+  "description": "Cria, atualiza, remove ou importa itens da lista de compras interna. Use consultar_lista_compras para obter os item_id que update e delete exigem.",
   "parameters": {
     "type": "object",
     "properties": {
       "action": {
         "type": "string",
-        "description": "Ação: create, update, delete, import_batch, clear_planning ou finalize"
+        "description": "Acao: create, update, delete, import_batch, clear_planning ou finalize"
       },
       "item_id": {
         "type": "string",
-        "description": "ID do item"
+        "description": "ID do item, obrigatorio em update e delete. Vem de consultar_lista_compras."
       },
       "nome": {
         "type": "string",
-        "description": "Nome do item"
+        "description": "Nome do item. Em create, nome ja existente nao e recusado: o item existente recebe os campos informados na chamada (inclusive isPlanned) e o retorno traz ja_existia: true com o item_id dele."
       },
       "categoria": {
         "type": "string",
@@ -30,19 +30,19 @@
       },
       "isPlanned": {
         "type": "boolean",
-        "description": "Se o item está planejado"
+        "description": "Se o item entra no planejamento — e o que faz o item aparecer na tela de compras. Em import_batch o padrao e true (quem importa uma lista quer ve-la na tela); passe false para so alimentar o cadastro."
       },
       "isPurchased": {
         "type": "boolean",
-        "description": "Se o item está comprado"
+        "description": "Se o item esta comprado. Marcar como comprado implica planejado; tirar do planejamento tira o comprado."
       },
       "ordem": {
         "type": "integer",
-        "description": "Posição do item"
+        "description": "Posicao do item"
       },
       "importText": {
         "type": "string",
-        "description": "Texto bruto para importação em lote"
+        "description": "Texto bruto para importacao em lote, uma linha por item, no formato 'Nome' ou 'Nome|Categoria'. Linha cujo nome ja existe nao e descartada em silencio: o item existente entra no planejamento e aparece em 'ignorados' com o motivo e o item_id."
       }
     },
     "required": ["action"]
