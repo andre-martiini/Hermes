@@ -380,6 +380,13 @@ export const ShoppingListTool = ({
       const nextIsPlanned = Boolean(isPlanned);
       const nextIsPurchased = Boolean(isPurchased);
       const jaCadastrado = items.find(item => normalizeShoppingText(item.nome) === normalizeShoppingText(nextNome));
+      // Sobre item que ja existe, `create` so acrescenta: pedir isPlanned/isPurchased
+      // falso nao desmarca nada no servidor. O card tem de dizer isso, senao
+      // promete um "Sim -> Nao" que confirmar nao produz.
+      const linhaFlag = (rotulo: string, atual: boolean, pedido: boolean) => {
+        if (!pedido) return `${rotulo}: ${atual ? 'Sim' : 'Nao'} (segue igual — "criar" nunca desmarca)`;
+        return atual ? `${rotulo}: Sim (ja estava)` : `${rotulo}: Nao -> Sim`;
+      };
       return {
         title: 'Criacao de item proposta',
         description: !nextNome
@@ -393,8 +400,8 @@ export const ShoppingListTool = ({
               ...(categoria !== undefined ? [`Categoria: ${jaCadastrado.categoria} -> ${nextCategoria}`] : []),
               ...(quantidade !== undefined ? [`Quantidade: ${jaCadastrado.quantidade} -> ${nextQuantidade}`] : []),
               ...(unit !== undefined ? [`Unidade: ${jaCadastrado.unit} -> ${nextUnit}`] : []),
-              ...(isPlanned !== undefined ? [`Planejado: ${jaCadastrado.isPlanned ? 'Sim' : 'Nao'} -> ${nextIsPlanned ? 'Sim' : 'Nao'}`] : []),
-              ...(isPurchased !== undefined ? [`Comprado: ${jaCadastrado.isPurchased ? 'Sim' : 'Nao'} -> ${nextIsPurchased ? 'Sim' : 'Nao'}`] : []),
+              ...(isPlanned !== undefined ? [linhaFlag('Planejado', jaCadastrado.isPlanned, nextIsPlanned)] : []),
+              ...(isPurchased !== undefined ? [linhaFlag('Comprado', jaCadastrado.isPurchased, nextIsPurchased)] : []),
               ...(typeof ordem === 'number' ? [`Ordem: ${ordem}`] : []),
             ]
           : [

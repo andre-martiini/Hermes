@@ -377,12 +377,27 @@ def _intencao_aditiva(entrada: dict) -> dict:
 
 
 def _detalhe_criar_existente(nome: str, updates: dict, final: dict) -> str:
+    """Todo campo escrito entra no texto.
+
+    `detalhe` e o que o assistente repassa ao usuario, entao omitir uma escrita
+    aqui e o mesmo defeito que este modulo corrige: anunciar sucesso sem dizer o
+    que mudou. Planejar e mexer na quantidade na mesma chamada tem de aparecer
+    inteiro, nao so a parte do planejamento.
+    """
     if not updates:
         estado = "planejado" if final.get("isPlanned") else "so no cadastro, sem planejamento"
         return f'"{nome}" ja existia e nada mudou: continua {estado}.'
+    partes = []
     if updates.get("isPlanned"):
-        return f'"{nome}" ja existia e foi marcado como planejado.'
-    return f'"{nome}" ja existia; atualizei {", ".join(sorted(updates))}.'
+        partes.append("entrou no planejamento")
+    if updates.get("isPurchased"):
+        partes.append("ficou marcado como comprado")
+    outros = sorted(campo for campo in updates if campo not in ("isPlanned", "isPurchased"))
+    if outros:
+        partes.append("atualizei " + ", ".join(outros))
+    if not partes:
+        partes.append("atualizei " + ", ".join(sorted(updates)))
+    return f'"{nome}" ja existia; ' + "; ".join(partes) + "."
 
 
 def _updates_informados(entrada: dict, atual: dict, incluir_nome: bool) -> dict:

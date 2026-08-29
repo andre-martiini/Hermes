@@ -380,6 +380,26 @@ class TestCriarComNomeExistente(unittest.TestCase):
         self.assertEqual(sorted(r["atualizado"]), ["isPlanned", "quantidade"])
         self.assertEqual(db.collection(lc.COLECAO).dados["id1"]["quantidade"], "5")
 
+    def test_detalhe_nao_esconde_escrita_atras_do_planejamento(self):
+        """Planejar e mudar quantidade na mesma chamada tem de aparecer inteiro."""
+        db = _db_com("manteiga")
+        db.collection(lc.COLECAO).dados["id1"]["quantidade"] = "3"
+        r = lc.mutar(db, "create", {"nome": "manteiga", "quantidade": "5", "isPlanned": True})
+        self.assertIn("entrou no planejamento", r["detalhe"])
+        self.assertIn("quantidade", r["detalhe"])
+
+    def test_detalhe_cita_todo_campo_de_updates(self):
+        db = _db_com("manteiga")
+        db.collection(lc.COLECAO).dados["id1"].update({"categoria": "Frios", "unit": "kg"})
+        r = lc.mutar(db, "create", {
+            "nome": "manteiga", "categoria": "Mercado", "unit": "un", "isPurchased": True,
+        })
+        for campo in r["atualizado"]:
+            if campo in ("isPlanned", "isPurchased"):
+                continue
+            self.assertIn(campo, r["detalhe"], f"{campo} foi gravado mas nao aparece no detalhe")
+        self.assertIn("comprado", r["detalhe"])
+
     def test_nome_vazio_continua_recusado(self):
         with self.assertRaises(lc.ListaComprasError) as ctx:
             lc.mutar(_db_com(), "create", {"nome": "   "})
