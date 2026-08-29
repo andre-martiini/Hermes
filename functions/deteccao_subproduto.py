@@ -679,7 +679,7 @@ DECISOES = {
 
 
 def decidir(db, sugestao_id: str, decisao: str, hoje: str,
-            devolver_vaga=None) -> dict:
+            aplicar=None) -> dict:
     """Aplica a decisao do usuario sobre uma elevacao sugerida.
 
     Sem esta funcao o detector e inerte: as sugestoes aparecem na fila e nao ha
@@ -703,22 +703,20 @@ def decidir(db, sugestao_id: str, decisao: str, hoje: str,
         return {"ok": False, "erro": f"Decisao invalida. Use: {', '.join(DECISOES)}."}
 
     ref = db.collection(COL_ELEVACOES).document(str(sugestao_id))
-    snap = ref.get()
-    if not snap.exists:
-        return {"ok": False, "erro": "Sugestao nao encontrada."}
-    dados = snap.to_dict() or {}
-    if str(dados.get("status")) != STATUS_PENDENTE:
-        return {"ok": False, "erro": f"Sugestao ja estava como '{dados.get('status')}'."}
+    try:
+        ok, dados, erro = (aplicar or _aplicar_decisao)(db, ref, alvo, hoje)
+    except Exception as exc:  # noqa: BLE001
+        # Falhar aqui e falhar a decisao inteira, de proposito. Engolir o erro
+        # deixaria a sugestao decidida com a vaga presa: nao da para repetir a
+        # decisao (o status ja saiu de pendente) e a vaga nunca volta.
+        return {"ok": False,
+                "erro": f"A decisao nao foi gravada: {exc}. Tente de novo."}
+    if not ok:
+        return {"ok": False, "erro": erro}
 
-    ref.update({"status": alvo, "decidida_em": hoje})
     resposta = {"ok": True, "status": alvo, "sugestao_id": str(sugestao_id)}
 
     if alvo == STATUS_NUNCA:
-        # "Nunca" e ajuste de escopo, nao interrupcao gasta: devolve a vaga do
-        # mes. Sem isto, tres sugestoes recusadas para sempre bloqueariam o resto
-        # do mes — contradizendo a regra que `elevacoes_do_mes` ja aplica na
-        # leitura, e deixando as duas contagens discordando entre si.
-        (devolver_vaga or _devolver_vaga)(db, str(dados.get("criada_em") or hoje))
         resposta["detalhe"] = (
             f'"{dados.get("titulo_acao")}" nao sera mais sugerida para elevacao, '
             "e a vaga do mes volta a ficar disponivel.")
@@ -750,26 +748,69 @@ def decidir(db, sugestao_id: str, decisao: str, hoje: str,
     return resposta
 
 
-def _devolver_vaga(db, criada_em: str) -> None:
-    """Decrementa o contador do mes em que a sugestao foi criada.
+def _mes_da_vaga(dados: dict, hoje: str) -> str:
+    """De qual mes a vaga volta: o da sugestao, nunca o de hoje.
 
-    O mes vem da sugestao, e nao de hoje: recusar em setembro uma sugestao de
-    agosto nao pode abrir vaga em setembro.
+    Recusar em setembro uma sugestao de agosto nao pode abrir vaga em setembro —
+    a vaga que foi gasta foi a de agosto.
+    """
+    return str(dados.get("criada_em") or hoje)
+
+
+def _corpo_da_decisao(transaction, ref, contador_de, alvo: str, hoje: str) -> tuple:
+    """Le a sugestao, confere que ela ainda esta pendente e grava tudo de uma vez.
+
+    Todas as leituras antes de todas as escritas, que e o que o Firestore exige
+    dentro de uma transacao — inclusive a leitura do contador, cujo documento so
+    da para saber depois de ler a sugestao (o mes vem dela).
+
+    Devolve `(ok, dados, erro)`.
+    """
+    snap = ref.get(transaction=transaction)
+    if not snap.exists:
+        return False, {}, "Sugestao nao encontrada."
+    dados = snap.to_dict() or {}
+    if str(dados.get("status")) != STATUS_PENDENTE:
+        return False, dados, f"Sugestao ja estava como '{dados.get('status')}'."
+
+    contador, atual = None, 0
+    if alvo == STATUS_NUNCA:
+        # "Nunca" e ajuste de escopo, nao interrupcao gasta: a vaga volta. Sem
+        # isto, tres recusas definitivas bloqueariam o resto do mes —
+        # contradizendo a regra que `elevacoes_do_mes` ja aplica na leitura, e
+        # deixando as duas contagens discordando entre si.
+        contador = contador_de(_mes_da_vaga(dados, hoje))
+        csnap = contador.get(transaction=transaction)
+        atual = (csnap.to_dict() or {}).get("count", 0) if csnap.exists else 0
+
+    transaction.update(ref, {"status": alvo, "decidida_em": hoje})
+    if contador is not None:
+        transaction.set(contador, {"count": max(0, int(atual or 0) - 1),
+                                   "atualizado_em": hoje}, merge=True)
+    return True, dados, ""
+
+
+def _aplicar_decisao(db, ref, alvo: str, hoje: str) -> tuple:
+    """A transicao de status e a devolucao da vaga na MESMA transacao.
+
+    Separadas, duas chamadas concorrentes de `decidir(..., "nunca")` para a mesma
+    sugestao passariam as duas pela checagem de pendente antes de qualquer uma
+    gravar, e o contador seria decrementado duas vezes — subcontando o mes e
+    abrindo vaga que nao existe. Nao e hipotese remota: `run_tool_loop` executa
+    as tool calls de uma rodada em paralelo, num ThreadPoolExecutor, que e a
+    mesma razao pela qual `reservar_no_firestore` ja e transacional.
+
+    Juntas, tambem some o outro lado: status gravado com a devolucao falhando
+    deixava a vaga presa para sempre, porque a decisao nao da para repetir.
     """
     from firebase_admin import firestore as _fs
 
-    contador = _contador_do_mes(db, criada_em)
-
     @_fs.transactional
     def _txn(transaction):
-        snap = contador.get(transaction=transaction)
-        atual = (snap.to_dict() or {}).get("count", 0) if snap.exists else 0
-        transaction.set(contador, {"count": max(0, int(atual or 0) - 1)}, merge=True)
+        return _corpo_da_decisao(transaction, ref,
+                                 lambda mes: _contador_do_mes(db, mes), alvo, hoje)
 
-    try:
-        _txn(db.transaction())
-    except Exception as exc:
-        print(f"[Elevacao] Falha ao devolver vaga do mes: {exc}")
+    return _txn(db.transaction())
 
 
 def listar_pendentes(db, limite: int = 20) -> dict:

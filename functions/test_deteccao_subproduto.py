@@ -266,26 +266,62 @@ class _Snap:
 class _Ref:
     def __init__(self, col, doc_id):
         self._col, self.id = col, doc_id
+        self._subcols = {}
 
     def set(self, dados):
         self._col[self.id] = dict(dados)
 
-    def get(self):
+    def get(self, transaction=None):
         return _Snap(self._col, self.id)
 
     def update(self, dados):
-        self._col[self.id].update(dados)
+        self._col.setdefault(self.id, {}).update(dados)
+
+    def collection(self, nome):
+        return self._subcols.setdefault(nome, _Colecao())
+
+
+class _Transacao:
+    """Transacao falsa: aplica na hora, sem isolamento.
+
+    A atomicidade real e do Firestore e nao da para exercitar aqui. O que estes
+    testes cobrem e o corpo da transacao — a ordem das leituras e escritas, de
+    qual mes a vaga volta, e o que acontece quando a sugestao ja saiu de
+    pendente. O que se ganha por ter o corpo separado do decorador e justamente
+    poder testar essa logica sem Firestore.
+    """
+
+    def update(self, ref, dados):
+        ref.update(dados)
+
+    def set(self, ref, dados, merge=False):
+        if merge and ref.get().exists:
+            ref.update(dados)
+        else:
+            ref.set(dados)
+
+
+def _aplicar(db, ref, alvo, hoje):
+    """O `aplicar` de producao, com a transacao trocada pela falsa."""
+    return ds._corpo_da_decisao(_Transacao(), ref,
+                                lambda mes: ds._contador_do_mes(db, mes), alvo, hoje)
 
 
 class _Colecao:
     def __init__(self):
-        self.dados, self._seq = {}, 0
+        self.dados, self._seq, self._subcols = {}, 0, {}
 
     def document(self, doc_id=None):
         if doc_id is None:
             self._seq += 1
             doc_id = f"s{self._seq}"
-        return _Ref(self.dados, str(doc_id))
+        doc_id = str(doc_id)
+        ref = _Ref(self.dados, doc_id)
+        # As subcolecoes vivem na colecao e nao no `_Ref`, porque `document()`
+        # devolve um `_Ref` novo a cada chamada — no contador do mes, a segunda
+        # chamada precisa enxergar o que a primeira gravou.
+        ref._subcols = self._subcols.setdefault(doc_id, {})
+        return ref
 
     def limit(self, _n):
         return self
@@ -507,7 +543,7 @@ class TestADecisaoDoUsuario(unittest.TestCase):
 
     def test_nunca_e_definitivo_e_tira_a_acao_das_proximas_varreduras(self):
         db = self._db_com_pendente()
-        r = ds.decidir(db, "s1", "nunca", HOJE, devolver_vaga=lambda *a: None)
+        r = ds.decidir(db, "s1", "nunca", HOJE, aplicar=_aplicar)
         self.assertEqual(r["status"], ds.STATUS_NUNCA)
         gravada = db.cols[ds.COL_ELEVACOES].dados["s1"]
         decididas = ds.acoes_ja_decididas([gravada])
@@ -515,7 +551,7 @@ class TestADecisaoDoUsuario(unittest.TestCase):
 
     def test_adiar_devolve_a_acao_para_a_fila_depois(self):
         db = self._db_com_pendente()
-        ds.decidir(db, "s1", "adiar", HOJE)
+        ds.decidir(db, "s1", "adiar", HOJE, aplicar=_aplicar)
         gravada = db.cols[ds.COL_ELEVACOES].dados["s1"]
         decididas = ds.acoes_ja_decididas([gravada])
         self.assertEqual(len(ds.candidatas(
@@ -529,7 +565,7 @@ class TestADecisaoDoUsuario(unittest.TestCase):
         um campo novo passado ali funciona numa porta e some nas outras, em
         silencio. Vincular depois e o unico jeito de ele valer sempre.
         """
-        r = ds.decidir(self._db_com_pendente(), "s1", "aceitar", HOJE)
+        r = ds.decidir(self._db_com_pendente(), "s1", "aceitar", HOJE, aplicar=_aplicar)
         rascunho = r["rascunho_da_acao"]
         self.assertNotIn("estrategia_objetivo_id", rascunho)
         self.assertIn("HANDOFF-SISPNAES.md", rascunho["descricao"])
@@ -538,24 +574,33 @@ class TestADecisaoDoUsuario(unittest.TestCase):
         self.assertEqual(r["vincular_depois"]["tool"], "editar_acao")
 
     def test_o_detalhe_avisa_que_sem_o_segundo_passo_a_acao_nasce_solta(self):
-        r = ds.decidir(self._db_com_pendente(), "s1", "aceitar", HOJE)
+        r = ds.decidir(self._db_com_pendente(), "s1", "aceitar", HOJE, aplicar=_aplicar)
         self.assertIn("editar_acao", r["detalhe"])
         self.assertIn("solta", r["detalhe"])
 
     def test_decidir_duas_vezes_nao_sobrescreve(self):
         db = self._db_com_pendente()
-        ds.decidir(db, "s1", "nunca", HOJE, devolver_vaga=lambda *a: None)
-        segunda = ds.decidir(db, "s1", "aceitar", HOJE)
+        ds.decidir(db, "s1", "nunca", HOJE, aplicar=_aplicar)
+        segunda = ds.decidir(db, "s1", "aceitar", HOJE, aplicar=_aplicar)
         self.assertFalse(segunda["ok"])
         self.assertEqual(db.cols[ds.COL_ELEVACOES].dados["s1"]["status"], ds.STATUS_NUNCA)
 
     def test_decisao_invalida_lista_as_validas(self):
-        r = ds.decidir(self._db_com_pendente(), "s1", "talvez", HOJE)
+        r = ds.decidir(self._db_com_pendente(), "s1", "talvez", HOJE, aplicar=_aplicar)
         self.assertFalse(r["ok"])
         self.assertIn("nunca", r["erro"])
 
     def test_sugestao_inexistente_nao_finge_sucesso(self):
-        self.assertFalse(ds.decidir(self._db_com_pendente(), "nao-existe", "aceitar", HOJE)["ok"])
+        self.assertFalse(ds.decidir(self._db_com_pendente(), "nao-existe", "aceitar", HOJE, aplicar=_aplicar)["ok"])
+
+    @staticmethod
+    def _contador(db, data):
+        return (ds._contador_do_mes(db, data).get().to_dict() or {}).get("count")
+
+    @staticmethod
+    def _com_contador(db, data, valor):
+        ds._contador_do_mes(db, data).set({"count": valor})
+        return db
 
     def test_nunca_devolve_a_vaga_do_mes(self):
         """"Nunca" e ajuste de escopo, nao interrupcao gasta.
@@ -564,26 +609,55 @@ class TestADecisaoDoUsuario(unittest.TestCase):
         e as duas contagens (o contador gravado e `elevacoes_do_mes`) passariam a
         discordar entre si.
         """
-        chamadas = []
-        ds.decidir(self._db_com_pendente(), "s1", "nunca", HOJE,
-                   devolver_vaga=lambda db, criada_em: chamadas.append(criada_em))
-        self.assertEqual(chamadas, [HOJE])
+        db = self._com_contador(self._db_com_pendente(), HOJE, 3)
+        ds.decidir(db, "s1", "nunca", HOJE, aplicar=_aplicar)
+        self.assertEqual(self._contador(db, HOJE), 2)
 
     def test_a_vaga_volta_para_o_mes_da_sugestao_e_nao_para_o_de_hoje(self):
         """Recusar em setembro uma sugestao de agosto nao abre vaga em setembro."""
         db = self._db_com_pendente()
         db.cols[ds.COL_ELEVACOES].dados["s1"]["criada_em"] = "2026-07-15"
-        chamadas = []
-        ds.decidir(db, "s1", "nunca", "2026-08-29",
-                   devolver_vaga=lambda db_, criada_em: chamadas.append(criada_em))
-        self.assertEqual(chamadas, ["2026-07-15"])
+        self._com_contador(db, "2026-07-15", 3)
+        self._com_contador(db, "2026-08-29", 1)
+        ds.decidir(db, "s1", "nunca", "2026-08-29", aplicar=_aplicar)
+        self.assertEqual(self._contador(db, "2026-07-15"), 2)
+        self.assertEqual(self._contador(db, "2026-08-29"), 1)
+
+    def test_a_vaga_devolvida_nao_deixa_o_contador_negativo(self):
+        """Contador negativo seria licenca para estourar o teto no mes seguinte."""
+        db = self._com_contador(self._db_com_pendente(), HOJE, 0)
+        ds.decidir(db, "s1", "nunca", HOJE, aplicar=_aplicar)
+        self.assertEqual(self._contador(db, HOJE), 0)
 
     def test_adiar_nao_devolve_vaga(self):
         """Adiada interrompeu; a vaga fica gasta ate o mes virar."""
-        chamadas = []
-        ds.decidir(self._db_com_pendente(), "s1", "adiar", HOJE,
-                   devolver_vaga=lambda db, criada_em: chamadas.append(criada_em))
-        self.assertEqual(chamadas, [])
+        db = self._com_contador(self._db_com_pendente(), HOJE, 3)
+        ds.decidir(db, "s1", "adiar", HOJE, aplicar=_aplicar)
+        self.assertEqual(self._contador(db, HOJE), 3)
+
+    def test_a_segunda_recusa_da_mesma_sugestao_nao_devolve_a_vaga_de_novo(self):
+        """A checagem de pendente e a devolucao moram na mesma transacao.
+
+        `run_tool_loop` executa as tool calls de uma rodada em paralelo. Separadas,
+        duas recusas da mesma sugestao passariam as duas pela checagem antes de
+        qualquer uma gravar, e o contador cairia duas vezes — subcontando o mes e
+        abrindo vaga que nao existe.
+        """
+        db = self._com_contador(self._db_com_pendente(), HOJE, 3)
+        primeira = ds.decidir(db, "s1", "nunca", HOJE, aplicar=_aplicar)
+        segunda = ds.decidir(db, "s1", "nunca", HOJE, aplicar=_aplicar)
+        self.assertTrue(primeira["ok"])
+        self.assertFalse(segunda["ok"])
+        self.assertEqual(self._contador(db, HOJE), 2)
+
+    def test_gravacao_que_falha_nao_e_relatada_como_decidida(self):
+        """Meio-caminho aqui prende a vaga: nao da para repetir a decisao."""
+        def _explode(*_a):
+            raise RuntimeError("indisponivel")
+
+        r = ds.decidir(self._db_com_pendente(), "s1", "nunca", HOJE, aplicar=_explode)
+        self.assertFalse(r["ok"])
+        self.assertIn("indisponivel", r["erro"])
 
     def test_listar_traz_so_pendentes_com_o_id_para_decidir(self):
         db = self._db_com_pendente()

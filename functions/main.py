@@ -11905,7 +11905,12 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
             return {'status': 'invalidated', 'message': msg}
 
         # Aplica mudanças — somente campos whitelistados
-        _ALLOWED = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_link_optout'}
+        # A whitelist e a fronteira real da edicao: campo fora dela e descartado
+        # em silencio, e uma alteracao que so tem esse campo termina em "Nenhum
+        # campo valido". `_CAMPOS_EDITAVEIS`, em tools/hermes_tools.py, e o que
+        # anuncia ao modelo o que da para editar — as duas listas TEM de andar
+        # juntas, e `test_hermes_tools` quebra quando divergem.
+        _ALLOWED = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_link_optout', 'projeto', 'estrategia_objetivo_id'}
 
         def _normalizar_status_acao(valor):
             if valor is None:
@@ -12131,7 +12136,12 @@ def confirmarEdicaoEmLote(req: https_fn.CallableRequest):
         from datetime import datetime as _dt, timezone as _tz
 
         db_ref = get_db()
-        _ALLOWED = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_link_optout'}
+        # A whitelist e a fronteira real da edicao: campo fora dela e descartado
+        # em silencio, e uma alteracao que so tem esse campo termina em "Nenhum
+        # campo valido". `_CAMPOS_EDITAVEIS`, em tools/hermes_tools.py, e o que
+        # anuncia ao modelo o que da para editar — as duas listas TEM de andar
+        # juntas, e `test_hermes_tools` quebra quando divergem.
+        _ALLOWED = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'prazo_final', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas', 'email_link_optout', 'projeto', 'estrategia_objetivo_id'}
 
         def _normalizar_status_acao(valor):
             if valor is None:
