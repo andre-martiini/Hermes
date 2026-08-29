@@ -118,9 +118,15 @@ export function resumoDoBolso(
 ): ResumoDoBolso {
     const disponivel = bolso(settings, contasDoMes);
 
+    // Prioridade, com o id como desempate. Sem ele, duas metas de mesma
+    // `priority` ficam na ordem de ENTRADA — e os dois lados recebem a lista de
+    // fontes diferentes (o MCP monta do Firestore, a tela do snapshot). Com o
+    // bolso cobrindo só uma das duas, cada lado diria que uma diferente cabe.
     const ativas = (metas || [])
         .filter(m => m.status !== 'completed')
-        .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
+        .sort((a, b) =>
+            (a.priority ?? 99) - (b.priority ?? 99)
+            || String(a.id).localeCompare(String(b.id)));
 
     // Em centavos inteiros: somar floats e comparar com o bolso erra na
     // fronteira exata, marcando como "não cabe" um item que cabe por zero.

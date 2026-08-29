@@ -82,11 +82,21 @@ def cobertura(meta: dict, disponivel: float) -> float:
     return min(alvo, centavos(disponivel)) / 100 if alvo > 0 else 0.0
 
 
-def _prioridade(meta: dict) -> float:
+def _ordem(meta: dict) -> tuple:
+    """Prioridade, com o id como desempate.
+
+    O desempate nao e capricho. Sem ele, duas metas de mesma `priority` ficam na
+    ordem de ENTRADA da lista — e os dois lados recebem a lista de fontes
+    diferentes (o MCP monta do Firestore, a tela do snapshot). Com o bolso
+    cobrindo so uma das duas, cada lado diria que uma diferente cabe: a mesma
+    divergencia entre linguagens que este modulo existe para eliminar, entrando
+    por uma porta que a fixture nao olhava.
+    """
     try:
-        return float(meta.get("priority"))
+        prioridade = float(meta.get("priority"))
     except (TypeError, ValueError):
-        return 99.0
+        prioridade = 99.0
+    return (prioridade, str(meta.get("id") or ""))
 
 
 def cobertura_da_fila(metas, disponivel: float) -> dict:
@@ -100,7 +110,7 @@ def cobertura_da_fila(metas, disponivel: float) -> dict:
     `priority` (que ate agora nao tinha efeito nenhum sobre nada).
     """
     ativas = [m for m in (metas or []) if str(m.get("status") or "") != "completed"]
-    ativas.sort(key=_prioridade)
+    ativas.sort(key=_ordem)
 
     # Em centavos inteiros: somar floats e comparar com o bolso erra na fronteira
     # exata, marcando como "nao cabe" um item que cabe por zero.

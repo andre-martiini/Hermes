@@ -72,6 +72,40 @@ describe('cobertura individual — os números que a tela já mostrava', () => {
     });
 });
 
+describe('empate de prioridade', () => {
+    // O mesmo caso de `functions/test_bolso_aquisicoes.py`. Duas metas de mesma
+    // `priority` ficavam na ordem de ENTRADA, e os dois lados recebem a lista de
+    // fontes diferentes — o MCP do Firestore, a tela do snapshot.
+
+    const SETTINGS = { emergencyReserveCurrent: 0, emergencyReserveTarget: 0, investmentReserveCurrent: 1000 };
+    const cabe = (metas: any[]) =>
+        Object.fromEntries(resumoDoBolso(metas, SETTINGS, []).metas.map(m => [m.id, m.cabeNaFila]));
+
+    it('a ordem de entrada não muda quem cabe', () => {
+        const metas = [
+            { id: 'z', targetAmount: 600, priority: 2, status: 'active' },
+            { id: 'a', targetAmount: 600, priority: 2, status: 'active' },
+        ];
+        expect(cabe(metas)).toEqual(cabe([...metas].reverse()));
+    });
+
+    it('o desempate é pelo id e é estável', () => {
+        const metas = [
+            { id: 'z', targetAmount: 600, priority: 2, status: 'active' },
+            { id: 'a', targetAmount: 600, priority: 2, status: 'active' },
+        ];
+        expect(cabe(metas)).toEqual({ a: true, z: false });
+    });
+
+    it('prioridade ausente vai para o fim', () => {
+        const metas = [
+            { id: 'sem', targetAmount: 600, status: 'active' },
+            { id: 'com', targetAmount: 600, priority: 1, status: 'active' },
+        ];
+        expect(cabe(metas)).toEqual({ com: true, sem: false });
+    });
+});
+
 describe('dinheiro não é float', () => {
     // Os MESMOS casos de `functions/test_bolso_aquisicoes.py`. Se um lado mudar
     // de convenção, o outro quebra.

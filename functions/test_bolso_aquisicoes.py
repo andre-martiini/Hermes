@@ -85,6 +85,41 @@ class TestACoberturaBateComATela(unittest.TestCase):
         self.assertEqual(r["metas"][0]["currentAmount"], 480)
 
 
+class TestEmpateDePrioridade(unittest.TestCase):
+    """A porta que a fixture nao olhava.
+
+    Duas metas de mesma `priority` ficavam na ordem de ENTRADA da lista, e os
+    dois lados recebem a lista de fontes diferentes: o MCP monta do Firestore, a
+    tela monta do snapshot. Com o bolso cobrindo so uma das duas, cada lado
+    diria que uma diferente cabe — divergencia entre linguagens outra vez, sem
+    nenhum teste reclamar.
+
+    O mesmo caso esta no arquivo espelho.
+    """
+
+    SETTINGS = {"emergencyReserveCurrent": 0, "emergencyReserveTarget": 0,
+                "investmentReserveCurrent": 1000}
+
+    def _cabe(self, metas):
+        r = ba.resumo(metas, self.SETTINGS, [])
+        return {m["id"]: m["cabe_na_fila"] for m in r["metas"]}
+
+    def test_a_ordem_de_entrada_nao_muda_quem_cabe(self):
+        metas = [{"id": "z", "targetAmount": 600, "priority": 2, "status": "active"},
+                 {"id": "a", "targetAmount": 600, "priority": 2, "status": "active"}]
+        self.assertEqual(self._cabe(metas), self._cabe(list(reversed(metas))))
+
+    def test_o_desempate_e_pelo_id_e_e_estavel(self):
+        metas = [{"id": "z", "targetAmount": 600, "priority": 2, "status": "active"},
+                 {"id": "a", "targetAmount": 600, "priority": 2, "status": "active"}]
+        self.assertEqual(self._cabe(metas), {"a": True, "z": False})
+
+    def test_prioridade_ausente_vai_para_o_fim(self):
+        metas = [{"id": "sem", "targetAmount": 600, "status": "active"},
+                 {"id": "com", "targetAmount": 600, "priority": 1, "status": "active"}]
+        self.assertEqual(self._cabe(metas), {"com": True, "sem": False})
+
+
 class TestDinheiroNaoEFloat(unittest.TestCase):
     """Os dois jeitos de a aritmetica reintroduzir a divergencia entre linguagens.
 
