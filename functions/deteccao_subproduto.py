@@ -369,15 +369,22 @@ def montar_dossie(candidata: dict, limite_diario: int = 4000) -> dict:
     }
 
 
-def resumo_para_o_usuario(sugestao: dict, titulo_acao: str, nome_objetivo: str) -> str:
+def resumo_para_o_usuario(sugestao: dict, titulo_acao: str, nome_objetivo: str,
+                          concluida_em: str = "", passivo: bool = False) -> str:
     """O texto do card. Nao e "considere transformar isso em artigo".
 
     Cada linha responde uma pergunta que o usuario faria antes de aceitar: o que
     ja existe, o que da para fazer com isso, a que objetivo serve, o que falta e
     quanto custa. Sugestao vaga e recusada sem leitura.
     """
+    idade = ""
+    if passivo:
+        # Sem esta linha o card apresenta trabalho antigo como se fosse desta
+        # semana, e o usuario aceita sem saber o que esta aceitando.
+        idade = (f" (trabalho antigo, concluido em {concluida_em})" if concluida_em
+                 else " (trabalho antigo)")
     return (
-        f'Elevacao sugerida — acao "{titulo_acao}"\n'
+        f'Elevacao sugerida — acao "{titulo_acao}"{idade}\n'
         f'O que ja existe: {sugestao["o_que_ja_existe"]}\n'
         f'Ativo possivel: {sugestao["ativo_possivel"]}\n'
         f'Objetivo servido: {nome_objetivo} — {sugestao["justificativa"]}\n'
@@ -606,7 +613,8 @@ def reservar_no_firestore(db, hoje: str, teto: int, ref, payload: dict,
 
 def registrar_sugestao(db, sugestao: dict, hoje: str, titulo_acao: str,
                        nome_objetivo: str, teto: int = TETO_POR_MES,
-                       reservar=reservar_no_firestore, ja_no_mes: int = 0) -> str | None:
+                       reservar=reservar_no_firestore, ja_no_mes: int = 0,
+                       concluida_em: str = "", passivo: bool = False) -> str | None:
     """Grava a sugestao se ainda houver vaga no mes. None quando nao ha.
 
     `reservar` e uma costura: a atomicidade e o ponto, e testa-la de verdade
@@ -621,7 +629,12 @@ def registrar_sugestao(db, sugestao: dict, hoje: str, titulo_acao: str,
         "criada_em": hoje,
         "titulo_acao": titulo_acao,
         "nome_objetivo": nome_objetivo,
-        "resumo": resumo_para_o_usuario(sugestao, titulo_acao, nome_objetivo),
+        # Quando o trabalho aconteceu, gravado e nao deduzido: e o que separa
+        # "fiz isso esta semana" de "fiz isso ha dois anos" na hora de decidir.
+        "concluida_em": concluida_em or None,
+        "passivo": bool(passivo),
+        "resumo": resumo_para_o_usuario(sugestao, titulo_acao, nome_objetivo,
+                                        concluida_em=concluida_em, passivo=passivo),
     }
     return ref.id if reservar(db, hoje, teto, ref, payload, ja_no_mes) else None
 
@@ -1008,8 +1021,16 @@ def _ferramenta_propor(db, hoje: str, rodada: dict, aceitas: list,
     # propria; se ele nao entrasse aqui, `validar_proposta` recusaria todo id de
     # passivo como inexistente — a cota inteira viraria um no-op que ainda por
     # cima avanca o cursor, descartando aquelas acoes em silencio.
-    titulos = {c["task_id"]: str(c["tarefa"].get("titulo") or "")
-               for c in list(rodada["candidatos"]) + list(rodada.get("passivo") or [])}
+    todas = list(rodada["candidatos"]) + list(rodada.get("passivo") or [])
+    titulos = {c["task_id"]: str(c["tarefa"].get("titulo") or "") for c in todas}
+    # Quando a acao foi concluida, e se ela veio do passivo. O card precisa disso:
+    # sugestao sobre trabalho de 2024 apresentada igual a de trabalho desta semana
+    # faz o usuario aceitar sem saber o que esta aceitando. Instruir o modelo a
+    # dizer isso na justificativa nao basta — neste modulo a validacao mora na
+    # gravacao, e nao na confianca no prompt.
+    quando = {c["task_id"]: (str(c["tarefa"].get("data_conclusao") or "")[:10],
+                             bool(c.get("passivo")))
+              for c in todas}
 
     def propor_elevacao(**kwargs) -> dict:
         sugestao = validar_proposta(kwargs, set(objetivos_por_id), set(titulos))
@@ -1018,10 +1039,12 @@ def _ferramenta_propor(db, hoje: str, rodada: dict, aceitas: list,
         objetivo = objetivos_por_id[sugestao["objetivo_id"]]
         # O teto e conferido dentro da transacao, e nao aqui: esta funcao roda em
         # paralelo com as outras tool calls da mesma rodada.
+        concluida_em, e_passivo = quando.get(sugestao["task_id"], ("", False))
         sugestao_id = registrar_sugestao(
             db, sugestao, hoje, titulos[sugestao["task_id"]],
             str(objetivo.get("objetivoMacro") or ""), reservar=reservar,
             ja_no_mes=int(rodada.get("ja_no_mes") or 0),
+            concluida_em=concluida_em, passivo=e_passivo,
         )
         if not sugestao_id:
             return {"aceita": False, "motivo": "teto do mes ja atingido"}
@@ -1129,11 +1152,12 @@ def rodar_deteccao(db, hoje: str, carga_semana, claude_key: str) -> dict:
                     contar_passivo(db, rodada.get("passivo_cursor") or "",
                                    rodada.get("corte_conclusao") or hoje))
     print(f"[Elevacao] Rodada concluida. propostas={len(aceitas)} "
-          f"candidatas={len(rodada['candidatos'])} "
+          f"candidatas={len(rodada['candidatos'])}+{len(rodada.get('passivo') or [])} "
           f"conclusoes_desde={rodada.get('corte_conclusao')} "
           f"resumo={resultado['text'][:200]!r}")
     return {"rodou": True, "propostas": aceitas,
-            "candidatas": len(rodada["candidatos"])}
+            "candidatas": len(rodada["candidatos"]),
+            "candidatas_passivo": len(rodada.get("passivo") or [])}
 
 
 # ---------------------------------------------------------------------------
@@ -1309,6 +1333,8 @@ def listar_pendentes(db, limite: int = 20) -> dict:
             "motivo_escassez": dados.get("motivo_escassez"),
             "resumo": dados.get("resumo"),
             "criada_em": dados.get("criada_em"),
+            "concluida_em": dados.get("concluida_em"),
+            "passivo": bool(dados.get("passivo")),
         })
     pendentes.sort(key=lambda s: str(s.get("criada_em") or ""))
     return {"total": len(pendentes), "sugestoes": pendentes[:limite]}

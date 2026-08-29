@@ -609,6 +609,60 @@ class TestAContagemDoQueFaltaDoPassivo(unittest.TestCase):
         self.assertEqual(ds.contar_passivo(self._db(), "2026-04-01|b0", "2026-08-29"), 0)
 
 
+class TestOCardDizQuandoOTrabalhoAconteceu(unittest.TestCase):
+    """Sugestao de passivo apresentada igual a de trabalho desta semana engana.
+
+    O material de 2024 vale o mesmo, mas a decisao nao e a mesma: o usuario pode
+    nem lembrar da acao. Instruir o modelo a situar isso na justificativa nao
+    basta — neste modulo a validacao mora na gravacao, e nao na confianca no
+    prompt, e foi assim que o teto e a lista de objetivos foram tratados.
+    """
+
+    BASE = {
+        "task_id": "antiga", "objetivo_id": "intel", "motivo_escassez": "ja_escrito",
+        "o_que_ja_existe": "handoff pronto", "passo_que_falta": "publicar",
+        "custo_estimado": "uma tarde", "ativo_possivel": "Relato de experiencia",
+        "justificativa": "O handoff ja e o texto do relato.",
+    }
+
+    def test_o_card_de_passivo_diz_a_data(self):
+        texto = ds.resumo_para_o_usuario(self.BASE, "Handoff", "Autoridade",
+                                         concluida_em="2024-03-01", passivo=True)
+        self.assertIn("trabalho antigo", texto)
+        self.assertIn("2024-03-01", texto)
+
+    def test_o_card_da_semana_nao_ganha_ressalva(self):
+        texto = ds.resumo_para_o_usuario(self.BASE, "Handoff", "Autoridade")
+        self.assertNotIn("trabalho antigo", texto)
+
+    def test_passivo_sem_data_ainda_avisa_que_e_antigo(self):
+        texto = ds.resumo_para_o_usuario(self.BASE, "Handoff", "Autoridade", passivo=True)
+        self.assertIn("trabalho antigo", texto)
+
+    def test_a_sugestao_gravada_guarda_quando_aconteceu(self):
+        """Gravado, e nao deduzido depois: a fila e o card leem daqui."""
+        gravado = {}
+
+        def _reservar(db, hoje, teto, ref, payload, ja_no_mes=0):
+            gravado.update(payload)
+            return True
+
+        ds.registrar_sugestao(_Db(), dict(self.BASE), HOJE, "Handoff", "Autoridade",
+                              reservar=_reservar, concluida_em="2024-03-01", passivo=True)
+        self.assertEqual(gravado["concluida_em"], "2024-03-01")
+        self.assertTrue(gravado["passivo"])
+
+    def test_a_fila_devolve_o_contexto_temporal(self):
+        db = _Db()
+        db.collection(ds.COL_ELEVACOES).dados["s1"] = {
+            **self.BASE, "status": ds.STATUS_PENDENTE, "criada_em": HOJE,
+            "titulo_acao": "Handoff", "nome_objetivo": "Autoridade",
+            "concluida_em": "2024-03-01", "passivo": True, "resumo": "x"}
+        sugestao = ds.listar_pendentes(db)["sugestoes"][0]
+        self.assertEqual(sugestao["concluida_em"], "2024-03-01")
+        self.assertTrue(sugestao["passivo"])
+
+
 class TestConcluidaQueGanhaCorpoDepois(unittest.TestCase):
     """Acao concluida PODE ganhar corpo depois, e sem isto sumiria para sempre.
 
