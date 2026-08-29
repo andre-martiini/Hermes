@@ -24,13 +24,28 @@ const parseDateDay = (dateStr?: string) => {
     };
 };
 import { resolveTwoStepAction } from './src/utils/destructiveActions';
+import { centavos, MetaComCobertura } from './src/utils/bolsoAquisicoes';
 import { NFSeGenerator } from './src/components/NFSeGenerator';
+/**
+ * A meta como `resumoDoBolso` a devolve: com a cobertura e a leitura da fila já
+ * calculadas. A tela recebe isso pronto e **não refaz nenhuma das duas contas**.
+ *
+ * Não é preciosismo de tipo. Refazer a fila aqui, em float, fazia um item
+ * aparecer 100% coberto e "não cabe" ao mesmo tempo na fronteira exata — a
+ * divergência entre linguagens que o módulo compartilhado existe para eliminar,
+ * reentrando pela porta da view. Os campos são obrigatórios justamente para que
+ * um chamador que monte as metas por fora do módulo não compile.
+ */
+export type MetaDeAquisicao = FinanceGoal & Pick<MetaComCobertura, 'coberturaPct' | 'cabeNaFila'>;
+
 interface FinanceViewProps {
     transactions: FinanceTransaction[];
-    goals: FinanceGoal[];
+    goals: MetaDeAquisicao[];
     emergencyReserve: { target: number; current: number };
     /** O cofre de aquisições: quanto há disponível para desejos de compra. */
     bolsoAquisicoes: number;
+    /** Quantos itens da fila o cofre compra de uma vez, na ordem de prioridade. */
+    itensQueCabemNoBolso: number;
     settings: FinanceSettings;
     currentMonthTotal: number;
     currentMonthIncome: number;
@@ -238,6 +253,7 @@ const FinanceView = ({
     goals,
     emergencyReserve,
     bolsoAquisicoes,
+    itensQueCabemNoBolso,
     settings,
     currentMonthTotal,
     currentMonthIncome = 0,
@@ -569,32 +585,35 @@ const FinanceView = ({
     const currentBudget = settings.monthlyBudgets?.[periodKey] || settings.monthlyBudget;
     const budgetPercentage = Math.min((currentMonthTotal / currentBudget) * 100, 100);
 
-    const sortedGoals = [...goals].sort((a, b) => a.priority - b.priority);
+    // A MESMA ordenação do módulo, desempate por id incluído. Sem o desempate, duas
+    // metas de mesma `priority` apareceriam na tela numa ordem e teriam sido
+    // avaliadas na fila noutra — os selos de "cabe" ficariam fora de ordem em
+    // relação à lista que o usuário está lendo.
+    const sortedGoals = [...goals].sort((a, b) =>
+        (a.priority ?? 99) - (b.priority ?? 99) || String(a.id).localeCompare(String(b.id)));
 
-    // O cofre e ate onde ele alcanca na fila. As coberturas individuais NAO sao
-    // somaveis — dois itens de R$ 2.000 podem aparecer os dois como cobertos com
-    // um bolso de R$ 3.870,97, e comprar os dois nao da. A tela precisa dizer
-    // isso, senao o modelo de bolso unico (que e deliberado e esta certo) passa
-    // a trabalhar contra o usuario na hora de decidir.
-    // O valor do cofre vem pronto de quem monta as metas — derivar de volta a
-    // partir das coberturas ja aplicadas seria engenharia reversa de um numero
-    // que o chamador tem na mao.
-    const cabeNaFila = useMemo(() => {
-        const ativas = [...goals]
-            .filter(g => g.status !== 'completed' && g.targetAmount > 0)
-            .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
-        let acumulado = 0;
-        return new Map(ativas.map(g => {
-            acumulado += g.targetAmount;
-            return [g.id, acumulado <= bolsoAquisicoes] as const;
-        }));
-    }, [goals, bolsoAquisicoes]);
-    const itensQueCabem = [...cabeNaFila.values()].filter(Boolean).length;
-    const somaDosCobertos = sortedGoals
-        .filter(g => g.status !== 'completed' && g.targetAmount > 0
-                     && g.currentAmount >= g.targetAmount)
-        .reduce((acc, g) => acc + g.targetAmount, 0);
-    const cobertosEstouramOCofre = somaDosCobertos > bolsoAquisicoes;
+    // O cofre, a cobertura de cada meta e a leitura da fila chegam PRONTOS de
+    // `resumoDoBolso`. A tela não recalcula nenhum dos três: quando recalculava,
+    // fazia em float o que o módulo faz em centavos, e na fronteira exata os dois
+    // discordavam — um item aparecia 100% coberto e "não cabe" ao mesmo tempo,
+    // que é a pior contradição possível num número que orienta compra.
+    //
+    // O que sobra aqui é só o que a tela precisa dizer e o módulo não devolve: as
+    // coberturas individuais NÃO são somáveis. Dois itens de R$ 2.000 podem
+    // aparecer os dois como cobertos com um bolso de R$ 3.870,97, e comprar os
+    // dois não dá. Sem esse aviso o modelo de bolso único — que é deliberado e
+    // está certo — trabalha contra o usuário na hora de decidir.
+    //
+    // A comparação usa `centavos()` do próprio módulo, e não `>=` em float, pelo
+    // mesmo motivo de lá: na fronteira exata o float responde "não" para um item
+    // que cabe por zero.
+    const coberto = (g: MetaDeAquisicao) =>
+        centavos(g.targetAmount) > 0 && centavos(g.currentAmount) >= centavos(g.targetAmount);
+    const cobertosEmCentavos = sortedGoals
+        .filter(g => g.status !== 'completed' && coberto(g))
+        .reduce((acc, g) => acc + centavos(g.targetAmount), 0);
+    const somaDosCobertos = cobertosEmCentavos / 100;
+    const cobertosEstouramOCofre = cobertosEmCentavos > centavos(bolsoAquisicoes);
 
     const handleFileUpload = async (file: File) => {
         if (!file) return null;
@@ -2101,10 +2120,16 @@ const FinanceView = ({
                                                 R$ {bolsoAquisicoes.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </span>
                                         </div>
+                                        {/* Fila vazia primeiro: sem nenhum desejo cadastrado, zero
+                                            itens que cabem não é falta de dinheiro, e dizer que o
+                                            cofre "ainda não cobre o primeiro item" seria uma
+                                            afirmação financeira falsa sobre um item inexistente. */}
                                         <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-                                            {itensQueCabem === 0
-                                                ? 'Ainda não cobre o primeiro item da fila por inteiro.'
-                                                : `Compra ${itensQueCabem} ${itensQueCabem === 1 ? 'item' : 'itens'} da fila ao mesmo tempo, na ordem de prioridade.`}
+                                            {sortedGoals.length === 0
+                                                ? 'Nenhum desejo de compra na fila — o cofre está inteiro.'
+                                                : itensQueCabemNoBolso === 0
+                                                    ? 'Ainda não cobre o primeiro item da fila por inteiro.'
+                                                    : `Compra ${itensQueCabemNoBolso} ${itensQueCabemNoBolso === 1 ? 'item' : 'itens'} da fila ao mesmo tempo, na ordem de prioridade.`}
                                         </p>
                                         {cobertosEstouramOCofre && (
                                             <p className="mt-2 text-xs font-medium text-amber-600 dark:text-amber-400">
@@ -2135,11 +2160,15 @@ const FinanceView = ({
                                     {sortedGoals.length > 0 ? (
                                         <div className="space-y-4">
                                             {sortedGoals.map((goal) => {
-                                                const isReady = goal.targetAmount > 0 && goal.currentAmount >= goal.targetAmount;
-                                                const pct = goal.targetAmount > 0 ? Math.min(100, (goal.currentAmount / goal.targetAmount) * 100) : 0;
+                                                const isReady = coberto(goal);
+                                                // A porcentagem vem arredondada do módulo. Arredondar
+                                                // aqui a razão crua reintroduzia a divergência: uma casa
+                                                // decimal por regra própria da tela contra a do módulo,
+                                                // e 49/400 dava 12,2 no MCP e 12,3 aqui.
+                                                const pct = goal.coberturaPct;
                                                 // Coberto sozinho não é o mesmo que comprável junto
                                                 // com os que vêm antes na fila.
-                                                const cabe = cabeNaFila.get(goal.id) ?? false;
+                                                const cabe = goal.cabeNaFila;
                                                 const cobertoMasNaoCabe = isReady && !cabe;
 
                                                 return (

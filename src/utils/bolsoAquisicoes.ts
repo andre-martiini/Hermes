@@ -90,17 +90,22 @@ export function cobertura(meta: MetaBolso, disponivel: number): number {
     return alvo > 0 ? Math.min(alvo, centavos(disponivel)) / 100 : 0;
 }
 
-export interface MetaComCobertura extends MetaBolso {
+/** O que o módulo acrescenta a cada meta. */
+export interface ComCobertura {
     currentAmount: number;
     coberturaPct: number;
     /** Se dá para comprar este item JUNTO com os que vêm antes dele na fila. */
     cabeNaFila: boolean;
 }
 
-export interface ResumoDoBolso {
+// Interseção e não `extends`: `MetaBolso.currentAmount` é opcional e aqui ele
+// deixa de ser, porque o módulo sempre o devolve.
+export type MetaComCobertura = MetaBolso & ComCobertura;
+
+export interface ResumoDoBolso<T extends MetaBolso = MetaBolso> {
     bolso: number;
     itensQueCabem: number;
-    metas: MetaComCobertura[];
+    metas: (T & ComCobertura)[];
 }
 
 /**
@@ -111,11 +116,11 @@ export interface ResumoDoBolso {
  * vários selos de 100% aparecem ao mesmo tempo. É também o único uso efetivo que
  * o campo `priority` ganha.
  */
-export function resumoDoBolso(
-    metas: MetaBolso[],
+export function resumoDoBolso<T extends MetaBolso>(
+    metas: T[],
     settings: SettingsBolso,
     contasDoMes: ContaDoMes[],
-): ResumoDoBolso {
+): ResumoDoBolso<T> {
     const disponivel = bolso(settings, contasDoMes);
 
     // Prioridade, com o id como desempate. Sem ele, duas metas de mesma

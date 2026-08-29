@@ -3711,7 +3711,17 @@ const App: React.FC = () => {
       // e cada meta ficava com o valor de um momento diferente, enquanto as
       // nunca editadas guardavam o zero do cadastro. Nada lê esse campo na tela,
       // e por isso a divergência só aparecia por fora, no MCP.
-      const { currentAmount: _derivado, ...persistivel } = goal as any;
+      //
+      // `coberturaPct` e `cabeNaFila` saem pelo mesmo motivo: são derivados do
+      // cofre no instante da leitura, e a meta chega aqui já enriquecida por
+      // `resumoDoBolso`. Gravá-los criaria de novo a classe de defeito que este
+      // trecho existe para fechar — só que agora em campos que o MCP nem lê.
+      const {
+        currentAmount: _derivado,
+        coberturaPct: _pct,
+        cabeNaFila: _cabe,
+        ...persistivel
+      } = goal as any;
       await updateDoc(doc(db, 'finance_goals', goal.id), persistivel);
     } catch (err) {
       console.error(err);
@@ -6036,56 +6046,35 @@ const App: React.FC = () => {
                     onUpdateService={handleUpdateService}
                     onDeleteService={handleDeleteService}
                   />
-                ) : viewMode === 'finance' ? (
+                ) : viewMode === 'finance' ? (() => {
+                  // UMA chamada ao módulo compartilhado, e a tela consome o que
+                  // ela devolve. A versão anterior passava o cofre e deixava a
+                  // FinanceView refazer a conta da fila por fora — o que
+                  // reintroduzia, em float e sem desempate, exatamente a
+                  // divergência que o módulo existe para eliminar.
+                  //
+                  // As contas do mês vão CRUAS para o módulo: pré-agregar aqui
+                  // somava `amount` com `+`, que concatena quando o Firestore
+                  // guardou o valor como string.
+                  const aquisicoes = resumoDoBolso(
+                    financeGoals,
+                    {
+                      emergencyReserveCurrent: financeSettings.emergencyReserveCurrent || 0,
+                      emergencyReserveTarget: financeSettings.emergencyReserveTarget || 0,
+                      investmentReserveCurrent: financeSettings.investmentReserveCurrent || 0,
+                    },
+                    fixedBills.filter(b => b.month === currentMonth && b.year === currentYear),
+                  );
+                  return (
                   <FinanceView
                     transactions={financeTransactions}
-                    goals={(() => {
-                      // Filtrado pelo mês em exibição. A assinatura de
-                      // `fixed_bills` é sem filtro (index.tsx:1249), então somar
-                      // tudo incluía a poupança de todos os meses já registrados
-                      // — e `consultar_financas_v2` consulta só o mês pedido, de
-                      // modo que a tela e o MCP discordariam pelo caminho que
-                      // este PR existe para fechar.
-                      const totalSavings = fixedBills
-                        .filter(b => b.month === currentMonth && b.year === currentYear
-                                     && b.category === 'Poupança' && b.isPaid)
-                        .reduce((acc, curr) => acc + curr.amount, 0);
-                      const emergencyCurrent = financeSettings.emergencyReserveCurrent || 0;
-                      const isEmergencyFull = emergencyCurrent >= (financeSettings.emergencyReserveTarget || 0);
-                      const investmentCurrent = financeSettings.investmentReserveCurrent || 0;
-                      const availableForGoals = investmentCurrent + (isEmergencyFull ? totalSavings : 0);
-
-                      // A mesma regra que `consultar_financas_v2` aplica no
-                      // backend, agora vinda de um módulo só — antes cada lado
-                      // tinha a sua, e o backend lia um campo gravado.
-                      return resumoDoBolso(
-                        financeGoals as any,
-                        { emergencyReserveCurrent: emergencyCurrent,
-                          emergencyReserveTarget: financeSettings.emergencyReserveTarget || 0,
-                          investmentReserveCurrent: investmentCurrent + (isEmergencyFull ? totalSavings : 0) },
-                        [],
-                      ).metas.sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99)) as any;
-                    })()}
+                    goals={aquisicoes.metas}
                     emergencyReserve={{
                       target: financeSettings.emergencyReserveTarget || 0,
                       current: financeSettings.emergencyReserveCurrent || 0
                     }}
-                    bolsoAquisicoes={(() => {
-                      // Filtrado pelo mês em exibição. A assinatura de
-                      // `fixed_bills` é sem filtro (index.tsx:1249), então somar
-                      // tudo incluía a poupança de todos os meses já registrados
-                      // — e `consultar_financas_v2` consulta só o mês pedido, de
-                      // modo que a tela e o MCP discordariam pelo caminho que
-                      // este PR existe para fechar.
-                      const totalSavings = fixedBills
-                        .filter(b => b.month === currentMonth && b.year === currentYear
-                                     && b.category === 'Poupança' && b.isPaid)
-                        .reduce((acc, curr) => acc + curr.amount, 0);
-                      const emergencyCurrent = financeSettings.emergencyReserveCurrent || 0;
-                      const isEmergencyFull = emergencyCurrent >= (financeSettings.emergencyReserveTarget || 0);
-                      return (financeSettings.investmentReserveCurrent || 0)
-                        + (isEmergencyFull ? totalSavings : 0);
-                    })()}
+                    bolsoAquisicoes={aquisicoes.bolso}
+                    itensQueCabemNoBolso={aquisicoes.itensQueCabem}
                     settings={financeSettings}
                     currentMonth={currentMonth}
                     currentYear={currentYear}
@@ -6150,6 +6139,8 @@ const App: React.FC = () => {
                       setIsCopilotoOpen(true);
                     }}
                   />
+                  );
+                })()
                 ) : viewMode === 'knowledge' ? (
                   <div className="fixed inset-0 z-[50] bg-slate-50 md:relative md:inset-auto md:z-0 md:bg-transparent">
                     <KnowledgeView
