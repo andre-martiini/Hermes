@@ -100,6 +100,26 @@ primeiro**, classificando-os em três grupos antes de qualquer mudança de compo
 **Não implementar nada** de fechamento de marco até essa auditoria voltar — o desenho depende do que
 a auditoria encontrar, e implementar antes é escolher o desenho no escuro.
 
+**Detector de subproduto: ações concluídas fora da varredura.** A consulta semanal filtra
+`status in ["em andamento", "stand-by"]`, então uma ação concluída durante a semana nunca gera
+elevação — justamente o caso mais forte, porque é a que com mais certeza deixou documento, diário e
+etapas prontas. O docstring de `candidatas` já declara que *não* filtra por conclusão; a consulta
+acima dela revoga isso. Achado pelo Codex no PR #131 e deliberadamente não corrigido lá, por três
+razões que continuam valendo:
+
+1. **Índice composto.** `status == "concluído"` com recorte temporal é igualdade + range em campos
+   diferentes. `tarefas` hoje tem um único índice composto (`reminder_sent`/`reminder_at`), então
+   isso exige `firestore.indexes.json` e deploy do índice **antes** do código.
+2. **Campo de corte não confiável.** `data_conclusao` é gravado por três caminhos diferentes, e
+   `knowledge_graph.py` já assume que pode faltar. Escolher entre `data_conclusao` e
+   `data_atualizacao` muda quais ações entram.
+3. **A janela é decisão de produto.** As concluídas são a maior parte de `tarefas` com o tempo. Sete
+   dias casa com a cadência semanal da varredura, mas é escolha do André.
+
+Recomendação para quando isto for retomado: segunda consulta por `status == "concluído"` filtrada
+por `data_conclusao >= hoje-7`, com o índice declarado antes e `data_conclusao` conferido nos três
+caminhos de escrita primeiro.
+
 ## Verificações em produção
 
 As duas verificações de produção pendentes (indicador de saúde lendo a medida real, e a fila de
