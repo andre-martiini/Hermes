@@ -780,6 +780,20 @@ def execute(tool_name: str, slots: dict, db) -> str:
 
         settings = settings_doc.to_dict() or {}
 
+        # `currentAmount` e DERIVADO, e ate agora vinha gravado no documento. O
+        # valor gravado so era atualizado quando a meta era editada na tela,
+        # entao cada meta guardava o bolso de um momento diferente — e as que
+        # nunca foram editadas guardavam o zero do cadastro. A tela nunca leu
+        # esse campo (ela calcula na hora), e foi por isso que a divergencia
+        # passou despercebida: quem lia pelo MCP via numero errado.
+        #
+        # A regra vive em `bolso_aquisicoes`, espelhada em
+        # `src/utils/bolsoAquisicoes.ts`. As duas tem de dar o mesmo numero.
+        import bolso_aquisicoes
+
+        aquisicoes = bolso_aquisicoes.resumo(goals, settings, bills)
+        goals = aquisicoes["metas"]
+
         summary = {
             "periodo": {"mes": int(mes), "ano": int(ano)},
             "resumo": {
@@ -794,6 +808,20 @@ def execute(tool_name: str, slots: dict, db) -> str:
             "reserva_emergencia": {
                 "alvo": settings.get("emergencyReserveTarget", 0),
                 "atual": settings.get("emergencyReserveCurrent", 0)
+            },
+            # O bolso explicito, em campo proprio. Antes so dava para inferi-lo
+            # pelas coberturas, o que obrigava quem le a fazer engenharia
+            # reversa de um numero que o sistema ja tem.
+            #
+            # `itens_que_cabem_no_bolso` responde o que a cobertura individual
+            # nao responde: as coberturas NAO sao somaveis, entao varios itens a
+            # 100% ao mesmo tempo nao significam que da para comprar todos.
+            "aquisicoes": {
+                "bolso": aquisicoes["bolso_aquisicoes"],
+                "itens_que_cabem_no_bolso": aquisicoes["itens_que_cabem_no_bolso"],
+                "observacao": ("A cobertura de cada meta e individual: diz se da "
+                               "para comprar AQUELE item sozinho. Somar as "
+                               "coberturas estoura o bolso."),
             },
             "detalhes": {
                 "contas": bills,

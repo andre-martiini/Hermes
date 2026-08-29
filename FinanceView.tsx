@@ -29,6 +29,8 @@ interface FinanceViewProps {
     transactions: FinanceTransaction[];
     goals: FinanceGoal[];
     emergencyReserve: { target: number; current: number };
+    /** O cofre de aquisições: quanto há disponível para desejos de compra. */
+    bolsoAquisicoes: number;
     settings: FinanceSettings;
     currentMonthTotal: number;
     currentMonthIncome: number;
@@ -235,6 +237,7 @@ const FinanceView = ({
     transactions,
     goals,
     emergencyReserve,
+    bolsoAquisicoes,
     settings,
     currentMonthTotal,
     currentMonthIncome = 0,
@@ -567,6 +570,31 @@ const FinanceView = ({
     const budgetPercentage = Math.min((currentMonthTotal / currentBudget) * 100, 100);
 
     const sortedGoals = [...goals].sort((a, b) => a.priority - b.priority);
+
+    // O cofre e ate onde ele alcanca na fila. As coberturas individuais NAO sao
+    // somaveis — dois itens de R$ 2.000 podem aparecer os dois como cobertos com
+    // um bolso de R$ 3.870,97, e comprar os dois nao da. A tela precisa dizer
+    // isso, senao o modelo de bolso unico (que e deliberado e esta certo) passa
+    // a trabalhar contra o usuario na hora de decidir.
+    // O valor do cofre vem pronto de quem monta as metas — derivar de volta a
+    // partir das coberturas ja aplicadas seria engenharia reversa de um numero
+    // que o chamador tem na mao.
+    const cabeNaFila = useMemo(() => {
+        const ativas = [...goals]
+            .filter(g => g.status !== 'completed' && g.targetAmount > 0)
+            .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
+        let acumulado = 0;
+        return new Map(ativas.map(g => {
+            acumulado += g.targetAmount;
+            return [g.id, acumulado <= bolsoAquisicoes] as const;
+        }));
+    }, [goals, bolsoAquisicoes]);
+    const itensQueCabem = [...cabeNaFila.values()].filter(Boolean).length;
+    const somaDosCobertos = sortedGoals
+        .filter(g => g.status !== 'completed' && g.targetAmount > 0
+                     && g.currentAmount >= g.targetAmount)
+        .reduce((acc, g) => acc + g.targetAmount, 0);
+    const cobertosEstouramOCofre = somaDosCobertos > bolsoAquisicoes;
 
     const handleFileUpload = async (file: File) => {
         if (!file) return null;
@@ -2061,6 +2089,32 @@ const FinanceView = ({
 
                                 <div className="">
                                 <FinanceSection title="Aquisições & Desejos de Compra" disableCollapse>
+                                    {/* O cofre, uma vez e em destaque. Antes este número não
+                                        aparecia em lugar nenhum da tela — era preciso inferi-lo
+                                        pelas barras de cobertura. */}
+                                    <div className="mb-4 p-4 rounded-xl border border-primary-tactile/25 bg-primary-tactile/5">
+                                        <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                                            <span className="text-[10px] font-sans font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                                                Cofre de aquisições
+                                            </span>
+                                            <span className="text-2xl font-black tabular-nums">
+                                                R$ {bolsoAquisicoes.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </span>
+                                        </div>
+                                        <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+                                            {itensQueCabem === 0
+                                                ? 'Ainda não cobre o primeiro item da fila por inteiro.'
+                                                : `Compra ${itensQueCabem} ${itensQueCabem === 1 ? 'item' : 'itens'} da fila ao mesmo tempo, na ordem de prioridade.`}
+                                        </p>
+                                        {cobertosEstouramOCofre && (
+                                            <p className="mt-2 text-xs font-medium text-amber-600 dark:text-amber-400">
+                                                ⚠️ Os itens marcados como cobertos somam R$ {somaDosCobertos.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} —
+                                                mais que o cofre. A cobertura é individual: cada selo diz que dá para
+                                                comprar <em>aquele</em> item sozinho, não todos juntos.
+                                            </p>
+                                        )}
+                                    </div>
+
                                     <div className="flex justify-end mb-4">
                                         <button
                                             onClick={() => {
@@ -2083,6 +2137,10 @@ const FinanceView = ({
                                             {sortedGoals.map((goal) => {
                                                 const isReady = goal.targetAmount > 0 && goal.currentAmount >= goal.targetAmount;
                                                 const pct = goal.targetAmount > 0 ? Math.min(100, (goal.currentAmount / goal.targetAmount) * 100) : 0;
+                                                // Coberto sozinho não é o mesmo que comprável junto
+                                                // com os que vêm antes na fila.
+                                                const cabe = cabeNaFila.get(goal.id) ?? false;
+                                                const cobertoMasNaoCabe = isReady && !cabe;
 
                                                 return (
                                                     <div
@@ -2116,9 +2174,23 @@ const FinanceView = ({
                                                                 </div>
 
                                                                 <div className="flex items-center gap-2">
-                                                                    {isReady && (
+                                                                    {/* Dois selos, e a diferença entre eles é o ponto:
+                                                                        "recursos disponíveis" diz que dá para comprar ESTE
+                                                                        item sozinho; o âmbar diz que ele não cabe junto com
+                                                                        os de prioridade acima. Sem essa distinção, vários
+                                                                        selos verdes ao mesmo tempo convidam a estourar o
+                                                                        cofre sem perceber. */}
+                                                                    {isReady && !cobertoMasNaoCabe && (
                                                                         <span className="text-[9px] font-extrabold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
                                                                             🛒 RECURSOS DISPONÍVEIS
+                                                                        </span>
+                                                                    )}
+                                                                    {cobertoMasNaoCabe && (
+                                                                        <span
+                                                                            title="O cofre cobre este item sozinho, mas não junto com os de prioridade acima."
+                                                                            className="text-[9px] font-extrabold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1"
+                                                                        >
+                                                                            🛒 SÓ SE FOR ESTE
                                                                         </span>
                                                                     )}
                                                                     <button

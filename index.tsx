@@ -35,6 +35,7 @@ import ContactsView from './ContactsView';
 import PersonalDiaryView from './PersonalDiaryView';
 import WhatsappInboxView from './WhatsappInboxView';
 import { INTERNAL_NAVIGATION_EVENT } from './src/utils/internalNavigation';
+import { resumoDoBolso } from './src/utils/bolsoAquisicoes';
 // Importações dos módulos extraídos pelo split.js
 import {
   DEFAULT_APP_SETTINGS, getDaysInMonth, isWorkDay, callScrapeSipac,
@@ -3704,7 +3705,14 @@ const App: React.FC = () => {
   };
   const handleUpdateFinanceGoal = async (goal: FinanceGoal) => {
     try {
-      await updateDoc(doc(db, 'finance_goals', goal.id), goal as any);
+      // `currentAmount` é DERIVADO do bolso e não pode ser persistido. Ele é
+      // sobrescrito na leitura (ver o `map` que monta `goals` para a FinanceView),
+      // então salvar o objeto inteiro gravava o bolso do instante da edição —
+      // e cada meta ficava com o valor de um momento diferente, enquanto as
+      // nunca editadas guardavam o zero do cadastro. Nada lê esse campo na tela,
+      // e por isso a divergência só aparecia por fora, no MCP.
+      const { currentAmount: _derivado, ...persistivel } = goal as any;
+      await updateDoc(doc(db, 'finance_goals', goal.id), persistivel);
     } catch (err) {
       console.error(err);
       showToast("Erro ao atualizar meta.", "error");
@@ -6040,16 +6048,30 @@ const App: React.FC = () => {
                       const investmentCurrent = financeSettings.investmentReserveCurrent || 0;
                       const availableForGoals = investmentCurrent + (isEmergencyFull ? totalSavings : 0);
 
-                      return [...financeGoals].sort((a, b) => a.priority - b.priority).map(goal => {
-                        if (goal.status === 'completed') return goal;
-                        const allocated = goal.targetAmount > 0 ? Math.min(goal.targetAmount, availableForGoals) : 0;
-                        return { ...goal, currentAmount: allocated };
-                      });
+                      // A mesma regra que `consultar_financas_v2` aplica no
+                      // backend, agora vinda de um módulo só — antes cada lado
+                      // tinha a sua, e o backend lia um campo gravado.
+                      return resumoDoBolso(
+                        financeGoals as any,
+                        { emergencyReserveCurrent: emergencyCurrent,
+                          emergencyReserveTarget: financeSettings.emergencyReserveTarget || 0,
+                          investmentReserveCurrent: investmentCurrent + (isEmergencyFull ? totalSavings : 0) },
+                        [],
+                      ).metas.sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99)) as any;
                     })()}
                     emergencyReserve={{
                       target: financeSettings.emergencyReserveTarget || 0,
                       current: financeSettings.emergencyReserveCurrent || 0
                     }}
+                    bolsoAquisicoes={(() => {
+                      const totalSavings = fixedBills
+                        .filter(b => b.category === 'Poupança' && b.isPaid)
+                        .reduce((acc, curr) => acc + curr.amount, 0);
+                      const emergencyCurrent = financeSettings.emergencyReserveCurrent || 0;
+                      const isEmergencyFull = emergencyCurrent >= (financeSettings.emergencyReserveTarget || 0);
+                      return (financeSettings.investmentReserveCurrent || 0)
+                        + (isEmergencyFull ? totalSavings : 0);
+                    })()}
                     settings={financeSettings}
                     currentMonth={currentMonth}
                     currentYear={currentYear}
