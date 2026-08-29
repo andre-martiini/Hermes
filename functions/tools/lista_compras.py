@@ -73,6 +73,12 @@ _MINIMO_PARA_COMPARAR = 5
 # lactose" e "leite de coco" compartilhariam um token a toa.
 _LIGACOES = {"de", "do", "da", "dos", "das", "sem", "com", "e", "em", "para", "no", "na"}
 
+# "sem" e "com" ligam a frase como as outras, mas invertem o produto: "leite sem
+# lactose" e "leite com lactose" sao coisas opostas. Sem tratar isso, os dois
+# ficam com os mesmos tokens (as ligacoes saem) E a distancia de edicao entre os
+# nomes inteiros e exatamente 2 — os dois criterios erram junto.
+_POLARIDADE = {"sem", "com"}
+
 ACOES = ("create", "update", "delete", "import_batch", "clear_planning", "finalize")
 
 _FILTROS = {
@@ -187,6 +193,9 @@ def _parece(nome_novo: str, nome_existente: str) -> bool:
     if not a or not b or a == b:
         return False
 
+    if _polaridade_conflita(nome_novo, nome_existente):
+        return False
+
     # Grafia diferente do mesmo nome inteiro: "mucarela" x "mussarela".
     if (
         min(len(a), len(b)) >= _MINIMO_PARA_COMPARAR
@@ -209,6 +218,21 @@ def _parece(nome_novo: str, nome_existente: str) -> bool:
     return all(
         any(_mesma_palavra(x, y) for y in maior)
         for x in menor
+    )
+
+
+def _polaridade_conflita(um: str, outro: str) -> bool:
+    """Um nome nega o que o outro afirma.
+
+    So o par sem/com conta como conflito. "cafe" x "cafe sem acucar" segue
+    candidato — ali falta qualificador, nao ha contradicao —, e quem decide e o
+    usuario. O que nao pode e apontar como duplicata dois produtos opostos.
+    """
+    palavras_um = set(re.split(r"[^a-z0-9]+", normalize_name(um))) & _POLARIDADE
+    palavras_outro = set(re.split(r"[^a-z0-9]+", normalize_name(outro))) & _POLARIDADE
+    return (
+        ("sem" in palavras_um and "com" in palavras_outro)
+        or ("com" in palavras_um and "sem" in palavras_outro)
     )
 
 

@@ -316,6 +316,25 @@ class TestQuandoDoisNomesSaoOMesmoProduto(unittest.TestCase):
             with self.subTest(a=a, b=b):
                 self.assertFalse(lc._parece(a, b), f"{a!r} casou com {b!r}")
 
+    def test_sem_e_com_nao_sao_o_mesmo_produto(self):
+        """Os dois criterios erram junto aqui, entao a checagem vem antes deles.
+
+        Removidas as ligacoes, "leite sem lactose" e "leite com lactose" ficam
+        com tokens identicos; e a distancia entre os nomes inteiros e exatamente
+        2, dentro da tolerancia. Apontar um como duplicata do outro mandaria o
+        usuario juntar produtos opostos.
+        """
+        for a, b in (("leite com lactose", "leite sem lactose"),
+                     ("café com açúcar", "café sem açúcar"),
+                     ("arroz com sal", "arroz sem sal")):
+            with self.subTest(a=a, b=b):
+                self.assertFalse(lc._parece(a, b), f"{a!r} casou com {b!r}")
+
+    def test_falta_de_qualificador_nao_e_contradicao(self):
+        """So sem-contra-com e conflito; qualificador ausente segue candidato."""
+        self.assertTrue(lc._parece("café", "café sem açúcar"))
+        self.assertTrue(lc._parece("leite sem lactose", "leite sem lactose integral"))
+
     def test_grafia_errada_dentro_de_nome_composto_ainda_casa(self):
         """A exigencia de casar todas as palavras nao pode matar o caso util."""
         self.assertTrue(lc._parece("leite sem lactose", "Leite sem lactoze Itambé"))
