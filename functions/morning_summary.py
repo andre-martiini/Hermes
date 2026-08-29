@@ -431,6 +431,20 @@ def _coletar_filas(db, hoje: str) -> dict:
     except Exception as exc:
         print(f"[ResumoMatinal] Falha ao consultar email_action_suggestions: {exc}")
 
+    # Elevacoes sugeridas: o trabalho ja feito que rende um ativo se alguem
+    # perguntar. Entra como fila porque e exatamente isso — uma decisao pendente
+    # que so existe dentro de uma tela, e que sem superficie ninguem ve.
+    try:
+        docs = [d.to_dict() or {} for d in db.collection("elevacoes_sugeridas")
+                .where(filter=firestore.FieldFilter("status", "==", "pendente")).limit(20).stream()]
+        if docs:
+            amostra = [{"titulo": d.get("titulo_acao") or "(sem título)",
+                        "ativo": d.get("ativo_possivel") or "",
+                        "objetivo": d.get("nome_objetivo") or ""} for d in docs]
+            filas["elevacoes"] = _fila(len(docs), amostra, "strategy")
+    except Exception as exc:
+        print(f"[ResumoMatinal] Falha ao consultar elevacoes_sugeridas: {exc}")
+
     # `whatsapp_consolidacoes` sem `task_id` NÃO entra aqui, de propósito: consolidar
     # uma conversa é muitas vezes um fim em si (ler o que foi dito), e as duas saídas
     # possíveis — anexar a uma ação ou não fazer nada — são ambas estados finais

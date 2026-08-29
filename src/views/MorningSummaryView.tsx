@@ -88,6 +88,7 @@ const REGRA_TOM: Record<ResumoFocoRegra, 'urgente' | 'atencao' | 'neutro'> = {
 // decisões pendentes. Ver o comentário em morning_summary._coletar_filas.
 const FILA_LABEL: Record<string, string> = {
     sugestoes_vinculo: 'Sugestões de vínculo',
+    elevacoes: 'Elevações sugeridas',
     fusoes_contatos: 'Fusões de contato',
     notificacoes_ia: 'Notificações na fila',
     contas: 'Contas vencendo',
@@ -102,6 +103,7 @@ const FILA_NOTA: Record<string, string> = {
 
 const FILA_ICONE: Record<string, string> = {
     sugestoes_vinculo: '🔗',
+    elevacoes: '↗️',
     fusoes_contatos: '👥',
     notificacoes_ia: '🔔',
     contas: '💸',

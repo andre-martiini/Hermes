@@ -13732,6 +13732,34 @@ from monthly_recurring_actions import gerar_acoes_recorrentes_mensais
 # Import daily AI notification planner job
 from ai_notification_planner import ai_notification_planner_daily
 
+# Import weekly byproduct detector job
+import deteccao_subproduto
+
+
+@scheduler_fn.on_schedule(
+    # Domingo às 18h: a semana já aconteceu, e a sugestão chega antes de a próxima
+    # começar — quando ainda dá para caber a tarde que ela custa. Semanal, e não
+    # diária, porque "a ação ganhou corpo" não acontece todo dia e o teto é mensal.
+    schedule="0 18 * * 0",
+    timezone="America/Sao_Paulo",
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=300,
+)
+def detectar_subproduto_semanal(event: scheduler_fn.ScheduledEvent) -> None:
+    """Procura, no trabalho já feito, o que rende um ativo com um passo a mais."""
+    from morning_summary import _coletar_acoes, _hoje_sp
+
+    db = get_db()
+    keys_doc = _cached_doc_get(db, "system", "api_keys")
+    claude_key = (keys_doc.to_dict() or {}).get("claude_api_key") if keys_doc.exists else None
+    if not claude_key:
+        print("[Elevacao] claude_api_key não configurada em system/api_keys; abortando.")
+        return
+
+    hoje = _hoje_sp()
+    deteccao_subproduto.rodar_deteccao(
+        db, hoje, _coletar_acoes(db, hoje).get("carga_semana") or [], claude_key)
+
 # Import personal diary + weekly personality consolidation jobs
 from personal_diary import gerar_diario_pessoal, consolidar_personalidade, ajustarDiarioPessoal
 
