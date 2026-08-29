@@ -538,6 +538,77 @@ class TestJanelaMaiorQueOTetoDaConsulta(unittest.TestCase):
         self.assertTrue(ds.preparar_rodada(self._db(ds.LIMITE_TAREFAS), HOJE, [])["rodar"])
 
 
+class TestAPropostaDePassivoEAceita(unittest.TestCase):
+    """A cota so serve para alguma coisa se a proposta de passivo puder ser gravada.
+
+    `validar_proposta` confere o `task_id` contra o conjunto de candidatas da
+    rodada. Se esse conjunto sair so de `candidatos`, todo id de passivo e
+    recusado como inexistente — a cota inteira vira no-op, e o cursor avanca por
+    cima, descartando aquelas acoes em silencio. E a mesma falha de sempre: fonte
+    nova que nao atravessa todos os consumidores.
+    """
+
+    def _rodada(self):
+        return {
+            "restantes": 3,
+            "ja_no_mes": 0,
+            "objetivos": [{"id": "intel", "objetivoMacro": "Autoridade intelectual",
+                           "pilar": "intelectual"}],
+            "candidatos": [],
+            "passivo": [{
+                "task_id": "antiga", "passivo": True,
+                "tarefa": _tarefa(id="antiga", titulo="Handoff de 2024",
+                                  status="concluído"),
+                "corpo": {"documentos": ["H.md"], "etapas_feitas": 0,
+                          "tem_texto_pronto": True, "caracteres_diario": 0},
+            }],
+        }
+
+    def test_o_id_de_passivo_e_valido_para_a_ferramenta(self):
+        gravadas = []
+        _tools, mapa = ds._ferramenta_propor(
+            _Db(), HOJE, self._rodada(), gravadas,
+            reservar=lambda *a, **k: True)
+        r = mapa["propor_elevacao"](
+            task_id="antiga", objetivo_id="intel", motivo_escassez="ja_escrito",
+            o_que_ja_existe="handoff pronto", passo_que_falta="publicar",
+            custo_estimado="uma tarde", ativo_possivel="Relato de experiencia",
+            justificativa="O handoff ja e o texto do relato.")
+        self.assertNotIn("erro", str(r).lower())
+        # `aceitas` guarda o id da reserva, que carrega o mes e a acao.
+        self.assertEqual(gravadas, [ds.id_da_reserva(HOJE, "antiga")])
+
+
+class TestAContagemDoQueFaltaDoPassivo(unittest.TestCase):
+    """`restantes` e o numero que decide quando mandar parar. Errado, nao serve.
+
+    O cursor carrega `data|task_id` justamente por causa de empate de data.
+    Contar o dia inteiro do cursor incluiria ele proprio e as irmas ja
+    percorridas, e o numero ficaria travado num valor que nunca desce.
+    """
+
+    def _db(self):
+        db = _Db()
+        for i in range(4):
+            db.collection("tarefas").dados[f"a{i}"] = {
+                "status": "concluído", "data_conclusao": "2026-05-10"}
+        for i in range(3):
+            db.collection("tarefas").dados[f"b{i}"] = {
+                "status": "concluído", "data_conclusao": "2026-04-01"}
+        return db
+
+    def test_conta_so_o_que_esta_atras_do_cursor(self):
+        # Cursor em a1: sobram a0 (mesmo dia, id menor) e os tres de abril.
+        self.assertEqual(ds.contar_passivo(self._db(), "2026-05-10|a1", "2026-08-29"), 4)
+
+    def test_o_cursor_e_as_irmas_ja_passadas_nao_contam(self):
+        """Com o dia inteiro contado seriam 7; a2 e a3 ja passaram."""
+        self.assertNotEqual(ds.contar_passivo(self._db(), "2026-05-10|a3", "2026-08-29"), 7)
+
+    def test_no_fim_do_caminho_o_numero_zera(self):
+        self.assertEqual(ds.contar_passivo(self._db(), "2026-04-01|b0", "2026-08-29"), 0)
+
+
 class TestConcluidaQueGanhaCorpoDepois(unittest.TestCase):
     """Acao concluida PODE ganhar corpo depois, e sem isto sumiria para sempre.
 
@@ -925,6 +996,8 @@ class _Recorte:
                 return atual is not None and str(atual) >= str(valor)
             if op == "<=":
                 return atual is not None and str(atual) <= str(valor)
+            if op == "<":
+                return atual is not None and str(atual) < str(valor)
             raise AssertionError(f"operador nao suportado pelo fake: {op}")
         return _Recorte(self._dados, [i for i in self._ids if passa(i)], self._n)
 

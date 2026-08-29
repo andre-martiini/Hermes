@@ -864,12 +864,21 @@ def contar_passivo(db, cursor: str, corte: str):
 
     `None` e honesto: melhor a tela nao mostrar numero do que mostrar um errado.
     """
-    limite = _cursor_para_chave(cursor, corte)[0]
+    data, task_id = _cursor_para_chave(cursor, corte)
     try:
-        consulta = (db.collection("tarefas")
-                    .where(filter=_filtro("status", "==", STATUS_CONCLUIDO))
-                    .where(filter=_filtro("data_conclusao", "<=", limite)))
-        return int(consulta.count().get()[0][0].value)
+        base = (db.collection("tarefas")
+                .where(filter=_filtro("status", "==", STATUS_CONCLUIDO)))
+        # Datas estritamente anteriores contam inteiras.
+        total = int(base.where(filter=_filtro("data_conclusao", "<", data))
+                    .count().get()[0][0].value)
+        # No dia do cursor, so as que ainda estao atras dele. Contar o dia inteiro
+        # incluiria o proprio cursor e as irmas ja percorridas, e `restantes`
+        # ficaria travado num numero que nunca desce — o oposto de "onde estou".
+        if task_id:
+            for d in base.where(filter=_filtro("data_conclusao", "==", data)).stream():
+                if _chave(data, d.id) < (data, task_id):
+                    total += 1
+        return total
     except Exception as exc:  # noqa: BLE001
         print(f"[Elevacao] Nao foi possivel contar o passivo: {exc}")
         return None
@@ -995,7 +1004,12 @@ def _ferramenta_propor(db, hoje: str, rodada: dict, aceitas: list,
     estivesse so no prompt.
     """
     objetivos_por_id = {o["id"]: o for o in rodada["objetivos"]}
-    titulos = {c["task_id"]: str(c["tarefa"].get("titulo") or "") for c in rodada["candidatos"]}
+    # As duas listas, e nao so `candidatos`. O passivo aparece no prompt por vaga
+    # propria; se ele nao entrasse aqui, `validar_proposta` recusaria todo id de
+    # passivo como inexistente — a cota inteira viraria um no-op que ainda por
+    # cima avanca o cursor, descartando aquelas acoes em silencio.
+    titulos = {c["task_id"]: str(c["tarefa"].get("titulo") or "")
+               for c in list(rodada["candidatos"]) + list(rodada.get("passivo") or [])}
 
     def propor_elevacao(**kwargs) -> dict:
         sugestao = validar_proposta(kwargs, set(objetivos_por_id), set(titulos))
