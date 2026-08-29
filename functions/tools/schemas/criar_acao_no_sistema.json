@@ -117,6 +117,10 @@
       "sourceKnowledgeText": {
         "type": "string",
         "description": "Texto longo de origem a ser arquivado como nó de RAG vinculado à ação"
+      },
+      "estrategia_objetivo_id": {
+        "type": "string",
+        "description": "Id do objetivo estrategico que esta acao serve, quando ela serve a algum. Omita quando nao servir: 'nenhum objetivo' e resposta legitima e comum — forcar um vinculo faz a estrategia parar de discriminar. Objetivo com gerida_por_acoes false NUNCA deve ser usado aqui: ele e servido por dado."
       }
     },
     "required": [

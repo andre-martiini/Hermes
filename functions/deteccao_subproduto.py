@@ -397,26 +397,83 @@ _SCHEMA_PROPOSTA = {
 }
 
 
-def registrar_sugestao(db, sugestao: dict, hoje: str, titulo_acao: str, nome_objetivo: str) -> str:
+def _contador_do_mes(db, hoje: str):
+    return (db.collection("system_usage").document("elevacoes_sugeridas")
+            .collection("mensal").document(_mes(hoje)))
+
+
+def reservar_no_firestore(db, hoje: str, teto: int, ref, payload: dict) -> bool:
+    """Confere o teto do mes e grava a sugestao na MESMA transacao.
+
+    `claude_provider.run_tool_loop` executa as tool calls de uma rodada em
+    paralelo, num ThreadPoolExecutor. Um contador em memoria deixaria duas
+    threads lerem a mesma contagem antes de qualquer uma gravar, e uma rodada com
+    uma vaga sobrando persistiria varias sugestoes — o teto e a unica coisa que
+    impede o recurso de virar praga, entao ele nao pode depender de ordem de
+    execucao entre threads. A transacao serializa leitura e escrita mesmo entre
+    threads e entre execucoes sobrepostas do agendador, porque todas disputam o
+    mesmo documento contador (chave = mes).
+    """
+    from firebase_admin import firestore as _fs
+
+    contador = _contador_do_mes(db, hoje)
+
+    @_fs.transactional
+    def _txn(transaction):
+        snap = contador.get(transaction=transaction)
+        atual = (snap.to_dict() or {}).get("count", 0) if snap.exists else 0
+        if atual >= teto:
+            return False
+        transaction.set(contador, {"count": atual + 1, "atualizado_em": hoje}, merge=True)
+        transaction.set(ref, payload)
+        return True
+
+    try:
+        return bool(_txn(db.transaction()))
+    except Exception as exc:
+        print(f"[Elevacao] Falha ao reservar vaga do mes: {exc}")
+        return False
+
+
+def registrar_sugestao(db, sugestao: dict, hoje: str, titulo_acao: str,
+                       nome_objetivo: str, teto: int = TETO_POR_MES,
+                       reservar=reservar_no_firestore) -> str | None:
+    """Grava a sugestao se ainda houver vaga no mes. None quando nao ha.
+
+    `reservar` e uma costura: a atomicidade e o ponto, e testa-la de verdade
+    exigiria um Firestore. Injetando a reserva, o teste verifica o que e desta
+    camada — que vaga negada nao vira sugestao gravada, e que o payload sai
+    completo — sem testar a biblioteca do Google.
+    """
     ref = db.collection(COL_ELEVACOES).document()
-    ref.set({
+    payload = {
         **sugestao,
         "status": STATUS_PENDENTE,
         "criada_em": hoje,
         "titulo_acao": titulo_acao,
         "nome_objetivo": nome_objetivo,
         "resumo": resumo_para_o_usuario(sugestao, titulo_acao, nome_objetivo),
-    })
-    return ref.id
+    }
+    return ref.id if reservar(db, hoje, teto, ref, payload) else None
+
+
+class HistoricoIndisponivel(Exception):
+    """A base de sugestoes nao pode ser lida agora."""
 
 
 def _carregar_sugestoes(db) -> list[dict]:
+    """Levanta em vez de devolver lista vazia quando a leitura falha.
+
+    Historico vazio nao e um estado neutro aqui: e o estado em que o teto do mes
+    parece zerado e nenhuma acao parece decidida. Uma falha de Firestore viraria
+    permissao para estourar o limite e para repropor o que o usuario ja marcou
+    como "nunca". A trava tem de falhar fechada.
+    """
     try:
         return [{**(d.to_dict() or {}), "id": d.id}
                 for d in db.collection(COL_ELEVACOES).limit(400).stream()]
     except Exception as exc:
-        print(f"[Elevacao] Falha ao ler {COL_ELEVACOES}: {exc}")
-        return []
+        raise HistoricoIndisponivel(str(exc)) from exc
 
 
 def preparar_rodada(db, hoje: str, carga_semana) -> dict:
@@ -426,7 +483,11 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
     deterministicas e baratas, e decidir antes evita gastar chamada num dia em
     que nenhuma sugestao poderia sair de qualquer forma.
     """
-    sugestoes = _carregar_sugestoes(db)
+    try:
+        sugestoes = _carregar_sugestoes(db)
+    except HistoricoIndisponivel as exc:
+        print(f"[Elevacao] Historico indisponivel, rodada abortada: {exc}")
+        return {"rodar": False, "motivo": "historico_indisponivel"}
     veredito = pode_rodar(sugestoes, carga_semana, hoje)
     if not veredito["pode"]:
         return {"rodar": False, **veredito}
@@ -455,7 +516,8 @@ def preparar_rodada(db, hoje: str, carga_semana) -> dict:
     }
 
 
-def _ferramenta_propor(db, hoje: str, rodada: dict, aceitas: list):
+def _ferramenta_propor(db, hoje: str, rodada: dict, aceitas: list,
+                      reservar=reservar_no_firestore):
     """A tool de escrita. A validacao mora AQUI, e nao na confianca no modelo.
 
     O teto e a lista de objetivos validos sao conferidos no momento da gravacao:
@@ -467,16 +529,18 @@ def _ferramenta_propor(db, hoje: str, rodada: dict, aceitas: list):
     titulos = {c["task_id"]: str(c["tarefa"].get("titulo") or "") for c in rodada["candidatos"]}
 
     def propor_elevacao(**kwargs) -> dict:
-        if len(aceitas) >= rodada["restantes"]:
-            return {"aceita": False, "motivo": "teto do mes atingido nesta rodada"}
         sugestao = validar_proposta(kwargs, set(objetivos_por_id), set(titulos))
         if not sugestao:
             return {"aceita": False, "motivo": "proposta incompleta, id invalido ou justificativa generica"}
         objetivo = objetivos_por_id[sugestao["objetivo_id"]]
+        # O teto e conferido dentro da transacao, e nao aqui: esta funcao roda em
+        # paralelo com as outras tool calls da mesma rodada.
         sugestao_id = registrar_sugestao(
             db, sugestao, hoje, titulos[sugestao["task_id"]],
-            str(objetivo.get("objetivoMacro") or ""),
+            str(objetivo.get("objetivoMacro") or ""), reservar=reservar,
         )
+        if not sugestao_id:
+            return {"aceita": False, "motivo": "teto do mes ja atingido"}
         aceitas.append(sugestao_id)
         return {"aceita": True, "sugestao_id": sugestao_id}
 

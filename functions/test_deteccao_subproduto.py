@@ -321,8 +321,23 @@ class TestAGravacaoNaoConfiaNoModelo(unittest.TestCase):
                                       "tem_texto_pronto": True, "caracteres_diario": 2000}}],
         }
 
-    def _propor(self, db, rodada, aceitas, **over):
-        _, fmap = ds._ferramenta_propor(db, HOJE, rodada, aceitas)
+    @staticmethod
+    def _reserva(vagas):
+        """Reserva falsa com N vagas — a atomicidade real e do Firestore."""
+        estado = {"restam": vagas}
+
+        def reservar(db, hoje, teto, ref, payload):
+            if estado["restam"] <= 0:
+                return False
+            estado["restam"] -= 1
+            ref.set(payload)
+            return True
+
+        return reservar
+
+    def _propor(self, db, rodada, aceitas, vagas=9, **over):
+        _, fmap = ds._ferramenta_propor(db, HOJE, rodada, aceitas,
+                                        reservar=self._reserva(vagas))
         return fmap["propor_elevacao"](**{**TestAPropostaDaIA.BASE, **over})
 
     def test_proposta_boa_e_gravada_com_o_resumo_pronto(self):
@@ -334,12 +349,30 @@ class TestAGravacaoNaoConfiaNoModelo(unittest.TestCase):
         self.assertEqual(gravada["titulo_acao"], "Ciclo Sispnaes 2026")
         self.assertIn("HANDOFF-SISPNAES.md", gravada["resumo"])
 
-    def test_teto_da_rodada_e_conferido_na_gravacao(self):
+    def test_vaga_negada_nao_vira_sugestao_gravada(self):
+        """O teto e conferido na reserva, e nao por contador em memoria.
+
+        As tool calls de uma rodada rodam em paralelo; um contador em memoria
+        deixaria duas threads passarem pela mesma checagem antes de qualquer uma
+        gravar. Aqui o que se verifica e o contrato desta camada: reserva negada
+        nao grava e nao entra na lista de aceitas.
+        """
         db, aceitas = _Db(), []
-        self.assertTrue(self._propor(db, self._rodada(restantes=1), aceitas)["aceita"])
-        segunda = self._propor(db, self._rodada(restantes=1), aceitas)
-        self.assertFalse(segunda["aceita"])
-        self.assertEqual(len(db.cols[ds.COL_ELEVACOES].dados), 1)
+        _, fmap = ds._ferramenta_propor(db, HOJE, self._rodada(), aceitas,
+                                        reservar=self._reserva(0))
+        r = fmap["propor_elevacao"](**TestAPropostaDaIA.BASE)
+        self.assertFalse(r["aceita"])
+        self.assertIn("teto", r["motivo"])
+        self.assertEqual(aceitas, [])
+        self.assertEqual(db.cols.get(ds.COL_ELEVACOES, _Colecao()).dados, {})
+
+    def test_a_reserva_e_quem_decide_e_nao_a_contagem_local(self):
+        db, aceitas = _Db(), []
+        _, fmap = ds._ferramenta_propor(db, HOJE, self._rodada(restantes=1), aceitas,
+                                        reservar=self._reserva(2))
+        self.assertTrue(fmap["propor_elevacao"](**TestAPropostaDaIA.BASE)["aceita"])
+        self.assertTrue(fmap["propor_elevacao"](**TestAPropostaDaIA.BASE)["aceita"])
+        self.assertEqual(len(aceitas), 2)
 
     def test_objetivo_inventado_nao_grava(self):
         db = _Db()
@@ -352,6 +385,28 @@ class TestAGravacaoNaoConfiaNoModelo(unittest.TestCase):
 
     def test_justificativa_generica_nao_grava(self):
         self.assertFalse(self._propor(_Db(), self._rodada(), [], justificativa="Ajuda.")["aceita"])
+
+
+class TestFalhaDeLeituraFechaAPorta(unittest.TestCase):
+    """Historico ilegivel nao e historico vazio.
+
+    Vazio e o estado em que o teto parece zerado e nenhuma acao parece decidida.
+    Uma falha de Firestore viraria permissao para estourar o limite e para
+    repropor o que o usuario marcou como "nunca". A trava falha fechada.
+    """
+
+    class _DbQuebrado:
+        def collection(self, _nome):
+            raise RuntimeError("indisponivel")
+
+    def test_carregar_levanta_em_vez_de_devolver_vazio(self):
+        with self.assertRaises(ds.HistoricoIndisponivel):
+            ds._carregar_sugestoes(self._DbQuebrado())
+
+    def test_rodada_e_abortada_e_nao_roda_sem_historico(self):
+        r = ds.preparar_rodada(self._DbQuebrado(), HOJE, [])
+        self.assertFalse(r["rodar"])
+        self.assertEqual(r["motivo"], "historico_indisponivel")
 
 
 class TestAMensagemDoModelo(unittest.TestCase):

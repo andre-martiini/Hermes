@@ -825,6 +825,11 @@ def criar_acao_no_sistema(
             "data_criacao": now_iso,
             "data_atualizacao": now_iso,
             "contabilizar_meta": True,
+            # Vinculo estrategico na criacao. O campo ja existia nas acoes e so
+            # era preenchido pela tela; sem ele aqui, uma elevacao aceita nascia
+            # sem o objetivo que a justificou — e o card prometia o contrario.
+            **({"estrategia_objetivo_id": str(args["estrategia_objetivo_id"]).strip()}
+               if str(args.get("estrategia_objetivo_id") or "").strip() else {}),
             "acompanhamento": [],
             "entregas_relacionadas": [],
             "pool_dados": [],
