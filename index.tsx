@@ -4561,6 +4561,28 @@ const App: React.FC = () => {
     }
   };
 
+  // UMA chamada ao modulo compartilhado, e a tela consome o que ela devolve: o
+  // cofre, as metas ja enriquecidas e quantos itens cabem na fila. A versao
+  // anterior passava so o cofre e deixava a FinanceView refazer a conta por
+  // fora, o que reintroduzia em float a divergencia que o modulo existe para
+  // eliminar.
+  //
+  // As contas do mes vao CRUAS para o modulo: pre-agregar aqui somava `amount`
+  // com `+`, que concatena quando o Firestore guardou o valor como string.
+  //
+  // Fica aqui, no corpo do componente, e nao num IIFE dentro do JSX: o `?:` da
+  // arvore de `viewMode` e uma cadeia de expressoes, e enfiar um bloco no meio
+  // dela custou um deploy quebrado por um parentese sobrando.
+  const aquisicoes = resumoDoBolso(
+    financeGoals,
+    {
+      emergencyReserveCurrent: financeSettings.emergencyReserveCurrent || 0,
+      emergencyReserveTarget: financeSettings.emergencyReserveTarget || 0,
+      investmentReserveCurrent: financeSettings.investmentReserveCurrent || 0,
+    },
+    fixedBills.filter(b => b.month === currentMonth && b.year === currentYear),
+  );
+
   return (
     <>
       <div className={`min-h-screen flex flex-col md:flex-row relative transition-colors ${appBgClass}`}>
@@ -6046,26 +6068,7 @@ const App: React.FC = () => {
                     onUpdateService={handleUpdateService}
                     onDeleteService={handleDeleteService}
                   />
-                ) : viewMode === 'finance' ? (() => {
-                  // UMA chamada ao módulo compartilhado, e a tela consome o que
-                  // ela devolve. A versão anterior passava o cofre e deixava a
-                  // FinanceView refazer a conta da fila por fora — o que
-                  // reintroduzia, em float e sem desempate, exatamente a
-                  // divergência que o módulo existe para eliminar.
-                  //
-                  // As contas do mês vão CRUAS para o módulo: pré-agregar aqui
-                  // somava `amount` com `+`, que concatena quando o Firestore
-                  // guardou o valor como string.
-                  const aquisicoes = resumoDoBolso(
-                    financeGoals,
-                    {
-                      emergencyReserveCurrent: financeSettings.emergencyReserveCurrent || 0,
-                      emergencyReserveTarget: financeSettings.emergencyReserveTarget || 0,
-                      investmentReserveCurrent: financeSettings.investmentReserveCurrent || 0,
-                    },
-                    fixedBills.filter(b => b.month === currentMonth && b.year === currentYear),
-                  );
-                  return (
+                ) : viewMode === 'finance' ? (
                   <FinanceView
                     transactions={financeTransactions}
                     goals={aquisicoes.metas}
@@ -6139,8 +6142,6 @@ const App: React.FC = () => {
                       setIsCopilotoOpen(true);
                     }}
                   />
-                  );
-                })()
                 ) : viewMode === 'knowledge' ? (
                   <div className="fixed inset-0 z-[50] bg-slate-50 md:relative md:inset-auto md:z-0 md:bg-transparent">
                     <KnowledgeView
