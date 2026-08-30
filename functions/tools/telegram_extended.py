@@ -747,6 +747,16 @@ def execute(tool_name: str, slots: dict, db) -> str:
         goals_docs = db.collection("finance_goals").stream()
         settings_doc = db.collection("finance_settings").document("config").get()
 
+        # A regra de leitura de valor vive em `bolso_aquisicoes`, espelhada em
+        # `src/utils/bolsoAquisicoes.ts`. As duas tem de dar o mesmo numero.
+        import bolso_aquisicoes
+
+        # `float(d.get("amount", 0))` levantava aqui, ANTES de a soma do bolso
+        # chegar ao modulo: `float("abc")` da ValueError e `amount: None` da
+        # TypeError, porque a chave existe e o default do `get` nao se aplica. Um
+        # unico registro mal gravado derrubava a tool inteira, e a normalizacao
+        # que o modulo faz nunca era alcancada. `numero` le pela mesma gramatica
+        # dos dois lados e o que nao casar vale zero.
         bills = []
         total_bills = 0.0
         total_paid_bills = 0.0
@@ -754,7 +764,7 @@ def execute(tool_name: str, slots: dict, db) -> str:
             d = doc.to_dict()
             d["id"] = doc.id
             bills.append(d)
-            amount = float(d.get("amount", 0))
+            amount = bolso_aquisicoes.numero(d.get("amount"))
             total_bills += amount
             if d.get("isPaid"):
                 total_paid_bills += amount
@@ -766,7 +776,7 @@ def execute(tool_name: str, slots: dict, db) -> str:
             d = doc.to_dict()
             d["id"] = doc.id
             income.append(d)
-            amount = float(d.get("amount", 0))
+            amount = bolso_aquisicoes.numero(d.get("amount"))
             total_income += amount
             if d.get("isReceived"):
                 total_received_income += amount
@@ -776,9 +786,25 @@ def execute(tool_name: str, slots: dict, db) -> str:
             d = doc.to_dict()
             d["id"] = doc.id
             goals.append(d)
-        goals.sort(key=lambda x: x.get("priority", 99))
 
         settings = settings_doc.to_dict() or {}
+
+        # `currentAmount` e DERIVADO, e ate agora vinha gravado no documento. O
+        # valor gravado so era atualizado quando a meta era editada na tela,
+        # entao cada meta guardava o bolso de um momento diferente — e as que
+        # nunca foram editadas guardavam o zero do cadastro. A tela nunca leu
+        # esse campo (ela calcula na hora), e foi por isso que a divergencia
+        # passou despercebida: quem lia pelo MCP via numero errado.
+        #
+        # A ordenacao tambem vem do modulo, e NAO daqui. Havia um `goals.sort` por
+        # prioridade nesta funcao que era morto — `resumo` reordena o que
+        # devolve — e ao mesmo tempo perigoso: `x.get("priority", 99)` nao pega
+        # o caso de `priority` gravado como `None`, porque a chave existe e o
+        # default nao se aplica, e a comparacao de `None` com `int` levanta
+        # TypeError e derruba a tool inteira. `_ordem` coage com `float()` e cai
+        # para 99 justamente por isso. Uma ordenacao so, dentro do modulo.
+        aquisicoes = bolso_aquisicoes.resumo(goals, settings, bills)
+        goals = aquisicoes["metas"]
 
         summary = {
             "periodo": {"mes": int(mes), "ano": int(ano)},
@@ -794,6 +820,20 @@ def execute(tool_name: str, slots: dict, db) -> str:
             "reserva_emergencia": {
                 "alvo": settings.get("emergencyReserveTarget", 0),
                 "atual": settings.get("emergencyReserveCurrent", 0)
+            },
+            # O bolso explicito, em campo proprio. Antes so dava para inferi-lo
+            # pelas coberturas, o que obrigava quem le a fazer engenharia
+            # reversa de um numero que o sistema ja tem.
+            #
+            # `itens_que_cabem_no_bolso` responde o que a cobertura individual
+            # nao responde: as coberturas NAO sao somaveis, entao varios itens a
+            # 100% ao mesmo tempo nao significam que da para comprar todos.
+            "aquisicoes": {
+                "bolso": aquisicoes["bolso_aquisicoes"],
+                "itens_que_cabem_no_bolso": aquisicoes["itens_que_cabem_no_bolso"],
+                "observacao": ("A cobertura de cada meta e individual: diz se da "
+                               "para comprar AQUELE item sozinho. Somar as "
+                               "coberturas estoura o bolso."),
             },
             "detalhes": {
                 "contas": bills,

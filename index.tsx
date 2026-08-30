@@ -35,6 +35,7 @@ import ContactsView from './ContactsView';
 import PersonalDiaryView from './PersonalDiaryView';
 import WhatsappInboxView from './WhatsappInboxView';
 import { INTERNAL_NAVIGATION_EVENT } from './src/utils/internalNavigation';
+import { resumoDoBolso } from './src/utils/bolsoAquisicoes';
 // Importações dos módulos extraídos pelo split.js
 import {
   DEFAULT_APP_SETTINGS, getDaysInMonth, isWorkDay, callScrapeSipac,
@@ -3704,7 +3705,24 @@ const App: React.FC = () => {
   };
   const handleUpdateFinanceGoal = async (goal: FinanceGoal) => {
     try {
-      await updateDoc(doc(db, 'finance_goals', goal.id), goal as any);
+      // `currentAmount` é DERIVADO do bolso e não pode ser persistido. Ele é
+      // sobrescrito na leitura (ver o `map` que monta `goals` para a FinanceView),
+      // então salvar o objeto inteiro gravava o bolso do instante da edição —
+      // e cada meta ficava com o valor de um momento diferente, enquanto as
+      // nunca editadas guardavam o zero do cadastro. Nada lê esse campo na tela,
+      // e por isso a divergência só aparecia por fora, no MCP.
+      //
+      // `coberturaPct` e `cabeNaFila` saem pelo mesmo motivo: são derivados do
+      // cofre no instante da leitura, e a meta chega aqui já enriquecida por
+      // `resumoDoBolso`. Gravá-los criaria de novo a classe de defeito que este
+      // trecho existe para fechar — só que agora em campos que o MCP nem lê.
+      const {
+        currentAmount: _derivado,
+        coberturaPct: _pct,
+        cabeNaFila: _cabe,
+        ...persistivel
+      } = goal as any;
+      await updateDoc(doc(db, 'finance_goals', goal.id), persistivel);
     } catch (err) {
       console.error(err);
       showToast("Erro ao atualizar meta.", "error");
@@ -6028,28 +6046,35 @@ const App: React.FC = () => {
                     onUpdateService={handleUpdateService}
                     onDeleteService={handleDeleteService}
                   />
-                ) : viewMode === 'finance' ? (
+                ) : viewMode === 'finance' ? (() => {
+                  // UMA chamada ao módulo compartilhado, e a tela consome o que
+                  // ela devolve. A versão anterior passava o cofre e deixava a
+                  // FinanceView refazer a conta da fila por fora — o que
+                  // reintroduzia, em float e sem desempate, exatamente a
+                  // divergência que o módulo existe para eliminar.
+                  //
+                  // As contas do mês vão CRUAS para o módulo: pré-agregar aqui
+                  // somava `amount` com `+`, que concatena quando o Firestore
+                  // guardou o valor como string.
+                  const aquisicoes = resumoDoBolso(
+                    financeGoals,
+                    {
+                      emergencyReserveCurrent: financeSettings.emergencyReserveCurrent || 0,
+                      emergencyReserveTarget: financeSettings.emergencyReserveTarget || 0,
+                      investmentReserveCurrent: financeSettings.investmentReserveCurrent || 0,
+                    },
+                    fixedBills.filter(b => b.month === currentMonth && b.year === currentYear),
+                  );
+                  return (
                   <FinanceView
                     transactions={financeTransactions}
-                    goals={(() => {
-                      const totalSavings = fixedBills
-                        .filter(b => b.category === 'Poupança' && b.isPaid)
-                        .reduce((acc, curr) => acc + curr.amount, 0);
-                      const emergencyCurrent = financeSettings.emergencyReserveCurrent || 0;
-                      const isEmergencyFull = emergencyCurrent >= (financeSettings.emergencyReserveTarget || 0);
-                      const investmentCurrent = financeSettings.investmentReserveCurrent || 0;
-                      const availableForGoals = investmentCurrent + (isEmergencyFull ? totalSavings : 0);
-
-                      return [...financeGoals].sort((a, b) => a.priority - b.priority).map(goal => {
-                        if (goal.status === 'completed') return goal;
-                        const allocated = goal.targetAmount > 0 ? Math.min(goal.targetAmount, availableForGoals) : 0;
-                        return { ...goal, currentAmount: allocated };
-                      });
-                    })()}
+                    goals={aquisicoes.metas}
                     emergencyReserve={{
                       target: financeSettings.emergencyReserveTarget || 0,
                       current: financeSettings.emergencyReserveCurrent || 0
                     }}
+                    bolsoAquisicoes={aquisicoes.bolso}
+                    itensQueCabemNoBolso={aquisicoes.itensQueCabem}
                     settings={financeSettings}
                     currentMonth={currentMonth}
                     currentYear={currentYear}
@@ -6114,6 +6139,8 @@ const App: React.FC = () => {
                       setIsCopilotoOpen(true);
                     }}
                   />
+                  );
+                })()
                 ) : viewMode === 'knowledge' ? (
                   <div className="fixed inset-0 z-[50] bg-slate-50 md:relative md:inset-auto md:z-0 md:bg-transparent">
                     <KnowledgeView
