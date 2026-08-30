@@ -136,21 +136,30 @@ class ValidacaoAntesDaRede(unittest.TestCase):
         self.assertNotIn("valor", enviado)
 
 
-class TimeoutPorContexto(unittest.TestCase):
-    """A leitura de fundo do copiloto nao pode esperar um cold start inteiro."""
+class TetoDeEspera(unittest.TestCase):
+    """A leitura espera o servico subir; a escrita nao precisa esperar tanto.
 
-    def test_leitura_a_pedido_usa_o_teto_generoso(self):
+    Houve uma versao com teto curto para uma leitura de contexto ambiente no
+    copiloto financeiro. O bloco saiu — a carteira nao entra no saldo do mes,
+    entao na maioria das perguntas financeiras aquele numero era decoracao
+    cobrando latencia em todas elas. Ficou so a tool, que e chamada quando o
+    assunto aparece e pode esperar.
+    """
+
+    def test_leitura_espera_o_cold_start(self):
         sessao = _SessaoFalsa([_Resposta(200, {})])
         with _com_sessao(sessao):
             investimentos.carteira()
         self.assertEqual(sessao.chamadas[0]["timeout"], investimentos.TIMEOUT_LEITURA)
 
-    def test_leitura_de_contexto_usa_teto_curto(self):
+    def test_escrita_tem_teto_menor_que_a_leitura(self):
+        # A escrita so grava no Firestore do outro lado; a leitura ainda busca
+        # cotacao externa. Se os dois se igualarem, alguem mexeu sem querer.
         sessao = _SessaoFalsa([_Resposta(200, {})])
         with _com_sessao(sessao):
-            investimentos.carteira(timeout=investimentos.TIMEOUT_CONTEXTO)
-        self.assertEqual(sessao.chamadas[0]["timeout"], investimentos.TIMEOUT_CONTEXTO)
-        self.assertLess(investimentos.TIMEOUT_CONTEXTO, investimentos.TIMEOUT_LEITURA)
+            investimentos.registrar_aporte(10)
+        self.assertEqual(sessao.chamadas[0]["timeout"], investimentos.TIMEOUT_ESCRITA)
+        self.assertLess(investimentos.TIMEOUT_ESCRITA, investimentos.TIMEOUT_LEITURA)
 
 
 class TraducaoDoEstadoInicial(unittest.TestCase):

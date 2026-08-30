@@ -85,6 +85,18 @@ _CONFIRMACAO_PADRAO: set[str] = {"schedule_whatsapp_message"}
 #
 # Isto e ADITIVO: nao regateia nenhuma outra tool, e a politica do dono continua
 # valendo para todo o resto.
+#
+# ESTE CONJUNTO NAO CRESCE POR HABITO. Duas tools, dinheiro em outro sistema. Uma
+# terceira candidata e decisao explicita do dono, tomada uma vez, com o motivo
+# escrito aqui — e nao "parece do mesmo tipo, entao entra". Piso que cresce por
+# default vira exatamente o problema que ele resolve: gating que ninguem escolheu,
+# governando por inercia.
+#
+# O motivo de o piso existir tambem merece registro, porque ele nao e obvio no
+# codigo: `confirm_tools` esta vazia por um contorno do WhatsApp em 27/08/2026, e
+# nao por uma decisao sobre escrita de dinheiro. Sem o piso, a sobra de um
+# conserto de outra feature passaria a governar, calada, duas ferramentas que
+# mexem em dinheiro num sistema cujo estado ja provou que desliza.
 _CONFIRMACAO_SEMPRE: set[str] = {
     "registrar_aporte_investimento",
     "registrar_execucao_investimento",

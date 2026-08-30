@@ -67,9 +67,6 @@ _ESCOPO = "https://www.googleapis.com/auth/cloud-platform"
 # a leitura ter teto bem maior que a escrita — que so grava no Firestore.
 TIMEOUT_LEITURA = 45
 TIMEOUT_ESCRITA = 30
-# Leitura feita como contexto de fundo, nao a pedido: prefere-se a linha
-# faltar a resposta inteira travar num cold start.
-TIMEOUT_CONTEXTO = 8
 
 ATIVOS_VALIDOS = ("CDI", "BOVA11", "IVVB11")
 
@@ -154,14 +151,14 @@ def _detalhe(resposta) -> str:
     return str(corpo)[:300]
 
 
-def carteira(timeout: int | None = None) -> dict:
+def carteira() -> dict:
     """Valor atual da carteira e comparacao com o CDI. Somente leitura.
 
     Enquanto nao houver primeiro aporte o servico responde 200 com
     `{"status": "carteira nao registrada"}` — isso e o estado normal do sistema
     novo, nao uma falha, e quem chama nao deve tratar como erro.
     """
-    return _chamar("GET", "/carteira", timeout=timeout or TIMEOUT_LEITURA)
+    return _chamar("GET", "/carteira", timeout=TIMEOUT_LEITURA)
 
 
 def registrar_aporte(valor: float) -> dict:
