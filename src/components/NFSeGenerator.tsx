@@ -9,6 +9,22 @@ interface NFSeData {
   uf: string;
 }
 
+// Os estados em que o robo esta OCUPADO, num lugar so.
+//
+// Antes havia duas listas: a do listener (`requested` liga, `error` desliga) e a
+// do botao (`requested` ou `processing`). Elas divergiam, e as duas divergencias
+// deram no mesmo resultado — o botao de emissao habilitado no meio de uma
+// emissao em curso, podendo sobrescreve-la. Faltava `processing` numa e
+// `login_confirmed` na outra, e cada estado novo do bridge precisava ser
+// lembrado em dois lugares.
+//
+// Status desconhecido conta como OCIOSO de proposito: o bridge sinaliza o fim
+// com um status que este arquivo nao enumera, e tratar desconhecido como
+// ocupado deixaria o botao travado para sempre depois de uma emissao bem
+// sucedida. O preco e que um estado ativo novo precisa entrar nesta lista — que
+// agora e uma so, e esta comentada.
+const STATUS_ROBO_ATIVO = ['requested', 'processing', 'login_confirmed'];
+
 export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
   const [valorLiquido, setValorLiquido] = useState<string>('');
   
@@ -40,7 +56,6 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
   const [loading, setLoading] = useState(false);
   const [clientData, setClientData] = useState<NFSeData | null>(null);
   
-  const [showResults, setShowResults] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [isRobotRunning, setIsRobotRunning] = useState(false);
 
@@ -108,22 +123,65 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
   const cpAutoNum = brutoAutoNum * 0.11;
   const irrfAutoNum = 0;
 
+  // O painel de saida aparece assim que ha um valor liquido, que e o que o
+  // estado vazio ja promete ("preencha os parametros de entrada").
+  //
+  // Antes disto era um `useState(false)` cujo `setShowResults` NUNCA era
+  // chamado: o painel inteiro — CNPJ, codigo 17.01, bruto, INSS e os botoes de
+  // copiar — era inalcancavel, e a tela ficava permanentemente em
+  // WAITING_FOR_DATA_STREAM. A regressao entrou junto com a remocao do botao
+  // "gerar", quando o calculo passou a ser ao vivo, e ninguem viu porque o
+  // teste deste componente existia e nao rodava: o `npm test` enumerava os
+  // arquivos um a um e este nao estava na lista.
+  const showResults = liquidoNum > 0;
+
   // Valores Finais (Manual ou Auto)
   const finalBruto = valorBrutoManual !== null ? parseFloat(valorBrutoManual.replace(',', '.')) || 0 : brutoAutoNum;
   const finalCP = valorCPManual !== null ? parseFloat(valorCPManual.replace(',', '.')) || 0 : cpAutoNum;
   const finalIRRF = valorIRRFManual !== null ? parseFloat(valorIRRFManual.replace(',', '.')) || 0 : irrfAutoNum;
   
+  // O painel aparecer nao e o mesmo que a emissao estar liberada.
+  //
+  // `runRobot` grava um pedido em `automations/hermes_robot` e um robo emite
+  // NOTA FISCAL de verdade a partir dele. Com o painel destravado so pelo valor
+  // liquido, o botao ficava clicavel antes da busca do CNPJ — e o pedido saia
+  // com `cnpj_tomador: ''` e a descricao contendo o literal `[RAZAO SOCIAL]`.
+  // Antes deste PR isso era inalcancavel so porque o painel inteiro era morto;
+  // destravar o painel sem travar a acao trocaria um defeito por outro pior.
+  //
+  // Exige a razao social, e nao so o CNPJ digitado: a descricao da nota a
+  // interpola, e um CNPJ digitado a mao sem a busca deixa o placeholder no
+  // texto que vai para a nota.
+  //
+  // E o tomador so vale enquanto o CNPJ consultado ainda for o CNPJ do campo.
+  // Sem isso, buscar o CNPJ A e depois editar o campo para B mantinha
+  // `clientData` em A: `clientData?.cnpj || cnpj` escolhia A, a emissao
+  // continuava liberada, e a nota saia para A com o formulario mostrando B.
+  // Nota fiscal para o tomador errado e pior do que nota nenhuma.
+  const cnpjTomador = cleanCnpj(cnpj);
+  const tomadorConsultado =
+    clientData && cleanCnpj(clientData.cnpj) === cnpjTomador ? clientData : null;
+  const tomadorIdentificado = Boolean(tomadorConsultado?.razaoSocial);
+
+  const podeEmitir = cnpjTomador.length === 14
+    && tomadorIdentificado
+    && finalBruto > 0
+    && !loading;
+
   const mesReferenciaString = `${monthNames[selecaoMes - 1]}/${selecaoAno}`;
-  const autoDescricao = `Desenvolvimento de soluções tecnológicas e consultoria em gestão empresarial na empresa ${clientData?.razaoSocial || '[RAZÃO SOCIAL]'}. Referente ao mês de ${mesReferenciaString}. Valor líquido acordado: ${formatCurrency(liquidoNum)}.`;
+  const autoDescricao = `Desenvolvimento de soluções tecnológicas e consultoria em gestão empresarial na empresa ${tomadorConsultado?.razaoSocial || '[RAZÃO SOCIAL]'}. Referente ao mês de ${mesReferenciaString}. Valor líquido acordado: ${formatCurrency(liquidoNum)}.`;
   const finalDescricao = descricaoManual !== null ? descricaoManual : autoDescricao;
 
   const runRobot = async () => {
+    // Guarda alem do `disabled` do botao: quem dispara emissao de nota nao
+    // confia no estado visual de um botao para saber se os dados existem.
+    if (!podeEmitir) return;
     setIsRobotRunning(true);
     try {
         // Prepare data for the robot
         const robotData = {
             data_competencia: dataCompetencia,
-            cnpj_tomador: cleanCnpj(clientData?.cnpj || cnpj),
+            cnpj_tomador: cnpjTomador,
             descricao: finalDescricao,
             valor_bruto: finalBruto.toFixed(2).replace('.', ','),
             valor_irrf: finalIRRF.toFixed(2).replace('.', ','),
@@ -153,8 +211,9 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
         const data = docSnap.data();
         if (data) {
             setRobotStatus(data.status);
-            if (data.status === 'requested') setIsRobotRunning(true);
-            if (data.status === 'error') setIsRobotRunning(false);
+            // Ocupado passa a ser funcao do status, e nao um par de `if`s que
+            // cobria alguns estados e esquecia outros.
+            setIsRobotRunning(STATUS_ROBO_ATIVO.includes(data.status));
         }
     });
     return () => unsub();
@@ -372,9 +431,9 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
                         <div className="bg-white p-6 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none">
                             <span className="block text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest mb-2">TAKER_ID (CNPJ)</span>
                             <div className="flex justify-between items-center">
-                                <span className="text-sm font-sans font-semibold text-on-surface">{clientData?.cnpj || cnpj}</span>
+                                <span className="text-sm font-sans font-semibold text-on-surface">{formatCnpj(cnpj)}</span>
                                 <button 
-                                    onClick={() => handleCopy(cleanCnpj(clientData?.cnpj || cnpj), 'cnpj')}
+                                    onClick={() => handleCopy(cnpjTomador, 'cnpj')}
                                     className={`p-2 rounded-soft-touch transition-all ${copiedField === 'cnpj' ? 'bg-emerald-500 text-white' : 'bg-slate-100 hover:bg-on-surface hover:text-white text-slate-500'}`}
                                 >
                                     {copiedField === 'cnpj' ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>}
@@ -400,9 +459,16 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
                     <div className="bg-white p-6 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none">
                         <div className="flex justify-between items-start mb-4">
                             <span className="block text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">SERVICE_DESCRIPTION_BLOCK</span>
+                            {/* Travar o robo nao bastava: a descricao copiada daqui e
+                                colada no portal a mao produz a MESMA nota errada, e com
+                                o painel anunciando READY_FOR_TRANSFER. Enquanto o tomador
+                                nao esta identificado o texto contem o literal
+                                `[RAZAO SOCIAL]`. */}
                             <button 
                                 onClick={() => handleCopy(finalDescricao, 'descricao')}
-                                className={`flex items-center gap-2 px-4 py-2 rounded-soft-touch text-[9px] font-sans font-semibold uppercase tracking-widest transition-all ${copiedField === 'descricao' ? 'bg-emerald-500 text-white' : 'bg-on-surface text-white hover:bg-primary-tactile'}`}
+                                disabled={!tomadorIdentificado}
+                                title={!tomadorIdentificado ? 'Busque o CNPJ do tomador: a descrição ainda tem o campo da razão social por preencher' : undefined}
+                                className={`flex items-center gap-2 px-4 py-2 rounded-soft-touch text-[9px] font-sans font-semibold uppercase tracking-widest transition-all ${!tomadorIdentificado ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : copiedField === 'descricao' ? 'bg-emerald-500 text-white' : 'bg-on-surface text-white hover:bg-primary-tactile'}`}
                             >
                                 {copiedField === 'descricao' ? (
                                     <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> COPIED!</>
@@ -457,14 +523,15 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
                         
                         <button
                             onClick={runRobot}
-                            disabled={isRobotRunning && (robotStatus === 'requested' || robotStatus === 'processing')}
+                            disabled={isRobotRunning || !podeEmitir}
+                            title={!podeEmitir ? 'Busque o CNPJ do tomador antes de emitir' : undefined}
                             className={`w-full py-5 rounded-lg font-sans font-semibold uppercase tracking-[0.3em] text-xs flex items-center justify-center gap-4 transition-all shadow-none border-2 ${
-                                (isRobotRunning && (robotStatus === 'requested' || robotStatus === 'processing'))
+                                (isRobotRunning || !podeEmitir)
                                 ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' 
                                 : 'bg-on-surface text-surface border-on-surface hover:bg-primary-tactile hover:border-primary-tactile active:scale-[0.98]'
                             }`}
                         >
-                            {(isRobotRunning && (robotStatus === 'requested' || robotStatus === 'processing')) ? (
+                            {isRobotRunning ? (
                                 <>
                                     <span className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></span>
                                     {robotStatus === 'requested' ? 'SIGNAL_DISPATCHED...' : 'ROBOT_ENGAGED...'}
