@@ -60,7 +60,35 @@ _access_cache: dict[str, object] | None = None
 #
 # Configuravel sem deploy: `system/mcp_access.confirm_tools` (lista de nomes)
 # sobrepoe este padrao — inclusive para voltar a exigir confirmacao em tudo.
+# Politica de confirmacao do canal MCP, em duas camadas. Nenhuma das duas e
+# `registry._NEEDS_CONFIRMATION`: aquele conjunto alimenta so o metadado
+# `mutates` do `tools/list`, e quem decide a dupla chamada e daqui. Sao listas
+# diferentes com nomes parecidos, e ja se confundiu uma pela outra — por isso
+# esta nota.
+#
+# Padrao: vale so quando `system/mcp_access.confirm_tools` NAO existe. Se o
+# campo existir, ele substitui isto inteiro, inclusive vazio.
 _CONFIRMACAO_PADRAO: set[str] = {"schedule_whatsapp_message"}
+
+# Piso: exige dupla chamada mesmo com a politica configurada — inclusive vazia,
+# que e como o dono a deixou em 27/08/2026 para o envio de WhatsApp funcionar.
+#
+# So entra aqui escrita de dinheiro em OUTRO sistema. `criar_acao_no_sistema` e
+# `editar_acao` gravam e ficam de fora de proposito: erro ali se desfaz dentro
+# do proprio Hermes, e o humano no circuito e o pedido de permissao do cliente
+# MCP, como o repositorio ja decidiu. `registrar_aporte_investimento` e outra
+# coisa — soma ao `aporte_total` do servico de investimentos, que nao expoe
+# estorno; registrado em dobro, o rendimento fica errado para sempre e a
+# correcao nao existe de nenhum dos dois lados. `registrar_execucao_investimento`
+# vem junto porque e a mesma classe de acao e deixa linha permanente no log de
+# movimentos de la; separar os dois seria uma sutileza que ninguem lembraria.
+#
+# Isto e ADITIVO: nao regateia nenhuma outra tool, e a politica do dono continua
+# valendo para todo o resto.
+_CONFIRMACAO_SEMPRE: set[str] = {
+    "registrar_aporte_investimento",
+    "registrar_execucao_investimento",
+}
 
 # Tools que passam de um minuto e por isso nao podem rodar dentro do request.
 #
@@ -316,8 +344,8 @@ def _is_uid_allowed(uid: str) -> bool:
 
 
 def _exige_confirmacao(nome: str) -> bool:
-    """Gating do canal MCP — ver `_CONFIRMACAO_PADRAO`."""
-    return nome in _access_config()["confirm_tools"]
+    """Gating do canal MCP — ver `_CONFIRMACAO_PADRAO` e `_CONFIRMACAO_SEMPRE`."""
+    return nome in _CONFIRMACAO_SEMPRE or nome in _access_config()["confirm_tools"]
 
 
 def _check_rate_limit(uid: str) -> None:

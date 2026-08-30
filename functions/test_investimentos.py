@@ -260,6 +260,53 @@ class CredencialRecusada(unittest.TestCase):
         self.assertIn(investimentos.SA_INVOKER, resultado["erro"])
 
 
+class GatingDoCanalMCP(unittest.TestCase):
+    """A dupla chamada tem de valer mesmo com a politica do canal vazia.
+
+    O dono esvaziou `system/mcp_access.confirm_tools` em 27/08/2026 para o envio
+    de WhatsApp funcionar. Como o campo EXISTE como lista, ele substitui
+    `_CONFIRMACAO_PADRAO` inteiro — entao registrar as tools la nao gatearia
+    nada. Estar em `registry._NEEDS_CONFIRMATION` tampouco: aquele conjunto so
+    alimenta o metadado `mutates`.
+    """
+
+    ESCRITAS = ("registrar_aporte_investimento", "registrar_execucao_investimento")
+
+    def setUp(self):
+        import mcp_server
+
+        self.mcp = mcp_server
+        self._cache_anterior = mcp_server._access_cache
+        mcp_server._access_cache = {
+            "uids": {"*"}, "confirm_tools": set(), "expires_at": float("inf"),
+        }
+
+    def tearDown(self):
+        self.mcp._access_cache = self._cache_anterior
+
+    def test_escritas_exigem_confirmacao_com_politica_vazia(self):
+        for nome in self.ESCRITAS:
+            with self.subTest(tool=nome):
+                self.assertTrue(self.mcp._exige_confirmacao(nome))
+
+    def test_leitura_nao_exige_confirmacao(self):
+        self.assertFalse(self.mcp._exige_confirmacao("consultar_investimentos"))
+
+    def test_o_piso_e_aditivo_e_nao_regateia_o_resto(self):
+        # A decisao do repositorio para as demais tools mutantes e que o humano
+        # no circuito e o pedido de permissao do cliente MCP. O piso nao pode
+        # reverter isso pelas costas.
+        self.assertFalse(self.mcp._exige_confirmacao("criar_acao_no_sistema"))
+        self.assertFalse(self.mcp._exige_confirmacao("editar_acao"))
+
+    def test_registry_marca_as_escritas_como_mutantes(self):
+        from tools import registry
+
+        for nome in self.ESCRITAS:
+            with self.subTest(tool=nome):
+                self.assertTrue(registry.needs_confirmation(nome))
+
+
 class NadaEscreveNoFirestore(unittest.TestCase):
     def test_o_modulo_nao_toca_no_firestore(self):
         """O contrato com o outro sistema e a API HTTP, e so ela.

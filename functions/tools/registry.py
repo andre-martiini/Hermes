@@ -145,9 +145,10 @@ _NEEDS_CONFIRMATION: set[str] = {
     "confirmar_edicao_acao",
     "confirmar_edicao_em_lote",
     "confirmar_reagendamento_em_lote",
-    # Gravam na carteira real. `registrar_aporte_investimento` acumula e nao tem
-    # estorno no servico, entao a dupla chamada aqui nao e formalidade: e a
-    # unica barreira antes de um valor que so o usuario sabe conferir.
+    # Gravam na carteira real. Atencao: estar AQUI nao gateia nada — este
+    # conjunto so alimenta o metadado `mutates` do `tools/list`. Quem exige a
+    # dupla chamada e `mcp_server._CONFIRMACAO_SEMPRE`, onde as duas tambem
+    # estao, justamente porque a politica do canal esta vazia desde 27/08/2026.
     "registrar_aporte_investimento",
     "registrar_execucao_investimento",
 }
