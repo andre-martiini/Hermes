@@ -150,23 +150,43 @@ describe('NFSeGenerator', () => {
     expect(screen.getByText(/COPY_STREAM/i).closest('button')!.disabled).toBe(false);
   });
 
-  it('emissao em andamento continua travada ao reabrir o modal', async () => {
-    // O listener so restaurava `isRobotRunning` em `requested`. Com `processing`,
-    // fechar o modal no meio de uma emissao devolvia o botao habilitado, e um
-    // segundo clique sobrescrevia a automacao fiscal em curso.
+  it('status desconhecido libera de novo, para o botao nao travar apos o sucesso', async () => {
+    // O contraponto do `it.each` acima: o bridge sinaliza o fim com um status
+    // que este arquivo nao enumera, e tratar desconhecido como ocupado deixaria
+    // o botao morto depois de uma emissao bem sucedida.
     //
-    // O CNPJ PRECISA ser buscado aqui: sem isso o botao ficaria desabilitado por
-    // falta de tomador, e o teste passaria pelo motivo errado — foi o que
-    // aconteceu na primeira versao dele, que a mutacao nao derrubava.
+    // O CNPJ PRECISA ser buscado nos dois casos: sem isso o botao ficaria
+    // desabilitado por falta de tomador, e a assercao passaria pelo motivo
+    // errado — foi o que aconteceu na primeira versao deste teste, que a
+    // mutacao nao derrubava.
     (onSnapshot as any).mockImplementationOnce((_ref: any, cb: any) => {
-      cb({ data: () => ({ status: 'processing' }) });
+      cb({ data: () => ({ status: 'done' }) });
       return () => undefined;
     });
     abrir();
     fireEvent.change(campoLiquido(), { target: { value: '5000' } });
     await buscarCnpj();
-    expect(screen.getByText(/EXECUTE_ROBOTIC_EMISSION|ROBOT_ENGAGED/i).closest('button')!.disabled).toBe(true);
+    expect(screen.getByText(/EXECUTE_ROBOTIC_EMISSION/i).closest('button')!.disabled).toBe(false);
   });
+
+  it.each(['requested', 'processing', 'login_confirmed'])(
+    'emissao travada enquanto o robo esta em %s',
+    async (status) => {
+      // Uma lista so de "robo ocupado". As duas versoes anteriores enumeravam
+      // esses estados em dois lugares e divergiam — faltava `processing` num e
+      // `login_confirmed` no outro, e nos dois casos o botao voltava habilitado
+      // no meio de uma emissao em curso.
+      (onSnapshot as any).mockImplementationOnce((_ref: any, cb: any) => {
+        cb({ data: () => ({ status }) });
+        return () => undefined;
+      });
+      abrir();
+      fireEvent.change(campoLiquido(), { target: { value: '5000' } });
+      await buscarCnpj();
+      expect(screen.getByText(/EXECUTE_ROBOTIC_EMISSION|SIGNAL_DISPATCHED|ROBOT_ENGAGED/i)
+        .closest('button')!.disabled).toBe(true);
+    },
+  );
 
   it('busca o CNPJ e mostra a razao social', async () => {
     (global.fetch as any).mockResolvedValueOnce({

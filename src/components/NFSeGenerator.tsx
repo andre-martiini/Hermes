@@ -9,6 +9,22 @@ interface NFSeData {
   uf: string;
 }
 
+// Os estados em que o robo esta OCUPADO, num lugar so.
+//
+// Antes havia duas listas: a do listener (`requested` liga, `error` desliga) e a
+// do botao (`requested` ou `processing`). Elas divergiam, e as duas divergencias
+// deram no mesmo resultado — o botao de emissao habilitado no meio de uma
+// emissao em curso, podendo sobrescreve-la. Faltava `processing` numa e
+// `login_confirmed` na outra, e cada estado novo do bridge precisava ser
+// lembrado em dois lugares.
+//
+// Status desconhecido conta como OCIOSO de proposito: o bridge sinaliza o fim
+// com um status que este arquivo nao enumera, e tratar desconhecido como
+// ocupado deixaria o botao travado para sempre depois de uma emissao bem
+// sucedida. O preco e que um estado ativo novo precisa entrar nesta lista — que
+// agora e uma so, e esta comentada.
+const STATUS_ROBO_ATIVO = ['requested', 'processing', 'login_confirmed'];
+
 export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
   const [valorLiquido, setValorLiquido] = useState<string>('');
   
@@ -195,12 +211,9 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
         const data = docSnap.data();
         if (data) {
             setRobotStatus(data.status);
-            // `processing` tambem e execucao em andamento. Sem isto, fechar o
-            // modal ou recarregar a pagina no meio de uma emissao devolvia o
-            // botao habilitado — e um segundo clique sobrescrevia a automacao
-            // fiscal que ja estava rodando.
-            if (data.status === 'requested' || data.status === 'processing') setIsRobotRunning(true);
-            if (data.status === 'error') setIsRobotRunning(false);
+            // Ocupado passa a ser funcao do status, e nao um par de `if`s que
+            // cobria alguns estados e esquecia outros.
+            setIsRobotRunning(STATUS_ROBO_ATIVO.includes(data.status));
         }
     });
     return () => unsub();
@@ -510,15 +523,15 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
                         
                         <button
                             onClick={runRobot}
-                            disabled={(isRobotRunning && (robotStatus === 'requested' || robotStatus === 'processing')) || !podeEmitir}
+                            disabled={isRobotRunning || !podeEmitir}
                             title={!podeEmitir ? 'Busque o CNPJ do tomador antes de emitir' : undefined}
                             className={`w-full py-5 rounded-lg font-sans font-semibold uppercase tracking-[0.3em] text-xs flex items-center justify-center gap-4 transition-all shadow-none border-2 ${
-                                ((isRobotRunning && (robotStatus === 'requested' || robotStatus === 'processing')) || !podeEmitir)
+                                (isRobotRunning || !podeEmitir)
                                 ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' 
                                 : 'bg-on-surface text-surface border-on-surface hover:bg-primary-tactile hover:border-primary-tactile active:scale-[0.98]'
                             }`}
                         >
-                            {(isRobotRunning && (robotStatus === 'requested' || robotStatus === 'processing')) ? (
+                            {isRobotRunning ? (
                                 <>
                                     <span className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></span>
                                     {robotStatus === 'requested' ? 'SIGNAL_DISPATCHED...' : 'ROBOT_ENGAGED...'}
