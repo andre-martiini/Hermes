@@ -28,6 +28,21 @@ describe('dinheiro na fronteira do Firestore', () => {
         expect(bruto.amount).toBe('10');
     });
 
+    it('normaliza os valores dentro de um mapa', () => {
+        // `monthlyBudgets` e um valor por mes; uma string ali faz a divisao do
+        // orcamento dar NaN e a barra virar `width: NaN%`, sem erro no console.
+        const doc = comDinheiro(
+            { monthlyBudgets: { '2026-02': '5000', '2026-03': 4000, '2026-04': 'abc' } },
+            [], ['monthlyBudgets'],
+        );
+        expect(doc.monthlyBudgets).toEqual({ '2026-02': 5000, '2026-03': 4000, '2026-04': 0 });
+    });
+
+    it('mapa ausente ou de outro tipo nao vira objeto vazio', () => {
+        expect('monthlyBudgets' in comDinheiro({}, [], ['monthlyBudgets'])).toBe(false);
+        expect(comDinheiro({ monthlyBudgets: null }, [], ['monthlyBudgets']).monthlyBudgets).toBe(null);
+    });
+
     it('normaliza mais de um campo', () => {
         const doc = comDinheiro(
             { emergencyReserveCurrent: '1000', emergencyReserveTarget: 20000, outro: 'x' },

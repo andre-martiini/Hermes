@@ -30,10 +30,23 @@ import { numero } from './bolsoAquisicoes';
 export function comDinheiro(
     bruto: Record<string, any>,
     campos: string[],
+    camposDeMapa: string[] = [],
 ): Record<string, any> {
     const saida: Record<string, any> = { ...bruto };
     for (const campo of campos) {
         if (bruto[campo] !== undefined) saida[campo] = numero(bruto[campo]);
+    }
+    // `monthlyBudgets` guarda um valor por mês (`{"2026-02": 5000}`), e um deles
+    // gravado como string faz `currentMonthTotal / orçamento` dar NaN — a barra
+    // de orçamento vira `width: NaN%` sem erro nenhum no console. Por isso os
+    // valores DENTRO do mapa também passam pela gramática.
+    for (const campo of camposDeMapa) {
+        const mapa = bruto[campo];
+        if (mapa && typeof mapa === 'object' && !Array.isArray(mapa)) {
+            const normalizado: Record<string, number> = {};
+            for (const chave of Object.keys(mapa)) normalizado[chave] = numero(mapa[chave]);
+            saida[campo] = normalizado;
+        }
     }
     return saida;
 }

@@ -1247,12 +1247,27 @@ const App: React.FC = () => {
       );
     }, handleSnapshotError('finance_transactions'));
     const unsubGoals = onSnapshot(collection(db, 'finance_goals'), (snapshot) => {
-      setFinanceGoals(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as FinanceGoal)));
+      // `priority` NAO entra: `numero` cai para 0 no invalido, e 0 mandaria a
+      // meta para o inicio da fila. Quem le prioridade e `compararMetas`, que
+      // cai para 99 — o fim — de proposito.
+      setFinanceGoals(snapshot.docs.map(d => ({ id: d.id, ...comDinheiro(d.data(), ['targetAmount', 'currentAmount']) } as FinanceGoal)));
     }, handleSnapshotError('finance_goals'));
     const unsubSettings = onSnapshot(doc(db, 'finance_settings', 'config'), (doc) => {
       if (doc.exists()) {
-        setFinanceSettings(comDinheiro(doc.data(),
-          ['emergencyReserveCurrent', 'emergencyReserveTarget', 'investmentReserveCurrent']) as FinanceSettings);
+        // TODOS os campos monetarios do documento, e nao so os que o modulo do
+        // bolso le. Na primeira versao eu listei tres — os que a `resumoDoBolso`
+        // usa — e deixei de fora `monthlyBudget`, `investmentReserveTarget`,
+        // `defaultPrincipalIncome` e `externalSpendingLimit`, que a tela soma e
+        // divide por conta propria. `defaultPrincipalIncome` era o pior: e o
+        // fallback da renda principal em mes sem lancamento explicito, entao
+        // uma string ali fazia `"5000" + 0 + 0` virar "500000" na previsao
+        // anual. A lista sai do tipo `FinanceSettings`, campo a campo.
+        setFinanceSettings(comDinheiro(doc.data(), [
+          'monthlyBudget',
+          'emergencyReserveTarget', 'emergencyReserveCurrent',
+          'investmentReserveTarget', 'investmentReserveCurrent',
+          'defaultPrincipalIncome', 'externalSpendingLimit',
+        ], ['monthlyBudgets']) as FinanceSettings);
       }
     }, handleSnapshotError('finance_settings/config'));
     const qFixedBills = query(collection(db, 'fixed_bills'));
