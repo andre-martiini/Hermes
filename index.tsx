@@ -36,7 +36,7 @@ import PersonalDiaryView from './PersonalDiaryView';
 import WhatsappInboxView from './WhatsappInboxView';
 import { INTERNAL_NAVIGATION_EVENT } from './src/utils/internalNavigation';
 import { resumoDoBolso } from './src/utils/bolsoAquisicoes';
-import { comDinheiro } from './src/utils/dinheiroFirestore';
+import { comDinheiro, comDinheiroNaLista } from './src/utils/dinheiroFirestore';
 // Importações dos módulos extraídos pelo split.js
 import {
   DEFAULT_APP_SETTINGS, getDaysInMonth, isWorkDay, callScrapeSipac,
@@ -1292,7 +1292,21 @@ const App: React.FC = () => {
     // Services Sync
     const qServices = query(collection(db, 'servicos'), orderBy('data_criacao', 'desc'));
     const unsubProjects = onSnapshot(qServices, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Servico[];
+      // As parcelas entram pela mesma fronteira. Nao e simetria por gosto: a
+      // sincronia de servicos para rendas compara `existing.amount !==
+      // expected.amount` com `!==` estrito, e `expected.amount` vem de
+      // `parcela.valor`. Normalizar so o lado da renda faria os dois nunca
+      // serem iguais — a sincronia grava, o snapshot volta normalizado, o
+      // efeito re-dispara por `incomeEntries` e grava de novo. Loop infinito de
+      // escrita, contido apenas pelo debounce de 1s.
+      const data = snapshot.docs.map(doc => {
+        const bruto = doc.data() as Record<string, any>;
+        const servico = comDinheiro(bruto, ['valor_total']);
+        if (Array.isArray(bruto.parcelas)) {
+          servico.parcelas = comDinheiroNaLista(bruto.parcelas, ['valor']);
+        }
+        return { id: doc.id, ...servico };
+      }) as Servico[];
       setServices(data);
     }, handleSnapshotError('servicos'));
     // Health Sync

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { comDinheiro } from './dinheiroFirestore';
+import { comDinheiro, comDinheiroNaLista } from './dinheiroFirestore';
 
 describe('dinheiro na fronteira do Firestore', () => {
     it('numero gravado como string vira numero', () => {
@@ -51,5 +51,25 @@ describe('dinheiro na fronteira do Firestore', () => {
         expect(doc.emergencyReserveCurrent).toBe(1000);
         expect(doc.emergencyReserveTarget).toBe(20000);
         expect(doc.outro).toBe('x');
+    });
+
+    it('normaliza os valores de uma lista de sub-objetos', () => {
+        // As parcelas de um servico. Com o `valor` string de um lado e o
+        // `amount` da renda normalizado do outro, a sincronia entra em loop de
+        // escrita: `!==` nunca da falso.
+        const parcelas = comDinheiroNaLista(
+            [{ id: 'a', valor: '5000', status: 'pago' }, { id: 'b', valor: 300 }],
+            ['valor'],
+        );
+        expect(parcelas).toEqual([
+            { id: 'a', valor: 5000, status: 'pago' },
+            { id: 'b', valor: 300 },
+        ]);
+    });
+
+    it('lista ausente ou de outro tipo passa intacta', () => {
+        expect(comDinheiroNaLista(undefined, ['valor'])).toBe(undefined);
+        expect(comDinheiroNaLista(null, ['valor'])).toBe(null);
+        expect(comDinheiroNaLista([null, 'x'], ['valor'])).toEqual([null, 'x']);
     });
 });

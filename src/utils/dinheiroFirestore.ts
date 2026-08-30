@@ -50,3 +50,25 @@ export function comDinheiro(
     }
     return saida;
 }
+
+/**
+ * O mesmo, para uma lista de sub-objetos dentro do documento — `servicos`
+ * guarda as parcelas assim, cada uma com o seu `valor`.
+ *
+ * Existe por causa de um defeito concreto e caro: a sincronia de servicos para
+ * rendas compara `existing.amount !== expected.amount` com `!==` estrito. Com
+ * o `amount` da renda normalizado nesta fronteira e o `valor` da parcela ainda
+ * string, os dois NUNCA sao iguais — a sincronia grava, o snapshot volta
+ * normalizado, o efeito re-dispara pela dependencia `incomeEntries` e grava de
+ * novo. Loop infinito de escrita no Firestore, contido so pelo debounce de 1s.
+ *
+ * Normalizar so um dos lados de uma comparacao e pior que nao normalizar
+ * nenhum: transforma um dado errado em silencio num ciclo de escrita.
+ */
+export function comDinheiroNaLista(itens: any, campos: string[]): any {
+    if (!Array.isArray(itens)) return itens;
+    return itens.map(item =>
+        item && typeof item === 'object' && !Array.isArray(item)
+            ? comDinheiro(item, campos)
+            : item);
+}
