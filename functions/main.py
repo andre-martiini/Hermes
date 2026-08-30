@@ -7655,6 +7655,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
                 resumo = data_json.get("resumo", {})
                 metas = data_json.get("metas", [])
                 reserva = data_json.get("reserva_emergencia", {})
+                aquisicoes = data_json.get("aquisicoes", {})
                 detalhes = data_json.get("detalhes", {})
                 
                 parts = []
@@ -7669,9 +7670,66 @@ def askTaskAssistant(req: https_fn.CallableRequest):
                 parts.append(f"- Alvo: R$ {reserva.get('alvo', 0):.2f}")
                 parts.append(f"- Atual: R$ {reserva.get('atual', 0):.2f}")
                 
+                # O cofre de aquisicoes, e nao so o alvo de cada meta.
+                #
+                # Sem este bloco o copiloto respondia "da para comprar a
+                # bicicleta?" pelo `saldo_atual`, que e o numero errado para essa
+                # pergunta: o dinheiro de aquisicao mora na reserva de
+                # investimento mais a poupanca do mes, e nao no saldo do mes.
+                # Ele tinha o alvo de cada meta e nenhuma nocao de quanto ha
+                # disponivel — o que convida a inventar a diferenca.
+                #
+                # A cobertura vem calculada pelo mesmo modulo que a tela usa, e a
+                # observacao sobre nao somar coberturas vem junto porque e
+                # exatamente o erro que o numero individual induz.
+                bolso = aquisicoes.get("bolso", 0)
+                cabem = aquisicoes.get("itens_que_cabem_no_bolso", 0)
+                parts.append("\nCofre de Aquisicoes:")
+                parts.append(f"- Disponivel para desejos de compra: R$ {bolso:.2f}")
+                parts.append(f"- Itens da fila que cabem de uma vez: {cabem}")
+                if aquisicoes.get("observacao"):
+                    parts.append(f"- ATENCAO: {aquisicoes['observacao']}")
+
+                # Meta concluida sai por um ramo proprio, e nao e capricho de
+                # texto: `cabe_na_fila: False` tem DUAS causas — o cofre nao
+                # alcanca, ou o item nem esta na fila. O modulo exclui as
+                # concluidas da fila de proposito, entao dizer "NAO cabe junto
+                # com as de cima" sobre uma compra ja feita e afirmacao
+                # financeira falsa. E a `cobertura_pct` dela e calculada sobre o
+                # `currentAmount` historico, o que ela custou quando foi
+                # fechada, e nao sobre o cofre de hoje.
+                #
+                # E a QUARTA vez que essa conflacao morde neste sistema: o mesmo
+                # `False` ja tinha posto o selo ambar "so se for este" numa meta
+                # comprada, ja tinha feito o resumo do cofre dizer que o dinheiro
+                # nao cobre o primeiro item de uma fila vazia, e apareceu duas
+                # vezes aqui — na meta concluida e na meta sem valor. Quem
+                # consumir `cabe_na_fila` precisa olhar `status` E `targetAmount`
+                # antes; o booleano sozinho nao distingue "nao cabe" de "a
+                # pergunta nao se aplica".
                 parts.append("\nMetas Financeiras:")
                 for meta in metas:
-                    parts.append(f"- {meta.get('name')}: R$ {meta.get('targetAmount', 0):.2f} (Prioridade: {meta.get('priority')})")
+                    alvo = meta.get("targetAmount", 0)
+                    if str(meta.get("status") or "") == "completed":
+                        parts.append(f"- {meta.get('name')}: R$ {alvo:.2f} (JA COMPRADA)")
+                        continue
+                    # Meta sem valor definido e a QUARTA causa do mesmo `False`, e
+                    # a mais comum de todas: o botao "novo desejo de compra"
+                    # cadastra com `targetAmount: 0`, entao todo desejo recem
+                    # criado esta neste estado. `cobertura_da_fila` a descarta por
+                    # nao ter preco, e nao por nao caber.
+                    if alvo <= 0:
+                        parts.append(
+                            f"- {meta.get('name')}: SEM VALOR DEFINIDO "
+                            f"(Prioridade: {meta.get('priority')}; nao da para dizer se cabe)"
+                        )
+                        continue
+                    cobertura = meta.get("cobertura_pct", 0)
+                    cabe = "cabe na fila" if meta.get("cabe_na_fila") else "NAO cabe junto com as de cima"
+                    parts.append(
+                        f"- {meta.get('name')}: R$ {alvo:.2f} "
+                        f"(Prioridade: {meta.get('priority')}; coberto {cobertura:.1f}% pelo cofre; {cabe})"
+                    )
                 
                 parts.append("\nRendas Detalhadas:")
                 for r in detalhes.get("rendas", []):

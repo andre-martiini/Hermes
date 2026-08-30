@@ -36,6 +36,7 @@ import PersonalDiaryView from './PersonalDiaryView';
 import WhatsappInboxView from './WhatsappInboxView';
 import { INTERNAL_NAVIGATION_EVENT } from './src/utils/internalNavigation';
 import { resumoDoBolso } from './src/utils/bolsoAquisicoes';
+import { comDinheiro, comDinheiroNaLista } from './src/utils/dinheiroFirestore';
 // Importações dos módulos extraídos pelo split.js
 import {
   DEFAULT_APP_SETTINGS, getDaysInMonth, isWorkDay, callScrapeSipac,
@@ -1232,36 +1233,58 @@ const App: React.FC = () => {
     const unsubGoogleCalendar = onSnapshot(collection(db, 'google_calendar_events'), (snapshot) => {
       setGoogleCalendarEvents(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as GoogleCalendarEvent)));
     }, handleSnapshotError('google_calendar_events'));
+    // Os valores monetarios sao normalizados na FRONTEIRA, aqui, e nao em cada
+    // lugar que soma ou formata. O porque esta em `comDinheiro`; em resumo, o
+    // `as FinanceTransaction` e uma afirmacao e nao uma conversao, e ha 25+
+    // leituras de `amount` so na FinanceView que confiam nela.
+    //
+    // `comDinheiro` nao injeta `id`: o `finance_settings/config` e reescrito
+    // inteiro pelo `setDoc`, e um `id` a mais viraria campo gravado no doc.
     const unsubTransactions = onSnapshot(collection(db, 'finance_transactions'), (snapshot) => {
       setFinanceTransactions(snapshot.docs
-        .map(d => ({ id: d.id, ...d.data() } as FinanceTransaction))
+        .map(d => ({ id: d.id, ...comDinheiro(d.data(), ['amount']) } as FinanceTransaction))
         .filter(t => t.status !== 'deleted')
       );
     }, handleSnapshotError('finance_transactions'));
     const unsubGoals = onSnapshot(collection(db, 'finance_goals'), (snapshot) => {
-      setFinanceGoals(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as FinanceGoal)));
+      // `priority` NAO entra: `numero` cai para 0 no invalido, e 0 mandaria a
+      // meta para o inicio da fila. Quem le prioridade e `compararMetas`, que
+      // cai para 99 — o fim — de proposito.
+      setFinanceGoals(snapshot.docs.map(d => ({ id: d.id, ...comDinheiro(d.data(), ['targetAmount', 'currentAmount']) } as FinanceGoal)));
     }, handleSnapshotError('finance_goals'));
     const unsubSettings = onSnapshot(doc(db, 'finance_settings', 'config'), (doc) => {
       if (doc.exists()) {
-        setFinanceSettings(doc.data() as FinanceSettings);
+        // TODOS os campos monetarios do documento, e nao so os que o modulo do
+        // bolso le. Na primeira versao eu listei tres — os que a `resumoDoBolso`
+        // usa — e deixei de fora `monthlyBudget`, `investmentReserveTarget`,
+        // `defaultPrincipalIncome` e `externalSpendingLimit`, que a tela soma e
+        // divide por conta propria. `defaultPrincipalIncome` era o pior: e o
+        // fallback da renda principal em mes sem lancamento explicito, entao
+        // uma string ali fazia `"5000" + 0 + 0` virar "500000" na previsao
+        // anual. A lista sai do tipo `FinanceSettings`, campo a campo.
+        setFinanceSettings(comDinheiro(doc.data(), [
+          'monthlyBudget',
+          'emergencyReserveTarget', 'emergencyReserveCurrent',
+          'investmentReserveTarget', 'investmentReserveCurrent',
+          'defaultPrincipalIncome', 'externalSpendingLimit',
+        ], ['monthlyBudgets']) as FinanceSettings);
       }
     }, handleSnapshotError('finance_settings/config'));
     const qFixedBills = query(collection(db, 'fixed_bills'));
     const unsubFixedBills = onSnapshot(qFixedBills, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FixedBill));
-      setFixedBills(data);
+      setFixedBills(snapshot.docs.map(d => ({ id: d.id, ...comDinheiro(d.data(), ['amount']) } as FixedBill)));
     }, handleSnapshotError('fixed_bills'));
     const unsubRubrics = onSnapshot(collection(db, 'bill_rubrics'), (snapshot) => {
-      setBillRubrics(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as BillRubric)));
+      setBillRubrics(snapshot.docs.map(d => ({ id: d.id, ...comDinheiro(d.data(), ['defaultAmount']) } as BillRubric)));
     }, handleSnapshotError('bill_rubrics'));
     const unsubIncomeEntries = onSnapshot(collection(db, 'income_entries'), (snapshot) => {
       setIncomeEntries(snapshot.docs
-        .map(d => ({ id: d.id, ...d.data() } as IncomeEntry))
+        .map(d => ({ id: d.id, ...comDinheiro(d.data(), ['amount']) } as IncomeEntry))
         .filter(e => e.status !== 'deleted')
       );
     }, handleSnapshotError('income_entries'));
     const unsubIncomeRubrics = onSnapshot(collection(db, 'income_rubrics'), (snapshot) => {
-      setIncomeRubrics(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as IncomeRubric)));
+      setIncomeRubrics(snapshot.docs.map(d => ({ id: d.id, ...comDinheiro(d.data(), ['defaultAmount']) } as IncomeRubric)));
     }, handleSnapshotError('income_rubrics'));
     const unsubShopping = onSnapshot(collection(db, 'shopping_items'), (snapshot) => {
       setShoppingItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ShoppingItem)));
@@ -1269,7 +1292,21 @@ const App: React.FC = () => {
     // Services Sync
     const qServices = query(collection(db, 'servicos'), orderBy('data_criacao', 'desc'));
     const unsubProjects = onSnapshot(qServices, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Servico[];
+      // As parcelas entram pela mesma fronteira. Nao e simetria por gosto: a
+      // sincronia de servicos para rendas compara `existing.amount !==
+      // expected.amount` com `!==` estrito, e `expected.amount` vem de
+      // `parcela.valor`. Normalizar so o lado da renda faria os dois nunca
+      // serem iguais — a sincronia grava, o snapshot volta normalizado, o
+      // efeito re-dispara por `incomeEntries` e grava de novo. Loop infinito de
+      // escrita, contido apenas pelo debounce de 1s.
+      const data = snapshot.docs.map(doc => {
+        const bruto = doc.data() as Record<string, any>;
+        const servico = comDinheiro(bruto, ['valor_total']);
+        if (Array.isArray(bruto.parcelas)) {
+          servico.parcelas = comDinheiroNaLista(bruto.parcelas, ['valor']);
+        }
+        return { id: doc.id, ...servico };
+      }) as Servico[];
       setServices(data);
     }, handleSnapshotError('servicos'));
     // Health Sync
