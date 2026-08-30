@@ -7690,12 +7690,31 @@ def askTaskAssistant(req: https_fn.CallableRequest):
                 if aquisicoes.get("observacao"):
                     parts.append(f"- ATENCAO: {aquisicoes['observacao']}")
 
+                # Meta concluida sai por um ramo proprio, e nao e capricho de
+                # texto: `cabe_na_fila: False` tem DUAS causas — o cofre nao
+                # alcanca, ou o item nem esta na fila. O modulo exclui as
+                # concluidas da fila de proposito, entao dizer "NAO cabe junto
+                # com as de cima" sobre uma compra ja feita e afirmacao
+                # financeira falsa. E a `cobertura_pct` dela e calculada sobre o
+                # `currentAmount` historico, o que ela custou quando foi
+                # fechada, e nao sobre o cofre de hoje.
+                #
+                # E a terceira vez que essa conflacao morde neste sistema: o mesmo
+                # `False` ja tinha posto o selo ambar "so se for este" numa meta
+                # comprada, e ja tinha feito o resumo do cofre dizer que o
+                # dinheiro nao cobre o primeiro item de uma fila vazia. Quem
+                # consumir `cabe_na_fila` daqui em diante precisa olhar o
+                # `status` antes.
                 parts.append("\nMetas Financeiras:")
                 for meta in metas:
+                    alvo = meta.get("targetAmount", 0)
+                    if str(meta.get("status") or "") == "completed":
+                        parts.append(f"- {meta.get('name')}: R$ {alvo:.2f} (JA COMPRADA)")
+                        continue
                     cobertura = meta.get("cobertura_pct", 0)
                     cabe = "cabe na fila" if meta.get("cabe_na_fila") else "NAO cabe junto com as de cima"
                     parts.append(
-                        f"- {meta.get('name')}: R$ {meta.get('targetAmount', 0):.2f} "
+                        f"- {meta.get('name')}: R$ {alvo:.2f} "
                         f"(Prioridade: {meta.get('priority')}; coberto {cobertura:.1f}% pelo cofre; {cabe})"
                     )
                 
