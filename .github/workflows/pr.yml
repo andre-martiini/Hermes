@@ -1,0 +1,55 @@
+name: Checks do PR
+
+# Roda em todo PR para a `main` o MESMO gate que o deploy roda, mais o build.
+#
+# O build esta aqui por um motivo concreto: em 30/08 a `main` ficou sem deploy
+# por um erro de sintaxe no `index.tsx` que passou por todos os checks do PR.
+# `tsconfig.json` tem `"include": ["src"]`, e `index.tsx` e `FinanceView.tsx`
+# ficam na RAIZ do repositorio — ou seja, `tsc --noEmit` nao olha nenhum dos
+# dois, e os testes tambem nao, porque nenhum importa esses arquivos. O unico
+# check que os cobre e o `vite build`, que ate entao so rodava no workflow de
+# deploy, DEPOIS do merge. O erro so aparecia com a `main` ja quebrada.
+#
+# Enquanto os arquivos da raiz estiverem fora do `tsc`, este job e a unica
+# coisa entre um erro de sintaxe neles e a `main`.
+
+on:
+  pull_request:
+    branches: [main]
+
+# Um push novo no PR cancela a checagem do anterior: o que importa e o estado
+# do head atual, e nao o de um commit que ja foi substituido.
+concurrency:
+  group: pr-checks-${{ github.head_ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verificar:
+    name: Testes e build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: Rodar testes
+        run: npm test
+
+      # A chave entra no bundle no build de producao. O build funciona sem ela
+      # (o valor so e embutido, nao validado), entao um PR de fork sem acesso ao
+      # secret ainda e checado — mas passar a chave deixa este build identico ao
+      # que o deploy faz, que e o ponto do job.
+      - name: Build do frontend (Vite -> dist)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: npm run build
