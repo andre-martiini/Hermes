@@ -20,6 +20,14 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // O gerador de NFS-e foi removido no #138, mas um cliente PWA com o
+    // bundle antigo ainda carregado continua tendo o runRobot, que grava a
+    // credencial do portal neste documento. O catch-all abaixo autorizava
+    // essa escrita, entao apagar o documento nao fechava o canal.
+    match /automations/{document=**} {
+      allow read, write: if false;
+    }
+
     match /public_configs/{document=**} {
       allow read, write: if internalUser();
     }
