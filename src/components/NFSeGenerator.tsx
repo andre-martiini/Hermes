@@ -124,11 +124,32 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
   const finalCP = valorCPManual !== null ? parseFloat(valorCPManual.replace(',', '.')) || 0 : cpAutoNum;
   const finalIRRF = valorIRRFManual !== null ? parseFloat(valorIRRFManual.replace(',', '.')) || 0 : irrfAutoNum;
   
+  // O painel aparecer nao e o mesmo que a emissao estar liberada.
+  //
+  // `runRobot` grava um pedido em `automations/hermes_robot` e um robo emite
+  // NOTA FISCAL de verdade a partir dele. Com o painel destravado so pelo valor
+  // liquido, o botao ficava clicavel antes da busca do CNPJ — e o pedido saia
+  // com `cnpj_tomador: ''` e a descricao contendo o literal `[RAZAO SOCIAL]`.
+  // Antes deste PR isso era inalcancavel so porque o painel inteiro era morto;
+  // destravar o painel sem travar a acao trocaria um defeito por outro pior.
+  //
+  // Exige a razao social, e nao so o CNPJ digitado: a descricao da nota a
+  // interpola, e um CNPJ digitado a mao sem a busca deixa o placeholder no
+  // texto que vai para a nota.
+  const cnpjTomador = cleanCnpj(clientData?.cnpj || cnpj);
+  const podeEmitir = cnpjTomador.length === 14
+    && Boolean(clientData?.razaoSocial)
+    && finalBruto > 0
+    && !loading;
+
   const mesReferenciaString = `${monthNames[selecaoMes - 1]}/${selecaoAno}`;
   const autoDescricao = `Desenvolvimento de soluções tecnológicas e consultoria em gestão empresarial na empresa ${clientData?.razaoSocial || '[RAZÃO SOCIAL]'}. Referente ao mês de ${mesReferenciaString}. Valor líquido acordado: ${formatCurrency(liquidoNum)}.`;
   const finalDescricao = descricaoManual !== null ? descricaoManual : autoDescricao;
 
   const runRobot = async () => {
+    // Guarda alem do `disabled` do botao: quem dispara emissao de nota nao
+    // confia no estado visual de um botao para saber se os dados existem.
+    if (!podeEmitir) return;
     setIsRobotRunning(true);
     try {
         // Prepare data for the robot
@@ -468,9 +489,10 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
                         
                         <button
                             onClick={runRobot}
-                            disabled={isRobotRunning && (robotStatus === 'requested' || robotStatus === 'processing')}
+                            disabled={(isRobotRunning && (robotStatus === 'requested' || robotStatus === 'processing')) || !podeEmitir}
+                            title={!podeEmitir ? 'Busque o CNPJ do tomador antes de emitir' : undefined}
                             className={`w-full py-5 rounded-lg font-sans font-semibold uppercase tracking-[0.3em] text-xs flex items-center justify-center gap-4 transition-all shadow-none border-2 ${
-                                (isRobotRunning && (robotStatus === 'requested' || robotStatus === 'processing'))
+                                ((isRobotRunning && (robotStatus === 'requested' || robotStatus === 'processing')) || !podeEmitir)
                                 ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' 
                                 : 'bg-on-surface text-surface border-on-surface hover:bg-primary-tactile hover:border-primary-tactile active:scale-[0.98]'
                             }`}

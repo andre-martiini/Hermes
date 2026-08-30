@@ -81,7 +81,7 @@ TailwindCSS com tema customizado em `tailwind.config.js`: cores nomeadas (`surfa
 
 Vitest + Testing Library. Arquivos `*.test.ts`/`*.test.tsx` ficam ao lado do código testado (ex.: `src/utils/destructiveActions.test.ts`, `src/components/NFSeGenerator.test.tsx`, `src/views/DiarioBordoUI.test.tsx`). `npm test` roda `vitest run` sem argumentos: **a descoberta é automática e não há lista para manter** — um arquivo novo passa a rodar sozinho, em qualquer pasta do repositório (fora de `node_modules` e `dist`).
 
-Era assim que essa seção mandava fazer até 30/08: o script enumerava os arquivos um a um e cabia a quem escrevia um teste novo adicionar o caminho. O modo de falha era silencioso por construção — esquecer não quebra nada, só deixa de proteger. Quando isso foi trocado, havia 16 arquivos de teste no repositório e 10 na lista: **seis testes existiam e nunca rodavam**, e um deles escondia uma regressão de tela em produção (o painel de saída do gerador de NFS-e, inalcançável porque `setShowResults` nunca era chamado). Não volte a filtrar o `npm test` por lista.
+Era assim que essa seção mandava fazer até 30/08: o script enumerava os arquivos um a um e cabia a quem escrevia um teste novo adicionar o caminho. O modo de falha era silencioso por construção — esquecer não quebra nada, só deixa de proteger. Quando isso foi trocado, havia 17 arquivos de teste no repositório e 11 na lista: **seis testes existiam e nunca rodavam**, e um deles escondia uma regressão de tela em produção (o painel de saída do gerador de NFS-e, inalcançável porque `setShowResults` nunca era chamado). Não volte a filtrar o `npm test` por lista.
 
 ## Navegação
 

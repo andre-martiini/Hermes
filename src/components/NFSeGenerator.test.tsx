@@ -75,6 +75,38 @@ describe('NFSeGenerator', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('17.01');
   });
 
+  it('nao libera a emissao antes de o tomador estar identificado', () => {
+    // `runRobot` grava um pedido que faz um robo emitir NOTA FISCAL de verdade.
+    // Com o painel destravado so pelo valor liquido, o botao ficava clicavel
+    // antes da busca do CNPJ, e o pedido saia com `cnpj_tomador: ''` e a
+    // descricao contendo o literal `[RAZAO SOCIAL]`.
+    abrir();
+    fireEvent.change(campoLiquido(), { target: { value: '5000' } });
+    const emitir = screen.getByText(/EXECUTE_ROBOTIC_EMISSION/i).closest('button')!;
+    expect(emitir.disabled).toBe(true);
+  });
+
+  it('libera a emissao depois de o CNPJ ser buscado', async () => {
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        cnpj: '12345678000195',
+        razao_social: 'EMPRESA TESTE LTDA',
+        municipio: 'SAO PAULO',
+        uf: 'SP',
+      }),
+    });
+    abrir();
+    fireEvent.change(campoLiquido(), { target: { value: '5000' } });
+    const campoCnpj = screen.getByPlaceholderText('00.000.000/0000-00');
+    fireEvent.change(campoCnpj, { target: { value: '12.345.678/0001-95' } });
+    fireEvent.click(campoCnpj.nextElementSibling as HTMLButtonElement);
+    await waitFor(() => {
+      const emitir = screen.getByText(/EXECUTE_ROBOTIC_EMISSION/i).closest('button')!;
+      expect(emitir.disabled).toBe(false);
+    });
+  });
+
   it('busca o CNPJ e mostra a razao social', async () => {
     (global.fetch as any).mockResolvedValueOnce({
       ok: true,
