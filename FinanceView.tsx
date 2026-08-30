@@ -25,7 +25,6 @@ const parseDateDay = (dateStr?: string) => {
 };
 import { resolveTwoStepAction } from './src/utils/destructiveActions';
 import { centavos, MetaComCobertura } from './src/utils/bolsoAquisicoes';
-import { NFSeGenerator } from './src/components/NFSeGenerator';
 /**
  * A meta como `resumoDoBolso` a devolve: com a cobertura e a leitura da fila já
  * calculadas. A tela recebe isso pronto e **não refaz nenhuma das duas contas**.
@@ -341,9 +340,6 @@ const FinanceView = ({
     const [billStatusFilter, setBillStatusFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
     const [billCategoryFilter, setBillCategoryFilter] = useState('all');
     const [billSort, setBillSort] = useState<{ key: 'description' | 'category' | 'amount' | 'dueDay' | 'status' | 'barcode' | 'pix'; direction: SortDirection }>({ key: 'dueDay', direction: 'asc' });
-
-    // NFSe Generator State
-    const [isNFSeGeneratorOpen, setIsNFSeGeneratorOpen] = useState(false);
 
     // Budget Chart Selector Tab ('accumulated' | 'daily')
     const [budgetChartTab, setBudgetChartTab] = useState<'accumulated' | 'daily'>('accumulated');
@@ -2314,22 +2310,11 @@ const FinanceView = ({
             {activeTab === 'income' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
 
-                    {isNFSeGeneratorOpen && (
-                        <NFSeGenerator onClose={() => setIsNFSeGeneratorOpen(false)} />
-                    )}
-
                     {/* SEÇÃO DE RENDAS / GANHOS */}
                     <FinanceSection title="Rendas e Rendimentos">
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                             <p className="text-slate-400 font-sans text-[10px] font-bold uppercase tracking-wider">Fontes de Renda Ativas</p>
                             <div className="flex gap-3 w-full md:w-auto">
-                                <button
-                                    onClick={() => setIsNFSeGeneratorOpen(true)}
-                                    className="flex-1 md:flex-none border border-slate-200 dark:border-white/10 bg-surface hover:bg-slate-50 text-on-surface px-4 py-2 flex items-center justify-center gap-2 rounded-lg text-[10px] font-sans font-bold uppercase tracking-wider transition-all shadow-sm"
-                                >
-                                    <svg className="w-4 h-4 text-primary-tactile" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                                    Gerar NFS-e
-                                </button>
                                 <button
                                     onClick={() => setIsManagingIncomeRubrics(!isManagingIncomeRubrics)}
                                     className={`flex-1 md:flex-none px-4 py-2 flex items-center justify-center rounded-lg text-[10px] font-sans font-bold uppercase tracking-wider transition-all border ${isManagingIncomeRubrics ? 'bg-slate-900 dark:bg-slate-800 text-white border-slate-900 dark:border-slate-850' : 'bg-surface text-slate-700 border-slate-200 dark:border-white/10 hover:bg-slate-50 shadow-sm'}`}
