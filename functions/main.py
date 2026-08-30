@@ -7655,6 +7655,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
                 resumo = data_json.get("resumo", {})
                 metas = data_json.get("metas", [])
                 reserva = data_json.get("reserva_emergencia", {})
+                aquisicoes = data_json.get("aquisicoes", {})
                 detalhes = data_json.get("detalhes", {})
                 
                 parts = []
@@ -7669,9 +7670,34 @@ def askTaskAssistant(req: https_fn.CallableRequest):
                 parts.append(f"- Alvo: R$ {reserva.get('alvo', 0):.2f}")
                 parts.append(f"- Atual: R$ {reserva.get('atual', 0):.2f}")
                 
+                # O cofre de aquisicoes, e nao so o alvo de cada meta.
+                #
+                # Sem este bloco o copiloto respondia "da para comprar a
+                # bicicleta?" pelo `saldo_atual`, que e o numero errado para essa
+                # pergunta: o dinheiro de aquisicao mora na reserva de
+                # investimento mais a poupanca do mes, e nao no saldo do mes.
+                # Ele tinha o alvo de cada meta e nenhuma nocao de quanto ha
+                # disponivel — o que convida a inventar a diferenca.
+                #
+                # A cobertura vem calculada pelo mesmo modulo que a tela usa, e a
+                # observacao sobre nao somar coberturas vem junto porque e
+                # exatamente o erro que o numero individual induz.
+                bolso = aquisicoes.get("bolso", 0)
+                cabem = aquisicoes.get("itens_que_cabem_no_bolso", 0)
+                parts.append("\nCofre de Aquisicoes:")
+                parts.append(f"- Disponivel para desejos de compra: R$ {bolso:.2f}")
+                parts.append(f"- Itens da fila que cabem de uma vez: {cabem}")
+                if aquisicoes.get("observacao"):
+                    parts.append(f"- ATENCAO: {aquisicoes['observacao']}")
+
                 parts.append("\nMetas Financeiras:")
                 for meta in metas:
-                    parts.append(f"- {meta.get('name')}: R$ {meta.get('targetAmount', 0):.2f} (Prioridade: {meta.get('priority')})")
+                    cobertura = meta.get("cobertura_pct", 0)
+                    cabe = "cabe na fila" if meta.get("cabe_na_fila") else "NAO cabe junto com as de cima"
+                    parts.append(
+                        f"- {meta.get('name')}: R$ {meta.get('targetAmount', 0):.2f} "
+                        f"(Prioridade: {meta.get('priority')}; coberto {cobertura:.1f}% pelo cofre; {cabe})"
+                    )
                 
                 parts.append("\nRendas Detalhadas:")
                 for r in detalhes.get("rendas", []):

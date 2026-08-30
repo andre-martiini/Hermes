@@ -36,6 +36,7 @@ import PersonalDiaryView from './PersonalDiaryView';
 import WhatsappInboxView from './WhatsappInboxView';
 import { INTERNAL_NAVIGATION_EVENT } from './src/utils/internalNavigation';
 import { resumoDoBolso } from './src/utils/bolsoAquisicoes';
+import { comDinheiro } from './src/utils/dinheiroFirestore';
 // Importações dos módulos extraídos pelo split.js
 import {
   DEFAULT_APP_SETTINGS, getDaysInMonth, isWorkDay, callScrapeSipac,
@@ -1232,9 +1233,16 @@ const App: React.FC = () => {
     const unsubGoogleCalendar = onSnapshot(collection(db, 'google_calendar_events'), (snapshot) => {
       setGoogleCalendarEvents(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as GoogleCalendarEvent)));
     }, handleSnapshotError('google_calendar_events'));
+    // Os valores monetarios sao normalizados na FRONTEIRA, aqui, e nao em cada
+    // lugar que soma ou formata. O porque esta em `comDinheiro`; em resumo, o
+    // `as FinanceTransaction` e uma afirmacao e nao uma conversao, e ha 25+
+    // leituras de `amount` so na FinanceView que confiam nela.
+    //
+    // `comDinheiro` nao injeta `id`: o `finance_settings/config` e reescrito
+    // inteiro pelo `setDoc`, e um `id` a mais viraria campo gravado no doc.
     const unsubTransactions = onSnapshot(collection(db, 'finance_transactions'), (snapshot) => {
       setFinanceTransactions(snapshot.docs
-        .map(d => ({ id: d.id, ...d.data() } as FinanceTransaction))
+        .map(d => ({ id: d.id, ...comDinheiro(d.data(), ['amount']) } as FinanceTransaction))
         .filter(t => t.status !== 'deleted')
       );
     }, handleSnapshotError('finance_transactions'));
@@ -1243,25 +1251,25 @@ const App: React.FC = () => {
     }, handleSnapshotError('finance_goals'));
     const unsubSettings = onSnapshot(doc(db, 'finance_settings', 'config'), (doc) => {
       if (doc.exists()) {
-        setFinanceSettings(doc.data() as FinanceSettings);
+        setFinanceSettings(comDinheiro(doc.data(),
+          ['emergencyReserveCurrent', 'emergencyReserveTarget', 'investmentReserveCurrent']) as FinanceSettings);
       }
     }, handleSnapshotError('finance_settings/config'));
     const qFixedBills = query(collection(db, 'fixed_bills'));
     const unsubFixedBills = onSnapshot(qFixedBills, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FixedBill));
-      setFixedBills(data);
+      setFixedBills(snapshot.docs.map(d => ({ id: d.id, ...comDinheiro(d.data(), ['amount']) } as FixedBill)));
     }, handleSnapshotError('fixed_bills'));
     const unsubRubrics = onSnapshot(collection(db, 'bill_rubrics'), (snapshot) => {
-      setBillRubrics(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as BillRubric)));
+      setBillRubrics(snapshot.docs.map(d => ({ id: d.id, ...comDinheiro(d.data(), ['defaultAmount']) } as BillRubric)));
     }, handleSnapshotError('bill_rubrics'));
     const unsubIncomeEntries = onSnapshot(collection(db, 'income_entries'), (snapshot) => {
       setIncomeEntries(snapshot.docs
-        .map(d => ({ id: d.id, ...d.data() } as IncomeEntry))
+        .map(d => ({ id: d.id, ...comDinheiro(d.data(), ['amount']) } as IncomeEntry))
         .filter(e => e.status !== 'deleted')
       );
     }, handleSnapshotError('income_entries'));
     const unsubIncomeRubrics = onSnapshot(collection(db, 'income_rubrics'), (snapshot) => {
-      setIncomeRubrics(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as IncomeRubric)));
+      setIncomeRubrics(snapshot.docs.map(d => ({ id: d.id, ...comDinheiro(d.data(), ['defaultAmount']) } as IncomeRubric)));
     }, handleSnapshotError('income_rubrics'));
     const unsubShopping = onSnapshot(collection(db, 'shopping_items'), (snapshot) => {
       setShoppingItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ShoppingItem)));
