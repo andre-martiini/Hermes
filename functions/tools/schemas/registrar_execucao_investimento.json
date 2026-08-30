@@ -1,0 +1,33 @@
+{
+  "name": "registrar_execucao_investimento",
+  "description": "Registra a posição que o USUÁRIO passou a ter depois de executar uma ordem na corretora. Não decide nem sugere compra ou venda: a decisão vem do sistema de investimentos, o usuário executa no home broker e só então informa aqui o que de fato ficou",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "ativo": {
+        "type": "string",
+        "enum": ["CDI", "BOVA11", "IVVB11"],
+        "description": "Ativo em que o usuário ficou posicionado"
+      },
+      "quantidade": {
+        "type": "number",
+        "description": "Cotas compradas. Obrigatório para BOVA11 e IVVB11"
+      },
+      "preco": {
+        "type": "number",
+        "description": "Preço pago por cota. Obrigatório para BOVA11 e IVVB11"
+      },
+      "valor": {
+        "type": "number",
+        "description": "Valor aplicado. Obrigatório para CDI"
+      },
+      "caixa": {
+        "type": "number",
+        "description": "Dinheiro que sobrou parado na corretora. Informe numa TROCA de posição: sem ele o serviço mantém o caixa anterior, porque não enxerga o valor da venda"
+      }
+    },
+    "required": [
+      "ativo"
+    ]
+  }
+}

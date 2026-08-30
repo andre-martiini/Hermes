@@ -7690,6 +7690,56 @@ def askTaskAssistant(req: https_fn.CallableRequest):
                 if aquisicoes.get("observacao"):
                     parts.append(f"- ATENCAO: {aquisicoes['observacao']}")
 
+                # Terceiro balde, ao lado da reserva de emergencia e do cofre de
+                # aquisicoes: a carteira de investimentos. Ela vive em OUTRO
+                # sistema (`decisao-investimentos`) e chega por HTTP — o Hermes
+                # nao guarda copia nem le as colecoes dele no Firestore.
+                #
+                # NAO entra em `saldo_atual` nem em `saldo_previsto`, e o rotulo
+                # diz isso ao copiloto de proposito: aqueles dois sao o caixa do
+                # mes, e somar dinheiro investido neles faria o copiloto
+                # responder que ha mais disponivel para gastar do que ha.
+                #
+                # Timeout curto e deliberado. O servico escala a zero e a leitura
+                # busca cotacao externa, entao cold start passa de 10s — e isto
+                # aqui e contexto de TODA pergunta financeira. Melhor a linha
+                # faltar do que a resposta inteira travar; quem quer o numero com
+                # certeza chama `consultar_investimentos`, que espera o quanto for.
+                try:
+                    import investimentos
+                    from bolso_aquisicoes import numero as _num
+                    carteira_inv = investimentos.carteira(
+                        timeout=investimentos.TIMEOUT_CONTEXTO
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    carteira_inv = {"erro": str(exc)}
+
+                parts.append("\nCarteira de Investimentos (NAO entra no saldo do mes):")
+                if carteira_inv.get("erro"):
+                    parts.append(
+                        "- Nao carregou a tempo (o servico escala a zero e o primeiro "
+                        "acesso e lento). NAO estime nem invente o valor. Se a pergunta "
+                        "for sobre investimentos, chame `consultar_investimentos`, que "
+                        "espera o servico subir."
+                    )
+                elif "valor_total" not in carteira_inv:
+                    # Ausencia do campo, e nao o texto do aviso: sem
+                    # `valor_total` nao ha carteira a mostrar, qualquer que seja
+                    # a redacao do outro lado.
+                    parts.append("- Ainda sem primeiro aporte registrado.")
+                else:
+                    parts.append(f"- Posicao: {carteira_inv.get('posicao') or 'so caixa'}")
+                    parts.append(f"- Valor de mercado: R$ {_num(carteira_inv.get('valor_total')):.2f}")
+                    parts.append(f"- Caixa parado na corretora: R$ {_num(carteira_inv.get('caixa')):.2f}")
+                    parts.append(f"- Total aportado: R$ {_num(carteira_inv.get('aporte_total')):.2f}")
+                    if carteira_inv.get("rendimento") is not None:
+                        rend = _num(carteira_inv.get("rendimento")) * 100
+                        linha = f"- Rendimento desde o primeiro aporte: {rend:.2f}%"
+                        if carteira_inv.get("cdi_no_periodo") is not None:
+                            cdi = _num(carteira_inv.get("cdi_no_periodo")) * 100
+                            linha += f" (CDI no mesmo periodo: {cdi:.2f}%)"
+                        parts.append(linha)
+
                 # Meta concluida sai por um ramo proprio, e nao e capricho de
                 # texto: `cabe_na_fila: False` tem DUAS causas — o cofre nao
                 # alcanca, ou o item nem esta na fila. O modulo exclui as

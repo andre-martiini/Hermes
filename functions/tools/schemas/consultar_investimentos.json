@@ -1,0 +1,9 @@
+{
+  "name": "consultar_investimentos",
+  "description": "Consulta a carteira de investimentos: posição atual, valor de mercado, caixa na corretora, total aportado e rendimento comparado ao CDI. Somente leitura",
+  "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": []
+  }
+}
