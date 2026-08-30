@@ -12,6 +12,7 @@ vi.mock('firebase/firestore', () => ({
   onSnapshot: vi.fn(() => () => undefined),
 }));
 
+import { onSnapshot } from 'firebase/firestore';
 import { NFSeGenerator } from './NFSeGenerator';
 
 Object.assign(navigator, { clipboard: { writeText: vi.fn() } });
@@ -105,6 +106,66 @@ describe('NFSeGenerator', () => {
       const emitir = screen.getByText(/EXECUTE_ROBOTIC_EMISSION/i).closest('button')!;
       expect(emitir.disabled).toBe(false);
     });
+  });
+
+  const buscarCnpj = async (valor = '12.345.678/0001-95', razao = 'EMPRESA TESTE LTDA') => {
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        cnpj: valor.replace(/\D/g, ''),
+        razao_social: razao,
+        municipio: 'SAO PAULO',
+        uf: 'SP',
+      }),
+    });
+    const campo = screen.getByPlaceholderText('00.000.000/0000-00');
+    fireEvent.change(campo, { target: { value: valor } });
+    fireEvent.click(campo.nextElementSibling as HTMLButtonElement);
+    // `getAllByText`: a razao social aparece no cartao do tomador E dentro da
+    // descricao gerada.
+    await waitFor(() => expect(screen.getAllByText(new RegExp(razao, 'i')).length).toBeGreaterThan(0));
+    return campo;
+  };
+
+  it('editar o CNPJ depois da busca invalida o tomador', async () => {
+    // Buscar A e trocar o campo para B mantinha `clientData` em A: a emissao
+    // continuava liberada e a nota sairia para A com o formulario mostrando B.
+    abrir();
+    fireEvent.change(campoLiquido(), { target: { value: '5000' } });
+    const campo = await buscarCnpj();
+    expect(screen.getByText(/EXECUTE_ROBOTIC_EMISSION/i).closest('button')!.disabled).toBe(false);
+
+    fireEvent.change(campo, { target: { value: '98.765.432/0001-10' } });
+    expect(screen.getByText(/EXECUTE_ROBOTIC_EMISSION/i).closest('button')!.disabled).toBe(true);
+    expect(screen.getByText(/COPY_STREAM/i).closest('button')!.disabled).toBe(true);
+  });
+
+  it('nao deixa copiar a descricao com o placeholder da razao social', async () => {
+    // Travar so o robo nao basta: esta descricao colada a mao no portal produz
+    // a mesma nota errada.
+    abrir();
+    fireEvent.change(campoLiquido(), { target: { value: '5000' } });
+    expect(screen.getByText(/COPY_STREAM/i).closest('button')!.disabled).toBe(true);
+    await buscarCnpj();
+    expect(screen.getByText(/COPY_STREAM/i).closest('button')!.disabled).toBe(false);
+  });
+
+  it('emissao em andamento continua travada ao reabrir o modal', async () => {
+    // O listener so restaurava `isRobotRunning` em `requested`. Com `processing`,
+    // fechar o modal no meio de uma emissao devolvia o botao habilitado, e um
+    // segundo clique sobrescrevia a automacao fiscal em curso.
+    //
+    // O CNPJ PRECISA ser buscado aqui: sem isso o botao ficaria desabilitado por
+    // falta de tomador, e o teste passaria pelo motivo errado — foi o que
+    // aconteceu na primeira versao dele, que a mutacao nao derrubava.
+    (onSnapshot as any).mockImplementationOnce((_ref: any, cb: any) => {
+      cb({ data: () => ({ status: 'processing' }) });
+      return () => undefined;
+    });
+    abrir();
+    fireEvent.change(campoLiquido(), { target: { value: '5000' } });
+    await buscarCnpj();
+    expect(screen.getByText(/EXECUTE_ROBOTIC_EMISSION|ROBOT_ENGAGED/i).closest('button')!.disabled).toBe(true);
   });
 
   it('busca o CNPJ e mostra a razao social', async () => {

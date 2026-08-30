@@ -136,14 +136,24 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
   // Exige a razao social, e nao so o CNPJ digitado: a descricao da nota a
   // interpola, e um CNPJ digitado a mao sem a busca deixa o placeholder no
   // texto que vai para a nota.
-  const cnpjTomador = cleanCnpj(clientData?.cnpj || cnpj);
+  //
+  // E o tomador so vale enquanto o CNPJ consultado ainda for o CNPJ do campo.
+  // Sem isso, buscar o CNPJ A e depois editar o campo para B mantinha
+  // `clientData` em A: `clientData?.cnpj || cnpj` escolhia A, a emissao
+  // continuava liberada, e a nota saia para A com o formulario mostrando B.
+  // Nota fiscal para o tomador errado e pior do que nota nenhuma.
+  const cnpjTomador = cleanCnpj(cnpj);
+  const tomadorConsultado =
+    clientData && cleanCnpj(clientData.cnpj) === cnpjTomador ? clientData : null;
+  const tomadorIdentificado = Boolean(tomadorConsultado?.razaoSocial);
+
   const podeEmitir = cnpjTomador.length === 14
-    && Boolean(clientData?.razaoSocial)
+    && tomadorIdentificado
     && finalBruto > 0
     && !loading;
 
   const mesReferenciaString = `${monthNames[selecaoMes - 1]}/${selecaoAno}`;
-  const autoDescricao = `Desenvolvimento de soluções tecnológicas e consultoria em gestão empresarial na empresa ${clientData?.razaoSocial || '[RAZÃO SOCIAL]'}. Referente ao mês de ${mesReferenciaString}. Valor líquido acordado: ${formatCurrency(liquidoNum)}.`;
+  const autoDescricao = `Desenvolvimento de soluções tecnológicas e consultoria em gestão empresarial na empresa ${tomadorConsultado?.razaoSocial || '[RAZÃO SOCIAL]'}. Referente ao mês de ${mesReferenciaString}. Valor líquido acordado: ${formatCurrency(liquidoNum)}.`;
   const finalDescricao = descricaoManual !== null ? descricaoManual : autoDescricao;
 
   const runRobot = async () => {
@@ -155,7 +165,7 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
         // Prepare data for the robot
         const robotData = {
             data_competencia: dataCompetencia,
-            cnpj_tomador: cleanCnpj(clientData?.cnpj || cnpj),
+            cnpj_tomador: cnpjTomador,
             descricao: finalDescricao,
             valor_bruto: finalBruto.toFixed(2).replace('.', ','),
             valor_irrf: finalIRRF.toFixed(2).replace('.', ','),
@@ -185,7 +195,11 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
         const data = docSnap.data();
         if (data) {
             setRobotStatus(data.status);
-            if (data.status === 'requested') setIsRobotRunning(true);
+            // `processing` tambem e execucao em andamento. Sem isto, fechar o
+            // modal ou recarregar a pagina no meio de uma emissao devolvia o
+            // botao habilitado — e um segundo clique sobrescrevia a automacao
+            // fiscal que ja estava rodando.
+            if (data.status === 'requested' || data.status === 'processing') setIsRobotRunning(true);
             if (data.status === 'error') setIsRobotRunning(false);
         }
     });
@@ -404,9 +418,9 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
                         <div className="bg-white p-6 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none">
                             <span className="block text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest mb-2">TAKER_ID (CNPJ)</span>
                             <div className="flex justify-between items-center">
-                                <span className="text-sm font-sans font-semibold text-on-surface">{clientData?.cnpj || cnpj}</span>
+                                <span className="text-sm font-sans font-semibold text-on-surface">{formatCnpj(cnpj)}</span>
                                 <button 
-                                    onClick={() => handleCopy(cleanCnpj(clientData?.cnpj || cnpj), 'cnpj')}
+                                    onClick={() => handleCopy(cnpjTomador, 'cnpj')}
                                     className={`p-2 rounded-soft-touch transition-all ${copiedField === 'cnpj' ? 'bg-emerald-500 text-white' : 'bg-slate-100 hover:bg-on-surface hover:text-white text-slate-500'}`}
                                 >
                                     {copiedField === 'cnpj' ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>}
@@ -432,9 +446,16 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
                     <div className="bg-white p-6 rounded-lg border border-[#e5e7eb] dark:border-white/10 shadow-none">
                         <div className="flex justify-between items-start mb-4">
                             <span className="block text-[8px] font-sans font-semibold text-slate-400 uppercase tracking-widest">SERVICE_DESCRIPTION_BLOCK</span>
+                            {/* Travar o robo nao bastava: a descricao copiada daqui e
+                                colada no portal a mao produz a MESMA nota errada, e com
+                                o painel anunciando READY_FOR_TRANSFER. Enquanto o tomador
+                                nao esta identificado o texto contem o literal
+                                `[RAZAO SOCIAL]`. */}
                             <button 
                                 onClick={() => handleCopy(finalDescricao, 'descricao')}
-                                className={`flex items-center gap-2 px-4 py-2 rounded-soft-touch text-[9px] font-sans font-semibold uppercase tracking-widest transition-all ${copiedField === 'descricao' ? 'bg-emerald-500 text-white' : 'bg-on-surface text-white hover:bg-primary-tactile'}`}
+                                disabled={!tomadorIdentificado}
+                                title={!tomadorIdentificado ? 'Busque o CNPJ do tomador: a descrição ainda tem o campo da razão social por preencher' : undefined}
+                                className={`flex items-center gap-2 px-4 py-2 rounded-soft-touch text-[9px] font-sans font-semibold uppercase tracking-widest transition-all ${!tomadorIdentificado ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : copiedField === 'descricao' ? 'bg-emerald-500 text-white' : 'bg-on-surface text-white hover:bg-primary-tactile'}`}
                             >
                                 {copiedField === 'descricao' ? (
                                     <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> COPIED!</>
