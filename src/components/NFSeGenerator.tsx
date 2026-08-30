@@ -40,7 +40,6 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
   const [loading, setLoading] = useState(false);
   const [clientData, setClientData] = useState<NFSeData | null>(null);
   
-  const [showResults, setShowResults] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [isRobotRunning, setIsRobotRunning] = useState(false);
 
@@ -107,6 +106,18 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
   const brutoAutoNum = liquidoNum / 0.89;
   const cpAutoNum = brutoAutoNum * 0.11;
   const irrfAutoNum = 0;
+
+  // O painel de saida aparece assim que ha um valor liquido, que e o que o
+  // estado vazio ja promete ("preencha os parametros de entrada").
+  //
+  // Antes disto era um `useState(false)` cujo `setShowResults` NUNCA era
+  // chamado: o painel inteiro — CNPJ, codigo 17.01, bruto, INSS e os botoes de
+  // copiar — era inalcancavel, e a tela ficava permanentemente em
+  // WAITING_FOR_DATA_STREAM. A regressao entrou junto com a remocao do botao
+  // "gerar", quando o calculo passou a ser ao vivo, e ninguem viu porque o
+  // teste deste componente existia e nao rodava: o `npm test` enumerava os
+  // arquivos um a um e este nao estava na lista.
+  const showResults = liquidoNum > 0;
 
   // Valores Finais (Manual ou Auto)
   const finalBruto = valorBrutoManual !== null ? parseFloat(valorBrutoManual.replace(',', '.')) || 0 : brutoAutoNum;
