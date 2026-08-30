@@ -1,0 +1,60 @@
+name: Abrir PR automaticamente
+
+# Existe porque o fluxo de desenvolvimento acordado em 30/08/2026 tem um so
+# gesto manual do Andre: o `git push`. Tudo o mais e automatico.
+#
+# O Claude trabalha numa branch `claude/**` na maquina dele, roda os testes e
+# commita — mas nao tem credencial para dar push nem para abrir PR. O Andre da
+# o push; este workflow abre o PR. Sem ele o ciclo para na branch: o Codex
+# revisa PULL REQUESTS, nao branches, entao push sem PR nao dispara revisao
+# nenhuma. Foi exatamente o que aconteceu na primeira rodada, em 30/08.
+#
+# `--fill` usa o titulo e o corpo do ultimo commit. O corpo do commit e o
+# relatorio de seis secoes do fluxo (o que mudou, o que pode quebrar, o que os
+# testes provam, O QUE ELES NAO PROVAM, o que so o Andre pode verificar, e quem
+# conferiu alem do Claude). Assim o Claude controla a descricao do PR sem
+# precisar de acesso a API do GitHub.
+#
+# CUIDADO CONHECIDO: PR aberto com o GITHUB_TOKEN nao dispara outros workflows,
+# por protecao do GitHub contra recursao. O Codex e um GitHub App, e apps
+# recebem o evento normalmente — verificado na pratica. Mas se algum dia a
+# revisao passar a ser um workflow, ela nao vai acordar por aqui.
+
+on:
+  push:
+    branches: ['claude/**']
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  abrir-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Abrir PR se ainda nao existir
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          abertos=$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')
+          if [ "$abertos" != "0" ]; then
+            echo "Ja existe PR aberto para $BRANCH. Nada a fazer."
+            exit 0
+          fi
+
+          # Branch sem commit a frente da main nao rende PR — e `gh pr create`
+          # falharia, mandando um e-mail de workflow quebrado por um caso que
+          # nao e erro. Sai limpo.
+          if [ "$(git rev-list --count origin/main.."$BRANCH")" = "0" ]; then
+            echo "$BRANCH nao tem commits a frente da main. Nada a abrir."
+            exit 0
+          fi
+
+          gh pr create --base main --head "$BRANCH" --fill
