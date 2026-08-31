@@ -16,8 +16,11 @@ import {
 import {
   cartaoVazio,
   conferirBanco,
+  exportarCartoesParaJson,
   gatilhosDeTexto,
+  importarCartoesDeJson,
   linhasDeTexto,
+  MODELO_PARA_IA,
   type BancoRespostas,
 } from '../../utils/bancosRespostas';
 import type { CartaoResposta } from '../../utils/cartoesReuniao';
@@ -40,6 +43,9 @@ export const BancoRespostasEditor: React.FC<Props> = ({ isDark, onClose, onBanco
   const [descricao, setDescricao] = useState('');
   const [cartoes, setCartoes] = useState<CartaoResposta[]>([]);
   const [cartaoAberto, setCartaoAberto] = useState<string | null>(null);
+  const [importAberto, setImportAberto] = useState(false);
+  const [jsonColado, setJsonColado] = useState('');
+  const [aviso, setAviso] = useState<string | null>(null);
 
   const painel = isDark ? 'bg-slate-900 border-white/10' : 'bg-white border-slate-200';
   const campo = isDark
@@ -200,6 +206,83 @@ export const BancoRespostasEditor: React.FC<Props> = ({ isDark, onClose, onBanco
               <p className={`mt-3 rounded-xl px-3 py-2 text-[11px] font-semibold leading-relaxed ${isDark ? 'bg-amber-500/10 text-amber-300' : 'bg-amber-50 text-amber-800'}`}>
                 {problemas.length} ponto(s) a resolver antes de usar este banco numa reunião. Cada cartão mostra o seu.
               </p>
+            )}
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                onClick={() => setImportAberto(a => !a)}
+                className={`rounded-xl border px-3 py-1.5 text-[11px] font-bold ${campo}`}
+              >
+                {importAberto ? 'Fechar importação' : 'Importar JSON'}
+              </button>
+              <button
+                onClick={() => {
+                  void navigator.clipboard.writeText(MODELO_PARA_IA);
+                  setAviso('Modelo copiado. Cole numa IA junto com os seus documentos e traga o JSON de volta.');
+                }}
+                className={`rounded-xl border px-3 py-1.5 text-[11px] font-bold ${campo}`}
+                title="Instruções prontas para pedir os cartões a uma IA externa"
+              >
+                Copiar modelo para IA
+              </button>
+              <button
+                onClick={() => {
+                  void navigator.clipboard.writeText(exportarCartoesParaJson(cartoes));
+                  setAviso(`${cartoes.length} cartão(ões) copiados como JSON.`);
+                }}
+                disabled={cartoes.length === 0}
+                className={`rounded-xl border px-3 py-1.5 text-[11px] font-bold disabled:opacity-40 ${campo}`}
+              >
+                Exportar JSON
+              </button>
+            </div>
+
+            {aviso && (
+              <p className={`mt-2 rounded-xl px-3 py-2 text-[11px] font-semibold ${isDark ? 'bg-emerald-500/10 text-emerald-300' : 'bg-emerald-50 text-emerald-800'}`}>
+                {aviso}
+              </p>
+            )}
+
+            {importAberto && (
+              <div className={`mt-2 rounded-2xl border p-3 ${campo}`}>
+                <textarea
+                  value={jsonColado}
+                  onChange={e => setJsonColado(e.target.value)}
+                  placeholder='Cole aqui o JSON dos cartões. Aceita uma lista, ou um objeto com a chave "cartoes".'
+                  rows={6}
+                  className={`w-full rounded-xl border px-3 py-2 font-mono text-[11px] outline-none ${campo}`}
+                />
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    onClick={() => {
+                      const { cartoes: lidos, recusados } = importarCartoesDeJson(jsonColado);
+                      if (lidos.length > 0) {
+                        setCartoes(atuais => [...atuais, ...lidos]);
+                        setCartaoAberto(null);
+                      }
+                      const partes = [
+                        lidos.length > 0 ? `${lidos.length} cartão(ões) importados.` : 'Nenhum cartão importado.',
+                        ...recusados.map(r => `Item ${r.posicao} recusado: ${r.motivo}`),
+                      ];
+                      setAviso(partes.join(' '));
+                      if (lidos.length > 0) { setJsonColado(''); setImportAberto(false); }
+                    }}
+                    className={`rounded-xl px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider ${isDark ? 'bg-white text-slate-950' : 'bg-slate-900 text-white'}`}
+                  >
+                    Importar
+                  </button>
+                  <button
+                    onClick={() => { setJsonColado(''); setImportAberto(false); }}
+                    className={`rounded-xl border px-3 py-1.5 text-[11px] font-bold ${campo}`}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+                <p className={`mt-2 text-[10px] leading-relaxed ${suave}`}>
+                  Os cartões entram no banco que está aberto, somando-se aos que já existem. Nada é
+                  salvo antes de você clicar em salvar — e cartão recusado é sempre dito, com o motivo.
+                </p>
+              </div>
             )}
 
             <div className="mt-3 space-y-2">

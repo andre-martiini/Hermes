@@ -5,6 +5,7 @@ import { collection, addDoc, getDocs, query, orderBy, limit, doc, setDoc, getDoc
 import { HermesGlobalChat } from './HermesGlobalChat';
 import { casarCartoes, filtrarRecentes, type CartaoCasado } from '../../utils/cartoesReuniao';
 import { BancoRespostasEditor } from './BancoRespostasEditor';
+import { DesdobramentoReuniaoModal } from './DesdobramentoReuniaoModal';
 import { listarBancos } from '../../services/bancosRespostasService';
 import type { BancoRespostas } from '../../utils/bancosRespostas';
 
@@ -200,6 +201,16 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
   const [bancos, setBancos] = useState<BancoRespostas[]>([]);
   const [bancoSelecionadoId, setBancoSelecionadoId] = useState<string>('');
   const [editorBancosAberto, setEditorBancosAberto] = useState(false);
+  const [desdobramentoAberto, setDesdobramentoAberto] = useState(false);
+
+  // O título definitivo só é gerado ao gravar a reunião. Para o desdobramento
+  // basta um rótulo que identifique de qual reunião a ação veio, e o horário
+  // da primeira fala serve — vem do estado, então acompanha a tela.
+  const tituloDaReuniaoCorrente = useMemo(() => {
+    const inicio = transcripts[0]?.timestamp;
+    if (!inicio) return '';
+    return `Reunião ${inicio.toLocaleDateString('pt-BR')} ${inicio.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  }, [transcripts]);
 
   const carregarBancos = useCallback(async () => {
     try {
@@ -1270,6 +1281,18 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
               </button>
             </div>
 
+            {/* Desdobramento: só depois de a reunião ter conversa e ter parado.
+                Durante a gravação, oferecer isso seria convidar a sair da reunião. */}
+            {!isRecording && hasContent && (
+              <button
+                onClick={() => setDesdobramentoAberto(true)}
+                className={`flex h-10 items-center rounded-xl border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-all ${ghostButtonClass}`}
+                title="Extrair decisões e ações desta reunião, para revisão"
+              >
+                Desdobramento
+              </button>
+            )}
+
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <div className={`flex h-10 items-center rounded-xl border px-3 ${inputClass}`}>
                 <svg className={`h-3.5 w-3.5 shrink-0 ${subtleClass}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1527,6 +1550,16 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
           </aside>
         )}
       </div>
+
+      {desdobramentoAberto && (
+        <DesdobramentoReuniaoModal
+          isDark={isDark}
+          titulo={tituloDaReuniaoCorrente}
+          falas={transcripts.map(t => ({ speaker: t.speaker, text: t.text }))}
+          onClose={() => setDesdobramentoAberto(false)}
+          showToast={showToast}
+        />
+      )}
 
       {editorBancosAberto && (
         <BancoRespostasEditor
