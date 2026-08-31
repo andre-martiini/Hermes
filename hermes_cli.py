@@ -36,6 +36,11 @@ DEBUG_MODE = True # Ativa log detalhado de cada tarefa no terminal do sistema
 # Mantém paridade com SYNC_GOOGLE_TASKS_ENABLED em functions/main.py.
 SYNC_GOOGLE_TASKS_ENABLED = False
 
+# Mesmo calendario dedicado usado pela Cloud Function. O watcher local e a
+# funcao em nuvem podem, por alguns instantes, receber o mesmo pedido de sync;
+# ambos precisam convergir para o MESMO calendario e o MESMO ID de evento.
+DEFAULT_GOOGLE_CALENDAR_ID = 'cf4953b9512ee2e85a7e064f9d5ce4eaf6e3634564c91e5c7ee2bb01fd46782a@group.calendar.google.com'
+
 # Configuração do Firebase
 KEY_FILE = 'firebase_service_account_key.json'
 
@@ -140,6 +145,58 @@ def archive_gmail_message(service, msg_id, log=None, reason="financeiro"):
 
 def get_calendar_service():
     return build('calendar', 'v3', credentials=get_google_creds())
+
+def get_target_calendar_id(db):
+    """Calendario exclusivo das acoes; nunca usa `primary` por fallback."""
+    try:
+        snap = db.collection('system').document('config').get()
+        cfg = (snap.to_dict() or {}) if snap.exists else {}
+        calendar_id = (
+            cfg.get('googleCalendarId')
+            or cfg.get('google_calendar_id')
+            or cfg.get('calendarId')
+        )
+        if isinstance(calendar_id, str) and calendar_id.strip():
+            return calendar_id.strip()
+    except Exception:
+        pass
+    return DEFAULT_GOOGLE_CALENDAR_ID
+
+def build_task_calendar_event_id(task_id):
+    stable_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"hermes-task:{task_id}")
+    return f"hermes{stable_uuid.hex}"
+
+def upsert_task_calendar_event(calendar_service, calendar_id, task_id, current_event_id, event_body):
+    """Cria/atualiza de forma idempotente o unico evento de uma acao."""
+    desired_event_id = build_task_calendar_event_id(task_id)
+
+    if current_event_id:
+        try:
+            return calendar_service.events().update(
+                calendarId=calendar_id,
+                eventId=current_event_id,
+                body=event_body,
+            ).execute()
+        except HttpError as exc:
+            if exc.resp.status != 404:
+                raise
+
+    insert_body = dict(event_body)
+    insert_body['id'] = desired_event_id
+    try:
+        return calendar_service.events().insert(
+            calendarId=calendar_id,
+            body=insert_body,
+        ).execute()
+    except HttpError as exc:
+        if exc.resp.status != 409:
+            raise
+        # Outra instancia pode ter criado o mesmo ID entre o GET/INSERT. Como o
+        # ID e deterministico, conflito significa sucesso idempotente.
+        return calendar_service.events().get(
+            calendarId=calendar_id,
+            eventId=desired_event_id,
+        ).execute()
 
 def cleanup_old_sync_badges(db, log_func=None):
     def log(msg):
@@ -464,6 +521,7 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
     try:
         service = get_tasks_service()
         calendar_service = get_calendar_service()
+        calendar_id = get_target_calendar_id(db)
 
         # Sincronia Ações -> Google Tasks desativada (ver SYNC_GOOGLE_TASKS_ENABLED). Mantém-se o Calendar.
         tasklist_id = None
@@ -572,25 +630,28 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
                         'summary': f"Tarefa: {title}",
                         'description': updated_notes,
                         'start': {'dateTime': start_dt, 'timeZone': 'America/Sao_Paulo'},
-                        'end': {'dateTime': end_dt, 'timeZone': 'America/Sao_Paulo'}
+                        'end': {'dateTime': end_dt, 'timeZone': 'America/Sao_Paulo'},
+                        'extendedProperties': {
+                            'private': {'hermes_task_id': doc.id}
+                        },
                     }
-                    if not cal_id:
-                        new_event = calendar_service.events().insert(calendarId='primary', body=event_body).execute()
-                        doc.reference.update({'google_calendar_id': new_event['id']})
+                    event = upsert_task_calendar_event(
+                        calendar_service,
+                        calendar_id,
+                        doc.id,
+                        cal_id,
+                        event_body,
+                    )
+                    if event.get('id') != cal_id:
+                        doc.reference.update({'google_calendar_id': event['id']})
                         log(f"[+] ALOCADA CALENDAR: {title}")
-                    else:
-                        try:
-                            calendar_service.events().update(calendarId='primary', eventId=cal_id, body=event_body).execute()
-                        except HttpError as cal_err:
-                            if cal_err.resp.status == 404:
-                                new_event = calendar_service.events().insert(calendarId='primary', body=event_body).execute()
-                                doc.reference.update({'google_calendar_id': new_event['id']})
                 except Exception as ce:
-                    pass
+                    log(f"[CAL][!] Falha ao sincronizar evento da tarefa '{title}': {ce}")
             elif (not sync_to_calendar or g_status == 'completed') and cal_id:
                  try:
-                     calendar_service.events().delete(calendarId='primary', eventId=cal_id).execute()
-                 except HttpError as ce: pass
+                     calendar_service.events().delete(calendarId=calendar_id, eventId=cal_id).execute()
+                 except HttpError:
+                     pass
                  doc.reference.update({'google_calendar_id': None})
 
         log(f"PUSH FINALIZADO: {count} atualizações.", force_ui=True)

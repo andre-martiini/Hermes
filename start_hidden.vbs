@@ -24,7 +24,8 @@ shell.CurrentDirectory = baseDir & "\automations"
 shell.Run "cmd /c title Hermes Automations API && python server.py > """ & logsDir & "\automations.log"" 2>&1", HIDDEN, WAIT_ON_RETURN
 
 shell.CurrentDirectory = baseDir
-shell.Run "cmd /c title Hermes Sync (Google Tasks) && python hermes_cli.py watch > """ & logsDir & "\sync.log"" 2>&1", HIDDEN, WAIT_ON_RETURN
+' A sincronizacao principal roda na Cloud Function. Iniciar tambem o watcher
+' local faria dois consumidores responderem ao mesmo system/sync.
 shell.Run "cmd /c title Hermes Sync (Monitor de Paginas) && python hermes_cli.py watch-pages > """ & logsDir & "\watch_pages.log"" 2>&1", HIDDEN, WAIT_ON_RETURN
 
 shell.Run "cmd /c ""cd /d " & baseDir & "\hermes-voice-bridge && .venv\Scripts\python.exe -m uvicorn main:app --port 3002 > " & logsDir & "\voice_bridge.log 2>&1""", HIDDEN, WAIT_ON_RETURN
