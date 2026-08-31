@@ -129,9 +129,18 @@ export interface ResultadoImportacao {
   recusados: { posicao: number; motivo: string }[];
 }
 
-const comoLista = (valor: unknown): string[] => {
+/**
+ * Lê um campo que pode vir como lista ou como texto solto.
+ *
+ * `porVirgula` existe porque gatilho e resposta se quebram de formas
+ * diferentes, e confundi-las estraga as duas. Gatilhos são frases curtas que
+ * quem escreve enfileira com vírgula — "quanto custa, qual o valor" são DOIS.
+ * Já uma resposta é frase inteira, e vírgula dentro dela é pontuação: quebrar
+ * por vírgula picaria a fala em pedaços sem sentido.
+ */
+const comoLista = (valor: unknown, porVirgula = false): string[] => {
   if (Array.isArray(valor)) return valor.map((v) => String(v).trim()).filter(Boolean);
-  if (typeof valor === 'string') return linhasDeTexto(valor);
+  if (typeof valor === 'string') return porVirgula ? gatilhosDeTexto(valor) : linhasDeTexto(valor);
   return [];
 };
 
@@ -176,7 +185,7 @@ export const importarCartoesDeJson = (texto: string): ResultadoImportacao => {
     }
     const obj = item as Record<string, unknown>;
     const pergunta = String(obj.pergunta ?? '').trim();
-    const gatilhos = comoLista(obj.gatilhos);
+    const gatilhos = comoLista(obj.gatilhos, true);
     const resposta = comoLista(obj.resposta);
 
     const faltando: string[] = [];
