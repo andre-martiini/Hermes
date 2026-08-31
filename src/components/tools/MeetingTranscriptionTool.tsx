@@ -3,6 +3,10 @@ import { httpsCallable } from 'firebase/functions';
 import { functions, db, auth } from '@/firebase';
 import { collection, addDoc, getDocs, query, orderBy, limit, doc, setDoc, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { HermesGlobalChat } from './HermesGlobalChat';
+import { casarCartoes, filtrarRecentes, type CartaoCasado } from '../../utils/cartoesReuniao';
+import { BancoRespostasEditor } from './BancoRespostasEditor';
+import { listarBancos } from '../../services/bancosRespostasService';
+import type { BancoRespostas } from '../../utils/bancosRespostas';
 
 export interface TranscriptionEntry {
   id: string;
@@ -31,6 +35,11 @@ interface MeetingTranscriptionToolProps {
 }
 
 const GROUP_WINDOW_MS = 7000;
+// Quanto de fala recente entra no casamento. Curto demais perde a pergunta
+// partida em duas frases; longo demais faz cartão subir por assunto que já passou.
+const JANELA_CARTAO_MS = 25000;
+// Três é o que cabe num olhar de relance no meio de uma frase.
+const MAX_CARTOES_VISIVEIS = 3;
 const SHORT_FRAGMENT_WORDS = 6;
 const MAX_GROUPED_WORDS = 64;
 const HISTORY_MAX_ITEMS = 30;
@@ -183,6 +192,71 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
   const [isRecording, setIsRecording] = useState(false);
   const [isSavingToDrive, setIsSavingToDrive] = useState(false);
   const [transcripts, setTranscripts] = useState<TranscriptionEntry[]>([]);
+
+  // ── Banco de respostas escolhido para esta reunião ─────────────────────
+  // O banco é DADO, não código: cada reunião tem o seu, criado antes no editor.
+  // Sem banco escolhido a coluna de cartões simplesmente não aparece — assistência
+  // ao vivo é opcional, e reunião sem preparação continua funcionando como sempre.
+  const [bancos, setBancos] = useState<BancoRespostas[]>([]);
+  const [bancoSelecionadoId, setBancoSelecionadoId] = useState<string>('');
+  const [editorBancosAberto, setEditorBancosAberto] = useState(false);
+
+  const carregarBancos = useCallback(async () => {
+    try {
+      setBancos(await listarBancos());
+    } catch (e) {
+      console.error('Erro ao carregar bancos de resposta', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    void carregarBancos();
+  }, [carregarBancos]);
+
+  const cartoesDoBanco = useMemo(
+    () => bancos.find(b => b.id === bancoSelecionadoId)?.cartoes ?? [],
+    [bancos, bancoSelecionadoId],
+  );
+
+  // ── Cartões de resposta ao vivo ────────────────────────────────────────
+  // Casamento LOCAL: nenhuma chamada de rede, nenhuma chamada de LLM. Ver
+  // src/utils/cartoesReuniao.ts para o porquê.
+  const [cartoesVisiveis, setCartoesVisiveis] = useState<CartaoCasado[]>([]);
+  const cartoesExibidosEmRef = useRef<Map<string, number>>(new Map());
+
+  useEffect(() => {
+    if (!isRecording || cartoesDoBanco.length === 0) return;
+    const agora = Date.now();
+    // Só a fala do OUTRO convoca cartão. Se a própria fala convocasse, o
+    // cartão subiria enquanto ele já está respondendo — tarde e no caminho.
+    const janela = transcripts
+      .filter(t => t.speaker === 'Reunião' && agora - t.timestamp.getTime() <= JANELA_CARTAO_MS)
+      .map(t => t.text)
+      .join(' ');
+    if (!janela) return;
+
+    const casados = filtrarRecentes(
+      casarCartoes(janela, cartoesDoBanco, { maximo: MAX_CARTOES_VISIVEIS }),
+      cartoesExibidosEmRef.current,
+      agora,
+    );
+    if (casados.length === 0) return;
+
+    casados.forEach(({ cartao }) => cartoesExibidosEmRef.current.set(cartao.id, agora));
+    setCartoesVisiveis(anteriores => {
+      const novos = [...casados, ...anteriores.filter(a => !casados.some(c => c.cartao.id === a.cartao.id))];
+      return novos.slice(0, MAX_CARTOES_VISIVEIS);
+    });
+  }, [transcripts, isRecording, cartoesDoBanco]);
+
+  useEffect(() => {
+    // Reunião nova começa sem cartão na tela e sem memória da anterior.
+    if (isRecording) {
+      setCartoesVisiveis([]);
+      cartoesExibidosEmRef.current = new Map();
+    }
+  }, [isRecording]);
+
   const [meetingStartedAt, setMeetingStartedAt] = useState<Date | null>(null);
   const [meetingEndedAt, setMeetingEndedAt] = useState<Date | null>(null);
   const [meetingHistory, setMeetingHistory] = useState<MeetingHistoryEntry[]>([]);
@@ -1170,6 +1244,32 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
               </span>
             )}
 
+            {/* Escolha do banco. Fica ao lado do botão de gravar porque é decisão
+                de ANTES da reunião — depois que a fala começa, ninguém para para configurar. */}
+            <div className="flex items-center gap-1">
+              <select
+                value={bancoSelecionadoId}
+                onChange={e => setBancoSelecionadoId(e.target.value)}
+                disabled={isRecording}
+                title={isRecording ? 'Escolha o banco antes de começar a gravar.' : 'Cartões que sobem sozinhos quando a pergunta aparecer'}
+                className={`h-10 rounded-xl border px-2 text-[11px] font-semibold outline-none disabled:opacity-50 ${inputClass}`}
+              >
+                <option value="">Sem cartões</option>
+                {bancos.map(banco => (
+                  <option key={banco.id} value={banco.id}>
+                    {banco.nome} ({banco.cartoes.length})
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => setEditorBancosAberto(true)}
+                className={`flex h-10 items-center rounded-xl border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-all ${ghostButtonClass}`}
+                title="Criar e editar bancos de resposta"
+              >
+                Cartões
+              </button>
+            </div>
+
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <div className={`flex h-10 items-center rounded-xl border px-3 ${inputClass}`}>
                 <svg className={`h-3.5 w-3.5 shrink-0 ${subtleClass}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1322,6 +1422,58 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
           </div>
         </section>
 
+        {/* Coluna dos cartões. A coluna nasce junto com a gravação, mesmo vazia:
+            se ela aparecesse só quando o primeiro cartão casa, a transcrição
+            inteira daria um pulo lateral no meio de uma frase do interlocutor —
+            que é exatamente o tipo de movimento que o cartão não pode causar.
+            Sem som, sem badge, sem animação: quem está falando decide se olha. */}
+        {isDesktopSplit && isRecording && cartoesDoBanco.length > 0 && (
+          <aside className="flex w-[300px] shrink-0 flex-col gap-2 xl:w-[340px]">
+            <span className={`px-1 text-[10px] font-bold uppercase tracking-wider ${subtleClass}`}>
+              Cartões
+            </span>
+            <div className="custom-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto">
+              {cartoesVisiveis.length === 0 ? (
+                <p className={`px-1 text-[11px] leading-relaxed ${subtleClass}`}>
+                  Nenhum cartão ainda. Eles sobem sozinhos quando a pergunta aparecer na fala do outro lado.
+                </p>
+              ) : (
+                cartoesVisiveis.map(({ cartao }) => (
+                  <article
+                    key={cartao.id}
+                    className={`rounded-2xl border p-3 shadow-sm ${panelClass}`}
+                  >
+                    <h4 className={`text-xs font-bold leading-snug ${titleClass}`}>{cartao.pergunta}</h4>
+                    <ul className={`mt-2 space-y-1.5 text-[12px] leading-relaxed ${mutedClass}`}>
+                      {cartao.resposta.map((linha, i) => (
+                        <li key={i}>{linha}</li>
+                      ))}
+                    </ul>
+                    {cartao.numeros && cartao.numeros.length > 0 && (
+                      <ul className={`mt-2 space-y-1 border-t pt-2 text-[12px] font-bold ${isDark ? 'border-white/10 text-slate-100' : 'border-slate-200 text-slate-900'}`}>
+                        {cartao.numeros.map((n, i) => (
+                          <li key={i}>{n}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {cartao.naoDizer && (
+                      <p className={`mt-2 rounded-xl px-2 py-1.5 text-[11px] font-semibold leading-snug ${isDark ? 'bg-rose-500/10 text-rose-300' : 'bg-rose-50 text-rose-700'}`}>
+                        Não diga: {cartao.naoDizer}
+                      </p>
+                    )}
+                    <button
+                      onClick={() => setCartoesVisiveis(atuais => atuais.filter(c => c.cartao.id !== cartao.id))}
+                      className={`mt-2 text-[10px] font-bold uppercase tracking-wider ${subtleClass} hover:text-rose-500`}
+                    >
+                      Dispensar
+                    </button>
+                  </article>
+                ))
+              )}
+            </div>
+          </aside>
+        )}
+
         {/* Coluna do Copiloto (desktop). O HermesGlobalChat fica sempre montado — recolher/expandir
             só alterna o prop isOpen (que internamente renderiza null), preservando a conversa única
             da reunião em vez de recriá-la a cada toggle. */}
@@ -1375,6 +1527,14 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
           </aside>
         )}
       </div>
+
+      {editorBancosAberto && (
+        <BancoRespostasEditor
+          isDark={isDark}
+          onClose={() => setEditorBancosAberto(false)}
+          onBancosMudaram={() => void carregarBancos()}
+        />
+      )}
 
       {/* Copiloto em overlay (mobile/tablet) */}
       {!isDesktopSplit && (
