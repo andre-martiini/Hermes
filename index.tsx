@@ -1775,6 +1775,7 @@ const App: React.FC = () => {
   const [completedLimit, setCompletedLimit] = useState(10);
   const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude' | 'servicos' | 'estrategia'>('home');
   const [viewMode, setViewMode] = useState<'home' | 'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'finance' | 'saude' | 'ferramentas' | 'knowledge' | 'services' | 'rag-bases' | 'concluidas' | 'strategy' | 'godmode' | 'contacts' | 'diario' | 'whatsapp'>('home');
+  const [morningSummaryAccessKey, setMorningSummaryAccessKey] = useState(0);
   // Navegação de módulo (sidebar/menu mobile): activeModule e viewMode precisam mudar juntos.
   // flushSync força um commit síncrono único para os dois, em vez de duas chamadas de setState
   // separadas que dependem do agrupamento automático do React — elimina qualquer janela onde
@@ -1783,6 +1784,9 @@ const App: React.FC = () => {
     flushSync(() => {
       setActiveModule(module);
       setViewMode(view);
+      // Um novo acesso deve recalcular o resumo mesmo quando ele já está aberto
+      // e activeModule/viewMode, isoladamente, não mudariam de valor.
+      if (view === 'home') setMorningSummaryAccessKey((key) => key + 1);
     });
   };
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
@@ -5310,6 +5314,7 @@ const App: React.FC = () => {
               <main className={(viewMode === 'home' || viewMode === 'dashboard' || viewMode === 'godmode' || viewMode === 'whatsapp') ? '' : 'mb-20'}>
                 {viewMode === 'home' ? (
                   <MorningSummaryView
+                    key={morningSummaryAccessKey}
                     isDark={isDarkTheme}
                     onOpenTask={handleCopilotoOpenTask}
                     onNavigate={handleMorningSummaryNavigate}

@@ -1276,9 +1276,9 @@ def gerar_resumo_matinal(event: scheduler_fn.ScheduledEvent = None) -> None:
 @https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=120)
 def gerarResumoMatinal(req: https_fn.CallableRequest):
     """
-    Regeneração sob demanda a partir da web (`MorningSummaryView.tsx`): o botão
-    "Atualizar" e o fallback de quando o agendador ainda não rodou (primeiro dia,
-    ou o dia virou enquanto o app estava aberto).
+    Regeneração sob demanda a partir da web (`MorningSummaryView.tsx`): ocorre
+    automaticamente a cada acesso ao Resumo do Dia e também serve de fallback
+    quando o agendador ainda não rodou (primeiro dia ou virada do dia).
     """
     from main import get_db
 
