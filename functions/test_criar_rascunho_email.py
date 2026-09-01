@@ -17,15 +17,17 @@ class _Req:
 
 
 class _Gmail:
-    def __init__(self): self.created = None
+    def __init__(self, headers=None, profile='andre@ufjf.br'):
+        self.created, self.headers, self.profile = None, headers or [
+            {'name': 'From', 'value': 'proad@ufjf.br'}, {'name': 'Message-ID', 'value': '<m1>'},
+        ], profile
     def users(self): return self
+    def getProfile(self, **kwargs): return _Req({'emailAddress': self.profile})
     def drafts(self): return self
     def create(self, **kwargs): self.created = kwargs['body']; return _Req({'id': 'draft-1'})
     def threads(self): return self
     def get(self, **kwargs):
-        return _Req({'messages': [{'payload': {'headers': [
-            {'name': 'From', 'value': 'proad@ufjf.br'}, {'name': 'Message-ID', 'value': '<m1>'},
-        ]}}]})
+        return _Req({'messages': [{'payload': {'headers': self.headers}}]})
 
 
 class _Ctx: pass
@@ -41,6 +43,15 @@ class CriarRascunhoEmailTest(unittest.TestCase):
         self.assertEqual(recipients, ['proad@ufjf.br'])
         self.assertEqual(headers['message-id'], '<m1>')
 
+    def test_ultima_mensagem_propria_usa_to_e_cc(self):
+        gmail = _Gmail([
+            {'name': 'From', 'value': 'André <andre@ufjf.br>'},
+            {'name': 'To', 'value': 'Paula <paula@ufjf.br>'},
+            {'name': 'Cc', 'value': 'andre@ufjf.br, Luis <luis@ufjf.br>'},
+        ])
+        recipients, _ = _thread_recipients(gmail, 'thread-1')
+        self.assertEqual(recipients, ['paula@ufjf.br', 'luis@ufjf.br'])
+
     def test_fixture_por_referencia_vira_mime_com_sha_igual(self):
         fixture = b'%PDF-1.4\n' + b'x' * (100 * 1024)
         gmail = _Gmail()
@@ -54,8 +65,37 @@ class CriarRascunhoEmailTest(unittest.TestCase):
         self.assertEqual(len(attached), 1)
         self.assertEqual(result['anexos'][0]['sha256'], __import__('hashlib').sha256(attached[0].get_payload(decode=True)).hexdigest())
 
+    def test_upload_token_nao_e_consumido_quando_outro_anexo_falha(self):
+        gmail = _Gmail()
+        module = types.SimpleNamespace(get_gmail_service=lambda: gmail)
+        with mock.patch.dict(sys.modules, {'main': module}), \
+             mock.patch('tools.anexar_arquivo.resolver_anexo_por_referencia', side_effect=[(b'a', 'a.txt'), ValueError('segundo anexo inválido')]), \
+             mock.patch('tools.anexar_arquivo.consumir_upload_token') as consume:
+            result = criar(_Ctx(), {'para': ['destino@ufjf.br'], 'assunto': 'Prova', 'corpo': 'segue', 'anexos': [
+                {'upload_token': 'token-1'}, {'drive_file_id': 'arquivo-inválido'},
+            ]})
+        self.assertIn('segundo anexo', result['erro'])
+        consume.assert_not_called()
+        self.assertIsNone(gmail.created)
+
+    def test_upload_token_so_e_consumido_depois_do_rascunho(self):
+        gmail = _Gmail()
+        module = types.SimpleNamespace(get_gmail_service=lambda: gmail)
+        with mock.patch.dict(sys.modules, {'main': module}), \
+             mock.patch('tools.anexar_arquivo.resolver_anexo_por_referencia', return_value=(b'a', 'a.txt')), \
+             mock.patch('tools.anexar_arquivo.consumir_upload_token') as consume:
+            result = criar(_Ctx(), {'para': ['destino@ufjf.br'], 'assunto': 'Prova', 'corpo': 'segue', 'anexos': [
+                {'upload_token': 'token-1'},
+            ]})
+        self.assertEqual(result['status'], 'draft_created')
+        consume.assert_called_once_with(mock.ANY, 'token-1')
+
 
 class GmailAttachmentReferenceTest(unittest.TestCase):
+    def test_nome_anexo_exige_mensagem_gmail(self):
+        with self.assertRaisesRegex(ValueError, 'nome_anexo'):
+            aa.resolver_anexo_por_referencia(_Ctx(), {'drive_file_id': 'arquivo', 'nome_anexo': 'prova'})
+
     def test_attachment_id_exato_e_nome_divergente_falha(self):
         service = _AttachmentService()
         with mock.patch.dict(sys.modules, {'main': types.SimpleNamespace(get_gmail_service=lambda: service)}):

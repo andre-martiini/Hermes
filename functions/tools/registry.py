@@ -120,6 +120,7 @@ _NEEDS_CONFIRMATION: set[str] = {
     "registrar_item_financeiro_v2",
     "schedule_whatsapp_message",
     "pausar_conversa",
+    "criar_rascunho_email",
     "preparar_vinculo_contatos",
     "preparar_atualizacao_contato",
     # Gravam direto, sem card de confirmacao intermediario.

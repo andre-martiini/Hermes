@@ -400,6 +400,8 @@ def resolver_anexo_por_referencia(ctx, reference: dict) -> tuple[bytes, str]:
         raise ValueError("Cada anexo precisa ter exatamente uma referência: drive_file_id, gmail_message_id ou upload_token.")
     if reference.get("attachment_id") and not reference.get("gmail_message_id"):
         raise ValueError("attachment_id só pode ser usado junto com gmail_message_id.")
+    if reference.get("nome_anexo") and not reference.get("gmail_message_id"):
+        raise ValueError("nome_anexo só pode ser usado junto com gmail_message_id.")
     return _resolver_conteudo(ctx, reference)
 
 
@@ -416,6 +418,8 @@ def _do_upload_token(ctx, args: dict) -> tuple[bytes, str]:
 
     reserva = snap.to_dict() or {}
     if reserva.get("uid") != ctx.user_uid:
+        raise ValueError(f"upload_token '{token}' desconhecido ou ja consumido.")
+    if reserva.get("consumed_at"):
         raise ValueError(f"upload_token '{token}' desconhecido ou ja consumido.")
     if reserva.get("expira_em", "") < datetime.now(timezone.utc).isoformat():
         raise ValueError("upload_token expirado. Chame preparar_upload de novo.")
@@ -441,13 +445,32 @@ def _do_upload_token(ctx, args: dict) -> tuple[bytes, str]:
             f"checksum nao confere: declarado {reserva['sha256'][:16]}..., "
             f"calculado {obtido[:16]}...")
 
-    # Some da area de espera: o token e de uso unico.
+    return dados, reserva["nome"]
+
+
+def consumir_upload_token(ctx, token: str) -> None:
+    """Invalida o staging somente depois de a operação externa ter sucesso."""
+    token = str(token or "").strip()
+    snap = ctx.db.collection(COL_UPLOADS).document(token).get() if token else None
+    if not snap or not snap.exists:
+        return
+    reserva = snap.to_dict() or {}
+    if reserva.get("uid") != ctx.user_uid or reserva.get("consumed_at"):
+        return
+    # Marcar primeiro evita um novo uso mesmo se a limpeza do blob falhar.
     try:
-        blob.delete()
+        snap.reference.update({"consumed_at": datetime.now(timezone.utc).isoformat()})
+    except Exception as exc:
+        print(f"[anexar_arquivo] Falha ao consumir upload {token}: {exc}")
+        return
+    try:
+        _bucket().blob(reserva["caminho"]).delete()
     except Exception as exc:
         print(f"[anexar_arquivo] Falha ao limpar staging {reserva['caminho']}: {exc}")
-    snap.reference.delete()
-    return dados, reserva["nome"]
+    try:
+        snap.reference.delete()
+    except Exception as exc:
+        print(f"[anexar_arquivo] Falha ao remover reserva {token}: {exc}")
 
 
 def _resolver_conteudo(ctx, args: dict) -> tuple[bytes, str]:
@@ -567,6 +590,9 @@ def anexar(ctx, args: dict) -> dict:
         except Exception as limpeza:
             print(f"[anexar_arquivo] Orfao em {arquivo['id']}, limpeza falhou: {limpeza}")
         return {"erro": f"Falha ao vincular a acao (upload revertido): {exc}"}
+
+    if args.get("upload_token"):
+        consumir_upload_token(ctx, str(args["upload_token"]))
 
     return {
         "status": "ok",

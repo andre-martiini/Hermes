@@ -8,6 +8,7 @@ import html
 import mimetypes
 import re
 from datetime import datetime, timezone
+from email.utils import getaddresses
 from email.message import EmailMessage
 
 from firebase_admin import firestore
@@ -39,17 +40,29 @@ def _thread_recipients(service, thread_id: str) -> tuple[list[str], dict[str, st
     if not messages:
         raise ValueError(f"Thread '{thread_id}' não contém mensagens.")
     headers = _headers(messages[-1])
-    to = headers.get("reply-to") or headers.get("from")
-    if not to:
+    profile = service.users().getProfile(userId="me").execute()
+    own_email = str(profile.get("emailAddress") or "").strip().lower()
+
+    def external(value: str) -> list[str]:
+        return [address for _, address in getaddresses([value])
+                if address and address.lower() != own_email]
+
+    # Quando a última mensagem foi enviada pelo próprio Hermes, `From` é a
+    # nossa caixa postal. Responder para ele cria um rascunho para si mesmo;
+    # nesse caso os destinatários reais estão nos cabeçalhos To/Cc.
+    recipients = external(headers.get("reply-to", "")) or external(headers.get("from", ""))
+    if not recipients:
+        recipients = external(headers.get("to", "")) + external(headers.get("cc", ""))
+    if not recipients:
         raise ValueError("Não foi possível herdar destinatário da thread.")
-    return [to], headers
+    return recipients, headers
 
 
 def criar(ctx, args: dict) -> dict:
     if "conteudo_base64" in args or any(isinstance(item, dict) and "conteudo_base64" in item for item in (args.get("anexos") or [])):
         return {"erro": "conteudo_base64 não é aceito; envie o arquivo via preparar_upload e use upload_token."}
     from main import get_gmail_service
-    from tools.anexar_arquivo import resolver_anexo_por_referencia
+    from tools.anexar_arquivo import consumir_upload_token, resolver_anexo_por_referencia
 
     service = get_gmail_service()
     thread_id = str(args.get("responder_a_thread_id") or "").strip()
@@ -80,6 +93,7 @@ def criar(ctx, args: dict) -> dict:
     message.add_alternative(_markdown_to_html(body), subtype="html")
 
     attached = []
+    upload_tokens = []
     try:
         for reference in args.get("anexos") or []:
             data, name = resolver_anexo_por_referencia(ctx, reference)
@@ -87,6 +101,8 @@ def criar(ctx, args: dict) -> dict:
             main, sub = (mime or "application/octet-stream").split("/", 1)
             message.add_attachment(data, maintype=main, subtype=sub, filename=name)
             attached.append({"nome": name, "tamanho_bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+            if isinstance(reference, dict) and reference.get("upload_token"):
+                upload_tokens.append(str(reference["upload_token"]))
     except ValueError as exc:
         return {"erro": str(exc)}
 
@@ -98,6 +114,11 @@ def criar(ctx, args: dict) -> dict:
     draft_id = str(draft.get("id") or "")
     if not draft_id:
         return {"erro": "Gmail não devolveu o id do rascunho."}
+    # O token só é consumido depois de o Gmail ter aceitado o rascunho inteiro.
+    # Assim um segundo anexo inválido ou uma falha no create não descarta o
+    # arquivo que o usuário já havia subido.
+    for token in upload_tokens:
+        consumir_upload_token(ctx, token)
     task_id = str(args.get("acao_id") or "").strip()
     if task_id:
         task_ref = ctx.db.collection("tarefas").document(task_id)
