@@ -363,6 +363,19 @@ def _schedule_whatsapp_message(ctx: ToolContext, args: dict):
     )
 
 
+def pausar_conversa(ctx: ToolContext, args: dict):
+    from tools.pausar_conversa import pausar
+    return pausar(ctx, args)
+
+
+def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
+    """Prévia opcional usada pelo gate MCP; nunca produz efeito externo."""
+    if name == "pausar_conversa":
+        from tools.pausar_conversa import preview as _preview
+        return _preview(ctx, args)
+    return None
+
+
 def _buscar_conversas_whatsapp(ctx: ToolContext, args: dict):
     from whatsapp_ingest import buscar_conversas_whatsapp as _buscar
 
@@ -1638,6 +1651,7 @@ _HANDLERS: dict = {
     "consultar_dados_cadastrais": _consultar_dados_cadastrais,
     "buscar_e_analisar_email": _buscar_e_analisar_email,
     "schedule_whatsapp_message": _schedule_whatsapp_message,
+    "pausar_conversa": pausar_conversa,
     "buscar_conversas_whatsapp": _buscar_conversas_whatsapp,
     "salvar_memoria_global": _salvar_memoria_global,
     "criar_objetivo_estrategico": _strategy("criar_objetivo_estrategico"),

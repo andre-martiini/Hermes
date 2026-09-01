@@ -33,7 +33,7 @@ from firebase_admin import auth as firebase_auth
 from firebase_admin import firestore
 
 from tools import registry
-from tools.hermes_tools import ToolNotAvailable, execute as execute_tool
+from tools.hermes_tools import ToolNotAvailable, execute as execute_tool, preview as preview_tool
 from tools.tool_context import ToolContext
 from copilot_context import build_mcp_voice_context
 
@@ -60,7 +60,7 @@ _access_cache: dict[str, object] | None = None
 #
 # Configuravel sem deploy: `system/mcp_access.confirm_tools` (lista de nomes)
 # sobrepoe este padrao — inclusive para voltar a exigir confirmacao em tudo.
-_CONFIRMACAO_PADRAO: set[str] = {"schedule_whatsapp_message"}
+_CONFIRMACAO_PADRAO: set[str] = {"schedule_whatsapp_message", "pausar_conversa"}
 
 # Tools que passam de um minuto e por isso nao podem rodar dentro do request.
 #
@@ -428,6 +428,18 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
 
     confirmed = arguments.pop("_confirmed", None)
     if _exige_confirmacao(name) and confirmed is not True:
+        try:
+            proposal = preview_tool(name, ctx, arguments)
+        except Exception as exc:  # prévia inválida deve apontar o dado, sem mutar
+            return _text_result({"erro": str(exc)}, is_error=True)
+        if proposal is not None:
+            return _text_result({
+                "status": proposal.get("status", "confirmation_required"),
+                "tool": name,
+                "confirmation_required": True,
+                "preview": proposal,
+                "message": "Confira a prévia e, após o sim explícito, repita a chamada com arguments._confirmed=true.",
+            }, is_error=False)
         return _text_result({
             "status": "confirmation_required",
             "tool": name,

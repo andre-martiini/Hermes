@@ -275,6 +275,20 @@ class TestCamadaJsonRpc(unittest.TestCase):
         conteudo = json.loads(payload["result"]["content"][0]["text"])
         self.assertEqual(conteudo["status"], "confirmation_required")
 
+    def test_gate_inclui_preview_quando_a_tool_oferece_hook(self):
+        from unittest import mock
+        with self._gating({"pausar_conversa"}), mock.patch.object(
+            mcp_server, "preview_tool", return_value={"status": "aguardando_confirmacao", "mensagem": "texto exato"}
+        ) as preview:
+            resp = self._post({
+                "jsonrpc": "2.0", "id": 55, "method": "tools/call",
+                "params": {"name": "pausar_conversa", "arguments": {"contato_ou_grupo": "Gabriela", "retomar_em": "amanha_manha"}},
+            })
+        content = json.loads(json.loads(resp.get_data(as_text=True))["result"]["content"][0]["text"])
+        self.assertEqual(content["status"], "aguardando_confirmacao")
+        self.assertEqual(content["preview"]["mensagem"], "texto exato")
+        preview.assert_called_once()
+
     def test_politica_vazia_desliga_o_gating(self):
         """O dono esvaziou `confirm_tools` em 27/08/2026 para o envio funcionar.
 
