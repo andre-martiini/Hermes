@@ -428,6 +428,14 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
     if since_ts is None:
         since_ts = datetime.now(timezone.utc) - timedelta(hours=DEFAULT_FIRST_RUN_LOOKBACK_HOURS)
 
+    from inbox_pendentes import atualizar_whatsapp_em_lote, backfill_whatsapp_inicial
+    try:
+        # Faz antes de avançar o cursor normal. Mesmo que uma página ainda não
+        # tenha terminado, ela é independente do cursor e retoma na próxima run.
+        backfill_whatsapp_inicial(db)
+    except Exception as exc:
+        log_to_firestore(sync_ref, logs, f"[WA-INGEST][!] Backfill do inbox adiado: {exc}", True)
+
     try:
         docs = list(
             db.collection("whatsapp_messages")
@@ -446,9 +454,7 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
     # Atualiza o índice de entrada antes de qualquer filtro/IA da triagem. A
     # pergunta "quem espera resposta" não depende de relevância semântica e não
     # pode sumir quando a triagem automática estiver desligada.
-    from inbox_pendentes import atualizar_whatsapp
-    for doc in docs:
-        atualizar_whatsapp(db, doc.to_dict() or {})
+    atualizar_whatsapp_em_lote(db, [doc.to_dict() or {} for doc in docs])
 
     settings = _load_settings(db)
     if not settings["enabled"]:

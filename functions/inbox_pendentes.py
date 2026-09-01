@@ -12,10 +12,15 @@ import base64
 import json
 from datetime import datetime, timezone
 
+from firebase_admin import firestore
+
 
 COLLECTION = "inbox_pendentes"
-ACTIVE_STATUSES = {"em andamento", "stand-by"}
+_STANDBY_STATUS_ALIASES = {"stand-by", "standby", "stand by", "cgby"}
+_ACTIVE_STATUS_ALIASES = {"em andamento", "andamento", "nao iniciado", "não iniciado", "pendente"}
 MAX_ITEMS = 15
+EMAIL_SUGGESTIONS_LIMIT = 60
+BACKFILL_PAGE_SIZE = 100
 
 
 def _as_datetime(value) -> datetime | None:
@@ -46,6 +51,25 @@ def _doc_id(prefix: str, source_id: str) -> str:
     return f"{prefix}_{encoded}"
 
 
+def _is_active_status(value) -> bool:
+    normalized = " ".join(str(value or "").strip().lower().split())
+    return normalized in _ACTIVE_STATUS_ALIASES or normalized in _STANDBY_STATUS_ALIASES
+
+
+def _whatsapp_payload(message: dict, when: datetime) -> dict:
+    chat_id = str(message.get("chat_id") or "").strip()
+    return {
+        "tipo": "whatsapp",
+        "chat_id": chat_id,
+        "chat_name": str(message.get("chat_name") or chat_id),
+        "is_group": bool(message.get("is_group")),
+        "ultima_de_andre": bool(message.get("from_me")),
+        "desde": when,
+        "trecho": str(message.get("content") or "")[:120],
+        "updated_at": datetime.now(timezone.utc),
+    }
+
+
 def atualizar_whatsapp(db, message: dict) -> None:
     """Espelha a última mensagem de um chat, sem reler o histórico.
 
@@ -62,16 +86,71 @@ def atualizar_whatsapp(db, message: dict) -> None:
         current = _as_datetime((existing.to_dict() or {}).get("desde"))
         if current and current > when:
             return
-    ref.set({
-        "tipo": "whatsapp",
-        "chat_id": chat_id,
-        "chat_name": str(message.get("chat_name") or chat_id),
-        "is_group": bool(message.get("is_group")),
-        "ultima_de_andre": bool(message.get("from_me")),
-        "desde": when,
-        "trecho": str(message.get("content") or "")[:120],
-        "updated_at": datetime.now(timezone.utc),
-    }, merge=True)
+    ref.set(_whatsapp_payload(message, when), merge=True)
+
+
+def atualizar_whatsapp_em_lote(db, messages: list[dict]) -> int:
+    """Atualiza só a mensagem mais recente de cada chat, em batches Firestore."""
+    latest: dict[str, tuple[datetime, dict]] = {}
+    for message in messages:
+        chat_id = str(message.get("chat_id") or "").strip()
+        when = _as_datetime(message.get("timestamp"))
+        if chat_id and when and (chat_id not in latest or when > latest[chat_id][0]):
+            latest[chat_id] = (when, message)
+    updates = []
+    for chat_id, (when, message) in latest.items():
+        ref = db.collection(COLLECTION).document(_doc_id("wa", chat_id))
+        existing = ref.get()
+        current = _as_datetime((existing.to_dict() or {}).get("desde")) if existing.exists else None
+        if not current or current <= when:
+            updates.append((ref, _whatsapp_payload(message, when)))
+    for start in range(0, len(updates), 500):
+        batch = db.batch()
+        for ref, payload in updates[start:start + 500]:
+            batch.set(ref, payload, merge=True)
+        batch.commit()
+    return len(updates)
+
+
+def backfill_whatsapp_inicial(db) -> bool:
+    """Reconstrói o índice uma página por vez a partir do registro de chats.
+
+    O cursor da triagem cobre apenas mensagens que chegam depois dele. Este
+    backfill independente consulta a última mensagem de cada chat conhecido,
+    portanto o primeiro avanço do cursor não torna pendências históricas
+    invisíveis. O marcador deixa a operação retomável e limitada por rodada.
+    """
+    marker_ref = db.collection("system").document("inbox_pendentes_backfill")
+    marker = marker_ref.get()
+    marker_data = marker.to_dict() or {} if marker.exists else {}
+    if marker_data.get("completed_at"):
+        return True
+    last_chat_id = str(marker_data.get("last_chat_id") or "")
+    query = db.collection("whatsapp_chats").order_by("__name__")
+    if last_chat_id:
+        query = query.start_after({"__name__": last_chat_id})
+    chats = list(query.limit(BACKFILL_PAGE_SIZE).stream())
+    if not chats:
+        marker_ref.set({"completed_at": datetime.now(timezone.utc)}, merge=True)
+        return True
+    latest_messages = []
+    for chat in chats:
+        data = chat.to_dict() or {}
+        chat_id = str(data.get("chat_id") or chat.id).strip()
+        if not chat_id:
+            continue
+        rows = list(db.collection("whatsapp_messages")
+                    .where("chat_id", "==", chat_id)
+                    .order_by("timestamp", direction=firestore.Query.DESCENDING)
+                    .limit(1).stream())
+        if rows:
+            latest_messages.append(rows[0].to_dict() or {})
+    atualizar_whatsapp_em_lote(db, latest_messages)
+    marker_ref.set({"last_chat_id": chats[-1].id, "updated_at": datetime.now(timezone.utc)}, merge=True)
+    if len(chats) < BACKFILL_PAGE_SIZE:
+        marker_ref.set({"completed_at": datetime.now(timezone.utc)}, merge=True)
+        return True
+    return False
 
 
 def _allowlist(db) -> set[str]:
@@ -92,7 +171,7 @@ def _active_tasks(db) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict]
     by_chat, by_email, by_id = {}, {}, {}
     for doc in db.collection("tarefas").stream():
         task = doc.to_dict() or {}
-        if str(task.get("status") or "").strip().lower() not in ACTIVE_STATUSES:
+        if not _is_active_status(task.get("status")):
             continue
         item = {
             "id": doc.id,
@@ -126,6 +205,21 @@ def _contacts(db) -> dict[str, str]:
         if chat_id and str(data.get("nome") or "").strip():
             result[chat_id] = str(data["nome"]).strip()
     return result
+
+
+def _applied_email_suggestions(db):
+    """Lê somente os vínculos aplicados, nunca a coleção histórica inteira."""
+    collection = db.collection("email_action_suggestions")
+    # O fallback atende os fakes mínimos dos testes; Firestore real sempre usa a
+    # consulta indexada e limitada abaixo.
+    if not hasattr(collection, "where"):
+        return collection.stream()
+    try:
+        return collection.where(
+            filter=firestore.FieldFilter("status", "in", ["applied", "applied_reactivated"])
+        ).limit(EMAIL_SUGGESTIONS_LIMIT).stream()
+    except TypeError:
+        return collection.where("status", "in", ["applied", "applied_reactivated"]).limit(EMAIL_SUGGESTIONS_LIMIT).stream()
 
 
 def _item(*, contato: str, canal: str, desde, trecho: str, task: dict | None,
@@ -183,13 +277,24 @@ def coletar(db, now: datetime | None = None) -> dict:
             items.append(item)
 
     # O email-action-linker conserva os metadados da mensagem na sugestão; só
-    # entram sugestões que já viraram um vínculo real no diário da ação.
-    for doc in db.collection("email_action_suggestions").stream():
+    # entram sugestões que já viraram um vínculo real no diário da ação. Há no
+    # máximo uma pendência por thread: a direção da última mensagem é atualizada
+    # pelo sync de e-mail, então uma resposta do André fecha a thread inteira.
+    emails_by_thread = {}
+    for doc in _applied_email_suggestions(db):
         data = doc.to_dict() or {}
         task = by_email.get(doc.id) or by_id.get(str(data.get("task_id") or ""))
         if not task or str(data.get("canal") or "") != "email":
             continue
         if not str(data.get("status") or "").startswith("applied"):
+            continue
+        key = str(data.get("gmail_thread_id") or doc.id)
+        current = emails_by_thread.get(key)
+        if current is None or (_as_datetime(data.get("internal_date")) or datetime.min.replace(tzinfo=timezone.utc)) > current[0]:
+            emails_by_thread[key] = (_as_datetime(data.get("internal_date")) or datetime.min.replace(tzinfo=timezone.utc), doc, data, task)
+
+    for _, doc, data, task in emails_by_thread.values():
+        if data.get("ultima_mensagem_de_andre"):
             continue
         item = _item(
             contato=str(data.get("sender") or data.get("origem_sinal") or "E-mail"),
