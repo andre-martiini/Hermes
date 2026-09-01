@@ -422,10 +422,6 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
     )
     from email_action_linker import _load_candidate_tasks, _format_candidates_for_prompt, queue_and_maybe_send_suggestion
 
-    settings = _load_settings(db)
-    if not settings["enabled"]:
-        return
-
     cursor_ref = db.collection("system").document("whatsapp_ingest")
     cursor_doc = cursor_ref.get()
     since_ts = (cursor_doc.to_dict() or {}).get("last_processed_at") if cursor_doc.exists else None
@@ -445,6 +441,21 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
         return
 
     if not docs:
+        return
+
+    # Atualiza o índice de entrada antes de qualquer filtro/IA da triagem. A
+    # pergunta "quem espera resposta" não depende de relevância semântica e não
+    # pode sumir quando a triagem automática estiver desligada.
+    from inbox_pendentes import atualizar_whatsapp
+    for doc in docs:
+        atualizar_whatsapp(db, doc.to_dict() or {})
+
+    settings = _load_settings(db)
+    if not settings["enabled"]:
+        # A triagem semântica pode estar desligada; o índice operacional de
+        # respostas continua válido e já foi atualizado acima.
+        latest_ingested_at = max((d.to_dict() or {}).get("ingested_at") for d in docs)
+        cursor_ref.set({"last_processed_at": latest_ingested_at}, merge=True)
         return
 
     groups: dict[str, list[dict]] = {}
