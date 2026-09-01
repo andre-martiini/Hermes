@@ -262,7 +262,10 @@ class TestCamadaJsonRpc(unittest.TestCase):
 
     def test_gating_do_canal_barra_antes_de_executar(self):
         """Com a tool na politica, a chamada para na confirmacao — nao envia nada."""
-        with self._gating({"schedule_whatsapp_message"}):
+        from unittest import mock
+        with self._gating({"schedule_whatsapp_message"}), mock.patch.object(
+            mcp_server, "_criar_confirmacao", return_value="confirmacao-1"
+        ):
             resp = self._post({
                 "jsonrpc": "2.0", "id": 5, "method": "tools/call",
                 "params": {
@@ -279,7 +282,7 @@ class TestCamadaJsonRpc(unittest.TestCase):
         from unittest import mock
         with self._gating({"pausar_conversa"}), mock.patch.object(
             mcp_server, "preview_tool", return_value={"status": "aguardando_confirmacao", "mensagem": "texto exato"}
-        ) as preview:
+        ) as preview, mock.patch.object(mcp_server, "_criar_confirmacao", return_value="confirmacao-2"):
             resp = self._post({
                 "jsonrpc": "2.0", "id": 55, "method": "tools/call",
                 "params": {"name": "pausar_conversa", "arguments": {"contato_ou_grupo": "Gabriela", "retomar_em": "amanha_manha"}},
@@ -287,16 +290,35 @@ class TestCamadaJsonRpc(unittest.TestCase):
         content = json.loads(json.loads(resp.get_data(as_text=True))["result"]["content"][0]["text"])
         self.assertEqual(content["status"], "aguardando_confirmacao")
         self.assertEqual(content["preview"]["mensagem"], "texto exato")
+        self.assertEqual(content["confirmation_id"], "confirmacao-2")
         preview.assert_called_once()
 
-    def test_politica_vazia_desliga_o_gating(self):
-        """O dono esvaziou `confirm_tools` em 27/08/2026 para o envio funcionar.
+    def test_confirmada_reutiliza_argumentos_e_previa_persistidos(self):
+        from datetime import datetime, timezone
+        from unittest import mock
+        approved = {
+            "arguments": {"contato_ou_grupo": "Gabriela", "retomar_em": "amanha_manha"},
+            "preview": {"mensagem": "texto aprovado"},
+            "created_at": datetime(2026, 9, 1, 12, tzinfo=timezone.utc),
+        }
+        with mock.patch.object(mcp_server, "_ler_confirmacao", return_value=approved) as read, \
+             mock.patch.object(mcp_server, "execute_tool", return_value={"ok": True}) as execute:
+            resp = self._post({
+                "jsonrpc": "2.0", "id": 56, "method": "tools/call",
+                "params": {"name": "pausar_conversa", "arguments": {
+                    "contato_ou_grupo": "Gabriela", "retomar_em": "amanha_manha",
+                    "_confirmed": True, "_confirmation_id": "confirmacao-2",
+                }},
+            })
+        self.assertFalse(json.loads(resp.get_data(as_text=True))["result"]["isError"])
+        self.assertEqual(read.call_args.args[2], {"contato_ou_grupo": "Gabriela", "retomar_em": "amanha_manha"})
+        self.assertEqual(execute.call_args.args[1], approved["arguments"])
 
-        Aqui so se verifica a decisao do gate — a tool nao chega a ser chamada,
-        porque exercitar envio de WhatsApp num teste seria mandar mensagem.
-        """
+    def test_politica_vazia_nao_desliga_envios_obrigatorios(self):
+        """Configuração viva pode adicionar gates, nunca remover envios externos."""
         with self._gating(set()):
-            self.assertFalse(mcp_server._exige_confirmacao("schedule_whatsapp_message"))
+            self.assertTrue(mcp_server._exige_confirmacao("schedule_whatsapp_message"))
+            self.assertTrue(mcp_server._exige_confirmacao("pausar_conversa"))
         with self._gating({"schedule_whatsapp_message"}):
             self.assertTrue(mcp_server._exige_confirmacao("schedule_whatsapp_message"))
 

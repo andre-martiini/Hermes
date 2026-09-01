@@ -5,6 +5,7 @@ from datetime import datetime
 
 sys.path.insert(0, '.')
 from tools.pausar_conversa import _parse_resume, preview, pausar
+from tools.schedule_whatsapp_message import schedule_whatsapp_message
 
 
 class _Ref:
@@ -70,6 +71,7 @@ class PausarConversaTest(unittest.TestCase):
         result = preview(ctx, {'contato_ou_grupo': 'Gabriela', 'retomar_em': 'amanha_manha'}, now=datetime(2026, 9, 1, 10))
         self.assertEqual(result['status'], 'aguardando_confirmacao')
         self.assertIn('Gabriela, vi sua mensagem.', result['mensagem'])
+        self.assertEqual(result['destinatario']['to_number'], '+55 27 99999-0000')
         self.assertEqual(ctx.db.inbox_ref.set_calls, [])
         self.assertEqual(ctx.db.task_ref.update_calls, [])
 
@@ -84,6 +86,58 @@ class PausarConversaTest(unittest.TestCase):
         update = ctx.db.task_ref.update_calls[-1]
         self.assertEqual(update['plano_acao'][0]['estado'], 'aguardando_terceiro')
         self.assertIn('Conversa pausada com Gabriela', str(update['acompanhamento']))
+
+    def test_confirmacao_mcp_reusa_previa_e_chave_da_fila(self):
+        ctx = _Ctx()
+        ctx.mcp_confirmation_id = 'confirmacao-1'
+        ctx.mcp_confirmation_created_at = datetime(2026, 9, 1, 13, 0)
+        ctx.mcp_confirmation_preview = {
+            'destinatario': {'nome': 'Gabriela', 'chat_id': '55@c.us', 'to_number': '+5527999990000', 'tipo': 'contato'},
+            'mensagem': 'Texto que o usuário aprovou',
+            'retomar_em': '2026-09-02T08:00:00-03:00',
+            'acao_vinculada': {'id': 'a1', 'titulo': 'Ação'},
+        }
+        with mock.patch('tools.pausar_conversa.preview', side_effect=AssertionError('não deve recalcular')), \
+             mock.patch('tools.schedule_whatsapp_message.schedule_whatsapp_message', return_value='Mensagem ENFILEIRADA job_id=confirmacao-1') as enqueue, \
+             mock.patch('tools.pausar_conversa.firestore.ArrayUnion', side_effect=lambda values: values):
+            result = pausar(ctx, {'contato_ou_grupo': 'Gabriela', 'retomar_em': 'amanha_manha'})
+        self.assertEqual(result['mensagem'], 'Texto que o usuário aprovou')
+        self.assertEqual(enqueue.call_args.kwargs['idempotency_key'], 'confirmacao-1')
+        self.assertIn('2026-09-01T13:00:00', str(ctx.db.task_ref.update_calls[-1]['acompanhamento']))
+
+
+class _OutboxSnap:
+    def __init__(self, ref): self.exists = ref.exists
+
+
+class _OutboxRef:
+    def __init__(self, ident): self.id, self.exists, self.set_calls = ident, False, []
+    def get(self): return _OutboxSnap(self)
+    def set(self, data): self.set_calls.append(data); self.exists = True
+
+
+class _OutboxCollection:
+    def __init__(self): self.refs = {}
+    def document(self, ident=None):
+        ident = ident or 'novo'
+        return self.refs.setdefault(ident, _OutboxRef(ident))
+
+
+class _OutboxDb:
+    def __init__(self): self.outbox = _OutboxCollection()
+    def collection(self, name):
+        assert name == 'whatsapp_outbox'
+        return self.outbox
+
+
+class ScheduleWhatsappMessageTest(unittest.TestCase):
+    def test_chave_idempotente_reutiliza_o_mesmo_job(self):
+        db = _OutboxDb()
+        primeiro = schedule_whatsapp_message(db, '+5527999999999', 'oi', '2026-09-02T08:00:00+00:00', idempotency_key='confirmacao-1')
+        segundo = schedule_whatsapp_message(db, '+5527999999999', 'oi', '2026-09-02T08:00:00+00:00', idempotency_key='confirmacao-1')
+        self.assertIn('job_id=confirmacao-1', primeiro)
+        self.assertIn('job_id=confirmacao-1', segundo)
+        self.assertEqual(len(db.outbox.refs['confirmacao-1'].set_calls), 1)
 
 
 if __name__ == '__main__':

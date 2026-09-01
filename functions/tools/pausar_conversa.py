@@ -118,7 +118,10 @@ def preview(ctx, args: dict, *, now: datetime | None = None) -> dict:
     task, _ = _linked_task(ctx, resolved["chat_id"], args.get("acao_id"))
     return {
         "status": "aguardando_confirmacao",
-        "destinatario": {"nome": resolved["nome"], "chat_id": resolved["chat_id"], "tipo": resolved["tipo"]},
+        "destinatario": {
+            "nome": resolved["nome"], "chat_id": resolved["chat_id"],
+            "to_number": resolved["to_number"], "tipo": resolved["tipo"],
+        },
         "mensagem": text,
         "retomar_em": resume.isoformat(),
         "acao_vinculada": ({"id": task.get("id"), "titulo": task.get("titulo")} if task else None),
@@ -127,13 +130,24 @@ def preview(ctx, args: dict, *, now: datetime | None = None) -> dict:
 
 def pausar(ctx, args: dict) -> dict:
     """Executa depois do gate MCP ter recebido ``_confirmed: true``."""
-    proposal = preview(ctx, args)
+    # No MCP a proposta foi congelada antes do "sim". Nos demais canais a
+    # função continua independente e calcula a proposta localmente.
+    proposal = getattr(ctx, "mcp_confirmation_preview", None) or preview(ctx, args)
     destination = proposal["destinatario"]
-    task, task_ref = _linked_task(ctx, destination["chat_id"], args.get("acao_id"))
+    # Tambem congela o vínculo da ação: uma ação iniciada entre a prévia e o
+    # "sim" não deve receber uma pausa que o usuário não viu na proposta.
+    approved_task = proposal.get("acao_vinculada") or {}
+    task, task_ref = (
+        _linked_task(ctx, destination["chat_id"], approved_task.get("id"))
+        if approved_task.get("id") else (None, None)
+    )
 
     from tools.schedule_whatsapp_message import schedule_whatsapp_message
-    queued = schedule_whatsapp_message(ctx.db, _find_chat(ctx, args.get("contato_ou_grupo"))["to_number"],
-                                        proposal["mensagem"], datetime.now(timezone.utc).isoformat())
+    queued = schedule_whatsapp_message(
+        ctx.db, destination["to_number"],
+        proposal["mensagem"], datetime.now(timezone.utc).isoformat(),
+        idempotency_key=getattr(ctx, "mcp_confirmation_id", None),
+    )
     if queued.startswith("Erro"):
         return {"erro": queued}
 
@@ -155,7 +169,9 @@ def pausar(ctx, args: dict) -> dict:
             plan.append({"id": str(uuid.uuid4())[:8], "text": step_text, "completed": False,
                          "estado": "aguardando_terceiro", "aguardando_de": "André",
                          "data_prevista": pause_until, "pausa_conversa_chat_id": destination["chat_id"]})
-        now_iso = datetime.now(timezone.utc).isoformat()
+        approved_at = getattr(ctx, "mcp_confirmation_created_at", None)
+        now_iso = (approved_at.isoformat() if isinstance(approved_at, datetime)
+                   else datetime.now(timezone.utc).isoformat())
         task_ref.update({
             "plano_acao": plan,
             "execution_lane": subtarefas.derivar_lane(plan, task.get("execution_lane")),
