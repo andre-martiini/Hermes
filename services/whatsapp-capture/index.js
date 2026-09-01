@@ -443,9 +443,7 @@ async function persistMessage(message, chat, chatId, isGroup) {
     }
 
     const chatTitle = chat?.name || (isGroup ? 'Grupo' : authorName);
-    // Metadados de contexto de grupo para a caixa de respostas pendentes. Não
-    // buscamos a mensagem citada: só persistimos o que já veio no payload, para
-    // não reprocessar histórico nem acrescentar uma chamada ao WhatsApp.
+    // Metadados de contexto de grupo para a caixa de respostas pendentes.
     const mentionedIds = Array.isArray(message.mentionedIds)
         ? message.mentionedIds.map((id) => String(id?._serialized || id)).filter(Boolean)
         : [];
@@ -453,7 +451,21 @@ async function persistMessage(message, chat, chatId, isGroup) {
     const rawQuoted = message?._data?.quotedMsg || message?._data?.quotedMessage || {};
     const rawQuotedId = message?._data?.quotedStanzaID || message?._data?.quotedMsgId
         || rawQuoted?.id?._serialized || null;
-    const rawQuotedFromMe = rawQuoted?.fromMe ?? rawQuoted?.id?.fromMe;
+    let rawQuotedFromMe = rawQuoted?.fromMe ?? rawQuoted?.id?.fromMe;
+    // No whatsapp-web.js normal, `_data.quotedStanzaID` traz só o identificador
+    // da citação — o objeto da mensagem citada não vem em `quotedMsg`. Para não
+    // descartar respostas diretas ao André, busque o remetente apenas quando há
+    // citação e o payload ainda não o informou. Isto roda na captura da mensagem
+    // nova, nunca como reprocessamento do histórico.
+    if (rawQuotedId && typeof rawQuotedFromMe !== 'boolean'
+        && typeof message.getQuotedMessage === 'function') {
+        try {
+            const quoted = await message.getQuotedMessage();
+            rawQuotedFromMe = quoted?.fromMe ?? quoted?.id?.fromMe;
+        } catch (quotedErr) {
+            console.warn(`[Message] Não foi possível resolver mensagem citada ${rawQuotedId}:`, quotedErr.message || quotedErr);
+        }
+    }
 
     const msgData = {
         // ID idempotente: chat + ID nativo da mensagem — antes misturava o
