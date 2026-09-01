@@ -1,10 +1,19 @@
+import os
+import sys
 import unittest
 from unittest.mock import Mock
 
 from googleapiclient.errors import HttpError
 from httplib2 import Response
 
-import hermes_cli
+# `hermes_cli.py` esta na RAIZ do repositorio, nao em `functions/`. Rodando os
+# testes de dentro de `functions/` — que e como o CI os roda — a raiz nao esta no
+# path e o import abaixo falha na carga do modulo, derrubando o arquivo inteiro
+# antes de qualquer teste. E o mesmo formato do erro que deixou a `main` sem
+# deploy em 30/08: arquivo na raiz que a ferramenta nao enxerga.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import hermes_cli  # noqa: E402
 
 
 def http_error(status):
