@@ -80,6 +80,17 @@ class InboxPendentesTest(unittest.TestCase):
         })
         self.assertEqual(coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))['itens'], [])
 
+    def test_grupo_com_resposta_a_andre_entra_sem_acao(self):
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['g']}}},
+            'perfil_pessoas': {}, 'email_action_suggestions': {}, 'tarefas': {},
+            'inbox_pendentes': {'g': {'tipo': 'whatsapp', 'chat_id': 'g', 'chat_name': 'Equipe',
+                'is_group': True, 'quoted_msg_id': 'old', 'quoted_from_me': True,
+                'desde': '2026-09-01T10:00:00+00:00'}},
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual([x['contato'] for x in result['itens']], ['Equipe'])
+
 
 class _MemorySnap:
     def __init__(self, ref): self.ref, self.exists = ref, ref.data is not None

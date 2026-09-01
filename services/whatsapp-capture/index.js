@@ -443,6 +443,17 @@ async function persistMessage(message, chat, chatId, isGroup) {
     }
 
     const chatTitle = chat?.name || (isGroup ? 'Grupo' : authorName);
+    // Metadados de contexto de grupo para a caixa de respostas pendentes. Não
+    // buscamos a mensagem citada: só persistimos o que já veio no payload, para
+    // não reprocessar histórico nem acrescentar uma chamada ao WhatsApp.
+    const mentionedIds = Array.isArray(message.mentionedIds)
+        ? message.mentionedIds.map((id) => String(id?._serialized || id)).filter(Boolean)
+        : [];
+    const ownWid = String(client?.info?.wid?._serialized || '');
+    const rawQuoted = message?._data?.quotedMsg || message?._data?.quotedMessage || {};
+    const rawQuotedId = message?._data?.quotedStanzaID || message?._data?.quotedMsgId
+        || rawQuoted?.id?._serialized || null;
+    const rawQuotedFromMe = rawQuoted?.fromMe ?? rawQuoted?.id?.fromMe;
 
     const msgData = {
         // ID idempotente: chat + ID nativo da mensagem — antes misturava o
@@ -461,6 +472,10 @@ async function persistMessage(message, chat, chatId, isGroup) {
         timestamp: admin.firestore.Timestamp.fromDate(new Date(message.timestamp * 1000)),
         message_type: message.type,
         content: message.body || '',
+        mentioned_ids: mentionedIds,
+        mentions_andre: !!ownWid && mentionedIds.includes(ownWid),
+        quoted_msg_id: rawQuotedId ? String(rawQuotedId) : null,
+        quoted_from_me: typeof rawQuotedFromMe === 'boolean' ? rawQuotedFromMe : null,
         links: (message.links || []).map((l) => (typeof l === 'string' ? l : l.link)).filter(Boolean),
         transcription_text: null,
         transcription_model: null,
