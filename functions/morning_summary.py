@@ -1188,6 +1188,11 @@ def build_morning_summary(db, date_str: str | None = None) -> dict:
     ontem_data = _coletar_ontem(db, ontem)
     perfil = _coletar_perfil(db)
     foco = _escolher_foco(acoes, estrategia, hoje)
+    # Índice materializado pelo mesmo ciclo que recebe mensagens de WhatsApp.
+    # A leitura é pequena e não faz RPC ao WhatsApp/Gmail durante a abertura de
+    # uma sessão MCP.
+    from inbox_pendentes import coletar as coletar_respostas_pendentes
+    respostas_pendentes = coletar_respostas_pendentes(db)
 
     dia_semana = _DIAS_SEMANA[datetime.strptime(hoje, "%Y-%m-%d").weekday()]
     pendencias = sum(f.get("total", 0) for f in filas.values() if isinstance(f, dict))
@@ -1218,6 +1223,7 @@ def build_morning_summary(db, date_str: str | None = None) -> dict:
         "estrategia": estrategia,
         "ontem": ontem_data,
         "perfil": perfil,
+        "respostas_pendentes": respostas_pendentes,
         "contadores": {**acoes["contadores"], "pendencias": pendencias, "focos": len(foco)},
     }
 
