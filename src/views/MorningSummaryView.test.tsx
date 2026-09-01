@@ -138,6 +138,13 @@ describe('MorningSummaryView', () => {
     const secao = async (titulo: string): Promise<HTMLElement> =>
         (await screen.findByRole('heading', { name: titulo })).closest('section') as HTMLElement;
 
+    it('regenera automaticamente ao abrir e não exibe o botão Atualizar', async () => {
+        render(<MorningSummaryView />);
+        await waitFor(() => expect(callable).toHaveBeenCalledTimes(1));
+        expect(callable).toHaveBeenCalledWith({ date: hoje });
+        expect(screen.queryByRole('button', { name: /Atualizar/i })).toBeNull();
+    });
+
     it('mostra os focos do dia com o motivo da regra que os escolheu', async () => {
         render(<MorningSummaryView />);
         const foco = within(await secao('Foco de hoje'));

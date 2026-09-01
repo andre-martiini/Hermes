@@ -40,15 +40,19 @@ npm install
 npm run dev
 ```
 
-### Opção 1: Rodar sincronização localmente (temporário)
+### Opção 1: Rodar sincronização localmente (alternativa temporária)
 
 ```bash
 python hermes_cli.py watch
 ```
 
+Não execute esse watcher ao mesmo tempo que a Cloud Function de sincronização.
+Em produção, `start.bat` e `start_hidden.vbs` deixam a sincronização exclusivamente
+com a Cloud Function.
+
 ### Iniciar tudo de uma vez (Windows)
 
-- `start.bat`: abre uma janela de terminal visível para cada serviço (frontend, API de automações, sincronizador, monitor de páginas). Use para acompanhar os logs manualmente.
+- `start.bat`: abre uma janela de terminal visível para cada serviço local (frontend, API de automações, monitor de páginas e voz). A sincronização principal permanece na Cloud Function.
 - `start_hidden.vbs`: inicia os mesmos serviços sem nenhuma janela de terminal, com a saída redirecionada para arquivos em `logs/`. Aponte um atalho na pasta Inicializar (`shell:startup`) ou uma tarefa do Agendador de Tarefas do Windows para `wscript.exe start_hidden.vbs` para que o Hermes suba silenciosamente junto com o Windows.
 
 ### Opção 2: Deploy da Cloud Function (recomendado)

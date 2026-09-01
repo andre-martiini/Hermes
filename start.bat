@@ -18,8 +18,8 @@ timeout /t 2 /nobreak >nul
 REM Inicia a API local que aciona as automacoes Selenium
 start "Hermes Automations API" cmd /k "cd /d %~dp0automations && python server.py"
 
-REM Inicia o sincronizador em outra janela
-start "Hermes Sync (Google Tasks)" cmd /k "python hermes_cli.py watch"
+REM A sincronizacao principal roda na Cloud Function. Nao inicie tambem
+REM hermes_cli.py watch: seriam dois consumidores do mesmo system/sync.
 
 REM Inicia o monitor de paginas web em outra janela
 start "Hermes Sync (Monitor de Paginas)" cmd /k "python hermes_cli.py watch-pages"
@@ -37,7 +37,7 @@ echo ========================================
 echo.
 echo [1] Hermes Web: http://localhost:5173
 echo [2] Hermes Automations API: http://127.0.0.1:8000
-echo [3] Hermes Sync: Monitorando sincronizacao
+echo [3] Hermes Sync: Cloud Function
 echo [4] Hermes Monitor: Verificando paginas web
 echo [5] Hermes Voice Bridge: http://127.0.0.1:3002
 echo [6] Hermes Voice Client: http://127.0.0.1:8765

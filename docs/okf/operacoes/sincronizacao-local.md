@@ -8,6 +8,10 @@ timestamp: 2026-05-19T17:30:42-03:00
 
 # Sincronização local
 
+> **Alternativa exclusiva:** não execute `hermes_cli.py watch` junto com a Cloud
+> Function. Os dois observam `system/sync`; em produção, use somente a Cloud
+> Function. Os inicializadores do Hermes não sobem mais este watcher local.
+
 ## Por quê
 
 A Cloud Function requer configurações de autenticação OAuth mais adequadas para ambientes com múltiplos usuários. Para uso pessoal, o script local (`hermes_cli.py watch`) é mais simples e confiável — ver alternativa em nuvem em [Deploy das Cloud Functions de sincronização](/docs/okf/operacoes/deploy-cloud-functions.md).

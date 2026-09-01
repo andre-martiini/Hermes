@@ -280,9 +280,9 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
     const [diarioAberto, setDiarioAberto] = useState(false);
 
     const hoje = localTodayStr();
-    // Uma tentativa automática por dia: sem isso, um dia em que o resumo
-    // legitimamente não existe (agendador falhou, coleção vazia) viraria um loop
-    // de chamadas à callable a cada re-render do snapshot.
+    // Uma tentativa automática por acesso/montagem. O componente é remontado
+    // sempre que o item "Resumo do dia" é acionado, inclusive se a tela já
+    // estiver aberta. O ref também evita a chamada duplicada do StrictMode.
     const autoGerado = useRef<string | null>(null);
 
     const gerar = useCallback(async (silencioso = false) => {
@@ -303,6 +303,12 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
     }, [hoje]);
 
     useEffect(() => {
+        if (autoGerado.current === hoje) return;
+        autoGerado.current = hoje;
+        void gerar(true);
+    }, [hoje, gerar]);
+
+    useEffect(() => {
         const unsub = onSnapshot(
             doc(db, 'resumo_matinal', hoje),
             (snap) => {
@@ -316,10 +322,6 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                     }
                 }
                 setIsLoading(false);
-                if (autoGerado.current !== hoje) {
-                    autoGerado.current = hoje;
-                    void gerar(true);
-                }
             },
             (e) => { setErro(e.message); setIsLoading(false); },
         );
@@ -420,19 +422,7 @@ export const MorningSummaryView: React.FC<MorningSummaryViewProps> = ({
                         {resumo.dia_semana}, {formatDia(resumo.data)}
                     </p>
                 </div>
-                <div className="flex items-center gap-2">
-                    {erro && <span className="text-xs text-red-500 max-w-[240px]">{erro}</span>}
-                    <button
-                        type="button"
-                        onClick={() => gerar()}
-                        disabled={isRegenerating}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors disabled:opacity-50 ${
-                            isDark ? 'border-[#2a313d] text-slate-300 hover:bg-[#151c27]' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                        }`}
-                    >
-                        {isRegenerating ? 'Atualizando…' : '↻ Atualizar'}
-                    </button>
-                </div>
+                {erro && <span className="text-xs text-red-500 max-w-[240px]">{erro}</span>}
             </header>
 
             {/* Estado do dia --------------------------------------------------- */}
