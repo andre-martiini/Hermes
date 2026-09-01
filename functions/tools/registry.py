@@ -48,6 +48,7 @@ _CATALOG: dict[str, str] = {
     "calculadora": "Calculadora dedicada para calculos matematicos ad-hoc ou projecoes.",
     "schedule_whatsapp_message": "Agenda ou envia uma mensagem de WhatsApp para um contato.",
     "pausar_conversa": "Enfileira uma resposta de pausa no WhatsApp e agenda a retomada após confirmação explícita",
+    "criar_rascunho_email": "Cria um rascunho Gmail com anexos por referência; nunca envia a mensagem",
     "buscar_contato": "Busca contatos por nome, email ou tag em perfil_pessoas para resolver menções a pessoas",
     "preparar_vinculo_contatos": "Prepara proposta de vínculo de pessoas a uma tarefa (gera card de confirmação)",
     "preparar_atualizacao_contato": "Prepara criação ou atualização de contato com novos fatos (gera card de confirmação)",
