@@ -375,7 +375,12 @@ def _destinatario_whatsapp_previa(ctx: ToolContext, destino: str) -> dict:
     # destino; só telefone nu ou JID @c.us pode usar esse fallback.
     phone_derived = "@" not in informado or informado.endswith("@c.us")
     candidates = []
-    phone_matches = []
+    # Um perfil pode conhecer o telefone antes de o capturador ter resolvido o
+    # JID. Esse fallback so vale se o registro de conversas nao trouxer um JID
+    # para o mesmo numero; caso contrario, o JID do registro e a identidade que
+    # deve ser usada no envio.
+    resolved_phone_matches = []
+    profile_phone_fallbacks = []
     try:
         for doc in ctx.db.collection("perfil_pessoas").stream():
             data = doc.to_dict() or {}
@@ -386,8 +391,12 @@ def _destinatario_whatsapp_previa(ctx: ToolContext, destino: str) -> dict:
                 if informado == chat_id:
                     return {"encontrado": True, "tipo": "contato", "nome": nome or informado,
                             "chat_id": chat_id}
-                phone_matches.append({"tipo": "contato", "nome": nome or informado,
-                                      "chat_id": chat_id or informado, "telefone": phone})
+                match = {"tipo": "contato", "nome": nome or informado,
+                         "chat_id": chat_id or informado, "telefone": phone}
+                if chat_id:
+                    resolved_phone_matches.append(match)
+                else:
+                    profile_phone_fallbacks.append(match)
             if nome or phone or chat_id:
                 candidates.append({"tipo": "contato", "nome": nome or phone or chat_id,
                                    "chat_id": chat_id, "telefone": phone})
@@ -402,21 +411,26 @@ def _destinatario_whatsapp_previa(ctx: ToolContext, destino: str) -> dict:
             registered_number = str(data.get("contact_number") or "")
             if (not is_registry_group and phone_derived and digits
                     and digits == "".join(c for c in registered_number if c.isdigit())):
-                phone_matches.append({"tipo": "contato", "nome": nome or informado,
-                                      "chat_id": chat_id, "telefone": registered_number})
+                resolved_phone_matches.append({"tipo": "contato", "nome": nome or informado,
+                                               "chat_id": chat_id, "telefone": registered_number})
             candidates.append({"tipo": "grupo" if is_registry_group else "contato",
                                "nome": nome or chat_id, "chat_id": chat_id,
                                "telefone": registered_number})
     except Exception as exc:
         # Sem uma base legível não é seguro criar uma confirmação para um JID cru.
         print(f"[hermes_tools] Falha ao resolver destinatário WhatsApp: {exc}")
+        return {"encontrado": False, "informado": informado, "sugestoes": []}
 
-    unique_matches = {match["chat_id"]: match for match in phone_matches}
+    unique_matches = {match["chat_id"]: match for match in resolved_phone_matches}
     if len(unique_matches) == 1:
         return {"encontrado": True, **next(iter(unique_matches.values()))}
     if len(unique_matches) > 1:
         return {"encontrado": False, "ambiguo": True, "informado": informado,
                 "sugestoes": list(unique_matches.values())[:3]}
+    if profile_phone_fallbacks:
+        # Todos os fallbacks usam o numero informado como chat_id; portanto
+        # duplicatas de perfil nao devem fabricar uma ambiguidade inexistente.
+        return {"encontrado": True, **profile_phone_fallbacks[0]}
 
     needle = informado.lower()
     def score(candidate):

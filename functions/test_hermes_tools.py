@@ -173,6 +173,25 @@ class TestExecucao(unittest.TestCase):
         self.assertEqual(proposal["status"], "confirmation_required")
         self.assertEqual(proposal["destinatario_id"], "12345@lid")
 
+    def test_previa_whatsapp_prefere_jid_do_registro_ao_fallback_do_perfil(self):
+        from tools.tool_context import ToolContext
+
+        db = _PreviewDb({
+            "perfil_pessoas": {
+                "p": {"nome": "Contato sem JID", "telefone": "+55 27 99999-0000"},
+            },
+            "whatsapp_chats": {
+                "lid": {"chat_id": "12345@lid", "chat_name": "Contato resolvido",
+                        "contact_number": "+55 27 99999-0000"},
+            },
+        })
+        proposal = hermes_tools.preview("schedule_whatsapp_message", ToolContext(_db=db), {
+            "contact_number": "+5527999990000", "message": "oi",
+            "scheduled_time": "2030-01-01T12:00:00+00:00",
+        })
+        self.assertEqual(proposal["status"], "confirmation_required")
+        self.assertEqual(proposal["destinatario_id"], "12345@lid")
+
     def test_previa_whatsapp_recusa_numero_ambiguo(self):
         from tools.tool_context import ToolContext
 
@@ -184,6 +203,22 @@ class TestExecucao(unittest.TestCase):
             "contact_number": "+5527999990000", "message": "oi", "scheduled_time": "2030-01-01T12:00:00+00:00",
         })
         self.assertEqual(proposal["status"], "destinatario_ambiguo")
+
+    def test_previa_whatsapp_recusa_leitura_parcial_do_registro(self):
+        from tools.tool_context import ToolContext
+
+        db = _PreviewDb({"perfil_pessoas": {}, "whatsapp_chats": {
+            "a": {"chat_id": "a@lid", "chat_name": "Primeiro",
+                  "contact_number": "+55 27 99999-0000"},
+            "b": {"chat_id": "b@lid", "chat_name": "Segundo",
+                  "contact_number": "+55 27 99999-0000"},
+        }}, failing_collection="whatsapp_chats")
+        proposal = hermes_tools.preview("schedule_whatsapp_message", ToolContext(_db=db), {
+            "contact_number": "+5527999990000", "message": "oi",
+            "scheduled_time": "2030-01-01T12:00:00+00:00",
+        })
+        self.assertEqual(proposal["status"], "destinatario_desconhecido")
+        self.assertEqual(proposal["sugestoes"], [])
 
 
 class TestVoz(unittest.TestCase):
@@ -287,11 +322,28 @@ class _PreviewCollection:
 
 
 class _PreviewDb:
-    def __init__(self, collections):
+    def __init__(self, collections, failing_collection=None):
         self._collections = collections
+        self._failing_collection = failing_collection
 
     def collection(self, name):
-        return _PreviewCollection(self._collections.get(name, {}))
+        collection = _PreviewCollection(self._collections.get(name, {}))
+        if name == self._failing_collection:
+            return _PreviewFailingCollection(collection)
+        return collection
+
+
+class _PreviewFailingCollection:
+    """Entrega um documento e interrompe a leitura, como um stream Firestore."""
+
+    def __init__(self, collection):
+        self._collection = collection
+
+    def stream(self):
+        docs = self._collection.stream()
+        if docs:
+            yield docs[0]
+        raise RuntimeError("leitura interrompida")
 
 
 class _OutboxSnap:
