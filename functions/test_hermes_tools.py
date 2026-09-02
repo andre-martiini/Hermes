@@ -144,6 +144,22 @@ class TestExecucao(unittest.TestCase):
         res = hermes_tools.execute("calculadora", {"expressao": "__import__('os')"}, ToolContext())
         self.assertIn("erro", res)
 
+    def test_previa_whatsapp_recusa_contato_e_grupo_desconhecidos(self):
+        from tools.tool_context import ToolContext
+
+        db = _PreviewDb({
+            "perfil_pessoas": {"p": {"nome": "Gabriela", "telefone": "+55 27 99999-0000", "whatsapp_chat_id": "5527999990000@c.us"}},
+            "whatsapp_chats": {"g": {"chat_id": "120363000000000001@g.us", "chat_name": "Equipe DAE"}},
+        })
+        ctx = ToolContext(_db=db)
+        for destino in ("144929460120343@lid", "5527999990000@lid", "120363999999999999@g.us"):
+            proposal = hermes_tools.preview("schedule_whatsapp_message", ctx, {
+                "contact_number": destino, "message": "oi", "scheduled_time": "2030-01-01T12:00:00+00:00",
+            })
+            self.assertEqual(proposal["status"], "destinatario_desconhecido")
+            self.assertEqual(proposal["informado"], destino)
+            self.assertLessEqual(len(proposal["sugestoes"]), 3)
+
 
 class TestVoz(unittest.TestCase):
     def test_tools_excluidas_da_voz_nao_aparecem(self):
@@ -226,6 +242,56 @@ class _ConfirmationDb:
     def document(self, name):
         self.confirmation_id = name
         return self.ref
+
+
+class _PreviewSnap:
+    def __init__(self, doc_id, data):
+        self.id = doc_id
+        self._data = data
+
+    def to_dict(self):
+        return dict(self._data)
+
+
+class _PreviewCollection:
+    def __init__(self, data):
+        self._data = data
+
+    def stream(self):
+        return [_PreviewSnap(doc_id, data) for doc_id, data in self._data.items()]
+
+
+class _PreviewDb:
+    def __init__(self, collections):
+        self._collections = collections
+
+    def collection(self, name):
+        return _PreviewCollection(self._collections.get(name, {}))
+
+
+class _OutboxSnap:
+    def __init__(self, data):
+        self.exists = data is not None
+        self._data = data
+
+    def to_dict(self):
+        return dict(self._data or {})
+
+
+class _OutboxDb:
+    def __init__(self, documents):
+        self._documents = documents
+
+    def collection(self, name):
+        assert name == "whatsapp_outbox"
+        return self
+
+    def document(self, name):
+        self.requested_id = name
+        return self
+
+    def get(self):
+        return _OutboxSnap(self._documents.get(self.requested_id))
 
 
 @unittest.skipIf(mcp_server is None, "firebase_functions indisponivel fora do venv de deploy")
@@ -326,6 +392,8 @@ class TestCamadaJsonRpc(unittest.TestCase):
         from unittest import mock
         with self._gating({"schedule_whatsapp_message"}), mock.patch.object(
             mcp_server, "_criar_confirmacao", return_value="confirmacao-1"
+        ), mock.patch.object(
+            mcp_server, "preview_tool", return_value={"status": "confirmation_required", "destinatario": "Contato conhecido"}
         ):
             resp = self._post({
                 "jsonrpc": "2.0", "id": 5, "method": "tools/call",
@@ -338,6 +406,26 @@ class TestCamadaJsonRpc(unittest.TestCase):
         payload = json.loads(resp.get_data(as_text=True))
         conteudo = json.loads(payload["result"]["content"][0]["text"])
         self.assertEqual(conteudo["status"], "confirmation_required")
+
+    def test_destinatario_desconhecido_nao_cria_confirmacao(self):
+        from unittest import mock
+
+        with self._gating({"schedule_whatsapp_message"}), \
+             mock.patch.object(mcp_server, "preview_tool", side_effect=lambda _name, _ctx, args: {
+                 "status": "destinatario_desconhecido", "informado": args["contact_number"], "sugestoes": []
+             }), \
+             mock.patch.object(mcp_server, "_criar_confirmacao") as create:
+            for rpc_id, destino in ((58, "144929460120343@lid"), (59, "120363999999999999@g.us")):
+                resp = self._post({
+                    "jsonrpc": "2.0", "id": rpc_id, "method": "tools/call",
+                    "params": {"name": "schedule_whatsapp_message", "arguments": {
+                        "contact_number": destino, "message": "oi", "scheduled_time": "2030-01-01T12:00:00+00:00",
+                    }},
+                })
+                content = json.loads(json.loads(resp.get_data(as_text=True))["result"]["content"][0]["text"])
+                self.assertEqual(content["status"], "destinatario_desconhecido")
+                self.assertEqual(content["informado"], destino)
+        create.assert_not_called()
 
     def test_gate_inclui_preview_quando_a_tool_oferece_hook(self):
         from unittest import mock
@@ -475,6 +563,40 @@ class TestConfirmacaoPersistida(unittest.TestCase):
             result = mcp_server._executar_confirmacao(ctx, "id-expirado")
         self.assertIn("expirada", result["erro"])
         execute.assert_not_called()
+
+    def test_confirmacao_de_envio_imediato_devolve_job_e_estado_do_outbox(self):
+        from datetime import datetime, timezone
+        from tools.tool_context import ToolContext
+
+        ctx = ToolContext(_db=_OutboxDb({"outbox-1": {"status": "sent"}}))
+        result = mcp_server._resultado_confirmacao_whatsapp(ctx, {
+            "scheduled_time": datetime.now(timezone.utc).isoformat(),
+        }, "Mensagem ENFILEIRADA. job_id=outbox-1.")
+        self.assertEqual(result["job_id"], "outbox-1")
+        self.assertEqual(result["status_outbox"], "sent")
+
+    def test_estado_sending_tambem_e_devolvido_no_envio_imediato(self):
+        from datetime import datetime, timezone
+        from tools.tool_context import ToolContext
+
+        ctx = ToolContext(_db=_OutboxDb({"outbox-2": {"status": "sending"}}))
+        result = mcp_server._resultado_confirmacao_whatsapp(ctx, {
+            "scheduled_time": datetime.now(timezone.utc).isoformat(),
+        }, "Mensagem ENFILEIRADA. job_id=outbox-2.", wait_seconds=0)
+        self.assertEqual(result["status_outbox"], "sending")
+
+    def test_falha_na_consulta_do_outbox_nao_impede_resultado_confirmado(self):
+        from datetime import datetime, timezone
+        from unittest import mock
+        from tools.tool_context import ToolContext
+
+        db = mock.Mock()
+        db.collection.side_effect = RuntimeError("Firestore indisponível")
+        ctx = ToolContext(_db=db)
+        result = mcp_server._resultado_confirmacao_whatsapp(ctx, {
+            "scheduled_time": datetime.now(timezone.utc).isoformat(),
+        }, "Mensagem ENFILEIRADA. job_id=outbox-3.")
+        self.assertEqual(result, {"resultado": "Mensagem ENFILEIRADA. job_id=outbox-3.", "job_id": "outbox-3"})
 
 
 class TestSinalDeIntencao(unittest.TestCase):
