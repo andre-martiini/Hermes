@@ -238,6 +238,8 @@ def execute(tool_name: str, slots: dict, db) -> str:
             "updated_by": "telegram",
             "origem": "telegram",
         }
+        if "sempre_ativo" in slots:
+            payload["sempre_ativo"] = slots["sempre_ativo"] is True
         if existing_ref:
             payload["created_at"] = existing_data.get("created_at", firestore.SERVER_TIMESTAMP)
             existing_ref.set(payload, merge=True)
