@@ -1540,7 +1540,24 @@ def obter_estado_atual(ctx: ToolContext, args: dict):
 
     data = str(args.get("data") or "").strip() or None
     try:
-        return build_morning_summary(ctx.db, data)
+        estado = build_morning_summary(ctx.db, data)
+        try:
+            from main import _pops_sempre_ativos
+            ativos = _pops_sempre_ativos(ctx.db)
+            def _atualizado(pop):
+                return str(pop.get("atualizado_em") or pop.get("updated_at") or "")
+            ativos.sort(key=_atualizado, reverse=True)
+            selecionados = ativos[:5]
+            estado["pops_ativos"] = [
+                {"id": pop.get("id", ""), "titulo": pop.get("titulo", ""),
+                 "instrucao_sistema": pop.get("instrucao_sistema", ""), "origem": "sempre_ativo"}
+                for pop in selecionados
+            ]
+            if len(ativos) > 5:
+                estado["pops_ativos_total_omitido"] = len(ativos) - 5
+        except Exception:
+            estado["pops_ativos"] = []
+        return estado
     except Exception as exc:  # noqa: BLE001
         return {"erro": f"Falha ao montar o estado atual: {exc}"}
 

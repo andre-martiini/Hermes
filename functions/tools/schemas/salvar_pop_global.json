@@ -19,6 +19,10 @@
         "type": "string",
         "description": "Instrução operacional completa do POP"
       },
+      "sempre_ativo": {
+        "type": "boolean",
+        "description": "Quando true, aplica o POP em toda conversa"
+      },
       "instrucao": {
         "type": "string",
         "description": "Apelido de instrucao_sistema"
