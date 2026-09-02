@@ -64,7 +64,9 @@ _access_cache: dict[str, object] | None = None
 # acrescenta tools ao gate. Estes dois efeitos externos, contudo, nunca podem
 # ser removidos por configuracao: uma lista vazia em producao nao pode tornar o
 # envio de mensagem (inclusive a pausa) executavel sem o "sim" do usuario.
-_CONFIRMACAO_OBRIGATORIA: set[str] = {"schedule_whatsapp_message", "pausar_conversa"}
+_CONFIRMACAO_OBRIGATORIA: set[str] = {
+    "schedule_whatsapp_message", "pausar_conversa", "criar_rascunho_email",
+}
 _CONFIRMACAO_PADRAO: set[str] = set(_CONFIRMACAO_OBRIGATORIA)
 _CONFIRMACAO_TTL = timedelta(minutes=15)
 

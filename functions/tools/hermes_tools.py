@@ -368,6 +368,11 @@ def pausar_conversa(ctx: ToolContext, args: dict):
     return pausar(ctx, args)
 
 
+def criar_rascunho_email(ctx: ToolContext, args: dict):
+    from tools.criar_rascunho_email import criar
+    return criar(ctx, args)
+
+
 def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
     """Prévia opcional usada pelo gate MCP; nunca produz efeito externo."""
     if name == "pausar_conversa":
@@ -1652,6 +1657,7 @@ _HANDLERS: dict = {
     "buscar_e_analisar_email": _buscar_e_analisar_email,
     "schedule_whatsapp_message": _schedule_whatsapp_message,
     "pausar_conversa": pausar_conversa,
+    "criar_rascunho_email": criar_rascunho_email,
     "buscar_conversas_whatsapp": _buscar_conversas_whatsapp,
     "salvar_memoria_global": _salvar_memoria_global,
     "criar_objetivo_estrategico": _strategy("criar_objetivo_estrategico"),

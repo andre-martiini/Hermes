@@ -322,6 +322,10 @@ class TestCamadaJsonRpc(unittest.TestCase):
         with self._gating({"schedule_whatsapp_message"}):
             self.assertTrue(mcp_server._exige_confirmacao("schedule_whatsapp_message"))
 
+    def test_rascunho_email_e_mutante_e_exige_confirmacao(self):
+        self.assertTrue(registry.needs_confirmation("criar_rascunho_email"))
+        self.assertTrue(mcp_server._exige_confirmacao("criar_rascunho_email"))
+
     def test_demais_tools_mutantes_nao_pedem_dupla_chamada(self):
         """`criar_acao_no_sistema` grava, mas o gating do canal esta desligado.
 

@@ -32,6 +32,10 @@
         "type": "string",
         "description": "Filtra qual anexo da mensagem usar, por parte do nome. Só com gmail_message_id"
       },
+      "attachment_id": {
+        "type": "string",
+        "description": "ID exato do anexo no Gmail. Quando informado com nome_anexo, ambos precisam apontar ao mesmo anexo"
+      },
       "descricao": {
         "type": "string",
         "description": "Texto opcional gravado no diário junto com o anexo, explicando o que é o documento"
