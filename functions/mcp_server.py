@@ -351,6 +351,7 @@ def _criar_confirmacao(ctx: ToolContext, nome: str, argumentos: dict, previa: di
         "expires_at": expires_at,
         "expira_em": expires_at,
     })
+    ctx.mcp_confirmation_expires_at = expires_at
     return confirmation_id
 
 
@@ -370,7 +371,7 @@ def _ler_confirmacao(ctx: ToolContext, nome: str, argumentos: dict, confirmation
     return data
 
 
-def _executar_confirmacao(ctx: ToolContext, confirmation_id: object) -> dict:
+def _executar_confirmacao(ctx: ToolContext, confirmation_id: object, *, tool_esperada: str | None = None) -> dict:
     """Executa uma única vez a proposta congelada, sem confiar no cliente."""
     if not isinstance(confirmation_id, str) or not confirmation_id.strip():
         return {"erro": "confirmation_id obrigatório"}
@@ -381,19 +382,41 @@ def _executar_confirmacao(ctx: ToolContext, confirmation_id: object) -> dict:
     data = snap.to_dict() or {}
     if data.get("uid") != ctx.user_uid:
         return {"erro": "Confirmação não pertence a este usuário."}
-    if data.get("executed_at"):
-        return {"status": "ja_executada", "resultado_anterior": data.get("result")}
+    if data.get("executed_at") or data.get("executada_em"):
+        return {"status": "ja_executada", "resultado_anterior": data.get("result", data.get("resultado"))}
     expires_at = data.get("expires_at")
     if not isinstance(expires_at, datetime) or expires_at <= datetime.now(timezone.utc):
         return {"erro": "Confirmação expirada; peça uma nova prévia."}
     nome, argumentos = data.get("tool"), dict(data.get("arguments") or {})
     if not isinstance(nome, str) or not registry.is_mcp_enabled(nome):
         return {"erro": "Tool da confirmação não está disponível."}
+    if tool_esperada and nome != tool_esperada:
+        return {"erro": "Confirmação não pertence a esta chamada."}
+    # `create` é atômico no Firestore: duas confirmações concorrentes não podem
+    # obter a mesma reivindicação. O outbox usa o mesmo id como segunda barreira
+    # para WhatsApp.
+    claim = ref.collection("claims").document("execute")
+    try:
+        claim.create({"claimed_at": datetime.now(timezone.utc)})
+    except Exception:
+        latest = ref.get().to_dict() or {}
+        if latest.get("executed_at") or latest.get("executada_em"):
+            return {"status": "ja_executada", "resultado_anterior": latest.get("result", latest.get("resultado"))}
+        return {"status": "em_execucao", "message": "Confirmação já está sendo executada."}
     ctx.mcp_confirmation_id = confirmation_id
     ctx.mcp_confirmation_created_at = data.get("created_at")
     ctx.mcp_confirmation_preview = data.get("preview")
-    result = execute_tool(nome, argumentos, ctx)
-    ref.set({"executed_at": datetime.now(timezone.utc), "result": result}, merge=True)
+    ctx.mcp_confirmed_tool = nome
+    ctx.mcp_confirmed_arguments = argumentos
+    try:
+        result = execute_tool(nome, argumentos, ctx)
+    except Exception as exc:  # não deixar uma confirmação reivindicada sem resultado
+        result = {"erro": f"Falha ao executar a confirmação: {exc}"}
+    executed_at = datetime.now(timezone.utc)
+    # Os nomes originais em inglês continuam para documentos D2; os aliases em
+    # português tornam o documento inspecionável pelo contrato atual sem migração.
+    ref.set({"executed_at": executed_at, "executada_em": executed_at,
+             "result": result, "resultado": result}, merge=True)
     return result if isinstance(result, dict) else {"resultado": result}
 
 
@@ -449,7 +472,7 @@ def _handle_initialize(params: dict) -> dict:
             "do usuario. Mostre o destinatario e o texto exato e espere ele "
             "concordar antes de chamar — e o unico efeito que nao da para "
             "desfazer de dentro do Hermes. Se o servidor responder pedindo "
-            "confirmacao, repita a chamada com `_confirmed: true`.\n"
+            "confirmacao, chame `confirmar_acao` com o `confirmation_id` devolvido.\n"
             "- Para anexar arquivo, a ordem de preferencia e: `drive_file_id` "
             "(arquivo que ja esta no Drive — peca ao usuario para joga-lo la pelo "
             "celular se ainda nao estiver), `gmail_message_id`, `url`, e por fim "
@@ -507,7 +530,17 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
         raise McpError(-32602, "params.name obrigatorio em tools/call")
 
     if name == "confirmar_acao":
+        # O contexto e novo por request, mas limpar estes atributos deixa a
+        # funcao correta tambem quando chamada diretamente em testes.
+        ctx.mcp_confirmed_tool = None
+        ctx.mcp_confirmed_arguments = None
+        start = time.monotonic()
         result = _executar_confirmacao(ctx, arguments.get("confirmation_id"))
+        confirmed_tool = getattr(ctx, "mcp_confirmed_tool", None)
+        if confirmed_tool:
+            _audit_log(uid=ctx.user_uid, tool=confirmed_tool,
+                       arguments=getattr(ctx, "mcp_confirmed_arguments", {}),
+                       latency_ms=(time.monotonic() - start) * 1000)
         return _text_result(result, is_error=bool(result.get("erro")))
 
     if not registry.is_mcp_enabled(name):
@@ -517,16 +550,19 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
     confirmation_id = arguments.pop("_confirmation_id", None)
     if _exige_confirmacao(name) and confirmed is True:
         if confirmation_id:
-            try:
-                approved = _ler_confirmacao(ctx, name, arguments, confirmation_id)
-            except Exception as exc:
-                return _text_result({"erro": str(exc)}, is_error=True)
-            # O executor recebe os argumentos exatamente apresentados na primeira
-            # chamada, e a tool que tiver hook pode reutilizar a prévia congelada.
-            arguments = dict(approved["arguments"])
-            ctx.mcp_confirmation_id = str(confirmation_id)
-            ctx.mcp_confirmation_created_at = approved.get("created_at")
-            ctx.mcp_confirmation_preview = approved.get("preview")
+            # Compatibilidade com clientes que ainda repetem a tool original.
+            # Executa a mesma proposta persistida de `confirmar_acao`, jamais os
+            # argumentos que o cliente reenviou.
+            ctx.mcp_confirmed_tool = None
+            ctx.mcp_confirmed_arguments = None
+            start = time.monotonic()
+            result = _executar_confirmacao(ctx, confirmation_id, tool_esperada=name)
+            confirmed_tool = getattr(ctx, "mcp_confirmed_tool", None)
+            if confirmed_tool:
+                _audit_log(uid=ctx.user_uid, tool=confirmed_tool,
+                           arguments=getattr(ctx, "mcp_confirmed_arguments", {}),
+                           latency_ms=(time.monotonic() - start) * 1000)
+            return _text_result(result, is_error=bool(result.get("erro")))
         else:
             # Compatibilidade para tools antigas sem hook de prévia: `_confirmed`
             # continua bastando. Uma tool com hook nunca executa por este caminho,
@@ -551,14 +587,14 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
                 "confirmation_required": True,
                 "preview": proposal,
                 "confirmation_id": confirmation_id,
-                "expira_em": (datetime.now(timezone.utc) + _CONFIRMACAO_TTL).isoformat(),
+                "expira_em": getattr(ctx, "mcp_confirmation_expires_at", datetime.now(timezone.utc) + _CONFIRMACAO_TTL).isoformat(),
                 "message": "Confira a prévia e, após o sim explícito, chame confirmar_acao(confirmation_id) para executar.",
             }, is_error=False)
         return _text_result({
             "status": "confirmation_required",
             "tool": name,
             "confirmation_id": confirmation_id,
-            "expira_em": (datetime.now(timezone.utc) + _CONFIRMACAO_TTL).isoformat(),
+            "expira_em": getattr(ctx, "mcp_confirmation_expires_at", datetime.now(timezone.utc) + _CONFIRMACAO_TTL).isoformat(),
             "message": (
                 "Esta acao grava no Hermes e exige confirmacao explicita do usuario. "
                 "Mostre a ele exatamente o que sera feito e, apos o 'sim', chame "
