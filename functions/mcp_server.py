@@ -626,7 +626,8 @@ def _handle_prompts_list() -> dict:
             "name": snap.id,
             "title": titulo,
             "description": (
-                f"POP do Hermes: {titulo}."
+                ("[SEMPRE ATIVO] " if dados.get("sempre_ativo") is True else "")
+                + f"POP do Hermes: {titulo}."
                 + (f" Aciona em: {', '.join(gatilhos[:6])}." if gatilhos else "")
             ),
         })
