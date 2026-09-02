@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -69,6 +70,7 @@ _CONFIRMACAO_OBRIGATORIA: set[str] = {
 }
 _CONFIRMACAO_PADRAO: set[str] = set(_CONFIRMACAO_OBRIGATORIA)
 _CONFIRMACAO_TTL = timedelta(minutes=10)
+_WHATSAPP_JOB_ID_RE = re.compile(r"\bjob_id=([A-Za-z0-9_-]+)")
 
 # Tools que passam de um minuto e por isso nao podem rodar dentro do request.
 #
@@ -371,6 +373,43 @@ def _ler_confirmacao(ctx: ToolContext, nome: str, argumentos: dict, confirmation
     return data
 
 
+def _resultado_confirmacao_whatsapp(ctx: ToolContext, argumentos: dict, result):
+    """Acrescenta o job e, para envio imediato, o estado que o worker já gravou."""
+    if not isinstance(result, str):
+        return result
+    match = _WHATSAPP_JOB_ID_RE.search(result)
+    if not match:
+        return result
+    resposta = {"resultado": result, "job_id": match.group(1)}
+    try:
+        scheduled_at = datetime.fromisoformat(
+            str(argumentos.get("scheduled_time") or "").replace("Z", "+00:00")
+        )
+        if scheduled_at.tzinfo is None:
+            scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return resposta
+    if scheduled_at > datetime.now(timezone.utc) + timedelta(seconds=90):
+        return resposta
+
+    # A espera curta só cobre o caso "agora". Não transforma agendamento futuro
+    # em polling de cinco segundos nem afirma entrega quando o worker ainda não a
+    # registrou.
+    ref = ctx.db.collection("whatsapp_outbox").document(resposta["job_id"])
+    deadline = time.monotonic() + 5
+    while True:
+        snap = ref.get()
+        if snap.exists:
+            status = (snap.to_dict() or {}).get("status")
+            if status in {"pending", "sent", "failed"}:
+                resposta["status_outbox"] = status
+            if status in {"sent", "failed"} or time.monotonic() >= deadline:
+                return resposta
+        if time.monotonic() >= deadline:
+            return resposta
+        time.sleep(0.5)
+
+
 def _executar_confirmacao(ctx: ToolContext, confirmation_id: object, *, tool_esperada: str | None = None) -> dict:
     """Executa uma única vez a proposta congelada, sem confiar no cliente."""
     if not isinstance(confirmation_id, str) or not confirmation_id.strip():
@@ -412,6 +451,8 @@ def _executar_confirmacao(ctx: ToolContext, confirmation_id: object, *, tool_esp
         result = execute_tool(nome, argumentos, ctx)
     except Exception as exc:  # não deixar uma confirmação reivindicada sem resultado
         result = {"erro": f"Falha ao executar a confirmação: {exc}"}
+    if nome == "schedule_whatsapp_message":
+        result = _resultado_confirmacao_whatsapp(ctx, argumentos, result)
     executed_at = datetime.now(timezone.utc)
     # Os nomes originais em inglês continuam para documentos D2; os aliases em
     # português tornam o documento inspecionável pelo contrato atual sem migração.
@@ -577,8 +618,15 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
     elif _exige_confirmacao(name):
         try:
             proposal = preview_tool(name, ctx, arguments)
-            confirmation_id = _criar_confirmacao(ctx, name, arguments, proposal)
         except Exception as exc:  # prévia inválida deve apontar o dado, sem mutar
+            return _text_result({"erro": str(exc)}, is_error=True)
+        # Uma prévia pode recusar o destino. Neste caso não há ato a confirmar e
+        # não se deixa uma confirmação pendente para um identificador cru.
+        if proposal and proposal.get("status") == "destinatario_desconhecido":
+            return _text_result(proposal, is_error=False)
+        try:
+            confirmation_id = _criar_confirmacao(ctx, name, arguments, proposal)
+        except Exception as exc:
             return _text_result({"erro": str(exc)}, is_error=True)
         if proposal is not None:
             return _text_result({

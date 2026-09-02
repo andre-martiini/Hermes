@@ -26,6 +26,7 @@ mudanca de comportamento observavel.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -364,27 +365,44 @@ def _schedule_whatsapp_message(ctx: ToolContext, args: dict):
     )
 
 
-def _destinatario_whatsapp_previa(ctx: ToolContext, destino: str) -> tuple[str, str]:
-    """Resolve um nome apenas para a prévia; falha aqui não impede o gate."""
-    grupo = destino.endswith("@g.us")
+def _destinatario_whatsapp_previa(ctx: ToolContext, destino: str) -> dict:
+    """Resolve o destinatário antes da confirmação, sem aceitar JID livre."""
+    informado = str(destino or "").strip()
+    is_group = informado.endswith("@g.us")
+    digits = "".join(c for c in informado if c.isdigit())
+    candidates = []
     try:
-        if grupo:
-            for doc in ctx.db.collection("whatsapp_chats").stream():
-                data = doc.to_dict() or {}
-                chat_id = str(data.get("chat_id") or doc.id).strip()
-                if chat_id == destino:
-                    return "grupo", str(data.get("chat_name") or destino).strip()
-        else:
-            digits = "".join(c for c in destino if c.isdigit())
-            for doc in ctx.db.collection("perfil_pessoas").stream():
-                data = doc.to_dict() or {}
-                phone = str(data.get("telefone") or "")
-                chat_id = str(data.get("whatsapp_chat_id") or "")
-                if destino == chat_id or (digits and digits == "".join(c for c in phone if c.isdigit())):
-                    return "contato", str(data.get("nome") or destino).strip()
-    except Exception as exc:  # a prévia ainda pode mostrar o identificador bruto
+        for doc in ctx.db.collection("perfil_pessoas").stream():
+            data = doc.to_dict() or {}
+            nome = str(data.get("nome") or "").strip()
+            phone = str(data.get("telefone") or "").strip()
+            chat_id = str(data.get("whatsapp_chat_id") or "").strip()
+            if informado == chat_id or (not is_group and digits and digits == "".join(c for c in phone if c.isdigit())):
+                return {"encontrado": True, "tipo": "contato", "nome": nome or informado,
+                        "chat_id": chat_id or informado}
+            if nome or phone or chat_id:
+                candidates.append({"tipo": "contato", "nome": nome or phone or chat_id,
+                                   "chat_id": chat_id, "telefone": phone})
+        for doc in ctx.db.collection("whatsapp_chats").stream():
+            data = doc.to_dict() or {}
+            chat_id = str(data.get("chat_id") or doc.id).strip()
+            nome = str(data.get("chat_name") or "").strip()
+            if chat_id == informado:
+                return {"encontrado": True, "tipo": "grupo" if chat_id.endswith("@g.us") else "contato",
+                        "nome": nome or informado, "chat_id": chat_id}
+            if chat_id.endswith("@g.us"):
+                candidates.append({"tipo": "grupo", "nome": nome or chat_id, "chat_id": chat_id})
+    except Exception as exc:
+        # Sem uma base legível não é seguro criar uma confirmação para um JID cru.
         print(f"[hermes_tools] Falha ao resolver destinatário WhatsApp: {exc}")
-    return ("grupo" if grupo else "contato"), destino
+
+    needle = informado.lower()
+    def score(candidate):
+        values = [str(candidate.get(key) or "").lower() for key in ("nome", "chat_id", "telefone")]
+        return max((difflib.SequenceMatcher(None, needle, value).ratio() for value in values if value), default=0)
+
+    suggestions = sorted(candidates, key=score, reverse=True)[:3]
+    return {"encontrado": False, "informado": informado, "sugestoes": suggestions}
 
 
 def confirmar_acao(ctx: ToolContext, args: dict):
@@ -408,11 +426,14 @@ def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
         return _preview(ctx, args)
     if name == "schedule_whatsapp_message":
         destino = str(args.get("contact_number") or "").strip()
-        tipo, nome = _destinatario_whatsapp_previa(ctx, destino)
+        resolved = _destinatario_whatsapp_previa(ctx, destino)
+        if not resolved["encontrado"]:
+            return {"status": "destinatario_desconhecido", "informado": resolved["informado"],
+                    "sugestoes": resolved["sugestoes"]}
         return {"status": "confirmation_required",
-                "destinatario": ("GRUPO: " if tipo == "grupo" else "") + nome,
-                "destinatario_id": destino,
-                "tipo_destinatario": tipo,
+                "destinatario": ("GRUPO: " if resolved["tipo"] == "grupo" else "") + resolved["nome"],
+                "destinatario_id": resolved["chat_id"],
+                "tipo_destinatario": resolved["tipo"],
                 "mensagem": str(args.get("message") or ""),
                 "agendado_para": str(args.get("scheduled_time") or "")}
     return None
