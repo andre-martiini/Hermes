@@ -77,6 +77,7 @@ def _whatsapp_payload(message: dict, when: datetime) -> dict:
         "mentions_andre": bool(message.get("mentions_andre")),
         "quoted_msg_id": message.get("quoted_msg_id") or None,
         "quoted_from_me": message.get("quoted_from_me"),
+        "quoted_author": message.get("quoted_author") or None,
         "updated_at": datetime.now(timezone.utc),
     }
 
@@ -317,15 +318,19 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
         if "*" not in allowed and chat_id not in allowed:
             continue
         task = by_chat.get(chat_id)
-        if data.get("is_group") and not task:
+        inclusion_reason = "conversa_direta"
+        if data.get("is_group"):
             # D1b: quando o capturador trouxe metadados da mensagem, uma menção
             # explícita ao André ou resposta a mensagem dele basta para o grupo
             # entrar. Dados antigos, sem esses campos, continuam no fallback
             # conservador e não são reprocessados.
             mentions = {str(x) for x in (data.get("mentioned_ids") or [])}
             relevant = bool(data.get("mentions_andre") or data.get("quoted_from_me") or (mentions & andre_ids))
-            if not relevant:
+            metadata_present = (data.get("mentioned_ids") is not None or data.get("quoted_msg_id") is not None
+                                or data.get("quoted_from_me") is not None)
+            if not relevant and (not task or metadata_present):
                 continue
+            inclusion_reason = "mencao" if (data.get("mentions_andre") or (mentions & andre_ids)) else ("resposta_a_mim" if data.get("quoted_from_me") else "grupo_vinculado")
         reason = _noise_reason(trecho=data.get("trecho") or "", sender="", is_email=False,
                                has_contact=chat_id in contacts, has_task=bool(task), domains=domains, endings=endings)
         if reason and not incluir_filtrados:
@@ -338,6 +343,7 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
             paused_until=data.get("pausada_ate"), now=now,
         )
         if item:
+            item["motivo_inclusao"] = inclusion_reason
             items.append(item)
 
     # O email-action-linker conserva os metadados da mensagem na sugestão; só
@@ -372,6 +378,7 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
             paused_until=None, now=now,
         )
         if item:
+            item["motivo_inclusao"] = "conversa_direta"
             items.append(item)
 
     items.sort(key=lambda item: (not item.pop("_critica"), -item["horas_aguardando"], item["desde"]))
