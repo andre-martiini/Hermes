@@ -373,7 +373,7 @@ def _ler_confirmacao(ctx: ToolContext, nome: str, argumentos: dict, confirmation
     return data
 
 
-def _resultado_confirmacao_whatsapp(ctx: ToolContext, argumentos: dict, result):
+def _resultado_confirmacao_whatsapp(ctx: ToolContext, argumentos: dict, result, *, wait_seconds: float = 5):
     """Acrescenta o job e, para envio imediato, o estado que o worker já gravou."""
     if not isinstance(result, str):
         return result
@@ -395,19 +395,23 @@ def _resultado_confirmacao_whatsapp(ctx: ToolContext, argumentos: dict, result):
     # A espera curta só cobre o caso "agora". Não transforma agendamento futuro
     # em polling de cinco segundos nem afirma entrega quando o worker ainda não a
     # registrou.
-    ref = ctx.db.collection("whatsapp_outbox").document(resposta["job_id"])
-    deadline = time.monotonic() + 5
-    while True:
-        snap = ref.get()
-        if snap.exists:
-            status = (snap.to_dict() or {}).get("status")
-            if status in {"pending", "sent", "failed"}:
-                resposta["status_outbox"] = status
-            if status in {"sent", "failed"} or time.monotonic() >= deadline:
+    try:
+        ref = ctx.db.collection("whatsapp_outbox").document(resposta["job_id"])
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            snap = ref.get()
+            if snap.exists:
+                status = (snap.to_dict() or {}).get("status")
+                if status in {"pending", "sending", "sent", "failed"}:
+                    resposta["status_outbox"] = status
+                if status in {"sent", "failed"} or time.monotonic() >= deadline:
+                    return resposta
+            if time.monotonic() >= deadline:
                 return resposta
-        if time.monotonic() >= deadline:
-            return resposta
-        time.sleep(0.5)
+            time.sleep(0.5)
+    except Exception as exc:  # consulta é conveniência; a confirmação já executou
+        print(f"[mcp_server] Falha ao consultar outbox da confirmação: {exc}")
+        return resposta
 
 
 def _executar_confirmacao(ctx: ToolContext, confirmation_id: object, *, tool_esperada: str | None = None) -> dict:

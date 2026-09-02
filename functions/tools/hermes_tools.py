@@ -370,6 +370,10 @@ def _destinatario_whatsapp_previa(ctx: ToolContext, destino: str) -> dict:
     informado = str(destino or "").strip()
     is_group = informado.endswith("@g.us")
     digits = "".join(c for c in informado if c.isdigit())
+    # Um JID opaco (@lid, @broadcast...) não é um número de telefone. Casá-lo
+    # pelos dígitos poderia mostrar um contato conhecido e executar para outro
+    # destino; só telefone nu ou JID @c.us pode usar esse fallback.
+    phone_derived = "@" not in informado or informado.endswith("@c.us")
     candidates = []
     try:
         for doc in ctx.db.collection("perfil_pessoas").stream():
@@ -377,7 +381,7 @@ def _destinatario_whatsapp_previa(ctx: ToolContext, destino: str) -> dict:
             nome = str(data.get("nome") or "").strip()
             phone = str(data.get("telefone") or "").strip()
             chat_id = str(data.get("whatsapp_chat_id") or "").strip()
-            if informado == chat_id or (not is_group and digits and digits == "".join(c for c in phone if c.isdigit())):
+            if informado == chat_id or (phone_derived and not is_group and digits and digits == "".join(c for c in phone if c.isdigit())):
                 return {"encontrado": True, "tipo": "contato", "nome": nome or informado,
                         "chat_id": chat_id or informado}
             if nome or phone or chat_id:

@@ -152,7 +152,7 @@ class TestExecucao(unittest.TestCase):
             "whatsapp_chats": {"g": {"chat_id": "120363000000000001@g.us", "chat_name": "Equipe DAE"}},
         })
         ctx = ToolContext(_db=db)
-        for destino in ("144929460120343@lid", "120363999999999999@g.us"):
+        for destino in ("144929460120343@lid", "5527999990000@lid", "120363999999999999@g.us"):
             proposal = hermes_tools.preview("schedule_whatsapp_message", ctx, {
                 "contact_number": destino, "message": "oi", "scheduled_time": "2030-01-01T12:00:00+00:00",
             })
@@ -574,6 +574,29 @@ class TestConfirmacaoPersistida(unittest.TestCase):
         }, "Mensagem ENFILEIRADA. job_id=outbox-1.")
         self.assertEqual(result["job_id"], "outbox-1")
         self.assertEqual(result["status_outbox"], "sent")
+
+    def test_estado_sending_tambem_e_devolvido_no_envio_imediato(self):
+        from datetime import datetime, timezone
+        from tools.tool_context import ToolContext
+
+        ctx = ToolContext(_db=_OutboxDb({"outbox-2": {"status": "sending"}}))
+        result = mcp_server._resultado_confirmacao_whatsapp(ctx, {
+            "scheduled_time": datetime.now(timezone.utc).isoformat(),
+        }, "Mensagem ENFILEIRADA. job_id=outbox-2.", wait_seconds=0)
+        self.assertEqual(result["status_outbox"], "sending")
+
+    def test_falha_na_consulta_do_outbox_nao_impede_resultado_confirmado(self):
+        from datetime import datetime, timezone
+        from unittest import mock
+        from tools.tool_context import ToolContext
+
+        db = mock.Mock()
+        db.collection.side_effect = RuntimeError("Firestore indisponível")
+        ctx = ToolContext(_db=db)
+        result = mcp_server._resultado_confirmacao_whatsapp(ctx, {
+            "scheduled_time": datetime.now(timezone.utc).isoformat(),
+        }, "Mensagem ENFILEIRADA. job_id=outbox-3.")
+        self.assertEqual(result, {"resultado": "Mensagem ENFILEIRADA. job_id=outbox-3.", "job_id": "outbox-3"})
 
 
 class TestSinalDeIntencao(unittest.TestCase):
