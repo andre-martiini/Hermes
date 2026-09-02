@@ -375,6 +375,7 @@ def _destinatario_whatsapp_previa(ctx: ToolContext, destino: str) -> dict:
     # destino; só telefone nu ou JID @c.us pode usar esse fallback.
     phone_derived = "@" not in informado or informado.endswith("@c.us")
     candidates = []
+    phone_matches = []
     try:
         for doc in ctx.db.collection("perfil_pessoas").stream():
             data = doc.to_dict() or {}
@@ -382,8 +383,11 @@ def _destinatario_whatsapp_previa(ctx: ToolContext, destino: str) -> dict:
             phone = str(data.get("telefone") or "").strip()
             chat_id = str(data.get("whatsapp_chat_id") or "").strip()
             if informado == chat_id or (phone_derived and not is_group and digits and digits == "".join(c for c in phone if c.isdigit())):
-                return {"encontrado": True, "tipo": "contato", "nome": nome or informado,
-                        "chat_id": chat_id or informado}
+                if informado == chat_id:
+                    return {"encontrado": True, "tipo": "contato", "nome": nome or informado,
+                            "chat_id": chat_id}
+                phone_matches.append({"tipo": "contato", "nome": nome or informado,
+                                      "chat_id": chat_id or informado, "telefone": phone})
             if nome or phone or chat_id:
                 candidates.append({"tipo": "contato", "nome": nome or phone or chat_id,
                                    "chat_id": chat_id, "telefone": phone})
@@ -394,11 +398,25 @@ def _destinatario_whatsapp_previa(ctx: ToolContext, destino: str) -> dict:
             if chat_id == informado:
                 return {"encontrado": True, "tipo": "grupo" if chat_id.endswith("@g.us") else "contato",
                         "nome": nome or informado, "chat_id": chat_id}
-            if chat_id.endswith("@g.us"):
-                candidates.append({"tipo": "grupo", "nome": nome or chat_id, "chat_id": chat_id})
+            is_registry_group = chat_id.endswith("@g.us")
+            registered_number = str(data.get("contact_number") or "")
+            if (not is_registry_group and phone_derived and digits
+                    and digits == "".join(c for c in registered_number if c.isdigit())):
+                phone_matches.append({"tipo": "contato", "nome": nome or informado,
+                                      "chat_id": chat_id, "telefone": registered_number})
+            candidates.append({"tipo": "grupo" if is_registry_group else "contato",
+                               "nome": nome or chat_id, "chat_id": chat_id,
+                               "telefone": registered_number})
     except Exception as exc:
         # Sem uma base legível não é seguro criar uma confirmação para um JID cru.
         print(f"[hermes_tools] Falha ao resolver destinatário WhatsApp: {exc}")
+
+    unique_matches = {match["chat_id"]: match for match in phone_matches}
+    if len(unique_matches) == 1:
+        return {"encontrado": True, **next(iter(unique_matches.values()))}
+    if len(unique_matches) > 1:
+        return {"encontrado": False, "ambiguo": True, "informado": informado,
+                "sugestoes": list(unique_matches.values())[:3]}
 
     needle = informado.lower()
     def score(candidate):
@@ -432,7 +450,8 @@ def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
         destino = str(args.get("contact_number") or "").strip()
         resolved = _destinatario_whatsapp_previa(ctx, destino)
         if not resolved["encontrado"]:
-            return {"status": "destinatario_desconhecido", "informado": resolved["informado"],
+            return {"status": "destinatario_ambiguo" if resolved.get("ambiguo") else "destinatario_desconhecido",
+                    "informado": resolved["informado"],
                     "sugestoes": resolved["sugestoes"]}
         return {"status": "confirmation_required",
                 "destinatario": ("GRUPO: " if resolved["tipo"] == "grupo" else "") + resolved["nome"],

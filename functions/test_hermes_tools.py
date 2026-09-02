@@ -160,6 +160,31 @@ class TestExecucao(unittest.TestCase):
             self.assertEqual(proposal["informado"], destino)
             self.assertLessEqual(len(proposal["sugestoes"]), 3)
 
+    def test_previa_whatsapp_aceita_numero_da_conversa_individual_resolvida(self):
+        from tools.tool_context import ToolContext
+
+        db = _PreviewDb({"perfil_pessoas": {}, "whatsapp_chats": {
+            "lid": {"chat_id": "12345@lid", "chat_name": "Contato sem perfil", "is_group": False,
+                    "contact_number": "+55 27 99999-0000"},
+        }})
+        proposal = hermes_tools.preview("schedule_whatsapp_message", ToolContext(_db=db), {
+            "contact_number": "+5527999990000", "message": "oi", "scheduled_time": "2030-01-01T12:00:00+00:00",
+        })
+        self.assertEqual(proposal["status"], "confirmation_required")
+        self.assertEqual(proposal["destinatario_id"], "12345@lid")
+
+    def test_previa_whatsapp_recusa_numero_ambiguo(self):
+        from tools.tool_context import ToolContext
+
+        db = _PreviewDb({"perfil_pessoas": {}, "whatsapp_chats": {
+            "a": {"chat_id": "a@lid", "chat_name": "A", "contact_number": "+55 27 99999-0000"},
+            "b": {"chat_id": "b@lid", "chat_name": "B", "contact_number": "+55 27 99999-0000"},
+        }})
+        proposal = hermes_tools.preview("schedule_whatsapp_message", ToolContext(_db=db), {
+            "contact_number": "+5527999990000", "message": "oi", "scheduled_time": "2030-01-01T12:00:00+00:00",
+        })
+        self.assertEqual(proposal["status"], "destinatario_ambiguo")
+
 
 class TestVoz(unittest.TestCase):
     def test_tools_excluidas_da_voz_nao_aparecem(self):
