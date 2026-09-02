@@ -119,6 +119,20 @@ class InboxPendentesTest(unittest.TestCase):
         result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
         self.assertEqual([x['contato'] for x in result['itens']], ['Equipe'])
 
+    def test_grupos_aplicam_regra_fina_e_motivo(self):
+        db = Db({'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['a', 'b', 'c', 'd', 'e'], 'andre_chat_ids': ['andre@c.us']}}},
+                 'perfil_pessoas': {}, 'email_action_suggestions': {},
+                 'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento', 'whatsapp_vinculos': [{'chat_id': 'a'}, {'chat_id': 'b'}, {'chat_id': 'c'}]}},
+                 'inbox_pendentes': {
+                    'a': {'tipo': 'whatsapp', 'chat_id': 'a', 'is_group': True, 'mentioned_ids': ['andre@c.us'], 'trecho': 'Andre veja', 'desde': '2026-09-01T10:00:00+00:00'},
+                    'b': {'tipo': 'whatsapp', 'chat_id': 'b', 'is_group': True, 'mentioned_ids': [], 'quoted_from_me': False, 'trecho': 'conversa alheia', 'desde': '2026-09-01T10:00:00+00:00'},
+                    'c': {'tipo': 'whatsapp', 'chat_id': 'c', 'is_group': True, 'trecho': 'metadado antigo', 'desde': '2026-09-01T10:00:00+00:00'},
+                    'd': {'tipo': 'whatsapp', 'chat_id': 'd', 'is_group': True, 'quoted_from_me': True, 'trecho': 'respondendo', 'desde': '2026-09-01T10:00:00+00:00'},
+                    'e': {'tipo': 'whatsapp', 'chat_id': 'e', 'is_group': True, 'quoted_msg_id': 'q', 'quoted_author': 'andre@c.us', 'trecho': 'respondendo', 'desde': '2026-09-01T10:00:00+00:00'},
+                 }})
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))['itens']
+        self.assertEqual({x['contato']: x['motivo_inclusao'] for x in result}, {'a': 'mencao', 'c': 'grupo_vinculado', 'd': 'resposta_a_mim', 'e': 'resposta_a_mim'})
+
 
 class _MemorySnap:
     def __init__(self, ref): self.ref, self.exists = ref, ref.data is not None

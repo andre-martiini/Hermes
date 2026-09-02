@@ -452,6 +452,7 @@ async function persistMessage(message, chat, chatId, isGroup) {
     const rawQuotedId = message?._data?.quotedStanzaID || message?._data?.quotedMsgId
         || rawQuoted?.id?._serialized || null;
     let rawQuotedFromMe = rawQuoted?.fromMe ?? rawQuoted?.id?.fromMe;
+    let rawQuotedAuthor = rawQuoted?.author?._serialized || rawQuoted?.from?._serialized || rawQuoted?.from || null;
     // No whatsapp-web.js normal, `_data.quotedStanzaID` traz só o identificador
     // da citação — o objeto da mensagem citada não vem em `quotedMsg`. Para não
     // descartar respostas diretas ao André, busque o remetente apenas quando há
@@ -462,6 +463,7 @@ async function persistMessage(message, chat, chatId, isGroup) {
         try {
             const quoted = await message.getQuotedMessage();
             rawQuotedFromMe = quoted?.fromMe ?? quoted?.id?.fromMe;
+            rawQuotedAuthor = rawQuotedAuthor || quoted?.author?._serialized || quoted?.from?._serialized || quoted?.from || null;
         } catch (quotedErr) {
             console.warn(`[Message] Não foi possível resolver mensagem citada ${rawQuotedId}:`, quotedErr.message || quotedErr);
         }
@@ -488,6 +490,7 @@ async function persistMessage(message, chat, chatId, isGroup) {
         mentions_andre: !!ownWid && mentionedIds.includes(ownWid),
         quoted_msg_id: rawQuotedId ? String(rawQuotedId) : null,
         quoted_from_me: typeof rawQuotedFromMe === 'boolean' ? rawQuotedFromMe : null,
+        quoted_author: rawQuotedAuthor ? String(rawQuotedAuthor) : null,
         links: (message.links || []).map((l) => (typeof l === 'string' ? l : l.link)).filter(Boolean),
         transcription_text: null,
         transcription_model: null,
