@@ -325,12 +325,14 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
             # entrar. Dados antigos, sem esses campos, continuam no fallback
             # conservador e não são reprocessados.
             mentions = {str(x) for x in (data.get("mentioned_ids") or [])}
-            relevant = bool(data.get("mentions_andre") or data.get("quoted_from_me") or (mentions & andre_ids))
+            quoted_author = str(data.get("quoted_author") or "")
+            resposta_a_mim = bool(data.get("quoted_from_me") or quoted_author in andre_ids)
+            relevant = bool(data.get("mentions_andre") or resposta_a_mim or (mentions & andre_ids))
             metadata_present = (data.get("mentioned_ids") is not None or data.get("quoted_msg_id") is not None
                                 or data.get("quoted_from_me") is not None)
             if not relevant and (not task or metadata_present):
                 continue
-            inclusion_reason = "mencao" if (data.get("mentions_andre") or (mentions & andre_ids)) else ("resposta_a_mim" if data.get("quoted_from_me") else "grupo_vinculado")
+            inclusion_reason = "mencao" if (data.get("mentions_andre") or (mentions & andre_ids)) else ("resposta_a_mim" if resposta_a_mim else "grupo_vinculado")
         reason = _noise_reason(trecho=data.get("trecho") or "", sender="", is_email=False,
                                has_contact=chat_id in contacts, has_task=bool(task), domains=domains, endings=endings)
         if reason and not incluir_filtrados:
