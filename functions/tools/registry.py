@@ -47,6 +47,7 @@ _CATALOG: dict[str, str] = {
     "registrar_item_financeiro_v2": "Registra uma nova movimentação (renda ou despesa) no financeiro interno",
     "calculadora": "Calculadora dedicada para calculos matematicos ad-hoc ou projecoes.",
     "schedule_whatsapp_message": "Agenda ou envia uma mensagem de WhatsApp para um contato.",
+    "confirmar_acao": "Executa uma confirmação MCP persistida uma única vez",
     "pausar_conversa": "Enfileira uma resposta de pausa no WhatsApp e agenda a retomada após confirmação explícita",
     "criar_rascunho_email": "Cria um rascunho Gmail com anexos por referência; nunca envia a mensagem",
     "buscar_contato": "Busca contatos por nome, email ou tag em perfil_pessoas para resolver menções a pessoas",

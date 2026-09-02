@@ -360,7 +360,35 @@ def _schedule_whatsapp_message(ctx: ToolContext, args: dict):
         contact_number=args.get("contact_number"),
         message=args.get("message"),
         scheduled_time=args.get("scheduled_time"),
+        idempotency_key=getattr(ctx, "mcp_confirmation_id", None),
     )
+
+
+def _destinatario_whatsapp_previa(ctx: ToolContext, destino: str) -> tuple[str, str]:
+    """Resolve um nome apenas para a prévia; falha aqui não impede o gate."""
+    grupo = destino.endswith("@g.us")
+    try:
+        if grupo:
+            for doc in ctx.db.collection("whatsapp_chats").stream():
+                data = doc.to_dict() or {}
+                chat_id = str(data.get("chat_id") or doc.id).strip()
+                if chat_id == destino:
+                    return "grupo", str(data.get("chat_name") or destino).strip()
+        else:
+            digits = "".join(c for c in destino if c.isdigit())
+            for doc in ctx.db.collection("perfil_pessoas").stream():
+                data = doc.to_dict() or {}
+                phone = str(data.get("telefone") or "")
+                chat_id = str(data.get("whatsapp_chat_id") or "")
+                if destino == chat_id or (digits and digits == "".join(c for c in phone if c.isdigit())):
+                    return "contato", str(data.get("nome") or destino).strip()
+    except Exception as exc:  # a prévia ainda pode mostrar o identificador bruto
+        print(f"[hermes_tools] Falha ao resolver destinatário WhatsApp: {exc}")
+    return ("grupo" if grupo else "contato"), destino
+
+
+def confirmar_acao(ctx: ToolContext, args: dict):
+    return {"erro": "confirmar_acao é executada pelo gate MCP."}
 
 
 def pausar_conversa(ctx: ToolContext, args: dict):
@@ -378,6 +406,15 @@ def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
     if name == "pausar_conversa":
         from tools.pausar_conversa import preview as _preview
         return _preview(ctx, args)
+    if name == "schedule_whatsapp_message":
+        destino = str(args.get("contact_number") or "").strip()
+        tipo, nome = _destinatario_whatsapp_previa(ctx, destino)
+        return {"status": "confirmation_required",
+                "destinatario": ("GRUPO: " if tipo == "grupo" else "") + nome,
+                "destinatario_id": destino,
+                "tipo_destinatario": tipo,
+                "mensagem": str(args.get("message") or ""),
+                "agendado_para": str(args.get("scheduled_time") or "")}
     return None
 
 
@@ -1680,6 +1717,7 @@ _HANDLERS: dict = {
     "consultar_dados_cadastrais": _consultar_dados_cadastrais,
     "buscar_e_analisar_email": _buscar_e_analisar_email,
     "schedule_whatsapp_message": _schedule_whatsapp_message,
+    "confirmar_acao": confirmar_acao,
     "pausar_conversa": pausar_conversa,
     "criar_rascunho_email": criar_rascunho_email,
     "buscar_conversas_whatsapp": _buscar_conversas_whatsapp,
