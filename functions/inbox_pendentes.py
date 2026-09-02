@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from datetime import datetime, timezone
 
 from firebase_admin import firestore
@@ -21,6 +22,10 @@ _ACTIVE_STATUS_ALIASES = {"em andamento", "andamento", "nao iniciado", "não ini
 MAX_ITEMS = 15
 EMAIL_SUGGESTIONS_LIMIT = 60
 BACKFILL_PAGE_SIZE = 100
+_AUTO_SENDER = re.compile(r"^(noreply|no-reply|naoresponda|nao-responda|notificacao|notification|mailer-daemon|newsletter)[@._-]", re.I)
+_MEDIA_PREFIX = ("/9j/", "ivbor", "data:")
+_DEFAULT_DOMAINS = {"eventos.ifnmg.edu.br", "picpay.com", "picpay.com.br"}
+_DEFAULT_ENDINGS = {"ok", "okay", "blz", "beleza", "obrigado", "obrigada", "mto obrigado", "mto obrigada", "muito obrigado", "muito obrigada", "valeu", "ja foi", "entendi", "ah sim entendi", "combinado", "perfeito", "show", "top", "joia", "ate amanha", "ate logo", "bom dia", "boa tarde", "boa noite", "abraco", "abs"}
 
 
 def _as_datetime(value) -> datetime | None:
@@ -218,6 +223,38 @@ def _contacts(db) -> dict[str, str]:
     return result
 
 
+def _noise_config(db) -> tuple[set[str], set[str]]:
+    try:
+        snap = db.collection("config").document("inbox_pendentes").get()
+        data = snap.to_dict() or {} if snap.exists else {}
+    except Exception:
+        data = {}
+    return (_DEFAULT_DOMAINS | {str(x).lower() for x in (data.get("remetentes_ignorados") or [])},
+            _DEFAULT_ENDINGS | {_normalize_text(x) for x in (data.get("encerramentos") or [])})
+
+
+def _normalize_text(value) -> str:
+    import unicodedata
+    return " ".join("".join(c for c in unicodedata.normalize("NFD", str(value or "").lower()) if unicodedata.category(c) != "Mn").split())
+
+
+def _noise_reason(*, trecho: str, sender: str, is_email: bool, has_contact: bool, has_task: bool, domains: set[str], endings: set[str]) -> str | None:
+    raw = str(trecho or "").strip()
+    norm = _normalize_text(raw)
+    if is_email:
+        address = str(sender or "").lower().strip()
+        if _AUTO_SENDER.match(address) or any(address.endswith("@" + d) for d in domains):
+            return "automaticos"
+    if not raw or raw.lower().startswith(_MEDIA_PREFIX) or not re.sub(r"[^\w]", "", norm):
+        return "sem_texto"
+    if not is_email and not has_contact and not has_task and re.search(r"oferta|cart[aã]o|desconto|promo[cç][aã]o|fatura|clique|aproveite", norm):
+        return "automaticos"
+    words = re.findall(r"\w+", norm)
+    if "?" not in raw and len(words) <= 6 and norm.rstrip(".") in endings:
+        return "encerramentos"
+    return None
+
+
 def _applied_email_suggestions(db):
     """Lê somente os vínculos aplicados, nunca a coleção histórica inteira."""
     collection = db.collection("email_action_suggestions")
@@ -259,7 +296,7 @@ def _item(*, contato: str, canal: str, desde, trecho: str, task: dict | None,
     return out
 
 
-def coletar(db, now: datetime | None = None) -> dict:
+def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, limite: int = MAX_ITEMS) -> dict:
     """Lê o índice materializado e devolve no máximo quinze respostas devidas."""
     now = now or datetime.now(timezone.utc)
     allowed = _allowlist(db)
@@ -267,6 +304,8 @@ def coletar(db, now: datetime | None = None) -> dict:
     by_chat, by_email, by_id = _active_tasks(db)
     contacts = _contacts(db)
     items = []
+    filtered = {"automaticos": 0, "encerramentos": 0, "sem_texto": 0}
+    domains, endings = _noise_config(db)
 
     for doc in db.collection(COLLECTION).stream():
         data = doc.to_dict() or {}
@@ -285,6 +324,11 @@ def coletar(db, now: datetime | None = None) -> dict:
             relevant = bool(data.get("mentions_andre") or data.get("quoted_from_me") or (mentions & andre_ids))
             if not relevant:
                 continue
+        reason = _noise_reason(trecho=data.get("trecho") or "", sender="", is_email=False,
+                               has_contact=chat_id in contacts, has_task=bool(task), domains=domains, endings=endings)
+        if reason and not incluir_filtrados:
+            filtered[reason] += 1
+            continue
         item = _item(
             contato=contacts.get(chat_id) or str(data.get("chat_name") or chat_id),
             canal="whatsapp_grupo" if data.get("is_group") else "whatsapp",
@@ -314,6 +358,11 @@ def coletar(db, now: datetime | None = None) -> dict:
     for _, doc, data, task in emails_by_thread.values():
         if data.get("ultima_mensagem_de_andre"):
             continue
+        reason = _noise_reason(trecho=data.get("snippet") or data.get("resumo") or "", sender=data.get("sender") or "",
+                               is_email=True, has_contact=False, has_task=bool(task), domains=domains, endings=endings)
+        if reason and not incluir_filtrados:
+            filtered[reason] += 1
+            continue
         item = _item(
             contato=str(data.get("sender") or data.get("origem_sinal") or "E-mail"),
             canal="gmail", desde=data.get("internal_date") or data.get("analyzed_at"),
@@ -324,8 +373,9 @@ def coletar(db, now: datetime | None = None) -> dict:
             items.append(item)
 
     items.sort(key=lambda item: (not item.pop("_critica"), -item["horas_aguardando"], item["desde"]))
-    omitted = max(0, len(items) - MAX_ITEMS)
-    result = {"itens": items[:MAX_ITEMS]}
+    limite = max(1, min(int(limite or MAX_ITEMS), 100))
+    omitted = max(0, len(items) - limite)
+    result = {"itens": items[:limite], "filtrados": filtered}
     if omitted:
         result["total_omitido"] = omitted
     return result

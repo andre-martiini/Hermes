@@ -1562,6 +1562,13 @@ def obter_estado_atual(ctx: ToolContext, args: dict):
         return {"erro": f"Falha ao montar o estado atual: {exc}"}
 
 
+def listar_respostas_pendentes(ctx: ToolContext, args: dict):
+    """Audita a fila materializada, opcionalmente incluindo ruído filtrado."""
+    from inbox_pendentes import coletar
+    return coletar(ctx.db, incluir_filtrados=bool(args.get("incluir_filtrados")),
+                   limite=int(args.get("limite") or 50))
+
+
 def obter_acao(ctx: ToolContext, args: dict):
     """Uma acao inteira, sem corte. O oposto de `consultar_historico_acoes`.
 
@@ -1710,6 +1717,7 @@ _HANDLERS: dict = {
     "editar_acoes_em_lote": editar_acoes_em_lote,
     "reagendar_acoes_em_lote": reagendar_acoes_em_lote,
     "obter_estado_atual": obter_estado_atual,
+    "listar_respostas_pendentes": listar_respostas_pendentes,
     "obter_acao": obter_acao,
     "listar_conversas_whatsapp": _whatsapp("listar_conversas"),
     "ler_mensagens_whatsapp": _whatsapp("ler_mensagens"),
