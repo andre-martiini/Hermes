@@ -27,13 +27,15 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
+from datetime import datetime, timedelta, timezone
 
 from firebase_functions import https_fn, options
 from firebase_admin import auth as firebase_auth
 from firebase_admin import firestore
 
 from tools import registry
-from tools.hermes_tools import ToolNotAvailable, execute as execute_tool
+from tools.hermes_tools import ToolNotAvailable, execute as execute_tool, preview as preview_tool
 from tools.tool_context import ToolContext
 from copilot_context import build_mcp_voice_context
 
@@ -59,8 +61,12 @@ _access_cache: dict[str, object] | None = None
 # nao da para desfazer de dentro do Hermes.
 #
 # Configuravel sem deploy: `system/mcp_access.confirm_tools` (lista de nomes)
-# sobrepoe este padrao — inclusive para voltar a exigir confirmacao em tudo.
-_CONFIRMACAO_PADRAO: set[str] = {"schedule_whatsapp_message"}
+# acrescenta tools ao gate. Estes dois efeitos externos, contudo, nunca podem
+# ser removidos por configuracao: uma lista vazia em producao nao pode tornar o
+# envio de mensagem (inclusive a pausa) executavel sem o "sim" do usuario.
+_CONFIRMACAO_OBRIGATORIA: set[str] = {"schedule_whatsapp_message", "pausar_conversa"}
+_CONFIRMACAO_PADRAO: set[str] = set(_CONFIRMACAO_OBRIGATORIA)
+_CONFIRMACAO_TTL = timedelta(minutes=15)
 
 # Tools que passam de um minuto e por isso nao podem rodar dentro do request.
 #
@@ -300,7 +306,9 @@ def _access_config() -> dict:
 
     config = {
         "uids": uids,
-        "confirm_tools": _CONFIRMACAO_PADRAO if confirmar is None else confirmar,
+        "confirm_tools": _CONFIRMACAO_OBRIGATORIA | (
+            _CONFIRMACAO_PADRAO if confirmar is None else confirmar
+        ),
         # Uma falha de leitura resulta em allowlist vazia (fail closed). Cachear
         # isso por 5 min transformaria um soluco do Firestore em cinco minutos de
         # acesso negado — entao so memoiza leitura bem-sucedida.
@@ -317,7 +325,47 @@ def _is_uid_allowed(uid: str) -> bool:
 
 def _exige_confirmacao(nome: str) -> bool:
     """Gating do canal MCP — ver `_CONFIRMACAO_PADRAO`."""
-    return nome in _access_config()["confirm_tools"]
+    # Conferir tambem aqui torna a garantia independente de caches antigos e de
+    # quem construir uma configuracao de teste/manual fora de `_access_config`.
+    return nome in _CONFIRMACAO_OBRIGATORIA or nome in _access_config()["confirm_tools"]
+
+
+def _criar_confirmacao(ctx: ToolContext, nome: str, argumentos: dict, previa: dict | None) -> str:
+    """Guarda a proposta concreta que o usuario esta prestes a aprovar.
+
+    O segundo request MCP e independente do primeiro. Persistir a previa evita
+    que atalhos relativos (por exemplo, ``amanha_manha``) ou a resolucao de um
+    contato sejam calculados novamente depois do "sim".
+    """
+    confirmation_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    ctx.db.collection("mcp_confirmations").document(confirmation_id).set({
+        "uid": ctx.user_uid,
+        "tool": nome,
+        "arguments": argumentos,
+        "preview": previa,
+        "created_at": now,
+        "expires_at": now + _CONFIRMACAO_TTL,
+    })
+    return confirmation_id
+
+
+def _ler_confirmacao(ctx: ToolContext, nome: str, argumentos: dict, confirmation_id: object) -> dict:
+    """Valida e devolve uma proposta previamente apresentada ao mesmo usuario."""
+    if not isinstance(confirmation_id, str) or not confirmation_id.strip():
+        raise ValueError("Repita a chamada com o confirmation_id devolvido pela prévia.")
+    snap = ctx.db.collection("mcp_confirmations").document(confirmation_id).get()
+    if not snap.exists:
+        raise ValueError("Confirmação não encontrada ou já expirada; peça uma nova prévia.")
+    data = snap.to_dict() or {}
+    if data.get("uid") != ctx.user_uid or data.get("tool") != nome:
+        raise ValueError("Confirmação não pertence a esta chamada.")
+    if data.get("arguments") != argumentos:
+        raise ValueError("Os argumentos mudaram; peça uma nova prévia antes de confirmar.")
+    expires_at = data.get("expires_at")
+    if not isinstance(expires_at, datetime) or expires_at <= datetime.now(timezone.utc):
+        raise ValueError("Confirmação expirada; peça uma nova prévia.")
+    return data
 
 
 def _check_rate_limit(uid: str) -> None:
@@ -427,14 +475,53 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
         raise McpError(-32003, f"Tool '{name}' nao esta disponivel via MCP")
 
     confirmed = arguments.pop("_confirmed", None)
-    if _exige_confirmacao(name) and confirmed is not True:
+    confirmation_id = arguments.pop("_confirmation_id", None)
+    if _exige_confirmacao(name) and confirmed is True:
+        if confirmation_id:
+            try:
+                approved = _ler_confirmacao(ctx, name, arguments, confirmation_id)
+            except Exception as exc:
+                return _text_result({"erro": str(exc)}, is_error=True)
+            # O executor recebe os argumentos exatamente apresentados na primeira
+            # chamada, e a tool que tiver hook pode reutilizar a prévia congelada.
+            arguments = dict(approved["arguments"])
+            ctx.mcp_confirmation_id = str(confirmation_id)
+            ctx.mcp_confirmation_created_at = approved.get("created_at")
+            ctx.mcp_confirmation_preview = approved.get("preview")
+        else:
+            # Compatibilidade para tools antigas sem hook de prévia: `_confirmed`
+            # continua bastando. Uma tool com hook nunca executa por este caminho,
+            # pois precisa da prévia concreta apresentada ao usuario.
+            try:
+                if preview_tool(name, ctx, arguments) is not None:
+                    return _text_result({
+                        "erro": "Esta confirmação precisa do confirmation_id devolvido pela prévia.",
+                    }, is_error=True)
+            except Exception as exc:
+                return _text_result({"erro": str(exc)}, is_error=True)
+    elif _exige_confirmacao(name):
+        try:
+            proposal = preview_tool(name, ctx, arguments)
+            confirmation_id = _criar_confirmacao(ctx, name, arguments, proposal)
+        except Exception as exc:  # prévia inválida deve apontar o dado, sem mutar
+            return _text_result({"erro": str(exc)}, is_error=True)
+        if proposal is not None:
+            return _text_result({
+                "status": proposal.get("status", "confirmation_required"),
+                "tool": name,
+                "confirmation_required": True,
+                "preview": proposal,
+                "confirmation_id": confirmation_id,
+                "message": "Confira a prévia e, após o sim explícito, repita a chamada com arguments._confirmed=true e arguments._confirmation_id.",
+            }, is_error=False)
         return _text_result({
             "status": "confirmation_required",
             "tool": name,
+            "confirmation_id": confirmation_id,
             "message": (
                 "Esta acao grava no Hermes e exige confirmacao explicita do usuario. "
                 "Mostre a ele exatamente o que sera feito e, apos o 'sim', repita a "
-                "chamada com arguments._confirmed=true."
+                "chamada com arguments._confirmed=true e arguments._confirmation_id."
             ),
         }, is_error=False)
 
