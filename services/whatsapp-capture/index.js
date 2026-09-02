@@ -443,6 +443,29 @@ async function persistMessage(message, chat, chatId, isGroup) {
     }
 
     const chatTitle = chat?.name || (isGroup ? 'Grupo' : authorName);
+    // Metadados de contexto de grupo para a caixa de respostas pendentes.
+    const mentionedIds = Array.isArray(message.mentionedIds)
+        ? message.mentionedIds.map((id) => String(id?._serialized || id)).filter(Boolean)
+        : [];
+    const ownWid = String(client?.info?.wid?._serialized || '');
+    const rawQuoted = message?._data?.quotedMsg || message?._data?.quotedMessage || {};
+    const rawQuotedId = message?._data?.quotedStanzaID || message?._data?.quotedMsgId
+        || rawQuoted?.id?._serialized || null;
+    let rawQuotedFromMe = rawQuoted?.fromMe ?? rawQuoted?.id?.fromMe;
+    // No whatsapp-web.js normal, `_data.quotedStanzaID` traz só o identificador
+    // da citação — o objeto da mensagem citada não vem em `quotedMsg`. Para não
+    // descartar respostas diretas ao André, busque o remetente apenas quando há
+    // citação e o payload ainda não o informou. Isto roda na captura da mensagem
+    // nova, nunca como reprocessamento do histórico.
+    if (rawQuotedId && typeof rawQuotedFromMe !== 'boolean'
+        && typeof message.getQuotedMessage === 'function') {
+        try {
+            const quoted = await message.getQuotedMessage();
+            rawQuotedFromMe = quoted?.fromMe ?? quoted?.id?.fromMe;
+        } catch (quotedErr) {
+            console.warn(`[Message] Não foi possível resolver mensagem citada ${rawQuotedId}:`, quotedErr.message || quotedErr);
+        }
+    }
 
     const msgData = {
         // ID idempotente: chat + ID nativo da mensagem — antes misturava o
@@ -461,6 +484,10 @@ async function persistMessage(message, chat, chatId, isGroup) {
         timestamp: admin.firestore.Timestamp.fromDate(new Date(message.timestamp * 1000)),
         message_type: message.type,
         content: message.body || '',
+        mentioned_ids: mentionedIds,
+        mentions_andre: !!ownWid && mentionedIds.includes(ownWid),
+        quoted_msg_id: rawQuotedId ? String(rawQuotedId) : null,
+        quoted_from_me: typeof rawQuotedFromMe === 'boolean' ? rawQuotedFromMe : null,
         links: (message.links || []).map((l) => (typeof l === 'string' ? l : l.link)).filter(Boolean),
         transcription_text: null,
         transcription_model: null,

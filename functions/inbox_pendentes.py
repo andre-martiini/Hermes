@@ -66,6 +66,10 @@ def _whatsapp_payload(message: dict, when: datetime) -> dict:
         "ultima_de_andre": bool(message.get("from_me")),
         "desde": when,
         "trecho": str(message.get("content") or "")[:120],
+        "mentioned_ids": [str(x) for x in (message.get("mentioned_ids") or []) if str(x)],
+        "mentions_andre": bool(message.get("mentions_andre")),
+        "quoted_msg_id": message.get("quoted_msg_id") or None,
+        "quoted_from_me": message.get("quoted_from_me"),
         "updated_at": datetime.now(timezone.utc),
     }
 
@@ -162,6 +166,13 @@ def _allowlist(db) -> set[str]:
     return {str(x).strip() for x in (ingest.get("chats_allowlist") or []) if str(x).strip()}
 
 
+def _andre_ids(db) -> set[str]:
+    settings = db.collection("system").document("settings").get()
+    data = settings.to_dict() if settings.exists else {}
+    ingest = (data or {}).get("whatsapp_ingest") or {}
+    return {str(x).strip() for x in (ingest.get("andre_chat_ids") or []) if str(x).strip()}
+
+
 def _active_tasks(db) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict]]:
     """Retorna ações ativas por chat, por e-mail e por id.
 
@@ -252,6 +263,7 @@ def coletar(db, now: datetime | None = None) -> dict:
     """Lê o índice materializado e devolve no máximo quinze respostas devidas."""
     now = now or datetime.now(timezone.utc)
     allowed = _allowlist(db)
+    andre_ids = _andre_ids(db)
     by_chat, by_email, by_id = _active_tasks(db)
     contacts = _contacts(db)
     items = []
@@ -264,9 +276,15 @@ def coletar(db, now: datetime | None = None) -> dict:
         if "*" not in allowed and chat_id not in allowed:
             continue
         task = by_chat.get(chat_id)
-        # D1: regra conservadora aprovada. Grupos sem ação ativa não entram.
         if data.get("is_group") and not task:
-            continue
+            # D1b: quando o capturador trouxe metadados da mensagem, uma menção
+            # explícita ao André ou resposta a mensagem dele basta para o grupo
+            # entrar. Dados antigos, sem esses campos, continuam no fallback
+            # conservador e não são reprocessados.
+            mentions = {str(x) for x in (data.get("mentioned_ids") or [])}
+            relevant = bool(data.get("mentions_andre") or data.get("quoted_from_me") or (mentions & andre_ids))
+            if not relevant:
+                continue
         item = _item(
             contato=contacts.get(chat_id) or str(data.get("chat_name") or chat_id),
             canal="whatsapp_grupo" if data.get("is_group") else "whatsapp",
