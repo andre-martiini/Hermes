@@ -20,6 +20,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /automations/{document=**} {
+      allow read, write: if false;
+    }
+
     match /public_configs/{document=**} {
       allow read, write: if internalUser();
     }
