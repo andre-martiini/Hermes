@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from email.utils import parseaddr
 from datetime import datetime, timezone
 
 from firebase_admin import firestore
@@ -23,7 +24,8 @@ MAX_ITEMS = 15
 EMAIL_SUGGESTIONS_LIMIT = 60
 BACKFILL_PAGE_SIZE = 100
 _AUTO_SENDER = re.compile(r"^(noreply|no-reply|naoresponda|nao-responda|notificacao|notification|mailer-daemon|newsletter)[@._-]", re.I)
-_MEDIA_PREFIX = ("/9j/", "ivbor", "data:")
+_MEDIA_PREFIX = ("/9j/", "ivbor")
+_DATA_URI = re.compile(r"^data:[^;,\s]+(?:;[^,\s]+)*;base64,", re.I)
 _DEFAULT_DOMAINS = {"eventos.ifnmg.edu.br", "picpay.com", "picpay.com.br"}
 _DEFAULT_ENDINGS = {"ok", "okay", "blz", "beleza", "obrigado", "obrigada", "mto obrigado", "mto obrigada", "muito obrigado", "muito obrigada", "valeu", "ja foi", "entendi", "ah sim entendi", "combinado", "perfeito", "show", "top", "joia", "ate amanha", "ate logo", "bom dia", "boa tarde", "boa noite", "abraco", "abs"}
 
@@ -242,10 +244,10 @@ def _noise_reason(*, trecho: str, sender: str, is_email: bool, has_contact: bool
     raw = str(trecho or "").strip()
     norm = _normalize_text(raw)
     if is_email:
-        address = str(sender or "").lower().strip()
+        address = (parseaddr(str(sender or ""))[1] or str(sender or "")).lower().strip()
         if _AUTO_SENDER.match(address) or any(address.endswith("@" + d) for d in domains):
             return "automaticos"
-    if not raw or raw.lower().startswith(_MEDIA_PREFIX) or not re.sub(r"[^\w]", "", norm):
+    if not raw or raw.lower().startswith(_MEDIA_PREFIX) or _DATA_URI.match(raw) or not re.sub(r"[^\w]", "", norm):
         return "sem_texto"
     if not is_email and not has_contact and not has_task and re.search(r"oferta|cart[aã]o|desconto|promo[cç][aã]o|fatura|clique|aproveite", norm):
         return "automaticos"

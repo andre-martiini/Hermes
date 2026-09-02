@@ -47,6 +47,15 @@ class InboxPendentesTest(unittest.TestCase):
         db = Db({'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['a']}}}, 'perfil_pessoas': {}, 'tarefas': {}, 'email_action_suggestions': {},
                  'inbox_pendentes': {'a': {'tipo': 'whatsapp', 'chat_id': 'a', 'trecho': 'Ok', 'desde': '2026-09-01T08:00:00+00:00'}}})
         self.assertEqual(len(coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc), incluir_filtrados=True)['itens']), 1)
+
+    def test_data_textual_e_remetente_com_nome(self):
+        db = Db({'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}}, 'perfil_pessoas': {},
+                 'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento'}},
+                 'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w', 'trecho': 'Data: 5 de setembro, confirma?', 'desde': '2026-09-01T08:00:00+00:00'}},
+                 'email_action_suggestions': {'e': {'canal': 'email', 'status': 'applied', 'task_id': 't', 'sender': 'Newsletter <newsletter@example.com>', 'snippet': 'oferta', 'internal_date': '2026-09-01T08:00:00+00:00'}}})
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual([x['trecho'] for x in result['itens']], ['Data: 5 de setembro, confirma?'])
+        self.assertEqual(result['filtrados']['automaticos'], 1)
     def test_lista_tres_recebidas_ordem_e_exclui_enviada_pausada(self):
         db = Db({
             'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['a', 'b', 'c', 'd', 'e']}}},
