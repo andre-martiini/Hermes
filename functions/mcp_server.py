@@ -68,7 +68,7 @@ _CONFIRMACAO_OBRIGATORIA: set[str] = {
     "schedule_whatsapp_message", "pausar_conversa", "criar_rascunho_email",
 }
 _CONFIRMACAO_PADRAO: set[str] = set(_CONFIRMACAO_OBRIGATORIA)
-_CONFIRMACAO_TTL = timedelta(minutes=15)
+_CONFIRMACAO_TTL = timedelta(minutes=10)
 
 # Tools que passam de um minuto e por isso nao podem rodar dentro do request.
 #
@@ -341,13 +341,15 @@ def _criar_confirmacao(ctx: ToolContext, nome: str, argumentos: dict, previa: di
     """
     confirmation_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
+    expires_at = now + _CONFIRMACAO_TTL
     ctx.db.collection("mcp_confirmations").document(confirmation_id).set({
         "uid": ctx.user_uid,
         "tool": nome,
         "arguments": argumentos,
         "preview": previa,
         "created_at": now,
-        "expires_at": now + _CONFIRMACAO_TTL,
+        "expires_at": expires_at,
+        "expira_em": expires_at,
     })
     return confirmation_id
 
@@ -362,12 +364,37 @@ def _ler_confirmacao(ctx: ToolContext, nome: str, argumentos: dict, confirmation
     data = snap.to_dict() or {}
     if data.get("uid") != ctx.user_uid or data.get("tool") != nome:
         raise ValueError("Confirmação não pertence a esta chamada.")
-    if data.get("arguments") != argumentos:
-        raise ValueError("Os argumentos mudaram; peça uma nova prévia antes de confirmar.")
     expires_at = data.get("expires_at")
     if not isinstance(expires_at, datetime) or expires_at <= datetime.now(timezone.utc):
         raise ValueError("Confirmação expirada; peça uma nova prévia.")
     return data
+
+
+def _executar_confirmacao(ctx: ToolContext, confirmation_id: object) -> dict:
+    """Executa uma única vez a proposta congelada, sem confiar no cliente."""
+    if not isinstance(confirmation_id, str) or not confirmation_id.strip():
+        return {"erro": "confirmation_id obrigatório"}
+    ref = ctx.db.collection("mcp_confirmations").document(confirmation_id)
+    snap = ref.get()
+    if not snap.exists:
+        return {"erro": "Confirmação não encontrada ou expirada."}
+    data = snap.to_dict() or {}
+    if data.get("uid") != ctx.user_uid:
+        return {"erro": "Confirmação não pertence a este usuário."}
+    if data.get("executed_at"):
+        return {"status": "ja_executada", "resultado_anterior": data.get("result")}
+    expires_at = data.get("expires_at")
+    if not isinstance(expires_at, datetime) or expires_at <= datetime.now(timezone.utc):
+        return {"erro": "Confirmação expirada; peça uma nova prévia."}
+    nome, argumentos = data.get("tool"), dict(data.get("arguments") or {})
+    if not isinstance(nome, str) or not registry.is_mcp_enabled(nome):
+        return {"erro": "Tool da confirmação não está disponível."}
+    ctx.mcp_confirmation_id = confirmation_id
+    ctx.mcp_confirmation_created_at = data.get("created_at")
+    ctx.mcp_confirmation_preview = data.get("preview")
+    result = execute_tool(nome, argumentos, ctx)
+    ref.set({"executed_at": datetime.now(timezone.utc), "result": result}, merge=True)
+    return result if isinstance(result, dict) else {"resultado": result}
 
 
 def _check_rate_limit(uid: str) -> None:
@@ -450,10 +477,16 @@ def _handle_tools_list() -> dict:
             # derrubar o `tools/list` inteiro e deixar o cliente sem nenhuma tool.
             print(f"[mcp_server] Schema ausente para '{name}', tool omitida: {exc}")
             continue
+        input_schema = dict(schema.get("parameters", {"type": "object", "properties": {}}))
+        if _exige_confirmacao(name):
+            props = dict(input_schema.get("properties") or {})
+            props.setdefault("_confirmed", {"type": "boolean", "description": "Confirma a prévia persistida."})
+            props.setdefault("_confirmation_id", {"type": "string", "description": "ID devolvido pela prévia."})
+            input_schema["properties"] = props
         tools.append({
             "name": name,
             "description": schema.get("description", ""),
-            "inputSchema": schema.get("parameters", {"type": "object", "properties": {}}),
+            "inputSchema": input_schema,
             "_meta": {
                 # `needsConfirmation` e o que ESTE canal exige (a dupla chamada
                 # com `_confirmed`); `mutates` diz se a tool grava, independente
@@ -472,6 +505,10 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
     arguments = dict(params.get("arguments") or {})
     if not isinstance(name, str) or not name:
         raise McpError(-32602, "params.name obrigatorio em tools/call")
+
+    if name == "confirmar_acao":
+        result = _executar_confirmacao(ctx, arguments.get("confirmation_id"))
+        return _text_result(result, is_error=bool(result.get("erro")))
 
     if not registry.is_mcp_enabled(name):
         raise McpError(-32003, f"Tool '{name}' nao esta disponivel via MCP")
@@ -514,16 +551,18 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
                 "confirmation_required": True,
                 "preview": proposal,
                 "confirmation_id": confirmation_id,
-                "message": "Confira a prévia e, após o sim explícito, repita a chamada com arguments._confirmed=true e arguments._confirmation_id.",
+                "expira_em": (datetime.now(timezone.utc) + _CONFIRMACAO_TTL).isoformat(),
+                "message": "Confira a prévia e, após o sim explícito, chame confirmar_acao(confirmation_id) para executar.",
             }, is_error=False)
         return _text_result({
             "status": "confirmation_required",
             "tool": name,
             "confirmation_id": confirmation_id,
+            "expira_em": (datetime.now(timezone.utc) + _CONFIRMACAO_TTL).isoformat(),
             "message": (
                 "Esta acao grava no Hermes e exige confirmacao explicita do usuario. "
-                "Mostre a ele exatamente o que sera feito e, apos o 'sim', repita a "
-                "chamada com arguments._confirmed=true e arguments._confirmation_id."
+                "Mostre a ele exatamente o que sera feito e, apos o 'sim', chame "
+                "confirmar_acao(confirmation_id) para executar."
             ),
         }, is_error=False)
 

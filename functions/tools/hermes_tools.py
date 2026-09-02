@@ -360,7 +360,12 @@ def _schedule_whatsapp_message(ctx: ToolContext, args: dict):
         contact_number=args.get("contact_number"),
         message=args.get("message"),
         scheduled_time=args.get("scheduled_time"),
+        idempotency_key=getattr(ctx, "mcp_confirmation_id", None),
     )
+
+
+def confirmar_acao(ctx: ToolContext, args: dict):
+    return {"erro": "confirmar_acao é executada pelo gate MCP."}
 
 
 def pausar_conversa(ctx: ToolContext, args: dict):
@@ -378,6 +383,14 @@ def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
     if name == "pausar_conversa":
         from tools.pausar_conversa import preview as _preview
         return _preview(ctx, args)
+    if name == "schedule_whatsapp_message":
+        destino = str(args.get("contact_number") or "").strip()
+        grupo = destino.endswith("@g.us")
+        return {"status": "confirmation_required",
+                "destinatario": ("GRUPO: " if grupo else "") + destino,
+                "tipo_destinatario": "grupo" if grupo else "contato",
+                "mensagem": str(args.get("message") or ""),
+                "agendado_para": str(args.get("scheduled_time") or "")}
     return None
 
 
@@ -1680,6 +1693,7 @@ _HANDLERS: dict = {
     "consultar_dados_cadastrais": _consultar_dados_cadastrais,
     "buscar_e_analisar_email": _buscar_e_analisar_email,
     "schedule_whatsapp_message": _schedule_whatsapp_message,
+    "confirmar_acao": confirmar_acao,
     "pausar_conversa": pausar_conversa,
     "criar_rascunho_email": criar_rascunho_email,
     "buscar_conversas_whatsapp": _buscar_conversas_whatsapp,
