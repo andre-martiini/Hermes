@@ -424,6 +424,17 @@ def _destinatario_whatsapp_previa(ctx: ToolContext, destino: str) -> dict:
     unique_matches = {match["chat_id"]: match for match in resolved_phone_matches}
     if len(unique_matches) == 1:
         return {"encontrado": True, **next(iter(unique_matches.values()))}
+    # A migração do WhatsApp de @c.us para @lid mantém, por algum tempo, os
+    # dois registros para o mesmo telefone. Um par exato desses aliases é um
+    # contato só; a mensagem continuará usando o número originalmente informado
+    # e o worker o resolverá com client.getNumberId. Não se aplica a dois @lid
+    # distintos (ambiguidade real), nem a outras combinações de JID.
+    c_us_aliases = [match for match in unique_matches.values()
+                    if match["chat_id"].endswith("@c.us")]
+    lid_aliases = [match for match in unique_matches.values()
+                   if match["chat_id"].endswith("@lid")]
+    if len(unique_matches) == 2 and len(c_us_aliases) == 1 and len(lid_aliases) == 1:
+        return {"encontrado": True, **lid_aliases[0]}
     if len(unique_matches) > 1:
         return {"encontrado": False, "ambiguo": True, "informado": informado,
                 "sugestoes": list(unique_matches.values())[:3]}

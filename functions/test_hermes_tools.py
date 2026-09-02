@@ -204,6 +204,22 @@ class TestExecucao(unittest.TestCase):
         })
         self.assertEqual(proposal["status"], "destinatario_ambiguo")
 
+    def test_previa_whatsapp_reconcilia_aliases_c_us_e_lid_do_mesmo_numero(self):
+        from tools.tool_context import ToolContext
+
+        db = _PreviewDb({"perfil_pessoas": {}, "whatsapp_chats": {
+            "antigo": {"chat_id": "5527999990000@c.us", "chat_name": "Contato antigo",
+                        "contact_number": "+55 27 99999-0000"},
+            "atual": {"chat_id": "12345@lid", "chat_name": "Contato atual",
+                       "contact_number": "+55 27 99999-0000"},
+        }})
+        proposal = hermes_tools.preview("schedule_whatsapp_message", ToolContext(_db=db), {
+            "contact_number": "+5527999990000", "message": "oi",
+            "scheduled_time": "2030-01-01T12:00:00+00:00",
+        })
+        self.assertEqual(proposal["status"], "confirmation_required")
+        self.assertEqual(proposal["destinatario_id"], "12345@lid")
+
     def test_previa_whatsapp_recusa_leitura_parcial_do_registro(self):
         from tools.tool_context import ToolContext
 
