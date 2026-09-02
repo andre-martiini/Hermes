@@ -28,6 +28,34 @@ class Db:
 
 
 class InboxPendentesTest(unittest.TestCase):
+    def test_filtro_de_ruido_conta_e_preserva_pergunta_e_legenda(self):
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['a', 'b', 'c', 'd']}}},
+            'perfil_pessoas': {}, 'tarefas': {}, 'email_action_suggestions': {},
+            'inbox_pendentes': {
+                'a': {'tipo': 'whatsapp', 'chat_id': 'a', 'trecho': 'Ok', 'desde': '2026-09-01T08:00:00+00:00'},
+                'b': {'tipo': 'whatsapp', 'chat_id': 'b', 'trecho': '/9j/4AAQ', 'desde': '2026-09-01T08:00:00+00:00'},
+                'c': {'tipo': 'whatsapp', 'chat_id': 'c', 'trecho': 'Você pode confirmar? Obrigada', 'desde': '2026-09-01T08:00:00+00:00'},
+                'd': {'tipo': 'whatsapp', 'chat_id': 'd', 'trecho': 'segue a planilha', 'desde': '2026-09-01T08:00:00+00:00'},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(result['filtrados'], {'automaticos': 0, 'encerramentos': 1, 'sem_texto': 1})
+        self.assertEqual({x['trecho'] for x in result['itens']}, {'Você pode confirmar? Obrigada', 'segue a planilha'})
+
+    def test_auditoria_inclui_itens_filtrados(self):
+        db = Db({'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['a']}}}, 'perfil_pessoas': {}, 'tarefas': {}, 'email_action_suggestions': {},
+                 'inbox_pendentes': {'a': {'tipo': 'whatsapp', 'chat_id': 'a', 'trecho': 'Ok', 'desde': '2026-09-01T08:00:00+00:00'}}})
+        self.assertEqual(len(coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc), incluir_filtrados=True)['itens']), 1)
+
+    def test_data_textual_e_remetente_com_nome(self):
+        db = Db({'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}}, 'perfil_pessoas': {},
+                 'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento'}},
+                 'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w', 'trecho': 'Data: 5 de setembro, confirma?', 'desde': '2026-09-01T08:00:00+00:00'}},
+                 'email_action_suggestions': {'e': {'canal': 'email', 'status': 'applied', 'task_id': 't', 'sender': 'Newsletter <newsletter@example.com>', 'snippet': 'oferta', 'internal_date': '2026-09-01T08:00:00+00:00'}}})
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual([x['trecho'] for x in result['itens']], ['Data: 5 de setembro, confirma?'])
+        self.assertEqual(result['filtrados']['automaticos'], 1)
     def test_lista_tres_recebidas_ordem_e_exclui_enviada_pausada(self):
         db = Db({
             'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['a', 'b', 'c', 'd', 'e']}}},
@@ -51,7 +79,7 @@ class InboxPendentesTest(unittest.TestCase):
             'perfil_pessoas': {}, 'email_action_suggestions': {},
             'tarefas': {},
             'inbox_pendentes': {'g': {'tipo': 'whatsapp', 'chat_id': 'g', 'is_group': True,
-                'desde': '2026-09-01T10:00:00+00:00'}},
+                'trecho': 'precisamos decidir', 'desde': '2026-09-01T10:00:00+00:00'}},
         })
         self.assertEqual(coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))['itens'], [])
 
@@ -61,7 +89,7 @@ class InboxPendentesTest(unittest.TestCase):
             'perfil_pessoas': {}, 'email_action_suggestions': {},
             'tarefas': {'t': {'titulo': 'Ação', 'status': 'stand by', 'whatsapp_vinculos': [{'chat_id': 'g'}]}},
             'inbox_pendentes': {'g': {'tipo': 'whatsapp', 'chat_id': 'g', 'is_group': True,
-                'desde': '2026-09-01T10:00:00+00:00'}},
+                'trecho': 'precisamos decidir', 'desde': '2026-09-01T10:00:00+00:00'}},
         })
         self.assertEqual([x['contato'] for x in coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))['itens']], ['g'])
 
@@ -86,7 +114,7 @@ class InboxPendentesTest(unittest.TestCase):
             'perfil_pessoas': {}, 'email_action_suggestions': {}, 'tarefas': {},
             'inbox_pendentes': {'g': {'tipo': 'whatsapp', 'chat_id': 'g', 'chat_name': 'Equipe',
                 'is_group': True, 'quoted_msg_id': 'old', 'quoted_from_me': True,
-                'desde': '2026-09-01T10:00:00+00:00'}},
+                'trecho': 'precisamos decidir', 'desde': '2026-09-01T10:00:00+00:00'}},
         })
         result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
         self.assertEqual([x['contato'] for x in result['itens']], ['Equipe'])
