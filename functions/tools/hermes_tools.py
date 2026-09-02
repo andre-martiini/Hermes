@@ -26,6 +26,7 @@ mudanca de comportamento observavel.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -360,7 +361,86 @@ def _schedule_whatsapp_message(ctx: ToolContext, args: dict):
         contact_number=args.get("contact_number"),
         message=args.get("message"),
         scheduled_time=args.get("scheduled_time"),
+        idempotency_key=getattr(ctx, "mcp_confirmation_id", None),
     )
+
+
+def _destinatario_whatsapp_previa(ctx: ToolContext, destino: str) -> dict:
+    """Resolve o destinatário antes da confirmação, sem aceitar JID livre."""
+    informado = str(destino or "").strip()
+    is_group = informado.endswith("@g.us")
+    digits = "".join(c for c in informado if c.isdigit())
+    # Um JID opaco (@lid, @broadcast...) não é um número de telefone. Casá-lo
+    # pelos dígitos poderia mostrar um contato conhecido e executar para outro
+    # destino; só telefone nu ou JID @c.us pode usar esse fallback.
+    phone_derived = "@" not in informado or informado.endswith("@c.us")
+    candidates = []
+    try:
+        for doc in ctx.db.collection("perfil_pessoas").stream():
+            data = doc.to_dict() or {}
+            nome = str(data.get("nome") or "").strip()
+            phone = str(data.get("telefone") or "").strip()
+            chat_id = str(data.get("whatsapp_chat_id") or "").strip()
+            if informado == chat_id or (phone_derived and not is_group and digits and digits == "".join(c for c in phone if c.isdigit())):
+                return {"encontrado": True, "tipo": "contato", "nome": nome or informado,
+                        "chat_id": chat_id or informado}
+            if nome or phone or chat_id:
+                candidates.append({"tipo": "contato", "nome": nome or phone or chat_id,
+                                   "chat_id": chat_id, "telefone": phone})
+        for doc in ctx.db.collection("whatsapp_chats").stream():
+            data = doc.to_dict() or {}
+            chat_id = str(data.get("chat_id") or doc.id).strip()
+            nome = str(data.get("chat_name") or "").strip()
+            if chat_id == informado:
+                return {"encontrado": True, "tipo": "grupo" if chat_id.endswith("@g.us") else "contato",
+                        "nome": nome or informado, "chat_id": chat_id}
+            if chat_id.endswith("@g.us"):
+                candidates.append({"tipo": "grupo", "nome": nome or chat_id, "chat_id": chat_id})
+    except Exception as exc:
+        # Sem uma base legível não é seguro criar uma confirmação para um JID cru.
+        print(f"[hermes_tools] Falha ao resolver destinatário WhatsApp: {exc}")
+
+    needle = informado.lower()
+    def score(candidate):
+        values = [str(candidate.get(key) or "").lower() for key in ("nome", "chat_id", "telefone")]
+        return max((difflib.SequenceMatcher(None, needle, value).ratio() for value in values if value), default=0)
+
+    suggestions = sorted(candidates, key=score, reverse=True)[:3]
+    return {"encontrado": False, "informado": informado, "sugestoes": suggestions}
+
+
+def confirmar_acao(ctx: ToolContext, args: dict):
+    return {"erro": "confirmar_acao é executada pelo gate MCP."}
+
+
+def pausar_conversa(ctx: ToolContext, args: dict):
+    from tools.pausar_conversa import pausar
+    return pausar(ctx, args)
+
+
+def criar_rascunho_email(ctx: ToolContext, args: dict):
+    from tools.criar_rascunho_email import criar
+    return criar(ctx, args)
+
+
+def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
+    """Prévia opcional usada pelo gate MCP; nunca produz efeito externo."""
+    if name == "pausar_conversa":
+        from tools.pausar_conversa import preview as _preview
+        return _preview(ctx, args)
+    if name == "schedule_whatsapp_message":
+        destino = str(args.get("contact_number") or "").strip()
+        resolved = _destinatario_whatsapp_previa(ctx, destino)
+        if not resolved["encontrado"]:
+            return {"status": "destinatario_desconhecido", "informado": resolved["informado"],
+                    "sugestoes": resolved["sugestoes"]}
+        return {"status": "confirmation_required",
+                "destinatario": ("GRUPO: " if resolved["tipo"] == "grupo" else "") + resolved["nome"],
+                "destinatario_id": resolved["chat_id"],
+                "tipo_destinatario": resolved["tipo"],
+                "mensagem": str(args.get("message") or ""),
+                "agendado_para": str(args.get("scheduled_time") or "")}
+    return None
 
 
 def _buscar_conversas_whatsapp(ctx: ToolContext, args: dict):
@@ -1522,9 +1602,33 @@ def obter_estado_atual(ctx: ToolContext, args: dict):
 
     data = str(args.get("data") or "").strip() or None
     try:
-        return build_morning_summary(ctx.db, data)
+        estado = build_morning_summary(ctx.db, data)
+        try:
+            from main import _pops_sempre_ativos
+            ativos = _pops_sempre_ativos(ctx.db)
+            def _atualizado(pop):
+                return str(pop.get("atualizado_em") or pop.get("updated_at") or "")
+            ativos.sort(key=_atualizado, reverse=True)
+            selecionados = ativos[:5]
+            estado["pops_ativos"] = [
+                {"id": pop.get("id", ""), "titulo": pop.get("titulo", ""),
+                 "instrucao_sistema": pop.get("instrucao_sistema", ""), "origem": "sempre_ativo"}
+                for pop in selecionados
+            ]
+            if len(ativos) > 5:
+                estado["pops_ativos_total_omitido"] = len(ativos) - 5
+        except Exception:
+            estado["pops_ativos"] = []
+        return estado
     except Exception as exc:  # noqa: BLE001
         return {"erro": f"Falha ao montar o estado atual: {exc}"}
+
+
+def listar_respostas_pendentes(ctx: ToolContext, args: dict):
+    """Audita a fila materializada, opcionalmente incluindo ruído filtrado."""
+    from inbox_pendentes import coletar
+    return coletar(ctx.db, incluir_filtrados=bool(args.get("incluir_filtrados")),
+                   limite=int(args.get("limite") or 50))
 
 
 def obter_acao(ctx: ToolContext, args: dict):
@@ -1743,6 +1847,9 @@ _HANDLERS: dict = {
     "registrar_execucao_investimento": _registrar_execucao_investimento,
     "buscar_e_analisar_email": _buscar_e_analisar_email,
     "schedule_whatsapp_message": _schedule_whatsapp_message,
+    "confirmar_acao": confirmar_acao,
+    "pausar_conversa": pausar_conversa,
+    "criar_rascunho_email": criar_rascunho_email,
     "buscar_conversas_whatsapp": _buscar_conversas_whatsapp,
     "salvar_memoria_global": _salvar_memoria_global,
     "criar_objetivo_estrategico": _strategy("criar_objetivo_estrategico"),
@@ -1778,6 +1885,7 @@ _HANDLERS: dict = {
     "editar_acoes_em_lote": editar_acoes_em_lote,
     "reagendar_acoes_em_lote": reagendar_acoes_em_lote,
     "obter_estado_atual": obter_estado_atual,
+    "listar_respostas_pendentes": listar_respostas_pendentes,
     "obter_acao": obter_acao,
     "listar_conversas_whatsapp": _whatsapp("listar_conversas"),
     "ler_mensagens_whatsapp": _whatsapp("ler_mensagens"),

@@ -654,6 +654,57 @@ def _collect_fresh_message_ids(service, query: str, needed: int, suggestions_col
     return fresh_ids
 
 
+def atualizar_direcao_emails_aplicados(db, service, limit: int = 60) -> None:
+    """Materializa a direção atual das threads ligadas a ações.
+
+    A abertura de `obter_estado_atual` não chama Gmail. Esta etapa roda no sync
+    que já possui o serviço Gmail e atualiza no máximo sessenta vínculos ativos:
+    se a última mensagem de uma thread for do André, ela deixa de aparecer como
+    resposta pendente; se for recebida, seu timestamp avança para a mensagem
+    mais recente da thread.
+    """
+    suggestions = db.collection("email_action_suggestions")
+    try:
+        docs = list(suggestions.where("status", "in", ["applied", "applied_reactivated"]).limit(limit).stream())
+        own_email = str(service.users().getProfile(userId="me").execute().get("emailAddress") or "").strip().lower()
+    except Exception as exc:
+        print(f"[EMAIL-LINK] Falha ao atualizar direção de e-mails aplicados: {exc}")
+        return
+    if not own_email:
+        return
+
+    def _from(message: dict) -> str:
+        headers = ((message.get("payload") or {}).get("headers") or [])
+        raw = next((str(h.get("value") or "") for h in headers if str(h.get("name") or "").lower() == "from"), "")
+        from email.utils import parseaddr
+        return parseaddr(raw)[1].strip().lower()
+
+    checked_at = datetime.now(timezone.utc).isoformat()
+    for doc in docs:
+        data = doc.to_dict() or {}
+        message_id = str(data.get("google_message_id") or doc.id).strip()
+        thread_id = str(data.get("gmail_thread_id") or "").strip()
+        try:
+            if not thread_id:
+                source = service.users().messages().get(userId="me", id=message_id, format="metadata", metadataHeaders=["From"]).execute()
+                thread_id = str(source.get("threadId") or "").strip()
+            if not thread_id:
+                continue
+            thread = service.users().threads().get(userId="me", id=thread_id, format="metadata", metadataHeaders=["From"]).execute()
+            messages = thread.get("messages") or []
+            if not messages:
+                continue
+            latest = messages[-1]
+            doc.reference.set({
+                "gmail_thread_id": thread_id,
+                "ultima_mensagem_de_andre": _from(latest) == own_email,
+                "internal_date": latest.get("internalDate") or data.get("internal_date"),
+                "email_last_checked_at": checked_at,
+            }, merge=True)
+        except Exception as exc:
+            print(f"[EMAIL-LINK] Falha ao atualizar thread {thread_id or message_id}: {exc}")
+
+
 def link_emails_to_actions(db, service, sync_ref, logs):
     """
     Analisa e-mails recentes da caixa de entrada em busca de relação com ações
@@ -676,6 +727,7 @@ def link_emails_to_actions(db, service, sync_ref, logs):
     log_to_firestore(sync_ref, logs, "[EMAIL-LINK] Verificando e-mails relacionados a ações...", True)
 
     suggestions_col = db.collection("email_action_suggestions")
+    atualizar_direcao_emails_aplicados(db, service)
     chat_id = _resolve_default_telegram_chat_id(db)
     now = datetime.now(timezone.utc)
     sent_this_pass = 0
@@ -766,6 +818,7 @@ def link_emails_to_actions(db, service, sync_ref, logs):
             "titulo_sinal": subject,
             "origem_sinal": sender,
             "google_message_id": msg_id,
+            "gmail_thread_id": msg.get("threadId"),
             "subject": subject,
             "sender": sender,
             "snippet": snippet,

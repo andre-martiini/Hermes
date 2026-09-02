@@ -6085,15 +6085,9 @@ PORTUGUESE_STOPWORDS = {
 }
 
 
-def _match_pop_directives(db, prompt: str) -> list[dict]:
+def _pops_sempre_ativos(db) -> list[dict]:
+    """Retorna POPs sempre ativos usando o mesmo cache do matcher."""
     global _POPS_DATA_CACHE
-    prompt_norm = _normalize_pop_text(prompt)
-    if not prompt_norm:
-        return []
-
-    prompt_terms_all = prompt_norm.split()
-    prompt_terms_filtered = {t for t in prompt_terms_all if t not in PORTUGUESE_STOPWORDS}
-
     try:
         now = time.monotonic()
         if _POPS_DATA_CACHE and (now - _POPS_DATA_CACHE[0]) < _POPS_DATA_TTL:
@@ -6104,7 +6098,30 @@ def _match_pop_directives(db, prompt: str) -> list[dict]:
                 for d in db.collection("pops_diretrizes").stream()
             ]
             _POPS_DATA_CACHE = (now, all_pops)
+        ativos = [pop for pop in all_pops if pop.get("sempre_ativo") is True]
+        if len(ativos) > 5:
+            print(f"[POP] Warning: {len(ativos)} POPs sempre ativos podem gerar ruído no prompt")
+        return ativos
+    except Exception as pop_err:
+        print(f"[POP] Erro ao buscar diretrizes: {pop_err}")
+        return []
 
+
+def _match_pop_directives(db, prompt: str) -> list[dict]:
+    ativos = _pops_sempre_ativos(db)
+    prompt_norm = _normalize_pop_text(prompt)
+    if not prompt_norm:
+        return [
+            {"id": pop.get("id", ""), "titulo": (pop.get("titulo") or pop.get("id") or "POP").strip(),
+             "instrucao_sistema": (pop.get("instrucao_sistema") or "").strip(), "matched_triggers": [], "score": 0}
+            for pop in ativos if (pop.get("instrucao_sistema") or "").strip()
+        ]
+
+    prompt_terms_all = prompt_norm.split()
+    prompt_terms_filtered = {t for t in prompt_terms_all if t not in PORTUGUESE_STOPWORDS}
+
+    try:
+        all_pops = _POPS_DATA_CACHE[1] if _POPS_DATA_CACHE else []
         def _collect_matches(pops: list[dict]) -> list[dict]:
             matched: list[dict] = []
 
@@ -6162,14 +6179,21 @@ def _match_pop_directives(db, prompt: str) -> list[dict]:
 
             return matched
 
-        matched = _collect_matches(all_pops)
+        ativos_ids = {pop.get("id") for pop in ativos}
+        matched = _collect_matches([pop for pop in all_pops if pop.get("id") not in ativos_ids])
 
     except Exception as pop_err:
         print(f"[POP] Erro ao buscar diretrizes: {pop_err}")
         return []
 
     matched.sort(key=lambda item: item.get("score", 0), reverse=True)
-    return matched[:3]
+    sempre = [
+        {"id": pop.get("id", ""), "titulo": (pop.get("titulo") or pop.get("id") or "POP").strip(),
+         "instrucao_sistema": (pop.get("instrucao_sistema") or "").strip(),
+         "matched_triggers": [], "score": 0}
+        for pop in ativos if (pop.get("instrucao_sistema") or "").strip()
+    ]
+    return sempre + matched[:3]
 
 
 def _get_copilot_core(db):
@@ -9191,7 +9215,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         def salvar_pop_global(
             titulo: str,
             gatilhos: list[str],
-            instrucao_sistema: str
+            instrucao_sistema: str,
+            sempre_ativo: bool | None = None,
         ):
             """
             Cria ou atualiza um POP operacional persistido em pops_diretrizes.
@@ -9252,6 +9277,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "updated_by": user_uid or "copiloto",
                     "origem": "copiloto",
                 }
+                if sempre_ativo is not None:
+                    payload["sempre_ativo"] = bool(sempre_ativo)
 
                 if existing_ref:
                     payload["created_at"] = existing_data.get("created_at", firestore.SERVER_TIMESTAMP)

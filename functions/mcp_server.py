@@ -26,14 +26,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
+import uuid
+from datetime import datetime, timedelta, timezone
 
 from firebase_functions import https_fn, options
 from firebase_admin import auth as firebase_auth
 from firebase_admin import firestore
 
 from tools import registry
-from tools.hermes_tools import ToolNotAvailable, execute as execute_tool
+from tools.hermes_tools import ToolNotAvailable, execute as execute_tool, preview as preview_tool
 from tools.tool_context import ToolContext
 from copilot_context import build_mcp_voice_context
 
@@ -59,48 +62,34 @@ _access_cache: dict[str, object] | None = None
 # nao da para desfazer de dentro do Hermes.
 #
 # Configuravel sem deploy: `system/mcp_access.confirm_tools` (lista de nomes)
-# sobrepoe este padrao — inclusive para voltar a exigir confirmacao em tudo.
-# Politica de confirmacao do canal MCP, em duas camadas. Nenhuma das duas e
-# `registry._NEEDS_CONFIRMATION`: aquele conjunto alimenta so o metadado
-# `mutates` do `tools/list`, e quem decide a dupla chamada e daqui. Sao listas
-# diferentes com nomes parecidos, e ja se confundiu uma pela outra — por isso
-# esta nota.
+# acrescenta tools ao gate. Estes dois efeitos externos, contudo, nunca podem
+# ser removidos por configuracao: uma lista vazia em producao nao pode tornar o
+# envio de mensagem (inclusive a pausa) executavel sem o "sim" do usuario.
 #
-# Padrao: vale so quando `system/mcp_access.confirm_tools` NAO existe. Se o
-# campo existir, ele substitui isto inteiro, inclusive vazio.
-_CONFIRMACAO_PADRAO: set[str] = {"schedule_whatsapp_message"}
-
-# Piso: exige dupla chamada mesmo com a politica configurada — inclusive vazia,
-# que e como o dono a deixou em 27/08/2026 para o envio de WhatsApp funcionar.
-#
-# So entra aqui escrita de dinheiro em OUTRO sistema. `criar_acao_no_sistema` e
-# `editar_acao` gravam e ficam de fora de proposito: erro ali se desfaz dentro
-# do proprio Hermes, e o humano no circuito e o pedido de permissao do cliente
-# MCP, como o repositorio ja decidiu. `registrar_aporte_investimento` e outra
-# coisa — soma ao `aporte_total` do servico de investimentos, que nao expoe
-# estorno; registrado em dobro, o rendimento fica errado para sempre e a
+# As duas escritas de investimento entram pelo mesmo criterio, com uma diferenca
+# de grau: o efeito nao so escapa do Hermes como nao tem desfazer NENHUM.
+# `registrar_aporte_investimento` SOMA ao `aporte_total` de um servico que nao
+# expoe estorno — registrado em dobro, o rendimento fica errado para sempre, e a
 # correcao nao existe de nenhum dos dois lados. `registrar_execucao_investimento`
-# vem junto porque e a mesma classe de acao e deixa linha permanente no log de
-# movimentos de la; separar os dois seria uma sutileza que ninguem lembraria.
+# vem junto por ser a mesma classe de acao e deixar linha permanente no log de
+# movimentos de la.
 #
-# Isto e ADITIVO: nao regateia nenhuma outra tool, e a politica do dono continua
-# valendo para todo o resto.
+# O motivo de o piso importar aqui tambem merece registro: `confirm_tools` esteve
+# vazia em producao por um contorno do WhatsApp em 27/08/2026, e nao por decisao
+# sobre escrita de dinheiro. Sem o piso, a sobra de um conserto de outra feature
+# governaria, calada, ferramentas que mexem em dinheiro.
 #
-# ESTE CONJUNTO NAO CRESCE POR HABITO. Duas tools, dinheiro em outro sistema. Uma
-# terceira candidata e decisao explicita do dono, tomada uma vez, com o motivo
-# escrito aqui — e nao "parece do mesmo tipo, entao entra". Piso que cresce por
-# default vira exatamente o problema que ele resolve: gating que ninguem escolheu,
-# governando por inercia.
-#
-# O motivo de o piso existir tambem merece registro, porque ele nao e obvio no
-# codigo: `confirm_tools` esta vazia por um contorno do WhatsApp em 27/08/2026, e
-# nao por uma decisao sobre escrita de dinheiro. Sem o piso, a sobra de um
-# conserto de outra feature passaria a governar, calada, duas ferramentas que
-# mexem em dinheiro num sistema cujo estado ja provou que desliza.
-_CONFIRMACAO_SEMPRE: set[str] = {
-    "registrar_aporte_investimento",
-    "registrar_execucao_investimento",
+# ESTE CONJUNTO NAO CRESCE POR HABITO (condicao do dono, 02/09/2026). Uma
+# candidata nova e decisao explicita, tomada uma vez, com o motivo escrito aqui —
+# e nao "parece do mesmo tipo, entao entra". Piso que cresce por default vira o
+# problema que ele resolve: gating que ninguem escolheu, governando por inercia.
+_CONFIRMACAO_OBRIGATORIA: set[str] = {
+    "schedule_whatsapp_message", "pausar_conversa", "criar_rascunho_email",
+    "registrar_aporte_investimento", "registrar_execucao_investimento",
 }
+_CONFIRMACAO_PADRAO: set[str] = set(_CONFIRMACAO_OBRIGATORIA)
+_CONFIRMACAO_TTL = timedelta(minutes=10)
+_WHATSAPP_JOB_ID_RE = re.compile(r"\bjob_id=([A-Za-z0-9_-]+)")
 
 # Tools que passam de um minuto e por isso nao podem rodar dentro do request.
 #
@@ -340,7 +329,9 @@ def _access_config() -> dict:
 
     config = {
         "uids": uids,
-        "confirm_tools": _CONFIRMACAO_PADRAO if confirmar is None else confirmar,
+        "confirm_tools": _CONFIRMACAO_OBRIGATORIA | (
+            _CONFIRMACAO_PADRAO if confirmar is None else confirmar
+        ),
         # Uma falha de leitura resulta em allowlist vazia (fail closed). Cachear
         # isso por 5 min transformaria um soluco do Firestore em cinco minutos de
         # acesso negado — entao so memoiza leitura bem-sucedida.
@@ -356,8 +347,141 @@ def _is_uid_allowed(uid: str) -> bool:
 
 
 def _exige_confirmacao(nome: str) -> bool:
-    """Gating do canal MCP — ver `_CONFIRMACAO_PADRAO` e `_CONFIRMACAO_SEMPRE`."""
-    return nome in _CONFIRMACAO_SEMPRE or nome in _access_config()["confirm_tools"]
+    """Gating do canal MCP — ver `_CONFIRMACAO_PADRAO`."""
+    # Conferir tambem aqui torna a garantia independente de caches antigos e de
+    # quem construir uma configuracao de teste/manual fora de `_access_config`.
+    return nome in _CONFIRMACAO_OBRIGATORIA or nome in _access_config()["confirm_tools"]
+
+
+def _criar_confirmacao(ctx: ToolContext, nome: str, argumentos: dict, previa: dict | None) -> str:
+    """Guarda a proposta concreta que o usuario esta prestes a aprovar.
+
+    O segundo request MCP e independente do primeiro. Persistir a previa evita
+    que atalhos relativos (por exemplo, ``amanha_manha``) ou a resolucao de um
+    contato sejam calculados novamente depois do "sim".
+    """
+    confirmation_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    expires_at = now + _CONFIRMACAO_TTL
+    ctx.db.collection("mcp_confirmations").document(confirmation_id).set({
+        "uid": ctx.user_uid,
+        "tool": nome,
+        "arguments": argumentos,
+        "preview": previa,
+        "created_at": now,
+        "expires_at": expires_at,
+        "expira_em": expires_at,
+    })
+    ctx.mcp_confirmation_expires_at = expires_at
+    return confirmation_id
+
+
+def _ler_confirmacao(ctx: ToolContext, nome: str, argumentos: dict, confirmation_id: object) -> dict:
+    """Valida e devolve uma proposta previamente apresentada ao mesmo usuario."""
+    if not isinstance(confirmation_id, str) or not confirmation_id.strip():
+        raise ValueError("Repita a chamada com o confirmation_id devolvido pela prévia.")
+    snap = ctx.db.collection("mcp_confirmations").document(confirmation_id).get()
+    if not snap.exists:
+        raise ValueError("Confirmação não encontrada ou já expirada; peça uma nova prévia.")
+    data = snap.to_dict() or {}
+    if data.get("uid") != ctx.user_uid or data.get("tool") != nome:
+        raise ValueError("Confirmação não pertence a esta chamada.")
+    expires_at = data.get("expires_at")
+    if not isinstance(expires_at, datetime) or expires_at <= datetime.now(timezone.utc):
+        raise ValueError("Confirmação expirada; peça uma nova prévia.")
+    return data
+
+
+def _resultado_confirmacao_whatsapp(ctx: ToolContext, argumentos: dict, result, *, wait_seconds: float = 5):
+    """Acrescenta o job e, para envio imediato, o estado que o worker já gravou."""
+    if not isinstance(result, str):
+        return result
+    match = _WHATSAPP_JOB_ID_RE.search(result)
+    if not match:
+        return result
+    resposta = {"resultado": result, "job_id": match.group(1)}
+    try:
+        scheduled_at = datetime.fromisoformat(
+            str(argumentos.get("scheduled_time") or "").replace("Z", "+00:00")
+        )
+        if scheduled_at.tzinfo is None:
+            scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return resposta
+    if scheduled_at > datetime.now(timezone.utc) + timedelta(seconds=90):
+        return resposta
+
+    # A espera curta só cobre o caso "agora". Não transforma agendamento futuro
+    # em polling de cinco segundos nem afirma entrega quando o worker ainda não a
+    # registrou.
+    try:
+        ref = ctx.db.collection("whatsapp_outbox").document(resposta["job_id"])
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            snap = ref.get()
+            if snap.exists:
+                status = (snap.to_dict() or {}).get("status")
+                if status in {"pending", "sending", "sent", "failed"}:
+                    resposta["status_outbox"] = status
+                if status in {"sent", "failed"} or time.monotonic() >= deadline:
+                    return resposta
+            if time.monotonic() >= deadline:
+                return resposta
+            time.sleep(0.5)
+    except Exception as exc:  # consulta é conveniência; a confirmação já executou
+        print(f"[mcp_server] Falha ao consultar outbox da confirmação: {exc}")
+        return resposta
+
+
+def _executar_confirmacao(ctx: ToolContext, confirmation_id: object, *, tool_esperada: str | None = None) -> dict:
+    """Executa uma única vez a proposta congelada, sem confiar no cliente."""
+    if not isinstance(confirmation_id, str) or not confirmation_id.strip():
+        return {"erro": "confirmation_id obrigatório"}
+    ref = ctx.db.collection("mcp_confirmations").document(confirmation_id)
+    snap = ref.get()
+    if not snap.exists:
+        return {"erro": "Confirmação não encontrada ou expirada."}
+    data = snap.to_dict() or {}
+    if data.get("uid") != ctx.user_uid:
+        return {"erro": "Confirmação não pertence a este usuário."}
+    if data.get("executed_at") or data.get("executada_em"):
+        return {"status": "ja_executada", "resultado_anterior": data.get("result", data.get("resultado"))}
+    expires_at = data.get("expires_at")
+    if not isinstance(expires_at, datetime) or expires_at <= datetime.now(timezone.utc):
+        return {"erro": "Confirmação expirada; peça uma nova prévia."}
+    nome, argumentos = data.get("tool"), dict(data.get("arguments") or {})
+    if not isinstance(nome, str) or not registry.is_mcp_enabled(nome):
+        return {"erro": "Tool da confirmação não está disponível."}
+    if tool_esperada and nome != tool_esperada:
+        return {"erro": "Confirmação não pertence a esta chamada."}
+    # `create` é atômico no Firestore: duas confirmações concorrentes não podem
+    # obter a mesma reivindicação. O outbox usa o mesmo id como segunda barreira
+    # para WhatsApp.
+    claim = ref.collection("claims").document("execute")
+    try:
+        claim.create({"claimed_at": datetime.now(timezone.utc)})
+    except Exception:
+        latest = ref.get().to_dict() or {}
+        if latest.get("executed_at") or latest.get("executada_em"):
+            return {"status": "ja_executada", "resultado_anterior": latest.get("result", latest.get("resultado"))}
+        return {"status": "em_execucao", "message": "Confirmação já está sendo executada."}
+    ctx.mcp_confirmation_id = confirmation_id
+    ctx.mcp_confirmation_created_at = data.get("created_at")
+    ctx.mcp_confirmation_preview = data.get("preview")
+    ctx.mcp_confirmed_tool = nome
+    ctx.mcp_confirmed_arguments = argumentos
+    try:
+        result = execute_tool(nome, argumentos, ctx)
+    except Exception as exc:  # não deixar uma confirmação reivindicada sem resultado
+        result = {"erro": f"Falha ao executar a confirmação: {exc}"}
+    if nome == "schedule_whatsapp_message":
+        result = _resultado_confirmacao_whatsapp(ctx, argumentos, result)
+    executed_at = datetime.now(timezone.utc)
+    # Os nomes originais em inglês continuam para documentos D2; os aliases em
+    # português tornam o documento inspecionável pelo contrato atual sem migração.
+    ref.set({"executed_at": executed_at, "executada_em": executed_at,
+             "result": result, "resultado": result}, merge=True)
+    return result if isinstance(result, dict) else {"resultado": result}
 
 
 def _check_rate_limit(uid: str) -> None:
@@ -412,7 +536,7 @@ def _handle_initialize(params: dict) -> dict:
             "do usuario. Mostre o destinatario e o texto exato e espere ele "
             "concordar antes de chamar — e o unico efeito que nao da para "
             "desfazer de dentro do Hermes. Se o servidor responder pedindo "
-            "confirmacao, repita a chamada com `_confirmed: true`.\n"
+            "confirmacao, chame `confirmar_acao` com o `confirmation_id` devolvido.\n"
             "- Para anexar arquivo, a ordem de preferencia e: `drive_file_id` "
             "(arquivo que ja esta no Drive — peca ao usuario para joga-lo la pelo "
             "celular se ainda nao estiver), `gmail_message_id`, `url`, e por fim "
@@ -440,10 +564,16 @@ def _handle_tools_list() -> dict:
             # derrubar o `tools/list` inteiro e deixar o cliente sem nenhuma tool.
             print(f"[mcp_server] Schema ausente para '{name}', tool omitida: {exc}")
             continue
+        input_schema = dict(schema.get("parameters", {"type": "object", "properties": {}}))
+        if _exige_confirmacao(name):
+            props = dict(input_schema.get("properties") or {})
+            props.setdefault("_confirmed", {"type": "boolean", "description": "Confirma a prévia persistida."})
+            props.setdefault("_confirmation_id", {"type": "string", "description": "ID devolvido pela prévia."})
+            input_schema["properties"] = props
         tools.append({
             "name": name,
             "description": schema.get("description", ""),
-            "inputSchema": schema.get("parameters", {"type": "object", "properties": {}}),
+            "inputSchema": input_schema,
             "_meta": {
                 # `needsConfirmation` e o que ESTE canal exige (a dupla chamada
                 # com `_confirmed`); `mutates` diz se a tool grava, independente
@@ -463,18 +593,83 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
     if not isinstance(name, str) or not name:
         raise McpError(-32602, "params.name obrigatorio em tools/call")
 
+    if name == "confirmar_acao":
+        # O contexto e novo por request, mas limpar estes atributos deixa a
+        # funcao correta tambem quando chamada diretamente em testes.
+        ctx.mcp_confirmed_tool = None
+        ctx.mcp_confirmed_arguments = None
+        start = time.monotonic()
+        result = _executar_confirmacao(ctx, arguments.get("confirmation_id"))
+        confirmed_tool = getattr(ctx, "mcp_confirmed_tool", None)
+        if confirmed_tool:
+            _audit_log(uid=ctx.user_uid, tool=confirmed_tool,
+                       arguments=getattr(ctx, "mcp_confirmed_arguments", {}),
+                       latency_ms=(time.monotonic() - start) * 1000)
+        return _text_result(result, is_error=bool(result.get("erro")))
+
     if not registry.is_mcp_enabled(name):
         raise McpError(-32003, f"Tool '{name}' nao esta disponivel via MCP")
 
     confirmed = arguments.pop("_confirmed", None)
-    if _exige_confirmacao(name) and confirmed is not True:
+    confirmation_id = arguments.pop("_confirmation_id", None)
+    if _exige_confirmacao(name) and confirmed is True:
+        if confirmation_id:
+            # Compatibilidade com clientes que ainda repetem a tool original.
+            # Executa a mesma proposta persistida de `confirmar_acao`, jamais os
+            # argumentos que o cliente reenviou.
+            ctx.mcp_confirmed_tool = None
+            ctx.mcp_confirmed_arguments = None
+            start = time.monotonic()
+            result = _executar_confirmacao(ctx, confirmation_id, tool_esperada=name)
+            confirmed_tool = getattr(ctx, "mcp_confirmed_tool", None)
+            if confirmed_tool:
+                _audit_log(uid=ctx.user_uid, tool=confirmed_tool,
+                           arguments=getattr(ctx, "mcp_confirmed_arguments", {}),
+                           latency_ms=(time.monotonic() - start) * 1000)
+            return _text_result(result, is_error=bool(result.get("erro")))
+        else:
+            # Compatibilidade para tools antigas sem hook de prévia: `_confirmed`
+            # continua bastando. Uma tool com hook nunca executa por este caminho,
+            # pois precisa da prévia concreta apresentada ao usuario.
+            try:
+                if preview_tool(name, ctx, arguments) is not None:
+                    return _text_result({
+                        "erro": "Esta confirmação precisa do confirmation_id devolvido pela prévia.",
+                    }, is_error=True)
+            except Exception as exc:
+                return _text_result({"erro": str(exc)}, is_error=True)
+    elif _exige_confirmacao(name):
+        try:
+            proposal = preview_tool(name, ctx, arguments)
+        except Exception as exc:  # prévia inválida deve apontar o dado, sem mutar
+            return _text_result({"erro": str(exc)}, is_error=True)
+        # Uma prévia pode recusar o destino. Neste caso não há ato a confirmar e
+        # não se deixa uma confirmação pendente para um identificador cru.
+        if proposal and proposal.get("status") == "destinatario_desconhecido":
+            return _text_result(proposal, is_error=False)
+        try:
+            confirmation_id = _criar_confirmacao(ctx, name, arguments, proposal)
+        except Exception as exc:
+            return _text_result({"erro": str(exc)}, is_error=True)
+        if proposal is not None:
+            return _text_result({
+                "status": proposal.get("status", "confirmation_required"),
+                "tool": name,
+                "confirmation_required": True,
+                "preview": proposal,
+                "confirmation_id": confirmation_id,
+                "expira_em": getattr(ctx, "mcp_confirmation_expires_at", datetime.now(timezone.utc) + _CONFIRMACAO_TTL).isoformat(),
+                "message": "Confira a prévia e, após o sim explícito, chame confirmar_acao(confirmation_id) para executar.",
+            }, is_error=False)
         return _text_result({
             "status": "confirmation_required",
             "tool": name,
+            "confirmation_id": confirmation_id,
+            "expira_em": getattr(ctx, "mcp_confirmation_expires_at", datetime.now(timezone.utc) + _CONFIRMACAO_TTL).isoformat(),
             "message": (
                 "Esta acao grava no Hermes e exige confirmacao explicita do usuario. "
-                "Mostre a ele exatamente o que sera feito e, apos o 'sim', repita a "
-                "chamada com arguments._confirmed=true."
+                "Mostre a ele exatamente o que sera feito e, apos o 'sim', chame "
+                "confirmar_acao(confirmation_id) para executar."
             ),
         }, is_error=False)
 
@@ -577,7 +772,8 @@ def _handle_prompts_list() -> dict:
             "name": snap.id,
             "title": titulo,
             "description": (
-                f"POP do Hermes: {titulo}."
+                ("[SEMPRE ATIVO] " if dados.get("sempre_ativo") is True else "")
+                + f"POP do Hermes: {titulo}."
                 + (f" Aciona em: {', '.join(gatilhos[:6])}." if gatilhos else "")
             ),
         })

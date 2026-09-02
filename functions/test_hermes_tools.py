@@ -144,6 +144,22 @@ class TestExecucao(unittest.TestCase):
         res = hermes_tools.execute("calculadora", {"expressao": "__import__('os')"}, ToolContext())
         self.assertIn("erro", res)
 
+    def test_previa_whatsapp_recusa_contato_e_grupo_desconhecidos(self):
+        from tools.tool_context import ToolContext
+
+        db = _PreviewDb({
+            "perfil_pessoas": {"p": {"nome": "Gabriela", "telefone": "+55 27 99999-0000", "whatsapp_chat_id": "5527999990000@c.us"}},
+            "whatsapp_chats": {"g": {"chat_id": "120363000000000001@g.us", "chat_name": "Equipe DAE"}},
+        })
+        ctx = ToolContext(_db=db)
+        for destino in ("144929460120343@lid", "5527999990000@lid", "120363999999999999@g.us"):
+            proposal = hermes_tools.preview("schedule_whatsapp_message", ctx, {
+                "contact_number": destino, "message": "oi", "scheduled_time": "2030-01-01T12:00:00+00:00",
+            })
+            self.assertEqual(proposal["status"], "destinatario_desconhecido")
+            self.assertEqual(proposal["informado"], destino)
+            self.assertLessEqual(len(proposal["sugestoes"]), 3)
+
 
 class TestVoz(unittest.TestCase):
     def test_tools_excluidas_da_voz_nao_aparecem(self):
@@ -174,6 +190,108 @@ class _FakeRequest:
 
     def get_json(self, silent=False):
         return self._body
+
+
+class _ConfirmationSnap:
+    def __init__(self, data):
+        self._data = data
+        self.exists = data is not None
+
+    def to_dict(self):
+        return dict(self._data or {})
+
+
+class _ConfirmationClaim:
+    def __init__(self, parent):
+        self._parent = parent
+
+    def create(self, data):
+        if self._parent.claimed:
+            raise RuntimeError("already exists")
+        self._parent.claimed = True
+
+
+class _ConfirmationRef:
+    def __init__(self, data):
+        self.data = data
+        self.claimed = False
+
+    def get(self):
+        return _ConfirmationSnap(self.data)
+
+    def set(self, values, merge=False):
+        self.data = ({**self.data, **values} if merge else dict(values))
+
+    def collection(self, name):
+        self.asserted_collection = name
+        return self
+
+    def document(self, name):
+        self.asserted_document = name
+        return _ConfirmationClaim(self)
+
+
+class _ConfirmationDb:
+    def __init__(self, data):
+        self.ref = _ConfirmationRef(data)
+
+    def collection(self, name):
+        assert name == "mcp_confirmations"
+        return self
+
+    def document(self, name):
+        self.confirmation_id = name
+        return self.ref
+
+
+class _PreviewSnap:
+    def __init__(self, doc_id, data):
+        self.id = doc_id
+        self._data = data
+
+    def to_dict(self):
+        return dict(self._data)
+
+
+class _PreviewCollection:
+    def __init__(self, data):
+        self._data = data
+
+    def stream(self):
+        return [_PreviewSnap(doc_id, data) for doc_id, data in self._data.items()]
+
+
+class _PreviewDb:
+    def __init__(self, collections):
+        self._collections = collections
+
+    def collection(self, name):
+        return _PreviewCollection(self._collections.get(name, {}))
+
+
+class _OutboxSnap:
+    def __init__(self, data):
+        self.exists = data is not None
+        self._data = data
+
+    def to_dict(self):
+        return dict(self._data or {})
+
+
+class _OutboxDb:
+    def __init__(self, documents):
+        self._documents = documents
+
+    def collection(self, name):
+        assert name == "whatsapp_outbox"
+        return self
+
+    def document(self, name):
+        self.requested_id = name
+        return self
+
+    def get(self):
+        return _OutboxSnap(self._documents.get(self.requested_id))
 
 
 @unittest.skipIf(mcp_server is None, "firebase_functions indisponivel fora do venv de deploy")
@@ -237,7 +355,16 @@ class TestCamadaJsonRpc(unittest.TestCase):
         nomes = {t["name"] for t in payload["result"]["tools"]}
         self.assertIn("consultar_historico_acoes", nomes)
         self.assertIn("criar_acao_no_sistema", nomes)
+        self.assertIn("confirmar_acao", nomes)
         self.assertEqual(len(nomes), len(registry.list_mcp_enabled_tools()))
+
+    def test_tools_confirmaveis_declararam_campos_legados_no_schema_mcp(self):
+        payload = mcp_server._handle_tools_list()
+        por_nome = {tool["name"]: tool for tool in payload["tools"]}
+        for name in ("schedule_whatsapp_message", "pausar_conversa", "criar_rascunho_email"):
+            properties = por_nome[name]["inputSchema"]["properties"]
+            self.assertEqual(properties["_confirmed"]["type"], "boolean")
+            self.assertEqual(properties["_confirmation_id"]["type"], "string")
 
     @contextlib.contextmanager
     def _gating(self, tools):
@@ -262,7 +389,12 @@ class TestCamadaJsonRpc(unittest.TestCase):
 
     def test_gating_do_canal_barra_antes_de_executar(self):
         """Com a tool na politica, a chamada para na confirmacao — nao envia nada."""
-        with self._gating({"schedule_whatsapp_message"}):
+        from unittest import mock
+        with self._gating({"schedule_whatsapp_message"}), mock.patch.object(
+            mcp_server, "_criar_confirmacao", return_value="confirmacao-1"
+        ), mock.patch.object(
+            mcp_server, "preview_tool", return_value={"status": "confirmation_required", "destinatario": "Contato conhecido"}
+        ):
             resp = self._post({
                 "jsonrpc": "2.0", "id": 5, "method": "tools/call",
                 "params": {
@@ -275,16 +407,76 @@ class TestCamadaJsonRpc(unittest.TestCase):
         conteudo = json.loads(payload["result"]["content"][0]["text"])
         self.assertEqual(conteudo["status"], "confirmation_required")
 
-    def test_politica_vazia_desliga_o_gating(self):
-        """O dono esvaziou `confirm_tools` em 27/08/2026 para o envio funcionar.
+    def test_destinatario_desconhecido_nao_cria_confirmacao(self):
+        from unittest import mock
 
-        Aqui so se verifica a decisao do gate — a tool nao chega a ser chamada,
-        porque exercitar envio de WhatsApp num teste seria mandar mensagem.
-        """
+        with self._gating({"schedule_whatsapp_message"}), \
+             mock.patch.object(mcp_server, "preview_tool", side_effect=lambda _name, _ctx, args: {
+                 "status": "destinatario_desconhecido", "informado": args["contact_number"], "sugestoes": []
+             }), \
+             mock.patch.object(mcp_server, "_criar_confirmacao") as create:
+            for rpc_id, destino in ((58, "144929460120343@lid"), (59, "120363999999999999@g.us")):
+                resp = self._post({
+                    "jsonrpc": "2.0", "id": rpc_id, "method": "tools/call",
+                    "params": {"name": "schedule_whatsapp_message", "arguments": {
+                        "contact_number": destino, "message": "oi", "scheduled_time": "2030-01-01T12:00:00+00:00",
+                    }},
+                })
+                content = json.loads(json.loads(resp.get_data(as_text=True))["result"]["content"][0]["text"])
+                self.assertEqual(content["status"], "destinatario_desconhecido")
+                self.assertEqual(content["informado"], destino)
+        create.assert_not_called()
+
+    def test_gate_inclui_preview_quando_a_tool_oferece_hook(self):
+        from unittest import mock
+        with self._gating({"pausar_conversa"}), mock.patch.object(
+            mcp_server, "preview_tool", return_value={"status": "aguardando_confirmacao", "mensagem": "texto exato"}
+        ) as preview, mock.patch.object(mcp_server, "_criar_confirmacao", return_value="confirmacao-2"):
+            resp = self._post({
+                "jsonrpc": "2.0", "id": 55, "method": "tools/call",
+                "params": {"name": "pausar_conversa", "arguments": {"contato_ou_grupo": "Gabriela", "retomar_em": "amanha_manha"}},
+            })
+        content = json.loads(json.loads(resp.get_data(as_text=True))["result"]["content"][0]["text"])
+        self.assertEqual(content["status"], "aguardando_confirmacao")
+        self.assertEqual(content["preview"]["mensagem"], "texto exato")
+        self.assertEqual(content["confirmation_id"], "confirmacao-2")
+        preview.assert_called_once()
+
+    def test_confirmada_reutiliza_confirmacao_persistida_em_vez_dos_argumentos_reenviados(self):
+        from unittest import mock
+        with mock.patch.object(mcp_server, "_executar_confirmacao", return_value={"ok": True}) as execute:
+            resp = self._post({
+                "jsonrpc": "2.0", "id": 56, "method": "tools/call",
+                "params": {"name": "pausar_conversa", "arguments": {
+                    "contato_ou_grupo": "argumento adulterado", "retomar_em": "amanha_manha",
+                    "_confirmed": True, "_confirmation_id": "confirmacao-2",
+                }},
+            })
+        self.assertFalse(json.loads(resp.get_data(as_text=True))["result"]["isError"])
+        self.assertEqual(execute.call_args.args[1], "confirmacao-2")
+        self.assertEqual(execute.call_args.kwargs["tool_esperada"], "pausar_conversa")
+
+    def test_cliente_que_descarta_campos_desconhecidos_confirma_pela_tool_dedicada(self):
+        from unittest import mock
+        with mock.patch.object(mcp_server, "_executar_confirmacao", return_value={"ok": True}) as execute:
+            resp = self._post({
+                "jsonrpc": "2.0", "id": 57, "method": "tools/call",
+                "params": {"name": "confirmar_acao", "arguments": {"confirmation_id": "confirmacao-3"}},
+            })
+        self.assertFalse(json.loads(resp.get_data(as_text=True))["result"]["isError"])
+        execute.assert_called_once()
+
+    def test_politica_vazia_nao_desliga_envios_obrigatorios(self):
+        """Configuração viva pode adicionar gates, nunca remover envios externos."""
         with self._gating(set()):
-            self.assertFalse(mcp_server._exige_confirmacao("schedule_whatsapp_message"))
+            self.assertTrue(mcp_server._exige_confirmacao("schedule_whatsapp_message"))
+            self.assertTrue(mcp_server._exige_confirmacao("pausar_conversa"))
         with self._gating({"schedule_whatsapp_message"}):
             self.assertTrue(mcp_server._exige_confirmacao("schedule_whatsapp_message"))
+
+    def test_rascunho_email_e_mutante_e_exige_confirmacao(self):
+        self.assertTrue(registry.needs_confirmation("criar_rascunho_email"))
+        self.assertTrue(mcp_server._exige_confirmacao("criar_rascunho_email"))
 
     def test_demais_tools_mutantes_nao_pedem_dupla_chamada(self):
         """`criar_acao_no_sistema` grava, mas o gating do canal esta desligado.
@@ -327,6 +519,84 @@ class TestCamadaJsonRpc(unittest.TestCase):
     def test_delete_encerra_sessao_sem_erro(self):
         resp = self.handler(_FakeRequest(method="DELETE"))
         self.assertEqual(resp.status_code, 204)
+
+
+@unittest.skipIf(mcp_server is None, "firebase_functions indisponivel fora do venv de deploy")
+class TestConfirmacaoPersistida(unittest.TestCase):
+    def _ctx(self, data):
+        from tools.tool_context import ToolContext
+
+        return ToolContext(user_uid="uid-de-teste", _db=_ConfirmationDb(data))
+
+    def _confirmation(self, **extra):
+        from datetime import datetime, timedelta, timezone
+
+        data = {
+            "uid": "uid-de-teste",
+            "tool": "schedule_whatsapp_message",
+            "arguments": {"contact_number": "120363408233905746@g.us", "message": "texto aprovado",
+                          "scheduled_time": "2030-01-01T12:00:00+00:00"},
+            "preview": {"destinatario": "GRUPO: Grupo de teste", "mensagem": "texto aprovado"},
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
+        }
+        data.update(extra)
+        return data
+
+    def test_confirmar_executa_uma_vez_com_argumentos_congelados(self):
+        from unittest import mock
+
+        ctx = self._ctx(self._confirmation())
+        with mock.patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), \
+             mock.patch.object(mcp_server, "execute_tool", return_value={"job_id": "outbox-1"}) as execute:
+            first = mcp_server._executar_confirmacao(ctx, "id-1")
+            second = mcp_server._executar_confirmacao(ctx, "id-1")
+        self.assertEqual(first, {"job_id": "outbox-1"})
+        self.assertEqual(second["status"], "ja_executada")
+        execute.assert_called_once_with("schedule_whatsapp_message", ctx._db.ref.data["arguments"], ctx)
+
+    def test_confirmacao_expirada_nao_executa(self):
+        from datetime import datetime, timedelta, timezone
+        from unittest import mock
+
+        ctx = self._ctx(self._confirmation(expires_at=datetime.now(timezone.utc) - timedelta(seconds=1)))
+        with mock.patch.object(mcp_server, "execute_tool") as execute:
+            result = mcp_server._executar_confirmacao(ctx, "id-expirado")
+        self.assertIn("expirada", result["erro"])
+        execute.assert_not_called()
+
+    def test_confirmacao_de_envio_imediato_devolve_job_e_estado_do_outbox(self):
+        from datetime import datetime, timezone
+        from tools.tool_context import ToolContext
+
+        ctx = ToolContext(_db=_OutboxDb({"outbox-1": {"status": "sent"}}))
+        result = mcp_server._resultado_confirmacao_whatsapp(ctx, {
+            "scheduled_time": datetime.now(timezone.utc).isoformat(),
+        }, "Mensagem ENFILEIRADA. job_id=outbox-1.")
+        self.assertEqual(result["job_id"], "outbox-1")
+        self.assertEqual(result["status_outbox"], "sent")
+
+    def test_estado_sending_tambem_e_devolvido_no_envio_imediato(self):
+        from datetime import datetime, timezone
+        from tools.tool_context import ToolContext
+
+        ctx = ToolContext(_db=_OutboxDb({"outbox-2": {"status": "sending"}}))
+        result = mcp_server._resultado_confirmacao_whatsapp(ctx, {
+            "scheduled_time": datetime.now(timezone.utc).isoformat(),
+        }, "Mensagem ENFILEIRADA. job_id=outbox-2.", wait_seconds=0)
+        self.assertEqual(result["status_outbox"], "sending")
+
+    def test_falha_na_consulta_do_outbox_nao_impede_resultado_confirmado(self):
+        from datetime import datetime, timezone
+        from unittest import mock
+        from tools.tool_context import ToolContext
+
+        db = mock.Mock()
+        db.collection.side_effect = RuntimeError("Firestore indisponível")
+        ctx = ToolContext(_db=db)
+        result = mcp_server._resultado_confirmacao_whatsapp(ctx, {
+            "scheduled_time": datetime.now(timezone.utc).isoformat(),
+        }, "Mensagem ENFILEIRADA. job_id=outbox-3.")
+        self.assertEqual(result, {"resultado": "Mensagem ENFILEIRADA. job_id=outbox-3.", "job_id": "outbox-3"})
 
 
 class TestSinalDeIntencao(unittest.TestCase):

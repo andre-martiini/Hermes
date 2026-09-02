@@ -21,7 +21,8 @@ import datetime
 from firebase_admin import firestore
 
 
-def schedule_whatsapp_message(db, contact_number: str, message: str, scheduled_time: str) -> str:
+def schedule_whatsapp_message(db, contact_number: str, message: str, scheduled_time: str,
+                              *, idempotency_key: str | None = None) -> str:
     try:
         contact_number = str(contact_number or "").strip()
         message = str(message or "").strip()
@@ -43,14 +44,22 @@ def schedule_whatsapp_message(db, contact_number: str, message: str, scheduled_t
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=datetime.timezone.utc)
 
-        doc_ref = db.collection("whatsapp_outbox").document()
-        doc_ref.set({
-            "to_number": contact_number,
-            "content": message,
-            "scheduled_for": dt,
-            "status": "pending",
-            "created_at": firestore.SERVER_TIMESTAMP,
-        })
+        doc_ref = (db.collection("whatsapp_outbox").document(str(idempotency_key))
+                   if idempotency_key else db.collection("whatsapp_outbox").document())
+        # A pausa atualiza tambem o indice e, talvez, a acao. Se uma dessas
+        # gravacoes falhar depois de criar o job, uma nova chamada confirmada
+        # deve completar o estado sem enfileirar uma segunda mensagem.
+        if not doc_ref.get().exists:
+            payload = {
+                "to_number": contact_number,
+                "content": message,
+                "scheduled_for": dt,
+                "status": "pending",
+                "created_at": firestore.SERVER_TIMESTAMP,
+            }
+            if idempotency_key:
+                payload["idempotency_key"] = str(idempotency_key)
+            doc_ref.set(payload)
 
         return (
             f"Mensagem ENFILEIRADA (ainda nao enviada) para {contact_number}, "

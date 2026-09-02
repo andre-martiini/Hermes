@@ -1,0 +1,8 @@
+{
+  "name": "listar_respostas_pendentes",
+  "description": "Lista respostas pendentes e permite auditar itens filtrados por ruído",
+  "parameters": {"type": "object", "properties": {
+    "incluir_filtrados": {"type": "boolean", "description": "Inclui itens normalmente filtrados"},
+    "limite": {"type": "integer", "description": "Máximo de itens, até 100"}
+  }}
+}

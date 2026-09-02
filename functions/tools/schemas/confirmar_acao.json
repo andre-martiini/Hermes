@@ -1,0 +1,1 @@
+{"name":"confirmar_acao","description":"Executa uma confirmação MCP persistida, uma única vez.","parameters":{"type":"object","properties":{"confirmation_id":{"type":"string"}},"required":["confirmation_id"]}}

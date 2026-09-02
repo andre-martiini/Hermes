@@ -352,29 +352,57 @@ def _do_gmail(args: dict) -> tuple[bytes, str]:
     service = get_gmail_service()
     msg = service.users().messages().get(userId="me", id=msg_id, format="full").execute()
     procurado = str(args.get("nome_anexo") or "").strip().lower()
-
-    encontrado: list[tuple[bytes, str]] = []
+    attachment_id = str(args.get("attachment_id") or "").strip()
+    candidatos: list[tuple[str, str]] = []
 
     def _varrer(partes):
         for parte in partes or []:
-            if encontrado:
-                return
             _varrer(parte.get("parts"))
             nome_parte = parte.get("filename") or ""
             corpo = parte.get("body") or {}
             if not nome_parte or not corpo.get("attachmentId"):
                 continue
-            if procurado and procurado not in nome_parte.lower():
-                continue
-            anexo = service.users().messages().attachments().get(
-                userId="me", messageId=msg_id, id=corpo["attachmentId"]).execute()
-            encontrado.append((base64.urlsafe_b64decode(anexo["data"]), nome_parte))
+            candidatos.append((str(corpo["attachmentId"]), nome_parte))
 
     _varrer([msg.get("payload", {})])
-    if not encontrado:
-        alvo = f" com nome contendo '{procurado}'" if procurado else ""
-        raise ValueError(f"Nenhum anexo{alvo} na mensagem {msg_id}.")
-    return encontrado[0]
+    if attachment_id:
+        chosen = next((item for item in candidatos if item[0] == attachment_id), None)
+        if not chosen:
+            raise ValueError(f"attachment_id '{attachment_id}' não existe na mensagem {msg_id}.")
+        if procurado and procurado not in chosen[1].lower():
+            raise ValueError("attachment_id e nome_anexo apontam para anexos diferentes.")
+    else:
+        selected = [item for item in candidatos if not procurado or procurado in item[1].lower()]
+        if len(selected) == 1:
+            chosen = selected[0]
+        elif not selected:
+            alvo = f" com nome contendo '{procurado}'" if procurado else ""
+            raise ValueError(f"Nenhum anexo{alvo} na mensagem {msg_id}.")
+        else:
+            raise ValueError("A mensagem tem mais de um anexo; informe attachment_id ou nome_anexo.")
+    anexo = service.users().messages().attachments().get(
+        userId="me", messageId=msg_id, id=chosen[0]).execute()
+    if not anexo.get("data"):
+        raise ValueError(f"Anexo '{chosen[1]}' veio sem bytes da API Gmail.")
+    return base64.urlsafe_b64decode(anexo["data"]), chosen[1]
+
+
+def resolver_anexo_por_referencia(ctx, reference: dict) -> tuple[bytes, str]:
+    """Resolve uma referência segura para uma mensagem, reutilizando o pipeline.
+
+    A ferramenta de rascunho deliberadamente não aceita bytes inline: cada item
+    precisa escolher exatamente uma fonte que o Hermes busca por conta própria.
+    """
+    if not isinstance(reference, dict) or reference.get("conteudo_base64"):
+        raise ValueError("conteudo_base64 não é aceito; use preparar_upload e upload_token.")
+    sources = [key for key in ("drive_file_id", "upload_token", "gmail_message_id") if reference.get(key)]
+    if len(sources) != 1:
+        raise ValueError("Cada anexo precisa ter exatamente uma referência: drive_file_id, gmail_message_id ou upload_token.")
+    if reference.get("attachment_id") and not reference.get("gmail_message_id"):
+        raise ValueError("attachment_id só pode ser usado junto com gmail_message_id.")
+    if reference.get("nome_anexo") and not reference.get("gmail_message_id"):
+        raise ValueError("nome_anexo só pode ser usado junto com gmail_message_id.")
+    return _resolver_conteudo(ctx, reference)
 
 
 def _do_upload_token(ctx, args: dict) -> tuple[bytes, str]:
@@ -390,6 +418,8 @@ def _do_upload_token(ctx, args: dict) -> tuple[bytes, str]:
 
     reserva = snap.to_dict() or {}
     if reserva.get("uid") != ctx.user_uid:
+        raise ValueError(f"upload_token '{token}' desconhecido ou ja consumido.")
+    if reserva.get("consumed_at"):
         raise ValueError(f"upload_token '{token}' desconhecido ou ja consumido.")
     if reserva.get("expira_em", "") < datetime.now(timezone.utc).isoformat():
         raise ValueError("upload_token expirado. Chame preparar_upload de novo.")
@@ -415,13 +445,32 @@ def _do_upload_token(ctx, args: dict) -> tuple[bytes, str]:
             f"checksum nao confere: declarado {reserva['sha256'][:16]}..., "
             f"calculado {obtido[:16]}...")
 
-    # Some da area de espera: o token e de uso unico.
+    return dados, reserva["nome"]
+
+
+def consumir_upload_token(ctx, token: str) -> None:
+    """Invalida o staging somente depois de a operação externa ter sucesso."""
+    token = str(token or "").strip()
+    snap = ctx.db.collection(COL_UPLOADS).document(token).get() if token else None
+    if not snap or not snap.exists:
+        return
+    reserva = snap.to_dict() or {}
+    if reserva.get("uid") != ctx.user_uid or reserva.get("consumed_at"):
+        return
+    # Marcar primeiro evita um novo uso mesmo se a limpeza do blob falhar.
     try:
-        blob.delete()
+        snap.reference.update({"consumed_at": datetime.now(timezone.utc).isoformat()})
+    except Exception as exc:
+        print(f"[anexar_arquivo] Falha ao consumir upload {token}: {exc}")
+        return
+    try:
+        _bucket().blob(reserva["caminho"]).delete()
     except Exception as exc:
         print(f"[anexar_arquivo] Falha ao limpar staging {reserva['caminho']}: {exc}")
-    snap.reference.delete()
-    return dados, reserva["nome"]
+    try:
+        snap.reference.delete()
+    except Exception as exc:
+        print(f"[anexar_arquivo] Falha ao remover reserva {token}: {exc}")
 
 
 def _resolver_conteudo(ctx, args: dict) -> tuple[bytes, str]:
@@ -541,6 +590,9 @@ def anexar(ctx, args: dict) -> dict:
         except Exception as limpeza:
             print(f"[anexar_arquivo] Orfao em {arquivo['id']}, limpeza falhou: {limpeza}")
         return {"erro": f"Falha ao vincular a acao (upload revertido): {exc}"}
+
+    if args.get("upload_token"):
+        consumir_upload_token(ctx, str(args["upload_token"]))
 
     return {
         "status": "ok",

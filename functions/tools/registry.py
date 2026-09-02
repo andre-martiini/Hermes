@@ -47,6 +47,9 @@ _CATALOG: dict[str, str] = {
     "registrar_item_financeiro_v2": "Registra uma nova movimentação (renda ou despesa) no financeiro interno",
     "calculadora": "Calculadora dedicada para calculos matematicos ad-hoc ou projecoes.",
     "schedule_whatsapp_message": "Agenda ou envia uma mensagem de WhatsApp para um contato.",
+    "confirmar_acao": "Executa uma confirmação MCP persistida uma única vez",
+    "pausar_conversa": "Enfileira uma resposta de pausa no WhatsApp e agenda a retomada após confirmação explícita",
+    "criar_rascunho_email": "Cria um rascunho Gmail com anexos por referência; nunca envia a mensagem",
     "buscar_contato": "Busca contatos por nome, email ou tag em perfil_pessoas para resolver menções a pessoas",
     "preparar_vinculo_contatos": "Prepara proposta de vínculo de pessoas a uma tarefa (gera card de confirmação)",
     "preparar_atualizacao_contato": "Prepara criação ou atualização de contato com novos fatos (gera card de confirmação)",
@@ -83,6 +86,7 @@ _CATALOG: dict[str, str] = {
     "editar_acoes_em_lote": "Edita varias acoes de uma vez, diretamente",
     "reagendar_acoes_em_lote": "Redistribui acoes por dias uteis e ja aplica",
     "obter_estado_atual": "Panorama do dia numa chamada: acoes, agenda, janelas livres e pendencias",
+    "listar_respostas_pendentes": "Lista a fila de respostas pendentes, com opção de auditar itens filtrados",
     "obter_acao": "Uma acao inteira e SEM TRUNCAMENTO: descricao, notas, plano completo e diario",
     # Ingestao de arquivo: sem ela, anexo so entrava por link de algo que ja
     # estava no Drive, e comprovante nascido fora dele ficava orfao.
@@ -123,6 +127,8 @@ _NEEDS_CONFIRMATION: set[str] = {
     "registrar_inscricao_bolsa_publica",
     "registrar_item_financeiro_v2",
     "schedule_whatsapp_message",
+    "pausar_conversa",
+    "criar_rascunho_email",
     "preparar_vinculo_contatos",
     "preparar_atualizacao_contato",
     # Gravam direto, sem card de confirmacao intermediario.
@@ -147,7 +153,7 @@ _NEEDS_CONFIRMATION: set[str] = {
     "confirmar_reagendamento_em_lote",
     # Gravam na carteira real. Atencao: estar AQUI nao gateia nada — este
     # conjunto so alimenta o metadado `mutates` do `tools/list`. Quem exige a
-    # dupla chamada e `mcp_server._CONFIRMACAO_SEMPRE`, onde as duas tambem
+    # dupla chamada e `mcp_server._CONFIRMACAO_OBRIGATORIA`, onde as duas tambem
     # estao, justamente porque a politica do canal esta vazia desde 27/08/2026.
     "registrar_aporte_investimento",
     "registrar_execucao_investimento",

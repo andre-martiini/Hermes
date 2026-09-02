@@ -422,15 +422,19 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
     )
     from email_action_linker import _load_candidate_tasks, _format_candidates_for_prompt, queue_and_maybe_send_suggestion
 
-    settings = _load_settings(db)
-    if not settings["enabled"]:
-        return
-
     cursor_ref = db.collection("system").document("whatsapp_ingest")
     cursor_doc = cursor_ref.get()
     since_ts = (cursor_doc.to_dict() or {}).get("last_processed_at") if cursor_doc.exists else None
     if since_ts is None:
         since_ts = datetime.now(timezone.utc) - timedelta(hours=DEFAULT_FIRST_RUN_LOOKBACK_HOURS)
+
+    from inbox_pendentes import atualizar_whatsapp_em_lote, backfill_whatsapp_inicial
+    try:
+        # Faz antes de avançar o cursor normal. Mesmo que uma página ainda não
+        # tenha terminado, ela é independente do cursor e retoma na próxima run.
+        backfill_whatsapp_inicial(db)
+    except Exception as exc:
+        log_to_firestore(sync_ref, logs, f"[WA-INGEST][!] Backfill do inbox adiado: {exc}", True)
 
     try:
         docs = list(
@@ -445,6 +449,19 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
         return
 
     if not docs:
+        return
+
+    # Atualiza o índice de entrada antes de qualquer filtro/IA da triagem. A
+    # pergunta "quem espera resposta" não depende de relevância semântica e não
+    # pode sumir quando a triagem automática estiver desligada.
+    atualizar_whatsapp_em_lote(db, [doc.to_dict() or {} for doc in docs])
+
+    settings = _load_settings(db)
+    if not settings["enabled"]:
+        # A triagem semântica pode estar desligada; o índice operacional de
+        # respostas continua válido e já foi atualizado acima.
+        latest_ingested_at = max((d.to_dict() or {}).get("ingested_at") for d in docs)
+        cursor_ref.set({"last_processed_at": latest_ingested_at}, merge=True)
         return
 
     groups: dict[str, list[dict]] = {}

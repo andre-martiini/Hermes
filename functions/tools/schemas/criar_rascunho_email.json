@@ -1,0 +1,15 @@
+{
+  "name": "criar_rascunho_email",
+  "description": "Cria um rascunho no Gmail com anexos buscados por referência. Nunca envia o e-mail.",
+  "parameters": {"type": "object", "properties": {
+    "para": {"type": "array", "items": {"type": "string"}, "description": "Destinatários; pode ficar vazio ao responder uma thread."},
+    "cc": {"type": "array", "items": {"type": "string"}},
+    "assunto": {"type": "string"}, "corpo": {"type": "string"},
+    "responder_a_thread_id": {"type": "string"}, "acao_id": {"type": "string"},
+    "anexos": {"type": "array", "items": {"type": "object", "properties": {
+      "drive_file_id": {"type": "string"}, "gmail_message_id": {"type": "string"},
+      "attachment_id": {"type": "string"}, "nome_anexo": {"type": "string"},
+      "upload_token": {"type": "string"}
+    }}}
+  }, "required": ["assunto", "corpo"]}
+}

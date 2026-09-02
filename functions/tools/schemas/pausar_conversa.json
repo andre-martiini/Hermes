@@ -1,0 +1,15 @@
+{
+  "name": "pausar_conversa",
+  "description": "Prepara e, somente após _confirmed=true, enfileira uma resposta curta de pausa no WhatsApp e marca quando retomar.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "contato_ou_grupo": {"type": "string", "description": "Nome, telefone ou chat_id conhecido do contato/grupo."},
+      "retomar_em": {"type": "string", "description": "ISO datetime com fuso, amanha_manha ou hoje_tarde."},
+      "mensagem": {"type": "string", "description": "Texto opcional; sem ele usa o modelo curto do Hermes."},
+      "acao_id": {"type": "string", "description": "Ação a atualizar; se omitida, usa vínculo WhatsApp↔ação ativo."},
+      "_confirmed": {"type": "boolean", "description": "Repita com true somente depois da confirmação explícita do usuário."}
+    },
+    "required": ["contato_ou_grupo", "retomar_em"]
+  }
+}
