@@ -39,6 +39,26 @@ DEFAULT_LOOKBACK = "2d"
 EXPIRE_AFTER_DAYS = 7
 GMAIL_QUERY_MAX_RESULTS = 20
 GMAIL_MAX_PAGES_PER_PASS = 5
+DEFAULT_IGNORED_SENDERS = ["notifications@github.com", "@github.com"]
+
+
+def is_sender_ignored(sender_raw: str | None, ignored_patterns: list[str]) -> bool:
+    """Verifica de forma determinística se um remetente deve ser ignorado.
+    Casa endereço de e-mail (via parseaddr), domínio (ex. @github.com) ou texto do remetente.
+    """
+    if not sender_raw or not ignored_patterns:
+        return False
+    raw_lower = str(sender_raw).strip().lower()
+    from email.utils import parseaddr
+    _, addr = parseaddr(sender_raw)
+    addr_lower = addr.strip().lower()
+    for pattern in ignored_patterns:
+        p = str(pattern).strip().lower()
+        if not p:
+            continue
+        if p in addr_lower or p in raw_lower:
+            return True
+    return False
 
 # Classificações de e-mail são geradas por um LLM a partir de conteúdo controlado
 # pelo remetente (assunto/corpo do e-mail) — não são um sinal confiável o suficiente
@@ -70,12 +90,18 @@ def _load_settings(db) -> dict:
 
     doc = _cached_doc_get(db, "system", "settings")
     cfg = ((doc.to_dict() or {}) if doc.exists else {}).get("email_action_linker") or {}
+    ignored_raw = cfg.get("ignored_senders")
+    if ignored_raw is None:
+        ignored_senders = list(DEFAULT_IGNORED_SENDERS)
+    else:
+        ignored_senders = [str(x).strip().lower() for x in ignored_raw if str(x).strip()]
     return {
         "enabled": bool(cfg.get("enabled", False)),
         "min_confidence": float(cfg.get("min_confidence", DEFAULT_MIN_CONFIDENCE)),
         "max_llm_calls_per_pass": int(cfg.get("max_llm_calls_per_pass", DEFAULT_MAX_LLM_CALLS_PER_PASS)),
         "max_suggestions_per_pass": int(cfg.get("max_suggestions_per_pass", DEFAULT_MAX_SUGGESTIONS_PER_PASS)),
         "lookback": str(cfg.get("lookback", DEFAULT_LOOKBACK)),
+        "ignored_senders": ignored_senders,
     }
 
 
@@ -760,6 +786,13 @@ def link_emails_to_actions(db, service, sync_ref, logs):
 
     # --- Etapa B: analisa e-mails novos ---
     query = f'in:inbox newer_than:{settings["lookback"]} -category:promotions -category:social'
+    query_excludes = []
+    for pat in settings.get("ignored_senders", []):
+        pat_clean = pat.strip()
+        if pat_clean and " " not in pat_clean and len(pat_clean) <= 60:
+            query_excludes.append(f"-from:{pat_clean}")
+    if query_excludes:
+        query = f"{query} {' '.join(query_excludes)}"
     try:
         fresh_message_ids = _collect_fresh_message_ids(service, query, settings["max_llm_calls_per_pass"], suggestions_col)
     except Exception as exc:
@@ -796,6 +829,25 @@ def link_emails_to_actions(db, service, sync_ref, logs):
             continue
 
         sender, subject = _gmail_message_headers(msg)
+        if is_sender_ignored(sender, settings.get("ignored_senders", [])):
+            base_doc = {
+                "canal": "email",
+                "titulo_sinal": subject,
+                "origem_sinal": sender,
+                "google_message_id": msg_id,
+                "gmail_thread_id": msg.get("threadId"),
+                "subject": subject,
+                "sender": sender,
+                "snippet": msg.get('snippet', ''),
+                "internal_date": msg.get('internalDate'),
+                "analyzed_at": now.isoformat(),
+                "status": "ignored",
+                "ignored_reason": "ignored_sender",
+                "related": False,
+            }
+            suggestions_col.document(msg_id).set(base_doc)
+            continue
+
         snippet = msg.get('snippet', '')
         body = _extract_email_body(msg.get('payload', {}))
 
