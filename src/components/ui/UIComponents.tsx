@@ -51,7 +51,31 @@ export const FilterChip = React.memo(({ label, isActive, onClick, colorClass }: 
   </button>
 ));
 
-export const PgcMiniTaskCard = React.memo(({ task, onClick }: { task: Tarefa, onClick?: () => void }) => {
+export interface PgcMiniTaskCardProps {
+  task: Tarefa;
+  onClick?: () => void;
+  isDark?: boolean;
+  suggestion?: {
+    entrega: string;
+    unidade?: string;
+    confidence?: number;
+    motivo?: string;
+    origem?: 'heuristica' | 'ia';
+  } | null;
+  onConfirmSuggestion?: () => void;
+  onDismissSuggestion?: () => void;
+  isConfirming?: boolean;
+}
+
+export const PgcMiniTaskCard = React.memo(({
+  task,
+  onClick,
+  isDark = false,
+  suggestion,
+  onConfirmSuggestion,
+  onDismissSuggestion,
+  isConfirming = false
+}: PgcMiniTaskCardProps) => {
   return (
     <div
       draggable
@@ -60,7 +84,9 @@ export const PgcMiniTaskCard = React.memo(({ task, onClick }: { task: Tarefa, on
         e.dataTransfer.effectAllowed = 'copy';
       }}
       onClick={onClick}
-      className={`bg-white border border-border-grid p-3 rounded-none shadow-soft-touch hover:border-primary-tactile transition-all ${onClick ? 'cursor-pointer' : 'cursor-grab'} active:cursor-grabbing w-full md:w-[280px] group`}
+      className={`border border-border-grid p-3 rounded-none shadow-soft-touch transition-all ${onClick ? 'cursor-pointer' : 'cursor-grab'} active:cursor-grabbing w-full group ${
+        isDark ? 'bg-slate-800 text-white hover:border-blue-500' : 'bg-white hover:border-primary-tactile'
+      } ${suggestion ? 'ring-1 ring-primary-tactile/30' : ''}`}
     >
       <div className="flex items-center gap-2 mb-2 flex-wrap">
         {task.area_tematica && (
@@ -70,7 +96,67 @@ export const PgcMiniTaskCard = React.memo(({ task, onClick }: { task: Tarefa, on
         )}
         <span className="text-[8px] font-black text-slate-400 uppercase font-mono">{formatDate(task.data_limite)}</span>
       </div>
-      <h5 className="text-[11px] font-bold text-text-main leading-tight group-hover:text-primary-tactile line-clamp-2">{task.titulo}</h5>
+      <h5 className={`text-[11px] font-bold leading-tight line-clamp-2 ${isDark ? 'text-slate-100 group-hover:text-blue-400' : 'text-text-main group-hover:text-primary-tactile'}`}>
+        {task.titulo}
+      </h5>
+
+      {suggestion && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className={`mt-2.5 pt-2 border-t border-dashed space-y-1.5 ${isDark ? 'border-slate-700 bg-blue-500/5 -mx-3 -mb-3 p-2.5' : 'border-slate-200 bg-slate-50 -mx-3 -mb-3 p-2.5'}`}
+        >
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-[8px] font-black uppercase tracking-wider text-primary-tactile flex items-center gap-1 font-mono">
+              <span>{suggestion.origem === 'ia' ? '✨ Sugestão IA' : '🎯 Sugestão'}</span>
+              {suggestion.confidence && (
+                <span className="text-slate-400 font-normal">({Math.round(suggestion.confidence * 100)}%)</span>
+              )}
+            </span>
+            {suggestion.unidade && (
+              <span className="text-[7px] font-mono font-bold px-1 rounded bg-slate-200 text-slate-700">
+                {suggestion.unidade}
+              </span>
+            )}
+          </div>
+          <p className="text-[9px] font-bold uppercase tracking-tight text-slate-700 dark:text-slate-200 line-clamp-2">
+            {suggestion.entrega}
+          </p>
+          {suggestion.motivo && (
+            <p className="text-[8px] text-slate-400 italic leading-snug line-clamp-1">
+              {suggestion.motivo}
+            </p>
+          )}
+          <div className="flex items-center gap-1.5 pt-1">
+            <button
+              type="button"
+              disabled={isConfirming}
+              onClick={(e) => {
+                e.stopPropagation();
+                onConfirmSuggestion?.();
+              }}
+              className="flex-1 py-1 px-2 rounded-none bg-emerald-600 hover:bg-emerald-500 text-white text-[8px] font-black uppercase tracking-wider font-mono transition-colors flex items-center justify-center gap-1 disabled:opacity-50"
+              title="Confirmar vínculo com esta entrega"
+            >
+              <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+              </svg>
+              {isConfirming ? 'Vinculando...' : 'Vincular (Sim)'}
+            </button>
+            <button
+              type="button"
+              disabled={isConfirming}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDismissSuggestion?.();
+              }}
+              className="py-1 px-2 rounded-none border border-slate-300 dark:border-slate-600 text-slate-400 hover:text-rose-500 hover:border-rose-400 text-[8px] font-black uppercase font-mono transition-colors disabled:opacity-50"
+              title="Dispensar sugestão"
+            >
+              Não
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 });

@@ -6,6 +6,7 @@ interface PgdAuditRowProps {
   entregaEntity?: EntregaInstitucional;
   atividadesRelacionadas: AtividadeRealizada[];
   tarefasRelacionadas: Tarefa[];
+  suggestedCount?: number;
   onDrop: (tarefaId: string) => void;
   onUnlinkTarefa: (tarefaId: string, entregaId: string) => void;
   onSelectTask: (t: Tarefa) => void;
@@ -23,6 +24,7 @@ export const PgdAuditRow = ({
   entregaEntity,
   atividadesRelacionadas,
   tarefasRelacionadas,
+  suggestedCount,
   onDrop,
   onUnlinkTarefa,
   onSelectTask,
@@ -172,6 +174,11 @@ export const PgdAuditRow = ({
             <div className="w-1.5 h-1.5 bg-emerald-400 rounded-lg"></div>
             {executionRecordsCount} registros PGD
           </div>
+          {suggestedCount && suggestedCount > 0 ? (
+            <div className="flex items-center gap-1.5 text-[9px] font-black text-amber-500 uppercase font-mono px-2 py-0.5 rounded border border-amber-500/20 bg-amber-500/5">
+              <span>✨ {suggestedCount} sugestão(ões)</span>
+            </div>
+          ) : null}
         </div>
 
         <button

@@ -781,3 +781,99 @@ def submitPublicScholarshipRegistration(req: https_fn.CallableRequest):
         })
 
     return {'success': True}
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=60)
+def suggestPgdTaskLinksAI(req: https_fn.CallableRequest) -> dict:
+    """Analisa ações pendentes e entregas do plano de trabalho PGD usando Gemini
+    para sugerir os vínculos semânticos mais adequados."""
+    require_authenticated(req)
+
+    data = req.data or {}
+    tasks = data.get('tasks') or []
+    entregas = data.get('entregas') or []
+
+    if not tasks or not entregas:
+        return {'matches': []}
+
+    db = get_db()
+    gemini_key = get_gemini_key(db)
+    if not gemini_key:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+            message="Chave Gemini nao configurada."
+        )
+
+    # Formatar as entregas
+    entregas_text_lines = []
+    for idx, e in enumerate(entregas):
+        unidade = str(e.get('unidade') or '').strip()
+        entrega = str(e.get('entrega') or '').strip()
+        descricao = str(e.get('descricao') or '').strip()
+        entregas_text_lines.append(f"[{idx}] Unidade: {unidade} | Entrega: {entrega} | Descrição: {descricao}")
+    entregas_text = "\n".join(entregas_text_lines)
+
+    # Formatar as tarefas (até 50 tarefas por lote)
+    tasks_text_lines = []
+    for t in tasks[:50]:
+        t_id = str(t.get('id') or '').strip()
+        titulo = str(t.get('titulo') or '').strip()
+        projeto = str(t.get('projeto') or '').strip()
+        area = str(t.get('area_tematica') or '').strip()
+        tags = ", ".join(t.get('tags') or [])
+        notas = str(t.get('notas') or '').strip()[:200]
+        tasks_text_lines.append(f"- ID: {t_id} | Título: {titulo} | Projeto: {projeto} | Área: {area} | Tags: {tags} | Notas: {notas}")
+    tasks_text = "\n".join(tasks_text_lines)
+
+    prompt = f"""Você é um auditor e assistente de gestão PGD (Programa de Gestão e Desempenho).
+O usuário possui ações executadas e precisa vinculá-las à entrega institucional correta no seu Plano de Trabalho.
+
+ENTREGAS DISPONÍVEIS NO PLANO:
+{entregas_text}
+
+AÇÕES PENDENTES DE VÍNCULO:
+{tasks_text}
+
+Para cada ação, avalie se ela tem relação direta ou afinidade temático-operacional com alguma das entregas listadas.
+Se houver relação clara, indique o índice da entrega (`entrega_index`), a confiança estimada (0.0 a 1.0) e uma justificativa curta e direta em português (1 frase).
+Se uma ação claramente não tiver relação com nenhuma entrega listada, omita-a ou retorne confidence abaixo de 0.5.
+
+Responda APENAS com um JSON no formato exato:
+{{
+  "matches": [
+    {{
+      "task_id": "id_da_tarefa",
+      "entrega_index": 0,
+      "confidence": 0.9,
+      "motivo": "Ação trata de termo de referência de compras sob responsabilidade da CLC"
+    }}
+  ]
+}}
+"""
+    try:
+        from gemini_cost_controls import GEMINI_LIGHT_MODEL
+        from google.genai import types
+        genai = get_genai_module()
+        client = genai.Client(api_key=gemini_key)
+        response = generate_content_logged(
+            client,
+            model=GEMINI_LIGHT_MODEL,
+            contents=prompt,
+            feature="pgd_task_linking",
+            db=db,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.1,
+            )
+        )
+        raw = (response.text or "").strip()
+        if "```json" in raw:
+            raw = raw.split("```json")[-1].split("```")[0].strip()
+        elif "```" in raw:
+            raw = raw.split("```")[-1].split("```")[0].strip()
+        res_json = json.loads(raw)
+        return {"matches": res_json.get("matches") or []}
+    except Exception as e:
+        print(f"Erro em suggestPgdTaskLinksAI: {e}")
+        return {"matches": []}
+

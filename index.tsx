@@ -50,6 +50,7 @@ import {
   RowCard, WysiwygEditor, NotificationCenter, AutoExpandingTextarea
 } from './src/components/ui/UIComponents';
 import { PgdAuditRow } from './src/components/ui/PgdAuditRow';
+import { usePgdSmartLinking } from './src/utils/usePgdSmartLinking';
 import { CreatePgdPlanModal } from './src/components/pgd/CreatePgdPlanModal';
 import { CreatePgdPlanPayload } from './src/utils/pgdPlanAutomation';
 import {
@@ -4140,14 +4141,39 @@ const App: React.FC = () => {
       // Regra 2: Verifica vínculos com entregas DO MÃŠS ATUAL
       const linkedIds = Array.isArray(t.entregas_relacionadas) ? t.entregas_relacionadas : [];
       const isLinkedToCurrent = linkedIds.some(id => currentDeliveryIds.includes(id));
-      // Se JÃ estiver vinculado a uma entrega deste mês, não precisa aparecer na lista de "Aguardando"
+      // Se JÃ  estiver vinculado a uma entrega deste mês, não precisa aparecer na lista de "Aguardando"
       // POIS ela já aparecerá dentro do card da entrega correspondente.
       // Se estiver vinculado a entrega de OUTRO mês, deve aparecer aqui?
       // O usuário disse: "todas as tarefas que tem a tag CLC ou a tag assistência estudantil devam constar nessa aba Audit PGC"
-      // E "Se ela estiver vinculada a uma das atividades já cadastradas, ótimo, senão o sistema deve proporcionar uma forma inteligente de fazer essa vinculação."
+      // E "Se ela estiver vinculada a uma das atividades já cadastradas, ótimo, sem o sistema deve proporcionar uma forma inteligente de fazer essa vinculação."
       return !isLinkedToCurrent;
     });
   }, [pgcTasks, pgcEntregas, calendarViewMode, calendarDate]);
+
+  const currentPlan = useMemo(() => {
+    const planKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+    return planosTrabalho.find((p) => p.mes_ano === planKey);
+  }, [planosTrabalho, currentYear, currentMonth]);
+
+  const {
+    combinedPgdSuggestions,
+    suggestedCountForDeliverable,
+    isSuggestingPgdAI,
+    confirmingTaskIds,
+    handleConfirmPgdSuggestion,
+    handleDismissPgdSuggestion,
+    handleBatchConfirmPgdSuggestions,
+    handleRunPgdAI,
+  } = usePgdSmartLinking({
+    currentPlan,
+    pgcTasksAguardando,
+    pgcEntregas,
+    handleCreateEntregaFromPlan,
+    handleLinkTarefa,
+    showToast,
+    functions,
+    db,
+  });
   const allUnidades = useMemo(() => {
     const fixed = ['CLC', 'Assistência Estudantil'];
     const dbUnidades = unidades.map(u => u.nome);
@@ -6462,15 +6488,68 @@ const App: React.FC = () => {
                         <div className={`lg:col-span-3 rounded-none border-2 flex flex-col overflow-hidden h-full ${isDarkTheme ? 'bg-slate-900 border-border-grid' : 'bg-white border-border-grid shadow-sm'}`}>
                           <div className={`p-4 border-b-2 border-border-grid flex-shrink-0 ${isDarkTheme ? 'bg-slate-800' : 'bg-slate-50'}`}>
                             <div className="flex items-center justify-between">
-                              <h4 className="text-[10px] font-black text-slate-900 tracking-widest uppercase font-mono">Pendentes</h4>
+                              <h4 className={`text-[10px] font-black tracking-widest uppercase font-mono ${isDarkTheme ? 'text-white' : 'text-slate-900'}`}>Pendentes</h4>
                               <span className="bg-slate-900 text-white text-[9px] font-black px-2 py-0.5 rounded-none font-mono">{pgcTasksAguardando.length}</span>
                             </div>
-                            <p className="text-slate-400 text-[9px] font-black uppercase tracking-widest mt-1 font-mono">Arraste p/ vincular</p>
+                            <div className="mt-2.5 flex flex-col gap-1.5">
+                              <button
+                                type="button"
+                                disabled={isSuggestingPgdAI || pgcTasksAguardando.length === 0}
+                                onClick={handleRunPgdAI}
+                                className={`w-full py-1.5 px-2 text-[8px] font-black uppercase font-mono tracking-wider transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 ${
+                                  isDarkTheme ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'
+                                }`}
+                                title="Analisar ações pendentes com IA para sugerir vínculos às entregas"
+                              >
+                                {isSuggestingPgdAI ? (
+                                  <>
+                                    <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                    </svg>
+                                    Analisando com IA...
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>✨ Sugerir com IA</span>
+                                  </>
+                                )}
+                              </button>
+
+                              {Object.keys(combinedPgdSuggestions).length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={handleBatchConfirmPgdSuggestions}
+                                  className="w-full py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white text-[8px] font-black uppercase font-mono tracking-wider transition-colors flex items-center justify-center gap-1"
+                                  title="Confirmar todos os vínculos sugeridos de uma vez"
+                                >
+                                  <span>⚡ Vincular Todas ({Object.keys(combinedPgdSuggestions).length})</span>
+                                </button>
+                              )}
+                            </div>
                           </div>
                           <div className="flex-1 overflow-y-auto p-3 space-y-2 scrollbar-hide">
-                            {pgcTasksAguardando.map(task => (
-                              <PgcMiniTaskCard key={task.id} task={task} onClick={() => setSelectedTask(task)} />
-                            ))}
+                            {pgcTasksAguardando.map(task => {
+                              const sugg = combinedPgdSuggestions[task.id];
+                              return (
+                                <PgcMiniTaskCard
+                                  key={task.id}
+                                  task={task}
+                                  isDark={isDarkTheme}
+                                  onClick={() => setSelectedTask(task)}
+                                  suggestion={sugg ? {
+                                    entrega: sugg.item.entrega,
+                                    unidade: sugg.item.unidade,
+                                    confidence: sugg.confidence,
+                                    motivo: sugg.motivo,
+                                    origem: sugg.origem
+                                  } : null}
+                                  isConfirming={confirmingTaskIds.has(task.id)}
+                                  onConfirmSuggestion={() => sugg && handleConfirmPgdSuggestion(task.id, sugg.item)}
+                                  onDismissSuggestion={() => handleDismissPgdSuggestion(task.id)}
+                                />
+                              );
+                            })}
                             {pgcTasksAguardando.length === 0 && (
                               <div className="py-10 text-center">
                                 <p className="text-slate-300 font-black text-[9px] uppercase tracking-widest italic font-mono">Tudo limpo!</p>
@@ -6481,13 +6560,14 @@ const App: React.FC = () => {
                         <div className={`lg:col-span-9 rounded-none border-2 overflow-hidden flex flex-col h-full ${isDarkTheme ? 'bg-slate-900 border-border-grid' : 'bg-white border-border-grid shadow-sm'}`}>
                           <div className="flex-1 overflow-y-auto divide-y-2 divide-border-grid scrollbar-hide">
                             {(() => {
-                              const currentPlan = planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`);
-                              if (!currentPlan) return <div className="p-12 text-center h-full flex items-center justify-center"><p className="text-slate-300 font-black text-sm uppercase tracking-widest italic">Nenhum plano definido.</p></div>;
-                              return currentPlan.itens.map((item, index) => {
+                              const plan = currentPlan;
+                              if (!plan) return <div className="p-12 text-center h-full flex items-center justify-center"><p className="text-slate-300 font-black text-sm uppercase tracking-widest italic">Nenhum plano definido.</p></div>;
+                              return plan.itens.map((item, index) => {
                                 const entregaEntity = pgcEntregas.find(e => e.entrega === item.entrega);
                                 const entregaId = entregaEntity?.id;
                                 const atividadesRelacionadas: AtividadeRealizada[] = entregaId ? atividadesPGC.filter(a => a.entrega_id === entregaId) : [];
                                 const tarefasRelacionadas: Tarefa[] = entregaId ? pgcTasks.filter(t => t.entregas_relacionadas?.includes(entregaId)) : [];
+                                const suggestedCount = suggestedCountForDeliverable[item.entrega] || 0;
                                 return (
                                   <React.Fragment key={String(index)}>
                                     <PgdAuditRow
@@ -6495,6 +6575,7 @@ const App: React.FC = () => {
                                       entregaEntity={entregaEntity}
                                       atividadesRelacionadas={atividadesRelacionadas}
                                       tarefasRelacionadas={tarefasRelacionadas}
+                                      suggestedCount={suggestedCount}
                                       onDrop={async (tarefaId) => {
                                         let targetId = entregaId;
                                         if (!targetId) {

@@ -34,6 +34,7 @@ from security_portals import (
     mutateShoppingList,
     submitPublicFinanceTransaction,
     submitPublicScholarshipRegistration,
+    suggestPgdTaskLinksAI,
 )
 from health_routines import DEFAULT_HEALTH_REMINDERS
 from pdf_precision import extract_pdf_text_with_fallback, is_pdf_mime_type
