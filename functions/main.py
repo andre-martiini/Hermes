@@ -13559,6 +13559,8 @@ def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
     email_cfg = data.get("email_action_linker") or {}
     diary_cfg = data.get("personal_diary") or {}
     wa_cfg = data.get("whatsapp_ingest") or {}
+    atencao_cfg = data.get("atencao") or {}
+    aguardando_cfg = atencao_cfg.get("aguardando_terceiro") or {}
 
     return {
         "email_action_linker": {"enabled": bool(email_cfg.get("enabled", False))},
@@ -13571,6 +13573,11 @@ def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
             # o agente pode ler. Separados em 27/08/2026 — ver whatsapp_tools.
             "capturar_todos": bool(wa_cfg.get("capturar_todos", False)),
             "leitura_total": bool(wa_cfg.get("leitura_total", False)),
+        },
+        "atencao": {
+            "aguardando_terceiro": {
+                "enabled": bool(aguardando_cfg.get("enabled", False)),
+            },
         },
         "whatsapp_auto_send_enabled": bool(data.get("whatsapp_auto_send_enabled", False)),
         "whatsapp_worker": _serialize_whatsapp_worker_heartbeat(db),
@@ -13611,6 +13618,15 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
             wa_updates["leitura_total"] = bool(wa_cfg["leitura_total"])
         if wa_updates:
             updates["whatsapp_ingest"] = wa_updates
+
+    atencao_cfg = data.get("atencao")
+    if isinstance(atencao_cfg, dict):
+        atencao_updates: dict = {}
+        aguardando_cfg = atencao_cfg.get("aguardando_terceiro")
+        if isinstance(aguardando_cfg, dict) and "enabled" in aguardando_cfg:
+            atencao_updates["aguardando_terceiro"] = {"enabled": bool(aguardando_cfg["enabled"])}
+        if atencao_updates:
+            updates["atencao"] = atencao_updates
 
     if "whatsapp_auto_send_enabled" in data:
         updates["whatsapp_auto_send_enabled"] = bool(data["whatsapp_auto_send_enabled"])
@@ -13826,6 +13842,9 @@ from monthly_recurring_actions import gerar_acoes_recorrentes_mensais
 
 # Import daily AI notification planner job
 from ai_notification_planner import ai_notification_planner_daily
+
+# Import attention queue action detector job
+from atencao import detectar_atencao_acoes
 
 # Import weekly byproduct detector job
 import deteccao_subproduto

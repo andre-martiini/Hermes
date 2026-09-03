@@ -1,0 +1,438 @@
+"""Fila de atenção unificada — agrega pendências determinísticas de ações,
+conversas e canais que demandam decisão ou acompanhamento do dono.
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+import zoneinfo
+
+from firebase_admin import firestore
+from firebase_functions import scheduler_fn, options
+
+import subtarefas
+
+COLLECTION = "atencao"
+
+# Origens permitidas
+ORIGENS = ("acao", "whatsapp", "email", "agenda", "repo", "financeiro", "saude")
+
+# Tipos de detectores
+TIPO_AGUARDANDO_TERCEIRO_VENCIDO = "aguardando_terceiro_vencido"
+
+# Prioridades
+PRIORIDADE_ALTA = "alta"
+PRIORIDADE_MEDIA = "media"
+PRIORIDADE_BAIXA = "baixa"
+_PRIORITY_ORDER = {PRIORIDADE_ALTA: 0, PRIORIDADE_MEDIA: 1, PRIORIDADE_BAIXA: 2}
+
+# Estados
+ESTADO_ABERTO = "aberto"
+ESTADO_DELEGADO = "delegado_ao_agente"
+ESTADO_AGUARDANDO_ANDRE = "aguardando_andre"
+ESTADO_RESOLVIDO = "resolvido"
+ESTADO_DESCARTADO = "descartado"
+ESTADOS_VALIDOS = (
+    ESTADO_ABERTO,
+    ESTADO_DELEGADO,
+    ESTADO_AGUARDANDO_ANDRE,
+    ESTADO_RESOLVIDO,
+    ESTADO_DESCARTADO,
+)
+ESTADOS_FECHADOS = (ESTADO_RESOLVIDO, ESTADO_DESCARTADO)
+
+# Aliases reutilizados de inbox_pendentes
+_ACTIVE_STATUS_ALIASES = {"em andamento", "andamento", "nao iniciado", "não iniciado", "pendente"}
+_STANDBY_STATUS_ALIASES = {"stand-by", "standby", "stand by", "cgby"}
+
+
+def _acao_e_critica(tarefa: dict, hoje_str: str) -> bool:
+    """Verifica se a ação é crítica reutilizando os critérios de morning_summary."""
+    degradacao = int(tarefa.get("degradation_count") or 0)
+    if degradacao >= 3:
+        return True
+    if tarefa.get("cobrar"):
+        return True
+    prazo_final = str(tarefa.get("prazo_final") or "").strip()
+    if prazo_final and len(prazo_final) >= 10:
+        try:
+            dias = (
+                datetime.strptime(prazo_final[:10], "%Y-%m-%d").date()
+                - datetime.strptime(hoje_str, "%Y-%m-%d").date()
+            ).days
+            if dias <= 2:
+                return True
+        except ValueError:
+            pass
+    return False
+
+
+def avaliar_etapas(
+    tarefas: list[dict],
+    hoje: date,
+    respostas_por_chat: dict[str, list] | None = None,
+) -> list[dict]:
+    """Avaliação pura e determinística de etapas vencidas aguardando terceiro.
+
+    Separação sem Firestore para testes de unidade rápidos e previsíveis.
+    """
+    itens: list[dict] = []
+    hoje_str = hoje.strftime("%Y-%m-%d")
+    respostas_por_chat = respostas_por_chat or {}
+
+    for tarefa in tarefas:
+        status = str(tarefa.get("status") or "").strip().lower()
+        if status not in _ACTIVE_STATUS_ALIASES and status not in _STANDBY_STATUS_ALIASES:
+            continue
+
+        acao_id = str(tarefa.get("id") or "").strip()
+        titulo_acao = str(tarefa.get("titulo") or "").strip()
+        plano = tarefa.get("plano_acao") or []
+        if not isinstance(plano, list):
+            continue
+
+        e_critica = _acao_e_critica(tarefa, hoje_str)
+        prioridade = PRIORIDADE_ALTA if e_critica else PRIORIDADE_MEDIA
+
+        # Chats do WhatsApp vinculados à ação
+        vinculos = tarefa.get("whatsapp_vinculos") or []
+        chat_ids = [
+            v.get("chat_id")
+            for v in vinculos
+            if isinstance(v, dict) and v.get("chat_id")
+        ]
+
+        for idx, step in enumerate(plano):
+            if not isinstance(step, dict):
+                continue
+
+            estado_etapa = subtarefas.estado_de(step)
+            if estado_etapa != subtarefas.AGUARDANDO_TERCEIRO:
+                continue
+
+            data_prevista_str = subtarefas.data_prevista_de(step, tarefa.get("data_limite"), plano)
+            if not data_prevista_str:
+                continue
+
+            try:
+                data_prevista = datetime.strptime(data_prevista_str[:10], "%Y-%m-%d").date()
+            except ValueError:
+                continue
+
+            if data_prevista >= hoje:
+                continue
+
+            # Se existir vínculo tarefas.whatsapp_vinculos e houver mensagem em whatsapp_messages
+            # daquele chat com timestamp >= data_prevista e from_me == false, não criar o item
+            # (a pessoa respondeu; quem avalia se resolveu é o dono).
+            # Registre isso num comentário: é a única inteligência do detector e é o que evita o ruído mais óbvio.
+            respondeu = False
+            for cid in chat_ids:
+                msgs = respostas_por_chat.get(cid, [])
+                for msg in msgs:
+                    if isinstance(msg, dict):
+                        if msg.get("from_me"):
+                            continue
+                        ts = msg.get("timestamp")
+                    else:
+                        ts = msg
+
+                    msg_date = None
+                    if isinstance(ts, datetime):
+                        msg_date = ts.date()
+                    elif hasattr(ts, "date"):
+                        msg_date = ts.date()
+                    elif isinstance(ts, str):
+                        try:
+                            msg_date = datetime.fromisoformat(ts.replace("Z", "+00:00")).date()
+                        except ValueError:
+                            pass
+
+                    if msg_date and msg_date >= data_prevista:
+                        respondeu = True
+                        break
+                if respondeu:
+                    break
+
+            if respondeu:
+                continue
+
+            etapa_id = str(step.get("id") or idx)
+            aguardando_de = str(step.get("aguardando_de") or "").strip() or "Terceiro"
+            texto_etapa = subtarefas.texto_de(step)
+            titulo = f"{aguardando_de} deveria ter respondido sobre: {texto_etapa}"
+            sugestao = f"Cobrar {aguardando_de} ou reagendar a etapa"
+            resumo = f"Ação '{titulo_acao}': etapa '{texto_etapa}' aguarda retorno de {aguardando_de} desde {data_prevista_str}."
+            if len(resumo) > 400:
+                resumo = resumo[:397] + "..."
+
+            chave_dedupe = f"aguardando_terceiro_vencido:{acao_id}:{etapa_id}"
+
+            item = {
+                "origem": "acao",
+                "tipo": TIPO_AGUARDANDO_TERCEIRO_VENCIDO,
+                "prioridade": prioridade,
+                "titulo": titulo,
+                "resumo": resumo,
+                "acao_id": acao_id or None,
+                "etapa_id": etapa_id or None,
+                "pessoa": aguardando_de,
+                "prazo": data_prevista_str,
+                "evidencia": {
+                    "acao_id": acao_id or None,
+                    "etapa_id": etapa_id or None,
+                    "chat_id": chat_ids[0] if chat_ids else None,
+                    "mensagem_ids": [],
+                },
+                "sugestao": sugestao,
+                "estado": ESTADO_ABERTO,
+                "chave_dedupe": chave_dedupe,
+            }
+            itens.append(item)
+
+    return itens
+
+
+@scheduler_fn.on_schedule(
+    schedule="every 30 minutes",
+    timezone="America/Sao_Paulo",
+    memory=options.MemoryOption.MB_256,
+    timeout_sec=120,
+)
+def detectar_atencao_acoes(event: scheduler_fn.ScheduledEvent = None) -> None:
+    """Cloud Function agendada a cada 30 min para detectar etapas aguardando terceiro vencidas."""
+    from main import get_db
+
+    db = get_db()
+    settings_doc = db.collection("system").document("settings").get()
+    settings = settings_doc.to_dict() if settings_doc.exists else {}
+    enabled = (
+        settings.get("atencao", {})
+        .get("aguardando_terceiro", {})
+        .get("enabled", False)
+    )
+    if not enabled:
+        print("[Atencao] Detector aguardando_terceiro_vencido desligado em system/settings; abortando.")
+        return
+
+    tarefas_docs = list(db.collection("tarefas").stream())
+    tarefas_ativas: list[dict] = []
+    chats_para_consultar: set[str] = set()
+
+    for doc in tarefas_docs:
+        d = doc.to_dict() or {}
+        d["id"] = doc.id
+        status = str(d.get("status") or "").strip().lower()
+        if status in _ACTIVE_STATUS_ALIASES or status in _STANDBY_STATUS_ALIASES:
+            tarefas_ativas.append(d)
+            for v in (d.get("whatsapp_vinculos") or []):
+                if isinstance(v, dict) and v.get("chat_id"):
+                    chats_para_consultar.add(v["chat_id"])
+
+    respostas_por_chat: dict[str, list[dict]] = {}
+    for cid in chats_para_consultar:
+        try:
+            msgs = list(
+                db.collection("whatsapp_messages")
+                .where("chat_id", "==", cid)
+                .where("from_me", "==", False)
+                .stream()
+            )
+            respostas_por_chat[cid] = [
+                {"timestamp": m.to_dict().get("timestamp"), "from_me": False}
+                for m in msgs
+            ]
+        except Exception as msg_err:
+            print(f"[Atencao] Falha ao consultar mensagens de {cid}: {msg_err}")
+
+    sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
+    hoje = datetime.now(sp_tz).date()
+
+    itens = avaliar_etapas(tarefas_ativas, hoje, respostas_por_chat)
+
+    for item in itens:
+        chave = item["chave_dedupe"]
+        doc_ref = db.collection(COLLECTION).document(chave)
+        existing_snap = doc_ref.get()
+
+        prazo_str = item.get("prazo")
+        prazo_dt = (
+            datetime.strptime(prazo_str[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            if prazo_str
+            else None
+        )
+
+        payload = {
+            "origem": item["origem"],
+            "tipo": item["tipo"],
+            "prioridade": item["prioridade"],
+            "titulo": item["titulo"],
+            "resumo": item["resumo"],
+            "acao_id": item["acao_id"],
+            "etapa_id": item["etapa_id"],
+            "pessoa": item["pessoa"],
+            "prazo": prazo_dt,
+            "prazo_origem": prazo_str,
+            "evidencia": item["evidencia"],
+            "sugestao": item["sugestao"],
+            "chave_dedupe": chave,
+            "atualizado_em": firestore.SERVER_TIMESTAMP,
+        }
+
+        if existing_snap.exists:
+            existing_data = existing_snap.to_dict() or {}
+            existing_estado = existing_data.get("estado")
+            existing_prazo = existing_data.get("prazo_origem")
+
+            if existing_estado in ESTADOS_FECHADOS:
+                if existing_prazo == prazo_str:
+                    # Não reabrir se o prazo de origem não mudou
+                    continue
+                # Se o prazo mudou para outra data também vencida, reabre
+                payload["estado"] = ESTADO_ABERTO
+                payload["resolvido_em"] = None
+                payload["desfecho"] = None
+            else:
+                payload["estado"] = existing_estado or ESTADO_ABERTO
+
+            doc_ref.set(payload, merge=True)
+        else:
+            payload["estado"] = ESTADO_ABERTO
+            payload["criado_em"] = firestore.SERVER_TIMESTAMP
+            doc_ref.set(payload)
+
+
+def _to_iso(val) -> str | None:
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val.isoformat()
+    if hasattr(val, "isoformat"):
+        return val.isoformat()
+    if hasattr(val, "to_datetime"):
+        return val.to_datetime().isoformat()
+    return str(val)
+
+
+def coletar_fila_atencao(
+    db,
+    estado: str | None = "aberto",
+    origem: str | None = None,
+    limite: int = 20,
+) -> dict:
+    """Coleta itens da fila de atenção com ordenação estável por prioridade e prazo."""
+    limite_ajustado = max(1, min(int(limite or 20), 100))
+    query = db.collection(COLLECTION)
+
+    if estado:
+        query = query.where("estado", "==", estado)
+    if origem:
+        query = query.where("origem", "==", origem)
+
+    docs = list(query.stream())
+    itens: list[dict] = []
+
+    for doc in docs:
+        d = doc.to_dict() or {}
+        item = {
+            "id": doc.id,
+            "origem": d.get("origem"),
+            "tipo": d.get("tipo"),
+            "prioridade": d.get("prioridade"),
+            "titulo": d.get("titulo"),
+            "resumo": d.get("resumo"),
+            "acao_id": d.get("acao_id"),
+            "etapa_id": d.get("etapa_id"),
+            "pessoa": d.get("pessoa"),
+            "prazo": _to_iso(d.get("prazo")),
+            "evidencia": d.get("evidencia") or {},
+            "sugestao": d.get("sugestao"),
+            "estado": d.get("estado"),
+            "chave_dedupe": d.get("chave_dedupe") or doc.id,
+            "criado_em": _to_iso(d.get("criado_em")),
+            "atualizado_em": _to_iso(d.get("atualizado_em")),
+            "resolvido_em": _to_iso(d.get("resolvido_em")),
+            "desfecho": d.get("desfecho"),
+        }
+        itens.append(item)
+
+    def _sort_key(x: dict) -> tuple:
+        prio = _PRIORITY_ORDER.get(x.get("prioridade"), 9)
+        prazo = x.get("prazo") or "9999-99-99"
+        criado = x.get("criado_em") or ""
+        return (prio, prazo, criado)
+
+    itens.sort(key=_sort_key)
+    return {
+        "total": len(itens),
+        "itens": itens[:limite_ajustado],
+    }
+
+
+def resolver_item(
+    db,
+    item_id: str,
+    novo_estado: str,
+    desfecho: str | None = None,
+    ctx=None,
+) -> dict:
+    """Resolve, descarta ou delega um item da fila de atenção."""
+    item_id = str(item_id or "").strip()
+    if not item_id:
+        return {"erro": "item_id é obrigatório."}
+
+    doc_ref = db.collection(COLLECTION).document(item_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        return {"erro": f"Item '{item_id}' não encontrado.", "status": "not_found"}
+
+    if novo_estado not in (ESTADO_DELEGADO, ESTADO_AGUARDANDO_ANDRE, ESTADO_RESOLVIDO, ESTADO_DESCARTADO):
+        return {"erro": f"Estado '{novo_estado}' inválido."}
+
+    desfecho_limpo = (desfecho or "").strip()
+    if novo_estado in ESTADOS_FECHADOS and not desfecho_limpo:
+        return {"erro": "Desfecho é obrigatório para resolver ou descartar um item da fila de atenção."}
+
+    item_data = doc.to_dict() or {}
+    update_data: dict = {
+        "estado": novo_estado,
+        "atualizado_em": firestore.SERVER_TIMESTAMP,
+    }
+    if desfecho_limpo:
+        update_data["desfecho"] = desfecho_limpo
+    if novo_estado in ESTADOS_FECHADOS:
+        update_data["resolvido_em"] = firestore.SERVER_TIMESTAMP
+
+    doc_ref.update(update_data)
+
+    # Se o item tiver acao_id, registra no diário de bordo da ação
+    acao_id = item_data.get("acao_id")
+    if acao_id and desfecho_limpo:
+        try:
+            from tools.hermes_tools import registrar_no_diario, ToolContext
+            if ctx is not None:
+                registrar_no_diario(
+                    ctx,
+                    {
+                        "task_id_alvo": acao_id,
+                        "nota": f"[Fila de Atenção: {item_data.get('titulo') or item_id}] {desfecho_limpo}",
+                    },
+                )
+            else:
+                dummy_ctx = ToolContext(db=db, user_uid=None, task_id=acao_id)
+                registrar_no_diario(
+                    dummy_ctx,
+                    {
+                        "task_id_alvo": acao_id,
+                        "nota": f"[Fila de Atenção: {item_data.get('titulo') or item_id}] {desfecho_limpo}",
+                    },
+                )
+        except Exception as diary_err:
+            print(f"[Atencao] Falha ao registrar desfecho no diário da ação {acao_id}: {diary_err}")
+
+    return {
+        "status": "ok",
+        "item_id": item_id,
+        "estado": novo_estado,
+        "desfecho": desfecho_limpo or None,
+    }

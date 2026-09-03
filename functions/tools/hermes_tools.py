@@ -1663,6 +1663,14 @@ def obter_estado_atual(ctx: ToolContext, args: dict):
                 estado["pops_ativos_total_omitido"] = len(ativos) - 5
         except Exception:
             estado["pops_ativos"] = []
+        try:
+            from atencao import coletar_fila_atencao
+            res_atencao = coletar_fila_atencao(ctx.db, estado="aberto", limite=10)
+            estado["fila_atencao"] = res_atencao.get("itens", [])
+            estado["fila_atencao_total"] = res_atencao.get("total", 0)
+        except Exception:
+            estado["fila_atencao"] = []
+            estado["fila_atencao_total"] = 0
         return estado
     except Exception as exc:  # noqa: BLE001
         return {"erro": f"Falha ao montar o estado atual: {exc}"}
@@ -1877,6 +1885,26 @@ def _registrar_execucao_investimento(ctx: ToolContext, args: dict):
     return investimentos.confirmar_execucao(ativo, **numeros)
 
 
+def obter_fila_atencao(ctx: ToolContext, args: dict):
+    from atencao import coletar_fila_atencao
+
+    estado = args.get("estado")
+    if estado is None:
+        estado = "aberto"
+    origem = args.get("origem")
+    limite = int(args.get("limite") or 20)
+    return coletar_fila_atencao(ctx.db, estado=estado, origem=origem, limite=limite)
+
+
+def resolver_item_atencao(ctx: ToolContext, args: dict):
+    from atencao import resolver_item
+
+    item_id = args.get("item_id")
+    estado = args.get("estado")
+    desfecho = args.get("desfecho")
+    return resolver_item(ctx.db, item_id=item_id, novo_estado=estado, desfecho=desfecho, ctx=ctx)
+
+
 # ---------------------------------------------------------------------------
 # Registro
 # ---------------------------------------------------------------------------
@@ -1956,6 +1984,8 @@ _HANDLERS: dict = {
     "remover_anexo": remover_anexo,
     "consultar_fatura_cartao": consultar_fatura_cartao,
     "consultar_compromissos_futuros": consultar_compromissos_futuros,
+    "obter_fila_atencao": obter_fila_atencao,
+    "resolver_item_atencao": resolver_item_atencao,
 }
 
 

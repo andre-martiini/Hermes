@@ -174,6 +174,14 @@ Portais públicos (sem autenticação Firebase) acessados por links externos —
 |---|---|---|
 | `daily_wip_reset_and_degradation` | Scheduler | Reset diário de status WIP e contagem de degradação |
 
+## `functions/atencao.py` (Fila de Atenção)
+
+Unificação determinística de pendências e sinais que demandam decisão do dono, sem chamadas a LLM na detecção.
+
+| Função | Trigger | O que faz |
+|---|---|---|
+| `detectar_atencao_acoes` | Scheduler (a cada 30 min, America/Sao_Paulo) | Varre ações ativas/stand-by com etapas em `aguardando_terceiro` e `data_prevista` vencida. Se não houver resposta do terceiro via WhatsApp após a data prevista, cria ou atualiza item na coleção `atencao` com deduplicação determinística (`tipo:acao_id:etapa_id`). Controlada pela flag `system/settings.atencao.aguardando_terceiro.enabled` |
+
 ## Padrões de integração
 
 - **Callable (síncrono):** frontend chama via `httpsCallable()`; timeout máximo observado de 540s. Usado para a maioria das ações do usuário (Copiloto, geração de conteúdo, sincronizações sob demanda).

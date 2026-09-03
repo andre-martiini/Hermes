@@ -32,6 +32,11 @@ service cloud.firestore {
       allow read, write: if internalUser();
     }
 
+    match /atencao/{document=**} {
+      allow read: if internalUser();
+      allow write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if internalUser();
     }

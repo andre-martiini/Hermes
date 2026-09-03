@@ -110,9 +110,13 @@ _CATALOG: dict[str, str] = {
     "consultar_investimentos": "Consulta a carteira de investimentos: posicao, valor, caixa, aporte total e rendimento contra o CDI",
     "registrar_aporte_investimento": "Registra dinheiro novo que o usuario enviou a corretora (SOMA ao total aportado)",
     "registrar_execucao_investimento": "Registra a posicao que o usuario passou a ter depois de executar uma ordem na corretora",
+    # Fila de atencao unificada
+    "obter_fila_atencao": "Lista a fila de atencao unificada: itens de acoes, conversas e rotinas que demandam decisao",
+    "resolver_item_atencao": "Resolve, descarta ou delega um item da fila de atencao, registrando o desfecho",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {
+    "resolver_item_atencao",
     "criar_acao_no_sistema",
     "agendar_lembrete_acao",
     "editar_plano_acao",
