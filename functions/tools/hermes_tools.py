@@ -1761,6 +1761,108 @@ def _registrar_saude(ctx: ToolContext, args: dict):
 
 
 # ---------------------------------------------------------------------------
+# Investimentos (servico externo `decisao-investimentos`)
+# ---------------------------------------------------------------------------
+#
+# O Hermes nao guarda carteira propria nem escreve nas colecoes do servico: ele
+# chama a API HTTP e devolve o que ela responder. Ver `investimentos.py` para o
+# porque de nada aqui ser reenviado automaticamente.
+
+
+def _valor_positivo(bruto, campo: str):
+    """Devolve `(valor, erro)`; um dos dois e sempre None.
+
+    Nao separa "nao e numero" de "e zero ou negativo" porque a correcao e a
+    mesma nos dois casos: informar de novo. A mensagem mostra o que chegou, que
+    e o que o usuario precisa para ver onde errou.
+    """
+    from bolso_aquisicoes import numero
+
+    valor = numero(bruto, padrao=-1.0)
+    if valor <= 0:
+        return None, _investimento_erro(
+            f"Nao entendi `{campo}` como um numero positivo (veio {bruto!r}). "
+            "Informe em reais com ponto decimal, ex.: 1500.50."
+        )
+    return valor, None
+
+
+def _investimento_erro(mensagem: str) -> dict:
+    return {"erro": mensagem}
+
+
+def _consultar_investimentos(ctx: ToolContext, args: dict):
+    import investimentos
+
+    resultado = investimentos.carteira()
+    if not isinstance(resultado, dict) or "erro" in resultado:
+        return resultado
+
+    # Sem primeiro aporte o servico responde 200 com um aviso e uma dica que cita
+    # `carteira.ps1` — o script de linha de comando do outro repositorio, que nao
+    # existe para quem fala com o Hermes. A dica e trocada pelo caminho daqui.
+    #
+    # O discriminador e a AUSENCIA de `valor_total`, nao o texto de `status`:
+    # sem esse campo nao ha carteira para mostrar, seja qual for a redacao do
+    # aviso — e casar por substring quebraria calado se o outro lado reescrevesse
+    # a mensagem.
+    if "valor_total" not in resultado:
+        return {
+            "status": resultado.get("status"),
+            "carteira_registrada": False,
+            "observacao": (
+                "Ainda nao ha primeiro aporte registrado — este e o estado normal "
+                "de quem nao comecou, nao um erro. Para comecar, registre o valor "
+                "enviado a corretora com `registrar_aporte_investimento`."
+            ),
+        }
+    resultado["carteira_registrada"] = True
+    return resultado
+
+
+def _registrar_aporte_investimento(ctx: ToolContext, args: dict):
+    import investimentos
+
+    valor, erro = _valor_positivo(args.get("valor"), "valor")
+    if erro:
+        return erro
+    return investimentos.registrar_aporte(valor)
+
+
+def _registrar_execucao_investimento(ctx: ToolContext, args: dict):
+    import investimentos
+    from bolso_aquisicoes import numero
+
+    ativo = str(args.get("ativo") or "").strip().upper()
+    if ativo not in investimentos.ATIVOS_VALIDOS:
+        return _investimento_erro(
+            f"`ativo` tem de ser um de {', '.join(investimentos.ATIVOS_VALIDOS)} — "
+            f"veio {args.get('ativo')!r}."
+        )
+
+    numeros: dict = {}
+    for campo in ("quantidade", "preco", "valor"):
+        if args.get(campo) is not None:
+            valor, erro = _valor_positivo(args.get(campo), campo)
+            if erro:
+                return erro
+            numeros[campo] = valor
+
+    # `caixa` aceita zero (sobrou nada na corretora), entao nao passa pelo
+    # validador de positivo — so nao pode ser negativo nem lixo.
+    if args.get("caixa") is not None:
+        caixa = numero(args.get("caixa"), padrao=-1.0)
+        if caixa < 0:
+            return _investimento_erro(
+                f"Nao entendi `caixa` como um numero maior ou igual a zero "
+                f"(veio {args.get('caixa')!r})."
+            )
+        numeros["caixa"] = caixa
+
+    return investimentos.confirmar_execucao(ativo, **numeros)
+
+
+# ---------------------------------------------------------------------------
 # Registro
 # ---------------------------------------------------------------------------
 
@@ -1769,6 +1871,9 @@ _HANDLERS: dict = {
     **{nome: _via_telegram(nome) for nome in _TELEGRAM_TOOLS},
     "registrar_item_financeiro_v2": _registrar_item_financeiro_v2,
     "agendar_lembrete_acao": _agendar_lembrete_acao,
+    "consultar_investimentos": _consultar_investimentos,
+    "registrar_aporte_investimento": _registrar_aporte_investimento,
+    "registrar_execucao_investimento": _registrar_execucao_investimento,
 
     # Delegadas a modulos dedicados
     "consultar_lista_compras": _consultar_lista_compras,

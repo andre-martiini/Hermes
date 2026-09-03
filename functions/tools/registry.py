@@ -104,9 +104,19 @@ _CATALOG: dict[str, str] = {
     "consolidar_whatsapp": "Consolida um recorte de mensagens: transcreve midia e sintetiza resumo e itens de acao",
     "ler_consolidacao_whatsapp": "Le uma consolidacao inteira, ou as mais recentes de uma conversa",
     "consultar_envio_whatsapp": "Estado real de uma mensagem enfileirada: enviada, na fila ou falhou",
+    # Integracao com o Sistema de Decisao de Investimentos (servico Cloud Run
+    # externo). Leitura e duas escritas que so registram o que o usuario ja
+    # executou na corretora; nenhuma logica de decisao mora aqui.
+    "consultar_investimentos": "Consulta a carteira de investimentos atual, o valor total e o rendimento comparado com o CDI",
+    "registrar_aporte_investimento": "Registra dinheiro novo enviado a corretora de investimentos (soma ao aporte total)",
+    "registrar_execucao_investimento": "Registra a posicao que o usuario passou a ter depois de comprar ou trocar ativos na corretora",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {
+    # Escrita de dinheiro em outro sistema: nao tem desfazimento no Hermes nem
+    # no servico de investimentos (sem endpoint de estorno). Dupla chamada MCP.
+    "registrar_aporte_investimento",
+    "registrar_execucao_investimento",
     "criar_acao_no_sistema",
     "agendar_lembrete_acao",
     "editar_plano_acao",
@@ -181,6 +191,10 @@ _VOICE_EXCLUDED: set[str] = {
     "confirmar_edicao_em_lote",
     "confirmar_reagendamento_em_lote",
     "ler_documento_na_integra",
+    # Escritas em investimentos sao perigosas faladas (um numero mal
+    # transcrito grava valor errado em registro cumulativo).
+    "registrar_aporte_investimento",
+    "registrar_execucao_investimento",
 }
 
 _schema_cache: dict[str, dict] = {}

@@ -65,8 +65,16 @@ _access_cache: dict[str, object] | None = None
 # acrescenta tools ao gate. Estes dois efeitos externos, contudo, nunca podem
 # ser removidos por configuracao: uma lista vazia em producao nao pode tornar o
 # envio de mensagem (inclusive a pausa) executavel sem o "sim" do usuario.
+#
+# As escritas de investimento entram aqui pelo mesmo motivo com agravante: nao ha
+# estorno do lado de la, e dobrar um aporte por repeticao envenenaria o calculo
+# de rendimento para sempre.
 _CONFIRMACAO_OBRIGATORIA: set[str] = {
-    "schedule_whatsapp_message", "pausar_conversa", "criar_rascunho_email",
+    "schedule_whatsapp_message",
+    "pausar_conversa",
+    "criar_rascunho_email",
+    "registrar_aporte_investimento",
+    "registrar_execucao_investimento",
 }
 _CONFIRMACAO_PADRAO: set[str] = set(_CONFIRMACAO_OBRIGATORIA)
 _CONFIRMACAO_TTL = timedelta(minutes=10)
