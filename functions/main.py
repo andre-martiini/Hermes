@@ -13846,6 +13846,9 @@ from ai_notification_planner import ai_notification_planner_daily
 # Import attention queue action detector job
 from atencao import detectar_atencao_acoes
 
+# Import WhatsApp-based attention detectors (promessa_sem_retorno, audio_relevante)
+from atencao_whatsapp import on_whatsapp_message_atencao, vencer_promessas
+
 # Import weekly byproduct detector job
 import deteccao_subproduto
 

@@ -104,8 +104,17 @@ Dois mecanismos completam o que a captura ao vivo não viu, ambos sobre `chat.fe
 - Fila alimentada por `functions/tools/schedule_whatsapp_message.py` (tool do copiloto), pela confirmação `confirm_whatsapp` no Telegram, e pela ponte de voz (`hermes-voice-bridge/tools.py`).
 - Dois consumidores coordenados por `system/settings.whatsapp_auto_send_enabled` + o heartbeat do worker (§1): quando habilitado e o worker está vivo (heartbeat ≤ 10 min), o **cron do worker Node** reivindica e envia de verdade via `client.sendMessage`; caso contrário, a Cloud Function `dispatch_scheduled_whatsapp_messages` manda um card no Telegram com link `wa.me` para envio manual.
 
+## 6. Detectores reativos da fila de atenção
+
+`functions/atencao_whatsapp.py` roda em cada mensagem capturada (trigger Firestore em `whatsapp_messages`, nao cron - a latencia importa) e alimenta a coleção `atencao` (ver `arquitetura/schema-firestore.md`):
+
+- **`promessa_sem_retorno`**: uma mensagem enviada pelo dono que casa com um padrao de compromisso ("deixa comigo", "pode deixar", "te aviso ainda hoje", ...) abre um registro em `promessas_abertas`; uma mensagem seguinte do dono, longa o bastante ou com mídia, fecha a promessa. Vencido o prazo (`system/settings.atencao.promessa_sem_retorno.horas`, padrão 4h) sem fechamento, `vencer_promessas` (scheduler a cada 15 min) cria o item na fila.
+- **`audio_relevante`**: um áudio recebido (`ptt`/`audio`) em conversa vinculada a uma ação ativa vira item da fila, para o Claude consolidar depois com `consolidar_whatsapp` - este detector nunca transcreve nada sozinho. Vínculo por `tarefas.whatsapp_vinculos` (grupos e individuais) ou, em chat individual sem vínculo direto, pelo par `perfil_pessoas.whatsapp_chat_id` + `interacoes_pessoas.tarefa_id`.
+- Ambos atrás de flag em `system/settings.atencao` (padrão desligado) e fora do escopo de grupos para `promessa_sem_retorno`.
+
 ## Limitações conhecidas
 
 - Automação não-oficial (`whatsapp-web.js`) — sujeita a bloqueio/quebra pelo WhatsApp; sem SLA.
 - A captura ao vivo depende do processo estar rodando; o buraco é coberto pelo backfill no boot (recuperação retroativa, limitada a 300 mensagens por chat) e pelo sync sob demanda da Caixa de Entrada (§1). Ausências muito longas em chats de alto volume podem exceder essa janela.
 - Upload de mídia ao Storage depende de `FIREBASE_STORAGE_BUCKET` estar configurado no ambiente do worker; sem isso, mídia é capturada só como metadata.
+- `captureMedia` não grava a duração do áudio (`media.duration_seconds`) - o detector `audio_relevante` trata duração desconhecida como relevante em vez de silenciar por falta de dado; gravar esse campo no worker é melhoria futura.
