@@ -53,6 +53,9 @@ let isProcessingOutbox = false;
 let isSyncingChats = false;
 let lastChatsSyncMs = 0;
 const CHATS_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
+// Cache em memória do último timestamp de atividade por chat, evitando regressão
+// durante backfill e economizando leituras ao Firestore em mensagens novas.
+const chatLastActivityMs = new Map();
 // Recuperação com `capturar_todos`: só chats mexidos nesta janela (ou com não
 // lidas) entram, e no máximo este tanto por passagem.
 const RECOVERY_JANELA_DIAS = 7;
@@ -239,7 +242,12 @@ async function syncChatRegistry() {
                 const chatName = chat.name || chatId;
                 let lastActivityTs = null;
                 if (chat.timestamp) {
-                    lastActivityTs = admin.firestore.Timestamp.fromDate(new Date(chat.timestamp * 1000));
+                    const tsMs = chat.timestamp * 1000;
+                    lastActivityTs = admin.firestore.Timestamp.fromDate(new Date(tsMs));
+                    const currentKnown = chatLastActivityMs.get(chatId) || 0;
+                    if (tsMs > currentKnown) {
+                        chatLastActivityMs.set(chatId, tsMs);
+                    }
                 }
 
                 const docRef = db.collection('whatsapp_chats').doc(chatId);
@@ -505,6 +513,29 @@ async function persistMessage(message, chat, chatId, isGroup) {
     }
 
     await db.collection('whatsapp_messages').doc(msgData.id).set(msgData, { merge: true });
+
+    // Atualiza last_activity_ts do chat no Firestore em tempo quase real.
+    // Só avança o carimbo (nunca regride, ex.: em backfill de histórico).
+    try {
+        const msgTsMs = msgData.timestamp.toMillis();
+        let lastTsMs = chatLastActivityMs.get(chatId);
+        if (lastTsMs === undefined) {
+            const chatDoc = await db.collection('whatsapp_chats').doc(chatId).get();
+            lastTsMs = (chatDoc.exists && chatDoc.data()?.last_activity_ts?.toMillis()) || 0;
+            chatLastActivityMs.set(chatId, lastTsMs);
+        }
+
+        if (msgTsMs > lastTsMs) {
+            chatLastActivityMs.set(chatId, msgTsMs);
+            await db.collection('whatsapp_chats').doc(chatId).set({
+                chat_id: chatId,
+                last_activity_ts: msgData.timestamp,
+            }, { merge: true });
+        }
+    } catch (chatUpdateErr) {
+        console.warn(`[Chats] Falha ao atualizar last_activity_ts do chat ${chatId}:`, chatUpdateErr.message || chatUpdateErr);
+    }
+
     return msgData.id;
 }
 
