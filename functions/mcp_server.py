@@ -645,7 +645,7 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
             return _text_result({"erro": str(exc)}, is_error=True)
         # Uma prévia pode recusar o destino. Neste caso não há ato a confirmar e
         # não se deixa uma confirmação pendente para um identificador cru.
-        if proposal and proposal.get("status") == "destinatario_desconhecido":
+        if proposal and proposal.get("status") in {"destinatario_desconhecido", "destinatario_ambiguo"}:
             return _text_result(proposal, is_error=False)
         try:
             confirmation_id = _criar_confirmacao(ctx, name, arguments, proposal)
