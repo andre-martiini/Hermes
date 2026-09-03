@@ -13560,8 +13560,17 @@ def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
     diary_cfg = data.get("personal_diary") or {}
     wa_cfg = data.get("whatsapp_ingest") or {}
 
+    ignored_raw = email_cfg.get("ignored_senders")
+    if ignored_raw is None:
+        ignored_senders = ["notifications@github.com", "@github.com"]
+    else:
+        ignored_senders = list(ignored_raw or [])
+
     return {
-        "email_action_linker": {"enabled": bool(email_cfg.get("enabled", False))},
+        "email_action_linker": {
+            "enabled": bool(email_cfg.get("enabled", False)),
+            "ignored_senders": ignored_senders,
+        },
         "personal_diary": {"enabled": bool(diary_cfg.get("enabled", False))},
         "whatsapp_ingest": {
             "enabled": bool(wa_cfg.get("enabled", False)),
@@ -13577,7 +13586,7 @@ def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
     }
 
 
-@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)
+@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=60)
 def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
     """Atualiza o subconjunto whitelisted de system/settings das automações
     multi-canal. Usa merge com dicts aninhados (não field paths com ponto —
@@ -13587,10 +13596,42 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
 
     data = req.data or {}
     updates: dict = {}
+    db = get_db()
+    dismissed_count = 0
 
     email_cfg = data.get("email_action_linker")
-    if isinstance(email_cfg, dict) and "enabled" in email_cfg:
-        updates["email_action_linker"] = {"enabled": bool(email_cfg["enabled"])}
+    if isinstance(email_cfg, dict):
+        email_updates: dict = {}
+        if "enabled" in email_cfg:
+            email_updates["enabled"] = bool(email_cfg["enabled"])
+        if "ignored_senders" in email_cfg and isinstance(email_cfg["ignored_senders"], list):
+            ignored_list = [str(x).strip().lower() for x in email_cfg["ignored_senders"] if str(x).strip()]
+            email_updates["ignored_senders"] = ignored_list
+            if email_cfg.get("dismiss_matching_pending", False):
+                from email_action_linker import is_sender_ignored
+                now_iso = datetime.now(timezone.utc).isoformat()
+                pending_docs = list(db.collection("email_action_suggestions").where("status", "in", ["pending", "expired"]).stream())
+                batch = db.batch()
+                batch_count = 0
+                for s_doc in pending_docs:
+                    s_data = s_doc.to_dict() or {}
+                    sender = s_data.get("sender") or s_data.get("origem_sinal") or ""
+                    if is_sender_ignored(sender, ignored_list):
+                        batch.update(s_doc.reference, {
+                            "status": "dismissed",
+                            "decided_at": now_iso,
+                            "dismissed_by": "ignored_filter",
+                        })
+                        dismissed_count += 1
+                        batch_count += 1
+                        if batch_count >= 400:
+                            batch.commit()
+                            batch = db.batch()
+                            batch_count = 0
+                if batch_count > 0:
+                    batch.commit()
+        if email_updates:
+            updates["email_action_linker"] = email_updates
 
     diary_cfg = data.get("personal_diary")
     if isinstance(diary_cfg, dict) and "enabled" in diary_cfg:
@@ -13618,9 +13659,45 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
     if not updates:
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="Nenhum campo valido para atualizar.")
 
-    db = get_db()
     db.collection("system").document("settings").set(updates, merge=True)
-    return {"success": True}
+    return {"success": True, "dismissed_pending_count": dismissed_count}
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=60)
+def dismissPendingIgnoredEmails(req: https_fn.CallableRequest) -> dict:
+    """Descarta todas as sugestões de e-mail pendentes ou expiradas cujo remetente
+    case com a lista de ignorados configurada em system/settings."""
+    _require_internal_user(req)
+    db = get_db()
+    from email_action_linker import _load_settings, is_sender_ignored
+    settings = _load_settings(db)
+    ignored_patterns = settings.get("ignored_senders", [])
+    if not ignored_patterns:
+        return {"dismissed_count": 0}
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    pending_docs = list(db.collection("email_action_suggestions").where("status", "in", ["pending", "expired"]).stream())
+    batch = db.batch()
+    batch_count = 0
+    dismissed_count = 0
+    for s_doc in pending_docs:
+        s_data = s_doc.to_dict() or {}
+        sender = s_data.get("sender") or s_data.get("origem_sinal") or ""
+        if is_sender_ignored(sender, ignored_patterns):
+            batch.update(s_doc.reference, {
+                "status": "dismissed",
+                "decided_at": now_iso,
+                "dismissed_by": "ignored_filter",
+            })
+            dismissed_count += 1
+            batch_count += 1
+            if batch_count >= 400:
+                batch.commit()
+                batch = db.batch()
+                batch_count = 0
+    if batch_count > 0:
+        batch.commit()
+    return {"dismissed_count": dismissed_count}
 
 
 @https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)

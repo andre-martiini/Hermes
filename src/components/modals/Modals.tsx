@@ -83,7 +83,7 @@ export const HermesModal = ({ isOpen, title, message, type, onConfirm, onCancel,
 // para o cliente (firestore.rules), então tudo passa pelas callables
 // getAutomationSettings/updateAutomationSettings (functions/main.py).
 interface AutomationSettingsData {
-  email_action_linker: { enabled: boolean };
+  email_action_linker: { enabled: boolean; ignored_senders?: string[] };
   personal_diary: { enabled: boolean };
   whatsapp_ingest: { enabled: boolean; linked_chats_only: boolean; chats_allowlist: string[]; capturar_todos: boolean; leitura_total: boolean };
   whatsapp_auto_send_enabled: boolean;
@@ -94,8 +94,11 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
   const [data, setData] = useState<AutomationSettingsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [cleaningIgnored, setCleaningIgnored] = useState(false);
+  const [cleanFeedback, setCleanFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [allowlistText, setAllowlistText] = useState('');
+  const [ignoredSendersText, setIgnoredSendersText] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -109,6 +112,7 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
         const d = res.data as AutomationSettingsData;
         setData(d);
         setAllowlistText((d.whatsapp_ingest?.chats_allowlist || []).join('\n'));
+        setIgnoredSendersText((d.email_action_linker?.ignored_senders || []).join('\n'));
       } catch (e: any) {
         if (!cancelled) setError(e?.message || 'Falha ao carregar configurações.');
       } finally {
@@ -128,6 +132,50 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
       setError(e?.message || 'Falha ao salvar. A alteração pode não ter sido aplicada.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveIgnoredSenders = async (dismissPending = false) => {
+    const list = Array.from(new Set(ignoredSendersText.split('\n').map(s => s.trim()).filter(Boolean)));
+    setIgnoredSendersText(list.join('\n'));
+    if (data) setData({ ...data, email_action_linker: { ...data.email_action_linker, ignored_senders: list } });
+    setSaving(true);
+    setError(null);
+    setCleanFeedback(null);
+    try {
+      const fn = httpsCallable(functions, 'updateAutomationSettings');
+      const res: any = await fn({
+        email_action_linker: {
+          ignored_senders: list,
+          dismiss_matching_pending: dismissPending,
+        },
+      });
+      if (dismissPending) {
+        const count = res.data?.dismissed_pending_count || 0;
+        setCleanFeedback(`${count} sugestão(ões) pendente(s) descartada(s).`);
+      } else {
+        setCleanFeedback('Lista de ignorados salva com sucesso.');
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Falha ao salvar lista de remetentes ignorados.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCleanPendingIgnored = async () => {
+    setCleaningIgnored(true);
+    setError(null);
+    setCleanFeedback(null);
+    try {
+      const fn = httpsCallable(functions, 'dismissPendingIgnoredEmails');
+      const res: any = await fn();
+      const count = res.data?.dismissed_count || 0;
+      setCleanFeedback(`${count} sugestão(ões) pendente(s) descartada(s).`);
+    } catch (e: any) {
+      setError(e?.message || 'Falha ao descartar sugestões pendentes.');
+    } finally {
+      setCleaningIgnored(false);
     }
   };
 
@@ -225,6 +273,57 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
           enabled={data.email_action_linker.enabled}
           onToggle={() => toggle('email_action_linker')}
         />
+        {data.email_action_linker.enabled && (
+          <div className={`space-y-2 pt-3 border-t border-dashed ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'}`}>
+            <label className={`text-[9px] font-bold uppercase tracking-wider block ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>
+              Remetentes ou domínios ignorados (um por linha — ex.: notifications@github.com ou @github.com)
+            </label>
+            <textarea
+              value={ignoredSendersText}
+              onChange={(e) => {
+                setIgnoredSendersText(e.target.value);
+                setCleanFeedback(null);
+              }}
+              placeholder="notifications@github.com&#10;@github.com&#10;noreply@"
+              rows={3}
+              className={`w-full border rounded-lg px-3 py-2 text-xs font-mono outline-none focus:ring-2 focus:ring-purple-500 ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-900'}`}
+            />
+            <p className={`text-[9px] italic ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>
+              E-mails desses remetentes são ignorados deterministicamente antes de qualquer análise de IA, evitando consumo de tokens e vínculos indevidos.
+            </p>
+            {cleanFeedback && (
+              <p className="text-[10px] font-bold text-emerald-500 animate-in fade-in duration-200">{cleanFeedback}</p>
+            )}
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => saveIgnoredSenders(false)}
+                disabled={saving || cleaningIgnored}
+                className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all disabled:opacity-50 ${isDarkTheme ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-slate-900 text-white hover:bg-slate-700'}`}
+              >
+                Salvar lista
+              </button>
+              <button
+                type="button"
+                onClick={() => saveIgnoredSenders(true)}
+                disabled={saving || cleaningIgnored}
+                title="Salva a lista e descarta as sugestões pendentes que casem com estes remetentes"
+                className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all disabled:opacity-50 border border-amber-500/40 text-amber-500 hover:bg-amber-500/10`}
+              >
+                Salvar e descartar pendentes
+              </button>
+              <button
+                type="button"
+                onClick={handleCleanPendingIgnored}
+                disabled={saving || cleaningIgnored}
+                title="Descarta sugestões pendentes ou expiradas que casem com a lista já salva"
+                className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all disabled:opacity-50 text-rose-400 hover:bg-rose-500/10 border border-rose-500/20`}
+              >
+                {cleaningIgnored ? 'Limpando...' : 'Descartar pendentes da lista'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className={cardClass}>
