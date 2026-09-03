@@ -1,6 +1,15 @@
 {
   "indexes": [
     {
+      "collectionGroup": "atencao",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "estado", "order": "ASCENDING" },
+        { "fieldPath": "prioridade", "order": "ASCENDING" },
+        { "fieldPath": "prazo", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "tarefas",
       "queryScope": "COLLECTION",
       "fields": [

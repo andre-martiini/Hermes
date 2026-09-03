@@ -1,0 +1,31 @@
+{
+  "name": "resolver_item_atencao",
+  "description": "Resolve, descarta ou delega um item da fila de atencao, registrando o desfecho e anotando no diario da acao quando houver vinculo. Exige confirmacao explicita.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "item_id": {
+        "type": "string",
+        "description": "ID do documento na colecao atencao (chave_dedupe do item)."
+      },
+      "estado": {
+        "type": "string",
+        "enum": [
+          "delegado_ao_agente",
+          "aguardando_andre",
+          "resolvido",
+          "descartado"
+        ],
+        "description": "Novo estado do item."
+      },
+      "desfecho": {
+        "type": "string",
+        "description": "Descricao do desfecho ou motivo da mudanca. Obrigatorio para 'resolvido' e 'descartado'."
+      }
+    },
+    "required": [
+      "item_id",
+      "estado"
+    ]
+  }
+}

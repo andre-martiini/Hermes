@@ -1,0 +1,37 @@
+{
+  "name": "obter_fila_atencao",
+  "description": "Lista itens da fila de atencao unificada que demandam decisao ou acompanhamento do dono (ex.: retorno de terceiro vencido, promessas pendentes). Chame no inicio de uma sessao, apos obter_estado_atual, quando quiser ver tudo que pede atencao, nao so o top 10.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "estado": {
+        "type": "string",
+        "enum": [
+          "aberto",
+          "delegado_ao_agente",
+          "aguardando_andre",
+          "resolvido",
+          "descartado"
+        ],
+        "description": "Filtra por estado do item. Padrao: 'aberto'."
+      },
+      "origem": {
+        "type": "string",
+        "enum": [
+          "acao",
+          "whatsapp",
+          "email",
+          "agenda",
+          "repo",
+          "financeiro",
+          "saude"
+        ],
+        "description": "Opcional. Filtra por canal de origem do item."
+      },
+      "limite": {
+        "type": "integer",
+        "description": "Numero maximo de itens a retornar (padrao: 20, maximo: 100)."
+      }
+    }
+  }
+}

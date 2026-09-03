@@ -19,14 +19,14 @@ vez de cada canal reimplementar as suas.
 
 ## O que está exposto
 
-**58 tools**, todo o catálogo de `functions/tools/registry.py` que tem executor e
+**60 tools**, todo o catálogo de `functions/tools/registry.py` que tem executor e
 schema. `tools/list` publica exatamente o que é chamável — uma tool sem handler
 ou sem schema simplesmente não aparece, em vez de falhar na chamada.
 
 Cobre: busca de ações e acervo, agenda, criação e edição de ações (individual e
 em lote), diário de bordo, memória global e POPs, contatos, finanças, saúde,
 dados cadastrais, portais públicos, WhatsApp, e-mail, SIPAC, objetivos
-estratégicos, relatórios e geração de imagem.
+estratégicos, investimentos, fila de atenção unificada, relatórios e geração de imagem.
 
 Um resource também é publicado: `hermes://voice-context`, com persona, perfil do
 usuário e memórias recentes — para um cliente externo compor seu system prompt
@@ -35,9 +35,16 @@ com o mesmo contexto que o copiloto web usa.
 ### Comece por `obter_estado_atual`
 
 Toda sessão de um cliente MCP começa do zero. `obter_estado_atual` devolve o dia
-inteiro numa chamada — ações de hoje, herdadas, críticas, agenda, janelas livres e
-pendências — reusando o coletor determinístico do resumo matinal. É o ponto de
+inteiro numa chamada — ações de hoje, herdadas, críticas, agenda, janelas livres,
+pendências e a **fila de atenção** (`fila_atencao` com top 10 e `fila_atencao_total`)
+— reusando o coletor determinístico do resumo matinal. É o ponto de
 partida indicado nas `instructions` do servidor.
+
+### Fila de atenção unificada (`obter_fila_atencao`, `resolver_item_atencao`)
+
+Centraliza os sinais e pendências que demandam decisão humana em um formato padronizado.
+- **`obter_fila_atencao`** (leitura): lista itens com paginação e ordenação por prioridade (`alta`→`media`→`baixa`) e prazo.
+- **`resolver_item_atencao`** (escrita, exige confirmação): atualiza o estado para `resolvido`, `descartado`, `delegado_ao_agente` ou `aguardando_andre`, registrando desfecho obrigatório para encerramentos e anotando no diário da ação vinculada.
 
 ### Escrita: direta, não em dois passos
 
