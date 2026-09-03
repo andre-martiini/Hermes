@@ -104,6 +104,12 @@ _CATALOG: dict[str, str] = {
     "consolidar_whatsapp": "Consolida um recorte de mensagens: transcreve midia e sintetiza resumo e itens de acao",
     "ler_consolidacao_whatsapp": "Le uma consolidacao inteira, ou as mais recentes de uma conversa",
     "consultar_envio_whatsapp": "Estado real de uma mensagem enfileirada: enviada, na fila ou falhou",
+    # Investimentos: o Hermes nao decide nem executa nada: le a carteira do
+    # servico `decisao-investimentos` e registra o que o USUARIO declarou ter
+    # feito na corretora. Quem decide e o motor deterministico do outro lado.
+    "consultar_investimentos": "Consulta a carteira de investimentos: posicao, valor, caixa, aporte total e rendimento contra o CDI",
+    "registrar_aporte_investimento": "Registra dinheiro novo que o usuario enviou a corretora (SOMA ao total aportado)",
+    "registrar_execucao_investimento": "Registra a posicao que o usuario passou a ter depois de executar uma ordem na corretora",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {
@@ -145,6 +151,12 @@ _NEEDS_CONFIRMATION: set[str] = {
     "confirmar_edicao_acao",
     "confirmar_edicao_em_lote",
     "confirmar_reagendamento_em_lote",
+    # Gravam na carteira real. Atencao: estar AQUI nao gateia nada — este
+    # conjunto so alimenta o metadado `mutates` do `tools/list`. Quem exige a
+    # dupla chamada e `mcp_server._CONFIRMACAO_OBRIGATORIA`, onde as duas tambem
+    # estao, justamente porque a politica do canal esta vazia desde 27/08/2026.
+    "registrar_aporte_investimento",
+    "registrar_execucao_investimento",
 }
 
 _ASYNC_TOOLS: set[str] = {
@@ -181,6 +193,11 @@ _VOICE_EXCLUDED: set[str] = {
     "confirmar_edicao_em_lote",
     "confirmar_reagendamento_em_lote",
     "ler_documento_na_integra",
+    # Escrita de dinheiro por voz nao: um numero mal transcrito ("mil e
+    # quinhentos") grava valor errado num registro que acumula e que o servico
+    # nao sabe estornar. Consultar por voz continua liberado.
+    "registrar_aporte_investimento",
+    "registrar_execucao_investimento",
 }
 
 _schema_cache: dict[str, dict] = {}

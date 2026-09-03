@@ -1,0 +1,16 @@
+{
+  "name": "registrar_aporte_investimento",
+  "description": "Registra dinheiro novo que o USUÁRIO enviou à corretora. SOMA ao total aportado — chamar duas vezes com o mesmo valor registra o dobro, e não há estorno. Só chame depois de o usuário confirmar o valor exato; nunca para corrigir um aporte anterior",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "valor": {
+        "type": "number",
+        "description": "Valor em reais enviado à corretora. Maior que zero"
+      }
+    },
+    "required": [
+      "valor"
+    ]
+  }
+}

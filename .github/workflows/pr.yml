@@ -53,3 +53,36 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: npm run build
+
+  # As Functions Python tinham 680 testes que NUNCA rodavam: o `pr.yml` so
+  # chamava `npm test` (front) e o `deploy.yml` instala as dependencias Python
+  # mas nao executa nada. E o mesmo defeito dos testes de front orfaos —
+  # arquivo de teste que existe, passa, e nao guarda nada, porque ninguem o
+  # invoca.
+  #
+  # Job separado do de front porque os dois nao dependem um do outro e assim
+  # rodam em paralelo; `libcairo2-dev` e `pkg-config` sao os mesmos que o
+  # deploy instala (pycairo nao tem wheel no Linux).
+  python:
+    name: Testes das Functions Python
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: functions/requirements.txt
+
+      - name: Instalar libs de sistema para dependencias Python
+        run: sudo apt-get update && sudo apt-get install -y libcairo2-dev pkg-config
+
+      - name: Instalar dependencias
+        run: pip install -r functions/requirements.txt
+
+      - name: Rodar testes
+        working-directory: functions
+        run: python -m unittest discover -s . -p "test_*.py"

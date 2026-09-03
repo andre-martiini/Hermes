@@ -65,8 +65,27 @@ _access_cache: dict[str, object] | None = None
 # acrescenta tools ao gate. Estes dois efeitos externos, contudo, nunca podem
 # ser removidos por configuracao: uma lista vazia em producao nao pode tornar o
 # envio de mensagem (inclusive a pausa) executavel sem o "sim" do usuario.
+#
+# As duas escritas de investimento entram pelo mesmo criterio, com uma diferenca
+# de grau: o efeito nao so escapa do Hermes como nao tem desfazer NENHUM.
+# `registrar_aporte_investimento` SOMA ao `aporte_total` de um servico que nao
+# expoe estorno — registrado em dobro, o rendimento fica errado para sempre, e a
+# correcao nao existe de nenhum dos dois lados. `registrar_execucao_investimento`
+# vem junto por ser a mesma classe de acao e deixar linha permanente no log de
+# movimentos de la.
+#
+# O motivo de o piso importar aqui tambem merece registro: `confirm_tools` esteve
+# vazia em producao por um contorno do WhatsApp em 27/08/2026, e nao por decisao
+# sobre escrita de dinheiro. Sem o piso, a sobra de um conserto de outra feature
+# governaria, calada, ferramentas que mexem em dinheiro.
+#
+# ESTE CONJUNTO NAO CRESCE POR HABITO (condicao do dono, 02/09/2026). Uma
+# candidata nova e decisao explicita, tomada uma vez, com o motivo escrito aqui —
+# e nao "parece do mesmo tipo, entao entra". Piso que cresce por default vira o
+# problema que ele resolve: gating que ninguem escolheu, governando por inercia.
 _CONFIRMACAO_OBRIGATORIA: set[str] = {
     "schedule_whatsapp_message", "pausar_conversa", "criar_rascunho_email",
+    "registrar_aporte_investimento", "registrar_execucao_investimento",
 }
 _CONFIRMACAO_PADRAO: set[str] = set(_CONFIRMACAO_OBRIGATORIA)
 _CONFIRMACAO_TTL = timedelta(minutes=10)
