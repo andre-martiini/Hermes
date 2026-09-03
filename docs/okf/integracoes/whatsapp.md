@@ -42,7 +42,7 @@ Dois mecanismos completam o que a captura ao vivo não viu, ambos sobre `chat.fe
 
 ### Registro de chats (`whatsapp_chats`)
 
-- O worker mantém um registro de todos os chats da conta no Firestore em `whatsapp_chats` (`chat_id`, `chat_name`, `is_group`, `last_activity_ts`, `last_synced_at`), populado via `client.getChats()`.
+- O worker mantém um registro de todos os chats da conta no Firestore em `whatsapp_chats` (`chat_id`, `chat_name`, `is_group`, `last_activity_ts`, `last_synced_at`), populado via `client.getChats()`. O campo `last_activity_ts` é mantido em tempo quase real pela captura ao vivo de mensagens (avançando sem regredir em backfills) e periodicamente pela sincronização de 6h.
 - **Cadência**: disparado 60s após o evento `ready` (quando o WhatsApp Web termina de hidratar os chats) e periodicamente a cada 6h no cron do heartbeat.
 - **Merge-only**: as escritas usam `db.batch()` em blocos de 450 com `merge: true` e **nunca deletam** documentos (falhas de hidratação parciais não apagam chats já conhecidos). Não dispara chamadas de rede adicionais como `groupMetadata.update()`.
 - **Precedência de nomes**: nos seletores e listagens (`listWhatsappChats`), a precedência de exibição é ID cru (allowlist) < nome em mensagem capturada < nome no registro `whatsapp_chats` (título mais atualizado).
