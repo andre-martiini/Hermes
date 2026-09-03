@@ -39,6 +39,14 @@ def briefing_matinal_acoes(event: scheduler_fn.ScheduledEvent):
 
     print(f"[BriefingMatinal] Gerando resumo para {today_str}.")
 
+    # Sincroniza decisao de investimentos de forma transparente se houver troca no mes
+    try:
+        import investimentos_sync
+
+        investimentos_sync.sincronizar_decisao_investimentos(db)
+    except Exception as exc_sync:
+        print(f"[BriefingMatinal] Sincronizacao de investimentos ignorada: {exc_sync}")
+
     tarefas_hoje = []
     try:
         docs = (

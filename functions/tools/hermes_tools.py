@@ -1817,6 +1817,21 @@ def _consultar_investimentos(ctx: ToolContext, args: dict):
             ),
         }
     resultado["carteira_registrada"] = True
+
+    # Se houver troca recomendada na decisao vigente, assegura de forma transparente
+    # que a acao com as etapas de ordens exista no Hermes (idempotente).
+    if resultado.get("decisao_vigente", {}).get("trocou") and getattr(ctx, "db", None):
+        try:
+            import investimentos_sync
+
+            sync_res = investimentos_sync.sincronizar_decisao_investimentos(ctx.db)
+            if sync_res.get("status") == "acao_criada":
+                resultado["acao_rebalanceamento_criada"] = sync_res
+            elif sync_res.get("status") == "ja_existe":
+                resultado["acao_rebalanceamento_id"] = sync_res.get("task_id")
+        except Exception as sync_exc:
+            print(f"[hermes_tools] Falha na sincronizacao de acao de investimentos: {sync_exc}")
+
     return resultado
 
 
