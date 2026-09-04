@@ -478,6 +478,7 @@ def criar_rascunho_whatsapp(ctx: ToolContext, args: dict):
         item_atencao_id=args.get("item_atencao_id"),
         origem=getattr(ctx, "session_id", None) or "claude",
         ctx=ctx,
+        tipo=args.get("tipo", "outro"),
     )
 
 

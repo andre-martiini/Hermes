@@ -23,6 +23,10 @@
       "item_atencao_id": {
         "type": "string",
         "description": "ID opcional do item na fila de atenção vinculado a esta mensagem (ao aprovar, resolve o item)."
+      },
+      "tipo": {
+        "type": "string",
+        "description": "Rótulo curto e estável para a categoria de mensagem (ex.: 'confirmacao_reuniao', 'retorno_promessa', 'cobranca_terceiro', 'outro'). Usado para métricas de autonomia."
       }
     },
     "required": [
