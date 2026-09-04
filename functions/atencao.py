@@ -5,12 +5,28 @@ conversas e canais que demandam decisão ou acompanhamento do dono.
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-import zoneinfo
+try:
+    import zoneinfo
+except ImportError:
+    from backports import zoneinfo
 
 from firebase_admin import firestore
 from firebase_functions import scheduler_fn, options
 
+try:
+    from ai_notification_planner import (
+        _reserve_and_create_notification,
+        AI_PLANNER_WINDOW_START,
+        AI_PLANNER_WINDOW_END,
+    )
+except ImportError:
+    _reserve_and_create_notification = None
+    AI_PLANNER_WINDOW_START = "07:00"
+    AI_PLANNER_WINDOW_END = "22:00"
+
 import subtarefas
+
+_TZ_SP = zoneinfo.ZoneInfo("America/Sao_Paulo")
 
 COLLECTION = "atencao"
 
@@ -455,3 +471,144 @@ def resolver_item(
         "estado": novo_estado,
         "desfecho": desfecho_limpo or None,
     }
+
+
+def mapear_origem_categoria_notificacao(origem: str | None) -> str:
+    """Mapeia a origem do item de atenção para a categoria de scheduled_notifications.
+
+    'acao' -> 'acoes'
+    qualquer outra origem ('whatsapp', 'email', 'financeiro', 'saude', etc.) -> 'geral'.
+    """
+    origem_limpa = str(origem or "").strip().lower()
+    if origem_limpa == "acao":
+        return "acoes"
+    return "geral"
+
+
+def dentro_janela_permitida(
+    horario_sp: str | datetime,
+    window_start: str = AI_PLANNER_WINDOW_START,
+    window_end: str = AI_PLANNER_WINDOW_END,
+) -> bool:
+    """Verifica se o horário HH:MM (America/Sao_Paulo) está dentro da janela permitida de notificação.
+
+    Por padrão, entre AI_PLANNER_WINDOW_START (07:00) e AI_PLANNER_WINDOW_END (22:00), inclusive.
+    Fora desse intervalo vigora o período de silêncio.
+    """
+    if isinstance(horario_sp, datetime):
+        if horario_sp.tzinfo is None:
+            sp_dt = horario_sp.replace(tzinfo=_TZ_SP)
+        else:
+            sp_dt = horario_sp.astimezone(_TZ_SP)
+        horario_str = sp_dt.strftime("%H:%M")
+    elif isinstance(horario_sp, str):
+        horario_str = horario_sp.strip()
+    else:
+        return False
+
+    return window_start <= horario_str <= window_end
+
+
+esta_na_janela_silencio = dentro_janela_permitida
+
+
+def avaliar_interrupcao_atencao(db, now: datetime | None = None) -> dict:
+    """Varre itens de alta prioridade na fila de atenção e agenda notificações no Telegram.
+
+    Executado a cada 1 minuto (via check_and_send_reminders) de forma determinística,
+    sem chamadas a LLM. Reutiliza o orçamento diário compartilhado com o planejador de IA
+    (_reserve_and_create_notification) e a janela de silêncio (07:00 a 22:00 SP).
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=_TZ_SP)
+
+    now_sp = now.astimezone(_TZ_SP)
+    today_str = now_sp.strftime("%Y-%m-%d")
+    horario_sp_str = now_sp.strftime("%H:%M")
+
+    candidatos = []
+    try:
+        query = (
+            db.collection(COLLECTION)
+            .where("estado", "==", ESTADO_ABERTO)
+            .where("prioridade", "==", PRIORIDADE_ALTA)
+        )
+        for doc in query.stream():
+            data = doc.to_dict() or {}
+            # Ignora se já foi avaliado anteriormente
+            if data.get("avaliado_interrupcao_em") is not None:
+                continue
+            # Defesa adicional em memória
+            if data.get("estado") != ESTADO_ABERTO or data.get("prioridade") != PRIORIDADE_ALTA:
+                continue
+            candidatos.append((doc, data))
+    except Exception as exc:
+        print(f"[AtencaoInterrupcao] Falha ao consultar candidatos de atencao: {exc}")
+        return {"status": "erro", "erro": str(exc), "avaliados": 0, "notificados": 0, "pulados_janela": 0}
+
+    avaliados = 0
+    notificados = 0
+    pulados_janela = 0
+
+    for doc, item in candidatos:
+        try:
+            # a. Janela de silêncio: se fora da janela permitida, pula sem marcar
+            # avaliado_interrupcao_em para retentar automaticamente no próximo minuto
+            if not dentro_janela_permitida(horario_sp_str, AI_PLANNER_WINDOW_START, AI_PLANNER_WINDOW_END):
+                pulados_janela += 1
+                continue
+
+            # b. Monta título e mensagem a partir dos campos do item (sem LLM)
+            titulo = str(item.get("titulo") or "Item de atenção prioritário").strip()[:120]
+            resumo = str(item.get("resumo") or "").strip()
+            sugestao = str(item.get("sugestao") or "").strip()
+            if sugestao:
+                mensagem = f"{resumo}\nSugestão: {sugestao}" if resumo else sugestao
+            else:
+                mensagem = resumo or titulo
+            mensagem = mensagem[:600]
+
+            # c. Mapeia categoria de scheduled_notifications
+            categoria = mapear_origem_categoria_notificacao(item.get("origem"))
+
+            # d. Reserva vaga no teto diário compartilhado e cria o documento
+            notif_ref = db.collection("scheduled_notifications").document()
+            payload = {
+                "title": titulo,
+                "message": mensagem,
+                "category": categoria,
+                "send_at": now,
+                "status": "pending",
+                "source": "atencao_interrupcao",
+                "motivo": f"Item de atenção ({item.get('origem') or 'geral'}): {titulo}"[:300],
+                "created_at": firestore.SERVER_TIMESTAMP,
+                "planner_run_date": today_str,
+                "feedback": None,
+                "atencao_id": getattr(doc, "id", None),
+            }
+
+            reservado = False
+            if _reserve_and_create_notification is not None:
+                reservado = _reserve_and_create_notification(db, today_str, notif_ref, payload)
+
+            if reservado:
+                notificados += 1
+
+            # e. Grava avaliado_interrupcao_em (reservou ou não por orçamento esgotado)
+            doc_ref = getattr(doc, "reference", None) or db.collection(COLLECTION).document(doc.id)
+            doc_ref.update({"avaliado_interrupcao_em": firestore.SERVER_TIMESTAMP})
+            avaliados += 1
+
+        except Exception as exc:
+            print(f"[AtencaoInterrupcao] Erro ao processar item {getattr(doc, 'id', 'desconhecido')}: {exc}")
+
+    return {
+        "status": "ok",
+        "candidatos": len(candidatos),
+        "avaliados": avaliados,
+        "notificados": notificados,
+        "pulados_janela": pulados_janela,
+    }
+

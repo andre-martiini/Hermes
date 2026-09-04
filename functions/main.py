@@ -3757,7 +3757,14 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
         else:
             task_doc.reference.update({'reminder_sent': True})
 
-    # 4. Notificacoes agendadas pelo planejador proativo de IA e Verificacao de Duplicatas de Contatos
+    # 4. Avaliacao de interrupcao da fila de atencao (itens de alta prioridade)
+    try:
+        from atencao import avaliar_interrupcao_atencao
+        avaliar_interrupcao_atencao(db, now)
+    except Exception as exc:
+        print(f"[AtencaoInterrupcao] Falha ao avaliar interrupcao de atencao: {exc}")
+
+    # Notificacoes agendadas pelo planejador proativo de IA e Verificacao de Duplicatas de Contatos
     try:
         from ai_notification_planner import dispatch_pending_ai_notifications, dispatch_scheduled_whatsapp_messages
         from contact_merge_utils import find_and_notify_duplicate_contacts
