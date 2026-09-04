@@ -1769,6 +1769,7 @@ def obter_acao(ctx: ToolContext, args: dict):
         "execution_lane": subtarefas.derivar_lane(plano, d.get("execution_lane")),
         "degradation_count": subtarefas.degradacao_da_acao(plano, d.get("degradation_count")),
         "estrategia_objetivo_id": d.get("estrategia_objetivo_id"),
+        "contexto_agente": d.get("contexto_agente"),
         "plano_acao": etapas,
         "etapas_feitas": feitas,
         "etapas_totais": totais,

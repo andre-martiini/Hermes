@@ -125,6 +125,7 @@ from gemini_cost_controls import (
     GEMINI_LIGHT_MODEL,
     GEMINI_BALANCED_MODEL,
     GEMINI_FRONTIER_MODEL,
+    GEMINI_STRUCTURED_MODEL,
     generate_content_logged,
 )
 from llm_providers import openai_provider
@@ -15354,4 +15355,258 @@ def githubWebhook(req: https_fn.Request) -> https_fn.Response:
     anotar_evento_github_em_tarefas(db, repo, nota)
 
     return https_fn.Response("OK", status=200)
+
+
+# ---------------------------------------------------------------------------
+# PR 5 (Fase 1): contexto_agente auto-mantido em acoes criticas
+# ---------------------------------------------------------------------------
+
+
+def eh_acao_critica(task_data: dict | None) -> bool:
+    """Determina se uma tarefa é considerada 'ação crítica'.
+    Critério canônico (idêntico a inbox_pendentes.py):
+    execution_lane == 'critica' ou degradation_count >= 3.
+    """
+    if not task_data or not isinstance(task_data, dict):
+        return False
+    lane = str(task_data.get("execution_lane") or "").strip().lower()
+    deg = task_data.get("degradation_count") or 0
+    try:
+        deg = int(deg)
+    except (ValueError, TypeError):
+        deg = 0
+    return (lane == "critica") or (deg >= 3)
+
+
+def montar_texto_fonte_contexto(task_data: dict, limite_diario: int = 20) -> str:
+    """Monta o texto estruturado com título, descrição, plano de ação e
+    últimas N entradas de diário para servir de fonte de verdade ao Gemini."""
+    titulo = (task_data.get("titulo") or "").strip()
+    descricao = (task_data.get("descricao") or "").strip()
+
+    plano = task_data.get("plano_acao") or []
+    etapas_textos = []
+    for i, etapa in enumerate(plano, 1):
+        if isinstance(etapa, dict):
+            texto = (etapa.get("texto") or etapa.get("titulo") or "").strip()
+            estado = (etapa.get("estado") or "").strip()
+            prefix = f"[{estado}] " if estado else ""
+            if texto:
+                etapas_textos.append(f"{i}. {prefix}{texto}")
+        elif isinstance(etapa, str) and etapa.strip():
+            etapas_textos.append(f"{i}. {etapa.strip()}")
+    plano_str = "\n".join(etapas_textos) if etapas_textos else "Nenhuma etapa cadastrada."
+
+    acomp = task_data.get("acompanhamento") or []
+    diario_textos = []
+    for entry in acomp[-limite_diario:]:
+        if isinstance(entry, dict):
+            dt = str(entry.get("data") or "").strip()
+            nota = str(entry.get("nota") or "").strip()
+            if dt and nota:
+                diario_textos.append(f"[{dt}] {nota}")
+            elif nota:
+                diario_textos.append(nota)
+        elif isinstance(entry, str) and entry.strip():
+            diario_textos.append(entry.strip())
+    diario_str = "\n".join(diario_textos) if diario_textos else "Nenhuma anotação de diário."
+
+    return (
+        f"Título: {titulo}\n"
+        f"Descrição: {descricao}\n\n"
+        f"Plano de Ação:\n{plano_str}\n\n"
+        f"Diário de Bordo (Últimas entradas):\n{diario_str}"
+    )
+
+
+def calcular_hash_contexto(texto: str) -> str:
+    """Calcula hash MD5 do texto fonte para deduplicação."""
+    return hashlib.md5((texto or "").strip().encode("utf-8")).hexdigest()
+
+
+def construir_prompt_contexto(texto_fonte: str) -> str:
+    """Gera o prompt para o Gemini produzir o resumo estruturado de contexto_agente.
+    Regra inegociável: nunca inventar informação ausente (onde_esta_o_codigo deve ser null
+    se não citado expressamente)."""
+    return f"""Você é um sintetizador de contexto operacional de alto nível para agentes autônomos.
+Sua tarefa é ler as informações de uma ação crítica (título, descrição, plano de ação e diário) e produzir um resumo estruturado em JSON para que um novo agente possa assumir o trabalho imediatamente sem perguntas.
+
+Texto da Ação:
+\"\"\"{texto_fonte}\"\"\"
+
+Estrutura JSON obrigatória:
+{{
+  "resumo": "O que é a ação em 1 a 3 frases objetivas.",
+  "pessoas_chave": ["Nome (papel ou contexto)", ...],
+  "onde_esta_o_codigo": "repo, branch, porta do dev server — APENAS o que estiver explicitamente citado no texto" ou null,
+  "ultimas_decisoes": ["Decisão 1", "Decisão 2", ...],
+  "travas": ["Bloqueio 1", ...]
+}}
+
+REGRAS INEGOCIÁVEIS:
+1. NÃO INVENTE NADA. Se o texto não menciona repositório, branch, porta ou código, "onde_esta_o_codigo" DEVE ser null. Jamais dê palpites ou deduções não fundamentadas.
+2. Se nenhuma pessoa for mencionada, retorne "pessoas_chave": [].
+3. Se não houver decisões explícitas tomadas no texto ou diário, retorne "ultimas_decisoes": [].
+4. Se não houver impedimentos ou bloqueios ativos citados, retorne "travas": [].
+5. Responda ESTRITAMENTE com o objeto JSON válido, sem texto explicativo antes ou depois.
+"""
+
+
+def parse_resposta_contexto(raw_response: str) -> dict | None:
+    """Faz parse defensivo do JSON gerado pelo LLM para contexto_agente.
+    Tenta regex de objeto JSON, fallback para remoção de cercas markdown.
+    Normaliza campos para o schema esperado. Retorna None se falhar ou se vazio."""
+    if not raw_response or not isinstance(raw_response, str):
+        return None
+
+    raw = raw_response.strip()
+    parsed = None
+
+    # 1. Tenta regex de objeto JSON
+    json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+    if json_match:
+        try:
+            parsed = json.loads(json_match.group(0))
+        except Exception:
+            pass
+
+    # 2. Fallback: remoção de cercas markdown
+    if not parsed or not isinstance(parsed, dict):
+        clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.IGNORECASE).strip()
+        if clean.startswith("{") and clean.endswith("}"):
+            try:
+                parsed = json.loads(clean)
+            except Exception:
+                pass
+
+    if not parsed or not isinstance(parsed, dict):
+        return None
+
+    # Validar e normalizar campos
+    resumo = str(parsed.get("resumo") or "").strip()
+    if not resumo:
+        return None
+
+    raw_pessoas = parsed.get("pessoas_chave")
+    pessoas_chave = []
+    if isinstance(raw_pessoas, list):
+        for p in raw_pessoas:
+            if p and str(p).strip():
+                pessoas_chave.append(str(p).strip())
+
+    onde_codigo = parsed.get("onde_esta_o_codigo")
+    if onde_codigo is not None:
+        onde_str = str(onde_codigo).strip()
+        if not onde_str or onde_str.lower() in ("null", "none", "n/a", "não informado", "nao informado"):
+            onde_codigo = None
+        else:
+            onde_codigo = onde_str
+
+    raw_decisoes = parsed.get("ultimas_decisoes")
+    ultimas_decisoes = []
+    if isinstance(raw_decisoes, list):
+        for d in raw_decisoes:
+            if d and str(d).strip():
+                ultimas_decisoes.append(str(d).strip())
+
+    raw_travas = parsed.get("travas")
+    travas = []
+    if isinstance(raw_travas, list):
+        for t in raw_travas:
+            if t and str(t).strip():
+                travas.append(str(t).strip())
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    return {
+        "resumo": resumo,
+        "pessoas_chave": pessoas_chave,
+        "onde_esta_o_codigo": onde_codigo,
+        "ultimas_decisoes": ultimas_decisoes,
+        "travas": travas,
+        "atualizado_em": now_iso,
+    }
+
+
+def processar_contexto_agente(db, task_id: str, task_data: dict, client=None) -> bool:
+    """Processa a geração/atualização de contexto_agente para uma tarefa crítica.
+    Retorna True se gerou e gravou contexto_agente, False caso contrário."""
+    if not task_data or not isinstance(task_data, dict):
+        return False
+
+    # 1. Ignora tarefas internas do sistema
+    if task_data.get("area_tematica") == "SISTEMAS":
+        return False
+
+    # 2. Ignora tarefas que não são críticas
+    if not eh_acao_critica(task_data):
+        return False
+
+    # 3. Monta texto fonte e hash de dedupe
+    full_text = montar_texto_fonte_contexto(task_data)
+    current_hash = calcular_hash_contexto(full_text)
+    if task_data.get("last_processed_contexto_hash") == current_hash:
+        return False
+
+    # 4. Obtém client do Gemini se não fornecido
+    if not client:
+        api_key = get_gemini_api_key()
+        if not api_key:
+            print(f"[CONTEXTO AGENTE] API key do Gemini não encontrada para tarefa {task_id}")
+            return False
+        from google import genai
+        client = genai.Client(api_key=api_key)
+
+    prompt = construir_prompt_contexto(full_text)
+    try:
+        response = generate_content_logged(
+            client,
+            model=GEMINI_STRUCTURED_MODEL,
+            contents=prompt,
+            feature="contexto_agente",
+            db=db,
+        )
+    except Exception as exc:
+        print(f"[CONTEXTO AGENTE] Falha na chamada Gemini para tarefa {task_id}: {exc}")
+        return False
+
+    raw_text = (getattr(response, "text", None) or "").strip()
+    contexto = parse_resposta_contexto(raw_text)
+    if not contexto:
+        # Se o parse falhou ou veio vazio, grava apenas o hash para evitar reprocessamento repetido
+        if db:
+            db.collection("tarefas").document(task_id).update({
+                "last_processed_contexto_hash": current_hash
+            })
+        return False
+
+    if db:
+        db.collection("tarefas").document(task_id).update({
+            "contexto_agente": contexto,
+            "last_processed_contexto_hash": current_hash
+        })
+    return True
+
+
+@firestore_fn.on_document_written(
+    document="tarefas/{taskId}",
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=120,
+)
+def on_tarefa_written_contexto_agente(
+    event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot | None]]
+):
+    """Gatilho disparado na escrita de qualquer tarefa. Mantém contexto_agente atualizado
+    para ações críticas usando Gemini estruturado."""
+    try:
+        if not event.data or not event.data.after or not event.data.after.exists:
+            return  # Tarefa deletada
+        task_data = event.data.after.to_dict() or {}
+        task_id = event.params.get("taskId")
+        if not task_id:
+            return
+        db = get_db()
+        processar_contexto_agente(db, task_id, task_data)
+    except Exception as exc:
+        print(f"[CONTEXTO AGENTE] Erro não tratado ao processar tarefa: {exc}")
 

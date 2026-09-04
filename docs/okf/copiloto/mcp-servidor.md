@@ -64,6 +64,12 @@ Permite registrar e consultar o histórico de execuções de rotinas agendadas d
 - **`registrar_execucao_agente`** (escrita): grava o desfecho de uma rotina (`rotina`, `resumo`, `status`, `contadores`, `erro`). **Nota de segurança:** não exige confirmação prévia no MCP por ser telemetria interna sem efeito em terceiros.
 - **`consultar_execucoes_agente`** (leitura): consulta execuções recentes, opcionalmente filtrando por rotina, ordenadas da mais recente para a mais antiga.
 
+### Contexto de agente auto-mantido em ações críticas (`obter_acao`)
+
+Para ações críticas (`execution_lane == "critica"` ou `degradation_count >= 3`), a tool **`obter_acao`** inclui o campo **`contexto_agente`** — um resumo estruturado gerado e mantido automaticamente via trigger do Firestore com Gemini estruturado (`on_tarefa_written_contexto_agente`):
+- Contém: `resumo`, `pessoas_chave`, `onde_esta_o_codigo` (null se não citado), `ultimas_decisoes`, `travas` e `atualizado_em`.
+- Permite que qualquer agente assuma uma ação crítica em sessão limpa imediatamente, sem necessidade de handoff manual. Para ações não críticas ou ainda não processadas, o campo retorna `None`.
+
 ### Escrita: direta, não em dois passos
 
 As tools `preparar_*` **não gravam nada**: montam uma proposta que a UI web
