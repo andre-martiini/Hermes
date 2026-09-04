@@ -82,6 +82,21 @@ class _MockQuery:
             filtered = []
         return _MockQuery(self.col, filtered)
 
+    def order_by(self, field, direction=None):
+        reverse = (
+            direction == "DESCENDING"
+            or getattr(direction, "name", "") == "DESCENDING"
+            or str(direction) == "DESCENDING"
+            or direction == -1
+            or (hasattr(firestore, "Query") and direction == getattr(firestore.Query, "DESCENDING", "DESCENDING"))
+        )
+        sorted_items = sorted(
+            self.items,
+            key=lambda x: str(x[1].get(field) or ""),
+            reverse=reverse,
+        )
+        return _MockQuery(self.col, sorted_items)
+
     def limit(self, n: int):
         return _MockQuery(self.col, self.items[:n])
 
@@ -120,6 +135,21 @@ class _MockCollection:
             filtered = []
         return _MockQuery(self, filtered)
 
+    def order_by(self, field, direction=None):
+        reverse = (
+            direction == "DESCENDING"
+            or getattr(direction, "name", "") == "DESCENDING"
+            or str(direction) == "DESCENDING"
+            or direction == -1
+            or (hasattr(firestore, "Query") and direction == getattr(firestore.Query, "DESCENDING", "DESCENDING"))
+        )
+        sorted_items = sorted(
+            list(self._docs.items()),
+            key=lambda x: str(x[1].get(field) or ""),
+            reverse=reverse,
+        )
+        return _MockQuery(self, sorted_items)
+
     def limit(self, n: int):
         return _MockQuery(self, list(self._docs.items())[:n])
 
@@ -138,6 +168,9 @@ class _MockTransaction:
 
     def get(self, doc_ref):
         return doc_ref.get()
+
+    def update(self, doc_ref, data):
+        doc_ref.update(data)
 
     def set(self, doc_ref, data, merge=False):
         doc_ref.set(data, merge=merge)
@@ -166,37 +199,55 @@ class _MockDb:
 class TestAvaliarLiberacaoPromovidos(unittest.TestCase):
     """Testes de lógica pura da função avaliar_liberacao_promovidos."""
 
-    def test_filtra_apenas_aguardando_janela_com_prazo_vencido(self):
+    def test_filtra_apenas_aguardando_janela_com_prazo_vencido_e_telegram_entregue(self):
         agora = datetime.datetime(2026, 9, 4, 15, 0, tzinfo=timezone.utc)
         rascunhos = [
-            # Vencido há 2 min -> deve liberar
+            # Vencido há 2 min com card Telegram entregue -> deve liberar
             {
                 "id": "r1",
                 "status": oa.STATUS_AGUARDANDO_JANELA,
                 "envio_liberado_em": agora - timedelta(minutes=2),
+                "telegram_message_id": 100,
             },
             # Ainda dentro da janela (vence daqui a 5 min) -> não libera
             {
                 "id": "r2",
                 "status": oa.STATUS_AGUARDANDO_JANELA,
                 "envio_liberado_em": agora + timedelta(minutes=5),
+                "telegram_message_id": 101,
             },
             # Status aguardando_aprovacao comum (mesmo que com timestamp antigo) -> não libera
             {
                 "id": "r3",
                 "status": oa.STATUS_AGUARDANDO,
                 "envio_liberado_em": agora - timedelta(minutes=10),
+                "telegram_message_id": 102,
             },
             # Status descartado -> não libera
             {
                 "id": "r4",
                 "status": oa.STATUS_DESCARTADO,
                 "envio_liberado_em": agora - timedelta(minutes=1),
+                "telegram_message_id": 103,
             },
         ]
 
         prontos = oa.avaliar_liberacao_promovidos(rascunhos, agora)
         self.assertEqual(prontos, ["r1"])
+
+    def test_nao_libera_se_card_telegram_nao_entregue(self):
+        """Veto humano inegociável: não libera automaticamente se o dono não recebeu o botão Cancelar."""
+        agora = datetime.datetime(2026, 9, 4, 15, 0, tzinfo=timezone.utc)
+        rascunhos = [
+            {
+                "id": "r_sem_tg",
+                "status": oa.STATUS_AGUARDANDO_JANELA,
+                "envio_liberado_em": agora - timedelta(minutes=2),
+                # telegram_message_id ausente
+            },
+        ]
+        prontos = oa.avaliar_liberacao_promovidos(rascunhos, agora)
+        self.assertEqual(prontos, [])
 
     def test_trata_envio_liberado_em_em_string_iso(self):
         agora = datetime.datetime(2026, 9, 4, 15, 0, tzinfo=timezone.utc)
@@ -205,6 +256,7 @@ class TestAvaliarLiberacaoPromovidos(unittest.TestCase):
                 "id": "r_iso",
                 "status": oa.STATUS_AGUARDANDO_JANELA,
                 "envio_liberado_em": "2026-09-04T14:50:00+00:00",
+                "telegram_message_id": 105,
             },
         ]
         prontos = oa.avaliar_liberacao_promovidos(rascunhos, agora)
@@ -276,6 +328,27 @@ class TestCriarRascunhoPromovido(unittest.TestCase):
         self.assertEqual(doc["status"], oa.STATUS_AGUARDANDO_JANELA)
         self.assertIsNotNone(doc.get("envio_liberado_em"))
 
+    def test_tipo_promovido_sem_telegram_degrada_para_aguardando_aprovacao(self):
+        # Cadastra o tipo em system/mcp_access.tipos_promovidos
+        self.db.collection("system")._docs["mcp_access"] = {
+            "tipos_promovidos": ["confirmacao_reuniao"],
+            "janela_cancelamento_min": 15,
+        }
+        with mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=None):
+            res = oa.criar_rascunho(
+                self.db,
+                contact_number="+5527999991111",
+                message="Sua reunião está confirmada amanhã às 10h.",
+                motivo="Confirmação",
+                tipo="confirmacao_reuniao",
+            )
+            self.assertEqual(res["status"], oa.STATUS_AGUARDANDO)
+            self.assertFalse(res["telegram_notificado"])
+            self.assertIn("Degradado para aprovação manual", res["instrucao"])
+            doc = self.db.collection(oa.COLLECTION)._docs[res["outbox_id"]]
+            self.assertEqual(doc["status"], oa.STATUS_AGUARDANDO)
+            self.assertIsNone(doc.get("envio_liberado_em"))
+
 
 class TestLiberacaoECancelamento(unittest.TestCase):
     """Testes de liberação periódica de promovidos e cancelamento via descarte."""
@@ -295,6 +368,7 @@ class TestLiberacaoECancelamento(unittest.TestCase):
             "content": "Msg 1",
             "tipo": "confirmacao_reuniao",
             "envio_liberado_em": agora - timedelta(minutes=1),
+            "telegram_message_id": 999,
         }
         self.outbox._docs["dentro_janela"] = {
             "status": oa.STATUS_AGUARDANDO_JANELA,
@@ -302,6 +376,7 @@ class TestLiberacaoECancelamento(unittest.TestCase):
             "content": "Msg 2",
             "tipo": "confirmacao_reuniao",
             "envio_liberado_em": agora + timedelta(minutes=5),
+            "telegram_message_id": 1000,
         }
 
         liberados = oa.liberar_rascunhos_promovidos(self.db, agora=agora)
@@ -313,6 +388,20 @@ class TestLiberacaoECancelamento(unittest.TestCase):
 
         doc_j = self.outbox._docs["dentro_janela"]
         self.assertEqual(doc_j["status"], oa.STATUS_AGUARDANDO_JANELA)
+
+    def test_liberar_rascunhos_promovidos_ignora_vencido_sem_telegram(self):
+        agora = datetime.datetime(2026, 9, 4, 15, 0, tzinfo=timezone.utc)
+        self.outbox._docs["vencido_sem_tg"] = {
+            "status": oa.STATUS_AGUARDANDO_JANELA,
+            "destinatario_nome": "Lucas",
+            "content": "Msg sem tg",
+            "tipo": "confirmacao_reuniao",
+            "envio_liberado_em": agora - timedelta(minutes=1),
+            # sem telegram_message_id
+        }
+        liberados = oa.liberar_rascunhos_promovidos(self.db, agora=agora)
+        self.assertEqual(liberados, 0)
+        self.assertEqual(self.outbox._docs["vencido_sem_tg"]["status"], oa.STATUS_AGUARDANDO_JANELA)
 
     def test_cancelamento_via_descartar_rascunho_funciona_em_aguardando_janela(self):
         self.outbox._docs["promovido_para_cancelar"] = {
@@ -336,6 +425,17 @@ class TestLiberacaoECancelamento(unittest.TestCase):
         # Item de atenção reaberto
         item = self.db.collection("atencao")._docs["item-123"]
         self.assertEqual(item["estado"], "aberto")
+
+    def test_cancelamento_atomico_rejeita_se_ja_aprovado_na_corrida(self):
+        self.outbox._docs["corrida_doc"] = {
+            "status": oa.STATUS_PENDING,
+            "destinatario_nome": "Lucas",
+            "content": "Texto já aprovado",
+            "tipo": "confirmacao_reuniao",
+        }
+        res = oa.descartar_rascunho(self.db, outbox_id="corrida_doc")
+        self.assertEqual(res["status"], "already_decided")
+        self.assertEqual(self.outbox._docs["corrida_doc"]["status"], oa.STATUS_PENDING)
 
 
 class TestTiposElegiveisParaPromocao(unittest.TestCase):
@@ -433,6 +533,36 @@ class TestTiposElegiveisParaPromocao(unittest.TestCase):
         self.assertEqual(len(elegiveis), 1)
         self.assertEqual(elegiveis[0]["tipo"], "retorno_promessa")
         self.assertEqual(elegiveis[0]["metricas"]["taxa_sem_edicao"], 1.0)
+
+    def test_ordena_por_recencia_ao_limitar_janela_recente(self):
+        """Garante que a janela pega os mais recentes por created_at decrescente."""
+        agora = datetime.datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
+        # 10 rascunhos antigos de um tipo descontinuado
+        for i in range(10):
+            self.outbox._docs[f"velho_{i}"] = {
+                "tipo": "tipo_antigo",
+                "status": oa.STATUS_SENT,
+                "foi_editado": False,
+                "created_at": (agora - timedelta(days=30, hours=i)).isoformat(),
+                "aprovado_em": agora - timedelta(days=30, hours=i),
+            }
+        # 10 rascunhos recentes de um tipo ativo
+        for i in range(10):
+            self.outbox._docs[f"novo_{i}"] = {
+                "tipo": "tipo_recente",
+                "status": oa.STATUS_SENT,
+                "foi_editado": False,
+                "created_at": (agora - timedelta(hours=i)).isoformat(),
+                "aprovado_em": agora - timedelta(hours=i),
+            }
+
+        # Com janela_recente=10, deve selecionar os 10 novos e ignorar os 10 velhos
+        elegiveis = pa.tipos_elegiveis_para_promocao(
+            self.db, amostra_minima=8, taxa_minima=0.9, janela_recente=10
+        )
+        tipos = [e["tipo"] for e in elegiveis]
+        self.assertIn("tipo_recente", tipos)
+        self.assertNotIn("tipo_antigo", tipos)
 
 
 class TestDecidirPromocaoAutonomia(unittest.TestCase):

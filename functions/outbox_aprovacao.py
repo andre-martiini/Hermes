@@ -140,12 +140,19 @@ def avaliar_liberacao_promovidos(
     rascunhos: list[dict],
     agora: datetime.datetime,
 ) -> list[str]:
-    """Filtra puramente quais rascunhos em aguardando_janela já venceram a janela de cancelamento."""
+    """Filtra puramente quais rascunhos em aguardando_janela já venceram a janela de cancelamento.
+
+    Garante o veto humano: só libera se o card Telegram com o botão de cancelamento foi
+    comprovadamente emitido (telegram_message_id presente).
+    """
     prontos: list[str] = []
     agora_utc = agora if agora.tzinfo else agora.replace(tzinfo=timezone.utc)
 
     for r in rascunhos:
         if r.get("status") != STATUS_AGUARDANDO_JANELA:
+            continue
+        # Veto humano inegociável: só libera se o card com botão de cancelamento foi entregue
+        if not r.get("telegram_message_id"):
             continue
         liberado_em = r.get("envio_liberado_em")
         if isinstance(liberado_em, str):
@@ -337,6 +344,25 @@ def criar_rascunho(
     except Exception as tg_err:
         print(f"[OutboxAprovacao] Falha ao enviar card Telegram para {outbox_id}: {tg_err}")
 
+    if is_promovido and not telegram_msg_id:
+        # Se a emissão do card Telegram falhou, degrada para aprovação regular
+        # para impedir envio autônomo sem supervisão humana efetiva
+        doc_ref.update({
+            "status": STATUS_AGUARDANDO,
+            "envio_liberado_em": None,
+            "degradado_motivo": "falha_entrega_card_telegram",
+        })
+        return {
+            "status": STATUS_AGUARDANDO,
+            "outbox_id": outbox_id,
+            "destinatario_nome": destinatario_nome,
+            "telegram_notificado": False,
+            "instrucao": (
+                "Tipo promovido, mas o card do Telegram falhou no envio. Degradado para aprovação manual "
+                "por segurança para impedir envio sem confirmação do dono."
+            ),
+        }
+
     if is_promovido:
         return {
             "status": STATUS_AGUARDANDO_JANELA,
@@ -520,26 +546,70 @@ def descartar_rascunho(
     chat_id: str | int | None = None,
     telegram_msg_id: int | None = None,
 ) -> dict:
-    """Descarta um rascunho de WhatsApp e reabre o item da fila de atenção se houver."""
+    """Descarta um rascunho de WhatsApp e reabre o item da fila de atenção se houver.
+
+    Executa via transação atômica Firestore para garantir exclusão mútua com a
+    aprovação automática (liberar_rascunhos_promovidos), evitando condições de corrida.
+    """
     outbox_id = str(outbox_id or "").strip()
     if not outbox_id:
         return {"erro": "outbox_id é obrigatório."}
 
     doc_ref = db.collection(COLLECTION).document(outbox_id)
-    snap = doc_ref.get()
-    if not snap.exists:
-        return {"status": "not_found", "erro": f"Rascunho '{outbox_id}' não encontrado."}
-
-    data = snap.to_dict() or {}
-    valido, motivo = validar_transicao_descarte(data.get("status"))
-    if not valido:
-        return {"status": "already_decided", "erro": f"Rascunho {motivo}", "dados": data}
-
     agora_utc = datetime.datetime.now(timezone.utc)
-    doc_ref.update({
-        "status": STATUS_DESCARTADO,
-        "descartado_em": firestore.SERVER_TIMESTAMP if hasattr(firestore, "SERVER_TIMESTAMP") else agora_utc,
-    })
+    transaction_result = {}
+    transaction_success = False
+
+    if hasattr(db, "transaction"):
+        try:
+            transaction = db.transaction()
+
+            @firestore.transactional
+            def _exec_discard(tx):
+                snap = doc_ref.get(transaction=tx)
+                if not snap.exists:
+                    return {"status": "not_found", "erro": f"Rascunho '{outbox_id}' não encontrado."}
+                data = snap.to_dict() or {}
+                valido, motivo = validar_transicao_descarte(data.get("status"))
+                if not valido:
+                    return {
+                        "status": "already_decided",
+                        "erro": f"Rascunho {motivo}",
+                        "dados": data,
+                    }
+
+                tx.update(
+                    doc_ref,
+                    {
+                        "status": STATUS_DESCARTADO,
+                        "descartado_em": firestore.SERVER_TIMESTAMP if hasattr(firestore, "SERVER_TIMESTAMP") else agora_utc,
+                    },
+                )
+                return {"status": "ok", "dados": data}
+
+            transaction_result = _exec_discard(transaction)
+            transaction_success = True
+        except Exception as tx_err:
+            print(f"[OutboxAprovacao] Transação Firestore de descarte falhou ou mock sem suporte: {tx_err}")
+
+    if not transaction_success:
+        snap = doc_ref.get()
+        if not snap.exists:
+            return {"status": "not_found", "erro": f"Rascunho '{outbox_id}' não encontrado."}
+        data = snap.to_dict() or {}
+        valido, motivo = validar_transicao_descarte(data.get("status"))
+        if not valido:
+            return {"status": "already_decided", "erro": f"Rascunho {motivo}", "dados": data}
+        doc_ref.update({
+            "status": STATUS_DESCARTADO,
+            "descartado_em": agora_utc,
+        })
+        transaction_result = {"status": "ok", "dados": data}
+
+    if transaction_result.get("status") != "ok":
+        return transaction_result
+
+    data = transaction_result.get("dados") or {}
 
     # Item da fila de atenção volta para aberto (o dono descartou o texto, não o assunto)
     item_atencao_id = data.get("item_atencao_id")

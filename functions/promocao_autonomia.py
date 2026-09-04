@@ -50,18 +50,27 @@ def tipos_elegiveis_para_promocao(
     """
     from outbox_aprovacao import metricas_por_tipo
 
-    # 1. Busca documentos recentes com status pending ou sent
+    # 1. Busca documentos recentes ordenados por recência antes de limitar a janela
     docs = []
     try:
-        query = db.collection("whatsapp_outbox").where("status", "in", ["pending", "sent"]).limit(janela_recente)
-        docs = list(query.stream())
+        query = (
+            db.collection("whatsapp_outbox")
+            .order_by("created_at", direction=firestore.Query.DESCENDING)
+            .limit(janela_recente)
+        )
+        all_recent = list(query.stream())
+        docs = [d for d in all_recent if (d.to_dict() or {}).get("status") in ("pending", "sent")]
     except Exception:
         try:
-            all_docs = list(db.collection("whatsapp_outbox").limit(janela_recente).stream())
-            docs = [d for d in all_docs if (d.to_dict() or {}).get("status") in ("pending", "sent")]
-        except Exception as exc:
-            print(f"[PromocaoAutonomia] Falha ao consultar whatsapp_outbox: {exc}")
-            return []
+            query = db.collection("whatsapp_outbox").where("status", "in", ["pending", "sent"]).limit(janela_recente)
+            docs = list(query.stream())
+        except Exception:
+            try:
+                all_docs = list(db.collection("whatsapp_outbox").limit(janela_recente).stream())
+                docs = [d for d in all_docs if (d.to_dict() or {}).get("status") in ("pending", "sent")]
+            except Exception as exc:
+                print(f"[PromocaoAutonomia] Falha ao consultar whatsapp_outbox: {exc}")
+                return []
 
     if not docs:
         return []
