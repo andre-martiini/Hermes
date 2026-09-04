@@ -37,6 +37,11 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /promessas_abertas/{document=**} {
+      allow read: if internalUser();
+      allow write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if internalUser();
     }

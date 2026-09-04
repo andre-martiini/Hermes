@@ -182,6 +182,15 @@ Unificação determinística de pendências e sinais que demandam decisão do do
 |---|---|---|
 | `detectar_atencao_acoes` | Scheduler (a cada 30 min, America/Sao_Paulo) | Varre ações ativas/stand-by com etapas em `aguardando_terceiro` e `data_prevista` vencida. Se não houver resposta do terceiro via WhatsApp após a data prevista, cria ou atualiza item na coleção `atencao` com deduplicação determinística (`tipo:acao_id:etapa_id`). Controlada pela flag `system/settings.atencao.aguardando_terceiro.enabled` |
 
+## `functions/atencao_whatsapp.py` (Detectores reativos de WhatsApp)
+
+Dois detectores acionados por trigger Firestore (nao por cron - a latencia importa aqui), cada um atras da propria flag. Logica de deteccao pura e testavel, sem LLM, mesmo espirito de `atencao.py`.
+
+| Funcao | Trigger | O que faz |
+|---|---|---|
+| `on_whatsapp_message_atencao` | Firestore on-create em `whatsapp_messages/{message_id}` | Roda os dois detectores a cada mensagem capturada, cada um isolado em seu proprio try/except. **`promessa_sem_retorno`**: mensagem `from_me` de texto que casa com um padrao de compromisso ("deixa comigo", "te aviso ainda hoje", ...) cria/renova um documento em `promessas_abertas`; uma mensagem `from_me` seguinte longa ou com midia fecha a promessa como `cumprida`. Controlada por `system/settings.atencao.promessa_sem_retorno.enabled`/`.horas`. **`audio_relevante`**: audio (`ptt`/`audio`) recebido em chat vinculado a uma acao ativa (via `tarefas.whatsapp_vinculos` ou, em chat individual, via `perfil_pessoas.whatsapp_chat_id` + `interacoes_pessoas`) vira item da fila `atencao`; sequencias de audios em menos de 10 min no mesmo chat sao mescladas num item so. Controlada por `system/settings.atencao.audio_relevante.enabled`/`.segundos_min` |
+| `vencer_promessas` | Scheduler (a cada 15 min, America/Sao_Paulo) | Fecha o relogio: promessas `aberta` com `vence_em` no passado viram item `promessa_sem_retorno` na fila `atencao` e a promessa passa a `vencida`. Uma resposta do dono depois disso resolve o item automaticamente (unico caso em que um detector fecha item sem o dono) |
+
 ## Padrões de integração
 
 - **Callable (síncrono):** frontend chama via `httpsCallable()`; timeout máximo observado de 540s. Usado para a maioria das ações do usuário (Copiloto, geração de conteúdo, sincronizações sob demanda).

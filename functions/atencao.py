@@ -67,6 +67,25 @@ def _acao_e_critica(tarefa: dict, hoje_str: str) -> bool:
     return False
 
 
+def mapear_acoes_ativas_por_chat(db) -> dict[str, dict]:
+    """Chat_id -> tarefa (dict completo, com 'id') para toda acao ativa/stand-by que
+    tenha `whatsapp_vinculos`. Local unico da varredura para nao repeti-la em cada
+    detector reativo de WhatsApp (ver functions/atencao_whatsapp.py). Nao reaproveitado
+    por detectar_atencao_acoes nesta PR para nao tocar em codigo ja mergeado/testado -
+    fica como limpeza futura."""
+    resultado: dict[str, dict] = {}
+    for doc in db.collection("tarefas").stream():
+        d = doc.to_dict() or {}
+        status = str(d.get("status") or "").strip().lower()
+        if status not in _ACTIVE_STATUS_ALIASES and status not in _STANDBY_STATUS_ALIASES:
+            continue
+        d["id"] = doc.id
+        for v in (d.get("whatsapp_vinculos") or []):
+            if isinstance(v, dict) and str(v.get("chat_id") or "").strip():
+                resultado[str(v["chat_id"]).strip()] = d
+    return resultado
+
+
 def avaliar_etapas(
     tarefas: list[dict],
     hoje: date,

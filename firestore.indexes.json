@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "promessas_abertas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "estado", "order": "ASCENDING" },
+        { "fieldPath": "vence_em", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "atencao",
       "queryScope": "COLLECTION",
       "fields": [
