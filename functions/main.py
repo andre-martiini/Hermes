@@ -15610,3 +15610,380 @@ def on_tarefa_written_contexto_agente(
     except Exception as exc:
         print(f"[CONTEXTO AGENTE] Erro não tratado ao processar tarefa: {exc}")
 
+
+# ==============================================================================
+# FASE 2: MODELO DE INTERAÇÃO POR PESSOA (perfil_pessoas.modelo_interacao)
+# ==============================================================================
+
+def tem_sinal_suficiente(
+    qtd_mensagens: int | None,
+    qtd_interacoes: int | None,
+    min_mensagens: int = 6,
+    min_interacoes: int = 1,
+) -> bool:
+    """Verifica se há sinal suficiente para justificar a síntese via LLM.
+    Pula se tiver menos de min_mensagens (padrão 6) nos últimos 90 dias E menos de
+    min_interacoes (padrão 1) em interacoes_pessoas."""
+    try:
+        m = int(qtd_mensagens or 0)
+    except (TypeError, ValueError):
+        m = 0
+    try:
+        i = int(qtd_interacoes or 0)
+    except (TypeError, ValueError):
+        i = 0
+    if m < min_mensagens and i < min_interacoes:
+        return False
+    return True
+
+
+def montar_texto_fonte_modelo_pessoa(
+    nome: str,
+    mensagens: list[dict],
+    interacoes: list[dict],
+    tarefas_map: dict[str, str] | None = None,
+) -> str:
+    """Monta o texto-fonte consolidando histórico recente de mensagens do WhatsApp
+    (em ordem cronológica) e interações/vínculos da pessoa com ações."""
+    nome_contato = (nome or "").strip() or "Contato"
+
+    linhas_mensagens = []
+    for m in mensagens:
+        if not isinstance(m, dict):
+            continue
+        ts = m.get("timestamp")
+        dt_prefix = ""
+        if ts:
+            if hasattr(ts, "isoformat"):
+                dt_prefix = f"[{ts.isoformat()[:16]}] "
+            elif isinstance(ts, str) and len(ts) >= 10:
+                dt_prefix = f"[{ts[:16]}] "
+        autor = "André" if m.get("from_me") else nome_contato
+        texto = str(m.get("content") or m.get("transcription_text") or "").strip()
+        if texto:
+            linhas_mensagens.append(f"{dt_prefix}{autor}: {texto}")
+
+    texto_mensagens = (
+        "\n".join(linhas_mensagens)
+        if linhas_mensagens
+        else "Nenhuma mensagem de WhatsApp encontrada."
+    )
+
+    linhas_interacoes = []
+    for inter in interacoes:
+        if not isinstance(inter, dict):
+            continue
+        dt = str(inter.get("data") or "").strip()[:10]
+        dt_prefix = f"[{dt}] " if dt else ""
+        tarefa_id = str(inter.get("tarefa_id") or "").strip()
+        descricao = str(inter.get("descricao") or "").strip()
+        titulo_acao = tarefas_map.get(tarefa_id) if (tarefas_map and tarefa_id) else ""
+        if titulo_acao:
+            linhas_interacoes.append(f"- {dt_prefix}Ação: {titulo_acao} ({tarefa_id}) — {descricao}")
+        elif tarefa_id:
+            linhas_interacoes.append(f"- {dt_prefix}Ação ({tarefa_id}) — {descricao}")
+        elif descricao:
+            linhas_interacoes.append(f"- {dt_prefix}{descricao}")
+
+    texto_interacoes = (
+        "\n".join(linhas_interacoes)
+        if linhas_interacoes
+        else "Nenhuma interação recente registrada."
+    )
+
+    return (
+        f"Pessoa: {nome_contato}\n\n"
+        f"Mensagens recentes de WhatsApp:\n{texto_mensagens}\n\n"
+        f"Interações e vínculos com ações:\n{texto_interacoes}"
+    )
+
+
+def calcular_hash_modelo_pessoa(texto: str) -> str:
+    """Calcula hash MD5 do texto-fonte para deduplicação."""
+    return hashlib.md5((texto or "").strip().encode("utf-8")).hexdigest()
+
+
+def construir_prompt_modelo_pessoa(nome: str, texto_fonte: str) -> str:
+    """Gera o prompt para o Gemini sintetizar o modelo_interacao da pessoa.
+    Regra inegociável: nunca inventar registro ou tempo_resposta_tipico se não houver
+    sinal suficiente no texto-fonte (retornar null)."""
+    nome_contato = (nome or "").strip() or "Contato"
+    return f"""Você é um analista de comunicação e relacionamento para um assistente executivo pessoal.
+Sua tarefa é analisar as interações e mensagens entre o André e \"{nome_contato}\" e produzir um resumo estruturado em JSON com o modelo de interação dessa pessoa.
+
+Texto-fonte das interações e mensagens:
+\"\"\"{texto_fonte}\"\"\"
+
+Estrutura JSON obrigatória:
+{{
+  "registro": "descrição curta do tom/formalidade que o André usa com essa pessoa (ex: 'formal, trata por Dr.', 'informal, brincam bastante')" ou null,
+  "tempo_resposta_tipico": "descrição textual do tempo habitual de resposta da pessoa (ex: 'costuma responder em ~2h durante o dia útil')" ou null,
+  "acoes_recentes": ["título da ação (id)", ...]
+}}
+
+REGRAS INEGOCIÁVEIS:
+1. NUNCA INVENTE OU SUPONHA. Se as mensagens não demonstrarem claramente um padrão de tom/formalidade do André com essa pessoa, retorne "registro": null. Se não houver dados suficientes de tempo de resposta da pessoa (ex: poucas mensagens ou nenhuma troca bidirecional), retorne "tempo_resposta_tipico": null. Jamais use generalizações vazias ou vagas como "cordial", "comum" ou "tempo normal".
+2. "acoes_recentes" deve listar estritamente as ações citadas nas interações ou mensagens (com título e id se disponíveis). Se não houver nenhuma ação vinculada, retorne [].
+3. Responda ESTRITAMENTE com o objeto JSON válido, sem texto explicativo antes ou depois.
+"""
+
+
+def parse_resposta_modelo_pessoa(raw_response: str) -> dict | None:
+    """Faz parse defensivo do JSON gerado pelo LLM para modelo_interacao.
+    Tenta regex de objeto JSON, fallback para remoção de cercas markdown.
+    Normaliza campos e garante ISO UTC em atualizado_em. Retorna None se falhar ou vazio."""
+    if not raw_response or not isinstance(raw_response, str):
+        return None
+
+    raw = raw_response.strip()
+    if not raw:
+        return None
+
+    parsed = None
+    json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+    if json_match:
+        try:
+            parsed = json.loads(json_match.group(0))
+        except Exception:
+            pass
+
+    if not parsed or not isinstance(parsed, dict):
+        clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.IGNORECASE).strip()
+        if clean.startswith("{") and clean.endswith("}"):
+            try:
+                parsed = json.loads(clean)
+            except Exception:
+                pass
+
+    if not parsed or not isinstance(parsed, dict):
+        return None
+
+    def _sanitizar_texto(val) -> str | None:
+        if val is None:
+            return None
+        s = str(val).strip()
+        if not s or s.lower() in ("null", "none", "n/a", "não informado", "nao informado", "indefinido"):
+            return None
+        return s
+
+    registro = _sanitizar_texto(parsed.get("registro"))
+    tempo_resposta = _sanitizar_texto(parsed.get("tempo_resposta_tipico"))
+
+    raw_acoes = parsed.get("acoes_recentes")
+    acoes_recentes = []
+    if isinstance(raw_acoes, list):
+        for ac in raw_acoes:
+            if ac and str(ac).strip():
+                acoes_recentes.append(str(ac).strip())
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    return {
+        "registro": registro,
+        "tempo_resposta_tipico": tempo_resposta,
+        "acoes_recentes": acoes_recentes,
+        "atualizado_em": now_iso,
+    }
+
+
+def processar_modelo_pessoa(db, pessoa_id: str, pessoa_data: dict, client=None) -> bool:
+    """Processa a geração/atualização do modelo_interacao para uma pessoa.
+    Retorna True se gerou e gravou modelo_interacao, False caso contrário."""
+    if not pessoa_data or not isinstance(pessoa_data, dict):
+        return False
+
+    chat_id = str(pessoa_data.get("whatsapp_chat_id") or "").strip()
+    if not chat_id:
+        return False
+
+    # 1. Carrega últimas mensagens do WhatsApp
+    raw_msgs = []
+    if db:
+        try:
+            raw_msgs = list(
+                db.collection("whatsapp_messages")
+                .where("chat_id", "==", chat_id)
+                .order_by("timestamp", direction=firestore.Query.DESCENDING)
+                .limit(40)
+                .stream()
+            )
+        except Exception as q_err:
+            print(f"[MODELO PESSOA] Falha ao consultar mensagens de {chat_id}: {q_err}")
+            raw_msgs = []
+
+    mensagens_recentes = []
+    for doc in raw_msgs:
+        m = doc.to_dict() if hasattr(doc, "to_dict") else doc
+        if isinstance(m, dict):
+            mensagens_recentes.append(m)
+
+    # Inverte para ordem cronológica (antigas -> recentes)
+    mensagens_cronologicas = list(reversed(mensagens_recentes))
+
+    # 2. Carrega até 20 interações da pessoa
+    raw_interacoes = []
+    if db:
+        try:
+            raw_interacoes = list(
+                db.collection("interacoes_pessoas")
+                .where("pessoa_id", "==", pessoa_id)
+                .limit(20)
+                .stream()
+            )
+        except Exception as i_err:
+            print(f"[MODELO PESSOA] Falha ao consultar interacoes de {pessoa_id}: {i_err}")
+            raw_interacoes = []
+
+    interacoes = []
+    for doc in raw_interacoes:
+        d = doc.to_dict() if hasattr(doc, "to_dict") else doc
+        if isinstance(d, dict):
+            interacoes.append(d)
+
+    interacoes.sort(key=lambda x: str(x.get("data") or ""), reverse=True)
+    interacoes_top10 = interacoes[:10]
+
+    # 3. Filtro de sinal: conta mensagens nos últimos 90 dias
+    cutoff_90d = datetime.now(timezone.utc) - timedelta(days=90)
+    qtd_90d = 0
+    for m in mensagens_recentes:
+        ts = m.get("timestamp")
+        if ts:
+            if hasattr(ts, "to_datetime"):
+                dt = ts.to_datetime()
+            elif isinstance(ts, datetime):
+                dt = ts
+            elif isinstance(ts, str):
+                try:
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                except Exception:
+                    dt = None
+            else:
+                dt = None
+            if dt:
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if dt >= cutoff_90d:
+                    qtd_90d += 1
+            else:
+                qtd_90d += 1
+        else:
+            qtd_90d += 1
+
+    if not tem_sinal_suficiente(qtd_90d, len(interacoes)):
+        return False
+
+    # 4. Mapear títulos de tarefas vinculadas às interações
+    tarefas_map = {}
+    if db:
+        tarefa_ids = {str(i.get("tarefa_id") or "").strip() for i in interacoes_top10}
+        tarefa_ids.discard("")
+        for tid in tarefa_ids:
+            try:
+                tsnap = db.collection("tarefas").document(tid).get()
+                if tsnap.exists:
+                    tarefas_map[tid] = str((tsnap.to_dict() or {}).get("titulo") or "").strip()
+            except Exception:
+                pass
+
+    nome = str(pessoa_data.get("nome") or "").strip()
+    texto_fonte = montar_texto_fonte_modelo_pessoa(
+        nome, mensagens_cronologicas, interacoes_top10, tarefas_map
+    )
+    current_hash = calcular_hash_modelo_pessoa(texto_fonte)
+
+    if pessoa_data.get("last_processed_modelo_hash") == current_hash:
+        return False
+
+    # 5. Chama Gemini com controle de custo
+    if not client:
+        api_key = get_gemini_api_key()
+        if not api_key:
+            print(f"[MODELO PESSOA] API key do Gemini não encontrada para pessoa {pessoa_id}")
+            return False
+        from google import genai
+        client = genai.Client(api_key=api_key)
+
+    prompt = construir_prompt_modelo_pessoa(nome, texto_fonte)
+    try:
+        response = generate_content_logged(
+            client,
+            model=GEMINI_STRUCTURED_MODEL,
+            contents=prompt,
+            feature="modelo_pessoa",
+            db=db,
+        )
+    except Exception as exc:
+        print(f"[MODELO PESSOA] Falha na chamada Gemini para pessoa {pessoa_id}: {exc}")
+        return False
+
+    raw_text = (getattr(response, "text", None) or "").strip()
+    modelo = parse_resposta_modelo_pessoa(raw_text)
+    if not modelo:
+        if db:
+            db.collection("perfil_pessoas").document(pessoa_id).update({
+                "last_processed_modelo_hash": current_hash
+            })
+        return False
+
+    if db:
+        db.collection("perfil_pessoas").document(pessoa_id).update({
+            "modelo_interacao": modelo,
+            "last_processed_modelo_hash": current_hash,
+        })
+    return True
+
+
+def executar_atualizacao_modelos_pessoas(db, client=None) -> dict:
+    """Executa a rotina de atualização dos modelos de pessoas para toda a base.
+    Cada contato é executado com isolamento estrito de exceção."""
+    stats = {
+        "total_analisados": 0,
+        "atualizados": 0,
+        "sem_chat": 0,
+        "ignorados_baixo_sinal_ou_dedup": 0,
+        "erros": 0,
+    }
+    if not db:
+        return stats
+
+    pessoas_snaps = list(db.collection("perfil_pessoas").stream())
+    for snap in pessoas_snaps:
+        stats["total_analisados"] += 1
+        p_data = snap.to_dict() or {}
+        p_id = snap.id
+        chat_id = str(p_data.get("whatsapp_chat_id") or "").strip()
+        if not chat_id:
+            stats["sem_chat"] += 1
+            continue
+
+        try:
+            res = processar_modelo_pessoa(db, p_id, p_data, client=client)
+            if res:
+                stats["atualizados"] += 1
+            else:
+                stats["ignorados_baixo_sinal_ou_dedup"] += 1
+        except Exception as p_err:
+            stats["erros"] += 1
+            print(f"[MODELO PESSOA] Erro isolado na pessoa {p_id}: {p_err}")
+
+    return stats
+
+
+@scheduler_fn.on_schedule(
+    schedule="30 5 * * *",  # Todos os dias às 5:30 (horário de Brasília)
+    timezone="America/Sao_Paulo",
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=300,
+)
+def atualizar_modelos_pessoas(event: scheduler_fn.ScheduledEvent) -> None:
+    """Job diário que sintetiza e mantém perfil_pessoas.modelo_interacao
+    para contatos com whatsapp_chat_id e sinal de interação suficiente."""
+    try:
+        db = get_db()
+        stats = executar_atualizacao_modelos_pessoas(db)
+        print(f"[MODELO PESSOA] Job finalizado com sucesso: {stats}")
+    except Exception as exc:
+        print(f"[MODELO PESSOA] Erro no job atualizar_modelos_pessoas: {exc}")
+
+
