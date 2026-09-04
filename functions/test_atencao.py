@@ -842,8 +842,33 @@ class TestAtencaoFinanceiro(unittest.TestCase):
         itens = avaliar_contas_vencendo(contas, self.hoje)
         self.assertEqual(len(itens), 0)
 
-    def test_detectar_atencao_financeiro_persiste_no_db(self):
+    def test_detectar_atencao_financeiro_desligado_por_padrao(self):
         db = MockDb({
+            "fixed_bills": {
+                "bill-10": {
+                    "description": "Plano de Saúde",
+                    "amount": 650.0,
+                    "due_day": 6,
+                    "month": 8,
+                    "year": 2026,
+                    "paid": False,
+                }
+            }
+        })
+        itens = detectar_atencao_financeiro(db, hoje=self.hoje)
+        self.assertEqual(itens, [])
+        doc = db.collection(COLLECTION).document("conta_vencendo:bill-10:2026-09-06").get()
+        self.assertFalse(doc.exists)
+
+    def test_detectar_atencao_financeiro_persiste_no_db_quando_habilitado(self):
+        db = MockDb({
+            "system": {
+                "settings": {
+                    "atencao": {
+                        "financeiro": {"enabled": True}
+                    }
+                }
+            },
             "fixed_bills": {
                 "bill-10": {
                     "description": "Plano de Saúde",
@@ -899,8 +924,33 @@ class TestAtencaoSaude(unittest.TestCase):
         self.assertEqual(avaliar_rotinas_saude({}, self.hoje), [])
         self.assertEqual(avaliar_rotinas_saude({"ultima_pesagem": {}}, self.hoje), [])
 
-    def test_detectar_atencao_saude_persiste_no_db(self):
+    def test_detectar_atencao_saude_desligado_por_padrao(self):
         db = MockDb({
+            "health_weights": {
+                "w-1": {
+                    "date": "2026-08-30",
+                    "weight": 80.0,
+                },
+                "w-2": {
+                    "date": "2026-09-01",
+                    "weight": 79.5,
+                }
+            }
+        })
+        itens = detectar_atencao_saude(db, hoje=self.hoje)
+        self.assertEqual(itens, [])
+        doc = db.collection(COLLECTION).document("saude_pesagem_ausente:2026-09-01").get()
+        self.assertFalse(doc.exists)
+
+    def test_detectar_atencao_saude_persiste_no_db_quando_habilitado(self):
+        db = MockDb({
+            "system": {
+                "settings": {
+                    "atencao": {
+                        "saude": {"enabled": True}
+                    }
+                }
+            },
             "health_weights": {
                 "w-1": {
                     "date": "2026-08-30",

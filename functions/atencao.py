@@ -393,8 +393,31 @@ def avaliar_contas_vencendo(
     return itens
 
 
-def detectar_atencao_financeiro(db, hoje: date | None = None) -> list[dict]:
-    """Varre contas fixas do mês e grava pendências financeiras na fila atencao."""
+def detectar_atencao_financeiro(
+    db, hoje: date | None = None, settings: dict | None = None
+) -> list[dict]:
+    """Varre contas fixas do mês e grava pendências financeiras na fila atencao.
+
+    Respeita a flag system/settings.atencao.financeiro.enabled (padrão False, desligado).
+    """
+    if settings is None:
+        try:
+            settings_doc = db.collection("system").document("settings").get()
+            settings = settings_doc.to_dict() if settings_doc.exists else {}
+        except Exception as set_err:
+            print(f"[AtencaoFinanceiro] Falha ao consultar settings: {set_err}")
+            settings = {}
+
+    enabled = (
+        (settings or {})
+        .get("atencao", {})
+        .get("financeiro", {})
+        .get("enabled", False)
+    )
+    if not enabled:
+        print("[AtencaoFinanceiro] Detector financeiro desligado em system/settings; abortando.")
+        return []
+
     sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
     hoje_dt = hoje or datetime.now(sp_tz).date()
 
@@ -475,8 +498,31 @@ def avaliar_rotinas_saude(
     return itens
 
 
-def detectar_atencao_saude(db, hoje: date | None = None) -> list[dict]:
-    """Varre registros de saúde e grava alertas de rotinas ausentes na fila atencao."""
+def detectar_atencao_saude(
+    db, hoje: date | None = None, settings: dict | None = None
+) -> list[dict]:
+    """Varre registros de saúde e grava alertas de rotinas ausentes na fila atencao.
+
+    Respeita a flag system/settings.atencao.saude.enabled (padrão False, desligado).
+    """
+    if settings is None:
+        try:
+            settings_doc = db.collection("system").document("settings").get()
+            settings = settings_doc.to_dict() if settings_doc.exists else {}
+        except Exception as set_err:
+            print(f"[AtencaoSaude] Falha ao consultar settings: {set_err}")
+            settings = {}
+
+    enabled = (
+        (settings or {})
+        .get("atencao", {})
+        .get("saude", {})
+        .get("enabled", False)
+    )
+    if not enabled:
+        print("[AtencaoSaude] Detector saude desligado em system/settings; abortando.")
+        return []
+
     sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
     hoje_dt = hoje or datetime.now(sp_tz).date()
     hoje_str = hoje_dt.strftime("%Y-%m-%d")
@@ -524,15 +570,15 @@ def detectar_atencao_acoes(event: scheduler_fn.ScheduledEvent = None) -> None:
     sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
     hoje = datetime.now(sp_tz).date()
 
-    # Executa detectores de finanças e saúde em conjunto
-    try:
-        detectar_atencao_financeiro(db, hoje)
-        detectar_atencao_saude(db, hoje)
-    except Exception as fs_err:
-        print(f"[Atencao] Falha ao executar detectores de financeiro/saude: {fs_err}")
-
     settings_doc = db.collection("system").document("settings").get()
     settings = settings_doc.to_dict() if settings_doc.exists else {}
+
+    # Executa detectores de finanças e saúde em conjunto (respeitando flags de settings)
+    try:
+        detectar_atencao_financeiro(db, hoje, settings=settings)
+        detectar_atencao_saude(db, hoje, settings=settings)
+    except Exception as fs_err:
+        print(f"[Atencao] Falha ao executar detectores de financeiro/saude: {fs_err}")
     enabled = (
         settings.get("atencao", {})
         .get("aguardando_terceiro", {})
