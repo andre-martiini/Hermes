@@ -428,6 +428,20 @@ def executar_retro_semanal(db, now: datetime | None = None, client: Any = None) 
         except Exception as exc:
             print(f"[RetroAgente] Falha ao gravar proposta em correcoes_pendentes: {exc}")
 
+    # 8.1 Hook determinístico de promoção de autonomia (PR 2 da Fase 3)
+    sugestoes_promocao: list[str] = []
+    try:
+        from promocao_autonomia import tipos_elegiveis_para_promocao, registrar_sugestao_promocao
+        elegiveis = tipos_elegiveis_para_promocao(db)
+        for cand in elegiveis[:2]:
+            t = cand.get("tipo")
+            m = cand.get("metricas") or {}
+            if t:
+                registrar_sugestao_promocao(db, tipo=t, metricas=m)
+                sugestoes_promocao.append(t)
+    except Exception as pr_err:
+        print(f"[RetroAgente] Falha ao verificar/registrar promoções de autonomia: {pr_err}")
+
     # 9. Envia UMA mensagem informativa no Telegram (sem botões)
     telegram_sent = False
     try:
@@ -449,6 +463,10 @@ def executar_retro_semanal(db, now: datetime | None = None, client: Any = None) 
                 tit_pop = proposta_pop.get("titulo_procedimento")
                 msg += f"\n\n⚙️ <i>Uma proposta de ajuste de POP para '<b>{tit_pop}</b>' foi registrada na fila de evolução autônoma para validação.</i>"
 
+            if sugestoes_promocao:
+                tipos_str = ", ".join(f"'{t}'" for t in sugestoes_promocao)
+                msg += f"\n\n🚀 <i>Sugestão de autonomia: o(s) tipo(s) de mensagem {tipos_str} atingiram taxa alta de aprovação sem edição e foram sugeridos para envio com janela de cancelamento. Decida via tool 'decidir_promocao_autonomia'.</i>"
+
             _send_telegram_message_raw(db, chat_id, msg)
             telegram_sent = True
     except Exception as exc:
@@ -459,6 +477,7 @@ def executar_retro_semanal(db, now: datetime | None = None, client: Any = None) 
         "retro_id": retro_id,
         "proposta_pop": proposta_pop,
         "correcao_id": corr_id,
+        "sugestoes_promocao": sugestoes_promocao,
         "resumo": resumo,
         "telegram_sent": telegram_sent,
     }

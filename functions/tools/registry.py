@@ -41,6 +41,8 @@ _CATALOG: dict[str, str] = {
     # que mais importa e "nunca" — sem ela o sistema repete e vira barulho.
     "consultar_elevacoes_sugeridas": "Lista as elevacoes sugeridas que esperam decisao, com o material que ja existe e o objetivo servido",
     "decidir_elevacao": "Aceita, adia ou descarta para sempre uma elevacao sugerida",
+    "consultar_promocoes_autonomia_sugeridas": "Lista sugestões de promoção de autonomia por tipo de rascunho WhatsApp que esperam decisão",
+    "decidir_promocao_autonomia": "Aplica a decisão do usuário (aceitar, adiar, nunca) sobre a promoção de autonomia de um tipo de rascunho WhatsApp",
     "obter_projeto_bolsas_publico": "Consulta dados publicos de um projeto de bolsas por ID",
     "registrar_inscricao_bolsa_publica": "Registra uma inscricao publica em um projeto de bolsas",
     "consultar_financas_v2": "Consulta detalhada do financeiro interno: rendas, obrigações, metas e transações",
@@ -135,6 +137,7 @@ _NEEDS_CONFIRMATION: set[str] = {
     "registrar_transacao_financeira_publica",
     "mutar_lista_compras",
     "decidir_elevacao",
+    "decidir_promocao_autonomia",
     "mutar_portal_compras_publico",
     "registrar_inscricao_bolsa_publica",
     "registrar_item_financeiro_v2",

@@ -1,0 +1,14 @@
+{
+  "name": "consultar_promocoes_autonomia_sugeridas",
+  "description": "Lista sugestões de promoção de autonomia por tipo de rascunho WhatsApp que esperam decisão: tipos com histórico consistente de aprovação sem edição para transição para envio com janela de cancelamento.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "limite": {
+        "type": "integer",
+        "description": "Máximo de sugestões no retorno. Padrão 20."
+      }
+    },
+    "required": []
+  }
+}

@@ -3805,6 +3805,13 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
         except Exception as exc:
             print(f"[OutboxAprovacao] Falha ao expirar rascunhos pendentes: {exc}")
 
+    # 6. Liberar rascunhos promovidos com janela de cancelamento vencida (executa a cada tick)
+    try:
+        from outbox_aprovacao import liberar_rascunhos_promovidos
+        liberar_rascunhos_promovidos(db, agora=now)
+    except Exception as exc:
+        print(f"[OutboxAprovacao] Falha ao liberar rascunhos promovidos: {exc}")
+
 
 
 @https_fn.on_call()

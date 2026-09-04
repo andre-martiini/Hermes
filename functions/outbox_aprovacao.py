@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime
 from datetime import timezone
 import html
+import os
 import zoneinfo
 
 from firebase_admin import firestore
@@ -17,6 +18,7 @@ from firebase_admin import firestore
 COLLECTION = "whatsapp_outbox"
 
 STATUS_AGUARDANDO = "aguardando_aprovacao"
+STATUS_AGUARDANDO_JANELA = "aguardando_janela"
 STATUS_PENDING = "pending"
 STATUS_DESCARTADO = "descartado"
 STATUS_EXPIRADO = "expirado"
@@ -30,7 +32,7 @@ STATUS_FAILED = "failed"
 
 def validar_transicao_aprovacao(status_atual: str | None) -> tuple[bool, str]:
     """Valida se o rascunho pode transicionar para pending."""
-    if status_atual == STATUS_AGUARDANDO:
+    if status_atual in (STATUS_AGUARDANDO, STATUS_AGUARDANDO_JANELA):
         return True, ""
     if status_atual is None:
         return False, "Rascunho não encontrado."
@@ -39,7 +41,7 @@ def validar_transicao_aprovacao(status_atual: str | None) -> tuple[bool, str]:
 
 def validar_transicao_descarte(status_atual: str | None) -> tuple[bool, str]:
     """Valida se o rascunho pode ser descartado."""
-    if status_atual == STATUS_AGUARDANDO:
+    if status_atual in (STATUS_AGUARDANDO, STATUS_AGUARDANDO_JANELA):
         return True, ""
     if status_atual is None:
         return False, "Rascunho não encontrado."
@@ -67,6 +69,32 @@ def montar_card_telegram(
             {"text": "✅ Enviar", "callback_data": f"outbox:{outbox_id}:ok"},
             {"text": "✏️ Editar", "callback_data": f"outbox:{outbox_id}:edit"},
             {"text": "🗑️ Descartar", "callback_data": f"outbox:{outbox_id}:no"},
+        ]
+    ]
+    return corpo, botoes
+
+
+def montar_card_telegram_promovido(
+    destinatario_nome: str,
+    motivo: str,
+    content: str,
+    outbox_id: str,
+    minutos_janela: int = 10,
+) -> tuple[str, list[list[dict]]]:
+    """Monta o card no Telegram para rascunho de tipo promovido com botão de cancelamento."""
+    nome_limpo = str(destinatario_nome or "").strip() or "Destinatário"
+    motivo_limpo = str(motivo or "").strip()
+    texto_msg = str(content or "").strip()
+
+    corpo = (
+        f"🤖 <b>Envio autônomo para {html.escape(nome_limpo)}</b>\n"
+        f"{html.escape(motivo_limpo)}\n\n"
+        f'"{html.escape(texto_msg)}"\n\n'
+        f"⏱️ <i>Vai para a fila automaticamente em até {minutos_janela} min — toque abaixo para cancelar.</i>"
+    )
+    botoes = [
+        [
+            {"text": "🛑 Cancelar", "callback_data": f"outbox:{outbox_id}:no"},
         ]
     ]
     return corpo, botoes
@@ -108,6 +136,47 @@ def avaliar_expirados(
     return expirados
 
 
+def avaliar_liberacao_promovidos(
+    rascunhos: list[dict],
+    agora: datetime.datetime,
+) -> list[str]:
+    """Filtra puramente quais rascunhos em aguardando_janela já venceram a janela de cancelamento.
+
+    Garante o veto humano: só libera se o card Telegram com o botão de cancelamento foi
+    comprovadamente emitido (telegram_message_id presente).
+    """
+    prontos: list[str] = []
+    agora_utc = agora if agora.tzinfo else agora.replace(tzinfo=timezone.utc)
+
+    for r in rascunhos:
+        if r.get("status") != STATUS_AGUARDANDO_JANELA:
+            continue
+        # Veto humano inegociável: só libera se o card com botão de cancelamento foi entregue
+        if not r.get("telegram_message_id"):
+            continue
+        liberado_em = r.get("envio_liberado_em")
+        if isinstance(liberado_em, str):
+            try:
+                liberado_em = datetime.datetime.fromisoformat(liberado_em.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+        elif hasattr(liberado_em, "to_datetime"):
+            liberado_em = liberado_em.to_datetime()
+
+        if not isinstance(liberado_em, datetime.datetime):
+            continue
+
+        if liberado_em.tzinfo is None:
+            liberado_em = liberado_em.replace(tzinfo=timezone.utc)
+
+        if agora_utc >= liberado_em:
+            doc_id = str(r.get("id") or r.get("outbox_id") or "").strip()
+            if doc_id:
+                prontos.append(doc_id)
+
+    return prontos
+
+
 # ---------------------------------------------------------------------------
 # Operações de Banco e Integrações
 # ---------------------------------------------------------------------------
@@ -122,6 +191,37 @@ def _to_iso(val) -> str | None:
     if hasattr(val, "to_datetime"):
         return val.to_datetime().isoformat()
     return str(val)
+
+
+def _obter_janela_cancelamento_min(db) -> int:
+    """Obtém a janela de cancelamento em minutos: Firestore -> ENV -> padrão 10."""
+    try:
+        snap = db.collection("system").document("mcp_access").get()
+        if snap.exists:
+            val = (snap.to_dict() or {}).get("janela_cancelamento_min")
+            if val is not None:
+                return max(1, int(val))
+    except Exception:
+        pass
+    env_val = os.environ.get("PROMOCAO_JANELA_MIN")
+    if env_val:
+        try:
+            return max(1, int(env_val))
+        except ValueError:
+            pass
+    return 10
+
+
+def _tipos_promovidos(db) -> set[str]:
+    """Lê diretamente os tipos promovidos cadastrados em system/mcp_access."""
+    try:
+        snap = db.collection("system").document("mcp_access").get()
+        if snap.exists:
+            lista = (snap.to_dict() or {}).get("tipos_promovidos") or []
+            return {str(t).strip().lower() for t in lista if str(t).strip()}
+    except Exception as err:
+        print(f"[OutboxAprovacao] Falha ao ler tipos_promovidos de system/mcp_access: {err}")
+    return set()
 
 
 def criar_rascunho(
@@ -183,13 +283,21 @@ def criar_rascunho(
     destinatario_nome = res_dest.get("nome") or contact_number
     destino_real = res_dest.get("chat_id") or contact_number
 
+    # Verifica se o tipo de rascunho está promovido para autonomia com janela
+    promovidos = _tipos_promovidos(db)
+    is_promovido = tipo_limpo.lower() in promovidos
+    janela_min = _obter_janela_cancelamento_min(db) if is_promovido else 0
+    agora_utc = datetime.datetime.now(timezone.utc)
+    envio_liberado_em = (agora_utc + datetime.timedelta(minutes=janela_min)) if is_promovido else None
+    status_inicial = STATUS_AGUARDANDO_JANELA if is_promovido else STATUS_AGUARDANDO
+
     doc_ref = db.collection(COLLECTION).document()
     outbox_id = doc_ref.id
 
     payload = {
         "to_number": destino_real,
         "content": message,
-        "status": STATUS_AGUARDANDO,
+        "status": status_inicial,
         "motivo": motivo,
         "acao_id": acao_id,
         "item_atencao_id": item_atencao_id,
@@ -199,6 +307,9 @@ def criar_rascunho(
         "foi_editado": False,
         "created_at": firestore.SERVER_TIMESTAMP,
     }
+    if is_promovido:
+        payload["envio_liberado_em"] = envio_liberado_em
+
     doc_ref.set(payload)
 
     # Dispara o card no Telegram
@@ -210,12 +321,21 @@ def criar_rascunho(
         token = telegram_token or _get_telegram_token(db)
         target_chat = chat_id or _resolve_default_telegram_chat_id(db)
         if token and target_chat:
-            card_text, card_keyboard = montar_card_telegram(
-                destinatario_nome=destinatario_nome,
-                motivo=motivo,
-                content=message,
-                outbox_id=outbox_id,
-            )
+            if is_promovido:
+                card_text, card_keyboard = montar_card_telegram_promovido(
+                    destinatario_nome=destinatario_nome,
+                    motivo=motivo,
+                    content=message,
+                    outbox_id=outbox_id,
+                    minutos_janela=janela_min,
+                )
+            else:
+                card_text, card_keyboard = montar_card_telegram(
+                    destinatario_nome=destinatario_nome,
+                    motivo=motivo,
+                    content=message,
+                    outbox_id=outbox_id,
+                )
             telegram_msg_id = _send_telegram_message_with_keyboard(
                 token, target_chat, card_text, card_keyboard
             )
@@ -223,6 +343,39 @@ def criar_rascunho(
                 doc_ref.update({"telegram_message_id": telegram_msg_id})
     except Exception as tg_err:
         print(f"[OutboxAprovacao] Falha ao enviar card Telegram para {outbox_id}: {tg_err}")
+
+    if is_promovido and not telegram_msg_id:
+        # Se a emissão do card Telegram falhou, degrada para aprovação regular
+        # para impedir envio autônomo sem supervisão humana efetiva
+        doc_ref.update({
+            "status": STATUS_AGUARDANDO,
+            "envio_liberado_em": None,
+            "degradado_motivo": "falha_entrega_card_telegram",
+        })
+        return {
+            "status": STATUS_AGUARDANDO,
+            "outbox_id": outbox_id,
+            "destinatario_nome": destinatario_nome,
+            "telegram_notificado": False,
+            "instrucao": (
+                "Tipo promovido, mas o card do Telegram falhou no envio. Degradado para aprovação manual "
+                "por segurança para impedir envio sem confirmação do dono."
+            ),
+        }
+
+    if is_promovido:
+        return {
+            "status": STATUS_AGUARDANDO_JANELA,
+            "outbox_id": outbox_id,
+            "destinatario_nome": destinatario_nome,
+            "telegram_notificado": bool(telegram_msg_id),
+            "envio_liberado_em": _to_iso(envio_liberado_em),
+            "instrucao": (
+                f"Tipo promovido — vai para a fila automaticamente em até {janela_min} min "
+                "salvo cancelamento do dono. Não afirme que foi enviado; consulte "
+                "consultar_envio_whatsapp com este id para saber o estado real."
+            ),
+        }
 
     return {
         "status": STATUS_AGUARDANDO,
@@ -364,7 +517,12 @@ def aprovar_rascunho(
             if token and target_chat:
                 sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
                 hora_formatada = datetime.datetime.now(sp_tz).strftime("%H:%M")
-                sufixo_canal = " (via WhatsApp)" if aprovado_via == "whatsapp" else ""
+                if aprovado_via == "whatsapp":
+                    sufixo_canal = " (via WhatsApp)"
+                elif aprovado_via == "janela_automatica":
+                    sufixo_canal = " (liberação automática)"
+                else:
+                    sufixo_canal = ""
                 novo_texto = (
                     f"✅ <b>Enviado para a fila às {hora_formatada}{sufixo_canal}</b>\n"
                     f"Destino: {html.escape(str(dest_nome))}\n"
@@ -388,26 +546,70 @@ def descartar_rascunho(
     chat_id: str | int | None = None,
     telegram_msg_id: int | None = None,
 ) -> dict:
-    """Descarta um rascunho de WhatsApp e reabre o item da fila de atenção se houver."""
+    """Descarta um rascunho de WhatsApp e reabre o item da fila de atenção se houver.
+
+    Executa via transação atômica Firestore para garantir exclusão mútua com a
+    aprovação automática (liberar_rascunhos_promovidos), evitando condições de corrida.
+    """
     outbox_id = str(outbox_id or "").strip()
     if not outbox_id:
         return {"erro": "outbox_id é obrigatório."}
 
     doc_ref = db.collection(COLLECTION).document(outbox_id)
-    snap = doc_ref.get()
-    if not snap.exists:
-        return {"status": "not_found", "erro": f"Rascunho '{outbox_id}' não encontrado."}
-
-    data = snap.to_dict() or {}
-    valido, motivo = validar_transicao_descarte(data.get("status"))
-    if not valido:
-        return {"status": "already_decided", "erro": f"Rascunho {motivo}", "dados": data}
-
     agora_utc = datetime.datetime.now(timezone.utc)
-    doc_ref.update({
-        "status": STATUS_DESCARTADO,
-        "descartado_em": firestore.SERVER_TIMESTAMP if hasattr(firestore, "SERVER_TIMESTAMP") else agora_utc,
-    })
+    transaction_result = {}
+    transaction_success = False
+
+    if hasattr(db, "transaction"):
+        try:
+            transaction = db.transaction()
+
+            @firestore.transactional
+            def _exec_discard(tx):
+                snap = doc_ref.get(transaction=tx)
+                if not snap.exists:
+                    return {"status": "not_found", "erro": f"Rascunho '{outbox_id}' não encontrado."}
+                data = snap.to_dict() or {}
+                valido, motivo = validar_transicao_descarte(data.get("status"))
+                if not valido:
+                    return {
+                        "status": "already_decided",
+                        "erro": f"Rascunho {motivo}",
+                        "dados": data,
+                    }
+
+                tx.update(
+                    doc_ref,
+                    {
+                        "status": STATUS_DESCARTADO,
+                        "descartado_em": firestore.SERVER_TIMESTAMP if hasattr(firestore, "SERVER_TIMESTAMP") else agora_utc,
+                    },
+                )
+                return {"status": "ok", "dados": data}
+
+            transaction_result = _exec_discard(transaction)
+            transaction_success = True
+        except Exception as tx_err:
+            print(f"[OutboxAprovacao] Transação Firestore de descarte falhou ou mock sem suporte: {tx_err}")
+
+    if not transaction_success:
+        snap = doc_ref.get()
+        if not snap.exists:
+            return {"status": "not_found", "erro": f"Rascunho '{outbox_id}' não encontrado."}
+        data = snap.to_dict() or {}
+        valido, motivo = validar_transicao_descarte(data.get("status"))
+        if not valido:
+            return {"status": "already_decided", "erro": f"Rascunho {motivo}", "dados": data}
+        doc_ref.update({
+            "status": STATUS_DESCARTADO,
+            "descartado_em": agora_utc,
+        })
+        transaction_result = {"status": "ok", "dados": data}
+
+    if transaction_result.get("status") != "ok":
+        return transaction_result
+
+    data = transaction_result.get("dados") or {}
 
     # Item da fila de atenção volta para aberto (o dono descartou o texto, não o assunto)
     item_atencao_id = data.get("item_atencao_id")
@@ -579,12 +781,49 @@ def expirar_rascunhos_pendentes(
     return expirados_count
 
 
+def liberar_rascunhos_promovidos(
+    db,
+    agora: datetime.datetime | None = None,
+    telegram_token: str | None = None,
+    chat_id: str | int | None = None,
+) -> int:
+    """Varre e libera rascunhos em aguardando_janela cujo envio_liberado_em <= agora."""
+    agora_utc = agora or datetime.datetime.now(timezone.utc)
+    if agora_utc.tzinfo is None:
+        agora_utc = agora_utc.replace(tzinfo=timezone.utc)
+
+    query = db.collection(COLLECTION).where("status", "==", STATUS_AGUARDANDO_JANELA)
+    docs = list(query.stream())
+
+    rascunhos_dados = []
+    for doc in docs:
+        d = doc.to_dict() or {}
+        d["id"] = doc.id
+        rascunhos_dados.append(d)
+
+    ids_liberar = avaliar_liberacao_promovidos(rascunhos_dados, agora_utc)
+    liberados_count = 0
+
+    for doc_id in ids_liberar:
+        res = aprovar_rascunho(
+            db,
+            outbox_id=doc_id,
+            telegram_token=telegram_token,
+            chat_id=chat_id,
+            aprovado_via="janela_automatica",
+        )
+        if res.get("status") == "ok":
+            liberados_count += 1
+
+    return liberados_count
+
+
 def listar_rascunhos(db, limite: int = 20) -> dict:
-    """Lista rascunhos de WhatsApp com status aguardando_aprovacao."""
+    """Lista rascunhos de WhatsApp com status aguardando_aprovacao ou aguardando_janela."""
     limite_ajustado = max(1, min(int(limite or 20), 50))
     query = (
         db.collection(COLLECTION)
-        .where("status", "==", STATUS_AGUARDANDO)
+        .where("status", "in", [STATUS_AGUARDANDO, STATUS_AGUARDANDO_JANELA])
     )
 
     docs = list(query.stream())
@@ -594,6 +833,7 @@ def listar_rascunhos(db, limite: int = 20) -> dict:
         d = doc.to_dict() or {}
         rascunhos.append({
             "id": doc.id,
+            "status": d.get("status"),
             "destinatario_nome": d.get("destinatario_nome"),
             "to_number": d.get("to_number"),
             "motivo": d.get("motivo"),
@@ -603,6 +843,7 @@ def listar_rascunhos(db, limite: int = 20) -> dict:
             "origem": d.get("origem"),
             "tipo": d.get("tipo", "outro"),
             "foi_editado": bool(d.get("foi_editado", False)),
+            "envio_liberado_em": _to_iso(d.get("envio_liberado_em")),
             "criado_em": _to_iso(d.get("created_at")),
             "telegram_message_id": d.get("telegram_message_id"),
         })
