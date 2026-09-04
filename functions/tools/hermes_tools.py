@@ -1714,6 +1714,11 @@ def obter_estado_atual(ctx: ToolContext, args: dict):
             estado["agent_requests_pendentes"] = contar_pendentes(ctx.db)
         except Exception:
             estado["agent_requests_pendentes"] = 0
+        try:
+            from outbox_aprovacao import contar_pendentes as contar_outbox_pendentes
+            estado["outbox_pendentes"] = contar_outbox_pendentes(ctx.db)
+        except Exception:
+            estado["outbox_pendentes"] = 0
         return estado
     except Exception as exc:  # noqa: BLE001
         return {"erro": f"Falha ao montar o estado atual: {exc}"}

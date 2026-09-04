@@ -20,13 +20,20 @@ from atencao import (
     PRIORIDADE_MEDIA,
     PRIORIDADE_BAIXA,
     TIPO_AGUARDANDO_TERCEIRO_VENCIDO,
+    TIPO_CONTA_VENCENDO,
+    TIPO_ROTINA_SAUDE_AUSENTE,
     avaliar_etapas,
+    avaliar_contas_vencendo,
+    detectar_atencao_financeiro,
+    avaliar_rotinas_saude,
+    detectar_atencao_saude,
     coletar_fila_atencao,
     resolver_item,
     mapear_origem_categoria_notificacao,
     dentro_janela_permitida,
     esta_na_janela_silencio,
     avaliar_interrupcao_atencao,
+    detectar_atencao_acoes,
 )
 
 
@@ -76,6 +83,15 @@ class MockQuery:
                 if op == "==" and data.get(field) != val:
                     match = False
                     break
+                elif op == ">=" and not (data.get(field) is not None and data.get(field) >= val):
+                    match = False
+                    break
+                elif op == "<=" and not (data.get(field) is not None and data.get(field) <= val):
+                    match = False
+                    break
+                elif op == "in" and data.get(field) not in val:
+                    match = False
+                    break
             if match:
                 filtered.append(d)
         return filtered
@@ -86,7 +102,12 @@ class MockQuery:
             new_doc = MockDoc(auto_id, {})
             self.docs.append(new_doc)
             return new_doc
-        return next((d for d in self.docs if d.id == wanted), MockDoc(wanted, None))
+        existing = next((d for d in self.docs if d.id == wanted), None)
+        if existing is not None:
+            return existing
+        new_doc = MockDoc(wanted, None)
+        self.docs.append(new_doc)
+        return new_doc
 
 
 class MockDb:
@@ -726,6 +747,242 @@ class TestAvaliarInterrupcaoAtencao(unittest.TestCase):
         self.assertTrue(len(payload["title"]) > 0)
         self.assertTrue(len(payload["message"]) > 0)
         self.assertEqual(payload["category"], "geral")
+
+
+class TestAtencaoFinanceiro(unittest.TestCase):
+    def setUp(self):
+        self.hoje = date(2026, 9, 5)
+
+    def test_avaliar_contas_vencendo_em_ate_3_dias(self):
+        # Hoje é 05/09/2026. Conta vence dia 07/09/2026 (delta = 2 dias).
+        contas = [
+            {
+                "id": "bill-1",
+                "description": "Internet Fibra",
+                "amount": 150.0,
+                "due_day": 7,
+                "month": 8,  # Setembro (0-based)
+                "year": 2026,
+                "paid": False,
+            }
+        ]
+        itens = avaliar_contas_vencendo(contas, self.hoje)
+        self.assertEqual(len(itens), 1)
+        item = itens[0]
+        self.assertEqual(item["origem"], "financeiro")
+        self.assertEqual(item["tipo"], TIPO_CONTA_VENCENDO)
+        self.assertEqual(item["prioridade"], PRIORIDADE_MEDIA)
+        self.assertEqual(item["prazo"], "2026-09-07")
+        self.assertIn("Internet Fibra", item["titulo"])
+        self.assertIn("vence em 2 dia(s)", item["titulo"])
+        self.assertEqual(item["chave_dedupe"], "conta_vencendo:bill-1:2026-09-07")
+        self.assertEqual(item["evidencia"]["bill_id"], "bill-1")
+
+    def test_avaliar_contas_vence_hoje_gera_prioridade_alta(self):
+        contas = [
+            {
+                "id": "bill-2",
+                "description": "Aluguel",
+                "amount": 2500.0,
+                "due_day": 5,
+                "month": 8,
+                "year": 2026,
+                "paid": False,
+            }
+        ]
+        itens = avaliar_contas_vencendo(contas, self.hoje)
+        self.assertEqual(len(itens), 1)
+        self.assertEqual(itens[0]["prioridade"], PRIORIDADE_ALTA)
+        self.assertIn("vence hoje", itens[0]["titulo"])
+
+    def test_avaliar_contas_vencida_no_mes_gera_prioridade_alta(self):
+        contas = [
+            {
+                "id": "bill-3",
+                "description": "Energia",
+                "amount": 320.0,
+                "due_day": 2,  # venceu há 3 dias
+                "month": 8,
+                "year": 2026,
+                "paid": False,
+            }
+        ]
+        itens = avaliar_contas_vencendo(contas, self.hoje)
+        self.assertEqual(len(itens), 1)
+        self.assertEqual(itens[0]["prioridade"], PRIORIDADE_ALTA)
+        self.assertIn("vencida há 3 dia(s)", itens[0]["titulo"])
+
+    def test_avaliar_contas_ignora_pagas(self):
+        contas = [
+            {
+                "id": "bill-4",
+                "description": "Condomínio",
+                "amount": 800.0,
+                "due_day": 6,
+                "month": 8,
+                "year": 2026,
+                "paid": True,
+            }
+        ]
+        itens = avaliar_contas_vencendo(contas, self.hoje)
+        self.assertEqual(len(itens), 0)
+
+    def test_avaliar_contas_ignora_vencimento_longe(self):
+        contas = [
+            {
+                "id": "bill-5",
+                "description": "Cartão",
+                "amount": 1200.0,
+                "due_day": 20,
+                "month": 8,
+                "year": 2026,
+                "paid": False,
+            }
+        ]
+        itens = avaliar_contas_vencendo(contas, self.hoje)
+        self.assertEqual(len(itens), 0)
+
+    def test_detectar_atencao_financeiro_desligado_por_padrao(self):
+        db = MockDb({
+            "fixed_bills": {
+                "bill-10": {
+                    "description": "Plano de Saúde",
+                    "amount": 650.0,
+                    "due_day": 6,
+                    "month": 8,
+                    "year": 2026,
+                    "paid": False,
+                }
+            }
+        })
+        itens = detectar_atencao_financeiro(db, hoje=self.hoje)
+        self.assertEqual(itens, [])
+        doc = db.collection(COLLECTION).document("conta_vencendo:bill-10:2026-09-06").get()
+        self.assertFalse(doc.exists)
+
+    def test_detectar_atencao_financeiro_persiste_no_db_quando_habilitado(self):
+        db = MockDb({
+            "system": {
+                "settings": {
+                    "atencao": {
+                        "financeiro": {"enabled": True}
+                    }
+                }
+            },
+            "fixed_bills": {
+                "bill-10": {
+                    "description": "Plano de Saúde",
+                    "amount": 650.0,
+                    "due_day": 6,
+                    "month": 8,  # Setembro (0-based)
+                    "year": 2026,
+                    "paid": False,
+                }
+            }
+        })
+        itens = detectar_atencao_financeiro(db, hoje=self.hoje)
+        self.assertEqual(len(itens), 1)
+        doc = db.collection(COLLECTION).document("conta_vencendo:bill-10:2026-09-06").get()
+        self.assertTrue(doc.exists)
+        self.assertEqual(doc.to_dict()["origem"], "financeiro")
+        self.assertEqual(doc.to_dict()["tipo"], TIPO_CONTA_VENCENDO)
+
+
+class TestAtencaoSaude(unittest.TestCase):
+    def setUp(self):
+        self.hoje = date(2026, 9, 5)
+
+    def test_avaliar_rotinas_saude_alerta_quando_sem_registro_ha_3_dias_ou_mais(self):
+        registros = {
+            "ultima_pesagem": {
+                "date": "2026-09-01",
+                "weight": 79.2,
+            }
+        }
+        itens = avaliar_rotinas_saude(registros, self.hoje, dias_sem_registro_alerta=3)
+        self.assertEqual(len(itens), 1)
+        item = itens[0]
+        self.assertEqual(item["origem"], "saude")
+        self.assertEqual(item["tipo"], TIPO_ROTINA_SAUDE_AUSENTE)
+        self.assertEqual(item["prioridade"], PRIORIDADE_MEDIA)
+        self.assertIn("Pesagem não registrada há 4 dias", item["titulo"])
+        self.assertEqual(item["chave_dedupe"], "saude_pesagem_ausente:2026-09-01")
+        self.assertEqual(item["evidencia"]["dias_sem_pesagem"], 4)
+        self.assertEqual(item["evidencia"]["ultimo_peso"], 79.2)
+
+    def test_avaliar_rotinas_saude_silencia_quando_recente(self):
+        registros = {
+            "ultima_pesagem": {
+                "date": "2026-09-04",
+                "weight": 78.8,
+            }
+        }
+        itens = avaliar_rotinas_saude(registros, self.hoje, dias_sem_registro_alerta=3)
+        self.assertEqual(len(itens), 0)
+
+    def test_avaliar_rotinas_saude_silencia_quando_sem_dados(self):
+        self.assertEqual(avaliar_rotinas_saude({}, self.hoje), [])
+        self.assertEqual(avaliar_rotinas_saude({"ultima_pesagem": {}}, self.hoje), [])
+
+    def test_detectar_atencao_saude_desligado_por_padrao(self):
+        db = MockDb({
+            "health_weights": {
+                "w-1": {
+                    "date": "2026-08-30",
+                    "weight": 80.0,
+                },
+                "w-2": {
+                    "date": "2026-09-01",
+                    "weight": 79.5,
+                }
+            }
+        })
+        itens = detectar_atencao_saude(db, hoje=self.hoje)
+        self.assertEqual(itens, [])
+        doc = db.collection(COLLECTION).document("saude_pesagem_ausente:2026-09-01").get()
+        self.assertFalse(doc.exists)
+
+    def test_detectar_atencao_saude_persiste_no_db_quando_habilitado(self):
+        db = MockDb({
+            "system": {
+                "settings": {
+                    "atencao": {
+                        "saude": {"enabled": True}
+                    }
+                }
+            },
+            "health_weights": {
+                "w-1": {
+                    "date": "2026-08-30",
+                    "weight": 80.0,
+                },
+                "w-2": {
+                    "date": "2026-09-01",
+                    "weight": 79.5,
+                }
+            }
+        })
+        itens = detectar_atencao_saude(db, hoje=self.hoje)
+        self.assertEqual(len(itens), 1)
+        doc = db.collection(COLLECTION).document("saude_pesagem_ausente:2026-09-01").get()
+        self.assertTrue(doc.exists)
+        self.assertEqual(doc.to_dict()["origem"], "saude")
+        self.assertEqual(doc.to_dict()["tipo"], TIPO_ROTINA_SAUDE_AUSENTE)
+        self.assertEqual(doc.to_dict()["evidencia"]["dias_sem_pesagem"], 4)
+
+
+class TestDetectarAtencaoAcoesIntegracao(unittest.TestCase):
+    @patch("atencao.detectar_atencao_financeiro")
+    @patch("atencao.detectar_atencao_saude")
+    @patch("main.get_db")
+    def test_detectar_atencao_acoes_chama_detectores_financeiro_e_saude(
+        self, mock_get_db, mock_sau, mock_fin
+    ):
+        mock_get_db.return_value = MockDb()
+        fn = getattr(detectar_atencao_acoes, "__wrapped__", detectar_atencao_acoes)
+        fn()
+        mock_fin.assert_called_once()
+        mock_sau.assert_called_once()
 
 
 if __name__ == "__main__":

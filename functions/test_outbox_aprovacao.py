@@ -668,6 +668,17 @@ class TestAguardandoJanelaEListarRascunhos(unittest.TestCase):
         self.assertEqual(item_prom["status"], oa.STATUS_AGUARDANDO_JANELA)
         self.assertIsNotNone(item_prom.get("envio_liberado_em"))
 
+    def test_contar_pendentes_inclui_aguardando_e_janela_ignora_outros(self):
+        self.outbox._docs["r1"] = {"status": oa.STATUS_AGUARDANDO}
+        self.outbox._docs["r2"] = {"status": oa.STATUS_AGUARDANDO_JANELA}
+        self.outbox._docs["r3"] = {"status": oa.STATUS_SENT}
+        self.outbox._docs["r4"] = {"status": oa.STATUS_DESCARTADO}
+        self.outbox._docs["r5"] = {"status": oa.STATUS_EXPIRADO}
+        self.outbox._docs["r6"] = {"status": oa.STATUS_PENDING}
+
+        total = oa.contar_pendentes(self.db)
+        self.assertEqual(total, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

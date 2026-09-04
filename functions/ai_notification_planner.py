@@ -14,9 +14,9 @@ chamado a partir de `check_and_send_reminders` (main.py) — o mesmo motor de
 custo de LLM concentrado numa única chamada diária e o caminho de envio
 determinístico e barato.
 
-Financeiro e saúde ficam fora do escopo aqui pela mesma razão que estão fora
-do Godmode hoje: sem ferramentas de leitura calibradas para esses domínios
-ainda (ver `godmode.py`).
+Financeiro e saúde são cobertos de forma determinística via detectores da fila
+unificada `atencao` (ver `atencao.py`). Aqui no planejador diário com LLM o foco
+permanece restrito a tarefas e estratégia pessoal.
 """
 
 import datetime
@@ -48,8 +48,8 @@ AI_PLANNER_PERSONA = (
     "interação com o usuário, e decide se vale a pena interromper o dia dele com alguma "
     "notificação no Telegram.\n\n"
     "Escopo desta rodada: apenas tarefas/ações (`tarefas`) e metas estratégicas pessoais "
-    "(`estrategia_pessoal`). Financeiro e saúde ainda não têm ferramentas aqui — não invente "
-    "dados desses domínios nem tente compensar a ausência deles.\n\n"
+    "(`estrategia_pessoal`). Financeiro e saúde são atendidos por detectores determinísticos na "
+    "fila de atenção — não invente dados desses domínios nem tente compensar a ausência deles.\n\n"
     "Regra de ouro: silêncio é o resultado padrão e correto na maioria dos dias. O sistema já "
     "dispara lembretes determinísticos e confiáveis para prazo de tarefa configurado, pesagem "
     "e rotina de saúde — NUNCA duplique esses avisos. Seu valor está em cruzar dados que "

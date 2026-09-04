@@ -13941,7 +13941,7 @@ from monthly_recurring_actions import gerar_acoes_recorrentes_mensais
 from ai_notification_planner import ai_notification_planner_daily
 
 # Import attention queue action detector job
-from atencao import detectar_atencao_acoes
+from atencao import detectar_atencao_acoes, detectar_atencao_financeiro, detectar_atencao_saude
 
 # Import WhatsApp-based attention detectors (promessa_sem_retorno, audio_relevante)
 from atencao_whatsapp import on_whatsapp_message_atencao, vencer_promessas
