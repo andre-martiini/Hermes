@@ -1319,7 +1319,7 @@ from googleapiclient.errors import HttpError
 
 
 
-def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
+def sync_google_tasks_push(service, calendar_service, sync_ref, logs, tarefas_atualizadas=None):
 
     from datetime import datetime
 
@@ -1362,9 +1362,15 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
 
 
 
-        for doc in db.collection('tarefas').stream():
+        # Reaproveita o resultado de sync_google_calendar (ja reflete a
+        # sincronia inversa agenda -> Hermes) em vez de reler 'tarefas' do
+        # zero (evita 2 leituras completas redundantes da colecao por ciclo).
+        if tarefas_atualizadas is not None:
+            tarefas_iteravel = tarefas_atualizadas.values()
+        else:
+            tarefas_iteravel = ((d.reference, d.id, d.to_dict() or {}) for d in db.collection('tarefas').stream())
 
-            t = doc.to_dict()
+        for ref, doc_id, t in tarefas_iteravel:
 
             cat = t.get('area_tematica', '')
 
@@ -1378,7 +1384,7 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
             local_updated = t.get('data_atualizacao', '')
             if title != raw_title:
                 local_updated = datetime.now().isoformat()
-                doc.reference.update({'titulo': title, 'data_atualizacao': local_updated})
+                ref.update({'titulo': title, 'data_atualizacao': local_updated})
 
             if t.get('status') == 'excluído':
 
@@ -1406,7 +1412,7 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
                     except Exception as e:
                         log_to_firestore(sync_ref, logs, f"[!] Erro ao remover do Calendar: {e}")
 
-                doc.reference.delete()
+                ref.delete()
 
                 continue
 
@@ -1449,7 +1455,7 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
                     body = {'title': title, 'notes': updated_notes, 'status': g_status}
                     if g_due: body['due'] = g_due
                     new_task = service.tasks().insert(tasklist=tasklist_id, body=body).execute()
-                    doc.reference.update({'google_id': new_task['id'], 'data_atualizacao': new_task.get('updated'), 'notas': updated_notes, 'horario_fim': h_fim if not t.get('horario_fim') else t.get('horario_fim')})
+                    ref.update({'google_id': new_task['id'], 'data_atualizacao': new_task.get('updated'), 'notas': updated_notes, 'horario_fim': h_fim if not t.get('horario_fim') else t.get('horario_fim')})
                     log_to_firestore(sync_ref, logs, f"[+] ENVIADA TASKS: {title}")
                     g_id = new_task['id'] # Para usar no Calendar se precisar
                 elif g_id in g_tasks_map and is_iso_after(local_updated, g_tasks_map[g_id].get('updated', '')):
@@ -1466,14 +1472,14 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
                         if h_fim and not t.get('horario_fim'):
                             sync_updates['horario_fim'] = h_fim
                         if sync_updates:
-                            doc.reference.update(sync_updates)
+                            ref.update(sync_updates)
                     except HttpError as e:
                         if e.resp.status == 404:
-                            doc.reference.update({'google_id': None})
+                            ref.update({'google_id': None})
 
             # --- PARTE 2: Sincronia Google Calendar (Se possuir horário) ---
             cal_id = t.get('google_calendar_id')
-            desired_event_id = build_task_calendar_event_id(doc.id)
+            desired_event_id = build_task_calendar_event_id(doc_id)
             if sync_to_calendar and g_status == 'needsAction': # Só agenda eventos não concluídos
                 # Prepara o Evento
                 from datetime import datetime, timezone
@@ -1489,7 +1495,7 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
                         'end': {'dateTime': end_dt, 'timeZone': 'America/Sao_Paulo'},
                         'extendedProperties': {
                             'private': {
-                                'hermes_task_id': doc.id
+                                'hermes_task_id': doc_id
                             }
                         }
                     }
@@ -1504,7 +1510,7 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
                             if cal_err.resp.status != 409:
                                 raise
                             new_event = calendar_service.events().get(calendarId=calendar_id, eventId=desired_event_id).execute()
-                        doc.reference.update({'google_calendar_id': new_event['id']})
+                        ref.update({'google_calendar_id': new_event['id']})
                         log_to_firestore(sync_ref, logs, f"[+] ALOCADA CALENDAR: {title}")
                     else:
                         # Atualiza
@@ -1518,7 +1524,7 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
                                     if conflict_err.resp.status != 409:
                                         raise
                                     new_event = calendar_service.events().get(calendarId=calendar_id, eventId=desired_event_id).execute()
-                                doc.reference.update({'google_calendar_id': new_event['id']})
+                                ref.update({'google_calendar_id': new_event['id']})
                 except Exception as ce:
                     log_to_firestore(sync_ref, logs, f"[CAL][!] Falha ao sincronizar evento da tarefa '{title}': {ce}")
             elif (not sync_to_calendar or g_status == 'completed') and cal_id:
@@ -1526,7 +1532,7 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
                  try:
                      calendar_service.events().delete(calendarId=calendar_id, eventId=cal_id).execute()
                  except HttpError as ce: pass
-                 doc.reference.update({'google_calendar_id': None})
+                 ref.update({'google_calendar_id': None})
                  
 
 
@@ -1539,7 +1545,7 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
 
 
 
-def sync_google_calendar(service, sync_ref, logs):
+def sync_google_calendar(service, sync_ref, logs, tarefas_docs=None):
 
     from datetime import datetime, timedelta, timezone
 
@@ -1558,9 +1564,19 @@ def sync_google_calendar(service, sync_ref, logs):
 
         seen_ids = set()
 
+        # Reaproveita a leitura de 'tarefas' feita uma unica vez em run_full_sync
+        # (evita 2 leituras completas redundantes da colecao por ciclo de sync).
+        source_docs = tarefas_docs if tarefas_docs is not None else db.collection('tarefas').stream()
+
+        # tasks_by_id guarda (ref, id, dict) por tarefa; o dict e o mesmo objeto
+        # mutado pela sincronia inversa abaixo (agenda -> Hermes) e e devolvido
+        # no final para quem chamou (run_full_sync) repassar ao push sem reler
+        # a colecao do zero.
+        tasks_by_id = {}
         linked_tasks_by_event_id = {}
-        for task_doc in db.collection('tarefas').stream():
+        for task_doc in source_docs:
             task_data = task_doc.to_dict() or {}
+            tasks_by_id[task_doc.id] = (task_doc.reference, task_doc.id, task_data)
             linked_event_id = task_data.get('google_calendar_id')
             deterministic_event_id = build_task_calendar_event_id(task_doc.id)
             linked_tasks_by_event_id.setdefault(deterministic_event_id, []).append((task_doc.reference, task_data))
@@ -1692,12 +1708,15 @@ def sync_google_calendar(service, sync_ref, logs):
 
         log_to_firestore(sync_ref, logs, f"[CAL] {count} eventos sincronizados em {len(calendar_ids)} agenda(s). {deleted_count} removidos.")
 
+        return tasks_by_id
+
     except Exception as e:
 
         if is_google_invalid_grant_error(e):
             raise GoogleAuthRevokedError(GOOGLE_REAUTH_MESSAGE) from e
 
         log_to_firestore(sync_ref, logs, f"ERRO CAL: {e}")
+        return None
 
 def sync_pix_emails(service, sync_ref, logs):
     """
@@ -3019,9 +3038,14 @@ def run_full_sync(trigger_reason='unspecified'):
                 }, merge=True)
 
             ts, gs, cs = get_tasks_service(), get_gmail_service(), get_calendar_service()
+            # Leitura unica de 'tarefas' para este ciclo: antes, sync_google_calendar
+            # e sync_google_tasks_push liam a colecao inteira cada um por conta
+            # propria (2 leituras completas redundantes por ciclo de sync, 48
+            # ciclos/dia - achado da investigacao de custo de 04/09/2026).
+            tarefas_snapshot = list(db.collection('tarefas').stream())
             # Primeiro puxa o Calendar para permitir sincronia inversa (agenda -> Hermes) antes do push
-            sync_google_calendar(cs, sync_ref, logs)
-            sync_google_tasks_push(ts, cs, sync_ref, logs)
+            tarefas_atualizadas = sync_google_calendar(cs, sync_ref, logs, tarefas_docs=tarefas_snapshot)
+            sync_google_tasks_push(ts, cs, sync_ref, logs, tarefas_atualizadas=tarefas_atualizadas)
             sync_google_tasks_pull(ts, sync_ref, logs)
 
             sync_pix_emails(gs, sync_ref, logs)
