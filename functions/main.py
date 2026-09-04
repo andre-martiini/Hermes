@@ -13873,6 +13873,9 @@ import deteccao_subproduto
 # Import weekly review batch rescheduling proposal job
 from revisao_semanal import revisar_semana_propor_reagendamento
 
+# Import weekly agent retro job
+from retro_agente import retro_semanal_agente
+
 
 @scheduler_fn.on_schedule(
     # Domingo às 18h: a semana já aconteceu, e a sugestão chega antes de a próxima

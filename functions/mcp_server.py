@@ -601,11 +601,13 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
         start = time.monotonic()
         result = _executar_confirmacao(ctx, arguments.get("confirmation_id"))
         confirmed_tool = getattr(ctx, "mcp_confirmed_tool", None)
+        is_err = bool(result.get("erro")) if isinstance(result, dict) else False
         if confirmed_tool:
             _audit_log(uid=ctx.user_uid, tool=confirmed_tool,
                        arguments=getattr(ctx, "mcp_confirmed_arguments", {}),
-                       latency_ms=(time.monotonic() - start) * 1000)
-        return _text_result(result, is_error=bool(result.get("erro")))
+                       latency_ms=(time.monotonic() - start) * 1000,
+                       is_error=is_err)
+        return _text_result(result, is_error=is_err)
 
     if not registry.is_mcp_enabled(name):
         raise McpError(-32003, f"Tool '{name}' nao esta disponivel via MCP")
@@ -622,11 +624,13 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
             start = time.monotonic()
             result = _executar_confirmacao(ctx, confirmation_id, tool_esperada=name)
             confirmed_tool = getattr(ctx, "mcp_confirmed_tool", None)
+            is_err = bool(result.get("erro")) if isinstance(result, dict) else False
             if confirmed_tool:
                 _audit_log(uid=ctx.user_uid, tool=confirmed_tool,
                            arguments=getattr(ctx, "mcp_confirmed_arguments", {}),
-                           latency_ms=(time.monotonic() - start) * 1000)
-            return _text_result(result, is_error=bool(result.get("erro")))
+                           latency_ms=(time.monotonic() - start) * 1000,
+                           is_error=is_err)
+            return _text_result(result, is_error=is_err)
         else:
             # Compatibilidade para tools antigas sem hook de prévia: `_confirmed`
             # continua bastando. Uma tool com hook nunca executa por este caminho,
@@ -696,7 +700,7 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
             ctx.user_uid, name, arguments,
             session_id=ctx.session_id, task_id=ctx.task_id,
         )
-        _audit_log(uid=ctx.user_uid, tool=name, arguments=arguments, latency_ms=0.0)
+        _audit_log(uid=ctx.user_uid, tool=name, arguments=arguments, latency_ms=0.0, is_error=False)
         return _text_result({
             "status": "processing",
             "job_id": job_id,
@@ -725,6 +729,7 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
             tool=name,
             arguments=arguments,
             latency_ms=(time.monotonic() - start) * 1000,
+            is_error=is_error,
         )
 
     return {"content": [{"type": "text", "text": text}], "isError": is_error}
@@ -838,7 +843,14 @@ def _handle_resources_read(params: dict, *, uid: str) -> dict:
 # Auditoria e helpers HTTP
 # --------------------------------------------------------------------------
 
-def _audit_log(*, uid: str | None, tool: str, arguments: dict, latency_ms: float) -> None:
+def _audit_log(
+    *,
+    uid: str | None,
+    tool: str,
+    arguments: dict,
+    latency_ms: float,
+    is_error: bool = False,
+) -> None:
     try:
         db = firestore.client()
         db.collection("mcp_audit_log").add({
@@ -846,6 +858,7 @@ def _audit_log(*, uid: str | None, tool: str, arguments: dict, latency_ms: float
             "tool": tool,
             "arguments": json.loads(json.dumps(arguments, ensure_ascii=False, default=str)),
             "latency_ms": round(latency_ms, 1),
+            "is_error": bool(is_error),
             "timestamp": firestore.SERVER_TIMESTAMP,
         })
     except Exception as exc:
