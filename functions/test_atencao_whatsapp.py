@@ -9,10 +9,13 @@ from atencao_whatsapp import (
     ESTADO_PROMESSA_VENCIDA,
     TIPO_AUDIO_RELEVANTE,
     TIPO_PROMESSA_SEM_RETORNO,
+    _obter_whatsapp_owner_chat_id,
+    _processar_aprovacao_outbox,
     _processar_audio,
     avaliar_audio,
     avaliar_promessas_vencidas,
     decidir_acao_mensagem_from_me,
+    interpretar_resposta_aprovacao_whatsapp,
     mensagem_cumpre_promessa,
     mensagem_e_promessa,
     mesclar_ou_criar_item_audio,
@@ -350,6 +353,228 @@ class TestHookAgentRequests(unittest.TestCase):
         req_doc2 = req_col._docs[expected_req_id]
         self.assertEqual(req_doc2["status"], "pendente")
         self.assertEqual(req_doc2["payload"]["mensagem_ids"], ["aud1", "aud2"])
+
+
+class TestAprovacaoOutboxWhatsApp(unittest.TestCase):
+    def setUp(self):
+        self.owner_chat_id = "5511999999999@c.us"
+        self.rascunho_unico = [{
+            "id": "outbox-abc-123",
+            "outbox_id": "outbox-abc-123",
+            "content": "Texto do rascunho original para o cliente",
+            "status": "aguardando_aprovacao",
+        }]
+
+    def test_aprovacao_variacoes_sim_ok_pode_manda(self):
+        frases_aprovacao = [
+            "sim", "SIM", "Sim.", "ok", "OK!", "pode", "manda", "mandar",
+            "pode mandar", "pode enviar", "aprova", "aprovar", "envia",
+            "confirma", "confirmar", "positivo", "vai", "manda bala", "manda ver",
+        ]
+        for frase in frases_aprovacao:
+            with self.subTest(frase=frase):
+                msg = {
+                    "from_me": True,
+                    "chat_id": self.owner_chat_id,
+                    "content": frase,
+                }
+                res = interpretar_resposta_aprovacao_whatsapp(
+                    msg, self.rascunho_unico, self.owner_chat_id
+                )
+                self.assertIsNotNone(res)
+                self.assertEqual(res["acao"], "aprovar")
+                self.assertEqual(res["outbox_id"], "outbox-abc-123")
+
+    def test_descarte_variacoes_nao_descarta_cancela(self):
+        frases_descarte = [
+            "nao", "não", "NÃO!", "descarta", "descartar", "cancela",
+            "cancelar", "ignora", "ignorar", "lixo", "deleta", "apaga",
+            "descarta isso", "cancela isso",
+        ]
+        for frase in frases_descarte:
+            with self.subTest(frase=frase):
+                msg = {
+                    "from_me": True,
+                    "chat_id": self.owner_chat_id,
+                    "content": frase,
+                }
+                res = interpretar_resposta_aprovacao_whatsapp(
+                    msg, self.rascunho_unico, self.owner_chat_id
+                )
+                self.assertIsNotNone(res)
+                self.assertEqual(res["acao"], "descartar")
+                self.assertEqual(res["outbox_id"], "outbox-abc-123")
+
+    def test_edicao_texto_livre(self):
+        textos_edicao = [
+            "Oi Dr. Marcos, por favor confirme a reunião para quinta às 15h.",
+            "Não posso ir amanhã, prefiro na sexta às 10h.",
+            "Altera o valor para R$ 150,00",
+        ]
+        for texto in textos_edicao:
+            with self.subTest(texto=texto):
+                msg = {
+                    "from_me": True,
+                    "chat_id": self.owner_chat_id,
+                    "content": texto,
+                }
+                res = interpretar_resposta_aprovacao_whatsapp(
+                    msg, self.rascunho_unico, self.owner_chat_id
+                )
+                self.assertIsNotNone(res)
+                self.assertEqual(res["acao"], "editar")
+                self.assertEqual(res["outbox_id"], "outbox-abc-123")
+                self.assertEqual(res["novo_texto"], texto)
+
+    def test_sem_pendentes_retorna_none(self):
+        msg = {
+            "from_me": True,
+            "chat_id": self.owner_chat_id,
+            "content": "sim",
+        }
+        res = interpretar_resposta_aprovacao_whatsapp(msg, [], self.owner_chat_id)
+        self.assertIsNone(res)
+
+    def test_multiplos_pendentes_retorna_ambiguo(self):
+        pendentes = [
+            {"id": "outbox-1", "content": "Msg 1"},
+            {"id": "outbox-2", "content": "Msg 2"},
+        ]
+        msg = {
+            "from_me": True,
+            "chat_id": self.owner_chat_id,
+            "content": "sim",
+        }
+        res = interpretar_resposta_aprovacao_whatsapp(msg, pendentes, self.owner_chat_id)
+        self.assertIsNotNone(res)
+        self.assertEqual(res["acao"], "ambiguo")
+        self.assertEqual(res["quantidade"], 2)
+
+    def test_chat_de_terceiro_ignorado_mesmo_com_comando(self):
+        chat_terceiro = "5511888888888@c.us"
+        for cmd in ["sim", "nao", "cancela", "texto de edicao"]:
+            with self.subTest(cmd=cmd):
+                msg = {
+                    "from_me": True,
+                    "chat_id": chat_terceiro,
+                    "content": cmd,
+                }
+                res = interpretar_resposta_aprovacao_whatsapp(
+                    msg, self.rascunho_unico, self.owner_chat_id
+                )
+                self.assertIsNone(res)
+
+    def test_from_me_false_ignorado_no_self_chat(self):
+        msg = {
+            "from_me": False,
+            "chat_id": self.owner_chat_id,
+            "content": "sim",
+        }
+        res = interpretar_resposta_aprovacao_whatsapp(
+            msg, self.rascunho_unico, self.owner_chat_id
+        )
+        self.assertIsNone(res)
+
+    def test_owner_chat_id_ausente_retorna_none(self):
+        msg = {
+            "from_me": True,
+            "chat_id": self.owner_chat_id,
+            "content": "sim",
+        }
+        self.assertIsNone(interpretar_resposta_aprovacao_whatsapp(msg, self.rascunho_unico, None))
+        self.assertIsNone(interpretar_resposta_aprovacao_whatsapp(msg, self.rascunho_unico, ""))
+
+    def test_mensagem_sem_conteudo_retorna_none(self):
+        msg = {
+            "from_me": True,
+            "chat_id": self.owner_chat_id,
+            "content": "   ",
+        }
+        self.assertIsNone(
+            interpretar_resposta_aprovacao_whatsapp(msg, self.rascunho_unico, self.owner_chat_id)
+        )
+
+    @mock.patch("atencao_whatsapp._obter_whatsapp_owner_chat_id")
+    @mock.patch("outbox_aprovacao.listar_rascunhos")
+    @mock.patch("outbox_aprovacao.aprovar_rascunho")
+    def test_processar_aprovacao_outbox_executa_aprovacao(
+        self, mock_aprovar, mock_listar, mock_owner_id
+    ):
+        mock_owner_id.return_value = self.owner_chat_id
+        mock_listar.return_value = {"total": 1, "rascunhos": self.rascunho_unico}
+
+        db = mock.MagicMock()
+        msg = {
+            "from_me": True,
+            "chat_id": self.owner_chat_id,
+            "content": "sim, pode mandar",
+        }
+        _processar_aprovacao_outbox(db, msg)
+
+        mock_aprovar.assert_called_once_with(
+            db, outbox_id="outbox-abc-123", aprovado_via="whatsapp"
+        )
+
+    @mock.patch("atencao_whatsapp._obter_whatsapp_owner_chat_id")
+    @mock.patch("outbox_aprovacao.listar_rascunhos")
+    @mock.patch("outbox_aprovacao.descartar_rascunho")
+    def test_processar_aprovacao_outbox_executa_descarte(
+        self, mock_descartar, mock_listar, mock_owner_id
+    ):
+        mock_owner_id.return_value = self.owner_chat_id
+        mock_listar.return_value = {"total": 1, "rascunhos": self.rascunho_unico}
+
+        db = mock.MagicMock()
+        msg = {
+            "from_me": True,
+            "chat_id": self.owner_chat_id,
+            "content": "descarta",
+        }
+        _processar_aprovacao_outbox(db, msg)
+
+        mock_descartar.assert_called_once_with(
+            db, outbox_id="outbox-abc-123"
+        )
+
+    @mock.patch("atencao_whatsapp._obter_whatsapp_owner_chat_id")
+    @mock.patch("outbox_aprovacao.listar_rascunhos")
+    @mock.patch("outbox_aprovacao.aplicar_edicao_rascunho")
+    def test_processar_aprovacao_outbox_executa_edicao(
+        self, mock_editar, mock_listar, mock_owner_id
+    ):
+        mock_owner_id.return_value = self.owner_chat_id
+        mock_listar.return_value = {"total": 1, "rascunhos": self.rascunho_unico}
+
+        db = mock.MagicMock()
+        novo_texto = "Texto revisado pelo dono diretamente no WhatsApp"
+        msg = {
+            "from_me": True,
+            "chat_id": self.owner_chat_id,
+            "content": novo_texto,
+        }
+        _processar_aprovacao_outbox(db, msg)
+
+        mock_editar.assert_called_once_with(
+            db, outbox_id="outbox-abc-123", novo_texto=novo_texto
+        )
+
+    @mock.patch("atencao_whatsapp._obter_whatsapp_owner_chat_id")
+    @mock.patch("outbox_aprovacao.listar_rascunhos")
+    def test_processar_aprovacao_outbox_fast_path_ignora_sem_listar(
+        self, mock_listar, mock_owner_id
+    ):
+        # Se from_me for False, nem deve buscar settings ou rascunhos
+        db = mock.MagicMock()
+        msg = {"from_me": False, "chat_id": self.owner_chat_id, "content": "sim"}
+        _processar_aprovacao_outbox(db, msg)
+        mock_owner_id.assert_not_called()
+        mock_listar.assert_not_called()
+
+        # Se chat for de terceiro, busca owner mas não lista rascunhos
+        mock_owner_id.return_value = self.owner_chat_id
+        msg2 = {"from_me": True, "chat_id": "terceiro@c.us", "content": "sim"}
+        _processar_aprovacao_outbox(db, msg2)
+        mock_listar.assert_not_called()
 
 
 if __name__ == "__main__":
