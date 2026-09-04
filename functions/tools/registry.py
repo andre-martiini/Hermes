@@ -115,6 +115,9 @@ _CATALOG: dict[str, str] = {
     # Fila de atencao unificada
     "obter_fila_atencao": "Lista a fila de atencao unificada: itens de acoes, conversas e rotinas que demandam decisao",
     "resolver_item_atencao": "Resolve, descarta ou delega um item da fila de atencao, registrando o desfecho",
+    # Pedidos de trabalho autonomo
+    "consultar_pedidos_agente": "Lista pedidos de trabalho autonomo enfileirados pelo sistema para o agente executar",
+    "concluir_pedido_agente": "Conclui ou registra erro em um pedido de trabalho autonomo executado pelo agente",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {

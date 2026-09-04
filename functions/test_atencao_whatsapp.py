@@ -2,12 +2,14 @@
 
 from datetime import datetime, timezone
 import unittest
+from unittest import mock
 
 from atencao_whatsapp import (
     ESTADO_PROMESSA_ABERTA,
     ESTADO_PROMESSA_VENCIDA,
     TIPO_AUDIO_RELEVANTE,
     TIPO_PROMESSA_SEM_RETORNO,
+    _processar_audio,
     avaliar_audio,
     avaliar_promessas_vencidas,
     decidir_acao_mensagem_from_me,
@@ -205,5 +207,151 @@ class TestAudioRelevante(unittest.TestCase):
         self.assertEqual(item["prioridade"], "alta")
 
 
+class _MockDocSnap:
+    def __init__(self, doc_id: str, data: dict | None):
+        self.id = doc_id
+        self._data = dict(data) if data is not None else None
+        self.exists = data is not None
+
+    def to_dict(self):
+        return dict(self._data) if self._data is not None else {}
+
+
+class _MockDocRef:
+    def __init__(self, col, doc_id: str):
+        self.col = col
+        self.id = doc_id
+
+    def get(self):
+        data = self.col._docs.get(self.id)
+        return _MockDocSnap(self.id, data)
+
+    def set(self, data, merge=False):
+        if merge and self.id in self.col._docs:
+            self.col._docs[self.id].update(data)
+        else:
+            self.col._docs[self.id] = dict(data)
+
+    def update(self, data):
+        if self.id not in self.col._docs:
+            raise KeyError(f"Doc {self.id} does not exist")
+        self.col._docs[self.id].update(data)
+
+
+def _get_nested(d, path):
+    curr = d
+    for p in path.split("."):
+        if not isinstance(curr, dict):
+            return None
+        curr = curr.get(p)
+    return curr
+
+
+class _MockQuery:
+    def __init__(self, col, items):
+        self.col = col
+        self.items = items
+
+    def where(self, field, op, val):
+        filtered = [
+            (k, v) for k, v in self.items
+            if op == "==" and _get_nested(v, field) == val
+        ]
+        return _MockQuery(self.col, filtered)
+
+    def stream(self):
+        return [_MockDocSnap(k, v) for k, v in self.items]
+
+
+class _MockCollection:
+    def __init__(self, db, name: str):
+        self.db = db
+        self.name = name
+        self._docs: dict[str, dict] = {}
+
+    def document(self, doc_id: str):
+        return _MockDocRef(self, doc_id)
+
+    def where(self, field, op, val):
+        filtered = [
+            (k, v) for k, v in self._docs.items()
+            if op == "==" and _get_nested(v, field) == val
+        ]
+        return _MockQuery(self, filtered)
+
+    def stream(self):
+        return [_MockDocSnap(k, v) for k, v in self._docs.items()]
+
+
+class _MockDB:
+    def __init__(self):
+        self._collections: dict[str, _MockCollection] = {}
+
+    def collection(self, name: str) -> _MockCollection:
+        if name not in self._collections:
+            self._collections[name] = _MockCollection(self, name)
+        return self._collections[name]
+
+
+class TestHookAgentRequests(unittest.TestCase):
+    @mock.patch("atencao_whatsapp._flag_audio", return_value=(True, 20))
+    @mock.patch("atencao_whatsapp._acoes_ativas_por_chat_cached")
+    def test_hook_cria_e_mescla_agent_request(self, mock_acoes, mock_flag):
+        mock_acoes.return_value = {"chat-test": {"id": "acao-xyz", "titulo": "Ação Teste"}}
+        db = _MockDB()
+
+        # Primeiro áudio
+        m1 = {
+            "from_me": False,
+            "message_type": "ptt",
+            "chat_id": "chat-test",
+            "chat_name": "Guilherme",
+            "wa_message_id": "aud1",
+            "author_name": "Guilherme",
+            "media": {},
+            "timestamp": datetime(2026, 9, 3, 10, 0, tzinfo=timezone.utc),
+        }
+        _processar_audio(db, m1)
+
+        atencao_col = db.collection("atencao")
+        req_col = db.collection("agent_requests")
+
+        self.assertEqual(len(atencao_col._docs), 1)
+        self.assertEqual(len(req_col._docs), 1)
+
+        expected_atencao_id = "audio_relevante:chat-test:aud1"
+        expected_req_id = f"consolidar_audio:{expected_atencao_id}"
+        self.assertIn(expected_req_id, req_col._docs)
+
+        req_doc = req_col._docs[expected_req_id]
+        self.assertEqual(req_doc["status"], "pendente")
+        self.assertEqual(req_doc["tipo"], "consolidar_audio")
+        self.assertEqual(req_doc["item_atencao_id"], expected_atencao_id)
+        self.assertEqual(req_doc["acao_id"], "acao-xyz")
+        self.assertEqual(req_doc["payload"]["mensagem_ids"], ["aud1"])
+        self.assertEqual(req_doc["payload"]["chat_id"], "chat-test")
+        self.assertEqual(req_doc["payload"]["chat_name"], "Guilherme")
+
+        # Segundo áudio 2 minutos depois (mesma janela de 10 min)
+        m2 = {
+            "from_me": False,
+            "message_type": "ptt",
+            "chat_id": "chat-test",
+            "chat_name": "Guilherme",
+            "wa_message_id": "aud2",
+            "author_name": "Guilherme",
+            "media": {},
+            "timestamp": datetime(2026, 9, 3, 10, 2, tzinfo=timezone.utc),
+        }
+        _processar_audio(db, m2)
+
+        # Não deve criar um novo doc, deve manter o mesmo atualizado
+        self.assertEqual(len(req_col._docs), 1)
+        req_doc2 = req_col._docs[expected_req_id]
+        self.assertEqual(req_doc2["status"], "pendente")
+        self.assertEqual(req_doc2["payload"]["mensagem_ids"], ["aud1", "aud2"])
+
+
 if __name__ == "__main__":
     unittest.main()
+

@@ -52,6 +52,12 @@ Separa o trabalho de **redigir** (feito pelo Claude) de **aprovar e enviar** (fe
 - **`criar_rascunho_whatsapp`** (escrita): cria um registro em `whatsapp_outbox` com status `aguardando_aprovacao` e envia card com botões inline no Telegram (`[✅ Enviar] [✏️ Editar] [🗑️ Descartar]`). **Nota de segurança:** esta tool **não** exige `_confirmed` no protocolo MCP porque não envia nada a terceiros — o gate humano real acontece no Telegram.
 - **`listar_rascunhos_pendentes`** (leitura): lista rascunhos em `aguardando_aprovacao` para que o agente confira o que ainda espera decisão antes de redigir de novo.
 
+### Pedidos de trabalho autônomo (`consultar_pedidos_agente`, `concluir_pedido_agente`)
+
+Permite a sessões agendadas do Claude consumir e fechar itens da fila de trabalho autônomo (`agent_requests`), sem intervenção do dono.
+- **`consultar_pedidos_agente`** (leitura): lista pedidos pendentes (ex.: `tipo: "consolidar_audio"`), ordenados do mais antigo para o mais recente.
+- **`concluir_pedido_agente`** (escrita): conclui o pedido com `resultado` ou registra `erro`. **Nota de segurança:** não exige confirmação prévia no MCP porque fecha trabalho interno sem produzir efeitos em terceiros.
+
 ### Escrita: direta, não em dois passos
 
 As tools `preparar_*` **não gravam nada**: montam uma proposta que a UI web
