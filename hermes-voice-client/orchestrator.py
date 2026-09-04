@@ -70,6 +70,10 @@ def _json_schema_to_gemini(schema: dict) -> types.Schema:
 def _build_gemini_tools(mcp_tools: list[dict]) -> list[types.Tool]:
     declarations = []
     for tool in mcp_tools:
+        # Fail-closed intencional: se o metadado estiver ausente/falso, não expor por voz
+        # para evitar liberar ferramentas críticas (ex: financeiras) em caso de versão legada.
+        if not tool.get("_meta", {}).get("voiceEnabled", False):
+            continue
         input_schema = tool.get("inputSchema") or {"type": "object", "properties": {}}
         declarations.append(
             types.FunctionDeclaration(
