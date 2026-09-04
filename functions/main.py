@@ -3788,6 +3788,15 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
     except Exception as exc:
         print(f"[AtencaoInterrupcao] Falha ao avaliar interrupcao de atencao: {exc}")
 
+    # 4b. Detectores periodicos da fila de atencao (financeiro e saude a cada 30 min)
+    if now.minute in (0, 30):
+        try:
+            from atencao import detectar_atencao_financeiro, detectar_atencao_saude
+            detectar_atencao_financeiro(db, now.date())
+            detectar_atencao_saude(db, now.date())
+        except Exception as exc:
+            print(f"[AtencaoPeriodica] Falha ao rodar detectores de financeiro/saude: {exc}")
+
     # Notificacoes agendadas pelo planejador proativo de IA e Verificacao de Duplicatas de Contatos
     try:
         from ai_notification_planner import dispatch_pending_ai_notifications, dispatch_scheduled_whatsapp_messages
@@ -13941,7 +13950,7 @@ from monthly_recurring_actions import gerar_acoes_recorrentes_mensais
 from ai_notification_planner import ai_notification_planner_daily
 
 # Import attention queue action detector job
-from atencao import detectar_atencao_acoes
+from atencao import detectar_atencao_acoes, detectar_atencao_financeiro, detectar_atencao_saude
 
 # Import WhatsApp-based attention detectors (promessa_sem_retorno, audio_relevante)
 from atencao_whatsapp import on_whatsapp_message_atencao, vencer_promessas

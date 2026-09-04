@@ -12,6 +12,7 @@ import contextlib
 import json
 import os
 import unittest
+from unittest.mock import MagicMock, patch
 
 from tools import hermes_tools, registry
 
@@ -847,6 +848,18 @@ class TestEscritaDireta(unittest.TestCase):
     def test_estado_atual_e_somente_leitura(self):
         self.assertIn("obter_estado_atual", registry.list_mcp_enabled_tools())
         self.assertFalse(registry.needs_confirmation("obter_estado_atual"))
+
+    @patch("morning_summary.build_morning_summary")
+    @patch("outbox_aprovacao.contar_pendentes")
+    def test_obter_estado_atual_inclui_outbox_pendentes(self, mock_contar, mock_build):
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+        mock_build.return_value = {"acoes": []}
+        mock_contar.return_value = 3
+        ctx = ToolContext(_db=MagicMock())
+        res = hermes_tools.obter_estado_atual(ctx, {})
+        self.assertIn("outbox_pendentes", res)
+        self.assertEqual(res["outbox_pendentes"], 3)
 
 
 class TestRetornoNaoMenteSobreOEfeito(unittest.TestCase):

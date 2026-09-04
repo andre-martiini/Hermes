@@ -4,7 +4,7 @@ conversas e canais que demandam decisão ou acompanhamento do dono.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 try:
     import zoneinfo
 except ImportError:
@@ -35,6 +35,8 @@ ORIGENS = ("acao", "whatsapp", "email", "agenda", "repo", "financeiro", "saude")
 
 # Tipos de detectores
 TIPO_AGUARDANDO_TERCEIRO_VENCIDO = "aguardando_terceiro_vencido"
+TIPO_CONTA_VENCENDO = "conta_vencendo"
+TIPO_ROTINA_SAUDE_AUSENTE = "rotina_saude_ausente"
 
 # Prioridades
 PRIORIDADE_ALTA = "alta"
@@ -228,6 +230,286 @@ def avaliar_etapas(
     return itens
 
 
+def _persistir_itens_atencao(db, itens: list[dict]) -> int:
+    """Persiste lista de itens na coleção atencao de forma idempotente e determinística."""
+    gravados = 0
+    agora_utc = datetime.now(timezone.utc)
+    for item in itens:
+        chave = item["chave_dedupe"]
+        doc_ref = db.collection(COLLECTION).document(chave)
+        existing_snap = doc_ref.get()
+
+        prazo_str = item.get("prazo")
+        prazo_dt = None
+        if prazo_str and len(str(prazo_str)) >= 10:
+            try:
+                prazo_dt = datetime.strptime(str(prazo_str)[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            except ValueError:
+                prazo_dt = None
+
+        payload = {
+            "origem": item["origem"],
+            "tipo": item["tipo"],
+            "prioridade": item["prioridade"],
+            "titulo": item["titulo"],
+            "resumo": item["resumo"],
+            "acao_id": item.get("acao_id"),
+            "etapa_id": item.get("etapa_id"),
+            "pessoa": item.get("pessoa"),
+            "prazo": prazo_dt,
+            "prazo_origem": prazo_str,
+            "evidencia": item.get("evidencia") or {},
+            "sugestao": item.get("sugestao") or "",
+            "chave_dedupe": chave,
+            "atualizado_em": firestore.SERVER_TIMESTAMP if hasattr(firestore, "SERVER_TIMESTAMP") else agora_utc,
+        }
+
+        if existing_snap.exists:
+            existing_data = existing_snap.to_dict() or {}
+            existing_estado = existing_data.get("estado")
+            existing_prazo = existing_data.get("prazo_origem")
+
+            if existing_estado in ESTADOS_FECHADOS:
+                if existing_prazo == prazo_str:
+                    # Não reabrir se o prazo de origem não mudou
+                    continue
+                # Se o prazo mudou para outra data também vencida, reabre
+                payload["estado"] = ESTADO_ABERTO
+                payload["resolvido_em"] = None
+                payload["desfecho"] = None
+            else:
+                payload["estado"] = existing_estado or ESTADO_ABERTO
+
+            doc_ref.set(payload, merge=True)
+        else:
+            payload["estado"] = ESTADO_ABERTO
+            payload["criado_em"] = firestore.SERVER_TIMESTAMP if hasattr(firestore, "SERVER_TIMESTAMP") else agora_utc
+            doc_ref.set(payload)
+        gravados += 1
+    return gravados
+
+
+def avaliar_contas_vencendo(
+    contas: list[dict],
+    hoje: date,
+    dias_antecedencia: int = 3,
+) -> list[dict]:
+    """Avaliação pura e determinística de contas a vencer ou vencidas (origem 'financeiro').
+
+    Regra de ouro: silêncio por padrão. Só gera item para contas do mês corrente
+    não pagas que estejam vencidas ou vencendo em até `dias_antecedencia` dias.
+    """
+    itens: list[dict] = []
+    hoje_ano = hoje.year
+    hoje_mes = hoje.month
+
+    for conta in contas:
+        if conta.get("isPaid") or conta.get("paid"):
+            continue
+
+        due_day = conta.get("dueDay")
+        if due_day is None:
+            due_day = conta.get("due_day")
+        if due_day is None:
+            continue
+        try:
+            due_day = int(due_day)
+        except (ValueError, TypeError):
+            continue
+
+        if due_day <= 0:
+            continue
+
+        # Ano e mês da conta (padrão: mês/ano de hoje se não especificados)
+        # Atenção: no Firestore, 'month' é gravado 0-11 pelo frontend JS
+        conta_mes_raw = conta.get("month")
+        conta_ano = conta.get("year") or hoje_ano
+        if conta_mes_raw is not None:
+            try:
+                conta_mes = int(conta_mes_raw) + 1  # converte 0-11 para 1-12
+            except (ValueError, TypeError):
+                conta_mes = hoje_mes
+        else:
+            conta_mes = hoje_mes
+
+        try:
+            vencimento = date(int(conta_ano), int(conta_mes), due_day)
+        except ValueError:
+            continue
+
+        delta_dias = (vencimento - hoje).days
+
+        # Só gera item se estiver vencida no mês ou vencendo em até dias_antecedencia
+        if delta_dias > dias_antecedencia:
+            continue
+
+        doc_id = str(conta.get("id") or conta.get("doc_id") or "").strip()
+        descricao = str(conta.get("description") or "(sem descrição)").strip()
+        valor = conta.get("amount")
+        try:
+            valor_str = f"R$ {float(valor):.2f}" if valor is not None else "valor não informado"
+        except (ValueError, TypeError):
+            valor_str = str(valor or "valor não informado")
+        vencimento_str = vencimento.strftime("%Y-%m-%d")
+
+        if delta_dias < 0:
+            dias_vencida = abs(delta_dias)
+            prioridade = PRIORIDADE_ALTA
+            titulo = f"Conta '{descricao}' vencida há {dias_vencida} dia(s)"
+            resumo = f"Conta fixa '{descricao}' ({valor_str}) venceu em {vencimento_str} e não consta como paga."
+        elif delta_dias == 0:
+            prioridade = PRIORIDADE_ALTA
+            titulo = f"Conta '{descricao}' vence hoje"
+            resumo = f"Conta fixa '{descricao}' ({valor_str}) vence hoje ({vencimento_str}) e aguarda pagamento."
+        else:
+            prioridade = PRIORIDADE_MEDIA
+            titulo = f"Conta '{descricao}' vence em {delta_dias} dia(s)"
+            resumo = f"Conta fixa '{descricao}' ({valor_str}) vence em {vencimento_str}."
+
+        chave_dedupe = f"conta_vencendo:{doc_id or descricao}:{vencimento_str}"
+
+        itens.append({
+            "origem": "financeiro",
+            "tipo": TIPO_CONTA_VENCENDO,
+            "prioridade": prioridade,
+            "titulo": titulo,
+            "resumo": resumo,
+            "acao_id": None,
+            "etapa_id": None,
+            "pessoa": None,
+            "prazo": vencimento_str,
+            "evidencia": {
+                "bill_id": doc_id,
+                "descricao": descricao,
+                "amount": valor,
+                "due_date": vencimento_str,
+                "delta_dias": delta_dias,
+            },
+            "sugestao": "Pagar a conta e registrar pagamento no módulo Financeiro",
+            "estado": ESTADO_ABERTO,
+            "chave_dedupe": chave_dedupe,
+        })
+
+    return itens
+
+
+def detectar_atencao_financeiro(db, hoje: date | None = None) -> list[dict]:
+    """Varre contas fixas do mês e grava pendências financeiras na fila atencao."""
+    sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
+    hoje_dt = hoje or datetime.now(sp_tz).date()
+
+    ano = hoje_dt.year
+    mes = hoje_dt.month
+
+    contas: list[dict] = []
+    try:
+        # month no Firestore é 0-based (0=Jan ... 11=Dez)
+        docs = (
+            db.collection("fixed_bills")
+            .where("month", "==", mes - 1)
+            .where("year", "==", ano)
+            .stream()
+        )
+        for doc in docs:
+            d = doc.to_dict() or {}
+            d["id"] = doc.id
+            contas.append(d)
+    except Exception as exc:
+        print(f"[AtencaoFinanceiro] Falha ao consultar fixed_bills: {exc}")
+        return []
+
+    itens = avaliar_contas_vencendo(contas, hoje_dt)
+    if itens:
+        _persistir_itens_atencao(db, itens)
+    return itens
+
+
+def avaliar_rotinas_saude(
+    registros_saude: dict,
+    hoje: date,
+    dias_sem_registro_alerta: int = 3,
+) -> list[dict]:
+    """Avaliação pura e determinística de rotinas essenciais de saúde (origem 'saude').
+
+    Gera alerta se a rotina de pesagem matinal estiver sem registro há >= dias_sem_registro_alerta.
+    """
+    itens: list[dict] = []
+    ultima_pesagem = registros_saude.get("ultima_pesagem")
+    if not ultima_pesagem:
+        return itens
+
+    data_pesagem_raw = ultima_pesagem.get("date")
+    if not data_pesagem_raw:
+        return itens
+
+    try:
+        data_pesagem = datetime.strptime(str(data_pesagem_raw)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return itens
+
+    dias_sem_pesagem = (hoje - data_pesagem).days
+    if dias_sem_pesagem >= dias_sem_registro_alerta:
+        data_str = data_pesagem.strftime("%Y-%m-%d")
+        peso_val = ultima_pesagem.get("weight")
+        peso_str = f" ({peso_val} kg)" if peso_val else ""
+        itens.append({
+            "origem": "saude",
+            "tipo": TIPO_ROTINA_SAUDE_AUSENTE,
+            "prioridade": PRIORIDADE_MEDIA,
+            "titulo": f"Pesagem não registrada há {dias_sem_pesagem} dias",
+            "resumo": f"Último registro de peso foi em {data_pesagem.strftime('%d/%m/%Y')}{peso_str}. Manter pesagem regular apoia o acompanhamento de saúde.",
+            "acao_id": None,
+            "etapa_id": None,
+            "pessoa": None,
+            "prazo": hoje.strftime("%Y-%m-%d"),
+            "evidencia": {
+                "ultima_pesagem_data": data_str,
+                "dias_sem_pesagem": dias_sem_pesagem,
+                "ultimo_peso": peso_val,
+            },
+            "sugestao": "Registrar pesagem matinal no módulo Saúde do Hermes",
+            "estado": ESTADO_ABERTO,
+            "chave_dedupe": f"saude_pesagem_ausente:{data_str}",
+        })
+
+    return itens
+
+
+def detectar_atencao_saude(db, hoje: date | None = None) -> list[dict]:
+    """Varre registros de saúde e grava alertas de rotinas ausentes na fila atencao."""
+    sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
+    hoje_dt = hoje or datetime.now(sp_tz).date()
+    hoje_str = hoje_dt.strftime("%Y-%m-%d")
+
+    registros_saude: dict = {}
+    try:
+        limite_busca_str = (hoje_dt - timedelta(days=60)).strftime("%Y-%m-%d")
+        docs = (
+            db.collection("health_weights")
+            .where("date", ">=", limite_busca_str)
+            .where("date", "<=", hoje_str)
+            .stream()
+        )
+        medidas = []
+        for doc in docs:
+            d = doc.to_dict() or {}
+            dt = str(d.get("date") or "")[:10]
+            val = float(d.get("weight") or 0)
+            if val > 0 and dt:
+                medidas.append({"date": dt, "weight": val})
+        medidas.sort(key=lambda m: m["date"])
+        if medidas:
+            registros_saude["ultima_pesagem"] = medidas[-1]
+    except Exception as exc:
+        print(f"[AtencaoSaude] Falha ao consultar health_weights: {exc}")
+        return []
+
+    itens = avaliar_rotinas_saude(registros_saude, hoje_dt)
+    if itens:
+        _persistir_itens_atencao(db, itens)
+    return itens
+
+
 @scheduler_fn.on_schedule(
     schedule="every 30 minutes",
     timezone="America/Sao_Paulo",
@@ -235,10 +517,20 @@ def avaliar_etapas(
     timeout_sec=120,
 )
 def detectar_atencao_acoes(event: scheduler_fn.ScheduledEvent = None) -> None:
-    """Cloud Function agendada a cada 30 min para detectar etapas aguardando terceiro vencidas."""
+    """Cloud Function agendada a cada 30 min para detectar pendências determinísticas."""
     from main import get_db
 
     db = get_db()
+    sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
+    hoje = datetime.now(sp_tz).date()
+
+    # Executa detectores de finanças e saúde em conjunto
+    try:
+        detectar_atencao_financeiro(db, hoje)
+        detectar_atencao_saude(db, hoje)
+    except Exception as fs_err:
+        print(f"[Atencao] Falha ao executar detectores de financeiro/saude: {fs_err}")
+
     settings_doc = db.collection("system").document("settings").get()
     settings = settings_doc.to_dict() if settings_doc.exists else {}
     enabled = (
@@ -280,61 +572,8 @@ def detectar_atencao_acoes(event: scheduler_fn.ScheduledEvent = None) -> None:
         except Exception as msg_err:
             print(f"[Atencao] Falha ao consultar mensagens de {cid}: {msg_err}")
 
-    sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
-    hoje = datetime.now(sp_tz).date()
-
     itens = avaliar_etapas(tarefas_ativas, hoje, respostas_por_chat)
-
-    for item in itens:
-        chave = item["chave_dedupe"]
-        doc_ref = db.collection(COLLECTION).document(chave)
-        existing_snap = doc_ref.get()
-
-        prazo_str = item.get("prazo")
-        prazo_dt = (
-            datetime.strptime(prazo_str[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            if prazo_str
-            else None
-        )
-
-        payload = {
-            "origem": item["origem"],
-            "tipo": item["tipo"],
-            "prioridade": item["prioridade"],
-            "titulo": item["titulo"],
-            "resumo": item["resumo"],
-            "acao_id": item["acao_id"],
-            "etapa_id": item["etapa_id"],
-            "pessoa": item["pessoa"],
-            "prazo": prazo_dt,
-            "prazo_origem": prazo_str,
-            "evidencia": item["evidencia"],
-            "sugestao": item["sugestao"],
-            "chave_dedupe": chave,
-            "atualizado_em": firestore.SERVER_TIMESTAMP,
-        }
-
-        if existing_snap.exists:
-            existing_data = existing_snap.to_dict() or {}
-            existing_estado = existing_data.get("estado")
-            existing_prazo = existing_data.get("prazo_origem")
-
-            if existing_estado in ESTADOS_FECHADOS:
-                if existing_prazo == prazo_str:
-                    # Não reabrir se o prazo de origem não mudou
-                    continue
-                # Se o prazo mudou para outra data também vencida, reabre
-                payload["estado"] = ESTADO_ABERTO
-                payload["resolvido_em"] = None
-                payload["desfecho"] = None
-            else:
-                payload["estado"] = existing_estado or ESTADO_ABERTO
-
-            doc_ref.set(payload, merge=True)
-        else:
-            payload["estado"] = ESTADO_ABERTO
-            payload["criado_em"] = firestore.SERVER_TIMESTAMP
-            doc_ref.set(payload)
+    _persistir_itens_atencao(db, itens)
 
 
 def _to_iso(val) -> str | None:

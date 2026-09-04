@@ -858,6 +858,25 @@ def listar_rascunhos(db, limite: int = 20) -> dict:
     }
 
 
+def contar_pendentes(db) -> int:
+    """Retorna a contagem de rascunhos em aguardando_aprovacao ou aguardando_janela."""
+    try:
+        query = (
+            db.collection(COLLECTION)
+            .where("status", "in", [STATUS_AGUARDANDO, STATUS_AGUARDANDO_JANELA])
+        )
+        return len(list(query.stream()))
+    except Exception:
+        try:
+            total = 0
+            for st in (STATUS_AGUARDANDO, STATUS_AGUARDANDO_JANELA):
+                total += len(list(db.collection(COLLECTION).where("status", "==", st).stream()))
+            return total
+        except Exception as fallback_exc:
+            print(f"[OutboxAprovacao] Falha ao contar pendentes: {fallback_exc}")
+            return 0
+
+
 def metricas_por_tipo(db, tipo: str, limite: int = 20) -> dict:
     """Calcula métricas de aprovação e edição de rascunhos para um tipo específico.
 
