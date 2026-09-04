@@ -135,6 +135,7 @@ def criar_rascunho(
     ctx=None,
     telegram_token: str | None = None,
     chat_id: str | int | None = None,
+    tipo: str = "outro",
 ) -> dict:
     """Cria um rascunho de WhatsApp e envia o card de aprovação ao Telegram."""
     contact_number = str(contact_number or "").strip()
@@ -142,6 +143,7 @@ def criar_rascunho(
     motivo = str(motivo or "").strip()
     acao_id = str(acao_id).strip() if acao_id else None
     item_atencao_id = str(item_atencao_id).strip() if item_atencao_id else None
+    tipo_limpo = str(tipo or "outro").strip() or "outro"
 
     if not contact_number:
         return {"erro": "contact_number é obrigatório."}
@@ -193,6 +195,8 @@ def criar_rascunho(
         "item_atencao_id": item_atencao_id,
         "origem": origem or "claude",
         "destinatario_nome": destinatario_nome,
+        "tipo": tipo_limpo,
+        "foi_editado": False,
         "created_at": firestore.SERVER_TIMESTAMP,
     }
     doc_ref.set(payload)
@@ -471,6 +475,7 @@ def aplicar_edicao_rascunho(
     doc_ref.update({
         "content": novo_texto,
         "status": STATUS_AGUARDANDO,
+        "foi_editado": True,
         "atualizado_em": firestore.SERVER_TIMESTAMP if hasattr(firestore, "SERVER_TIMESTAMP") else agora_utc,
     })
 
@@ -596,6 +601,8 @@ def listar_rascunhos(db, limite: int = 20) -> dict:
             "acao_id": d.get("acao_id"),
             "item_atencao_id": d.get("item_atencao_id"),
             "origem": d.get("origem"),
+            "tipo": d.get("tipo", "outro"),
+            "foi_editado": bool(d.get("foi_editado", False)),
             "criado_em": _to_iso(d.get("created_at")),
             "telegram_message_id": d.get("telegram_message_id"),
         })
@@ -607,4 +614,60 @@ def listar_rascunhos(db, limite: int = 20) -> dict:
     return {
         "total": len(rascunhos),
         "rascunhos": rascunhos[:limite_ajustado],
+    }
+
+
+def metricas_por_tipo(db, tipo: str, limite: int = 20) -> dict:
+    """Calcula métricas de aprovação e edição de rascunhos para um tipo específico.
+
+    Busca os últimos `limite` documentos com aquele `tipo` e `status` em
+    ('pending', 'sent') — ou seja, já aprovados e decididos pelo dono, ignorando
+    rascunhos ainda pendentes de aprovação, descartados ou expirados.
+    Ordena por `aprovado_em` decrescente.
+    """
+    tipo_limpo = str(tipo or "").strip()
+    limite_ajustado = max(1, min(int(limite or 20), 100))
+
+    if not tipo_limpo:
+        return {
+            "tipo": tipo_limpo,
+            "amostra": 0,
+            "aprovados_sem_edicao": 0,
+            "taxa_sem_edicao": 0.0,
+        }
+
+    query = db.collection(COLLECTION).where("tipo", "==", tipo_limpo)
+    docs = list(query.stream())
+
+    # Filtra apenas os já decididos e aprovados (pending, sent)
+    aprovados = []
+    for doc in docs:
+        d = doc.to_dict() or {}
+        st = d.get("status")
+        if st in (STATUS_PENDING, STATUS_SENT):
+            aprovados.append(d)
+
+    # Ordena por aprovado_em decrescente
+    def _sort_aprovado(x: dict) -> str:
+        val = x.get("aprovado_em")
+        if val is None:
+            return ""
+        if isinstance(val, (datetime.datetime, datetime.date)):
+            return val.isoformat()
+        if hasattr(val, "isoformat"):
+            return val.isoformat()
+        return str(val)
+
+    aprovados.sort(key=_sort_aprovado, reverse=True)
+    amostra_docs = aprovados[:limite_ajustado]
+
+    amostra = len(amostra_docs)
+    sem_edicao = sum(1 for d in amostra_docs if not d.get("foi_editado", False))
+    taxa = (sem_edicao / amostra) if amostra > 0 else 0.0
+
+    return {
+        "tipo": tipo_limpo,
+        "amostra": amostra,
+        "aprovados_sem_edicao": sem_edicao,
+        "taxa_sem_edicao": taxa,
     }

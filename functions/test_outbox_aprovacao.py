@@ -414,5 +414,188 @@ class TestCriarEListarRascunho(unittest.TestCase):
             self.assertIn("Mariana", mock_send.call_args[0][2])
 
 
+class TestTipoEEudicaoOutbox(unittest.TestCase):
+    """Testes de tipo e rastreio de edição no outbox de WhatsApp (PR 1 da Fase 3)."""
+
+    def setUp(self):
+        self.db = _MockDb()
+
+    def test_criar_rascunho_com_tipo_explicitado(self):
+        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={
+            "encontrado": True, "nome": "Mariana", "chat_id": "5527998887777@c.us"
+        }), mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=123):
+            res = oa.criar_rascunho(
+                self.db,
+                contact_number="+5527998887777",
+                message="Confirmação da reunião de amanhã",
+                motivo="Alinhar agenda",
+                tipo="confirmacao_reuniao",
+            )
+            self.assertEqual(res["status"], oa.STATUS_AGUARDANDO)
+            doc = self.db.collection(oa.COLLECTION)._docs[res["outbox_id"]]
+            self.assertEqual(doc["tipo"], "confirmacao_reuniao")
+            self.assertFalse(doc["foi_editado"])
+
+    def test_criar_rascunho_sem_tipo_usa_default_outro(self):
+        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={
+            "encontrado": True, "nome": "Mariana", "chat_id": "5527998887777@c.us"
+        }), mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=123):
+            res = oa.criar_rascunho(
+                self.db,
+                contact_number="+5527998887777",
+                message="Mensagem qualquer",
+                motivo="Sem tipo explícito",
+            )
+            self.assertEqual(res["status"], oa.STATUS_AGUARDANDO)
+            doc = self.db.collection(oa.COLLECTION)._docs[res["outbox_id"]]
+            self.assertEqual(doc["tipo"], "outro")
+            self.assertFalse(doc["foi_editado"])
+
+    def test_aplicar_edicao_marca_foi_editado_true(self):
+        outbox = self.db.collection(oa.COLLECTION)
+        outbox._docs["r1"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "content": "Texto original",
+            "tipo": "retorno_promessa",
+            "foi_editado": False,
+        }
+        with mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=234):
+            res = oa.aplicar_edicao_rascunho(self.db, outbox_id="r1", novo_texto="Texto modificado pelo dono")
+            self.assertEqual(res["status"], "ok")
+            doc = outbox._docs["r1"]
+            self.assertEqual(doc["content"], "Texto modificado pelo dono")
+            self.assertTrue(doc["foi_editado"])
+
+            # Segunda edição mantém foi_editado como True
+            oa.aplicar_edicao_rascunho(self.db, outbox_id="r1", novo_texto="Texto refinado mais uma vez")
+            self.assertTrue(outbox._docs["r1"]["foi_editado"])
+
+    def test_aprovar_rascunho_sem_edicao_mantem_foi_editado_false(self):
+        outbox = self.db.collection(oa.COLLECTION)
+        outbox._docs["r2"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "content": "Texto direto",
+            "tipo": "cobranca_terceiro",
+            "foi_editado": False,
+        }
+        res = oa.aprovar_rascunho(self.db, outbox_id="r2")
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(outbox._docs["r2"]["status"], oa.STATUS_PENDING)
+        self.assertFalse(outbox._docs["r2"]["foi_editado"])
+
+    def test_criar_rascunho_whatsapp_tool_repassa_tipo(self):
+        from tools.hermes_tools import criar_rascunho_whatsapp, ToolContext
+        ctx = ToolContext(_db=self.db)
+        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={
+            "encontrado": True, "nome": "Lucas", "chat_id": "5527999991111@c.us"
+        }), mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=123):
+            res = criar_rascunho_whatsapp(ctx, {
+                "contact_number": "+5527999991111",
+                "message": "Aviso de reunião",
+                "motivo": "Aviso",
+                "tipo": "aviso_agenda",
+            })
+            self.assertEqual(res["status"], oa.STATUS_AGUARDANDO)
+            doc = self.db.collection(oa.COLLECTION)._docs[res["outbox_id"]]
+            self.assertEqual(doc["tipo"], "aviso_agenda")
+            self.assertFalse(doc["foi_editado"])
+
+
+class TestMetricasPorTipo(unittest.TestCase):
+    """Testes da função metricas_por_tipo (PR 1 da Fase 3)."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.outbox = self.db.collection(oa.COLLECTION)
+
+    def test_amostra_mista_calcula_taxa_correta(self):
+        agora = datetime.datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
+        # 5 aprovados sem edição (status pending e sent)
+        for i in range(1, 4):
+            self.outbox._docs[f"sent_ok_{i}"] = {
+                "tipo": "confirmacao_reuniao",
+                "status": oa.STATUS_SENT,
+                "foi_editado": False,
+                "aprovado_em": agora - timedelta(minutes=i * 10),
+            }
+        for i in range(1, 3):
+            self.outbox._docs[f"pending_ok_{i}"] = {
+                "tipo": "confirmacao_reuniao",
+                "status": oa.STATUS_PENDING,
+                "foi_editado": False,
+                "aprovado_em": agora - timedelta(minutes=30 + i * 10),
+            }
+
+        # 2 aprovados com edição
+        self.outbox._docs["sent_edit_1"] = {
+            "tipo": "confirmacao_reuniao",
+            "status": oa.STATUS_SENT,
+            "foi_editado": True,
+            "aprovado_em": agora - timedelta(minutes=60),
+        }
+        self.outbox._docs["pending_edit_2"] = {
+            "tipo": "confirmacao_reuniao",
+            "status": oa.STATUS_PENDING,
+            "foi_editado": True,
+            "aprovado_em": agora - timedelta(minutes=70),
+        }
+
+        # Itens que DEVEM ficar de fora da conta:
+        self.outbox._docs["descartado_1"] = {
+            "tipo": "confirmacao_reuniao",
+            "status": oa.STATUS_DESCARTADO,
+            "foi_editado": False,
+            "descartado_em": agora - timedelta(minutes=5),
+        }
+        self.outbox._docs["aguardando_1"] = {
+            "tipo": "confirmacao_reuniao",
+            "status": oa.STATUS_AGUARDANDO,
+            "foi_editado": False,
+            "created_at": agora - timedelta(minutes=2),
+        }
+        self.outbox._docs["outro_tipo_1"] = {
+            "tipo": "outro",
+            "status": oa.STATUS_SENT,
+            "foi_editado": False,
+            "aprovado_em": agora - timedelta(minutes=1),
+        }
+
+        res = oa.metricas_por_tipo(self.db, tipo="confirmacao_reuniao", limite=20)
+        self.assertEqual(res["tipo"], "confirmacao_reuniao")
+        self.assertEqual(res["amostra"], 7)  # 5 sem edição + 2 com edição
+        self.assertEqual(res["aprovados_sem_edicao"], 5)
+        self.assertAlmostEqual(res["taxa_sem_edicao"], 5 / 7, places=4)
+
+    def test_limite_de_amostra_respeitado_e_ordenado_por_aprovado_em(self):
+        agora = datetime.datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
+        # Cria 10 rascunhos: os 3 mais recentes com edição, os 7 mais antigos sem edição
+        for i in range(10):
+            self.outbox._docs[f"doc_{i}"] = {
+                "tipo": "retorno_promessa",
+                "status": oa.STATUS_SENT,
+                "foi_editado": (i < 3),  # i=0,1,2 foram editados (mais recentes)
+                "aprovado_em": agora - timedelta(hours=i),
+            }
+
+        # Limite = 5: pega os 5 mais recentes (i=0,1,2 foram editados; i=3,4 não foram)
+        res = oa.metricas_por_tipo(self.db, tipo="retorno_promessa", limite=5)
+        self.assertEqual(res["amostra"], 5)
+        self.assertEqual(res["aprovados_sem_edicao"], 2)
+        self.assertEqual(res["taxa_sem_edicao"], 2 / 5)
+
+    def test_amostra_zero_retorna_zeros_sem_erro(self):
+        res = oa.metricas_por_tipo(self.db, tipo="tipo_inexistente", limite=20)
+        self.assertEqual(res["tipo"], "tipo_inexistente")
+        self.assertEqual(res["amostra"], 0)
+        self.assertEqual(res["aprovados_sem_edicao"], 0)
+        self.assertEqual(res["taxa_sem_edicao"], 0.0)
+
+    def test_tipo_vazio_retorna_zeros(self):
+        res = oa.metricas_por_tipo(self.db, tipo="", limite=20)
+        self.assertEqual(res["amostra"], 0)
+        self.assertEqual(res["aprovados_sem_edicao"], 0)
+        self.assertEqual(res["taxa_sem_edicao"], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
