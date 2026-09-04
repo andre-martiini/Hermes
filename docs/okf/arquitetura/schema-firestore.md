@@ -90,7 +90,7 @@ Logs de qualidade/feedback de respostas geradas pelo sistema.
 ## Pessoas, projetos e bolsistas
 
 ### `perfil_pessoas`
-Contatos, bolsistas e colaboradores: `nome`, `email`, `telefone`, `whatsapp_chat_id` (ID de chat 1:1 `@c.us`), `cpf`/`rg`, `dados_bancarios`, `lattes`, `origem` (`manual`\|`google_contacts`\|`extracao_ia`), `google_contact_id`, `resumo_ia`. Escrito pelo frontend, por `sync_google_contacts`, `linkWhatsappContacts`, `generate_contact_summary`, e por extratores de menções em tarefas (`knowledge_graph.py`).
+Contatos, bolsistas e colaboradores: `nome`, `email`, `telefone`, `whatsapp_chat_id` (ID de chat 1:1 `@c.us`), `cpf`/`rg`, `dados_bancarios`, `lattes`, `origem` (`manual`\|`google_contacts`\|`extracao_ia`), `google_contact_id`, `resumo_ia`, `modelo_interacao` (mapa auto-mantido pelo job diário `atualizar_modelos_pessoas`: `registro`, `tempo_resposta_tipico`, `acoes_recentes`, `atualizado_em`), `last_processed_modelo_hash` (MD5 dedupe do texto-fonte de mensagens e interações). Escrito pelo frontend, por `sync_google_contacts`, `linkWhatsappContacts`, `generate_contact_summary`, extratores de menções em tarefas (`knowledge_graph.py`) e `atualizar_modelos_pessoas` (`main.py`).
 
 ### `vinculos_projeto`
 Vínculo de bolsista/colaborador a um projeto: `pessoa_id`, `projeto_id`, `tipo_bolsa_id`, `percentual_recebimento`, `funcao`, `status`, `documentos`, `valor_bolsa_mensal_atual`. Relações: → `perfil_pessoas`, → `projetos`, → `tipo_bolsas`.

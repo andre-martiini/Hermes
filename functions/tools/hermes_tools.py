@@ -226,6 +226,7 @@ def _buscar_contato(ctx: ToolContext, args: dict):
                 "telefone": data.get("telefone", ""),
                 "whatsapp_chat_id": data.get("whatsapp_chat_id", ""),
                 "tags": data.get("tags", []),
+                "modelo_interacao": data.get("modelo_interacao"),
                 "score": score,
             })
 
