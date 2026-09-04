@@ -2,6 +2,13 @@
 
 from datetime import date, datetime, timezone
 import unittest
+from unittest.mock import MagicMock, patch
+import uuid
+
+try:
+    import zoneinfo
+except ImportError:
+    from backports import zoneinfo
 
 from atencao import (
     COLLECTION,
@@ -11,10 +18,15 @@ from atencao import (
     ESTADO_RESOLVIDO,
     PRIORIDADE_ALTA,
     PRIORIDADE_MEDIA,
+    PRIORIDADE_BAIXA,
     TIPO_AGUARDANDO_TERCEIRO_VENCIDO,
     avaliar_etapas,
     coletar_fila_atencao,
     resolver_item,
+    mapear_origem_categoria_notificacao,
+    dentro_janela_permitida,
+    esta_na_janela_silencio,
+    avaliar_interrupcao_atencao,
 )
 
 
@@ -23,6 +35,7 @@ class MockDoc:
         self.id = doc_id
         self._data = data
         self.exists = data is not None
+        self.reference = self
 
     def to_dict(self):
         return dict(self._data or {})
@@ -33,6 +46,15 @@ class MockDoc:
     def update(self, fields):
         if self._data is not None:
             self._data.update(fields)
+
+    def set(self, fields, merge=False):
+        if self._data is None:
+            self._data = {}
+        if merge:
+            self._data.update(fields)
+        else:
+            self._data = dict(fields)
+        self.exists = True
 
 
 class MockQuery:
@@ -58,17 +80,25 @@ class MockQuery:
                 filtered.append(d)
         return filtered
 
-    def document(self, wanted):
+    def document(self, wanted=None):
+        if wanted is None:
+            auto_id = f"mock-doc-{uuid.uuid4().hex[:8]}"
+            new_doc = MockDoc(auto_id, {})
+            self.docs.append(new_doc)
+            return new_doc
         return next((d for d in self.docs if d.id == wanted), MockDoc(wanted, None))
 
 
 class MockDb:
-    def __init__(self, data):
-        self.data = data
+    def __init__(self, data=None):
+        self.data = data if data is not None else {}
+        self._collections = {}
 
     def collection(self, name):
-        docs = [MockDoc(k, v) for k, v in self.data.get(name, {}).items()]
-        return MockQuery(docs)
+        if name not in self._collections:
+            docs = [MockDoc(k, v) for k, v in self.data.get(name, {}).items()]
+            self._collections[name] = MockQuery(docs)
+        return self._collections[name]
 
 
 class TestAguardandoTerceiroVencido(unittest.TestCase):
@@ -365,5 +395,339 @@ class TestFilaAtencaoTools(unittest.TestCase):
         self.assertEqual(doc.to_dict()["desfecho"], "Cartório respondeu")
 
 
+class TestAvaliarInterrupcaoAtencao(unittest.TestCase):
+    def setUp(self):
+        self.tz_sp = zoneinfo.ZoneInfo("America/Sao_Paulo")
+
+    def test_mapear_origem_categoria_notificacao(self):
+        self.assertEqual(mapear_origem_categoria_notificacao("acao"), "acoes")
+        self.assertEqual(mapear_origem_categoria_notificacao("ACAO"), "acoes")
+        self.assertEqual(mapear_origem_categoria_notificacao(" whatsapp "), "geral")
+        self.assertEqual(mapear_origem_categoria_notificacao("email"), "geral")
+        self.assertEqual(mapear_origem_categoria_notificacao("financeiro"), "geral")
+        self.assertEqual(mapear_origem_categoria_notificacao("saude"), "geral")
+        self.assertEqual(mapear_origem_categoria_notificacao("agenda"), "geral")
+        self.assertEqual(mapear_origem_categoria_notificacao("repo"), "geral")
+        self.assertEqual(mapear_origem_categoria_notificacao(None), "geral")
+        self.assertEqual(mapear_origem_categoria_notificacao(""), "geral")
+
+    def test_dentro_janela_permitida(self):
+        # Limites exatos
+        self.assertTrue(dentro_janela_permitida("07:00"))
+        self.assertTrue(dentro_janela_permitida("22:00"))
+        self.assertTrue(dentro_janela_permitida("10:30"))
+        self.assertTrue(dentro_janela_permitida("15:45"))
+
+        # Fora da janela
+        self.assertFalse(dentro_janela_permitida("06:59"))
+        self.assertFalse(dentro_janela_permitida("22:01"))
+        self.assertFalse(dentro_janela_permitida("00:00"))
+        self.assertFalse(dentro_janela_permitida("05:30"))
+        self.assertFalse(dentro_janela_permitida("23:59"))
+
+        # Com datetime aware em SP
+        dt_dentro_sp = datetime(2026, 9, 4, 10, 30, tzinfo=self.tz_sp)
+        dt_fora_sp = datetime(2026, 9, 4, 5, 30, tzinfo=self.tz_sp)
+        self.assertTrue(dentro_janela_permitida(dt_dentro_sp))
+        self.assertFalse(dentro_janela_permitida(dt_fora_sp))
+
+        # Com datetime naive (assume SP)
+        self.assertTrue(dentro_janela_permitida(datetime(2026, 9, 4, 14, 0)))
+        self.assertFalse(dentro_janela_permitida(datetime(2026, 9, 4, 3, 0)))
+
+        # Inválidos
+        self.assertFalse(dentro_janela_permitida(None))
+        self.assertFalse(dentro_janela_permitida(123))
+
+        # Alias esta_na_janela_silencio
+        self.assertEqual(esta_na_janela_silencio("10:00"), dentro_janela_permitida("10:00"))
+        self.assertEqual(esta_na_janela_silencio("05:00"), dentro_janela_permitida("05:00"))
+
+    @patch("atencao._reserve_and_create_notification")
+    def test_avaliar_interrupcao_sucesso_dentro_janela(self, mock_reserve):
+        mock_reserve.return_value = True
+
+        db = MockDb({
+            COLLECTION: {
+                "item-1": {
+                    "estado": ESTADO_ABERTO,
+                    "prioridade": PRIORIDADE_ALTA,
+                    "origem": "acao",
+                    "titulo": "Promessa crítica vencida",
+                    "resumo": "Contato Alexandre sem retorno",
+                    "sugestao": "Cobrar por áudio",
+                }
+            }
+        })
+
+        now = datetime(2026, 9, 4, 10, 30, tzinfo=self.tz_sp)
+        res = avaliar_interrupcao_atencao(db, now=now)
+
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["candidatos"], 1)
+        self.assertEqual(res["avaliados"], 1)
+        self.assertEqual(res["notificados"], 1)
+        self.assertEqual(res["pulados_janela"], 0)
+
+        mock_reserve.assert_called_once()
+        args, _ = mock_reserve.call_args
+        _, today_str, notif_ref, payload = args
+
+        self.assertEqual(today_str, "2026-09-04")
+        self.assertEqual(payload["title"], "Promessa crítica vencida")
+        self.assertIn("Contato Alexandre sem retorno", payload["message"])
+        self.assertIn("Sugestão: Cobrar por áudio", payload["message"])
+        self.assertEqual(payload["category"], "acoes")
+        self.assertEqual(payload["source"], "atencao_interrupcao")
+        self.assertEqual(payload["status"], "pending")
+        self.assertEqual(payload["send_at"], now)
+        self.assertEqual(payload["atencao_id"], "item-1")
+
+        # Verifica que gravou avaliado_interrupcao_em no documento
+        doc = db.collection(COLLECTION).document("item-1")
+        self.assertIsNotNone(doc.to_dict().get("avaliado_interrupcao_em"))
+
+    @patch("atencao._reserve_and_create_notification")
+    def test_avaliar_interrupcao_fora_da_janela_pula_sem_marcar(self, mock_reserve):
+        db = MockDb({
+            COLLECTION: {
+                "item-1": {
+                    "estado": ESTADO_ABERTO,
+                    "prioridade": PRIORIDADE_ALTA,
+                    "origem": "acao",
+                    "titulo": "Promessa vencida",
+                    "resumo": "Contato sem retorno",
+                }
+            }
+        })
+
+        # 05:30 da manhã — fora da janela 07:00 a 22:00
+        now = datetime(2026, 9, 4, 5, 30, tzinfo=self.tz_sp)
+        res = avaliar_interrupcao_atencao(db, now=now)
+
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["candidatos"], 1)
+        self.assertEqual(res["avaliados"], 0)
+        self.assertEqual(res["notificados"], 0)
+        self.assertEqual(res["pulados_janela"], 1)
+
+        mock_reserve.assert_not_called()
+
+        # Inegociável: item NÃO pode ter avaliado_interrupcao_em gravado para permitir retry
+        doc = db.collection(COLLECTION).document("item-1")
+        self.assertIsNone(doc.to_dict().get("avaliado_interrupcao_em"))
+
+    @patch("atencao._reserve_and_create_notification")
+    def test_avaliar_interrupcao_item_ja_avaliado_ignorado(self, mock_reserve):
+        db = MockDb({
+            COLLECTION: {
+                "item-ja-visto": {
+                    "estado": ESTADO_ABERTO,
+                    "prioridade": PRIORIDADE_ALTA,
+                    "origem": "acao",
+                    "titulo": "Item anterior",
+                    "avaliado_interrupcao_em": "2026-09-04T08:00:00",
+                }
+            }
+        })
+
+        now = datetime(2026, 9, 4, 11, 0, tzinfo=self.tz_sp)
+        res = avaliar_interrupcao_atencao(db, now=now)
+
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["candidatos"], 0)
+        self.assertEqual(res["avaliados"], 0)
+        self.assertEqual(res["notificados"], 0)
+        mock_reserve.assert_not_called()
+
+    @patch("atencao._reserve_and_create_notification")
+    def test_avaliar_interrupcao_orcamento_esgotado_marca_avaliado(self, mock_reserve):
+        # Orçamento de 3 notificações diárias já atingido
+        mock_reserve.return_value = False
+
+        db = MockDb({
+            COLLECTION: {
+                "item-1": {
+                    "estado": ESTADO_ABERTO,
+                    "prioridade": PRIORIDADE_ALTA,
+                    "origem": "acao",
+                    "titulo": "Promessa urgente",
+                    "resumo": "Cobrar hoje",
+                }
+            }
+        })
+
+        now = datetime(2026, 9, 4, 14, 0, tzinfo=self.tz_sp)
+        res = avaliar_interrupcao_atencao(db, now=now)
+
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["candidatos"], 1)
+        self.assertEqual(res["avaliados"], 1)
+        self.assertEqual(res["notificados"], 0)
+
+        mock_reserve.assert_called_once()
+        # Item não reservou, mas DEVE ser marcado como avaliado para não reavaliar o resto do dia
+        doc = db.collection(COLLECTION).document("item-1")
+        self.assertIsNotNone(doc.to_dict().get("avaliado_interrupcao_em"))
+
+    @patch("atencao._reserve_and_create_notification")
+    def test_avaliar_interrupcao_mapeamento_origens(self, mock_reserve):
+        mock_reserve.return_value = True
+
+        db = MockDb({
+            COLLECTION: {
+                "item-fin": {
+                    "estado": ESTADO_ABERTO,
+                    "prioridade": PRIORIDADE_ALTA,
+                    "origem": "financeiro",
+                    "titulo": "Boleto vencendo",
+                    "resumo": "Aluguel vence hoje",
+                },
+                "item-sau": {
+                    "estado": ESTADO_ABERTO,
+                    "prioridade": PRIORIDADE_ALTA,
+                    "origem": "saude",
+                    "titulo": "Medicação em atraso",
+                    "resumo": "Dose da manhã",
+                },
+            }
+        })
+
+        now = datetime(2026, 9, 4, 12, 0, tzinfo=self.tz_sp)
+        res = avaliar_interrupcao_atencao(db, now=now)
+
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["candidatos"], 2)
+        self.assertEqual(res["avaliados"], 2)
+        self.assertEqual(res["notificados"], 2)
+
+        self.assertEqual(mock_reserve.call_count, 2)
+        categories = [call[0][3]["category"] for call in mock_reserve.call_args_list]
+        self.assertEqual(categories, ["geral", "geral"])
+
+    @patch("atencao._reserve_and_create_notification")
+    def test_avaliar_interrupcao_isolamento_de_falha(self, mock_reserve):
+        mock_reserve.return_value = True
+
+        db = MockDb({
+            COLLECTION: {
+                "item-erro": {
+                    "estado": ESTADO_ABERTO,
+                    "prioridade": PRIORIDADE_ALTA,
+                    "origem": "acao",
+                    "titulo": "Item com problema",
+                },
+                "item-ok": {
+                    "estado": ESTADO_ABERTO,
+                    "prioridade": PRIORIDADE_ALTA,
+                    "origem": "acao",
+                    "titulo": "Item que passa",
+                },
+            }
+        })
+
+        doc_erro = db.collection(COLLECTION).document("item-erro")
+
+        def _explode(*args, **kwargs):
+            raise RuntimeError("Erro simulado no documento")
+
+        doc_erro.update = _explode
+
+        now = datetime(2026, 9, 4, 10, 0, tzinfo=self.tz_sp)
+        res = avaliar_interrupcao_atencao(db, now=now)
+
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["candidatos"], 2)
+        self.assertEqual(res["avaliados"], 1)
+        self.assertEqual(res["notificados"], 2)  # Tentou notificar ambos, o segundo persistiu update
+        doc_ok = db.collection(COLLECTION).document("item-ok")
+        self.assertIsNotNone(doc_ok.to_dict().get("avaliado_interrupcao_em"))
+
+    @patch("atencao._reserve_and_create_notification")
+    def test_avaliar_interrupcao_ignora_prioridade_media_ou_baixa(self, mock_reserve):
+        db = MockDb({
+            COLLECTION: {
+                "item-media": {
+                    "estado": ESTADO_ABERTO,
+                    "prioridade": PRIORIDADE_MEDIA,
+                    "origem": "acao",
+                    "titulo": "Item médio",
+                },
+                "item-baixa": {
+                    "estado": ESTADO_ABERTO,
+                    "prioridade": PRIORIDADE_BAIXA,
+                    "origem": "acao",
+                    "titulo": "Item baixo",
+                },
+            }
+        })
+
+        now = datetime(2026, 9, 4, 10, 0, tzinfo=self.tz_sp)
+        res = avaliar_interrupcao_atencao(db, now=now)
+
+        self.assertEqual(res["candidatos"], 0)
+        self.assertEqual(res["avaliados"], 0)
+        self.assertEqual(res["notificados"], 0)
+        mock_reserve.assert_not_called()
+
+    @patch("atencao._reserve_and_create_notification")
+    def test_avaliar_interrupcao_ignora_itens_fechados(self, mock_reserve):
+        db = MockDb({
+            COLLECTION: {
+                "item-resolvido": {
+                    "estado": ESTADO_RESOLVIDO,
+                    "prioridade": PRIORIDADE_ALTA,
+                    "origem": "acao",
+                    "titulo": "Item resolvido",
+                },
+                "item-descartado": {
+                    "estado": ESTADO_DESCARTADO,
+                    "prioridade": PRIORIDADE_ALTA,
+                    "origem": "acao",
+                    "titulo": "Item descartado",
+                },
+            }
+        })
+
+        now = datetime(2026, 9, 4, 10, 0, tzinfo=self.tz_sp)
+        res = avaliar_interrupcao_atencao(db, now=now)
+
+        self.assertEqual(res["candidatos"], 0)
+        self.assertEqual(res["avaliados"], 0)
+        self.assertEqual(res["notificados"], 0)
+        mock_reserve.assert_not_called()
+
+    @patch("atencao._reserve_and_create_notification")
+    def test_avaliar_interrupcao_fallback_titulo_e_mensagem(self, mock_reserve):
+        mock_reserve.return_value = True
+
+        db = MockDb({
+            COLLECTION: {
+                "item-sem-texto": {
+                    "estado": ESTADO_ABERTO,
+                    "prioridade": PRIORIDADE_ALTA,
+                    "origem": None,
+                    "titulo": None,
+                    "resumo": None,
+                    "sugestao": None,
+                }
+            }
+        })
+
+        now = datetime(2026, 9, 4, 10, 0, tzinfo=self.tz_sp)
+        res = avaliar_interrupcao_atencao(db, now=now)
+
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["avaliados"], 1)
+        self.assertEqual(res["notificados"], 1)
+
+        args, _ = mock_reserve.call_args
+        payload = args[3]
+        self.assertTrue(len(payload["title"]) > 0)
+        self.assertTrue(len(payload["message"]) > 0)
+        self.assertEqual(payload["category"], "geral")
+
+
 if __name__ == "__main__":
     unittest.main()
+
