@@ -1691,6 +1691,11 @@ def obter_estado_atual(ctx: ToolContext, args: dict):
         except Exception:
             estado["fila_atencao"] = []
             estado["fila_atencao_total"] = 0
+        try:
+            from agent_requests import contar_pendentes
+            estado["agent_requests_pendentes"] = contar_pendentes(ctx.db)
+        except Exception:
+            estado["agent_requests_pendentes"] = 0
         return estado
     except Exception as exc:  # noqa: BLE001
         return {"erro": f"Falha ao montar o estado atual: {exc}"}
@@ -1925,6 +1930,23 @@ def resolver_item_atencao(ctx: ToolContext, args: dict):
     return resolver_item(ctx.db, item_id=item_id, novo_estado=estado, desfecho=desfecho, ctx=ctx)
 
 
+def consultar_pedidos_agente(ctx: ToolContext, args: dict):
+    from agent_requests import listar_pendentes
+
+    tipo = args.get("tipo")
+    limite = int(args.get("limite") or 20)
+    return listar_pendentes(ctx.db, tipo=tipo, limite=limite)
+
+
+def concluir_pedido_agente(ctx: ToolContext, args: dict):
+    from agent_requests import concluir
+
+    request_id = args.get("request_id")
+    resultado = args.get("resultado")
+    erro = args.get("erro")
+    return concluir(ctx.db, request_id=request_id, resultado=resultado, erro=erro)
+
+
 # ---------------------------------------------------------------------------
 # Registro
 # ---------------------------------------------------------------------------
@@ -2008,6 +2030,8 @@ _HANDLERS: dict = {
     "resolver_item_atencao": resolver_item_atencao,
     "criar_rascunho_whatsapp": criar_rascunho_whatsapp,
     "listar_rascunhos_pendentes": listar_rascunhos_pendentes,
+    "consultar_pedidos_agente": consultar_pedidos_agente,
+    "concluir_pedido_agente": concluir_pedido_agente,
 }
 
 

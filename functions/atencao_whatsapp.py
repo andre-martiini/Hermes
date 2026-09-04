@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from firebase_admin import firestore
 from firebase_functions import firestore_fn, scheduler_fn, options
 
+import agent_requests
 import atencao
 from inbox_pendentes import _normalize_text
 
@@ -428,6 +429,28 @@ def _processar_audio(db, mensagem: dict) -> None:
         payload["estado"] = atencao.ESTADO_ABERTO
         payload["criado_em"] = firestore.SERVER_TIMESTAMP
     atencao_ref.document(doc_id).set(payload, merge=True)
+
+    # Hook do PR 1 (Fase 1): enfileira ou atualiza pedido de consolidacao autonoma
+    try:
+        msg_ids = (item.get("evidencia") or {}).get("mensagem_ids") or [mensagem["wa_message_id"]]
+        req_payload = agent_requests.montar_payload_consolidar_audio(
+            chat_id=chat_id,
+            chat_name=mensagem.get("chat_name") or chat_id,
+            mensagem_ids=msg_ids,
+            acao_id=item.get("acao_id"),
+            item_atencao_id=doc_id,
+        )
+        agent_requests.enfileirar_ou_atualizar(
+            db,
+            doc_id=f"consolidar_audio:{doc_id}",
+            tipo=agent_requests.TIPO_CONSOLIDAR_AUDIO,
+            payload=req_payload,
+            origem="atencao_whatsapp.audio_relevante",
+            acao_id=item.get("acao_id"),
+            item_atencao_id=doc_id,
+        )
+    except Exception as ar_exc:
+        print(f"[AtencaoWhatsApp] Falha ao enfileirar agent_request para audio: {ar_exc}")
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,24 @@
+{
+  "name": "concluir_pedido_agente",
+  "description": "Conclui ou registra erro em um pedido de trabalho autônomo executado pelo agente.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "request_id": {
+        "type": "string",
+        "description": "ID do documento em agent_requests."
+      },
+      "resultado": {
+        "type": "string",
+        "description": "Descrição do resultado da execução autônoma (obrigatório se não houver erro)."
+      },
+      "erro": {
+        "type": "string",
+        "description": "Descrição do erro ocorrido durante a execução autônoma (obrigatório se não houver resultado)."
+      }
+    },
+    "required": [
+      "request_id"
+    ]
+  }
+}
