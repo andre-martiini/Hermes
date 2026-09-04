@@ -101,8 +101,52 @@ Dois mecanismos completam o que a captura ao vivo não viu, ambos sobre `chat.fe
 
 ## 5. Envio (`whatsapp_outbox`)
 
-- Fila alimentada por `functions/tools/schedule_whatsapp_message.py` (tool do copiloto), pela confirmação `confirm_whatsapp` no Telegram, e pela ponte de voz (`hermes-voice-bridge/tools.py`).
+- Fila alimentada por `functions/tools/schedule_whatsapp_message.py` (tool do copiloto), pela confirmação `confirm_whatsapp` no Telegram, pela ponte de voz (`hermes-voice-bridge/tools.py`) e pela tool `criar_rascunho_whatsapp` (aprovação com um toque no Telegram).
 - Dois consumidores coordenados por `system/settings.whatsapp_auto_send_enabled` + o heartbeat do worker (§1): quando habilitado e o worker está vivo (heartbeat ≤ 10 min), o **cron do worker Node** reivindica e envia de verdade via `client.sendMessage`; caso contrário, a Cloud Function `dispatch_scheduled_whatsapp_messages` manda um card no Telegram com link `wa.me` para envio manual.
+
+### Ciclo de vida e Estados do Outbox
+
+```
+                  [criar_rascunho_whatsapp]
+                             │
+                             ▼
+                 ┌───────────────────────┐
+                 │  aguardando_aprovacao │
+                 └───────────────────────┘
+                     │       │       │
+       [toque "✅ Enviar"]   │   [toque "🗑️ Descartar"]
+                     │   [48h sem toque]
+                     │       │       │
+                     │       ▼       ▼
+                     │  ┌─────────┐ ┌────────────┐
+                     │  │ expirado│ │ descartado │
+                     │  └─────────┘ └────────────┘
+                     ▼
+                 ┌───────────────────────┐
+[schedule_msg] ─>│        pending        │
+                 └───────────────────────┘
+                             │
+                     (claim pelo worker)
+                             ▼
+                 ┌───────────────────────┐
+                 │        sending        │
+                 └───────────────────────┘
+                     │               │
+            (entrega com sucesso) (falha ou destino inválido)
+                     │               │
+                     ▼               ▼
+                 ┌─────────┐    ┌─────────┐
+                 │  sent   │    │ failed  │
+                 └─────────┘    └─────────┘
+```
+
+- `aguardando_aprovacao`: Rascunho criado pelo agente/copiloto. Fica rigorosamente fora do envio do worker até a aprovação humana via botão inline no Telegram (`outbox:{id}:ok`). Toque em `✏️ Editar` mantém este estado após atualização do texto;
+- `pending`: Mensagem pronta para despacho pelo worker (ou pela CF de fallback);
+- `sending`: Reivindicada com lock pelo worker durante a tentativa de envio;
+- `sent`: Entregue com sucesso no WhatsApp (registra `sent_at`, `sent_to`, `wa_message_id`);
+- `failed`: Falha permanente no envio (registra `failed_at`, `error_message`);
+- `descartado`: Descartada pelo dono no Telegram via botão `🗑️ Descartar` (não envia; reabre item da fila de atenção se vinculado);
+- `expirado`: Expiração automática pelo cron após 48h em `aguardando_aprovacao` sem decisão humana.
 
 ## 6. Detectores reativos da fila de atenção
 

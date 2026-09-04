@@ -3763,6 +3763,14 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
     except Exception as exc:
         print(f"[AINotifications] Falha ao despachar notificacoes agendadas: {exc}")
 
+    # 5. Expirar rascunhos de WhatsApp aguardando aprovação há mais de 48h (executa uma vez por hora)
+    if now.minute == 0:
+        try:
+            from outbox_aprovacao import expirar_rascunhos_pendentes
+            expirar_rascunhos_pendentes(db, agora=now)
+        except Exception as exc:
+            print(f"[OutboxAprovacao] Falha ao expirar rascunhos pendentes: {exc}")
+
 
 
 @https_fn.on_call()
