@@ -118,6 +118,22 @@ def _decidir_elevacao(ctx: ToolContext, args: dict):
         ctx.db, args.get("sugestao_id"), args.get("decisao"), _hoje_sp())
 
 
+def _consultar_promocoes_autonomia_sugeridas(ctx: ToolContext, args: dict):
+    import promocao_autonomia
+
+    return promocao_autonomia.listar_promocoes_pendentes(ctx.db, limite=int(args.get("limite") or 20))
+
+
+def _decidir_promocao_autonomia(ctx: ToolContext, args: dict):
+    import promocao_autonomia
+
+    return promocao_autonomia.decidir_promocao_autonomia(
+        ctx.db,
+        tipo=args.get("tipo"),
+        decisao=args.get("decisao"),
+    )
+
+
 def _agendar_lembrete_acao(ctx: ToolContext, args: dict):
     from tools.telegram_extended import execute as _execute
 
@@ -1994,6 +2010,8 @@ _HANDLERS: dict = {
     "consultar_lista_compras": _consultar_lista_compras,
     "consultar_elevacoes_sugeridas": _consultar_elevacoes_sugeridas,
     "decidir_elevacao": _decidir_elevacao,
+    "consultar_promocoes_autonomia_sugeridas": _consultar_promocoes_autonomia_sugeridas,
+    "decidir_promocao_autonomia": _decidir_promocao_autonomia,
     "consultar_historico_acoes": _consultar_historico_acoes,
     "buscar_arquivos_acervo": _buscar_arquivos_acervo,
     "buscar_contato": _buscar_contato,

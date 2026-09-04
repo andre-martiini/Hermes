@@ -1,0 +1,26 @@
+{
+  "name": "decidir_promocao_autonomia",
+  "description": "Aplica a decisão do usuário sobre uma sugestão de promoção de autonomia para um tipo de rascunho de WhatsApp. 'aceitar' promove o tipo para envio autônomo com janela de cancelamento de 10 min (dono mantém veto no Telegram); 'adiar' mantém a exigência de aprovação prévia e permite nova avaliação futura; 'nunca' descarta definitivamente a promoção para esse tipo.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "tipo": {
+        "type": "string",
+        "description": "Identificador do tipo de rascunho sugerido (ex.: 'confirmacao_reuniao', 'retorno_promessa')."
+      },
+      "decisao": {
+        "type": "string",
+        "description": "Decisão a aplicar: aceitar, adiar ou nunca.",
+        "enum": [
+          "aceitar",
+          "adiar",
+          "nunca"
+        ]
+      }
+    },
+    "required": [
+      "tipo",
+      "decisao"
+    ]
+  }
+}

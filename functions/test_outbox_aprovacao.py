@@ -73,7 +73,11 @@ class _MockCollection:
         return _MockDocRef(self, doc_id)
 
     def where(self, field, op, val):
-        return _MockQuery(self, [(k, v) for k, v in self._docs.items() if op == "==" and v.get(field) == val])
+        if op == "==":
+            return _MockQuery(self, [(k, v) for k, v in self._docs.items() if v.get(field) == val])
+        if op == "in":
+            return _MockQuery(self, [(k, v) for k, v in self._docs.items() if v.get(field) in val])
+        return _MockQuery(self, [])
 
     def stream(self):
         snaps = []
@@ -595,6 +599,74 @@ class TestMetricasPorTipo(unittest.TestCase):
         self.assertEqual(res["amostra"], 0)
         self.assertEqual(res["aprovados_sem_edicao"], 0)
         self.assertEqual(res["taxa_sem_edicao"], 0.0)
+
+
+class TestAguardandoJanelaEListarRascunhos(unittest.TestCase):
+    """Testes de suporte ao novo status aguardando_janela e montagem de card promovido (PR 2 Fase 3)."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.outbox = self.db.collection(oa.COLLECTION)
+
+    def test_transicoes_aceitam_aguardando_janela(self):
+        ok, mot = oa.validar_transicao_aprovacao(oa.STATUS_AGUARDANDO_JANELA)
+        self.assertTrue(ok)
+        self.assertEqual(mot, "")
+
+        ok, mot = oa.validar_transicao_descarte(oa.STATUS_AGUARDANDO_JANELA)
+        self.assertTrue(ok)
+        self.assertEqual(mot, "")
+
+    def test_montar_card_telegram_promovido(self):
+        texto, botoes = oa.montar_card_telegram_promovido(
+            destinatario_nome="Mariana",
+            motivo="Confirmação de Reunião",
+            content="Olá Mariana, tudo bem?",
+            outbox_id="out-123",
+            minutos_janela=10,
+        )
+        self.assertIn("Envio autônomo para Mariana", texto)
+        self.assertIn("em até 10 min", texto)
+        self.assertIn("Olá Mariana, tudo bem?", texto)
+        self.assertEqual(len(botoes), 1)
+        self.assertEqual(len(botoes[0]), 1)
+        self.assertEqual(botoes[0][0]["text"], "🛑 Cancelar")
+        self.assertEqual(botoes[0][0]["callback_data"], "outbox:out-123:no")
+
+    def test_listar_rascunhos_inclui_aguardando_janela_e_envio_liberado_em(self):
+        agora = datetime.datetime(2026, 9, 4, 14, 0, tzinfo=timezone.utc)
+        self.outbox._docs["r_regular"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "destinatario_nome": "Pedro",
+            "content": "Regular",
+            "tipo": "outro",
+            "created_at": agora - timedelta(minutes=5),
+        }
+        self.outbox._docs["r_promovido"] = {
+            "status": oa.STATUS_AGUARDANDO_JANELA,
+            "destinatario_nome": "Carla",
+            "content": "Promovido",
+            "tipo": "confirmacao_reuniao",
+            "created_at": agora - timedelta(minutes=2),
+            "envio_liberado_em": agora + timedelta(minutes=8),
+        }
+        self.outbox._docs["r_descartado"] = {
+            "status": oa.STATUS_DESCARTADO,
+            "destinatario_nome": "João",
+            "content": "Descartado",
+            "created_at": agora - timedelta(minutes=10),
+        }
+
+        res = oa.listar_rascunhos(self.db, limite=20)
+        self.assertEqual(res["total"], 2)
+        ids = [item["id"] for item in res["rascunhos"]]
+        self.assertIn("r_regular", ids)
+        self.assertIn("r_promovido", ids)
+        self.assertNotIn("r_descartado", ids)
+
+        item_prom = next(i for i in res["rascunhos"] if i["id"] == "r_promovido")
+        self.assertEqual(item_prom["status"], oa.STATUS_AGUARDANDO_JANELA)
+        self.assertIsNotNone(item_prom.get("envio_liberado_em"))
 
 
 if __name__ == "__main__":
