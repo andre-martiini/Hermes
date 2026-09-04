@@ -72,10 +72,13 @@ passam pelo mesmo copiloto, com as mesmas ferramentas do Hermes.
 
 ## Limitações conhecidas desta fase
 
-- Só as tools marcadas como `voice_enabled` no servidor MCP funcionam aqui
-  (hoje: `consultar_historico_acoes`, `buscar_arquivos_acervo`,
-  `buscar_contato`, `calculadora`) — as demais ainda não têm executor ligado
-  ao MCP (ver `functions/tools/mcp_dispatch.py`).
+- O cliente filtra dinamicamente as tools expostas ao Gemini a partir do metadado
+  `_meta.voiceEnabled` fornecido pelo servidor MCP. Ferramentas complexas, em lote
+  ou inadequadas para áudio (ex.: relatórios, formulários, imagens, mutações financeiras)
+  ficam excluídas conforme `_VOICE_EXCLUDED` em `functions/tools/registry.py`.
+- Decisão de rascunhos de WhatsApp (`whatsapp_outbox`) não é realizada por voz (apenas
+  listagem de rascunhos pendentes via `listar_rascunhos_pendentes`; a aprovação/descarte
+  ocorre via botões interativos no Telegram).
 - Sem VAD/barge-in: é preciso segurar o botão para falar.
 - Qualidade da voz Piper em pt-BR não foi validada por escuta ainda — troque
   `PIPER_VOICE` e compare se o resultado não agradar.
