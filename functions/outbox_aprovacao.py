@@ -239,6 +239,7 @@ def aprovar_rascunho(
     telegram_token: str | None = None,
     chat_id: str | int | None = None,
     ctx=None,
+    aprovado_via: str = "telegram",
 ) -> dict:
     """Transição atômica de aguardando_aprovacao para pending.
 
@@ -278,7 +279,7 @@ def aprovar_rascunho(
                     {
                         "status": STATUS_PENDING,
                         "aprovado_em": firestore.SERVER_TIMESTAMP,
-                        "aprovado_via": "telegram",
+                        "aprovado_via": aprovado_via,
                         "scheduled_for": agora_utc,
                     },
                 )
@@ -305,7 +306,7 @@ def aprovar_rascunho(
         doc_ref.update({
             "status": STATUS_PENDING,
             "aprovado_em": agora_utc,
-            "aprovado_via": "telegram",
+            "aprovado_via": aprovado_via,
             "scheduled_for": agora_utc,
         })
         transaction_result = {"status": "ok", "dados": data}
@@ -359,8 +360,9 @@ def aprovar_rascunho(
             if token and target_chat:
                 sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
                 hora_formatada = datetime.datetime.now(sp_tz).strftime("%H:%M")
+                sufixo_canal = " (via WhatsApp)" if aprovado_via == "whatsapp" else ""
                 novo_texto = (
-                    f"✅ <b>Enviado para a fila às {hora_formatada}</b>\n"
+                    f"✅ <b>Enviado para a fila às {hora_formatada}{sufixo_canal}</b>\n"
                     f"Destino: {html.escape(str(dest_nome))}\n"
                     f"Motivo: {html.escape(str(motivo_rascunho))}"
                 )

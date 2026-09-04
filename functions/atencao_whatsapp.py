@@ -285,6 +285,87 @@ def mesclar_ou_criar_item_audio(existing_item: dict | None, novo: dict, mensagem
 
 
 # ---------------------------------------------------------------------------
+# Resposta e aprovação de rascunhos do outbox pelo WhatsApp próprio
+# ---------------------------------------------------------------------------
+
+_COMANDOS_APROVAR = {
+    "sim", "s", "ok", "pode", "manda", "mandar", "aprova", "aprovar",
+    "envia", "enviar", "confirma", "confirmar", "pode enviar", "pode mandar",
+    "sim pode mandar", "sim pode enviar", "sim manda", "sim envia",
+    "ok pode mandar", "ok pode enviar", "ok manda", "ok envia",
+    "pode sim", "manda sim", "positivo", "vai", "manda ver", "manda bala",
+}
+
+_COMANDOS_DESCARTAR = {
+    "nao", "n", "descarta", "descartar", "cancela", "cancelar",
+    "ignora", "ignorar", "lixo", "deleta", "deletar", "apaga", "apagar",
+    "descarta isso", "cancela isso", "nao manda", "nao enviar", "nao mande",
+}
+
+
+def interpretar_resposta_aprovacao_whatsapp(
+    mensagem: dict,
+    rascunhos_pendentes: list[dict],
+    owner_chat_id: str | None = None,
+) -> dict | None:
+    """Interpreta se uma mensagem enviada pelo dono no self-chat é uma aprovação,
+    descarte ou edição de rascunho de WhatsApp aguardando aprovação no outbox.
+
+    Regras puras (sem I/O):
+    - Só considera mensagens `from_me == True` no chat do próprio dono (`owner_chat_id`).
+    - Qualquer outro chat ou remetente retorna None (nunca interfere em terceiros).
+    - Se não houver rascunhos pendentes: retorna None (mensagem pessoal comum do dono).
+    - Se houver mais de um rascunho pendente: retorna `{"acao": "ambiguo", "quantidade": N}`.
+    - Se houver exatamente um rascunho pendente:
+      - Comando em `_COMANDOS_APROVAR` -> `{"outbox_id": ..., "acao": "aprovar"}`
+      - Comando em `_COMANDOS_DESCARTAR` -> `{"outbox_id": ..., "acao": "descartar"}`
+      - Qualquer outro texto não vazio -> `{"outbox_id": ..., "acao": "editar", "novo_texto": ...}`
+    """
+    if not owner_chat_id or not str(owner_chat_id).strip():
+        return None
+
+    if not mensagem.get("from_me"):
+        return None
+
+    chat_id = str(mensagem.get("chat_id") or "").strip()
+    if chat_id != str(owner_chat_id).strip():
+        return None
+
+    if not rascunhos_pendentes:
+        return None
+
+    raw_texto = str(mensagem.get("content") or "").strip()
+    if not raw_texto:
+        return None
+
+    if len(rascunhos_pendentes) > 1:
+        return {
+            "acao": "ambiguo",
+            "quantidade": len(rascunhos_pendentes),
+        }
+
+    rascunho = rascunhos_pendentes[0]
+    outbox_id = str(rascunho.get("id") or rascunho.get("outbox_id") or "").strip()
+    if not outbox_id:
+        return None
+
+    norm = _normalize_text(raw_texto)
+    clean_cmd = re.sub(r"[^\w\s]", "", norm).strip()
+
+    if clean_cmd in _COMANDOS_APROVAR:
+        return {"outbox_id": outbox_id, "acao": "aprovar"}
+
+    if clean_cmd in _COMANDOS_DESCARTAR:
+        return {"outbox_id": outbox_id, "acao": "descartar"}
+
+    return {
+        "outbox_id": outbox_id,
+        "acao": "editar",
+        "novo_texto": raw_texto,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Integracao com Firestore
 # ---------------------------------------------------------------------------
 
@@ -453,6 +534,54 @@ def _processar_audio(db, mensagem: dict) -> None:
         print(f"[AtencaoWhatsApp] Falha ao enfileirar agent_request para audio: {ar_exc}")
 
 
+def _obter_whatsapp_owner_chat_id(db) -> str | None:
+    settings_doc = db.collection("system").document("settings").get()
+    settings = settings_doc.to_dict() if settings_doc.exists else {}
+    owner_id = (settings or {}).get("whatsapp_owner_chat_id")
+    if owner_id:
+        return str(owner_id).strip()
+    return None
+
+
+def _processar_aprovacao_outbox(db, mensagem: dict) -> None:
+    """Consome a mensagem no self-chat do dono para aprovar, descartar ou editar
+    rascunhos de WhatsApp pendentes no outbox."""
+    # Fast path: se a mensagem não é from_me, nunca pode ser aprovação do dono
+    if not mensagem.get("from_me"):
+        return
+
+    owner_chat_id = _obter_whatsapp_owner_chat_id(db)
+    if not owner_chat_id:
+        return
+
+    chat_id = str(mensagem.get("chat_id") or "").strip()
+    if chat_id != owner_chat_id:
+        return
+
+    import outbox_aprovacao
+
+    res_listar = outbox_aprovacao.listar_rascunhos(db, limite=50)
+    pendentes = res_listar.get("rascunhos") or []
+
+    decisao = interpretar_resposta_aprovacao_whatsapp(mensagem, pendentes, owner_chat_id)
+    if not decisao:
+        return
+
+    acao = decisao.get("acao")
+    outbox_id = decisao.get("outbox_id")
+
+    if acao == "aprovar" and outbox_id:
+        outbox_aprovacao.aprovar_rascunho(db, outbox_id=outbox_id, aprovado_via="whatsapp")
+    elif acao == "descartar" and outbox_id:
+        outbox_aprovacao.descartar_rascunho(db, outbox_id=outbox_id)
+    elif acao == "editar" and outbox_id:
+        novo_texto = decisao.get("novo_texto") or ""
+        outbox_aprovacao.aplicar_edicao_rascunho(db, outbox_id=outbox_id, novo_texto=novo_texto)
+    elif acao == "ambiguo":
+        qtd = decisao.get("quantidade", 0)
+        print(f"[AtencaoWhatsApp] Resposta no self-chat ambígua: {qtd} rascunhos pendentes no outbox.")
+
+
 # ---------------------------------------------------------------------------
 # Cloud Functions
 # ---------------------------------------------------------------------------
@@ -464,7 +593,7 @@ def _processar_audio(db, mensagem: dict) -> None:
     timeout_sec=60,
 )
 def on_whatsapp_message_atencao(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]) -> None:
-    """Roda os dois detectores reativos a cada mensagem de WhatsApp capturada,
+    """Roda os detectores reativos a cada mensagem de WhatsApp capturada,
     cada um atras da propria flag e isolado em seu proprio try/except - uma
     falha em um detector nunca deve impedir o outro nem quebrar a captura."""
     snap = event.data
@@ -486,6 +615,11 @@ def on_whatsapp_message_atencao(event: firestore_fn.Event[firestore_fn.DocumentS
         _processar_audio(db, mensagem)
     except Exception as exc:
         print(f"[AtencaoWhatsApp] Falha no detector audio_relevante: {exc}")
+
+    try:
+        _processar_aprovacao_outbox(db, mensagem)
+    except Exception as exc:
+        print(f"[AtencaoWhatsApp] Falha no detector aprovacao_outbox: {exc}")
 
 
 @scheduler_fn.on_schedule(

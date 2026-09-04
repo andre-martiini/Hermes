@@ -46,10 +46,10 @@ Centraliza os sinais e pendências que demandam decisão humana em um formato pa
 - **`obter_fila_atencao`** (leitura): lista itens com paginação e ordenação por prioridade (`alta`→`media`→`baixa`) e prazo.
 - **`resolver_item_atencao`** (escrita, exige confirmação): atualiza o estado para `resolvido`, `descartado`, `delegado_ao_agente` ou `aguardando_andre`, registrando desfecho obrigatório para encerramentos e anotando no diário da ação vinculada.
 
-### Rascunhos de WhatsApp com aprovação via Telegram (`criar_rascunho_whatsapp`, `listar_rascunhos_pendentes`)
+### Rascunhos de WhatsApp com aprovação via Telegram ou WhatsApp próprio (`criar_rascunho_whatsapp`, `listar_rascunhos_pendentes`)
 
-Separa o trabalho de **redigir** (feito pelo Claude) de **aprovar e enviar** (feito pelo dono onde estiver, com um toque no Telegram).
-- **`criar_rascunho_whatsapp`** (escrita): cria um registro em `whatsapp_outbox` com status `aguardando_aprovacao` e envia card com botões inline no Telegram (`[✅ Enviar] [✏️ Editar] [🗑️ Descartar]`). **Nota de segurança:** esta tool **não** exige `_confirmed` no protocolo MCP porque não envia nada a terceiros — o gate humano real acontece no Telegram.
+Separa o trabalho de **redigir** (feito pelo Claude) de **aprovar e enviar** (feito pelo dono onde estiver, com um toque no Telegram ou respondendo no chat consigo mesmo no WhatsApp).
+- **`criar_rascunho_whatsapp`** (escrita): cria um registro em `whatsapp_outbox` com status `aguardando_aprovacao` e envia card com botões inline no Telegram (`[✅ Enviar] [✏️ Editar] [🗑️ Descartar]`). Se configurado `whatsapp_owner_chat_id` em `system/settings`, o dono também pode aprovar diretamente respondendo "sim/ok", descartar com "não/descarta" ou enviar novo texto para editar direto no seu próprio WhatsApp. **Nota de segurança:** esta tool **não** exige `_confirmed` no protocolo MCP porque não envia nada a terceiros — o gate humano real acontece no Telegram ou no WhatsApp do dono.
 - **`listar_rascunhos_pendentes`** (leitura): lista rascunhos em `aguardando_aprovacao` para que o agente confira o que ainda espera decisão antes de redigir de novo.
 
 ### Pedidos de trabalho autônomo (`consultar_pedidos_agente`, `concluir_pedido_agente`)
