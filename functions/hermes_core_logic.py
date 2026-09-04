@@ -2424,6 +2424,67 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
                 print(f"[AINotifications] Falha ao registrar feedback de {notif_id}: {exc}")
                 _answer_callback_query(token, query_id, "Não consegui registrar o feedback.")
 
+    elif data.startswith("reagendamento_lote:"):
+        parts = data.split(":")
+        proposta_id = parts[1] if len(parts) > 1 else ""
+        action = parts[2] if len(parts) > 2 else ""
+        if not proposta_id or action not in ("aplicar", "descartar"):
+            _answer_callback_query(token, query_id)
+        else:
+            try:
+                doc_ref = db.collection("reagendamentos_propostos").document(proposta_id)
+                doc_snap = doc_ref.get()
+                if not doc_snap.exists:
+                    _answer_callback_query(token, query_id, "Proposta não encontrada.")
+                else:
+                    proposta = doc_snap.to_dict() or {}
+                    status_atual = proposta.get("status")
+                    if status_atual != "pending":
+                        _answer_callback_query(token, query_id, f"Proposta já processada ({status_atual}).")
+                    elif action == "descartar":
+                        doc_ref.set(
+                            {
+                                "status": "descartado",
+                                "descartado_em": datetime.now(timezone.utc).isoformat(),
+                            },
+                            merge=True,
+                        )
+                        _answer_callback_query(token, query_id, "Proposta descartada.")
+                        response_text = "❌ Proposta de reagendamento em lote descartada."
+                        _persist_callback_turn(f"Reagendamento lote ({proposta_id}): descartar", response_text)
+                        _send_telegram_message(token, chat_id, response_text)
+                    elif action == "aplicar":
+                        items = proposta.get("items") or []
+                        justificativa = (
+                            proposta.get("justificativa")
+                            or "Reagendamento em lote semanal via aprovação no Telegram."
+                        )
+
+                        import main
+                        from tools.callable_bridge import invoke_callable
+
+                        resultado = invoke_callable(
+                            main.confirmarReagendamentoEmLote,
+                            {"items": items, "justificativa": justificativa},
+                            uid=None,
+                            token={"uid": None},
+                        )
+                        doc_ref.set(
+                            {
+                                "status": "aplicado",
+                                "aplicado_em": datetime.now(timezone.utc).isoformat(),
+                                "resultado_aplicacao": resultado,
+                            },
+                            merge=True,
+                        )
+                        _answer_callback_query(token, query_id, f"{len(items)} ações reagendadas!")
+                        response_text = f"✅ Reagendamento em lote aplicado com sucesso para {len(items)} ação(ões)."
+                        _persist_callback_turn(f"Reagendamento lote ({proposta_id}): aplicar", response_text)
+                        _send_telegram_message(token, chat_id, response_text)
+            except Exception as exc:
+                print(f"[ReagendamentoLote] Falha ao processar callback de {proposta_id}: {exc}")
+                _answer_callback_query(token, query_id, "Erro ao processar reagendamento.")
+
     elif data == "exit_context":
         acao_titulo = session.get("acao_titulo") or "anterior"
         response_text = f"✅ Saindo do contexto <b>{acao_titulo}</b>. Voltando ao modo geral."

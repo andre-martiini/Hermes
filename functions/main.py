@@ -13870,6 +13870,9 @@ from atencao_whatsapp import on_whatsapp_message_atencao, vencer_promessas
 # Import weekly byproduct detector job
 import deteccao_subproduto
 
+# Import weekly review batch rescheduling proposal job
+from revisao_semanal import revisar_semana_propor_reagendamento
+
 
 @scheduler_fn.on_schedule(
     # Domingo às 18h: a semana já aconteceu, e a sugestão chega antes de a próxima
