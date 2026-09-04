@@ -6711,6 +6711,49 @@ def _format_pending_memory_conflict(conflict_data: dict | None) -> str:
     )
 
 
+def _fetch_usd_brl_rate(db) -> float:
+    """Cotacao aproximada USD->BRL para o relatorio diario de custo (nao
+    precisa ser exata). Tenta buscar ao vivo (API publica, sem chave); se
+    falhar, usa a ultima cotacao com sucesso salva em
+    system/cost_controls.last_usd_brl_rate; se nao houver nenhuma ainda, cai
+    num valor fixo aproximado (ajustar aqui se ficar muito desatualizado)."""
+    FALLBACK_USD_BRL_RATE = 5.30
+
+    try:
+        import requests as _requests
+        resp = _requests.get(
+            "https://api.frankfurter.app/latest?from=USD&to=BRL", timeout=5
+        )
+        resp.raise_for_status()
+        rate = float(resp.json()["rates"]["BRL"])
+        if rate > 0:
+            try:
+                from datetime import datetime as _dt2, timezone as _tz2
+                db.collection("system").document("cost_controls").set(
+                    {
+                        "last_usd_brl_rate": rate,
+                        "last_usd_brl_rate_at": _dt2.now(_tz2.utc).isoformat(),
+                    },
+                    merge=True,
+                )
+            except Exception:
+                pass
+            return rate
+    except Exception as exc:
+        print(f"[CustoGemini] Falha ao buscar cotacao USD/BRL ao vivo: {exc}")
+
+    try:
+        cfg = _cached_doc_get(db, "system", "cost_controls")
+        if cfg.exists:
+            cached_rate = (cfg.to_dict() or {}).get("last_usd_brl_rate")
+            if cached_rate:
+                return float(cached_rate)
+    except Exception:
+        pass
+
+    return FALLBACK_USD_BRL_RATE
+
+
 @scheduler_fn.on_schedule(
     schedule="30 20 * * *",
     timezone="America/Sao_Paulo",
@@ -6752,9 +6795,13 @@ def relatorio_diario_custo_gemini(event: scheduler_fn.ScheduledEvent):
             reverse=True,
         )[:3]
 
+        usd_brl_rate = _fetch_usd_brl_rate(db)
+        cost_brl = cost * usd_brl_rate
+        budget_brl = budget * usd_brl_rate
+
         lines = [
             f"💰 <b>Uso Gemini — {day}</b>",
-            f"Custo estimado: <b>${cost:.2f}</b> (orçamento: ${budget:.2f})",
+            f"Custo estimado: <b>${cost:.2f}</b> (~R$ {cost_brl:.2f}) | orçamento: ${budget:.2f} (~R$ {budget_brl:.2f})",
             f"Chamadas: {calls} | Tokens: {int(tokens.get('total') or 0):,}".replace(",", "."),
             f"Entrada: {int(tokens.get('input') or 0):,} | Saída: {int(tokens.get('output') or 0):,}".replace(",", "."),
         ]
@@ -6762,6 +6809,7 @@ def relatorio_diario_custo_gemini(event: scheduler_fn.ScheduledEvent):
             lines.append("Top consumidores:")
             for name, fdata in top_features:
                 lines.append(f"  • {name}: {int((fdata or {}).get('tokens_total') or 0):,} tokens".replace(",", "."))
+        lines.append("Obs.: cobre só tokens de IA (Gemini) — não inclui Firestore, Cloud Run e outros custos de infraestrutura.")
         if cost > budget:
             lines.insert(0, "⚠️ <b>ORÇAMENTO DIÁRIO ESTOURADO</b>")
 
