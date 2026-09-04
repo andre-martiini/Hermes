@@ -1947,6 +1947,36 @@ def concluir_pedido_agente(ctx: ToolContext, args: dict):
     return concluir(ctx.db, request_id=request_id, resultado=resultado, erro=erro)
 
 
+def registrar_execucao_agente(ctx: ToolContext, args: dict):
+    from agent_runs import registrar
+
+    rotina = args.get("rotina")
+    resumo = args.get("resumo")
+    contadores = args.get("contadores")
+    status = args.get("status")
+    erro = args.get("erro")
+    iniciado_em = args.get("iniciado_em")
+    finalizado_em = args.get("finalizado_em")
+    return registrar(
+        ctx.db,
+        rotina=rotina,
+        resumo=resumo,
+        contadores=contadores,
+        status=status or "sucesso",
+        erro=erro,
+        iniciado_em=iniciado_em,
+        finalizado_em=finalizado_em,
+    )
+
+
+def consultar_execucoes_agente(ctx: ToolContext, args: dict):
+    from agent_runs import listar_recentes
+
+    rotina = args.get("rotina")
+    limite = int(args.get("limite") or 20)
+    return listar_recentes(ctx.db, rotina=rotina, limite=limite)
+
+
 # ---------------------------------------------------------------------------
 # Registro
 # ---------------------------------------------------------------------------
@@ -2032,6 +2062,8 @@ _HANDLERS: dict = {
     "listar_rascunhos_pendentes": listar_rascunhos_pendentes,
     "consultar_pedidos_agente": consultar_pedidos_agente,
     "concluir_pedido_agente": concluir_pedido_agente,
+    "registrar_execucao_agente": registrar_execucao_agente,
+    "consultar_execucoes_agente": consultar_execucoes_agente,
 }
 
 

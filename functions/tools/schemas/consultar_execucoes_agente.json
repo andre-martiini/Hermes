@@ -1,0 +1,18 @@
+{
+  "name": "consultar_execucoes_agente",
+  "description": "Consulta o histórico de execuções recentes de rotinas agendadas do agente registradas em agent_runs.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "rotina": {
+        "type": "string",
+        "description": "Filtrar execuções por identificador de rotina (opcional)."
+      },
+      "limite": {
+        "type": "integer",
+        "description": "Número máximo de registros a retornar (padrão: 20, máx: 50)."
+      }
+    },
+    "required": []
+  }
+}

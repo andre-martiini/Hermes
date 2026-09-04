@@ -118,6 +118,9 @@ _CATALOG: dict[str, str] = {
     # Pedidos de trabalho autonomo
     "consultar_pedidos_agente": "Lista pedidos de trabalho autonomo enfileirados pelo sistema para o agente executar",
     "concluir_pedido_agente": "Conclui ou registra erro em um pedido de trabalho autonomo executado pelo agente",
+    # Observabilidade de execucoes do agente
+    "registrar_execucao_agente": "Registra uma execucao de rotina agendada do agente para observabilidade e metricas",
+    "consultar_execucoes_agente": "Consulta o historico de execucoes recentes de rotinas agendadas do agente",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {

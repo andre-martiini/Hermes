@@ -1,0 +1,46 @@
+{
+  "name": "registrar_execucao_agente",
+  "description": "Registra uma execução de rotina agendada do agente na coleção agent_runs para observabilidade e métricas de proatividade.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "rotina": {
+        "type": "string",
+        "description": "Identificador da rotina executada (ex.: 'briefing_matinal', 'varredura_followups', 'executor_agent_requests')."
+      },
+      "resumo": {
+        "type": "string",
+        "description": "Breve resumo textual do que a rotina fez durante a execução."
+      },
+      "contadores": {
+        "type": "object",
+        "description": "Objeto livre com contadores da execução (ex.: {'itens_lidos': 4, 'rascunhos_criados': 2})."
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "sucesso",
+          "erro",
+          "parcial"
+        ],
+        "description": "Desfecho da execução. Padrão: 'sucesso'."
+      },
+      "erro": {
+        "type": "string",
+        "description": "Mensagem ou detalhe de erro (obrigatório se status for 'erro')."
+      },
+      "iniciado_em": {
+        "type": "string",
+        "description": "Carimbo ISO do início da execução (opcional)."
+      },
+      "finalizado_em": {
+        "type": "string",
+        "description": "Carimbo ISO do término da execução (opcional)."
+      }
+    },
+    "required": [
+      "rotina",
+      "resumo"
+    ]
+  }
+}
