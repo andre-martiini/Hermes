@@ -392,6 +392,16 @@ def consultar_envio(ctx, args: dict) -> dict:
             saida["falhou_em"] = _iso(d.get("failed_at"))
             saida["erro"] = d.get("error_message")
             saida["erro_origem"] = d.get("error_origem")
+        if d.get("status") == "aguardando_aprovacao":
+            saida["motivo"] = d.get("motivo")
+            saida["destinatario_nome"] = d.get("destinatario_nome")
+            saida["message"] = "Aguardando aprovação do dono no Telegram — NAO diga ao usuario que a mensagem foi enviada."
+        if d.get("status") == "descartado":
+            saida["descartado_em"] = _iso(d.get("descartado_em"))
+            saida["message"] = "Descartado pelo dono."
+        if d.get("status") == "expirado":
+            saida["expirado_em"] = _iso(d.get("expirado_em"))
+            saida["message"] = "Expirado sem aprovação (mais de 48h)."
         if d.get("status") == "pending":
             # Um `pending` que passou da hora nao e "esperando": e um envio
             # encalhado. Sem esta distincao ele fica "na fila" para sempre, que

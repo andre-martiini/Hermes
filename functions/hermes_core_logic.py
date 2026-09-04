@@ -2925,6 +2925,48 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
             print(f"[Diario] Falha ao confirmar diário {diary_date}: {exc}")
         _answer_callback_query(token, query_id, "Combinado!")
 
+    elif data.startswith("outbox:"):
+        parts = data.split(":")
+        outbox_id = parts[1] if len(parts) > 1 else ""
+        action = parts[2] if len(parts) > 2 else ""
+
+        if not outbox_id or action not in ("ok", "no", "edit"):
+            _answer_callback_query(token, query_id, "Ação não reconhecida.")
+        elif action == "ok":
+            from outbox_aprovacao import aprovar_rascunho
+            res = aprovar_rascunho(db, outbox_id, telegram_token=token, chat_id=chat_id)
+            if res.get("status") == "already_decided":
+                _answer_callback_query(token, query_id, "Este rascunho já foi decidido.")
+            elif res.get("status") == "not_found":
+                _answer_callback_query(token, query_id, "Rascunho não encontrado.")
+            elif res.get("status") == "ok":
+                _answer_callback_query(token, query_id, "Enviado para a fila!")
+                _persist_callback_turn(f"Botão: aprovar rascunho outbox:{outbox_id}", "✅ Enviado para a fila")
+            else:
+                _answer_callback_query(token, query_id, f"Erro: {res.get('erro', 'falha ao aprovar')}")
+        elif action == "no":
+            from outbox_aprovacao import descartar_rascunho
+            telegram_msg_id = message.get("message_id") if isinstance(message, dict) else None
+            res = descartar_rascunho(
+                db, outbox_id, telegram_token=token, chat_id=chat_id, telegram_msg_id=telegram_msg_id
+            )
+            if res.get("status") == "already_decided":
+                _answer_callback_query(token, query_id, "Este rascunho já foi decidido.")
+            elif res.get("status") == "not_found":
+                _answer_callback_query(token, query_id, "Rascunho não encontrado.")
+            elif res.get("status") == "ok":
+                _answer_callback_query(token, query_id, "Rascunho descartado.")
+                _persist_callback_turn(f"Botão: descartar rascunho outbox:{outbox_id}", "🗑️ Rascunho descartado")
+            else:
+                _answer_callback_query(token, query_id, f"Erro: {res.get('erro', 'falha ao descartar')}")
+        elif action == "edit":
+            session["pending_outbox_edit"] = outbox_id
+            _save_session(db, chat_id, session)
+            _answer_callback_query(token, query_id, "Me manda o texto novo.")
+            msg = "✍️ Me manda o texto novo em resposta a esta mensagem."
+            _persist_callback_turn(f"Botão: editar rascunho outbox:{outbox_id}", msg)
+            _send_telegram_message(token, chat_id, msg)
+
     else:
 
         _answer_callback_query(token, query_id)
@@ -4077,6 +4119,31 @@ def _process_telegram_message(db, data: dict):
             diary_reply = "⚠️ Não consegui ajustar o diário agora. Tente novamente mais tarde."
         _persist_turn_to_copilot(text, diary_reply)
         _send_telegram_session_message(db, token, chat_id, diary_reply, session=session)
+        return
+
+    # --- Ajuste de rascunho de outbox WhatsApp pendente (botão "✏️ Editar") ---
+    pending_outbox_id = session.get("pending_outbox_edit")
+    if pending_outbox_id and text and not text.startswith("/"):
+        from outbox_aprovacao import aplicar_edicao_rascunho
+        session.pop("pending_outbox_edit", None)
+        _save_session(db, chat_id, session)
+        try:
+            res_edit = aplicar_edicao_rascunho(
+                db,
+                pending_outbox_id,
+                text,
+                telegram_token=token,
+                chat_id=chat_id,
+            )
+            if res_edit.get("status") == "ok":
+                outbox_reply = "✍️ Texto do rascunho atualizado com sucesso! Um novo card de aprovação foi enviado acima."
+            else:
+                outbox_reply = f"⚠️ Não consegui atualizar o rascunho: {res_edit.get('erro', 'erro desconhecido')}"
+        except Exception as exc:
+            print(f"[OutboxAprovacao] Falha ao aplicar edição de rascunho: {exc}")
+            outbox_reply = "⚠️ Ocorreu um erro ao atualizar o rascunho."
+        _persist_turn_to_copilot(text, outbox_reply)
+        _send_telegram_session_message(db, token, chat_id, outbox_reply, session=session)
         return
 
     # --- /entrar command — busca semântica de ações para travamento de contexto ---

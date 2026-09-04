@@ -1,0 +1,34 @@
+{
+  "name": "criar_rascunho_whatsapp",
+  "description": "Cria um rascunho de mensagem de WhatsApp e envia card de aprovação em um toque para o Telegram do dono. O envio real só acontece após a aprovação humana no Telegram. Devolve o ID do rascunho para consulta posterior via consultar_envio_whatsapp.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "contact_number": {
+        "type": "string",
+        "description": "Número de telefone com DDI e DDD (ex.: '+5527999990000') ou chat_id (@c.us, @g.us, @lid)."
+      },
+      "message": {
+        "type": "string",
+        "description": "Texto da mensagem proposta."
+      },
+      "motivo": {
+        "type": "string",
+        "description": "Uma frase explicando por que este rascunho existe ou foi gerado."
+      },
+      "acao_id": {
+        "type": "string",
+        "description": "ID opcional da ação no Hermes vinculada a esta mensagem (ao aprovar, registra nota no diário da ação)."
+      },
+      "item_atencao_id": {
+        "type": "string",
+        "description": "ID opcional do item na fila de atenção vinculado a esta mensagem (ao aprovar, resolve o item)."
+      }
+    },
+    "required": [
+      "contact_number",
+      "message",
+      "motivo"
+    ]
+  }
+}

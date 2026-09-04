@@ -1,0 +1,418 @@
+"""Testes para o fluxo de rascunhos de WhatsApp com aprovação via Telegram (PR 4).
+
+Cobre:
+- Lógica pura (transições, montagem de card, expiração temporal)
+- Transição atômica de aprovação (aguardando_aprovacao -> pending)
+- Proteção contra toque duplo (already_decided)
+- Descarte de rascunho e reabertura do item na fila de atenção
+- Edição do conteúdo do rascunho sem alterar destinatário
+- Expiração de rascunhos antigos (> 48h) sem tocar em outros status
+- Validação e resolução rigorosa de destinatário na criação
+"""
+
+import datetime
+from datetime import timezone, timedelta
+import unittest
+from unittest import mock
+
+import outbox_aprovacao as oa
+
+
+# --------------------------------------------------------------------------
+# Mock simples de Firestore para testes
+# --------------------------------------------------------------------------
+
+class _MockDocSnap:
+    def __init__(self, doc_id: str, data: dict | None):
+        self.id = doc_id
+        self._data = dict(data) if data is not None else None
+        self.exists = data is not None
+        self.reference = None
+
+    def to_dict(self):
+        return dict(self._data) if self._data is not None else {}
+
+
+class _MockDocRef:
+    def __init__(self, col, doc_id: str):
+        self.col = col
+        self.id = doc_id
+
+    def get(self, transaction=None):
+        data = self.col._docs.get(self.id)
+        snap = _MockDocSnap(self.id, data)
+        snap.reference = self
+        return snap
+
+    def set(self, data, merge=False):
+        if merge and self.id in self.col._docs:
+            self.col._docs[self.id].update(data)
+        else:
+            self.col._docs[self.id] = dict(data)
+
+    def update(self, data):
+        if self.id not in self.col._docs:
+            raise KeyError(f"Doc {self.id} does not exist")
+        self.col._docs[self.id].update(data)
+
+    def delete(self):
+        self.col._docs.pop(self.id, None)
+
+
+class _MockCollection:
+    def __init__(self, db, name: str):
+        self.db = db
+        self.name = name
+        self._docs: dict[str, dict] = {}
+        self._id_counter = 1
+
+    def document(self, doc_id: str | None = None):
+        if not doc_id:
+            doc_id = f"mock-doc-{self._id_counter}"
+            self._id_counter += 1
+        return _MockDocRef(self, doc_id)
+
+    def where(self, field, op, val):
+        return _MockQuery(self, [(k, v) for k, v in self._docs.items() if op == "==" and v.get(field) == val])
+
+    def stream(self):
+        snaps = []
+        for k, v in self._docs.items():
+            snap = _MockDocSnap(k, v)
+            snap.reference = _MockDocRef(self, k)
+            snaps.append(snap)
+        return snaps
+
+
+class _MockQuery:
+    def __init__(self, col, items):
+        self.col = col
+        self.items = items
+
+    def stream(self):
+        snaps = []
+        for k, v in self.items:
+            snap = _MockDocSnap(k, v)
+            snap.reference = _MockDocRef(self.col, k)
+            snaps.append(snap)
+        return snaps
+
+
+class _MockTransaction:
+    def __init__(self, db):
+        self.db = db
+        self._read_only = False
+        self._id = b"mock-tx-id"
+        self._max_attempts = 5
+
+    def get(self, ref):
+        return ref.get(transaction=self)
+
+    def update(self, ref, data):
+        ref.update(data)
+
+    def _rollback(self):
+        pass
+
+    def _commit(self):
+        pass
+
+
+class _MockDb:
+    def __init__(self):
+        self._cols: dict[str, _MockCollection] = {}
+
+    def collection(self, name: str):
+        if name not in self._cols:
+            self._cols[name] = _MockCollection(self, name)
+        return self._cols[name]
+
+    def transaction(self):
+        return _MockTransaction(self)
+
+
+# --------------------------------------------------------------------------
+# Testes Unitários
+# --------------------------------------------------------------------------
+
+class TestLogicaPura(unittest.TestCase):
+    """Testes de funções puras (sem I/O ou banco)."""
+
+    def test_validar_transicao_aprovacao(self):
+        ok, msg = oa.validar_transicao_aprovacao(oa.STATUS_AGUARDANDO)
+        self.assertTrue(ok)
+        self.assertEqual(msg, "")
+
+        for status in [oa.STATUS_PENDING, oa.STATUS_DESCARTADO, oa.STATUS_SENT, oa.STATUS_EXPIRADO]:
+            ok, msg = oa.validar_transicao_aprovacao(status)
+            self.assertFalse(ok)
+            self.assertIn("já decidido", msg)
+
+        ok, msg = oa.validar_transicao_aprovacao(None)
+        self.assertFalse(ok)
+        self.assertIn("não encontrado", msg)
+
+    def test_validar_transicao_descarte(self):
+        ok, msg = oa.validar_transicao_descarte(oa.STATUS_AGUARDANDO)
+        self.assertTrue(ok)
+
+        ok, msg = oa.validar_transicao_descarte(oa.STATUS_PENDING)
+        self.assertFalse(ok)
+        self.assertIn("já decidido", msg)
+
+    def test_montar_card_telegram(self):
+        corpo, botoes = oa.montar_card_telegram(
+            destinatario_nome="João Silva",
+            motivo="Confirmar reunião",
+            content="Oi João, podemos falar às 14h?",
+            outbox_id="job-123",
+        )
+        self.assertIn("João Silva", corpo)
+        self.assertIn("Confirmar reunião", corpo)
+        self.assertIn("Oi João, podemos falar às 14h?", corpo)
+
+        # 3 botões inline
+        self.assertEqual(len(botoes), 1)
+        row = botoes[0]
+        self.assertEqual(len(row), 3)
+        self.assertEqual(row[0]["callback_data"], "outbox:job-123:ok")
+        self.assertEqual(row[1]["callback_data"], "outbox:job-123:edit")
+        self.assertEqual(row[2]["callback_data"], "outbox:job-123:no")
+
+    def test_avaliar_expirados_puro(self):
+        agora = datetime.datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
+        rascunhos = [
+            # 50h atrás -> expirado
+            {"id": "r1", "status": oa.STATUS_AGUARDANDO, "created_at": agora - timedelta(hours=50)},
+            # 10h atrás -> não expirado
+            {"id": "r2", "status": oa.STATUS_AGUARDANDO, "created_at": agora - timedelta(hours=10)},
+            # 50h atrás mas já pendente -> não expira
+            {"id": "r3", "status": oa.STATUS_PENDING, "created_at": agora - timedelta(hours=50)},
+            # 50h atrás mas descartado -> não expira
+            {"id": "r4", "status": oa.STATUS_DESCARTADO, "created_at": agora - timedelta(hours=50)},
+        ]
+        exp = oa.avaliar_expirados(rascunhos, agora, limite_horas=48)
+        self.assertEqual(exp, ["r1"])
+
+
+class TestAprovacaoTransicao(unittest.TestCase):
+    """Testes da transição atômica de aprovação."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.outbox = self.db.collection(oa.COLLECTION)
+        self.tx_patch = mock.patch("firebase_admin.firestore.transactional", side_effect=lambda fn: fn)
+        self.tx_patch.start()
+        self.addCleanup(self.tx_patch.stop)
+
+    def test_aprovar_rascunho_sucesso(self):
+        self.outbox._docs["job-1"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "to_number": "5527999990000@c.us",
+            "content": "Texto da mensagem",
+            "motivo": "Aviso urgente",
+            "destinatario_nome": "Fulano",
+            "telegram_message_id": 999,
+        }
+
+        with mock.patch("core.telegram_api.edit_message", return_value=True) as mock_edit:
+            res = oa.aprovar_rascunho(self.db, "job-1", telegram_token="fake-token", chat_id="12345")
+            self.assertEqual(res["status"], "ok")
+            doc = self.outbox._docs["job-1"]
+            self.assertEqual(doc["status"], oa.STATUS_PENDING)
+            self.assertEqual(doc["aprovado_via"], "telegram")
+            self.assertIsNotNone(doc.get("aprovado_em"))
+            self.assertIsNotNone(doc.get("scheduled_for"))
+            mock_edit.assert_called_once()
+            self.assertIn("Enviado para a fila", mock_edit.call_args[0][3])
+
+    def test_toque_duplo_nao_duplica(self):
+        self.outbox._docs["job-1"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "to_number": "5527999990000@c.us",
+            "content": "Texto",
+        }
+        # Primeiro clique
+        res1 = oa.aprovar_rascunho(self.db, "job-1")
+        self.assertEqual(res1["status"], "ok")
+
+        # Segundo clique (toque duplo)
+        res2 = oa.aprovar_rascunho(self.db, "job-1")
+        self.assertEqual(res2["status"], "already_decided")
+        self.assertIn("já decidido", res2["erro"])
+
+    def test_aprovacao_resolve_item_atencao(self):
+        self.outbox._docs["job-1"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "item_atencao_id": "item-atencao-77",
+            "destinatario_nome": "Beltrano",
+        }
+        with mock.patch("atencao.resolver_item") as mock_resolver:
+            res = oa.aprovar_rascunho(self.db, "job-1")
+            self.assertEqual(res["status"], "ok")
+            mock_resolver.assert_called_once_with(
+                self.db,
+                item_id="item-atencao-77",
+                novo_estado="resolvido",
+                desfecho="mensagem aprovada e enviada",
+                ctx=None,
+            )
+
+    def test_aprovacao_anota_diario_acao(self):
+        self.outbox._docs["job-1"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "acao_id": "tarefa-101",
+            "motivo": "Cobrança de entrega",
+            "destinatario_nome": "Ciclano",
+        }
+        with mock.patch("tools.hermes_tools.registrar_no_diario") as mock_diario:
+            res = oa.aprovar_rascunho(self.db, "job-1")
+            self.assertEqual(res["status"], "ok")
+            mock_diario.assert_called_once()
+            args = mock_diario.call_args[0][1]
+            self.assertEqual(args["task_id_alvo"], "tarefa-101")
+            self.assertIn("Cobrança de entrega", args["nota"])
+
+
+class TestDescarte(unittest.TestCase):
+    """Testes de descarte de rascunho."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.outbox = self.db.collection(oa.COLLECTION)
+        self.atencao = self.db.collection("atencao")
+
+    def test_descartar_sucesso_e_reabre_fila(self):
+        self.outbox._docs["job-2"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "item_atencao_id": "atencao-55",
+            "telegram_message_id": 888,
+        }
+        self.atencao._docs["atencao-55"] = {
+            "estado": "resolvido",
+            "desfecho": "algo anterior",
+        }
+
+        with mock.patch("core.telegram_api.edit_message", return_value=True) as mock_edit:
+            res = oa.descartar_rascunho(self.db, "job-2", telegram_token="tok", chat_id="123")
+            self.assertEqual(res["status"], "ok")
+            self.assertEqual(self.outbox._docs["job-2"]["status"], oa.STATUS_DESCARTADO)
+
+            # Item da fila de atenção volta para aberto
+            item_at = self.atencao._docs["atencao-55"]
+            self.assertEqual(item_at["estado"], "aberto")
+            self.assertIsNone(item_at["desfecho"])
+
+            mock_edit.assert_called_once()
+            self.assertIn("descartado", mock_edit.call_args[0][3].lower())
+
+    def test_descartar_ja_decidido_falha(self):
+        self.outbox._docs["job-2"] = {
+            "status": oa.STATUS_PENDING,
+        }
+        res = oa.descartar_rascunho(self.db, "job-2")
+        self.assertEqual(res["status"], "already_decided")
+
+
+class TestEdicao(unittest.TestCase):
+    """Testes de substituição de conteúdo em rascunho."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.outbox = self.db.collection(oa.COLLECTION)
+
+    def test_editar_substitui_content_e_reenvia_card(self):
+        self.outbox._docs["job-3"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "to_number": "+5527999991111",
+            "destinatario_nome": "Carlos",
+            "content": "Texto velho",
+            "motivo": "Follow-up",
+        }
+
+        with mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=777) as mock_send,              mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"),              mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
+            res = oa.aplicar_edicao_rascunho(self.db, "job-3", "Texto novo corrigido pelo dono")
+            self.assertEqual(res["status"], "ok")
+            doc = self.outbox._docs["job-3"]
+            self.assertEqual(doc["content"], "Texto novo corrigido pelo dono")
+            self.assertEqual(doc["status"], oa.STATUS_AGUARDANDO)
+            self.assertEqual(doc["to_number"], "+5527999991111")
+            self.assertEqual(doc["destinatario_nome"], "Carlos")
+            self.assertEqual(doc["telegram_message_id"], 777)
+            mock_send.assert_called_once()
+            self.assertIn("Texto novo corrigido", mock_send.call_args[0][2])
+
+
+class TestExpiracao(unittest.TestCase):
+    """Testes de expiração de rascunhos (> 48h)."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.outbox = self.db.collection(oa.COLLECTION)
+
+    def test_expirar_apenas_antigos_em_aguardando(self):
+        agora = datetime.datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
+        self.outbox._docs["velho"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "created_at": agora - timedelta(hours=50),
+            "telegram_message_id": 111,
+        }
+        self.outbox._docs["novo"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "created_at": agora - timedelta(hours=2),
+        }
+        self.outbox._docs["pending_antigo"] = {
+            "status": oa.STATUS_PENDING,
+            "created_at": agora - timedelta(hours=50),
+        }
+
+        with mock.patch("core.telegram_api.edit_message", return_value=True) as mock_edit:
+            total = oa.expirar_rascunhos_pendentes(
+                self.db, agora=agora, limite_horas=48, telegram_token="tok", chat_id="123"
+            )
+            self.assertEqual(total, 1)
+            self.assertEqual(self.outbox._docs["velho"]["status"], oa.STATUS_EXPIRADO)
+            self.assertEqual(self.outbox._docs["novo"]["status"], oa.STATUS_AGUARDANDO)
+            self.assertEqual(self.outbox._docs["pending_antigo"]["status"], oa.STATUS_PENDING)
+            mock_edit.assert_called_once()
+            self.assertIn("expirado", mock_edit.call_args[0][3].lower())
+
+
+class TestCriarEListarRascunho(unittest.TestCase):
+    """Testes de criação e listagem."""
+
+    def setUp(self):
+        self.db = _MockDb()
+
+    def test_criar_rascunho_destinatario_desconhecido_recusa(self):
+        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={
+            "encontrado": False, "informado": "numero-invalido", "sugestoes": []
+        }):
+            res = oa.criar_rascunho(
+                self.db,
+                contact_number="numero-invalido",
+                message="Ola",
+                motivo="Teste",
+            )
+            self.assertEqual(res.get("status"), "destinatario_invalido")
+            self.assertIn("Destinatário não encontrado", res.get("erro", ""))
+
+    def test_criar_rascunho_sucesso_dispara_telegram(self):
+        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={
+            "encontrado": True, "nome": "Mariana", "chat_id": "5527998887777@c.us"
+        }),         mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=555) as mock_send,         mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"),         mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
+            res = oa.criar_rascunho(
+                self.db,
+                contact_number="+5527998887777",
+                message="Relatório pronto",
+                motivo="Envio de fechamento",
+            )
+            self.assertEqual(res["status"], oa.STATUS_AGUARDANDO)
+            self.assertEqual(res["destinatario_nome"], "Mariana")
+            self.assertTrue(res["telegram_notificado"])
+            mock_send.assert_called_once()
+            self.assertIn("Mariana", mock_send.call_args[0][2])
+
+
+if __name__ == "__main__":
+    unittest.main()

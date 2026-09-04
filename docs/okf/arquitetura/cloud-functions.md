@@ -135,7 +135,7 @@ O backend roda em Cloud Functions Python (gen2). Há ~80 funções exportadas em
 |---|---|---|
 | `telegramWebhook` | HTTP request | Recebe updates do bot do Telegram |
 | `on_telegram_inbound` | Firestore create (`telegram_inbound/{id}`) | Processa mensagem recebida do Telegram |
-| `_handle_telegram_callback` | (interno, chamado por `telegramWebhook`) | Processa botões inline, inclusive `ai_notif:{id}:{useful\|dismiss}` (grava feedback em `scheduled_notifications`), `emlink:{id}:{ok\|on\|mut\|no}` (aplica/ignora sugestão de vínculo sinal↔ação em `email_action_suggestions`; `mut` também aplica as `mutacoes_propostas` na tarefa vinculada) e `diary_edit:{data}`/`diary_ok:{data}` (trava a sessão para capturar um ajuste ao diário pessoal do dia, ou confirma sem alteração) |
+| `_handle_telegram_callback` | (interno, chamado por `telegramWebhook`) | Processa botões inline, inclusive `ai_notif:{id}:{useful\|dismiss}` (grava feedback em `scheduled_notifications`), `emlink:{id}:{ok\|on\|mut\|no}` (aplica/ignora sugestão de vínculo sinal↔ação em `email_action_suggestions`; `mut` também aplica as `mutacoes_propostas` na tarefa vinculada), `diary_edit:{data}`/`diary_ok:{data}` (trava a sessão para capturar um ajuste ao diário pessoal do dia, ou confirma sem alteração) e `outbox:{id}:{ok\|edit\|no}` (aprova mensagem de WhatsApp enviando para a fila `pending`, descarta o rascunho ou trava sessão para captura de novo texto) |
 
 ## `functions/godmode.py`
 

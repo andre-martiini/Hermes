@@ -611,6 +611,24 @@ class TestConsultarEnvio(unittest.TestCase):
         ctx = self._ctx({"j": {"status": "sent", "to_number": "+55", "content": "z" * 500}})
         self.assertLessEqual(len(wa.consultar_envio(ctx, {"job_id": "j"})["trecho"]), 80)
 
+    def test_aguardando_aprovacao_descreve_estado_e_alerta(self):
+        ctx = self._ctx({"j_draft": {"status": "aguardando_aprovacao", "to_number": "+5527999990000",
+                                     "destinatario_nome": "Carlos", "motivo": "Reunião de alinhamento",
+                                     "content": "Olá Carlos"}})
+        r = wa.consultar_envio(ctx, {"job_id": "j_draft"})
+        self.assertEqual(r["status"], "aguardando_aprovacao")
+        self.assertEqual(r["destinatario_nome"], "Carlos")
+        self.assertEqual(r["motivo"], "Reunião de alinhamento")
+        self.assertIn("Aguardando aprovação do dono no Telegram", r["message"])
+        self.assertIn("NAO diga", r["message"])
+
+    def test_descartado_descreve_estado(self):
+        ctx = self._ctx({"j_discard": {"status": "descartado", "to_number": "+5527999990000",
+                                       "content": "Olá", "descartado_em": "2026-09-03T18:00:00Z"}})
+        r = wa.consultar_envio(ctx, {"job_id": "j_discard"})
+        self.assertEqual(r["status"], "descartado")
+        self.assertIn("Descartado pelo dono", r["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

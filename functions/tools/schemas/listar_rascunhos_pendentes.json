@@ -1,0 +1,14 @@
+{
+  "name": "listar_rascunhos_pendentes",
+  "description": "Lista rascunhos de mensagens de WhatsApp que estão aguardando aprovação do dono no Telegram.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "limite": {
+        "type": "integer",
+        "description": "Número máximo de rascunhos a listar (padrão: 20)."
+      }
+    },
+    "required": []
+  }
+}

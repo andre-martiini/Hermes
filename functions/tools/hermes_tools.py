@@ -466,6 +466,26 @@ def criar_rascunho_email(ctx: ToolContext, args: dict):
     return criar(ctx, args)
 
 
+def criar_rascunho_whatsapp(ctx: ToolContext, args: dict):
+    from outbox_aprovacao import criar_rascunho
+    return criar_rascunho(
+        ctx.db,
+        contact_number=args.get("contact_number"),
+        message=args.get("message"),
+        motivo=args.get("motivo"),
+        acao_id=args.get("acao_id"),
+        item_atencao_id=args.get("item_atencao_id"),
+        origem=getattr(ctx, "session_id", None) or "claude",
+        ctx=ctx,
+    )
+
+
+def listar_rascunhos_pendentes(ctx: ToolContext, args: dict):
+    from outbox_aprovacao import listar_rascunhos
+    limite = int(args.get("limite") or 20)
+    return listar_rascunhos(ctx.db, limite=limite)
+
+
 def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
     """Prévia opcional usada pelo gate MCP; nunca produz efeito externo."""
     if name == "pausar_conversa":
@@ -1986,6 +2006,8 @@ _HANDLERS: dict = {
     "consultar_compromissos_futuros": consultar_compromissos_futuros,
     "obter_fila_atencao": obter_fila_atencao,
     "resolver_item_atencao": resolver_item_atencao,
+    "criar_rascunho_whatsapp": criar_rascunho_whatsapp,
+    "listar_rascunhos_pendentes": listar_rascunhos_pendentes,
 }
 
 
