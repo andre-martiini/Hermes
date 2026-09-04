@@ -76,6 +76,15 @@ class TestBuildGeminiTools(unittest.TestCase):
         self.assertEqual(len(declarations), 1)
         self.assertEqual(declarations[0].name, "obter_fila_atencao")
 
+    def test_retorna_vazio_quando_todas_as_tools_carecem_de_meta(self):
+        # Garante fail-closed documentado: servidor legado sem _meta resulta em lista vazia
+        mcp_tools = [
+            {"name": "tool_legada_1"},
+            {"name": "registrar_aporte_investimento"},
+        ]
+        tools = _build_gemini_tools(mcp_tools)
+        self.assertEqual(tools, [])
+
     def test_input_schema_ausente_usa_objeto_padrao(self):
         mcp_tools = [
             {
