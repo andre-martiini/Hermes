@@ -18,6 +18,8 @@ import secrets
 import os
 import sys
 import unicodedata
+import hmac
+import hashlib
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if CURRENT_DIR not in sys.path:
@@ -15202,3 +15204,154 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
                 _shutil.rmtree(local_chunk_dir, ignore_errors=True)
             except Exception:
                 pass
+
+
+# ---------------------------------------------------------------------------
+# Webhook do GitHub para registro de eventos no diário da ação (acompanhamento)
+# ---------------------------------------------------------------------------
+
+def _obter_github_webhook_secret(db) -> str | None:
+    """Busca o segredo do webhook em system/api_keys com fallback para env var."""
+    doc = db.collection("system").document("api_keys").get()
+    keys = doc.to_dict() or {} if doc.exists else {}
+    secret = keys.get("github_webhook_secret") or os.environ.get("GITHUB_WEBHOOK_SECRET")
+    if secret:
+        return str(secret).strip()
+    return None
+
+
+def verificar_assinatura_github(corpo_bruto: bytes, signature_header: str | None, secret: str | None) -> bool:
+    """Valida a assinatura HMAC-SHA256 (X-Hub-Signature-256) do GitHub."""
+    if not secret or not signature_header:
+        return False
+    if not signature_header.startswith("sha256="):
+        return False
+    expected_sig = signature_header[len("sha256="):].strip()
+    calculated_sig = hmac.new(secret.encode("utf-8"), corpo_bruto, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(calculated_sig, expected_sig)
+
+
+def normalizar_evento_github(evento: str, payload: dict) -> dict | None:
+    """Decisão pura: decide se o evento do GitHub vira entrada no diário.
+    Retorna dict com 'repo' e 'nota', ou None se o evento deve ser ignorado.
+    """
+    if not isinstance(payload, dict):
+        return None
+
+    repo_data = payload.get("repository") or {}
+    repo_name = str(repo_data.get("full_name") or "").strip()
+    if not repo_name:
+        return None
+
+    if evento == "pull_request":
+        action = payload.get("action")
+        pr = payload.get("pull_request") or {}
+        if action == "closed" and pr.get("merged") is True:
+            number = pr.get("number")
+            title = str(pr.get("title") or "").strip()
+            html_url = str(pr.get("html_url") or "").strip()
+            nota = f'[GitHub] PR #{number} mergeada em {repo_name}: "{title}" — {html_url}'
+            return {"repo": repo_name, "nota": nota}
+        return None
+
+    if evento == "push":
+        default_branch = str(repo_data.get("default_branch") or "").strip()
+        ref = str(payload.get("ref") or "").strip()
+        if not default_branch or ref != f"refs/heads/{default_branch}":
+            return None
+
+        commits = payload.get("commits") or []
+        if not commits:
+            return None
+
+        n_commits = len(commits)
+        head_commit = payload.get("head_commit") or commits[-1]
+        msg = str(head_commit.get("message") or "")
+        first_line = msg.splitlines()[0].strip() if msg.splitlines() else ""
+        compare_url = str(payload.get("compare") or head_commit.get("url") or "").strip()
+
+        nota = f'[GitHub] Push em {repo_name} ({default_branch}), {n_commits} commit(s) — último: "{first_line}" — {compare_url}'
+        return {"repo": repo_name, "nota": nota}
+
+    return None
+
+
+def anotar_evento_github_em_tarefas(db, repo: str, nota: str) -> int:
+    """Anota evento do GitHub no acompanhamento de tarefas vinculadas."""
+    if not repo or not nota:
+        return 0
+
+    tarefas = list(
+        db.collection("tarefas").where("github_repos_vinculados", "array_contains", repo).stream()
+    )
+    if not tarefas:
+        print(f"[githubWebhook] Nenhum repo vinculado a '{repo}' encontrado.")
+        return 0
+
+    entry = {
+        "data": datetime.now(timezone.utc).isoformat(),
+        "nota": nota.strip(),
+    }
+
+    count = 0
+    for tdoc in tarefas:
+        try:
+            tdoc.reference.update({"acompanhamento": firestore.ArrayUnion([entry])})
+            count += 1
+        except Exception as exc:
+            print(f"[githubWebhook] Falha ao anotar no diário da tarefa {tdoc.id}: {exc}")
+
+    return count
+
+
+@https_fn.on_request(
+    timeout_sec=30,
+    memory=options.MemoryOption.MB_256,
+)
+def githubWebhook(req: https_fn.Request) -> https_fn.Response:
+    """Receptor HTTP de webhooks do GitHub para registrar eventos no diário da ação."""
+    if req.method != "POST":
+        return https_fn.Response("Method Not Allowed", status=405)
+
+    db = get_db()
+    secret = _obter_github_webhook_secret(db)
+    if not secret:
+        print("[githubWebhook] Falha de configuracao: github_webhook_secret nao configurado em system/api_keys nem em os.environ.")
+        return https_fn.Response("Webhook secret not configured", status=500)
+
+    # 1. Valida assinatura
+    corpo_bruto = req.get_data()
+    sig_header = req.headers.get("X-Hub-Signature-256")
+    if not verificar_assinatura_github(corpo_bruto, sig_header, secret):
+        print("[githubWebhook] Assinatura ausente ou invalida.")
+        return https_fn.Response("Unauthorized", status=401)
+
+    # 2. Trata ping
+    evento = req.headers.get("X-GitHub-Event", "")
+    if evento == "ping":
+        return https_fn.Response("pong", status=200)
+
+    # 3. Deduplicacao por delivery_id
+    delivery_id = req.headers.get("X-GitHub-Delivery")
+    if delivery_id:
+        import core.idempotency
+        if not core.idempotency.check_and_register(db, delivery_id):
+            return https_fn.Response("Already processed", status=200)
+
+    # 4. Normaliza o evento (funcao pura)
+    try:
+        payload = json.loads(corpo_bruto.decode("utf-8")) if corpo_bruto else {}
+    except Exception:
+        payload = {}
+
+    normalizado = normalizar_evento_github(evento, payload)
+    if not normalizado:
+        return https_fn.Response("Ignored event", status=200)
+
+    # 5. Anota no acompanhamento das tarefas vinculadas
+    repo = normalizado["repo"]
+    nota = normalizado["nota"]
+    anotar_evento_github_em_tarefas(db, repo, nota)
+
+    return https_fn.Response("OK", status=200)
+
