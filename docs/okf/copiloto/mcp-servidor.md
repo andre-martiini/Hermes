@@ -58,6 +58,12 @@ Permite a sessões agendadas do Claude consumir e fechar itens da fila de trabal
 - **`consultar_pedidos_agente`** (leitura): lista pedidos pendentes (ex.: `tipo: "consolidar_audio"`), ordenados do mais antigo para o mais recente.
 - **`concluir_pedido_agente`** (escrita): conclui o pedido com `resultado` ou registra `erro`. **Nota de segurança:** não exige confirmação prévia no MCP porque fecha trabalho interno sem produzir efeitos em terceiros.
 
+### Observabilidade de execuções do agente (`registrar_execucao_agente`, `consultar_execucoes_agente`)
+
+Permite registrar e consultar o histórico de execuções de rotinas agendadas do Claude (`agent_runs`) para métricas de proatividade e autoaperfeiçoamento (Eixo 6).
+- **`registrar_execucao_agente`** (escrita): grava o desfecho de uma rotina (`rotina`, `resumo`, `status`, `contadores`, `erro`). **Nota de segurança:** não exige confirmação prévia no MCP por ser telemetria interna sem efeito em terceiros.
+- **`consultar_execucoes_agente`** (leitura): consulta execuções recentes, opcionalmente filtrando por rotina, ordenadas da mais recente para a mais antiga.
+
 ### Escrita: direta, não em dois passos
 
 As tools `preparar_*` **não gravam nada**: montam uma proposta que a UI web
