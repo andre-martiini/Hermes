@@ -286,11 +286,16 @@ def criar_rascunho(
     destino_real = res_dest.get("chat_id") or contact_number
 
     # Verifica se o tipo de rascunho tem envio imediato ou está promovido para autonomia com janela
+    scheduled_for = None
     if envio_imediato:
         is_promovido = False
         janela_min = 0
         envio_liberado_em = None
         status_inicial = STATUS_PENDING
+        # Envio imediato é "agendado para agora", não "sem agendamento": o worker
+        # seleciona jobs pendentes com scheduled_for <= agora(), e essa comparação
+        # no Firestore exclui documentos com o campo null/ausente.
+        scheduled_for = datetime.datetime.now(timezone.utc)
     else:
         promovidos = _tipos_promovidos(db)
         is_promovido = tipo_limpo.lower() in promovidos
@@ -317,6 +322,8 @@ def criar_rascunho(
     }
     if is_promovido:
         payload["envio_liberado_em"] = envio_liberado_em
+    if scheduled_for is not None:
+        payload["scheduled_for"] = scheduled_for
 
     doc_ref.set(payload)
 

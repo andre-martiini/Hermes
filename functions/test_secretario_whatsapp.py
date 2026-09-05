@@ -270,6 +270,10 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
         self.assertEqual(rascunho["status"], outbox_aprovacao.STATUS_PENDING)
         self.assertIsNone(rascunho.get("envio_liberado_em"))
         self.assertEqual(rascunho.get("telegram_message_id"), "tg-999")
+        # Regressão: envio imediato precisa gravar scheduled_for = agora, nunca
+        # null/ausente, senão a query `scheduled_for <= agora()` do worker jamais
+        # seleciona esse job.
+        self.assertIsNotNone(rascunho.get("scheduled_for"))
 
     def test_limite_duas_trocas_encerra_e_escala_para_atencao(self):
         chat_id = "5511999999999@c.us"
