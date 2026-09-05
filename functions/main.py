@@ -13666,8 +13666,27 @@ def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
     import secretario_whatsapp
     sec_cfg = secretario_whatsapp.obter_config_secretario(db)
 
+    ignored_raw = email_cfg.get("ignored_senders")
+    if ignored_raw is None:
+        ignored_senders = ["notifications@github.com", "@github.com"]
+    else:
+        ignored_senders = list(ignored_raw or [])
+
+    try:
+        from inbox_pendentes import _noise_config
+        noise_domains, _ = _noise_config(db)
+        for d in sorted(noise_domains):
+            d_norm = str(d).strip().lower()
+            if d_norm and d_norm not in ignored_senders:
+                ignored_senders.append(d_norm)
+    except Exception:
+        pass
+
     return {
-        "email_action_linker": {"enabled": bool(email_cfg.get("enabled", False))},
+        "email_action_linker": {
+            "enabled": bool(email_cfg.get("enabled", False)),
+            "ignored_senders": ignored_senders,
+        },
         "personal_diary": {"enabled": bool(diary_cfg.get("enabled", False))},
         "whatsapp_ingest": {
             "enabled": bool(wa_cfg.get("enabled", False)),
@@ -13705,7 +13724,7 @@ def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
     }
 
 
-@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)
+@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=60)
 def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
     """Atualiza o subconjunto whitelisted de system/settings das automações
     multi-canal. Usa merge com dicts aninhados (não field paths com ponto —
@@ -13715,10 +13734,28 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
 
     data = req.data or {}
     updates: dict = {}
+    db = get_db()
+    dismissed_count = 0
 
     email_cfg = data.get("email_action_linker")
-    if isinstance(email_cfg, dict) and "enabled" in email_cfg:
-        updates["email_action_linker"] = {"enabled": bool(email_cfg["enabled"])}
+    if isinstance(email_cfg, dict):
+        email_updates: dict = {}
+        if "enabled" in email_cfg:
+            email_updates["enabled"] = bool(email_cfg["enabled"])
+        if "ignored_senders" in email_cfg and isinstance(email_cfg["ignored_senders"], list):
+            ignored_list = [str(x).strip().lower() for x in email_cfg["ignored_senders"] if str(x).strip()]
+            email_updates["ignored_senders"] = ignored_list
+            try:
+                db.collection("config").document("inbox_pendentes").set({
+                    "remetentes_ignorados": ignored_list
+                }, merge=True)
+            except Exception:
+                pass
+            if email_cfg.get("dismiss_matching_pending", False):
+                from email_action_linker import dismiss_matching_pending_emails
+                dismissed_count = dismiss_matching_pending_emails(db, ignored_list)
+        if email_updates:
+            updates["email_action_linker"] = email_updates
 
     diary_cfg = data.get("personal_diary")
     if isinstance(diary_cfg, dict) and "enabled" in diary_cfg:
@@ -13772,9 +13809,25 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
     if not updates:
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="Nenhum campo valido para atualizar.")
 
-    db = get_db()
     db.collection("system").document("settings").set(updates, merge=True)
-    return {"success": True}
+    return {"success": True, "dismissed_pending_count": dismissed_count}
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=60)
+def dismissPendingIgnoredEmails(req: https_fn.CallableRequest) -> dict:
+    """Descarta todas as sugestões de e-mail pendentes ou expiradas cujo remetente
+    case com a lista de ignorados configurada em system/settings."""
+    _require_internal_user(req)
+    db = get_db()
+    from email_action_linker import _load_settings, dismiss_matching_pending_emails
+    # Leitura direta do Firestore sem cache de 60s (P2.3)
+    settings = _load_settings(db, use_cache=False)
+    ignored_patterns = settings.get("ignored_senders", [])
+    if not ignored_patterns:
+        return {"dismissed_count": 0}
+
+    count = dismiss_matching_pending_emails(db, ignored_patterns)
+    return {"dismissed_count": count}
 
 
 @https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)

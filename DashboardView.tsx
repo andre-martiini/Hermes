@@ -427,6 +427,8 @@ const EmailLinkSuggestionsPanel: React.FC<{
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
     const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
+    const [searchQuery, setSearchQuery] = useState('');
+    const [dismissingAll, setDismissingAll] = useState(false);
 
     useEffect(() => {
         const unsubscribers = (['pending', 'expired'] as const).map(status => {
@@ -443,6 +445,35 @@ const EmailLinkSuggestionsPanel: React.FC<{
         () => [...suggestions].sort((a, b) => (b.analyzed_at || '').localeCompare(a.analyzed_at || '')),
         [suggestions]
     );
+
+    const filtered = useMemo(() => {
+        if (!searchQuery.trim()) return sorted;
+        const q = searchQuery.toLowerCase().trim();
+        return sorted.filter(s =>
+            (s.titulo_sinal || '').toLowerCase().includes(q) ||
+            (s.origem_sinal || '').toLowerCase().includes(q) ||
+            (s.task_titulo || '').toLowerCase().includes(q) ||
+            (s.resumo || '').toLowerCase().includes(q)
+        );
+    }, [sorted, searchQuery]);
+
+    const dismissAllVisible = async () => {
+        if (!filtered.length) return;
+        setDismissingAll(true);
+        try {
+            const nowIso = new Date().toISOString();
+            await Promise.all(
+                filtered.map(s => updateDoc(doc(db, 'email_action_suggestions', s.id), {
+                    status: 'dismissed',
+                    decided_at: nowIso,
+                }))
+            );
+        } catch (e) {
+            console.error('Falha ao dispensar sinais:', e);
+        } finally {
+            setDismissingAll(false);
+        }
+    };
 
     if (sorted.length === 0) return null;
 
@@ -638,7 +669,7 @@ const EmailLinkSuggestionsPanel: React.FC<{
                     >
                         <div className={`flex items-center justify-between px-7 py-5 border-b shrink-0 ${isDark ? 'border-[#2a313d]' : 'border-slate-100'}`}>
                             <h3 className="text-base font-bold uppercase tracking-wider">
-                                Sinais para vincular a ações ({sorted.length})
+                                Sinais para vincular a ações ({filtered.length !== sorted.length ? `${filtered.length} de ${sorted.length}` : sorted.length})
                             </h3>
                             <button
                                 type="button"
@@ -651,8 +682,39 @@ const EmailLinkSuggestionsPanel: React.FC<{
                                 </svg>
                             </button>
                         </div>
+                        <div className={`px-7 py-3 border-b flex flex-wrap items-center gap-3 shrink-0 ${isDark ? 'border-[#2a313d] bg-white/[0.02]' : 'border-slate-100 bg-slate-50/50'}`}>
+                            <div className="relative flex-1 min-w-[200px]">
+                                <input
+                                    type="text"
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    placeholder="Filtrar por remetente, título, ação..."
+                                    className={`w-full text-xs rounded-lg px-3 py-2 pl-8 outline-none border transition focus:ring-2 focus:ring-[#9333ea] ${
+                                        isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/30' : 'bg-white border-slate-200 text-slate-900 placeholder:text-slate-400'
+                                    }`}
+                                />
+                                <svg className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                            </div>
+                            {filtered.length > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={dismissAllVisible}
+                                    disabled={dismissingAll}
+                                    title="Descarta todos os sinais atualmente visíveis no filtro"
+                                    className="text-[10px] font-black uppercase tracking-wider px-3 py-2 rounded-lg border transition disabled:opacity-50 text-rose-500 hover:bg-rose-500/10 border-rose-500/20"
+                                >
+                                    {dismissingAll ? 'Dispensando...' : `Dispensar visíveis (${filtered.length})`}
+                                </button>
+                            )}
+                        </div>
                         <div className="flex-1 min-h-0 overflow-y-auto px-7 py-5 flex flex-col gap-3">
-                            {sorted.map(suggestion => {
+                            {filtered.length === 0 ? (
+                                <div className="py-12 text-center text-xs font-mono text-slate-400">
+                                    Nenhum sinal encontrado{searchQuery ? ' para o filtro atual.' : '.'}
+                                </div>
+                            ) : filtered.map(suggestion => {
                                 const isExpanded = expandedIds.has(suggestion.id);
                                 const mutacoesDescritas = describeMutations(suggestion.mutacoes_propostas);
                                 return (

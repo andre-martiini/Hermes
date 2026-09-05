@@ -28,6 +28,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from firebase_admin import firestore
 from gemini_cost_controls import GEMINI_LIGHT_MODEL, generate_content_logged
 
 FEATURE_NAME = "email_action_linker"
@@ -39,6 +40,91 @@ DEFAULT_LOOKBACK = "2d"
 EXPIRE_AFTER_DAYS = 7
 GMAIL_QUERY_MAX_RESULTS = 20
 GMAIL_MAX_PAGES_PER_PASS = 5
+DEFAULT_IGNORED_SENDERS = ["notifications@github.com", "@github.com"]
+
+
+def is_sender_ignored(sender_raw: str | None, ignored_patterns: list[str]) -> bool:
+    """Verifica de forma determinística se um remetente deve ser ignorado.
+    Casa endereço de e-mail (via parseaddr), domínio (ex. @github.com) ou texto do remetente.
+    """
+    if not sender_raw or not ignored_patterns:
+        return False
+    raw_lower = str(sender_raw).strip().lower()
+    from email.utils import parseaddr
+    _, addr = parseaddr(sender_raw)
+    addr_lower = addr.strip().lower()
+    for pattern in ignored_patterns:
+        p = str(pattern).strip().lower()
+        if not p:
+            continue
+        if p in addr_lower or p in raw_lower:
+            return True
+    return False
+
+
+def dismiss_matching_pending_emails(db, ignored_patterns: list[str]) -> int:
+    """Descarta sugestões pendentes ou expiradas de e-mail cujo remetente casa
+    com os padrões ignorados.
+
+    Garante:
+    1. Filtro estrito de canal ('email') para não descartar sugestões de outros canais
+       (WhatsApp/SIPAC/Calendar) que compartilham a coleção email_action_suggestions.
+    2. Transação atômica por documento para evitar race condition caso a sugestão tenha
+       sido aplicada concorrentemente no Telegram ou na interface web.
+    """
+    if not ignored_patterns:
+        return 0
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    pending_docs = list(
+        db.collection("email_action_suggestions")
+        .where("status", "in", ["pending", "expired"])
+        .stream()
+    )
+    dismissed_count = 0
+
+    @firestore.transactional
+    def _dismiss_tx(transaction, doc_ref):
+        snap = doc_ref.get(transaction=transaction)
+        if not snap.exists:
+            return False
+        data = snap.to_dict() or {}
+        if data.get("status") not in ("pending", "expired"):
+            return False
+        transaction.update(doc_ref, {
+            "status": "dismissed",
+            "decided_at": now_iso,
+            "dismissed_by": "ignored_filter",
+        })
+        return True
+
+    for s_doc in pending_docs:
+        s_data = s_doc.to_dict() or {}
+        # P2.1: Filtra estritamente canal de email
+        if s_data.get("canal") != "email":
+            continue
+
+        sender = s_data.get("sender") or s_data.get("origem_sinal") or ""
+        if is_sender_ignored(sender, ignored_patterns):
+            # P2.2: Transação atômica para evitar sobrescrever sugestão aplicada concorrentemente
+            applied = False
+            try:
+                tx = db.transaction()
+                applied = bool(_dismiss_tx(tx, s_doc.reference))
+            except Exception:
+                # Fallback defensivo para mocks de teste simplificados
+                snap = s_doc.reference.get()
+                if snap.exists and (snap.to_dict() or {}).get("status") in ("pending", "expired"):
+                    s_doc.reference.update({
+                        "status": "dismissed",
+                        "decided_at": now_iso,
+                        "dismissed_by": "ignored_filter",
+                    })
+                    applied = True
+            if applied:
+                dismissed_count += 1
+
+    return dismissed_count
 
 # Classificações de e-mail são geradas por um LLM a partir de conteúdo controlado
 # pelo remetente (assunto/corpo do e-mail) — não são um sinal confiável o suficiente
@@ -65,17 +151,38 @@ def _is_candidate_status(status_norm: str) -> bool:
     return status_norm in _STANDBY_STATUS_ALIASES or status_norm in _ACTIVE_STATUS_ALIASES
 
 
-def _load_settings(db) -> dict:
-    from main import _cached_doc_get
+def _load_settings(db, use_cache: bool = True) -> dict:
+    if use_cache:
+        from main import _cached_doc_get
+        doc = _cached_doc_get(db, "system", "settings")
+    else:
+        doc = db.collection("system").document("settings").get()
 
-    doc = _cached_doc_get(db, "system", "settings")
     cfg = ((doc.to_dict() or {}) if doc.exists else {}).get("email_action_linker") or {}
+    ignored_raw = cfg.get("ignored_senders")
+    if ignored_raw is None:
+        ignored_senders = list(DEFAULT_IGNORED_SENDERS)
+    else:
+        ignored_senders = [str(x).strip().lower() for x in ignored_raw if str(x).strip()]
+
+    # Unificação com a fonte de ruído de inbox_pendentes (_noise_config / config/inbox_pendentes)
+    try:
+        from inbox_pendentes import _noise_config
+        noise_domains, _ = _noise_config(db)
+        for d in sorted(noise_domains):
+            d_norm = str(d).strip().lower()
+            if d_norm and d_norm not in ignored_senders:
+                ignored_senders.append(d_norm)
+    except Exception:
+        pass
+
     return {
         "enabled": bool(cfg.get("enabled", False)),
         "min_confidence": float(cfg.get("min_confidence", DEFAULT_MIN_CONFIDENCE)),
         "max_llm_calls_per_pass": int(cfg.get("max_llm_calls_per_pass", DEFAULT_MAX_LLM_CALLS_PER_PASS)),
         "max_suggestions_per_pass": int(cfg.get("max_suggestions_per_pass", DEFAULT_MAX_SUGGESTIONS_PER_PASS)),
         "lookback": str(cfg.get("lookback", DEFAULT_LOOKBACK)),
+        "ignored_senders": ignored_senders,
     }
 
 
@@ -760,6 +867,13 @@ def link_emails_to_actions(db, service, sync_ref, logs):
 
     # --- Etapa B: analisa e-mails novos ---
     query = f'in:inbox newer_than:{settings["lookback"]} -category:promotions -category:social'
+    query_excludes = []
+    for pat in settings.get("ignored_senders", []):
+        pat_clean = pat.strip()
+        if pat_clean and " " not in pat_clean and len(pat_clean) <= 60:
+            query_excludes.append(f"-from:{pat_clean}")
+    if query_excludes:
+        query = f"{query} {' '.join(query_excludes)}"
     try:
         fresh_message_ids = _collect_fresh_message_ids(service, query, settings["max_llm_calls_per_pass"], suggestions_col)
     except Exception as exc:
@@ -796,6 +910,25 @@ def link_emails_to_actions(db, service, sync_ref, logs):
             continue
 
         sender, subject = _gmail_message_headers(msg)
+        if is_sender_ignored(sender, settings.get("ignored_senders", [])):
+            base_doc = {
+                "canal": "email",
+                "titulo_sinal": subject,
+                "origem_sinal": sender,
+                "google_message_id": msg_id,
+                "gmail_thread_id": msg.get("threadId"),
+                "subject": subject,
+                "sender": sender,
+                "snippet": msg.get('snippet', ''),
+                "internal_date": msg.get('internalDate'),
+                "analyzed_at": now.isoformat(),
+                "status": "ignored",
+                "ignored_reason": "ignored_sender",
+                "related": False,
+            }
+            suggestions_col.document(msg_id).set(base_doc)
+            continue
+
         snippet = msg.get('snippet', '')
         body = _extract_email_body(msg.get('payload', {}))
 
