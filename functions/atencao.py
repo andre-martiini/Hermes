@@ -31,12 +31,15 @@ _TZ_SP = zoneinfo.ZoneInfo("America/Sao_Paulo")
 COLLECTION = "atencao"
 
 # Origens permitidas
-ORIGENS = ("acao", "whatsapp", "email", "agenda", "repo", "financeiro", "saude")
+ORIGENS = ("acao", "whatsapp", "email", "agenda", "repo", "financeiro", "saude", "secretario_whatsapp")
 
 # Tipos de detectores
 TIPO_AGUARDANDO_TERCEIRO_VENCIDO = "aguardando_terceiro_vencido"
 TIPO_CONTA_VENCENDO = "conta_vencendo"
 TIPO_ROTINA_SAUDE_AUSENTE = "rotina_saude_ausente"
+TIPO_SECRETARIO_DECISAO_FORCADA = "secretario_decisao_forcada"
+TIPO_SECRETARIO_INSISTENCIA = "secretario_insistencia"
+TIPO_SECRETARIO_ASSUNTO_SENSIVEL = "secretario_assunto_sensivel"
 
 # Prioridades
 PRIORIDADE_ALTA = "alta"

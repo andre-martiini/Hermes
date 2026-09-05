@@ -214,14 +214,18 @@ def _obter_janela_cancelamento_min(db) -> int:
 
 def _tipos_promovidos(db) -> set[str]:
     """Lê diretamente os tipos promovidos cadastrados em system/mcp_access."""
+    promovidos: set[str] = set()
     try:
         snap = db.collection("system").document("mcp_access").get()
         if snap.exists:
             lista = (snap.to_dict() or {}).get("tipos_promovidos") or []
-            return {str(t).strip().lower() for t in lista if str(t).strip()}
+            promovidos = {str(t).strip().lower() for t in lista if str(t).strip()}
     except Exception as err:
         print(f"[OutboxAprovacao] Falha ao ler tipos_promovidos de system/mcp_access: {err}")
-    return set()
+    # O tipo secretario_whatsapp é promovido para autonomia com janela de cancelamento
+    # por definição arquitetural do Modo Secretário (veto humano garantido).
+    promovidos.add("secretario_whatsapp")
+    return promovidos
 
 
 def criar_rascunho(
