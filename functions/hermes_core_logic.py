@@ -5485,6 +5485,42 @@ def _process_telegram_message(db, data: dict):
         )
         return f"Proposta de WhatsApp gerada. Draft: {draft}\n\n[SISTEMA: Os botões de confirmação serão anexados automaticamente a esta resposta.]"
 
+    # O Telegram usa closures próprias (inclusive confirmações por botões),
+    # não o catálogo MCP. Reutilizar os handlers mantém a regra de negócio única.
+    def ativar_modo_secretario(contatos: list[str] = None, duracao_horas: float = None) -> str:
+        """Ativa o atendimento autônomo no WhatsApp para contatos autorizados.
+
+        Args:
+            contatos: Nomes, telefones ou JIDs. Omitir mantém a lista atual.
+            duracao_horas: Duração em horas; 0.5 equivale a 30 minutos.
+                Omitir mantém ativo até desligar manualmente.
+        """
+        from tools.hermes_tools import execute
+        from tools.tool_context import ToolContext
+
+        resultado = execute(
+            "ativar_modo_secretario",
+            {"contatos": contatos, "duracao_horas": duracao_horas},
+            ToolContext(_db=db, canal="telegram"),
+        )
+        return json.dumps(resultado, ensure_ascii=False, default=str)
+
+    def desativar_modo_secretario() -> str:
+        """Desativa imediatamente o atendimento autônomo do Modo Secretário no WhatsApp."""
+        from tools.hermes_tools import execute
+        from tools.tool_context import ToolContext
+
+        resultado = execute("desativar_modo_secretario", {}, ToolContext(_db=db, canal="telegram"))
+        return json.dumps(resultado, ensure_ascii=False, default=str)
+
+    def consultar_status_modo_secretario() -> str:
+        """Consulta se o Modo Secretário está ativo, seus contatos e a expiração."""
+        from tools.hermes_tools import execute
+        from tools.tool_context import ToolContext
+
+        resultado = execute("consultar_status_modo_secretario", {}, ToolContext(_db=db, canal="telegram"))
+        return json.dumps(resultado, ensure_ascii=False, default=str)
+
     tools_list = [
 
         consultar_historico_acoes,
@@ -5505,6 +5541,9 @@ def _process_telegram_message(db, data: dict):
         propor_lancamento_financeiro,
         schedule_whatsapp_message,
         agendar_lembrete_acao,
+        ativar_modo_secretario,
+        desativar_modo_secretario,
+        consultar_status_modo_secretario,
     ]
 
 
