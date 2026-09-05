@@ -130,14 +130,45 @@ def validar_regra_agenda(eventos_conflito: list[dict] | None) -> dict:
     }
 
 
+def _agora_sp() -> datetime.datetime:
+    """Retorna o datetime atual no fuso de São Paulo (UTC-3)."""
+    tz_sp = datetime.timezone(datetime.timedelta(hours=-3))
+    return datetime.datetime.now(tz_sp)
+
+
+def _esta_expirado(valido_ate_iso: str | None, agora: datetime.datetime | None = None) -> bool:
+    """Verifica se o timestamp ISO informado já expirou em relação ao instante de referência."""
+    if not valido_ate_iso:
+        return False
+    try:
+        limite = datetime.datetime.fromisoformat(str(valido_ate_iso))
+        ref = agora or _agora_sp()
+        if limite.tzinfo is None:
+            limite = limite.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=-3)))
+        return ref > limite
+    except Exception as exc:
+        print(f"[SecretarioWhatsApp] Erro ao parsear validade_iso '{valido_ate_iso}': {exc}")
+        return False
+
+
 def obter_config_secretario(db) -> dict:
-    """Lê as configurações de whatsapp_secretario em system/settings."""
+    """Lê as configurações de whatsapp_secretario em system/settings.
+    
+    Aplica expiração passiva na leitura: se desativa_em estiver preenchido e já
+    tiver expirado, trata enabled como False sem exigir cron job.
+    """
     try:
         snap = db.collection("system").document("settings").get()
         data = (snap.to_dict() or {}) if snap.exists else {}
         cfg = data.get("whatsapp_secretario") or {}
+        desativa_em = cfg.get("desativa_em")
+        enabled = bool(cfg.get("enabled", False))
+        if enabled and desativa_em:
+            if _esta_expirado(desativa_em):
+                enabled = False
         return {
-            "enabled": bool(cfg.get("enabled", False)),
+            "enabled": enabled,
+            "desativa_em": desativa_em,
             "chats_allowlist": [str(x).strip() for x in (cfg.get("chats_allowlist") or []) if str(x).strip()],
             "max_trocas": int(cfg.get("max_trocas", DEFAULT_MAX_TROCAS)),
             "max_trocas_prioritario": int(cfg.get("max_trocas_prioritario", DEFAULT_MAX_TROCAS_PRIORITARIO)),
@@ -147,11 +178,234 @@ def obter_config_secretario(db) -> dict:
         print(f"[SecretarioWhatsApp] Erro ao ler system/settings: {exc}")
         return {
             "enabled": False,
+            "desativa_em": None,
             "chats_allowlist": [],
             "max_trocas": DEFAULT_MAX_TROCAS,
             "max_trocas_prioritario": DEFAULT_MAX_TROCAS_PRIORITARIO,
             "janela_cancelamento_min": DEFAULT_JANELA_MIN,
         }
+
+
+def _andre_ids(db) -> set[str]:
+    """Obtém o conjunto de chat_ids do André a partir de system/settings.whatsapp_ingest.andre_chat_ids."""
+    try:
+        settings = db.collection("system").document("settings").get()
+        data = settings.to_dict() if settings.exists else {}
+        ingest = (data or {}).get("whatsapp_ingest") or {}
+        return {str(x).strip() for x in (ingest.get("andre_chat_ids") or []) if str(x).strip()}
+    except Exception:
+        return set()
+
+
+def resolver_identificador_contato(db, identificador_contato: str, ctx=None) -> tuple[str, str]:
+    """Resolve um nome, telefone ou JID para (chat_id, chat_name)."""
+    identificador = str(identificador_contato or "").strip()
+    if not identificador:
+        raise ValueError("Identificador do contato não pode ser vazio.")
+
+    # Se já for um JID válido (@c.us, @lid ou @g.us)
+    if "@" in identificador and (identificador.endswith("@c.us") or identificador.endswith("@lid") or identificador.endswith("@g.us")):
+        chat_name = identificador
+        try:
+            doc = db.collection("whatsapp_chats").document(identificador).get()
+            if doc.exists:
+                chat_name = str((doc.to_dict() or {}).get("chat_name") or identificador)
+        except Exception:
+            pass
+        return identificador, chat_name
+
+    # Tenta usar _destinatario_whatsapp_previa
+    try:
+        from tools import hermes_tools
+        if ctx is None:
+            class _SimpleCtx:
+                def __init__(self, db_inst):
+                    self.db = db_inst
+                    self.user_uid = "system"
+            ctx = _SimpleCtx(db)
+        
+        previa = hermes_tools._destinatario_whatsapp_previa(ctx, identificador)
+        if previa.get("encontrado") and previa.get("chat_id"):
+            return str(previa["chat_id"]).strip(), str(previa.get("nome") or identificador).strip()
+    except Exception as exc:
+        print(f"[SecretarioWhatsApp] Aviso ao resolver via previa: {exc}")
+
+    # Fallback 1: busca por nome ou telefone em perfil_pessoas
+    try:
+        termo_lower = identificador.lower()
+        for doc in db.collection("perfil_pessoas").limit(200).stream():
+            data = doc.to_dict() or {}
+            nome = str(data.get("nome") or "").strip()
+            telefones = data.get("telefones") or []
+            if isinstance(telefones, str):
+                telefones = [telefones]
+            telefones_limpos = [re.sub(r"\D", "", str(t)) for t in telefones]
+
+            digitos_busca = re.sub(r"\D", "", identificador)
+            bate_telefone = bool(digitos_busca and any(digitos_busca in t or t in digitos_busca for t in telefones_limpos if t))
+            bate_nome = bool(termo_lower and termo_lower in nome.lower())
+
+            if bate_nome or bate_telefone:
+                for t in telefones_limpos:
+                    if t:
+                        return f"{t}@c.us", nome or identificador
+    except Exception as exc:
+        print(f"[SecretarioWhatsApp] Aviso ao buscar em perfil_pessoas: {exc}")
+
+    # Fallback 2: busca por nome em whatsapp_chats
+    try:
+        termo_lower = identificador.lower()
+        for doc in db.collection("whatsapp_chats").limit(200).stream():
+            data = doc.to_dict() or {}
+            chat_name = str(data.get("chat_name") or "").strip()
+            if termo_lower in chat_name.lower():
+                return doc.id, chat_name
+    except Exception as exc:
+        print(f"[SecretarioWhatsApp] Aviso ao buscar em whatsapp_chats: {exc}")
+
+    # Fallback 3: dígitos numéricos diretos (formata como @c.us)
+    digitos = re.sub(r"\D", "", identificador)
+    if digitos:
+        return f"{digitos}@c.us", identificador
+
+    return identificador, identificador
+
+
+def ativar_modo_secretario(
+    db,
+    contatos: list[str] | None = None,
+    duracao_horas: float | None = None,
+    ctx=None,
+) -> dict:
+    """Ativa o Modo Secretário no WhatsApp em system/settings.
+    
+    - contatos: Opcional. Lista de nomes, telefones ou JIDs. Se fornecido, substitui
+      a chats_allowlist resolvendo cada entrada para chat_id. Se omitido, preserva a existente.
+    - duracao_horas: Opcional. Se informado, calcula e grava desativa_em (ISO).
+      A configuração expirará automaticamente na leitura. Se omitido, desativa_em é setado para None.
+    """
+    settings_ref = db.collection("system").document("settings")
+    snap = settings_ref.get()
+    settings_data = (snap.to_dict() or {}) if snap.exists else {}
+    sec_cfg = dict(settings_data.get("whatsapp_secretario") or {})
+
+    sec_cfg["enabled"] = True
+
+    desativa_em = None
+    if duracao_horas is not None and float(duracao_horas) > 0:
+        limite = _agora_sp() + datetime.timedelta(hours=float(duracao_horas))
+        desativa_em = limite.isoformat()
+        sec_cfg["desativa_em"] = desativa_em
+    else:
+        sec_cfg["desativa_em"] = None
+
+    contatos_resolvidos = []
+    if contatos is not None:
+        nova_allowlist = []
+        for item in contatos:
+            item_str = str(item or "").strip()
+            if not item_str:
+                continue
+            try:
+                cid, cname = resolver_identificador_contato(db, item_str, ctx=ctx)
+                nova_allowlist.append(cid)
+                contatos_resolvidos.append({"identificador": item_str, "chat_id": cid, "nome": cname})
+            except Exception as exc:
+                print(f"[SecretarioWhatsApp] Erro ao resolver contato '{item_str}': {exc}")
+                nova_allowlist.append(item_str)
+                contatos_resolvidos.append({"identificador": item_str, "chat_id": item_str, "nome": item_str})
+        sec_cfg["chats_allowlist"] = list(dict.fromkeys(nova_allowlist))
+    else:
+        allowlist = list(sec_cfg.get("chats_allowlist") or [])
+        sec_cfg["chats_allowlist"] = allowlist
+
+    settings_ref.set({"whatsapp_secretario": sec_cfg}, merge=True)
+
+    msg_partes = ["Modo Secretário ativado com sucesso."]
+    if desativa_em:
+        msg_partes.append(f"Ativo por {duracao_horas}h (até {desativa_em}).")
+    else:
+        msg_partes.append("Ativo por tempo indeterminado até desligamento manual.")
+    
+    if contatos is not None:
+        msg_partes.append(f"Allowlist configurada para {len(sec_cfg['chats_allowlist'])} contato(s).")
+    else:
+        msg_partes.append(f"Allowlist existente preservada com {len(sec_cfg.get('chats_allowlist', []))} contato(s).")
+
+    return {
+        "success": True,
+        "enabled": True,
+        "desativa_em": desativa_em,
+        "chats_allowlist": sec_cfg.get("chats_allowlist", []),
+        "contatos_resolvidos": contatos_resolvidos,
+        "mensagem": " ".join(msg_partes),
+    }
+
+
+def desativar_modo_secretario(db) -> dict:
+    """Desativa imediatamente o Modo Secretário no WhatsApp (enabled: False, desativa_em: None)."""
+    settings_ref = db.collection("system").document("settings")
+    snap = settings_ref.get()
+    settings_data = (snap.to_dict() or {}) if snap.exists else {}
+    sec_cfg = dict(settings_data.get("whatsapp_secretario") or {})
+
+    sec_cfg["enabled"] = False
+    sec_cfg["desativa_em"] = None
+
+    settings_ref.set({"whatsapp_secretario": sec_cfg}, merge=True)
+
+    return {
+        "success": True,
+        "enabled": False,
+        "desativa_em": None,
+        "chats_allowlist": sec_cfg.get("chats_allowlist", []),
+        "mensagem": "Modo Secretário desativado com sucesso.",
+    }
+
+
+def consultar_status_modo_secretario(db) -> dict:
+    """Consulta o status atual do Modo Secretário (enabled, chats_allowlist, desativa_em)."""
+    cfg = obter_config_secretario(db)
+    enabled = cfg.get("enabled", False)
+    desativa_em = cfg.get("desativa_em")
+    allowlist = cfg.get("chats_allowlist", [])
+
+    contatos_detalhes = []
+    for cid in allowlist:
+        nome = cid
+        try:
+            doc = db.collection("whatsapp_chats").document(cid).get()
+            if doc.exists:
+                nome = str((doc.to_dict() or {}).get("chat_name") or cid)
+        except Exception:
+            pass
+        contatos_detalhes.append({"chat_id": cid, "nome": nome})
+
+    msg_partes = []
+    if enabled:
+        msg_partes.append("O Modo Secretário está ATIVO no WhatsApp.")
+        if desativa_em:
+            msg_partes.append(f"Programado para desativar em: {desativa_em}.")
+        else:
+            msg_partes.append("Sem expiração automática programada (ativo até desligamento manual).")
+    else:
+        msg_partes.append("O Modo Secretário está DESATIVADO no WhatsApp.")
+        if desativa_em and _esta_expirado(desativa_em):
+            msg_partes.append(f"(Expirou passivamente em {desativa_em}).")
+
+    if allowlist:
+        nomes = [c["nome"] for c in contatos_detalhes]
+        msg_partes.append(f"Contatos/grupos autorizados ({len(allowlist)}): {', '.join(nomes)}.")
+    else:
+        msg_partes.append("Nenhum contato na allowlist configurada (vazio).")
+
+    return {
+        "enabled": enabled,
+        "desativa_em": desativa_em,
+        "chats_allowlist": allowlist,
+        "contatos_detalhes": contatos_detalhes,
+        "mensagem": " ".join(msg_partes),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -991,23 +1245,27 @@ def processar_mensagem_secretario(
         processar_mensagem_from_me(db, mensagem)
         return None
 
-    # Fast path 2: Ignora mensagens de grupos
-    if mensagem.get("is_group"):
-        return None
-
     chat_id = str(mensagem.get("chat_id") or "").strip()
     if not chat_id:
         return None
 
-    # Fast path 3: Configuração em system/settings
+    # Fast path 2: Configuração em system/settings
     cfg = obter_config_secretario(db)
     if not cfg.get("enabled"):
         return None
 
-    # Fast path 4: Verifica briefing ativo ou allowlist
+    # Fast path 3: Verifica briefing ativo ou allowlist (tanto conversas diretas quanto grupos precisam de autorização)
     briefing = obter_briefing_ativo(db, chat_id)
     if not briefing and not chat_na_allowlist(chat_id, cfg.get("chats_allowlist")):
         return None
+
+    # Fast path 4: Em grupos autorizados, só responde na mensagem específica se o André for mencionado
+    if mensagem.get("is_group"):
+        mentions = {str(x).strip() for x in (mensagem.get("mentioned_ids") or []) if str(x).strip()}
+        andre_ids = _andre_ids(db)
+        mentions_andre = bool(mensagem.get("mentions_andre") or (mentions & andre_ids))
+        if not mentions_andre:
+            return None
 
     texto_msg = str(
         mensagem.get("content")

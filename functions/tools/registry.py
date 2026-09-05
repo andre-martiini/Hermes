@@ -127,6 +127,10 @@ _CATALOG: dict[str, str] = {
     "preparar_contato_prioritario_secretario": "Registra um briefing prioritário para o Modo Secretário no WhatsApp atender um contato específico durante a indisponibilidade do André",
     "consultar_contatos_prioritarios_secretario": "Lista os briefings prioritários cadastrados para o Modo Secretário no WhatsApp",
     "cancelar_contato_prioritario_secretario": "Cancela ou encerra antecipadamente o briefing prioritário de um contato no Modo Secretário",
+    # Modo Secretário no WhatsApp (ativação self-service)
+    "ativar_modo_secretario": "Ativa o Modo Secretário no WhatsApp com contatos autorizados e duração opcional",
+    "desativar_modo_secretario": "Desativa imediatamente o Modo Secretário no WhatsApp",
+    "consultar_status_modo_secretario": "Consulta o status atual do Modo Secretário (ativo, contatos na allowlist e expiração)",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {

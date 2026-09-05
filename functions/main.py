@@ -13658,6 +13658,13 @@ def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
     wa_cfg = data.get("whatsapp_ingest") or {}
     atencao_cfg = data.get("atencao") or {}
     aguardando_cfg = atencao_cfg.get("aguardando_terceiro") or {}
+    fin_cfg = atencao_cfg.get("financeiro") or {}
+    saude_cfg = atencao_cfg.get("saude") or {}
+    promessa_cfg = atencao_cfg.get("promessa_sem_retorno") or {}
+    audio_cfg = atencao_cfg.get("audio_relevante") or {}
+
+    import secretario_whatsapp
+    sec_cfg = secretario_whatsapp.obter_config_secretario(db)
 
     return {
         "email_action_linker": {"enabled": bool(email_cfg.get("enabled", False))},
@@ -13671,9 +13678,26 @@ def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
             "capturar_todos": bool(wa_cfg.get("capturar_todos", False)),
             "leitura_total": bool(wa_cfg.get("leitura_total", False)),
         },
+        "whatsapp_secretario": {
+            "enabled": bool(sec_cfg.get("enabled", False)),
+            "chats_allowlist": list(sec_cfg.get("chats_allowlist") or []),
+            "desativa_em": sec_cfg.get("desativa_em"),
+        },
         "atencao": {
             "aguardando_terceiro": {
                 "enabled": bool(aguardando_cfg.get("enabled", False)),
+            },
+            "financeiro": {
+                "enabled": bool(fin_cfg.get("enabled", False)),
+            },
+            "saude": {
+                "enabled": bool(saude_cfg.get("enabled", False)),
+            },
+            "promessa_sem_retorno": {
+                "enabled": bool(promessa_cfg.get("enabled", False)),
+            },
+            "audio_relevante": {
+                "enabled": bool(audio_cfg.get("enabled", False)),
             },
         },
         "whatsapp_auto_send_enabled": bool(data.get("whatsapp_auto_send_enabled", False)),
@@ -13716,12 +13740,27 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
         if wa_updates:
             updates["whatsapp_ingest"] = wa_updates
 
+    sec_cfg = data.get("whatsapp_secretario")
+    if isinstance(sec_cfg, dict):
+        sec_updates: dict = {}
+        if "enabled" in sec_cfg:
+            sec_updates["enabled"] = bool(sec_cfg["enabled"])
+            if not sec_updates["enabled"]:
+                sec_updates["desativa_em"] = None
+        if "chats_allowlist" in sec_cfg and isinstance(sec_cfg["chats_allowlist"], list):
+            sec_updates["chats_allowlist"] = [str(x).strip() for x in sec_cfg["chats_allowlist"] if str(x).strip()]
+        if "desativa_em" in sec_cfg:
+            sec_updates["desativa_em"] = sec_cfg["desativa_em"]
+        if sec_updates:
+            updates["whatsapp_secretario"] = sec_updates
+
     atencao_cfg = data.get("atencao")
     if isinstance(atencao_cfg, dict):
         atencao_updates: dict = {}
-        aguardando_cfg = atencao_cfg.get("aguardando_terceiro")
-        if isinstance(aguardando_cfg, dict) and "enabled" in aguardando_cfg:
-            atencao_updates["aguardando_terceiro"] = {"enabled": bool(aguardando_cfg["enabled"])}
+        for sub in ("aguardando_terceiro", "financeiro", "saude", "promessa_sem_retorno", "audio_relevante"):
+            sub_cfg = atencao_cfg.get(sub)
+            if isinstance(sub_cfg, dict) and "enabled" in sub_cfg:
+                atencao_updates[sub] = {"enabled": bool(sub_cfg["enabled"])}
         if atencao_updates:
             updates["atencao"] = atencao_updates
 

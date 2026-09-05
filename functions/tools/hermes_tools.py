@@ -2033,6 +2033,31 @@ def _cancelar_contato_prioritario_secretario(ctx: ToolContext, args: dict):
     )
 
 
+def _ativar_modo_secretario(ctx: ToolContext, args: dict):
+    import secretario_whatsapp
+
+    contatos = args.get("contatos")
+    duracao_horas = args.get("duracao_horas")
+    return secretario_whatsapp.ativar_modo_secretario(
+        db=ctx.db,
+        contatos=contatos,
+        duracao_horas=duracao_horas,
+        ctx=ctx,
+    )
+
+
+def _desativar_modo_secretario(ctx: ToolContext, args: dict):
+    import secretario_whatsapp
+
+    return secretario_whatsapp.desativar_modo_secretario(db=ctx.db)
+
+
+def _consultar_status_modo_secretario(ctx: ToolContext, args: dict):
+    import secretario_whatsapp
+
+    return secretario_whatsapp.consultar_status_modo_secretario(db=ctx.db)
+
+
 # ---------------------------------------------------------------------------
 # Registro
 # ---------------------------------------------------------------------------
@@ -2125,6 +2150,9 @@ _HANDLERS: dict = {
     "preparar_contato_prioritario_secretario": _preparar_contato_prioritario_secretario,
     "consultar_contatos_prioritarios_secretario": _consultar_contatos_prioritarios_secretario,
     "cancelar_contato_prioritario_secretario": _cancelar_contato_prioritario_secretario,
+    "ativar_modo_secretario": _ativar_modo_secretario,
+    "desativar_modo_secretario": _desativar_modo_secretario,
+    "consultar_status_modo_secretario": _consultar_status_modo_secretario,
 }
 
 
