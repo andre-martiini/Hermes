@@ -8,12 +8,25 @@ import { BancoRespostasEditor } from './BancoRespostasEditor';
 import { DesdobramentoReuniaoModal } from './DesdobramentoReuniaoModal';
 import { listarBancos } from '../../services/bancosRespostasService';
 import type { BancoRespostas } from '../../utils/bancosRespostas';
+import {
+  buscarEventoReuniaoAtivoOuProximo,
+  casarBancoComEvento,
+  resolverBancoAutomatico,
+  type ReuniaoAtivaOuProxima,
+} from '../../utils/reuniaoAgenda';
+import type { GoogleCalendarEvent } from '@/types';
 
 export interface TranscriptionEntry {
   id: string;
   speaker: 'Você' | 'Reunião';
   text: string;
   timestamp: Date;
+}
+
+export interface RegistroConsentimento {
+  terceirosPresentes: boolean;
+  avisoConfirmado: boolean;
+  confirmadoEm: string;
 }
 
 export interface MeetingHistoryEntry {
@@ -27,12 +40,15 @@ export interface MeetingHistoryEntry {
   chats: Array<{ role: 'user' | 'assistant'; content: string; timestamp: string }>;
   firestoreId?: string;
   driveWebViewLink?: string;
+  consentimentoAviso?: RegistroConsentimento | null;
+  eventoCalendarId?: string | null;
 }
 
 interface MeetingTranscriptionToolProps {
   onBack: () => void;
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
   isDark?: boolean;
+  googleEvents?: GoogleCalendarEvent[];
 }
 
 const GROUP_WINDOW_MS = 7000;
@@ -189,7 +205,12 @@ const QUICK_PROMPTS: Array<{ label: string; prompt: string }> = [
   },
 ];
 
-export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> = ({ onBack, showToast, isDark = false }) => {
+export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> = ({
+  onBack,
+  showToast,
+  isDark = false,
+  googleEvents,
+}) => {
   const [isRecording, setIsRecording] = useState(false);
   const [isSavingToDrive, setIsSavingToDrive] = useState(false);
   const [transcripts, setTranscripts] = useState<TranscriptionEntry[]>([]);
@@ -202,6 +223,18 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
   const [bancoSelecionadoId, setBancoSelecionadoId] = useState<string>('');
   const [editorBancosAberto, setEditorBancosAberto] = useState(false);
   const [desdobramentoAberto, setDesdobramentoAberto] = useState(false);
+
+  // ── Vínculo Banco ↔ Reunião Google Calendar ────────────────────────────
+  const [eventosAgenda, setEventosAgenda] = useState<GoogleCalendarEvent[]>(googleEvents ?? []);
+  const [reuniaoAgendaAtiva, setReuniaoAgendaAtiva] = useState<ReuniaoAtivaOuProxima | null>(null);
+  const [bancoSugeridoAgendaId, setBancoSugeridoAgendaId] = useState<string | null>(null);
+  const [escolhaManualBanco, setEscolhaManualBanco] = useState(false);
+
+  // ── Aviso e Consentimento de Gravação (Terceiros Presentes) ─────────────
+  const [terceirosPresentes, setTerceirosPresentes] = useState(false);
+  const [avisoConsentimento, setAvisoConsentimento] = useState(false);
+  const [registroConsentimento, setRegistroConsentimento] = useState<RegistroConsentimento | null>(null);
+  const registroConsentimentoRef = useRef<RegistroConsentimento | null>(null);
 
   // O título definitivo só é gerado ao gravar a reunião. Para o desdobramento
   // basta um rótulo que identifique de qual reunião a ação veio, e o horário
@@ -223,6 +256,39 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
   useEffect(() => {
     void carregarBancos();
   }, [carregarBancos]);
+
+  useEffect(() => {
+    if (googleEvents && googleEvents.length > 0) {
+      setEventosAgenda(googleEvents);
+      return;
+    }
+    const carregarEventos = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'google_calendar_events'));
+        const evs = snap.docs.map(d => ({ id: d.id, ...d.data() } as GoogleCalendarEvent));
+        setEventosAgenda(evs);
+      } catch (err) {
+        console.error('Erro ao carregar eventos da agenda no MeetingTranscriptionTool', err);
+      }
+    };
+    void carregarEventos();
+  }, [googleEvents]);
+
+  // Pré-seleciona automaticamente o banco associado ao evento em curso/próximo
+  useEffect(() => {
+    if (bancos.length === 0 || eventosAgenda.length === 0) return;
+    const { bancoSugerido, eventoAtivo } = resolverBancoAutomatico(bancos, eventosAgenda);
+    setReuniaoAgendaAtiva(eventoAtivo);
+
+    if (bancoSugerido) {
+      setBancoSugeridoAgendaId(bancoSugerido.id);
+      if (!escolhaManualBanco && !bancoSelecionadoId) {
+        setBancoSelecionadoId(bancoSugerido.id);
+      }
+    } else {
+      setBancoSugeridoAgendaId(null);
+    }
+  }, [bancos, eventosAgenda, escolhaManualBanco, bancoSelecionadoId]);
 
   const cartoesDoBanco = useMemo(
     () => bancos.find(b => b.id === bancoSelecionadoId)?.cartoes ?? [],
@@ -438,6 +504,8 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
             chats: (docSnap.data().chats as MeetingHistoryEntry['chats']) || [],
             firestoreId: docSnap.id,
             driveWebViewLink: (docSnap.data().driveWebViewLink as string) || undefined,
+            consentimentoAviso: (docSnap.data().consentimentoAviso as RegistroConsentimento) || null,
+            eventoCalendarId: (docSnap.data().eventoCalendarId as string) || null,
           }));
           setMeetingHistory(firestoreMeetings);
           return;
@@ -652,10 +720,16 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
     [persistCurrentMeetingToHistory, stopSystemAudioMonitor]
   );
 
-  const startRecording = async () => {
+  const startRecording = async (consentimentoInfo?: RegistroConsentimento) => {
     if (!deepgramKey) {
       setShowKeyModal(true);
       return;
+    }
+
+    const consent = consentimentoInfo ?? registroConsentimento;
+    if (consent) {
+      registroConsentimentoRef.current = consent;
+      setRegistroConsentimento(consent);
     }
 
     let micStream: MediaStream | null = null;
@@ -834,11 +908,17 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
         ? ['', '=== CHAT ASSISTENTE ===', ...chats.map(m => `[${m.timestamp.toLocaleTimeString('pt-BR')}] ${m.role === 'user' ? 'Você' : 'Assistente'}: ${m.content}`)]
         : [];
 
+      const consent = registroConsentimentoRef.current;
+      const consentLine = consent?.terceirosPresentes
+        ? `Aviso de Privacidade: Reunião com terceiros. Participantes avisados e consentimento confirmado em ${new Date(consent.confirmadoEm).toLocaleString('pt-BR')}`
+        : 'Aviso de Privacidade: Gravação individual / notas pessoais (sem terceiros presentes)';
+
       return [
         'TRANSCRIÇÃO DE REUNIÃO',
         '',
         `Início: ${started.toLocaleString('pt-BR')}`,
         `Fim: ${ended.toLocaleString('pt-BR')}`,
+        consentLine,
         '',
         '=== TRANSCRIÇÃO ===',
         ...transcriptionLines,
@@ -896,6 +976,11 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
       entry.id === meetingId ? { ...entry, titulo } : entry
     ));
 
+    const consent = registroConsentimentoRef.current;
+    const eventoId = reuniaoAgendaAtiva?.evento.id || reuniaoAgendaAtiva?.evento.google_id || null;
+    const eventoTitulo = reuniaoAgendaAtiva?.evento.titulo || null;
+    const bancoId = bancoSelecionadoId || null;
+
     try {
       const docRef = await addDoc(collection(db, 'reunioes'), {
         titulo,
@@ -909,18 +994,32 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
           timestamp: t.timestamp.toISOString(),
         })),
         chats: [],
+        consentimentoAviso: consent ? {
+          terceirosPresentes: consent.terceirosPresentes,
+          avisoConfirmado: consent.avisoConfirmado,
+          confirmadoEm: consent.confirmadoEm,
+        } : null,
+        eventoCalendarId: eventoId,
+        eventoCalendarTitulo: eventoTitulo,
+        bancoRespostasId: bancoId,
         driveWebViewLink: driveLinkByMeetingIdRef.current[meetingId] || null,
         data_criacao: new Date().toISOString(),
       });
       setMeetingHistory(prev => prev.map(entry =>
-        entry.id === meetingId ? { ...entry, titulo, firestoreId: docRef.id } : entry
+        entry.id === meetingId ? {
+          ...entry,
+          titulo,
+          firestoreId: docRef.id,
+          consentimentoAviso: consent,
+          eventoCalendarId: eventoId,
+        } : entry
       ));
     } catch (err) {
       console.error('Erro ao salvar reunião no Firestore:', err);
     } finally {
       setIsTitleGenerating(false);
     }
-  }, [generateMeetingTitle]);
+  }, [generateMeetingTitle, reuniaoAgendaAtiva, bancoSelecionadoId]);
 
   useEffect(() => {
     finalizeAndPersistMeetingRef.current = finalizeAndPersistMeeting;
@@ -1218,7 +1317,18 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
           {/* Barra de controles */}
           <div className={`flex flex-shrink-0 flex-wrap items-center gap-2 border-b px-4 py-3 ${isDark ? 'border-white/10 bg-slate-950/40' : 'border-slate-200 bg-slate-50'}`}>
             <button
-              onClick={() => (isRecording ? stopRecording(true) : (deepgramKey ? setShowShareGuide(true) : setShowKeyModal(true)))}
+              onClick={() => {
+                if (isRecording) {
+                  stopRecording(true);
+                } else if (!deepgramKey) {
+                  setShowKeyModal(true);
+                } else {
+                  if (reuniaoAgendaAtiva) {
+                    setTerceirosPresentes(true);
+                  }
+                  setShowShareGuide(true);
+                }
+              }}
               disabled={isSavingToDrive}
               className={`flex h-10 items-center gap-2 rounded-xl px-4 text-xs font-bold uppercase tracking-wider transition-all disabled:opacity-50 ${
                 isRecording
@@ -1240,13 +1350,44 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
             </button>
 
             {isRecording && (
-              <span className={`flex items-center gap-2 rounded-xl border px-3 py-2 font-mono text-xs font-bold ${isDark ? 'border-rose-500/30 bg-rose-500/10 text-rose-300' : 'border-rose-200 bg-rose-50 text-rose-600'}`}>
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-75" />
-                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-500" />
+              <>
+                <span className={`flex items-center gap-2 rounded-xl border px-3 py-2 font-mono text-xs font-bold ${isDark ? 'border-rose-500/30 bg-rose-500/10 text-rose-300' : 'border-rose-200 bg-rose-50 text-rose-600'}`}>
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-75" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-500" />
+                  </span>
+                  {formatClock(elapsedMs)}
                 </span>
-                {formatClock(elapsedMs)}
-              </span>
+
+                {/* Badge visível de consentimento e aviso durante gravação */}
+                {registroConsentimento?.terceirosPresentes ? (
+                  <span className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-[10px] font-bold ${isDark ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`} title="Todos os participantes foram informados e consentiram com a gravação">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                    Terceiros avisados (consentimento OK)
+                  </span>
+                ) : (
+                  <span className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-[10px] font-semibold ${isDark ? 'border-slate-700 bg-slate-800 text-slate-300' : 'border-slate-200 bg-slate-100 text-slate-600'}`} title="Gravação individual de notas pessoais">
+                    <span className="h-2 w-2 rounded-full bg-slate-400" />
+                    Individual / pessoal
+                  </span>
+                )}
+              </>
+            )}
+
+            {/* Vínculo detectado com reunião do Google Calendar */}
+            {reuniaoAgendaAtiva && (
+              <div className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] font-medium ${isDark ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300' : 'border-indigo-200 bg-indigo-50 text-indigo-700'}`}>
+                <span>📅</span>
+                <span className="max-w-[160px] truncate sm:max-w-[220px]" title={reuniaoAgendaAtiva.evento.titulo}>
+                  {reuniaoAgendaAtiva.emCurso ? 'Em curso: ' : `Em ${reuniaoAgendaAtiva.minutosParaInicio}m: `}
+                  <strong>{reuniaoAgendaAtiva.evento.titulo}</strong>
+                </span>
+                {bancoSugeridoAgendaId && bancoSelecionadoId === bancoSugeridoAgendaId && (
+                  <span className="text-[9px] font-bold uppercase tracking-wider opacity-85" title="Banco vinculado automaticamente à reunião">
+                    ★ Vinculado
+                  </span>
+                )}
+              </div>
             )}
 
             {hasContent && (
@@ -1260,7 +1401,10 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
             <div className="flex items-center gap-1">
               <select
                 value={bancoSelecionadoId}
-                onChange={e => setBancoSelecionadoId(e.target.value)}
+                onChange={e => {
+                  setBancoSelecionadoId(e.target.value);
+                  setEscolhaManualBanco(true);
+                }}
                 disabled={isRecording}
                 title={isRecording ? 'Escolha o banco antes de começar a gravar.' : 'Cartões que sobem sozinhos quando a pergunta aparecer'}
                 className={`h-10 rounded-xl border px-2 text-[11px] font-semibold outline-none disabled:opacity-50 ${inputClass}`}
@@ -1268,7 +1412,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
                 <option value="">Sem cartões</option>
                 {bancos.map(banco => (
                   <option key={banco.id} value={banco.id}>
-                    {banco.nome} ({banco.cartoes.length})
+                    {banco.nome} ({banco.cartoes.length}){banco.id === bancoSugeridoAgendaId ? ' ★ (Agenda)' : ''}
                   </option>
                 ))}
               </select>
@@ -1755,45 +1899,121 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
         </div>
       )}
 
-      {/* ── Modal: guia de compartilhamento ── */}
+      {/* ── Modal: guia de compartilhamento e consentimento ── */}
       {showShareGuide && (
         <div className="fixed inset-0 z-[655] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className={`flex w-full max-w-md flex-col gap-6 rounded-2xl border p-8 shadow-2xl ${panelClass}`}>
+          <div className={`flex w-full max-w-lg max-h-[90vh] overflow-y-auto flex-col gap-5 rounded-2xl border p-6 sm:p-8 shadow-2xl ${panelClass}`}>
             <div>
-              <h3 className={`mb-1 text-2xl font-bold tracking-tight ${titleClass}`}>Como compartilhar o áudio</h3>
-              <p className={`text-sm font-medium ${mutedClass}`}>Siga esses passos no diálogo que vai abrir para capturar o áudio da sua reunião.</p>
+              <h3 className={`mb-1 text-xl font-bold tracking-tight sm:text-2xl ${titleClass}`}>Preparação para Gravação</h3>
+              <p className={`text-xs sm:text-sm font-medium ${mutedClass}`}>Compartilhamento de áudio e consentimento de privacidade.</p>
             </div>
 
-            <ol className="flex flex-col gap-4">
-              {[
-                { step: '1', title: 'Selecione "Tela inteira"', desc: 'Não escolha a janela do Teams — escolha a aba Tela inteira para que o áudio do sistema fique disponível.' },
-                { step: '2', title: 'Ative "Compartilhar áudio do sistema"', desc: 'Marque a opção na parte inferior do diálogo antes de clicar em Compartilhar.' },
-                { step: '3', title: 'Clique em "Compartilhar"', desc: 'A gravação começa automaticamente após o compartilhamento.' },
-              ].map(item => (
-                <li key={item.step} className="flex items-start gap-3">
-                  <span className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-xs font-bold ${isDark ? 'bg-white text-slate-950' : 'bg-slate-900 text-white'}`}>{item.step}</span>
-                  <div>
-                    <p className={`text-sm font-bold ${titleClass}`}>{item.title}</p>
-                    <p className={`mt-0.5 text-xs ${mutedClass}`}>{item.desc}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
+            {/* ── Seção 1: Aviso e Consentimento com Terceiros ── */}
+            <div className={`rounded-xl border p-4 ${isDark ? 'border-indigo-500/30 bg-indigo-950/20' : 'border-indigo-200 bg-indigo-50/70'}`}>
+              <h4 className={`text-xs font-bold uppercase tracking-wider mb-2 ${titleClass}`}>
+                1. Participantes e Consentimento Ético
+              </h4>
+              <p className={`text-xs mb-3 leading-relaxed ${mutedClass}`}>
+                O Hermes transcreve as falas e extrai automaticamente compromissos e tarefas com o nome dos participantes.
+              </p>
 
-            <div className={`rounded-xl border px-4 py-3 text-xs font-medium ${isDark ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium">
+                  <input
+                    type="radio"
+                    name="consentimento_tipo"
+                    checked={!terceirosPresentes}
+                    onChange={() => {
+                      setTerceirosPresentes(false);
+                      setAvisoConsentimento(false);
+                    }}
+                    className="h-4 w-4 text-indigo-600"
+                  />
+                  <span>Gravação individual / notas pessoais (sem terceiros presentes)</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium">
+                  <input
+                    type="radio"
+                    name="consentimento_tipo"
+                    checked={terceirosPresentes}
+                    onChange={() => setTerceirosPresentes(true)}
+                    className="h-4 w-4 text-indigo-600"
+                  />
+                  <span>Há terceiros presentes na reunião</span>
+                </label>
+              </div>
+
+              {terceirosPresentes && (
+                <div className={`mt-3 rounded-lg border p-3 ${isDark ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+                  <p className="text-xs font-bold flex items-center gap-1.5">
+                    <span>⚠️</span>
+                    <span>Requisito de Privacidade:</span>
+                  </p>
+                  <p className="text-[11px] mt-1 leading-relaxed">
+                    Não grave terceiros em silêncio. Informe aos participantes que a reunião está sendo gravada e que os compromissos serão documentados.
+                  </p>
+                  <label className="mt-2.5 flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={avisoConsentimento}
+                      onChange={(e) => setAvisoConsentimento(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded text-indigo-600"
+                    />
+                    <span className="text-xs font-bold">
+                      Confirmo que os participantes foram avisados e consentiram com a gravação.
+                    </span>
+                  </label>
+                </div>
+              )}
+            </div>
+
+            {/* ── Seção 2: Compartilhamento do Áudio ── */}
+            <div>
+              <h4 className={`text-xs font-bold uppercase tracking-wider mb-2 ${titleClass}`}>
+                2. Compartilhar áudio da reunião
+              </h4>
+              <ol className="flex flex-col gap-3">
+                {[
+                  { step: 'A', title: 'Selecione "Tela inteira"', desc: 'Não escolha apenas a janela — escolha a aba Tela inteira para que o áudio do sistema fique disponível.' },
+                  { step: 'B', title: 'Ative "Compartilhar áudio do sistema"', desc: 'Marque a opção na parte inferior do diálogo antes de clicar em Compartilhar.' },
+                  { step: 'C', title: 'Clique em "Compartilhar"', desc: 'A gravação começa automaticamente após a seleção.' },
+                ].map(item => (
+                  <li key={item.step} className="flex items-start gap-2.5">
+                    <span className={`mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-xs font-bold ${isDark ? 'bg-white text-slate-950' : 'bg-slate-900 text-white'}`}>{item.step}</span>
+                    <div>
+                      <p className={`text-xs font-bold ${titleClass}`}>{item.title}</p>
+                      <p className={`mt-0.5 text-[11px] ${mutedClass}`}>{item.desc}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            <div className={`rounded-xl border px-4 py-2.5 text-xs font-medium ${isDark ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
               <strong>Dica para Teams:</strong> O Teams desktop bloqueia o áudio quando apenas a janela é compartilhada. Compartilhe a tela inteira para contornar essa restrição.
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex gap-3 pt-1">
               <button
                 onClick={() => setShowShareGuide(false)}
-                className={`flex-1 rounded-xl border px-4 py-3 text-sm font-bold uppercase tracking-wider transition-all ${ghostButtonClass}`}
+                className={`flex-1 rounded-xl border px-4 py-2.5 text-xs font-bold uppercase tracking-wider transition-all ${ghostButtonClass}`}
               >
                 Cancelar
               </button>
               <button
-                onClick={() => { setShowShareGuide(false); startRecording(); }}
-                className={`flex-1 rounded-xl px-4 py-3 text-sm font-bold uppercase tracking-wider transition-all ${isDark ? 'bg-white text-slate-950 hover:bg-slate-200' : 'bg-slate-900 text-white hover:bg-indigo-600'}`}
+                disabled={terceirosPresentes && !avisoConsentimento}
+                onClick={() => {
+                  const consent: RegistroConsentimento = {
+                    terceirosPresentes,
+                    avisoConfirmado: terceirosPresentes ? avisoConsentimento : false,
+                    confirmadoEm: new Date().toISOString(),
+                  };
+                  setRegistroConsentimento(consent);
+                  setShowShareGuide(false);
+                  void startRecording(consent);
+                }}
+                className={`flex-1 rounded-xl px-4 py-2.5 text-xs font-bold uppercase tracking-wider transition-all disabled:opacity-40 disabled:cursor-not-allowed ${isDark ? 'bg-white text-slate-950 hover:bg-slate-200' : 'bg-slate-900 text-white hover:bg-indigo-600'}`}
               >
                 Entendido, iniciar
               </button>

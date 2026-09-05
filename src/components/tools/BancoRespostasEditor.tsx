@@ -41,6 +41,7 @@ export const BancoRespostasEditor: React.FC<Props> = ({ isDark, onClose, onBanco
   const [idEmEdicao, setIdEmEdicao] = useState<string | null>(null);
   const [nome, setNome] = useState('');
   const [descricao, setDescricao] = useState('');
+  const [eventoCalendarId, setEventoCalendarId] = useState('');
   const [cartoes, setCartoes] = useState<CartaoResposta[]>([]);
   const [cartaoAberto, setCartaoAberto] = useState<string | null>(null);
   const [importAberto, setImportAberto] = useState(false);
@@ -78,6 +79,7 @@ export const BancoRespostasEditor: React.FC<Props> = ({ isDark, onClose, onBanco
     setIdEmEdicao(banco.id);
     setNome(banco.nome);
     setDescricao(banco.descricao ?? '');
+    setEventoCalendarId(banco.eventoCalendarId ?? '');
     setCartoes(banco.cartoes);
     setCartaoAberto(banco.cartoes[0]?.id ?? null);
   };
@@ -86,6 +88,7 @@ export const BancoRespostasEditor: React.FC<Props> = ({ isDark, onClose, onBanco
     setIdEmEdicao(null);
     setNome(nomeInicial);
     setDescricao('');
+    setEventoCalendarId('');
     setCartoes(base);
     setCartaoAberto(base[0]?.id ?? null);
   };
@@ -96,9 +99,9 @@ export const BancoRespostasEditor: React.FC<Props> = ({ isDark, onClose, onBanco
   const salvar = async () => {
     setSalvando(true);
     try {
-      if (idEmEdicao) await atualizarBanco(idEmEdicao, nome, cartoes, descricao);
+      if (idEmEdicao) await atualizarBanco(idEmEdicao, nome, cartoes, descricao, eventoCalendarId);
       else {
-        const novoId = await criarBanco(nome, cartoes, descricao);
+        const novoId = await criarBanco(nome, cartoes, descricao, eventoCalendarId);
         setIdEmEdicao(novoId);
       }
       await recarregar();
@@ -173,7 +176,9 @@ export const BancoRespostasEditor: React.FC<Props> = ({ isDark, onClose, onBanco
                 <div key={banco.id} className={`rounded-xl border p-2 ${idEmEdicao === banco.id ? (isDark ? 'border-indigo-400/50 bg-indigo-500/10' : 'border-indigo-300 bg-indigo-50') : campo}`}>
                   <button onClick={() => abrirBanco(banco)} className="w-full text-left">
                     <p className={`truncate text-xs font-bold ${titulo}`}>{banco.nome}</p>
-                    <p className={`text-[10px] ${suave}`}>{banco.cartoes.length} cartões</p>
+                    <p className={`text-[10px] ${suave}`}>
+                      {banco.cartoes.length} cartões{banco.eventoCalendarId ? ' • 📅 Vinculado' : ''}
+                    </p>
                   </button>
                   <button
                     onClick={() => void excluir(banco)}
@@ -199,6 +204,15 @@ export const BancoRespostasEditor: React.FC<Props> = ({ isDark, onClose, onBanco
                 onChange={(e) => setDescricao(e.target.value)}
                 placeholder="Descrição (opcional)"
                 className={`flex-1 rounded-xl border px-3 py-2 text-sm outline-none ${campo}`}
+              />
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <span className={`text-[11px] font-semibold whitespace-nowrap ${suave}`}>ID Reunião Calendar:</span>
+              <input
+                value={eventoCalendarId}
+                onChange={(e) => setEventoCalendarId(e.target.value)}
+                placeholder="Vínculo com evento do Google Calendar (opcional, ex: google_id ou ID do evento)"
+                className={`flex-1 rounded-xl border px-3 py-1.5 text-xs outline-none ${campo}`}
               />
             </div>
 

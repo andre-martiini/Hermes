@@ -29,6 +29,7 @@ export const listarBancos = async (): Promise<BancoRespostas[]> => {
       cartoes: ((dados.cartoes as CartaoResposta[]) ?? []).map(limparCartao),
       criadoEm: (dados.criadoEm as string) || '',
       atualizadoEm: (dados.atualizadoEm as string) || '',
+      eventoCalendarId: (dados.eventoCalendarId as string) || (dados.evento_calendar_id as string) || undefined,
     };
   });
 };
@@ -37,11 +38,13 @@ export const criarBanco = async (
   nome: string,
   cartoes: readonly CartaoResposta[],
   descricao?: string,
+  eventoCalendarId?: string,
 ): Promise<string> => {
   const agora = new Date().toISOString();
   const ref = await addDoc(collection(db, COLECAO), {
     nome: nome.trim() || 'Banco sem nome',
     ...(descricao?.trim() ? { descricao: descricao.trim() } : {}),
+    ...(eventoCalendarId?.trim() ? { eventoCalendarId: eventoCalendarId.trim() } : {}),
     cartoes: cartoes.map(limparCartao),
     criadoEm: agora,
     atualizadoEm: agora,
@@ -54,10 +57,12 @@ export const atualizarBanco = async (
   nome: string,
   cartoes: readonly CartaoResposta[],
   descricao?: string,
+  eventoCalendarId?: string,
 ): Promise<void> => {
   await updateDoc(doc(db, COLECAO, id), {
     nome: nome.trim() || 'Banco sem nome',
     descricao: descricao?.trim() ?? '',
+    eventoCalendarId: eventoCalendarId?.trim() || null,
     cartoes: cartoes.map(limparCartao),
     atualizadoEm: new Date().toISOString(),
   });

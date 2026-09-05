@@ -6096,6 +6096,7 @@ const App: React.FC = () => {
                     onUploadFile={handleUploadKnowledgeFile}
                     initialDiagnosisId={initialDiagnosisId}
                     isDark={isDarkTheme}
+                    googleEvents={googleCalendarEvents}
                     onSendToCopiloto={(text) => {
                       setCopilotoMode('default');
                       setCopilotoAutoStartMic(false);
