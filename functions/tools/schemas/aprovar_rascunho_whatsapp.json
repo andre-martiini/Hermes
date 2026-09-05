@@ -1,0 +1,14 @@
+{
+  "name": "aprovar_rascunho_whatsapp",
+  "description": "Aprova um rascunho de WhatsApp pendente no outbox (via sessão Cowork), promovendo-o para pending para entrega imediata pelo worker e atualizando o card no Telegram.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "outbox_id": {
+        "type": "string",
+        "description": "ID do documento do rascunho na coleção whatsapp_outbox a ser aprovado."
+      }
+    },
+    "required": ["outbox_id"]
+  }
+}

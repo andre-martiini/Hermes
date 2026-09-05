@@ -1,0 +1,18 @@
+{
+  "name": "descartar_rascunho_whatsapp",
+  "description": "Descarta um rascunho de WhatsApp pendente no outbox (via sessão Cowork), reabrindo o item da fila de atenção vinculado se houver.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "outbox_id": {
+        "type": "string",
+        "description": "ID do documento do rascunho na coleção whatsapp_outbox a ser descartado."
+      },
+      "motivo": {
+        "type": "string",
+        "description": "Motivo opcional do descarte para fins de auditoria/histórico."
+      }
+    },
+    "required": ["outbox_id"]
+  }
+}

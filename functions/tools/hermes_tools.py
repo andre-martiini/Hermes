@@ -504,6 +504,28 @@ def listar_rascunhos_pendentes(ctx: ToolContext, args: dict):
     return listar_rascunhos(ctx.db, limite=limite)
 
 
+def aprovar_rascunho_whatsapp(ctx: ToolContext, args: dict):
+    from outbox_aprovacao import aprovar_rascunho
+    outbox_id = str(args.get("outbox_id") or "").strip()
+    return aprovar_rascunho(
+        ctx.db,
+        outbox_id=outbox_id,
+        aprovado_via="cowork",
+        ctx=ctx,
+    )
+
+
+def descartar_rascunho_whatsapp(ctx: ToolContext, args: dict):
+    from outbox_aprovacao import descartar_rascunho
+    outbox_id = str(args.get("outbox_id") or "").strip()
+    motivo = args.get("motivo")
+    return descartar_rascunho(
+        ctx.db,
+        outbox_id=outbox_id,
+        motivo=motivo,
+    )
+
+
 def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
     """Prévia opcional usada pelo gate MCP; nunca produz efeito externo."""
     if name == "pausar_conversa":
@@ -2143,6 +2165,8 @@ _HANDLERS: dict = {
     "resolver_item_atencao": resolver_item_atencao,
     "criar_rascunho_whatsapp": criar_rascunho_whatsapp,
     "listar_rascunhos_pendentes": listar_rascunhos_pendentes,
+    "aprovar_rascunho_whatsapp": aprovar_rascunho_whatsapp,
+    "descartar_rascunho_whatsapp": descartar_rascunho_whatsapp,
     "consultar_pedidos_agente": consultar_pedidos_agente,
     "concluir_pedido_agente": concluir_pedido_agente,
     "registrar_execucao_agente": registrar_execucao_agente,

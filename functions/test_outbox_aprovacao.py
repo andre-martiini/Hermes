@@ -277,6 +277,30 @@ class TestAprovacaoTransicao(unittest.TestCase):
             self.assertEqual(args["task_id_alvo"], "tarefa-101")
             self.assertIn("Cobrança de entrega", args["nota"])
 
+    def test_aprovacao_via_cowork_adiciona_sufixo_telegram(self):
+        self.outbox._docs["job-cw"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "telegram_message_id": 999,
+            "destinatario_nome": "Renata",
+            "motivo": "Confirmação de entrega",
+        }
+        with mock.patch("core.telegram_api.edit_message", return_value=True) as mock_edit:
+            res = oa.aprovar_rascunho(
+                self.db,
+                "job-cw",
+                aprovado_via="cowork",
+                telegram_token="tok",
+                chat_id="123",
+            )
+            self.assertEqual(res["status"], "ok")
+            doc = self.outbox._docs["job-cw"]
+            self.assertEqual(doc["status"], oa.STATUS_PENDING)
+            self.assertEqual(doc["aprovado_via"], "cowork")
+
+            mock_edit.assert_called_once()
+            texto_editado = mock_edit.call_args[0][3]
+            self.assertIn("(via Cowork)", texto_editado)
+
 
 class TestDescarte(unittest.TestCase):
     """Testes de descarte de rascunho."""
@@ -316,6 +340,29 @@ class TestDescarte(unittest.TestCase):
         }
         res = oa.descartar_rascunho(self.db, "job-2")
         self.assertEqual(res["status"], "already_decided")
+
+    def test_descartar_com_motivo_grava_campo_e_edita_telegram(self):
+        self.outbox._docs["job-desc"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "telegram_message_id": 777,
+            "destinatario_nome": "Felipe",
+        }
+        with mock.patch("core.telegram_api.edit_message", return_value=True) as mock_edit:
+            res = oa.descartar_rascunho(
+                self.db,
+                "job-desc",
+                motivo="Mensagem já enviada por email",
+                telegram_token="tok",
+                chat_id="123",
+            )
+            self.assertEqual(res["status"], "ok")
+            doc = self.outbox._docs["job-desc"]
+            self.assertEqual(doc["status"], oa.STATUS_DESCARTADO)
+            self.assertEqual(doc.get("descartado_motivo"), "Mensagem já enviada por email")
+
+            mock_edit.assert_called_once()
+            texto_editado = mock_edit.call_args[0][3]
+            self.assertIn("Motivo: Mensagem já enviada por email", texto_editado)
 
 
 class TestEdicao(unittest.TestCase):
@@ -678,6 +725,58 @@ class TestAguardandoJanelaEListarRascunhos(unittest.TestCase):
 
         total = oa.contar_pendentes(self.db)
         self.assertEqual(total, 2)
+
+
+class TestHermesToolsOutboxCowork(unittest.TestCase):
+    def setUp(self):
+        self.db = _MockDb()
+        self.outbox = self.db.collection(oa.COLLECTION)
+        from tools.tool_context import ToolContext
+        self.ctx = ToolContext(_db=self.db)
+
+    def test_tools_registradas_no_catalogo_e_needs_confirmation(self):
+        from tools import registry
+        from mcp_server import _CONFIRMACAO_OBRIGATORIA
+
+        self.assertIn("aprovar_rascunho_whatsapp", registry._CATALOG)
+        self.assertIn("descartar_rascunho_whatsapp", registry._CATALOG)
+
+        self.assertTrue(registry.needs_confirmation("aprovar_rascunho_whatsapp"))
+        self.assertTrue(registry.needs_confirmation("descartar_rascunho_whatsapp"))
+
+        # Não deve estar em _CONFIRMACAO_OBRIGATORIA
+        self.assertNotIn("aprovar_rascunho_whatsapp", _CONFIRMACAO_OBRIGATORIA)
+        self.assertNotIn("descartar_rascunho_whatsapp", _CONFIRMACAO_OBRIGATORIA)
+
+    def test_execute_aprovar_rascunho_whatsapp(self):
+        from tools import hermes_tools
+        self.outbox._docs["r-aprov"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "content": "Olá teste",
+        }
+        res = hermes_tools.execute(
+            "aprovar_rascunho_whatsapp",
+            {"outbox_id": "r-aprov"},
+            self.ctx,
+        )
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(self.outbox._docs["r-aprov"]["status"], oa.STATUS_PENDING)
+        self.assertEqual(self.outbox._docs["r-aprov"]["aprovado_via"], "cowork")
+
+    def test_execute_descartar_rascunho_whatsapp(self):
+        from tools import hermes_tools
+        self.outbox._docs["r-desc"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "content": "Olá teste descartar",
+        }
+        res = hermes_tools.execute(
+            "descartar_rascunho_whatsapp",
+            {"outbox_id": "r-desc", "motivo": "Desnecessário"},
+            self.ctx,
+        )
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(self.outbox._docs["r-desc"]["status"], oa.STATUS_DESCARTADO)
+        self.assertEqual(self.outbox._docs["r-desc"]["descartado_motivo"], "Desnecessário")
 
 
 if __name__ == "__main__":

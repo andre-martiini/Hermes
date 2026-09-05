@@ -51,6 +51,8 @@ _CATALOG: dict[str, str] = {
     "schedule_whatsapp_message": "Agenda ou envia uma mensagem de WhatsApp para um contato.",
     "criar_rascunho_whatsapp": "Cria um rascunho de WhatsApp e envia card de aprovação em um toque ao Telegram do dono",
     "listar_rascunhos_pendentes": "Lista rascunhos de mensagens de WhatsApp aguardando aprovação no Telegram",
+    "aprovar_rascunho_whatsapp": "Aprova um rascunho de WhatsApp pendente no outbox (via Cowork) para entrega imediata",
+    "descartar_rascunho_whatsapp": "Descarta um rascunho de WhatsApp pendente no outbox (via Cowork)",
     "confirmar_acao": "Executa uma confirmação MCP persistida uma única vez",
     "pausar_conversa": "Enfileira uma resposta de pausa no WhatsApp e agenda a retomada após confirmação explícita",
     "criar_rascunho_email": "Cria um rascunho Gmail com anexos por referência; nunca envia a mensagem",
@@ -188,6 +190,9 @@ _NEEDS_CONFIRMATION: set[str] = {
     # Modo Secretário no WhatsApp (mutam system/settings)
     "ativar_modo_secretario",
     "desativar_modo_secretario",
+    # Aprovação e descarte de rascunhos de WhatsApp via Cowork
+    "aprovar_rascunho_whatsapp",
+    "descartar_rascunho_whatsapp",
 }
 
 _ASYNC_TOOLS: set[str] = {

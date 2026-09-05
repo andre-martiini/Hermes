@@ -554,6 +554,8 @@ def aprovar_rascunho(
                     sufixo_canal = " (via WhatsApp)"
                 elif aprovado_via == "janela_automatica":
                     sufixo_canal = " (liberação automática)"
+                elif aprovado_via == "cowork":
+                    sufixo_canal = " (via Cowork)"
                 else:
                     sufixo_canal = ""
                 novo_texto = (
@@ -578,6 +580,7 @@ def descartar_rascunho(
     telegram_token: str | None = None,
     chat_id: str | int | None = None,
     telegram_msg_id: int | None = None,
+    motivo: str | None = None,
 ) -> dict:
     """Descarta um rascunho de WhatsApp e reabre o item da fila de atenção se houver.
 
@@ -603,21 +606,22 @@ def descartar_rascunho(
                 if not snap.exists:
                     return {"status": "not_found", "erro": f"Rascunho '{outbox_id}' não encontrado."}
                 data = snap.to_dict() or {}
-                valido, motivo = validar_transicao_descarte(data.get("status"))
+                valido, mot = validar_transicao_descarte(data.get("status"))
                 if not valido:
                     return {
                         "status": "already_decided",
-                        "erro": f"Rascunho {motivo}",
+                        "erro": f"Rascunho {mot}",
                         "dados": data,
                     }
 
-                tx.update(
-                    doc_ref,
-                    {
-                        "status": STATUS_DESCARTADO,
-                        "descartado_em": firestore.SERVER_TIMESTAMP if hasattr(firestore, "SERVER_TIMESTAMP") else agora_utc,
-                    },
-                )
+                update_fields = {
+                    "status": STATUS_DESCARTADO,
+                    "descartado_em": firestore.SERVER_TIMESTAMP if hasattr(firestore, "SERVER_TIMESTAMP") else agora_utc,
+                }
+                if motivo:
+                    update_fields["descartado_motivo"] = str(motivo).strip()
+
+                tx.update(doc_ref, update_fields)
                 return {"status": "ok", "dados": data}
 
             transaction_result = _exec_discard(transaction)
@@ -630,13 +634,16 @@ def descartar_rascunho(
         if not snap.exists:
             return {"status": "not_found", "erro": f"Rascunho '{outbox_id}' não encontrado."}
         data = snap.to_dict() or {}
-        valido, motivo = validar_transicao_descarte(data.get("status"))
+        valido, mot = validar_transicao_descarte(data.get("status"))
         if not valido:
-            return {"status": "already_decided", "erro": f"Rascunho {motivo}", "dados": data}
-        doc_ref.update({
+            return {"status": "already_decided", "erro": f"Rascunho {mot}", "dados": data}
+        update_fields = {
             "status": STATUS_DESCARTADO,
             "descartado_em": agora_utc,
-        })
+        }
+        if motivo:
+            update_fields["descartado_motivo"] = str(motivo).strip()
+        doc_ref.update(update_fields)
         transaction_result = {"status": "ok", "dados": data}
 
     if transaction_result.get("status") != "ok":
@@ -673,6 +680,8 @@ def descartar_rascunho(
                     f"🗑️ <b>Rascunho descartado</b>\n"
                     f"Destino: {html.escape(str(dest_nome))}"
                 )
+                if motivo:
+                    novo_texto += f"\nMotivo: {html.escape(str(motivo))}"
                 edit_message(token, target_chat, int(tg_id), novo_texto)
         except Exception as edit_err:
             print(f"[OutboxAprovacao] Falha ao editar mensagem Telegram {tg_id}: {edit_err}")
