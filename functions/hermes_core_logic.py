@@ -3028,6 +3028,32 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
             _persist_callback_turn(f"Botão: editar rascunho outbox:{outbox_id}", msg)
             _send_telegram_message(token, chat_id, msg)
 
+    elif data.startswith("argos_auth:"):
+        parts = data.split(":")
+        solicitacao_id = parts[1] if len(parts) > 1 else ""
+        decisao = parts[2] if len(parts) > 2 else ""
+
+        if not solicitacao_id or decisao not in ("aprovar", "recusar"):
+            _answer_callback_query(token, query_id, "Ação não reconhecida.")
+        else:
+            from argos_autorizacao import decidir_autorizacao
+            telegram_msg_id = message.get("message_id") if isinstance(message, dict) else None
+            res = decidir_autorizacao(
+                db, solicitacao_id, decisao, telegram_token=token, chat_id=chat_id, telegram_msg_id=telegram_msg_id
+            )
+            if res.get("status") == "already_decided":
+                _answer_callback_query(token, query_id, "Esta solicitação já foi decidida.")
+            elif res.get("status") == "not_found":
+                _answer_callback_query(token, query_id, "Solicitação não encontrada.")
+            elif res.get("status") == "ok" and decisao == "aprovar":
+                _answer_callback_query(token, query_id, "Autorizado!")
+                _persist_callback_turn(f"Botão: autorizar argos_auth:{solicitacao_id}", "✅ Autorizado")
+            elif res.get("status") == "ok":
+                _answer_callback_query(token, query_id, "Recusado.")
+                _persist_callback_turn(f"Botão: recusar argos_auth:{solicitacao_id}", "❌ Recusado")
+            else:
+                _answer_callback_query(token, query_id, f"Erro: {res.get('erro', 'falha ao decidir')}")
+
     else:
 
         _answer_callback_query(token, query_id)
