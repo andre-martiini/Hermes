@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { BrainstormIdea, formatDate, ConhecimentoItem } from '@/types';
+import { BrainstormIdea, formatDate, ConhecimentoItem, GoogleCalendarEvent } from '@/types';
 import { AutoExpandingTextarea } from '../ui/UIComponents';
 import { ShoppingListTool } from './ShoppingListTool';
 import { TranscriptionTool } from './TranscriptionTool';
@@ -30,6 +30,7 @@ interface FerramentasViewProps {
   onUploadFile: (file: File) => Promise<ConhecimentoItem | null>;
   isDark?: boolean;
   onSendToCopiloto?: (text: string) => void;
+  googleEvents?: GoogleCalendarEvent[];
 }
 
 export const FerramentasView: React.FC<FerramentasViewProps> = ({
@@ -49,6 +50,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   onUploadFile,
   isDark = false,
   onSendToCopiloto,
+  googleEvents,
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [textInput, setTextInput] = useState('');
@@ -118,7 +120,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   }
 
   if (activeTool === 'meeting_transcription') {
-    return <MeetingTranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} isDark={isDark} />;
+    return <MeetingTranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} isDark={isDark} googleEvents={googleEvents} />;
   }
 
 

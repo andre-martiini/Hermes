@@ -14,6 +14,7 @@ export interface BancoRespostas {
   cartoes: CartaoResposta[];
   criadoEm: string;
   atualizadoEm: string;
+  eventoCalendarId?: string;
 }
 
 /** Uma linha por item, ignorando linhas em branco. É como a pessoa digita. */
