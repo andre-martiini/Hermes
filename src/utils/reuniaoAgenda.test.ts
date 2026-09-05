@@ -7,6 +7,11 @@ import {
   casarBancoComEvento,
   resolverBancoAutomatico,
   normalizarTextoAgenda,
+  validarInicioGravacao,
+  formatarCabecalhoConsentimento,
+  extrairFalasJanelaTempo,
+  montarPromptUltimosSegundos,
+  montarPromptConsultaAcervo,
 } from './reuniaoAgenda';
 
 const criarBancoMock = (
@@ -216,5 +221,126 @@ describe('resolverBancoAutomatico', () => {
 
     expect(resolucao.eventoAtivo).not.toBeNull();
     expect(resolucao.bancoSugerido).toBeNull();
+  });
+});
+
+describe('validarInicioGravacao', () => {
+  it('permite iniciar quando é gravação individual sem terceiros presentes', () => {
+    const res = validarInicioGravacao(false, false);
+    expect(res.podeIniciar).toBe(true);
+    expect(res.motivo).toBeUndefined();
+  });
+
+  it('bloqueia início quando há terceiros presentes e o aviso não foi confirmado', () => {
+    const res = validarInicioGravacao(true, false);
+    expect(res.podeIniciar).toBe(false);
+    expect(res.motivo).toContain('É obrigatório confirmar o aviso e consentimento');
+  });
+
+  it('permite iniciar quando há terceiros presentes e o aviso foi devidamente confirmado', () => {
+    const res = validarInicioGravacao(true, true);
+    expect(res.podeIniciar).toBe(true);
+    expect(res.motivo).toBeUndefined();
+  });
+});
+
+describe('formatarCabecalhoConsentimento', () => {
+  it('formata texto de consentimento para reunião com terceiros confirmada', () => {
+    const consent = {
+      terceirosPresentes: true,
+      avisoConfirmado: true,
+      confirmadoEm: '2026-09-05T14:30:00.000Z',
+    };
+    const cabecalho = formatarCabecalhoConsentimento(consent, '05/09/2026 11:30:00');
+    expect(cabecalho).toBe(
+      'Aviso de Privacidade: Reunião com terceiros. Participantes avisados e consentimento confirmado em 05/09/2026 11:30:00',
+    );
+  });
+
+  it('formata texto para gravação individual / notas pessoais', () => {
+    const consent = {
+      terceirosPresentes: false,
+      avisoConfirmado: false,
+      confirmadoEm: '2026-09-05T14:30:00.000Z',
+    };
+    const cabecalho = formatarCabecalhoConsentimento(consent);
+    expect(cabecalho).toBe(
+      'Aviso de Privacidade: Gravação individual / notas pessoais (sem terceiros presentes)',
+    );
+  });
+
+  it('formata texto padrão para consent nulo', () => {
+    const cabecalho = formatarCabecalhoConsentimento(null);
+    expect(cabecalho).toBe(
+      'Aviso de Privacidade: Gravação individual / notas pessoais (sem terceiros presentes)',
+    );
+  });
+});
+
+describe('extrairFalasJanelaTempo', () => {
+  const t0 = new Date('2026-09-05T14:30:00.000Z');
+  const t10 = new Date('2026-09-05T14:30:10.000Z');
+  const t25 = new Date('2026-09-05T14:30:25.000Z');
+  const t45 = new Date('2026-09-05T14:30:45.000Z');
+  const t55 = new Date('2026-09-05T14:30:55.000Z');
+
+  const falas = [
+    { timestamp: t0, speaker: 'André', text: 'Bom dia a todos.' },
+    { timestamp: t10, speaker: 'Interlocutor', text: 'Bom dia, vamos falar do prazo?' },
+    { timestamp: t25, speaker: 'André', text: 'Sim, o prazo final é 06/09.' },
+    { timestamp: t45, speaker: 'Interlocutor', text: 'E como fica a alocação de recursos?' },
+    { timestamp: t55, speaker: 'Interlocutor', text: 'Podemos fechar essa parte agora?' },
+  ];
+
+  it('filtra apenas as falas dentro da janela de 30 segundos em relação ao fim', () => {
+    const agoraRef = new Date('2026-09-05T14:30:55.000Z');
+    // Janela de 30s cobre de 14:30:25 até 14:30:55 (t25, t45, t55)
+    const extraidas = extrairFalasJanelaTempo(falas, 30, agoraRef);
+    expect(extraidas.length).toBe(3);
+    expect(extraidas.map((f) => f.speaker)).toEqual(['André', 'Interlocutor', 'Interlocutor']);
+    expect(extraidas[2].text).toBe('Podemos fechar essa parte agora?');
+  });
+
+  it('retorna fallback das últimas falas se nenhuma estiver na janela estrita', () => {
+    const agoraDistante = new Date('2026-09-05T14:35:00.000Z'); // 4 minutos depois
+    const extraidas = extrairFalasJanelaTempo(falas, 30, agoraDistante);
+    expect(extraidas.length).toBe(3); // fallback últimas 3 falas
+    expect(extraidas[2].text).toBe('Podemos fechar essa parte agora?');
+  });
+
+  it('retorna array vazio quando lista de falas é vazia', () => {
+    const extraidas = extrairFalasJanelaTempo([], 30);
+    expect(extraidas).toEqual([]);
+  });
+});
+
+describe('montarPromptUltimosSegundos', () => {
+  it('gera prompt estruturado com as falas recentes e instruções de concisão', () => {
+    const falas = [
+      { speaker: 'Interlocutor', text: 'Qual é o valor final da proposta?' },
+    ];
+    const prompt = montarPromptUltimosSegundos(falas, 'Negociação Contratual');
+    expect(prompt).toContain('Negociação Contratual');
+    expect(prompt).toContain('Qual é o valor final da proposta?');
+    expect(prompt).toContain('máximo de 2 a 3 frases');
+  });
+});
+
+describe('montarPromptConsultaAcervo', () => {
+  it('formata o contexto de reuniões e instrui o assistente a citar título e data', () => {
+    const acervo = [
+      {
+        titulo: 'Alinhamento Q3',
+        startedAt: '2026-09-01T10:00:00.000Z',
+        transcripts: [
+          { speaker: 'João', text: 'Ficou combinado entregar o relatório dia 10.' },
+        ],
+      },
+    ];
+    const prompt = montarPromptConsultaAcervo('O que ficou combinado com o João?', acervo);
+    expect(prompt).toContain('Alinhamento Q3');
+    expect(prompt).toContain('Ficou combinado entregar o relatório dia 10.');
+    expect(prompt).toContain('O que ficou combinado com o João?');
+    expect(prompt).toContain('Identifique explicitamente o título e a data');
   });
 });

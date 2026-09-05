@@ -203,3 +203,129 @@ export const resolverBancoAutomatico = (
     criterio: casamento?.criterio,
   };
 };
+
+/**
+ * Valida se a gravação pode ser iniciada com base na presença de terceiros e confirmação do aviso.
+ */
+export const validarInicioGravacao = (
+  terceirosPresentes: boolean,
+  avisoConfirmado: boolean,
+): { podeIniciar: boolean; motivo?: string } => {
+  if (!terceirosPresentes) {
+    return { podeIniciar: true };
+  }
+  if (!avisoConfirmado) {
+    return {
+      podeIniciar: false,
+      motivo: 'É obrigatório confirmar o aviso e consentimento dos participantes antes de iniciar gravação com terceiros.',
+    };
+  }
+  return { podeIniciar: true };
+};
+
+/**
+ * Formata o carimbo textual de consentimento para inclusão no cabeçalho da transcrição gravada.
+ */
+export const formatarCabecalhoConsentimento = (
+  consent: {
+    terceirosPresentes: boolean;
+    avisoConfirmado: boolean;
+    confirmadoEm: string;
+  } | null,
+  dataFormatadaOverride?: string,
+): string => {
+  if (consent?.terceirosPresentes) {
+    const dataStr = dataFormatadaOverride || new Date(consent.confirmadoEm).toLocaleString('pt-BR');
+    return `Aviso de Privacidade: Reunião com terceiros. Participantes avisados e consentimento confirmado em ${dataStr}`;
+  }
+  return 'Aviso de Privacidade: Gravação individual / notas pessoais (sem terceiros presentes)';
+};
+
+/**
+ * Extrai as falas mais recentes da transcrição dentro de uma janela de tempo (ex: últimos 30 segundos).
+ * Caso nenhuma fala caia na janela exata (ex: pausa recente), devolve as últimas 3 a 5 falas como contingência.
+ */
+export const extrairFalasJanelaTempo = <T extends { timestamp: Date | string; speaker: string; text: string }>(
+  transcripts: readonly T[],
+  segundosJanela = 30,
+  agora?: Date,
+): T[] => {
+  if (!transcripts || transcripts.length === 0) return [];
+  const janelaSec = segundosJanela > 0 ? segundosJanela : 30;
+
+  // Determina o tempo de referência (ou timestamp da última fala, ou agora fornecido)
+  const ultimaData = transcripts[transcripts.length - 1]?.timestamp;
+  const refMs = agora
+    ? agora.getTime()
+    : (ultimaData instanceof Date ? ultimaData.getTime() : new Date(ultimaData).getTime());
+
+  const janelaMs = janelaSec * 1000;
+  const dentroDaJanela = transcripts.filter((t) => {
+    const tMs = t.timestamp instanceof Date ? t.timestamp.getTime() : new Date(t.timestamp).getTime();
+    return Math.abs(refMs - tMs) <= janelaMs;
+  });
+
+  if (dentroDaJanela.length > 0) {
+    return [...dentroDaJanela];
+  }
+
+  // Fallback para as últimas 3 falas se o intervalo temporal for maior (ex: silêncio de 40s após uma pergunta)
+  return transcripts.slice(-3);
+};
+
+/**
+ * Monta o prompt para envio ao askChatbot sobre os últimos 30 segundos da reunião.
+ */
+export const montarPromptUltimosSegundos = (
+  falas: readonly { speaker: string; text: string }[],
+  tituloReuniao?: string,
+): string => {
+  const trecho = falas.length > 0
+    ? falas.map((f) => `${f.speaker}: ${f.text}`).join('\n')
+    : '(Nenhuma fala recente detectada)';
+
+  const contexto = tituloReuniao ? `Contexto da reunião: "${tituloReuniao}"\n\n` : '';
+
+  return (
+    `Você é o copiloto de reuniões em tempo real do Hermes.\n` +
+    contexto +
+    `O usuário solicitou apoio imediato sobre o que responder ao que acabou de ser dito nos últimos 30 segundos da reunião.\n\n` +
+    `=== FALAS RECENTES (ÚLTIMOS ~30 SEGUNDOS) ===\n` +
+    `${trecho}\n\n` +
+    `=== INSTRUÇÕES ===\n` +
+    `1. Seja extremamente direto, conciso e prático (máximo de 2 a 3 frases ou tópicos curtos).\n` +
+    `2. Sugira uma resposta ou posicionamento seguro, profissional e objetivo para o usuário falar agora.\n` +
+    `3. Se houver pergunta aberta do interlocutor, forneça a resposta ou o encaminhamento ideal.`
+  );
+};
+
+/**
+ * Monta o prompt de busca e síntese em linguagem natural sobre o acervo de reuniões gravadas.
+ */
+export const montarPromptConsultaAcervo = (
+  pergunta: string,
+  reunioes: readonly {
+    titulo: string;
+    startedAt: string;
+    transcripts: readonly { speaker: string; text: string }[];
+  }[],
+): string => {
+  const resumoReunioes = reunioes.slice(0, 10).map((r, idx) => {
+    const dataStr = new Date(r.startedAt).toLocaleDateString('pt-BR');
+    const falasAmostra = r.transcripts.slice(0, 30).map((t) => `${t.speaker}: ${t.text}`).join(' | ');
+    return `[Reunião #${idx + 1}] "${r.titulo}" (${dataStr}):\nTrecho da transcrição: ${falasAmostra || '(Sem transcrição detalhada)'}`;
+  }).join('\n\n');
+
+  return (
+    `Você é o assistente executivo Hermes consultando o histórico e acervo de reuniões gravadas do usuário.\n\n` +
+    `Pergunta do usuário:\n"${pergunta}"\n\n` +
+    `=== ACERVO DE REUNIÕES GRAVADAS ===\n` +
+    `${resumoReunioes || '(Nenhuma reunião encontrada no histórico)'}\n\n` +
+    `=== INSTRUÇÕES ===\n` +
+    `1. Responda à pergunta do usuário fundamentando-se exclusivamente nas reuniões gravadas acima.\n` +
+    `2. Identifique explicitamente o título e a data da reunião onde o assunto foi tratado ou decidido.\n` +
+    `3. Se não houver informação sobre o que foi perguntado no acervo, responda com clareza que não encontrou registro sobre esse tema nas reuniões gravadas.\n` +
+    `4. Seja conciso, claro e objetivo.`
+  );
+};
+
