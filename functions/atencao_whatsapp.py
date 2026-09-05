@@ -589,8 +589,8 @@ def _processar_aprovacao_outbox(db, mensagem: dict) -> None:
 
 @firestore_fn.on_document_created(
     document="whatsapp_messages/{message_id}",
-    memory=options.MemoryOption.MB_256,
-    timeout_sec=60,
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=120,
 )
 def on_whatsapp_message_atencao(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]) -> None:
     """Roda os detectores reativos a cada mensagem de WhatsApp capturada,
@@ -620,6 +620,12 @@ def on_whatsapp_message_atencao(event: firestore_fn.Event[firestore_fn.DocumentS
         _processar_aprovacao_outbox(db, mensagem)
     except Exception as exc:
         print(f"[AtencaoWhatsApp] Falha no detector aprovacao_outbox: {exc}")
+
+    try:
+        from secretario_whatsapp import processar_mensagem_secretario
+        processar_mensagem_secretario(db, mensagem)
+    except Exception as exc:
+        print(f"[AtencaoWhatsApp] Falha no modo secretario: {exc}")
 
 
 @scheduler_fn.on_schedule(
