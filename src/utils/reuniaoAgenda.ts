@@ -310,7 +310,7 @@ export const montarPromptConsultaAcervo = (
     transcripts: readonly { speaker: string; text: string }[];
   }[],
 ): string => {
-  const resumoReunioes = reunioes.slice(0, 10).map((r, idx) => {
+  const resumoReunioes = reunioes.slice(0, 30).map((r, idx) => {
     const dataStr = new Date(r.startedAt).toLocaleDateString('pt-BR');
     const falasAmostra = r.transcripts.slice(0, 30).map((t) => `${t.speaker}: ${t.text}`).join(' | ');
     return `[Reunião #${idx + 1}] "${r.titulo}" (${dataStr}):\nTrecho da transcrição: ${falasAmostra || '(Sem transcrição detalhada)'}`;

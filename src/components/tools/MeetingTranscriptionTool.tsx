@@ -366,6 +366,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
   // Copiloto embutido
   const [isDesktopSplit, setIsDesktopSplit] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches);
   const [isCopilotCollapsed, setIsCopilotCollapsed] = useState(false);
+  const [isMobileCopilotOpen, setIsMobileCopilotOpen] = useState(false);
   const [copilotPrompt, setCopilotPrompt] = useState<string | null>(null);
 
   // Escalonamento de assistência: últimos 30 segundos
