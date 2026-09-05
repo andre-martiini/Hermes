@@ -13745,7 +13745,9 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
         sec_updates: dict = {}
         if "enabled" in sec_cfg:
             sec_updates["enabled"] = bool(sec_cfg["enabled"])
-            if not sec_updates["enabled"]:
+            # Se desativando, ou se reativando sem fornecer nova validade temporária,
+            # limpa qualquer expiração anterior para não voltar a expirar de imediato.
+            if not sec_updates["enabled"] or "desativa_em" not in sec_cfg:
                 sec_updates["desativa_em"] = None
         if "chats_allowlist" in sec_cfg and isinstance(sec_cfg["chats_allowlist"], list):
             sec_updates["chats_allowlist"] = [str(x).strip() for x in sec_cfg["chats_allowlist"] if str(x).strip()]

@@ -185,6 +185,9 @@ _NEEDS_CONFIRMATION: set[str] = {
     "preparar_contato_prioritario_secretario",
     "consultar_contatos_prioritarios_secretario",
     "cancelar_contato_prioritario_secretario",
+    # Modo Secretário no WhatsApp (mutam system/settings)
+    "ativar_modo_secretario",
+    "desativar_modo_secretario",
 }
 
 _ASYNC_TOOLS: set[str] = {

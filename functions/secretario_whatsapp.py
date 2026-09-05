@@ -226,39 +226,62 @@ def resolver_identificador_contato(db, identificador_contato: str, ctx=None) -> 
         
         previa = hermes_tools._destinatario_whatsapp_previa(ctx, identificador)
         if previa.get("encontrado") and previa.get("chat_id"):
-            return str(previa["chat_id"]).strip(), str(previa.get("nome") or identificador).strip()
+            cid = str(previa["chat_id"]).strip()
+            if "@" not in cid and cid.isdigit():
+                cid = f"{cid}@c.us"
+            return cid, str(previa.get("nome") or identificador).strip()
     except Exception as exc:
         print(f"[SecretarioWhatsApp] Aviso ao resolver via previa: {exc}")
 
-    # Fallback 1: busca por nome ou telefone em perfil_pessoas
+    # Fallback 1: busca por nome ou telefone em perfil_pessoas (com suporte a telefone, telefones e whatsapp_chat_id)
     try:
         termo_lower = identificador.lower()
+        digitos_busca = re.sub(r"\D", "", identificador)
+
+        exatos = []
+        parciais = []
+
         for doc in db.collection("perfil_pessoas").limit(200).stream():
             data = doc.to_dict() or {}
             nome = str(data.get("nome") or "").strip()
+            chat_id = str(data.get("whatsapp_chat_id") or "").strip()
+            telefone = str(data.get("telefone") or "").strip()
             telefones = data.get("telefones") or []
             if isinstance(telefones, str):
                 telefones = [telefones]
-            telefones_limpos = [re.sub(r"\D", "", str(t)) for t in telefones]
+            todos_telefones = [telefone] + list(telefones)
+            telefones_limpos = [re.sub(r"\D", "", str(t)) for t in todos_telefones if str(t).strip()]
 
-            digitos_busca = re.sub(r"\D", "", identificador)
-            bate_telefone = bool(digitos_busca and any(digitos_busca in t or t in digitos_busca for t in telefones_limpos if t))
-            bate_nome = bool(termo_lower and termo_lower in nome.lower())
+            dest_cid = chat_id or (f"{telefones_limpos[0]}@c.us" if telefones_limpos else None)
+            if not dest_cid:
+                continue
 
-            if bate_nome or bate_telefone:
-                for t in telefones_limpos:
-                    if t:
-                        return f"{t}@c.us", nome or identificador
+            bate_telefone_exato = bool(digitos_busca and any(digitos_busca == t for t in telefones_limpos))
+            bate_telefone_parcial = bool(digitos_busca and any(len(digitos_busca) >= 8 and (digitos_busca in t or t in digitos_busca) for t in telefones_limpos))
+            bate_nome_exato = bool(termo_lower and termo_lower == nome.lower())
+            bate_nome_palavra = bool(termo_lower and termo_lower in [p.lower() for p in nome.split()])
+
+            if bate_nome_exato or bate_telefone_exato:
+                exatos.append((dest_cid, nome or identificador))
+            elif bate_nome_palavra or bate_telefone_parcial:
+                parciais.append((dest_cid, nome or identificador))
+
+        if len(exatos) == 1:
+            return exatos[0]
+        elif len(exatos) > 1:
+            return exatos[0]
+        elif len(parciais) == 1:
+            return parciais[0]
     except Exception as exc:
         print(f"[SecretarioWhatsApp] Aviso ao buscar em perfil_pessoas: {exc}")
 
-    # Fallback 2: busca por nome em whatsapp_chats
+    # Fallback 2: busca por nome em whatsapp_chats (prioriza correspondência exata)
     try:
         termo_lower = identificador.lower()
         for doc in db.collection("whatsapp_chats").limit(200).stream():
             data = doc.to_dict() or {}
             chat_name = str(data.get("chat_name") or "").strip()
-            if termo_lower in chat_name.lower():
+            if termo_lower == chat_name.lower():
                 return doc.id, chat_name
     except Exception as exc:
         print(f"[SecretarioWhatsApp] Aviso ao buscar em whatsapp_chats: {exc}")

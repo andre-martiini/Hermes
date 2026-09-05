@@ -619,6 +619,44 @@ class TestAutomationSettingsCallable(unittest.TestCase):
                 self.assertTrue(res_get["atencao"]["financeiro"]["enabled"])
                 self.assertTrue(res_get["atencao"]["saude"]["enabled"])
 
+    def test_reativar_via_settings_sem_desativa_em_limpa_expiracao_anterior(self):
+        import inspect
+        import main
+
+        update_fn = inspect.unwrap(main.updateAutomationSettings)
+        get_fn = inspect.unwrap(main.getAutomationSettings)
+
+        class _MockReq:
+            def __init__(self, data=None):
+                self.data = data or {}
+                self.auth = mock.MagicMock(uid="user-123")
+
+        # Estado inicial com desativa_em no passado
+        self.db.collection("system").document("settings").set({
+            "whatsapp_secretario": {
+                "enabled": False,
+                "desativa_em": "2020-01-01T12:00:00-03:00",
+                "chats_allowlist": ["5511999999999@c.us"],
+            }
+        })
+
+        with mock.patch.object(main, "get_db", return_value=self.db):
+            with mock.patch.object(main, "_require_internal_user", return_value=None):
+                # Reativa enviando apenas enabled: True (como o toggle do frontend faz)
+                update_req = _MockReq(data={
+                    "whatsapp_secretario": {
+                        "enabled": True,
+                    }
+                })
+                res_update = update_fn(update_req)
+                self.assertTrue(res_update["success"])
+
+                # Get deve trazer enabled: True e desativa_em: None (limpo!)
+                get_req = _MockReq()
+                res_get = get_fn(get_req)
+                self.assertTrue(res_get["whatsapp_secretario"]["enabled"])
+                self.assertIsNone(res_get["whatsapp_secretario"]["desativa_em"])
+
 
 
 class TestSecretarioContatoPrioritario(unittest.TestCase):
