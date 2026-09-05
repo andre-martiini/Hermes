@@ -1,0 +1,14 @@
+{
+  "name": "consultar_autorizacao_argos",
+  "description": "Consulta o estado atual de uma solicitação de autorização do Argos: aguardando_decisao, aprovado, recusado ou expirado (expira sozinha ~30 min sem decisão). Somente leitura — pode ser chamada quantas vezes for preciso enquanto se espera o André decidir pelo Telegram.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "solicitacao_id": {
+        "type": "string",
+        "description": "ID da solicitação devolvido por solicitar_autorizacao_argos."
+      }
+    },
+    "required": ["solicitacao_id"]
+  }
+}

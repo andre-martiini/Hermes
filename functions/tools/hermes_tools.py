@@ -526,6 +526,27 @@ def descartar_rascunho_whatsapp(ctx: ToolContext, args: dict):
     )
 
 
+def solicitar_autorizacao_argos(ctx: ToolContext, args: dict):
+    from argos_autorizacao import solicitar_autorizacao
+    return solicitar_autorizacao(
+        ctx.db,
+        tipo=args.get("tipo"),
+        sistema_id=args.get("sistema_id"),
+        demanda_id=args.get("demanda_id"),
+        resumo=args.get("resumo"),
+    )
+
+
+def consultar_autorizacao_argos(ctx: ToolContext, args: dict):
+    from argos_autorizacao import consultar_autorizacao
+    return consultar_autorizacao(ctx.db, solicitacao_id=args.get("solicitacao_id"))
+
+
+def consumir_autorizacao_argos(ctx: ToolContext, args: dict):
+    from argos_autorizacao import consumir_autorizacao
+    return consumir_autorizacao(ctx.db, solicitacao_id=args.get("solicitacao_id"))
+
+
 def preview(name: str, ctx: ToolContext, args: dict) -> dict | None:
     """Prévia opcional usada pelo gate MCP; nunca produz efeito externo."""
     if name == "pausar_conversa":
@@ -2167,6 +2188,9 @@ _HANDLERS: dict = {
     "listar_rascunhos_pendentes": listar_rascunhos_pendentes,
     "aprovar_rascunho_whatsapp": aprovar_rascunho_whatsapp,
     "descartar_rascunho_whatsapp": descartar_rascunho_whatsapp,
+    "solicitar_autorizacao_argos": solicitar_autorizacao_argos,
+    "consultar_autorizacao_argos": consultar_autorizacao_argos,
+    "consumir_autorizacao_argos": consumir_autorizacao_argos,
     "consultar_pedidos_agente": consultar_pedidos_agente,
     "concluir_pedido_agente": concluir_pedido_agente,
     "registrar_execucao_agente": registrar_execucao_agente,

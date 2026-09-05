@@ -1,0 +1,27 @@
+{
+  "name": "solicitar_autorizacao_argos",
+  "description": "Pede ao André, por um card com botões no Telegram, autorização para aprovar o plano de uma demanda ou enfileirar sua execução no Argos. Não afirme que foi autorizado ao receber a resposta desta tool — o card ainda está aguardando decisão. Consulte consultar_autorizacao_argos com o solicitacao_id devolvido até ver status 'aprovado', e só então chame consumir_autorizacao_argos imediatamente antes de agir no Argos.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "tipo": {
+        "type": "string",
+        "enum": ["approve-plan", "enqueue-job"],
+        "description": "O que está sendo autorizado: 'approve-plan' para aprovar o plano de uma demanda, 'enqueue-job' para enfileirar sua execução."
+      },
+      "sistema_id": {
+        "type": "string",
+        "description": "Identificador do sistema no Argos (ex.: 'mapa-de-precos-para-contratacoes-publicas')."
+      },
+      "demanda_id": {
+        "type": "string",
+        "description": "Identificador da demanda DevFlow no Argos (ex.: 'DEV-2026-0001')."
+      },
+      "resumo": {
+        "type": "string",
+        "description": "Descrição objetiva e específica do que está sendo autorizado — o que o plano faz, ou o que a execução vai mudar. Aparece no card do Telegram; o André decide com base só nisto."
+      }
+    },
+    "required": ["tipo", "sistema_id", "demanda_id", "resumo"]
+  }
+}

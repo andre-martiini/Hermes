@@ -1,0 +1,14 @@
+{
+  "name": "consumir_autorizacao_argos",
+  "description": "Marca uma autorização já 'aprovado' como 'usado' — uso único. Chame isto imediatamente antes (não muito antes) de chamar o endpoint do Argos (approve-plan ou jobs), e só prossiga se a resposta vier com status 'ok'. Uma segunda chamada com o mesmo solicitacao_id devolve 'already_used' e nunca autoriza a mesma decisão duas vezes.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "solicitacao_id": {
+        "type": "string",
+        "description": "ID da solicitação já aprovada, devolvido por solicitar_autorizacao_argos."
+      }
+    },
+    "required": ["solicitacao_id"]
+  }
+}
