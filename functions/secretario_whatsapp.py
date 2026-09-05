@@ -1007,42 +1007,31 @@ def _construir_tools_secretario(db, briefing: dict | None = None) -> tuple[list[
     return tools, function_map, resultado_final
 
 
-def _executar_llm_secretario(
-    db,
-    chat_name: str,
-    texto_mensagem: str,
-    historico: list[dict],
-    agora_sp: str,
+def montar_system_instruction_secretario(
+    historico: list[dict] | None = None,
     briefing: dict | None = None,
-) -> dict:
-    """Executa o loop de decisões com a Claude Messages API."""
-    import anthropic
-    from llm_providers import claude_provider
-    from main import _cached_doc_get
-
-    keys_doc = _cached_doc_get(db, "system", "api_keys")
-    claude_key = (keys_doc.to_dict() or {}).get("claude_api_key") if keys_doc.exists else None
-    if not claude_key:
-        print("[SecretarioWhatsApp] claude_api_key não configurada; usando resposta de contingência.")
-        return {
-            "resposta_para_contato": prefixar_assinatura(
-                "Olá! O André está indisponível no momento. Anotei sua mensagem e vou repassar a ele assim que possível."
-            ),
-            "resumo_recado": texto_mensagem[:150],
-            "forcou_decisao": False,
-            "assunto_sensivel": False,
-            "investigacao_concluida": False,
-        }
-
-    tools, function_map, resultado_coletado = _construir_tools_secretario(db, briefing=briefing)
-    client = anthropic.Anthropic(api_key=claude_key)
-
+) -> str:
+    """Monta a instrução de sistema do secretário adaptada ao estado da conversa."""
     system_instruction = SECRETARIO_SYSTEM_PROMPT
+
+    if not historico:
+        system_instruction += """
+CONTEXTO DA CONVERSA:
+Esta é a PRIMEIRA mensagem desta conversa.
+- Você pode se apresentar brevemente como assistente do André e explicar que ele está indisponível no momento.
+"""
+    else:
+        system_instruction += """
+CONTEXTO DA CONVERSA:
+Esta conversa JÁ ESTÁ EM ANDAMENTO (você já se apresentou anteriormente).
+- NÃO repita 'sou o assistente do André', saudações formais longas nem reintroduza quem você é.
+- O prefixo "**Hermes Bot:** " já identifica você. Vá direto ao ponto e responda à mensagem atual com objetividade e cortesia.
+"""
+
     if briefing:
         assunto_br = briefing.get("assunto")
         o_que_saber = briefing.get("o_que_precisa_saber")
         system_instruction += f"""
-
 BRIEFING PRIORITÁRIO ATIVO:
 O André pré-avisou que está aguardando uma resposta específica deste contato.
 - Assunto: {assunto_br}
@@ -1056,6 +1045,45 @@ DIRETRIZES DE INVESTIGAÇÃO ATIVA:
    - Se o interlocutor perguntar sobre agenda e o André estiver livre, NUNCA confirme disponibilidade nem compromisso.
    - NUNCA revele dados de finanças ou de saúde do André; recuse polidamente e marque `assunto_sensivel=true`.
 """
+
+    return system_instruction
+
+
+def _executar_llm_secretario(
+    db,
+    chat_name: str,
+    texto_mensagem: str,
+    historico: list[dict],
+    agora_sp: str,
+    briefing: dict | None = None,
+) -> dict:
+    """Executa o loop de decisões com a Claude Messages API."""
+    from main import _cached_doc_get
+
+    keys_doc = _cached_doc_get(db, "system", "api_keys")
+    claude_key = (keys_doc.to_dict() or {}).get("claude_api_key") if keys_doc.exists else None
+    if not claude_key:
+        print("[SecretarioWhatsApp] claude_api_key não configurada; usando resposta de contingência.")
+        texto_fallback = (
+            "Olá! O André está indisponível no momento. Anotei sua mensagem e vou repassar a ele assim que possível."
+            if not historico
+            else "Anotei sua mensagem e vou repassar ao André assim que possível."
+        )
+        return {
+            "resposta_para_contato": prefixar_assinatura(texto_fallback),
+            "resumo_recado": texto_mensagem[:150],
+            "forcou_decisao": False,
+            "assunto_sensivel": False,
+            "investigacao_concluida": False,
+        }
+
+    import anthropic
+    from llm_providers import claude_provider
+
+    tools, function_map, resultado_coletado = _construir_tools_secretario(db, briefing=briefing)
+    client = anthropic.Anthropic(api_key=claude_key)
+
+    system_instruction = montar_system_instruction_secretario(historico=historico, briefing=briefing)
 
     user_msg = (
         f"Data/hora atual: {agora_sp}\n"
@@ -1239,7 +1267,7 @@ def enviar_resposta_via_outbox(
     texto_resposta: str,
     resumo_recado: str,
 ) -> dict:
-    """Envia a resposta do secretário pelo outbox com janela de cancelamento."""
+    """Envia a resposta do secretário pelo outbox com envio imediato."""
     texto_final = prefixar_assinatura(texto_resposta)
     motivo = f"Resposta do Secretário para {chat_name}: {resumo_recado}"[:150]
 
@@ -1250,6 +1278,7 @@ def enviar_resposta_via_outbox(
         motivo=motivo,
         tipo=TIPO_OUTBOX_SECRETARIO,
         origem=ORIGEM_SECRETARIO,
+        envio_imediato=True,
     )
 
 
