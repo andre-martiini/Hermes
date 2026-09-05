@@ -13,6 +13,11 @@ import {
   casarBancoComEvento,
   resolverBancoAutomatico,
   type ReuniaoAtivaOuProxima,
+  validarInicioGravacao,
+  formatarCabecalhoConsentimento,
+  extrairFalasJanelaTempo,
+  montarPromptUltimosSegundos,
+  montarPromptConsultaAcervo,
 } from '../../utils/reuniaoAgenda';
 import type { GoogleCalendarEvent } from '@/types';
 
@@ -363,6 +368,18 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
   const [isCopilotCollapsed, setIsCopilotCollapsed] = useState(false);
   const [isMobileCopilotOpen, setIsMobileCopilotOpen] = useState(false);
   const [copilotPrompt, setCopilotPrompt] = useState<string | null>(null);
+
+  // Escalonamento de assistência: últimos 30 segundos
+  const [sugestaoUltimos30s, setSugestaoUltimos30s] = useState<string | null>(null);
+  const [isEscalandoUltimos30s, setIsEscalandoUltimos30s] = useState(false);
+
+  // Cartões em dispositivos móveis (drawer/bottom sheet)
+  const [isMobileCardsOpen, setIsMobileCardsOpen] = useState(false);
+
+  // Busca e consulta semântica ao acervo de reuniões gravadas
+  const [termoBuscaAcervo, setTermoBuscaAcervo] = useState('');
+  const [isBuscandoAcervo, setIsBuscandoAcervo] = useState(false);
+  const [respostaAcervo, setRespostaAcervo] = useState<string | null>(null);
 
   const micRecorderRef = useRef<MediaRecorder | null>(null);
   const systemRecorderRef = useRef<MediaRecorder | null>(null);
@@ -908,10 +925,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
         ? ['', '=== CHAT ASSISTENTE ===', ...chats.map(m => `[${m.timestamp.toLocaleTimeString('pt-BR')}] ${m.role === 'user' ? 'Você' : 'Assistente'}: ${m.content}`)]
         : [];
 
-      const consent = registroConsentimentoRef.current;
-      const consentLine = consent?.terceirosPresentes
-        ? `Aviso de Privacidade: Reunião com terceiros. Participantes avisados e consentimento confirmado em ${new Date(consent.confirmadoEm).toLocaleString('pt-BR')}`
-        : 'Aviso de Privacidade: Gravação individual / notas pessoais (sem terceiros presentes)';
+      const consentLine = formatarCabecalhoConsentimento(registroConsentimentoRef.current);
 
       return [
         'TRANSCRIÇÃO DE REUNIÃO',
@@ -960,6 +974,69 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
       return 'Reunião sem título';
     }
   }, []);
+
+  // ── Escalonamento: O que responder nos últimos 30 segundos ───────────────
+  const handleEscalarUltimos30s = useCallback(async () => {
+    if (transcripts.length === 0) {
+      showToast?.('Nenhuma fala recente detectada ainda para analisar.', 'info');
+      return;
+    }
+    setIsEscalandoUltimos30s(true);
+    setSugestaoUltimos30s(null);
+    try {
+      const falasRecentes = extrairFalasJanelaTempo(transcripts, 30);
+      const prompt = montarPromptUltimosSegundos(
+        falasRecentes.map(f => ({ speaker: f.speaker, text: f.text })),
+        reuniaoAgendaAtiva?.evento.titulo
+      );
+      const askChatbotFunc = httpsCallable(functions, 'askChatbot');
+      const response = await askChatbotFunc({ prompt });
+      const data = response.data as { result?: string };
+      const texto = data?.result?.trim();
+      if (texto) {
+        setSugestaoUltimos30s(texto);
+      } else {
+        showToast?.('Não foi possível obter sugestão imediata do copiloto.', 'error');
+      }
+    } catch (err) {
+      console.error('Erro ao acionar assistência de 30s:', err);
+      showToast?.('Erro ao consultar assistência imediata.', 'error');
+    } finally {
+      setIsEscalandoUltimos30s(false);
+    }
+  }, [transcripts, reuniaoAgendaAtiva, showToast]);
+
+  // ── Consulta ao Acervo de Reuniões Gravadas via IA ──────────────────────
+  const handleConsultarAcervo = useCallback(async () => {
+    const termo = termoBuscaAcervo.trim();
+    if (!termo) return;
+    setIsBuscandoAcervo(true);
+    setRespostaAcervo(null);
+    try {
+      const prompt = montarPromptConsultaAcervo(
+        termo,
+        meetingHistory.map(m => ({
+          titulo: m.titulo || 'Reunião sem título',
+          startedAt: m.startedAt,
+          transcripts: m.transcripts || [],
+        }))
+      );
+      const askChatbotFunc = httpsCallable(functions, 'askChatbot');
+      const response = await askChatbotFunc({ prompt });
+      const data = response.data as { result?: string };
+      const texto = data?.result?.trim();
+      if (texto) {
+        setRespostaAcervo(texto);
+      } else {
+        setRespostaAcervo('Nenhuma informação relevante encontrada no acervo de reuniões.');
+      }
+    } catch (err) {
+      console.error('Erro ao consultar acervo de reuniões:', err);
+      showToast?.('Erro ao pesquisar no acervo de reuniões via IA.', 'error');
+    } finally {
+      setIsBuscandoAcervo(false);
+    }
+  }, [termoBuscaAcervo, meetingHistory, showToast]);
 
   const finalizeAndPersistMeetingRef = useRef<((ended: Date) => void) | null>(null);
 
@@ -1596,14 +1673,66 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
             Sem som, sem badge, sem animação: quem está falando decide se olha. */}
         {isDesktopSplit && isRecording && cartoesDoBanco.length > 0 && (
           <aside className="flex w-[300px] shrink-0 flex-col gap-2 xl:w-[340px]">
-            <span className={`px-1 text-[10px] font-bold uppercase tracking-wider ${subtleClass}`}>
-              Cartões
-            </span>
+            <div className="flex items-center justify-between px-1">
+              <span className={`text-[10px] font-bold uppercase tracking-wider ${subtleClass}`}>
+                Cartões
+              </span>
+              <button
+                onClick={handleEscalarUltimos30s}
+                disabled={isEscalandoUltimos30s || transcripts.length === 0}
+                className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all disabled:opacity-40 ${
+                  isDark ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30' : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
+                }`}
+                title="Sugerir resposta objetiva para o que foi dito nos últimos 30 segundos"
+              >
+                <span>⚡</span>
+                <span>{isEscalandoUltimos30s ? 'Analisando...' : 'Últimos 30s'}</span>
+              </button>
+            </div>
+
+            {/* Sugestão imediata para os últimos 30 segundos */}
+            {sugestaoUltimos30s && (
+              <div className={`rounded-2xl border p-3 shadow-md animate-in fade-in duration-200 ${isDark ? 'border-amber-500/40 bg-amber-500/10' : 'border-amber-300 bg-amber-50/90'}`}>
+                <div className="flex items-center justify-between gap-1 mb-1.5">
+                  <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-amber-500">
+                    <span>💡</span>
+                    <span>O que responder agora:</span>
+                  </span>
+                  <button
+                    onClick={() => setSugestaoUltimos30s(null)}
+                    className={`text-[10px] font-bold ${subtleClass} hover:text-rose-500`}
+                    title="Dispensar sugestão"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <p className={`text-xs font-semibold leading-relaxed ${isDark ? 'text-amber-100' : 'text-amber-950'}`}>
+                  {sugestaoUltimos30s}
+                </p>
+                <div className="mt-2 flex items-center justify-end gap-2 border-t pt-1.5 border-amber-500/20">
+                  <button
+                    onClick={() => {
+                      void navigator.clipboard.writeText(sugestaoUltimos30s);
+                      showToast?.('Sugestão copiada!', 'success');
+                    }}
+                    className="text-[9px] font-bold uppercase tracking-wider text-amber-600 hover:underline"
+                  >
+                    Copiar
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="custom-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto">
               {cartoesVisiveis.length === 0 ? (
-                <p className={`px-1 text-[11px] leading-relaxed ${subtleClass}`}>
-                  Nenhum cartão ainda. Eles sobem sozinhos quando a pergunta aparecer na fala do outro lado.
-                </p>
+                <div className="space-y-2 px-1">
+                  <p className={`text-[11px] leading-relaxed ${subtleClass}`}>
+                    Nenhum cartão ainda. Eles sobem sozinhos quando a pergunta aparecer na fala do outro lado.
+                  </p>
+                  <p className={`text-[10px] leading-relaxed ${subtleClass}`}>
+                    Não encontrou o que precisa? Use o botão <strong>Últimos 30s</strong> acima para assistência imediata.
+                  </p>
+                </div>
               ) : (
                 cartoesVisiveis.map(({ cartao }) => (
                   <article
@@ -1713,9 +1842,142 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
         />
       )}
 
-      {/* Copiloto em overlay (mobile/tablet) */}
+      {/* Copiloto e Cartões em overlay/drawer (mobile/tablet) */}
       {!isDesktopSplit && (
         <>
+          {/* Botão flutuante de Cartões no mobile */}
+          {isRecording && cartoesDoBanco.length > 0 && !isMobileCardsOpen && (
+            <button
+              onClick={() => setIsMobileCardsOpen(true)}
+              className={`fixed bottom-24 right-6 z-[600] flex h-12 items-center gap-2 rounded-full px-4 text-xs font-bold uppercase tracking-wider shadow-lg border transition-all active:scale-95 ${
+                isDark ? 'bg-slate-900 border-white/20 text-white hover:bg-slate-800' : 'bg-white border-slate-300 text-slate-900 hover:bg-slate-100 shadow-slate-900/10'
+              }`}
+              aria-label="Abrir cartões de resposta"
+            >
+              <span>🃏</span>
+              <span>Cartões {cartoesVisiveis.length > 0 ? `(${cartoesVisiveis.length})` : ''}</span>
+            </button>
+          )}
+
+          {/* Drawer / Painel de Cartões no mobile */}
+          {isMobileCardsOpen && (
+            <div className="fixed inset-0 z-[650] flex justify-end">
+              <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" onClick={() => setIsMobileCardsOpen(false)} aria-hidden="true" />
+              <div className={`relative flex h-full w-full max-w-md flex-col border-l shadow-2xl animate-in slide-in-from-right duration-300 ${panelClass}`}>
+                <div className={`flex h-16 flex-shrink-0 items-center justify-between border-b px-5 ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">🃏</span>
+                    <div>
+                      <h3 className={`text-sm font-bold uppercase tracking-wider ${titleClass}`}>Cartões da Reunião</h3>
+                      <p className={`text-[10px] font-semibold uppercase tracking-wider ${subtleClass}`}>
+                        {cartoesVisiveis.length} {cartoesVisiveis.length === 1 ? 'cartão ativo' : 'cartões ativos'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setIsMobileCardsOpen(false)}
+                    className={`flex h-9 w-9 items-center justify-center rounded-xl border transition-all ${ghostButtonClass}`}
+                    aria-label="Fechar cartões"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div className={`flex items-center justify-between gap-2 border-b p-3 ${isDark ? 'bg-slate-900/40' : 'bg-slate-50'}`}>
+                  <span className={`text-[11px] font-medium ${subtleClass}`}>Assistência rápida:</span>
+                  <button
+                    onClick={handleEscalarUltimos30s}
+                    disabled={isEscalandoUltimos30s || transcripts.length === 0}
+                    className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-all disabled:opacity-40 ${
+                      isDark ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30' : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
+                    }`}
+                  >
+                    <span>⚡</span>
+                    <span>{isEscalandoUltimos30s ? 'Analisando...' : 'O que responder (30s)'}</span>
+                  </button>
+                </div>
+
+                {sugestaoUltimos30s && (
+                  <div className={`m-3 rounded-2xl border p-3.5 shadow-md ${isDark ? 'border-amber-500/40 bg-amber-500/10' : 'border-amber-300 bg-amber-50/90'}`}>
+                    <div className="flex items-center justify-between gap-1 mb-1.5">
+                      <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-amber-500">
+                        <span>💡</span>
+                        <span>O que responder agora:</span>
+                      </span>
+                      <button
+                        onClick={() => setSugestaoUltimos30s(null)}
+                        className={`text-[10px] font-bold ${subtleClass} hover:text-rose-500`}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <p className={`text-xs font-semibold leading-relaxed ${isDark ? 'text-amber-100' : 'text-amber-950'}`}>
+                      {sugestaoUltimos30s}
+                    </p>
+                    <div className="mt-2 flex justify-end">
+                      <button
+                        onClick={() => {
+                          void navigator.clipboard.writeText(sugestaoUltimos30s);
+                          showToast?.('Sugestão copiada!', 'success');
+                        }}
+                        className="text-[9px] font-bold uppercase tracking-wider text-amber-600 hover:underline"
+                      >
+                        Copiar
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="custom-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+                  {cartoesVisiveis.length === 0 ? (
+                    <div className="py-8 text-center px-2 space-y-2">
+                      <p className={`text-xs leading-relaxed ${subtleClass}`}>
+                        Nenhum cartão ativo no momento. Eles sobem automaticamente quando o interlocutor faz perguntas mapeadas no banco.
+                      </p>
+                      <p className={`text-[11px] ${subtleClass}`}>
+                        Use o botão <strong>O que responder (30s)</strong> acima se precisar de ajuda com o que acabou de ser falado.
+                      </p>
+                    </div>
+                  ) : (
+                    cartoesVisiveis.map(({ cartao }) => (
+                      <article
+                        key={cartao.id}
+                        className={`rounded-2xl border p-4 shadow-sm ${panelClass}`}
+                      >
+                        <h4 className={`text-xs font-bold leading-snug ${titleClass}`}>{cartao.pergunta}</h4>
+                        <ul className={`mt-2 space-y-1.5 text-[12px] leading-relaxed ${mutedClass}`}>
+                          {cartao.resposta.map((linha, i) => (
+                            <li key={i}>{linha}</li>
+                          ))}
+                        </ul>
+                        {cartao.numeros && cartao.numeros.length > 0 && (
+                          <ul className={`mt-2 space-y-1 border-t pt-2 text-[12px] font-bold ${isDark ? 'border-white/10 text-slate-100' : 'border-slate-200 text-slate-900'}`}>
+                            {cartao.numeros.map((n, i) => (
+                              <li key={i}>{n}</li>
+                            ))}
+                          </ul>
+                        )}
+                        {cartao.naoDizer && (
+                          <p className={`mt-2 rounded-xl px-2.5 py-1.5 text-[11px] font-semibold leading-snug ${isDark ? 'bg-rose-500/10 text-rose-300' : 'bg-rose-50 text-rose-700'}`}>
+                            Não diga: {cartao.naoDizer}
+                          </p>
+                        )}
+                        <button
+                          onClick={() => setCartoesVisiveis(atuais => atuais.filter(c => c.cartao.id !== cartao.id))}
+                          className={`mt-3 text-[10px] font-bold uppercase tracking-wider ${subtleClass} hover:text-rose-500`}
+                        >
+                          Dispensar
+                        </button>
+                      </article>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {!isMobileCopilotOpen && (
             <button
               onClick={() => setIsMobileCopilotOpen(true)}
@@ -1769,6 +2031,57 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
             </div>
 
             <div className="custom-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+              {/* ── Consulta ao Acervo com IA ── */}
+              <div className={`rounded-2xl border p-3.5 shadow-sm ${isDark ? 'border-indigo-500/30 bg-indigo-950/20' : 'border-indigo-200 bg-indigo-50/70'}`}>
+                <div className="flex items-center gap-1.5 mb-1 text-[11px] font-bold uppercase tracking-wider text-indigo-500">
+                  <span>🔍</span>
+                  <span>Consultar Acervo via IA</span>
+                </div>
+                <p className={`text-[11px] mb-2 leading-relaxed ${mutedClass}`}>
+                  Pergunte sobre acordos e temas tratados nas reuniões gravadas anteriores.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={termoBuscaAcervo}
+                    onChange={e => setTermoBuscaAcervo(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') void handleConsultarAcervo(); }}
+                    placeholder="Ex: O que ficou combinado com fulano?"
+                    className={`min-w-0 flex-1 rounded-xl border px-3 py-2 text-xs font-medium outline-none ${inputClass}`}
+                  />
+                  <button
+                    onClick={() => void handleConsultarAcervo()}
+                    disabled={isBuscandoAcervo || !termoBuscaAcervo.trim()}
+                    className={`rounded-xl px-3 py-2 text-[10px] font-bold uppercase tracking-wider transition-all disabled:opacity-40 ${
+                      isDark ? 'bg-white text-slate-950 hover:bg-slate-200' : 'bg-slate-900 text-white hover:bg-indigo-600'
+                    }`}
+                  >
+                    {isBuscandoAcervo ? 'Buscando...' : 'Perguntar'}
+                  </button>
+                </div>
+
+                {respostaAcervo && (
+                  <div className={`mt-3 rounded-xl border p-3 ${isDark ? 'border-white/10 bg-slate-900/80' : 'border-slate-200 bg-white'}`}>
+                    <div className="flex items-center justify-between gap-1 mb-1.5">
+                      <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-indigo-500">
+                        <span>💡</span>
+                        <span>Resposta do Acervo:</span>
+                      </span>
+                      <button
+                        onClick={() => setRespostaAcervo(null)}
+                        className={`text-[10px] font-bold ${subtleClass} hover:text-rose-500`}
+                        title="Fechar resposta"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <p className={`text-xs leading-relaxed whitespace-pre-wrap ${titleClass}`}>
+                      {respostaAcervo}
+                    </p>
+                  </div>
+                )}
+              </div>
+
               {meetingHistory.length === 0 ? (
                 <div className={`rounded-2xl border p-6 text-center text-xs font-bold ${softPanelClass} ${mutedClass}`}>
                   Nenhuma reunião registrada ainda.
@@ -2002,7 +2315,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
                 Cancelar
               </button>
               <button
-                disabled={terceirosPresentes && !avisoConsentimento}
+                disabled={!validarInicioGravacao(terceirosPresentes, avisoConsentimento).podeIniciar}
                 onClick={() => {
                   const consent: RegistroConsentimento = {
                     terceirosPresentes,
