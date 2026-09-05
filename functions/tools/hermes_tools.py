@@ -2001,6 +2001,38 @@ def consultar_execucoes_agente(ctx: ToolContext, args: dict):
     return listar_recentes(ctx.db, rotina=rotina, limite=limite)
 
 
+def _preparar_contato_prioritario_secretario(ctx: ToolContext, args: dict):
+    import secretario_whatsapp
+    return secretario_whatsapp.preparar_contato_prioritario(
+        db=ctx.db,
+        identificador_contato=args.get("identificador_contato"),
+        assunto=args.get("assunto"),
+        o_que_precisa_saber=args.get("o_que_precisa_saber"),
+        validade_horas=args.get("validade_horas"),
+        ctx=ctx,
+    )
+
+
+def _consultar_contatos_prioritarios_secretario(ctx: ToolContext, args: dict):
+    import secretario_whatsapp
+    apenas_ativos = args.get("apenas_ativos", True)
+    if apenas_ativos is None:
+        apenas_ativos = True
+    return secretario_whatsapp.consultar_contatos_prioritarios(
+        db=ctx.db,
+        apenas_ativos=bool(apenas_ativos),
+    )
+
+
+def _cancelar_contato_prioritario_secretario(ctx: ToolContext, args: dict):
+    import secretario_whatsapp
+    return secretario_whatsapp.cancelar_contato_prioritario(
+        db=ctx.db,
+        identificador_contato=args.get("identificador_contato"),
+        ctx=ctx,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Registro
 # ---------------------------------------------------------------------------
@@ -2090,6 +2122,9 @@ _HANDLERS: dict = {
     "concluir_pedido_agente": concluir_pedido_agente,
     "registrar_execucao_agente": registrar_execucao_agente,
     "consultar_execucoes_agente": consultar_execucoes_agente,
+    "preparar_contato_prioritario_secretario": _preparar_contato_prioritario_secretario,
+    "consultar_contatos_prioritarios_secretario": _consultar_contatos_prioritarios_secretario,
+    "cancelar_contato_prioritario_secretario": _cancelar_contato_prioritario_secretario,
 }
 
 
