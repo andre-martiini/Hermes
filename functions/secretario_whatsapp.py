@@ -215,6 +215,10 @@ def resolver_identificador_contato(db, identificador_contato: str, ctx=None) -> 
     if not identificador:
         raise ValueError("Identificador do contato não pode ser vazio.")
 
+    # Rejeita grupos explicitamente
+    if identificador.endswith("@g.us"):
+        raise ValueError("O Modo Secretário com contato prioritário não oferece suporte a grupos de WhatsApp.")
+
     # Se já for um JID válido (@c.us ou @lid)
     if "@" in identificador and (identificador.endswith("@c.us") or identificador.endswith("@lid")):
         chat_name = identificador
@@ -238,37 +242,110 @@ def resolver_identificador_contato(db, identificador_contato: str, ctx=None) -> 
         
         previa = hermes_tools._destinatario_whatsapp_previa(ctx, identificador)
         if previa.get("encontrado") and previa.get("chat_id"):
-            return str(previa["chat_id"]).strip(), str(previa.get("nome") or identificador).strip()
+            if previa.get("tipo") == "grupo" or str(previa["chat_id"]).endswith("@g.us"):
+                raise ValueError("O Modo Secretário com contato prioritário não oferece suporte a grupos de WhatsApp.")
+            cid = str(previa["chat_id"]).strip()
+            if "@" not in cid and cid.isdigit():
+                cid = f"{cid}@c.us"
+            return cid, str(previa.get("nome") or identificador).strip()
+    except ValueError:
+        raise
     except Exception as exc:
         print(f"[SecretarioWhatsApp] Aviso ao resolver via previa: {exc}")
 
-    # Fallback 1: busca por nome ou telefone em perfil_pessoas
+    # Fallback 1: busca por nome ou telefone em perfil_pessoas (suporta telefone, telefones e whatsapp_chat_id)
     try:
         termo_lower = identificador.lower()
+        digitos_busca = extrair_digitos(identificador)
+
+        exatos = []
+        parciais = []
+
         for doc in db.collection("perfil_pessoas").limit(200).stream():
             data = doc.to_dict() or {}
             nome = str(data.get("nome") or "").strip()
+            chat_id = str(data.get("whatsapp_chat_id") or "").strip()
             telefone = str(data.get("telefone") or "").strip()
-            w_id = str(data.get("whatsapp_chat_id") or "").strip()
-            if termo_lower == nome.lower() or termo_lower in nome.lower():
-                chat_id = w_id or (f"{extrair_digitos(telefone)}@c.us" if extrair_digitos(telefone) else "")
-                if chat_id:
-                    return chat_id, nome or identificador
-            if extrair_digitos(identificador) and extrair_digitos(identificador) == extrair_digitos(telefone):
-                chat_id = w_id or f"{extrair_digitos(telefone)}@c.us"
-                return chat_id, nome or identificador
+            telefones = data.get("telefones") or []
+            if isinstance(telefones, str):
+                telefones = [telefones]
+            todos_telefones = [telefone] + list(telefones)
+            telefones_limpos = [extrair_digitos(str(t)) for t in todos_telefones if str(t).strip()]
+
+            dest_cid = chat_id or (f"{telefones_limpos[0]}@c.us" if telefones_limpos else None)
+            if not dest_cid or dest_cid.endswith("@g.us"):
+                continue
+
+            bate_telefone_exato = bool(digitos_busca and any(digitos_busca == t for t in telefones_limpos))
+            bate_telefone_parcial = bool(digitos_busca and any(len(digitos_busca) >= 8 and (digitos_busca in t or t in digitos_busca) for t in telefones_limpos))
+            bate_nome_exato = bool(termo_lower and termo_lower == nome.lower())
+            bate_nome_palavra = bool(termo_lower and termo_lower in [p.lower() for p in nome.split()])
+            bate_nome_substring = bool(termo_lower and termo_lower in nome.lower())
+
+            item = (dest_cid, nome or identificador)
+            if bate_nome_exato or bate_telefone_exato:
+                exatos.append(item)
+            elif bate_nome_palavra or bate_nome_substring or bate_telefone_parcial:
+                parciais.append(item)
+
+        if exatos:
+            unique_cids = {cid: n for cid, n in exatos}
+            if len(unique_cids) == 1:
+                return next(iter(unique_cids.items()))
+            else:
+                nomes_conflito = sorted(list(unique_cids.values()))
+                raise ValueError(f"Múltiplos contatos encontrados para '{identificador}' ({', '.join(nomes_conflito)}). Especifique o número de telefone completo.")
+
+        if parciais:
+            unique_cids = {cid: n for cid, n in parciais}
+            if len(unique_cids) == 1:
+                return next(iter(unique_cids.items()))
+            else:
+                nomes_ambiguos = sorted(list(unique_cids.values()))
+                raise ValueError(f"Ambiguidade: múltiplos contatos encontrados para '{identificador}' ({', '.join(nomes_ambiguos)}). Especifique o nome completo ou telefone.")
+    except ValueError:
+        raise
     except Exception as exc:
         print(f"[SecretarioWhatsApp] Aviso ao buscar em perfil_pessoas: {exc}")
 
-    # Fallback 2: busca por chat_name em whatsapp_chats
+    # Fallback 2: busca por chat_name em whatsapp_chats (ignora grupos e exige correspondência exata ou única)
     try:
         termo_lower = identificador.lower()
+        exatos_chats = []
+        parciais_chats = []
+
         for doc in db.collection("whatsapp_chats").limit(200).stream():
             data = doc.to_dict() or {}
-            chat_name = str(data.get("chat_name") or "").strip()
             chat_id = str(data.get("chat_id") or doc.id).strip()
-            if termo_lower == chat_name.lower() or termo_lower in chat_name.lower():
-                return chat_id, chat_name or identificador
+            if chat_id.endswith("@g.us") or data.get("is_group"):
+                continue
+            chat_name = str(data.get("chat_name") or "").strip()
+            if not chat_name:
+                continue
+
+            item = (chat_id, chat_name)
+            if termo_lower == chat_name.lower():
+                exatos_chats.append(item)
+            elif termo_lower in chat_name.lower():
+                parciais_chats.append(item)
+
+        if exatos_chats:
+            unique_cids = {cid: name for cid, name in exatos_chats}
+            if len(unique_cids) == 1:
+                return next(iter(unique_cids.items()))
+            else:
+                nomes_conflito = sorted(list(unique_cids.values()))
+                raise ValueError(f"Múltiplos chats encontrados para '{identificador}' ({', '.join(nomes_conflito)}). Especifique o número de telefone completo.")
+
+        if parciais_chats:
+            unique_cids = {cid: name for cid, name in parciais_chats}
+            if len(unique_cids) == 1:
+                return next(iter(unique_cids.items()))
+            else:
+                nomes_ambiguos = sorted(list(unique_cids.values()))
+                raise ValueError(f"Ambiguidade: múltiplos chats encontrados para '{identificador}' ({', '.join(nomes_ambiguos)}). Especifique o nome completo ou telefone.")
+    except ValueError:
+        raise
     except Exception as exc:
         print(f"[SecretarioWhatsApp] Aviso ao buscar em whatsapp_chats: {exc}")
 
@@ -318,10 +395,24 @@ def preparar_contato_prioritario(
         "valido_ate": valido_ate,
         "resumo_estruturado": None,
         "informacao_obtida": None,
-        "criado_em": firestore.SERVER_TIMESTAMP,
-        "atualizado_em": firestore.SERVER_TIMESTAMP,
+        "criado_em": agora_sp or firestore.SERVER_TIMESTAMP,
+        "atualizado_em": agora_sp or firestore.SERVER_TIMESTAMP,
     }
     doc_ref.set(doc_data, merge=True)
+
+    # Reinicializa o contador de trocas da conversa para garantir ciclo limpo do novo briefing
+    try:
+        db.collection(COLLECTION_CONVERSAS).document(chat_id).set({
+            "chat_id": chat_id,
+            "chat_name": chat_name,
+            "estado": ESTADO_EM_ATENDIMENTO,
+            "trocas_count": 0,
+            "briefing_id": chat_id,
+            "historico_mensagens": [],
+            "atualizado_em": agora_sp or firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+    except Exception as exc:
+        print(f"[SecretarioWhatsApp] Aviso ao resetar conversa em preparar_contato_prioritario: {exc}")
 
     return {
         "status": "ok",
@@ -442,7 +533,8 @@ def obter_briefing_ativo(
 
     dados = None
     if snap.exists:
-        dados = snap.to_dict()
+        dados = snap.to_dict() or {}
+        dados["_doc_id"] = snap.id
     else:
         digitos = extrair_digitos(c_id)
         if digitos:
@@ -450,6 +542,7 @@ def obter_briefing_ativo(
                 d = doc.to_dict() or {}
                 if extrair_digitos(str(d.get("chat_id") or doc.id)) == digitos:
                     dados = d
+                    dados["_doc_id"] = doc.id
                     doc_ref = doc.reference
                     break
 
@@ -942,8 +1035,10 @@ def processar_mensagem_secretario(
     trocas_atuais = int(dados_conversa.get("trocas_count", 0))
     historico = list(dados_conversa.get("historico_mensagens") or [])
 
-    # Se a conversa anterior já foi assumida pelo André ou encerrada, inicia nova sessão
-    if estado_atual in (ESTADO_ASSUMIDO_POR_ANDRE, ESTADO_ENCERRADO):
+    briefing_doc_id = str(briefing.get("_doc_id") or briefing.get("chat_id") or chat_id) if briefing else None
+
+    # Se a conversa anterior já foi assumida pelo André, encerrada ou escalada, inicia nova sessão com contador zerado
+    if estado_atual in (ESTADO_ASSUMIDO_POR_ANDRE, ESTADO_ENCERRADO, ESTADO_ESCALADO):
         trocas_atuais = 0
         historico = []
         estado_atual = ESTADO_EM_ATENDIMENTO
@@ -957,8 +1052,8 @@ def processar_mensagem_secretario(
             )
             resumo_fechamento = f"Teto prioritário atingido ({max_trocas} trocas). Última mensagem: {texto_msg[:120]}"
 
-            # Marca briefing como concluído
-            db.collection(COLLECTION_PRIORITARIOS).document(chat_id).update({
+            # Marca briefing como concluído usando o ID real do documento
+            db.collection(COLLECTION_PRIORITARIOS).document(briefing_doc_id).update({
                 "status": STATUS_PRIORITARIO_CONCLUIDO,
                 "resumo_estruturado": resumo_fechamento,
                 "informacao_obtida": False,
@@ -993,6 +1088,7 @@ def processar_mensagem_secretario(
                 "chat_name": chat_name,
                 "estado": ESTADO_ENCERRADO,
                 "trocas_count": trocas_atuais + 1,
+                "briefing_id": briefing_doc_id,
                 "ultimo_recado": resumo_fechamento,
                 "escalado": True,
                 "item_atencao_id": item_id,
@@ -1115,7 +1211,7 @@ def processar_mensagem_secretario(
         )
     elif briefing and investigacao_concluida:
         # Conclusão bem-sucedida ou finalização da investigação com prioridade média
-        db.collection(COLLECTION_PRIORITARIOS).document(chat_id).update({
+        db.collection(COLLECTION_PRIORITARIOS).document(briefing_doc_id).update({
             "status": STATUS_PRIORITARIO_CONCLUIDO,
             "resumo_estruturado": resumo_estruturado,
             "informacao_obtida": informacao_obtida,
@@ -1174,6 +1270,8 @@ def processar_mensagem_secretario(
         "escalado": bool(forcou_decisao or assunto_sensivel or (briefing and investigacao_concluida)),
         "atualizado_em": firestore.SERVER_TIMESTAMP,
     }
+    if briefing_doc_id:
+        payload_conversa["briefing_id"] = briefing_doc_id
     if not snap_conversa.exists:
         payload_conversa["iniciado_em"] = firestore.SERVER_TIMESTAMP
     if item_atencao_id:

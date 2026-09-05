@@ -771,6 +771,126 @@ class TestSecretarioContatoPrioritario(unittest.TestCase):
             res_cons2 = hermes_tools.execute("consultar_contatos_prioritarios_secretario", {"apenas_ativos": True}, ctx)
             self.assertEqual(res_cons2["total"], 0)
 
+    def test_conclusao_investigacao_com_chat_id_digitos_puros_atualiza_documento_correto(self):
+        doc_briefing_id = "5511777777777"
+        inbound_chat_id = "5511777777777@c.us"
+        agora = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=-3)))
+
+        # Salvo apenas com dígitos no ID do documento
+        self.db.collection(sec.COLLECTION_PRIORITARIOS).document(doc_briefing_id).set({
+            "chat_id": doc_briefing_id,
+            "chat_name": "Fornecedor Materiais",
+            "assunto": "Preço do Cimento",
+            "o_que_precisa_saber": "Qual o valor do saco de 50kg para entrega amanhã?",
+            "status": sec.STATUS_PRIORITARIO_ATIVO,
+            "valido_ate": (agora + timedelta(hours=5)).isoformat(),
+        })
+
+        msg = {
+            "chat_id": inbound_chat_id,
+            "chat_name": "Fornecedor Materiais",
+            "from_me": False,
+            "content": "O saco de cimento CP II 50kg está saindo a R$ 32,90 para entrega amanhã.",
+            "wa_message_id": "msg-prio-doc-diff",
+        }
+
+        def mock_llm_concluir(**kwargs):
+            return {
+                "resposta_para_contato": "Anotado, repasso ao André.",
+                "resumo_estruturado": "Cimento CP II 50kg a R$ 32,90 com entrega amanhã.",
+                "informacao_obtida": True,
+                "investigacao_concluida": True,
+                "forcou_decisao": False,
+                "assunto_sensivel": False,
+            }
+
+        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={"encontrado": True, "nome": "Fornecedor Materiais", "chat_id": inbound_chat_id}):
+            with mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value="tg-prio-doc"):
+                res = sec.processar_mensagem_secretario(self.db, msg, llm_runner=mock_llm_concluir)
+
+        self.assertIsNotNone(res)
+        self.assertEqual(res["status"], "investigacao_concluida")
+
+        # Verifica que o documento originalmente cadastrado com dígitos puros foi atualizado corretamente
+        briefing_db = self.db.collection(sec.COLLECTION_PRIORITARIOS).document(doc_briefing_id).get().to_dict()
+        self.assertEqual(briefing_db["status"], sec.STATUS_PRIORITARIO_CONCLUIDO)
+        self.assertTrue(briefing_db["informacao_obtida"])
+        self.assertIn("R$ 32,90", briefing_db["resumo_estruturado"])
+
+    def test_resolver_identificador_prioriza_match_exato_sobre_substring(self):
+        # Cria "Ana Paula" antes de "Ana" no perfil
+        self.db.collection("perfil_pessoas").document("p_ana_paula").set({
+            "nome": "Ana Paula Silva",
+            "whatsapp_chat_id": "5511111111111@c.us",
+        })
+        self.db.collection("perfil_pessoas").document("p_ana").set({
+            "nome": "Ana",
+            "whatsapp_chat_id": "5511222222222@c.us",
+        })
+
+        # Buscando "Ana": deve priorizar correspondência exata para "Ana" (5511222222222@c.us)
+        cid, nome = sec.resolver_identificador_contato(self.db, "Ana")
+        self.assertEqual(cid, "5511222222222@c.us")
+        self.assertEqual(nome, "Ana")
+
+    def test_resolver_identificador_rejeita_ambiguidade_de_contatos(self):
+        self.db.collection("perfil_pessoas").document("p_carlos_1").set({
+            "nome": "Carlos Eduardo",
+            "whatsapp_chat_id": "5511333333333@c.us",
+        })
+        self.db.collection("perfil_pessoas").document("p_carlos_2").set({
+            "nome": "Carlos Silva",
+            "whatsapp_chat_id": "5511444444444@c.us",
+        })
+
+        with self.assertRaises(ValueError) as ctx_err:
+            sec.resolver_identificador_contato(self.db, "Carlos")
+        self.assertIn("Ambiguidade", str(ctx_err.exception))
+
+    def test_resolver_identificador_rejeita_grupos(self):
+        # 1. JID de grupo
+        with self.assertRaises(ValueError) as ctx_err1:
+            sec.resolver_identificador_contato(self.db, "1234567890-abcdef@g.us")
+        self.assertIn("não oferece suporte a grupos", str(ctx_err1.exception))
+
+        # 2. Previa retornando grupo
+        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={"encontrado": True, "tipo": "grupo", "chat_id": "12345@g.us"}):
+            with self.assertRaises(ValueError) as ctx_err2:
+                sec.resolver_identificador_contato(self.db, "Grupo da Família")
+            self.assertIn("não oferece suporte a grupos", str(ctx_err2.exception))
+
+    def test_preparar_contato_prioritario_reseta_contador_de_conversa_anterior_escalada(self):
+        chat_id = "5511555555555@c.us"
+
+        # Conversa anterior com 6 trocas e escalada
+        self.db.collection(sec.COLLECTION_CONVERSAS).document(chat_id).set({
+            "chat_id": chat_id,
+            "chat_name": "Contato Antigo",
+            "estado": sec.ESTADO_ESCALADO,
+            "trocas_count": 6,
+        })
+
+        # Prepara novo contato prioritário
+        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={"encontrado": True, "chat_id": chat_id, "nome": "Contato Antigo"}):
+            res_prep = sec.preparar_contato_prioritario(
+                self.db,
+                identificador_contato=chat_id,
+                assunto="Novo Assunto",
+                o_que_precisa_saber="Nova Informação",
+            )
+            self.assertEqual(res_prep["status"], "ok")
+
+        # Verifica que o estado da conversa foi resetado para 0 trocas e em atendimento
+        conv_db = self.db.collection(sec.COLLECTION_CONVERSAS).document(chat_id).get().to_dict()
+        self.assertEqual(conv_db["estado"], sec.ESTADO_EM_ATENDIMENTO)
+        self.assertEqual(conv_db["trocas_count"], 0)
+
+    def test_tools_prioritarias_marcadas_como_mutating_no_registry(self):
+        from tools import registry
+        self.assertTrue(registry.needs_confirmation("preparar_contato_prioritario_secretario"))
+        self.assertTrue(registry.needs_confirmation("consultar_contatos_prioritarios_secretario"))
+        self.assertTrue(registry.needs_confirmation("cancelar_contato_prioritario_secretario"))
+
 
 if __name__ == "__main__":
     unittest.main()

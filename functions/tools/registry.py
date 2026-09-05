@@ -177,6 +177,10 @@ _NEEDS_CONFIRMATION: set[str] = {
     # estao, justamente porque a politica do canal esta vazia desde 27/08/2026.
     "registrar_aporte_investimento",
     "registrar_execucao_investimento",
+    # Modo Secretário no WhatsApp (Contato Prioritário)
+    "preparar_contato_prioritario_secretario",
+    "consultar_contatos_prioritarios_secretario",
+    "cancelar_contato_prioritario_secretario",
 }
 
 _ASYNC_TOOLS: set[str] = {
