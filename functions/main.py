@@ -13752,28 +13752,8 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
             except Exception:
                 pass
             if email_cfg.get("dismiss_matching_pending", False):
-                from email_action_linker import is_sender_ignored
-                now_iso = datetime.now(timezone.utc).isoformat()
-                pending_docs = list(db.collection("email_action_suggestions").where("status", "in", ["pending", "expired"]).stream())
-                batch = db.batch()
-                batch_count = 0
-                for s_doc in pending_docs:
-                    s_data = s_doc.to_dict() or {}
-                    sender = s_data.get("sender") or s_data.get("origem_sinal") or ""
-                    if is_sender_ignored(sender, ignored_list):
-                        batch.update(s_doc.reference, {
-                            "status": "dismissed",
-                            "decided_at": now_iso,
-                            "dismissed_by": "ignored_filter",
-                        })
-                        dismissed_count += 1
-                        batch_count += 1
-                        if batch_count >= 400:
-                            batch.commit()
-                            batch = db.batch()
-                            batch_count = 0
-                if batch_count > 0:
-                    batch.commit()
+                from email_action_linker import dismiss_matching_pending_emails
+                dismissed_count = dismiss_matching_pending_emails(db, ignored_list)
         if email_updates:
             updates["email_action_linker"] = email_updates
 
@@ -13839,35 +13819,15 @@ def dismissPendingIgnoredEmails(req: https_fn.CallableRequest) -> dict:
     case com a lista de ignorados configurada em system/settings."""
     _require_internal_user(req)
     db = get_db()
-    from email_action_linker import _load_settings, is_sender_ignored
-    settings = _load_settings(db)
+    from email_action_linker import _load_settings, dismiss_matching_pending_emails
+    # Leitura direta do Firestore sem cache de 60s (P2.3)
+    settings = _load_settings(db, use_cache=False)
     ignored_patterns = settings.get("ignored_senders", [])
     if not ignored_patterns:
         return {"dismissed_count": 0}
 
-    now_iso = datetime.now(timezone.utc).isoformat()
-    pending_docs = list(db.collection("email_action_suggestions").where("status", "in", ["pending", "expired"]).stream())
-    batch = db.batch()
-    batch_count = 0
-    dismissed_count = 0
-    for s_doc in pending_docs:
-        s_data = s_doc.to_dict() or {}
-        sender = s_data.get("sender") or s_data.get("origem_sinal") or ""
-        if is_sender_ignored(sender, ignored_patterns):
-            batch.update(s_doc.reference, {
-                "status": "dismissed",
-                "decided_at": now_iso,
-                "dismissed_by": "ignored_filter",
-            })
-            dismissed_count += 1
-            batch_count += 1
-            if batch_count >= 400:
-                batch.commit()
-                batch = db.batch()
-                batch_count = 0
-    if batch_count > 0:
-        batch.commit()
-    return {"dismissed_count": dismissed_count}
+    count = dismiss_matching_pending_emails(db, ignored_patterns)
+    return {"dismissed_count": count}
 
 
 @https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)

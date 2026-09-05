@@ -78,5 +78,106 @@ class TestEmailActionLinkerFilter(unittest.TestCase):
             self.assertIn("eventos.ifnmg.edu.br", settings["ignored_senders"])
 
 
+    def test_load_settings_direct_read_when_use_cache_false(self):
+        from unittest.mock import MagicMock, patch
+        from email_action_linker import _load_settings
+
+        mock_db = MagicMock()
+        mock_doc = MagicMock()
+        mock_doc.exists = True
+        mock_doc.to_dict.return_value = {
+            "email_action_linker": {
+                "enabled": True,
+                "ignored_senders": ["fresh@domain.com"],
+            }
+        }
+        mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
+        with patch("main._cached_doc_get") as mock_cached_get, \
+             patch("inbox_pendentes._noise_config", return_value=(set(), set())):
+            settings = _load_settings(mock_db, use_cache=False)
+            mock_cached_get.assert_not_called()
+            mock_db.collection.assert_called_with("system")
+            self.assertIn("fresh@domain.com", settings["ignored_senders"])
+
+    def test_dismiss_matching_pending_emails_filters_canal_email_only(self):
+        from unittest.mock import MagicMock
+        from email_action_linker import dismiss_matching_pending_emails
+
+        mock_db = MagicMock()
+        # Mocking db.transaction() context
+        mock_tx = MagicMock()
+        mock_db.transaction.return_value = mock_tx
+
+        # Doc 1: canal email, matching sender -> should be dismissed
+        doc_email = MagicMock()
+        doc_email.to_dict.return_value = {
+            "canal": "email",
+            "status": "pending",
+            "sender": "ignore_me@domain.com",
+        }
+        snap_email = MagicMock()
+        snap_email.exists = True
+        snap_email.to_dict.return_value = {
+            "canal": "email",
+            "status": "pending",
+            "sender": "ignore_me@domain.com",
+        }
+        doc_email.reference.get.return_value = snap_email
+
+        # Doc 2: canal whatsapp, matching sender -> should NOT be dismissed
+        doc_wa = MagicMock()
+        doc_wa.to_dict.return_value = {
+            "canal": "whatsapp",
+            "status": "pending",
+            "sender": "ignore_me@domain.com",
+        }
+        snap_wa = MagicMock()
+        snap_wa.exists = True
+        snap_wa.to_dict.return_value = {
+            "canal": "whatsapp",
+            "status": "pending",
+            "sender": "ignore_me@domain.com",
+        }
+        doc_wa.reference.get.return_value = snap_wa
+
+        query_mock = MagicMock()
+        query_mock.stream.return_value = [doc_email, doc_wa]
+        mock_db.collection.return_value.where.return_value = query_mock
+
+        count = dismiss_matching_pending_emails(mock_db, ["@domain.com"])
+        self.assertEqual(count, 1)
+
+    def test_dismiss_matching_pending_emails_race_condition_skips_applied(self):
+        from unittest.mock import MagicMock
+        from email_action_linker import dismiss_matching_pending_emails
+
+        mock_db = MagicMock()
+        # Initial stream had pending
+        doc_applied = MagicMock()
+        doc_applied.to_dict.return_value = {
+            "canal": "email",
+            "status": "pending",
+            "sender": "ignore_me@domain.com",
+        }
+        # But inside transaction, status is already applied
+        snap_applied = MagicMock()
+        snap_applied.exists = True
+        snap_applied.to_dict.return_value = {
+            "canal": "email",
+            "status": "applied",
+            "sender": "ignore_me@domain.com",
+        }
+        doc_applied.reference.get.return_value = snap_applied
+
+        query_mock = MagicMock()
+        query_mock.stream.return_value = [doc_applied]
+        mock_db.collection.return_value.where.return_value = query_mock
+
+        count = dismiss_matching_pending_emails(mock_db, ["@domain.com"])
+        self.assertEqual(count, 0)
+        doc_applied.reference.update.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()
+
