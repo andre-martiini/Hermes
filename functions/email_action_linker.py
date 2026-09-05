@@ -95,6 +95,18 @@ def _load_settings(db) -> dict:
         ignored_senders = list(DEFAULT_IGNORED_SENDERS)
     else:
         ignored_senders = [str(x).strip().lower() for x in ignored_raw if str(x).strip()]
+
+    # Unificação com a fonte de ruído de inbox_pendentes (_noise_config / config/inbox_pendentes)
+    try:
+        from inbox_pendentes import _noise_config
+        noise_domains, _ = _noise_config(db)
+        for d in sorted(noise_domains):
+            d_norm = str(d).strip().lower()
+            if d_norm and d_norm not in ignored_senders:
+                ignored_senders.append(d_norm)
+    except Exception:
+        pass
+
     return {
         "enabled": bool(cfg.get("enabled", False)),
         "min_confidence": float(cfg.get("min_confidence", DEFAULT_MIN_CONFIDENCE)),

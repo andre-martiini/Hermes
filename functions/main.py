@@ -13672,6 +13672,16 @@ def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
     else:
         ignored_senders = list(ignored_raw or [])
 
+    try:
+        from inbox_pendentes import _noise_config
+        noise_domains, _ = _noise_config(db)
+        for d in sorted(noise_domains):
+            d_norm = str(d).strip().lower()
+            if d_norm and d_norm not in ignored_senders:
+                ignored_senders.append(d_norm)
+    except Exception:
+        pass
+
     return {
         "email_action_linker": {
             "enabled": bool(email_cfg.get("enabled", False)),
@@ -13735,6 +13745,12 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
         if "ignored_senders" in email_cfg and isinstance(email_cfg["ignored_senders"], list):
             ignored_list = [str(x).strip().lower() for x in email_cfg["ignored_senders"] if str(x).strip()]
             email_updates["ignored_senders"] = ignored_list
+            try:
+                db.collection("config").document("inbox_pendentes").set({
+                    "remetentes_ignorados": ignored_list
+                }, merge=True)
+            except Exception:
+                pass
             if email_cfg.get("dismiss_matching_pending", False):
                 from email_action_linker import is_sender_ignored
                 now_iso = datetime.now(timezone.utc).isoformat()

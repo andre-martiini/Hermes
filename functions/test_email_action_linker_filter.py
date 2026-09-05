@@ -43,6 +43,40 @@ class TestEmailActionLinkerFilter(unittest.TestCase):
         self.assertTrue(is_sender_ignored("notifications@github.com", patterns))
         self.assertFalse(is_sender_ignored("valid.person@empresa.com.br", patterns))
 
+    def test_load_settings_unifies_inbox_pendentes_noise(self):
+        from unittest.mock import MagicMock, patch
+        from email_action_linker import _load_settings
+
+        mock_db = MagicMock()
+        mock_doc = MagicMock()
+        mock_doc.exists = True
+        mock_doc.to_dict.return_value = {
+            "email_action_linker": {
+                "enabled": True,
+                "ignored_senders": ["custom@empresa.com"],
+            }
+        }
+        with patch("main._cached_doc_get", return_value=mock_doc), \
+             patch("inbox_pendentes._noise_config", return_value=({"eventos.ifnmg.edu.br", "picpay.com"}, set())):
+            settings = _load_settings(mock_db)
+            self.assertIn("custom@empresa.com", settings["ignored_senders"])
+            self.assertIn("eventos.ifnmg.edu.br", settings["ignored_senders"])
+            self.assertIn("picpay.com", settings["ignored_senders"])
+
+    def test_load_settings_default_unifies_noise_domains(self):
+        from unittest.mock import MagicMock, patch
+        from email_action_linker import _load_settings
+
+        mock_db = MagicMock()
+        mock_doc = MagicMock()
+        mock_doc.exists = False
+        with patch("main._cached_doc_get", return_value=mock_doc), \
+             patch("inbox_pendentes._noise_config", return_value=({"eventos.ifnmg.edu.br"}, set())):
+            settings = _load_settings(mock_db)
+            self.assertIn("notifications@github.com", settings["ignored_senders"])
+            self.assertIn("@github.com", settings["ignored_senders"])
+            self.assertIn("eventos.ifnmg.edu.br", settings["ignored_senders"])
+
 
 if __name__ == '__main__':
     unittest.main()
