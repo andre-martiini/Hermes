@@ -378,6 +378,285 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
         self.assertEqual(item["tipo"], sec.TIPO_ATENCAO_ASSUNTO_SENSIVEL)
         self.assertEqual(item["prioridade"], atencao.PRIORIDADE_ALTA)
 
+    def test_grupo_na_allowlist_com_mentions_andre_processa(self):
+        chat_id = "120363000000000000@g.us"
+        # Adiciona o grupo na allowlist
+        self.db.collection("system").document("settings").set({
+            "whatsapp_secretario": {
+                "enabled": True,
+                "chats_allowlist": [chat_id],
+                "max_trocas": 2,
+                "janela_cancelamento_min": 10,
+            }
+        })
+        msg = {
+            "chat_id": chat_id,
+            "chat_name": "Grupo de Trabalho",
+            "from_me": False,
+            "is_group": True,
+            "content": "@André você consegue ver isso?",
+            "mentions_andre": True,
+            "wa_message_id": "msg-grp-1",
+        }
+
+        def mock_llm(**kwargs):
+            return {
+                "resposta_para_contato": "Olá! O André está ausente no momento, mas já anotei.",
+                "resumo_recado": "Mensagem direcionada ao André no grupo.",
+                "forcou_decisao": False,
+                "assunto_sensivel": False,
+            }
+
+        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={"encontrado": True, "nome": "Grupo de Trabalho", "chat_id": chat_id}):
+            with mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value="tg-grp"):
+                res = sec.processar_mensagem_secretario(self.db, msg, llm_runner=mock_llm)
+
+        self.assertIsNotNone(res)
+        self.assertEqual(res["status"], "ok")
+        outbox_docs = list(self.db.collection(outbox_aprovacao.COLLECTION).stream())
+        self.assertEqual(len(outbox_docs), 1)
+        self.assertTrue(outbox_docs[0].to_dict()["content"].startswith("**Hermes Bot:** "))
+
+    def test_grupo_na_allowlist_com_mentioned_ids_cruzando_andre_ids_processa(self):
+        chat_id = "120363000000000000@g.us"
+        andre_wa_id = "5511999990000@c.us"
+        # Configura allowlist e andre_chat_ids
+        self.db.collection("system").document("settings").set({
+            "whatsapp_secretario": {
+                "enabled": True,
+                "chats_allowlist": [chat_id],
+            },
+            "whatsapp_ingest": {
+                "andre_chat_ids": [andre_wa_id],
+            }
+        })
+        msg = {
+            "chat_id": chat_id,
+            "chat_name": "Grupo Projeto",
+            "from_me": False,
+            "is_group": True,
+            "content": "Aviso importante para o André",
+            "mentions_andre": False,
+            "mentioned_ids": [andre_wa_id],
+            "wa_message_id": "msg-grp-2",
+        }
+
+        def mock_llm(**kwargs):
+            return {
+                "resposta_para_contato": "Anotado, vou repassar ao André.",
+                "resumo_recado": "Aviso importante para o André no grupo.",
+                "forcou_decisao": False,
+                "assunto_sensivel": False,
+            }
+
+        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={"encontrado": True, "nome": "Grupo Projeto", "chat_id": chat_id}):
+            with mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value="tg-grp2"):
+                res = sec.processar_mensagem_secretario(self.db, msg, llm_runner=mock_llm)
+
+        self.assertIsNotNone(res)
+        self.assertEqual(res["status"], "ok")
+
+    def test_grupo_fora_da_allowlist_com_mentions_andre_ignora(self):
+        chat_id = "grupo_nao_autorizado@g.us"
+        msg = {
+            "chat_id": chat_id,
+            "from_me": False,
+            "is_group": True,
+            "content": "@André você viu?",
+            "mentions_andre": True,
+            "wa_message_id": "msg-grp-3",
+        }
+        res = sec.processar_mensagem_secretario(self.db, msg)
+        self.assertIsNone(res)
+
+
+class TestSecretarioSelfService(unittest.TestCase):
+    def setUp(self):
+        self.db = _MockDb()
+
+    def test_ativar_modo_secretario_sem_contatos_mantem_allowlist(self):
+        self.db.collection("system").document("settings").set({
+            "whatsapp_secretario": {
+                "enabled": False,
+                "chats_allowlist": ["5511999999999@c.us"],
+            }
+        })
+        res = sec.ativar_modo_secretario(self.db)
+        self.assertTrue(res["success"])
+        self.assertTrue(res["enabled"])
+        self.assertIsNone(res["desativa_em"])
+        self.assertEqual(res["chats_allowlist"], ["5511999999999@c.us"])
+
+        cfg = sec.obter_config_secretario(self.db)
+        self.assertTrue(cfg["enabled"])
+        self.assertEqual(cfg["chats_allowlist"], ["5511999999999@c.us"])
+
+    def test_ativar_modo_secretario_com_contatos_e_duracao(self):
+        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={"encontrado": True, "nome": "Carlos", "chat_id": "5511777777777@c.us"}):
+            res = sec.ativar_modo_secretario(self.db, contatos=["5511888888888@c.us", "Carlos"], duracao_horas=2.0)
+
+        self.assertTrue(res["success"])
+        self.assertTrue(res["enabled"])
+        self.assertIsNotNone(res["desativa_em"])
+        self.assertIn("5511888888888@c.us", res["chats_allowlist"])
+        self.assertIn("5511777777777@c.us", res["chats_allowlist"])
+
+        cfg = sec.obter_config_secretario(self.db)
+        self.assertTrue(cfg["enabled"])
+        self.assertEqual(cfg["desativa_em"], res["desativa_em"])
+
+    def test_obter_config_expira_passivamente_quando_desativa_em_passou(self):
+        # Data no passado
+        desativa_passado = "2020-01-01T12:00:00-03:00"
+        self.db.collection("system").document("settings").set({
+            "whatsapp_secretario": {
+                "enabled": True,
+                "desativa_em": desativa_passado,
+                "chats_allowlist": ["5511999999999@c.us"],
+            }
+        })
+        cfg = sec.obter_config_secretario(self.db)
+        # enabled deve ser False passivamente sem cron!
+        self.assertFalse(cfg["enabled"])
+        self.assertEqual(cfg["desativa_em"], desativa_passado)
+
+    def test_desativar_modo_secretario(self):
+        self.db.collection("system").document("settings").set({
+            "whatsapp_secretario": {
+                "enabled": True,
+                "desativa_em": "2030-01-01T12:00:00-03:00",
+                "chats_allowlist": ["5511999999999@c.us"],
+            }
+        })
+        res = sec.desativar_modo_secretario(self.db)
+        self.assertTrue(res["success"])
+        self.assertFalse(res["enabled"])
+        self.assertIsNone(res["desativa_em"])
+
+        cfg = sec.obter_config_secretario(self.db)
+        self.assertFalse(cfg["enabled"])
+        self.assertIsNone(cfg["desativa_em"])
+
+    def test_consultar_status_modo_secretario(self):
+        self.db.collection("system").document("settings").set({
+            "whatsapp_secretario": {
+                "enabled": True,
+                "desativa_em": "2030-01-01T12:00:00-03:00",
+                "chats_allowlist": ["5511999999999@c.us"],
+            }
+        })
+        # Mock do nome da conversa
+        self.db.collection("whatsapp_chats").document("5511999999999@c.us").set({
+            "chat_name": "Carlos Parceiro"
+        })
+        st = sec.consultar_status_modo_secretario(self.db)
+        self.assertTrue(st["enabled"])
+        self.assertEqual(st["desativa_em"], "2030-01-01T12:00:00-03:00")
+        self.assertEqual(len(st["contatos_detalhes"]), 1)
+        self.assertEqual(st["contatos_detalhes"][0]["nome"], "Carlos Parceiro")
+        self.assertIn("Carlos Parceiro", st["mensagem"])
+
+    def test_mcp_tools_execucao(self):
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+
+        ctx = ToolContext("system", _db=self.db)
+        # 1. Ativar via tool
+        res_ativar = hermes_tools.execute("ativar_modo_secretario", {"duracao_horas": 1.5}, ctx)
+        self.assertTrue(res_ativar["success"])
+        self.assertTrue(res_ativar["enabled"])
+
+        # 2. Consultar status via tool
+        res_status = hermes_tools.execute("consultar_status_modo_secretario", {}, ctx)
+        self.assertTrue(res_status["enabled"])
+
+        # 3. Desativar via tool
+        res_desativar = hermes_tools.execute("desativar_modo_secretario", {}, ctx)
+        self.assertTrue(res_desativar["success"])
+        self.assertFalse(res_desativar["enabled"])
+
+
+class TestAutomationSettingsCallable(unittest.TestCase):
+    def setUp(self):
+        self.db = _MockDb()
+
+    def test_get_and_update_automation_settings_whatsapp_secretario(self):
+        import inspect
+        import main
+
+        update_fn = inspect.unwrap(main.updateAutomationSettings)
+        get_fn = inspect.unwrap(main.getAutomationSettings)
+
+        class _MockReq:
+            def __init__(self, data=None):
+                self.data = data or {}
+                self.auth = mock.MagicMock(uid="user-123")
+
+        with mock.patch.object(main, "get_db", return_value=self.db):
+            with mock.patch.object(main, "_require_internal_user", return_value=None):
+                # 1. Update
+                update_req = _MockReq(data={
+                    "whatsapp_secretario": {
+                        "enabled": True,
+                        "chats_allowlist": ["5511999999999@c.us", "120363000@g.us"],
+                        "desativa_em": "2030-01-01T12:00:00-03:00",
+                    },
+                    "atencao": {
+                        "financeiro": {"enabled": True},
+                        "saude": {"enabled": True},
+                    }
+                })
+                res_update = update_fn(update_req)
+                self.assertTrue(res_update["success"])
+
+                # 2. Get
+                get_req = _MockReq()
+                res_get = get_fn(get_req)
+                self.assertIn("whatsapp_secretario", res_get)
+                self.assertTrue(res_get["whatsapp_secretario"]["enabled"])
+                self.assertEqual(res_get["whatsapp_secretario"]["chats_allowlist"], ["5511999999999@c.us", "120363000@g.us"])
+                self.assertEqual(res_get["whatsapp_secretario"]["desativa_em"], "2030-01-01T12:00:00-03:00")
+                self.assertTrue(res_get["atencao"]["financeiro"]["enabled"])
+                self.assertTrue(res_get["atencao"]["saude"]["enabled"])
+
+    def test_reativar_via_settings_sem_desativa_em_limpa_expiracao_anterior(self):
+        import inspect
+        import main
+
+        update_fn = inspect.unwrap(main.updateAutomationSettings)
+        get_fn = inspect.unwrap(main.getAutomationSettings)
+
+        class _MockReq:
+            def __init__(self, data=None):
+                self.data = data or {}
+                self.auth = mock.MagicMock(uid="user-123")
+
+        # Estado inicial com desativa_em no passado
+        self.db.collection("system").document("settings").set({
+            "whatsapp_secretario": {
+                "enabled": False,
+                "desativa_em": "2020-01-01T12:00:00-03:00",
+                "chats_allowlist": ["5511999999999@c.us"],
+            }
+        })
+
+        with mock.patch.object(main, "get_db", return_value=self.db):
+            with mock.patch.object(main, "_require_internal_user", return_value=None):
+                # Reativa enviando apenas enabled: True (como o toggle do frontend faz)
+                update_req = _MockReq(data={
+                    "whatsapp_secretario": {
+                        "enabled": True,
+                    }
+                })
+                res_update = update_fn(update_req)
+                self.assertTrue(res_update["success"])
+
+                # Get deve trazer enabled: True e desativa_em: None (limpo!)
+                get_req = _MockReq()
+                res_get = get_fn(get_req)
+                self.assertTrue(res_get["whatsapp_secretario"]["enabled"])
+                self.assertIsNone(res_get["whatsapp_secretario"]["desativa_em"])
+
 
 
 class TestSecretarioContatoPrioritario(unittest.TestCase):

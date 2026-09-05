@@ -86,6 +86,7 @@ interface AutomationSettingsData {
   email_action_linker: { enabled: boolean };
   personal_diary: { enabled: boolean };
   whatsapp_ingest: { enabled: boolean; linked_chats_only: boolean; chats_allowlist: string[]; capturar_todos: boolean; leitura_total: boolean };
+  whatsapp_secretario?: { enabled: boolean; chats_allowlist: string[]; desativa_em?: string | null };
   whatsapp_auto_send_enabled: boolean;
   whatsapp_worker: { online: boolean; last_seen: string | null };
 }
@@ -96,6 +97,7 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [allowlistText, setAllowlistText] = useState('');
+  const [secretarioAllowlistText, setSecretarioAllowlistText] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -109,6 +111,7 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
         const d = res.data as AutomationSettingsData;
         setData(d);
         setAllowlistText((d.whatsapp_ingest?.chats_allowlist || []).join('\n'));
+        setSecretarioAllowlistText((d.whatsapp_secretario?.chats_allowlist || []).join('\n'));
       } catch (e: any) {
         if (!cancelled) setError(e?.message || 'Falha ao carregar configurações.');
       } finally {
@@ -171,6 +174,27 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
     setAllowlistText(list.join('\n'));
     if (data) setData({ ...data, whatsapp_ingest: { ...data.whatsapp_ingest, chats_allowlist: list } });
     save({ whatsapp_ingest: { chats_allowlist: list } });
+  };
+
+  const toggleSecretario = () => {
+    if (!data) return;
+    const current = data.whatsapp_secretario || { enabled: false, chats_allowlist: [], desativa_em: null };
+    const enabled = !current.enabled;
+    setData({
+      ...data,
+      whatsapp_secretario: { ...current, enabled }
+    });
+    save({ whatsapp_secretario: { enabled } });
+  };
+
+  const saveSecretarioAllowlist = () => {
+    const list = Array.from(new Set(secretarioAllowlistText.split('\n').map(s => s.trim()).filter(Boolean)));
+    setSecretarioAllowlistText(list.join('\n'));
+    if (data) {
+      const current = data.whatsapp_secretario || { enabled: false, chats_allowlist: [], desativa_em: null };
+      setData({ ...data, whatsapp_secretario: { ...current, chats_allowlist: list } });
+    }
+    save({ whatsapp_secretario: { chats_allowlist: list } });
   };
 
   if (loading) {
@@ -315,6 +339,47 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
             enabled={data.whatsapp_auto_send_enabled}
             onToggle={toggleAutoSend}
           />
+        </div>
+      </div>
+
+      <div className={cardClass}>
+        <div className="space-y-3">
+          <ToggleRow
+            label="Modo Secretário no WhatsApp"
+            desc="O Hermes atende quem escreve no WhatsApp quando você estiver indisponível — anota recados e consulta a agenda sem nunca confirmar compromissos sozinho. Toda resposta é assinada com '**Hermes Bot:**' e enviada via outbox com janela de cancelamento."
+            enabled={Boolean(data.whatsapp_secretario?.enabled)}
+            onToggle={toggleSecretario}
+          />
+          {data.whatsapp_secretario?.enabled && data.whatsapp_secretario?.desativa_em && (
+            <div className={`p-2.5 rounded-lg border text-[10px] font-mono flex items-center justify-between ${isDarkTheme ? 'bg-amber-500/10 border-amber-500/20 text-amber-300' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+              <span>⏳ Ativo temporariamente até:</span>
+              <span className="font-bold">{new Date(data.whatsapp_secretario.desativa_em).toLocaleString('pt-BR')}</span>
+            </div>
+          )}
+        </div>
+
+        <div className={`space-y-1 pt-3 border-t border-dashed ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'}`}>
+          <label className={`text-[9px] font-bold uppercase tracking-wider block ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>
+            Contatos e grupos autorizados para o Secretário (um por linha — ID do chat ou número)
+          </label>
+          <textarea
+            value={secretarioAllowlistText}
+            onChange={(e) => setSecretarioAllowlistText(e.target.value)}
+            placeholder="5527999999999@c.us"
+            rows={3}
+            className={`w-full border rounded-lg px-3 py-2 text-xs font-mono outline-none focus:ring-2 focus:ring-purple-500 ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-900'}`}
+          />
+          <p className={`text-[9px] italic ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>
+            O secretário só atende contatos ou grupos desta lista. Em grupos autorizados, o bot só responde quando você for explicitamente mencionado.
+          </p>
+          <button
+            type="button"
+            onClick={saveSecretarioAllowlist}
+            disabled={saving}
+            className={`mt-1 px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all disabled:opacity-50 ${isDarkTheme ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-slate-900 text-white hover:bg-slate-700'}`}
+          >
+            Salvar lista do Secretário
+          </button>
         </div>
       </div>
     </div>
