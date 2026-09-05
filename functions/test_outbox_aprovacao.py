@@ -464,6 +464,39 @@ class TestCriarEListarRascunho(unittest.TestCase):
             mock_send.assert_called_once()
             self.assertIn("Mariana", mock_send.call_args[0][2])
 
+    def test_criar_rascunho_envio_imediato_grava_scheduled_for_agora(self):
+        """Regressão: envio_imediato não pode gravar scheduled_for null/ausente.
+
+        O worker seleciona jobs pendentes com `scheduled_for <= agora()`, e essa
+        comparação no Firestore exclui documentos com o campo null/ausente — um
+        job de envio imediato sem scheduled_for fica pending para sempre.
+        """
+        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={
+            "encontrado": True, "nome": "Mariana", "chat_id": "5527998887777@c.us"
+        }), mock.patch("hermes_core_logic._send_telegram_message", return_value="tg-1"), \
+                mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"), \
+                mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
+            antes = datetime.datetime.now(timezone.utc)
+            res = oa.criar_rascunho(
+                self.db,
+                contact_number="+5527998887777",
+                message="Resposta automática",
+                motivo="Secretário respondeu na hora",
+                envio_imediato=True,
+            )
+            depois = datetime.datetime.now(timezone.utc)
+
+            self.assertEqual(res["status"], oa.STATUS_PENDING)
+            doc = self.db.collection(oa.COLLECTION)._docs[res["outbox_id"]]
+            scheduled_for = doc.get("scheduled_for")
+            self.assertIsNotNone(scheduled_for)
+            self.assertLessEqual(antes, scheduled_for)
+            self.assertLessEqual(scheduled_for, depois)
+
+            # Reproduz a semântica da query do worker: scheduled_for <= agora().
+            # Um valor null/ausente nunca satisfaz essa comparação no Firestore.
+            self.assertTrue(scheduled_for <= datetime.datetime.now(timezone.utc))
+
 
 class TestTipoEEudicaoOutbox(unittest.TestCase):
     """Testes de tipo e rastreio de edição no outbox de WhatsApp (PR 1 da Fase 3)."""
