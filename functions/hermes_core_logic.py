@@ -3028,6 +3028,32 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
             _persist_callback_turn(f"Botão: editar rascunho outbox:{outbox_id}", msg)
             _send_telegram_message(token, chat_id, msg)
 
+    elif data.startswith("argos_auth:"):
+        parts = data.split(":")
+        solicitacao_id = parts[1] if len(parts) > 1 else ""
+        decisao = parts[2] if len(parts) > 2 else ""
+
+        if not solicitacao_id or decisao not in ("aprovar", "recusar"):
+            _answer_callback_query(token, query_id, "Ação não reconhecida.")
+        else:
+            from argos_autorizacao import decidir_autorizacao
+            telegram_msg_id = message.get("message_id") if isinstance(message, dict) else None
+            res = decidir_autorizacao(
+                db, solicitacao_id, decisao, telegram_token=token, chat_id=chat_id, telegram_msg_id=telegram_msg_id
+            )
+            if res.get("status") == "already_decided":
+                _answer_callback_query(token, query_id, "Esta solicitação já foi decidida.")
+            elif res.get("status") == "not_found":
+                _answer_callback_query(token, query_id, "Solicitação não encontrada.")
+            elif res.get("status") == "ok" and decisao == "aprovar":
+                _answer_callback_query(token, query_id, "Autorizado!")
+                _persist_callback_turn(f"Botão: autorizar argos_auth:{solicitacao_id}", "✅ Autorizado")
+            elif res.get("status") == "ok":
+                _answer_callback_query(token, query_id, "Recusado.")
+                _persist_callback_turn(f"Botão: recusar argos_auth:{solicitacao_id}", "❌ Recusado")
+            else:
+                _answer_callback_query(token, query_id, f"Erro: {res.get('erro', 'falha ao decidir')}")
+
     else:
 
         _answer_callback_query(token, query_id)
@@ -5485,6 +5511,42 @@ def _process_telegram_message(db, data: dict):
         )
         return f"Proposta de WhatsApp gerada. Draft: {draft}\n\n[SISTEMA: Os botões de confirmação serão anexados automaticamente a esta resposta.]"
 
+    # O Telegram usa closures próprias (inclusive confirmações por botões),
+    # não o catálogo MCP. Reutilizar os handlers mantém a regra de negócio única.
+    def ativar_modo_secretario(contatos: list[str] = None, duracao_horas: float = None) -> str:
+        """Ativa o atendimento autônomo no WhatsApp para contatos autorizados.
+
+        Args:
+            contatos: Nomes, telefones ou JIDs. Omitir mantém a lista atual.
+            duracao_horas: Duração em horas; 0.5 equivale a 30 minutos.
+                Omitir mantém ativo até desligar manualmente.
+        """
+        from tools.hermes_tools import execute
+        from tools.tool_context import ToolContext
+
+        resultado = execute(
+            "ativar_modo_secretario",
+            {"contatos": contatos, "duracao_horas": duracao_horas},
+            ToolContext(_db=db, canal="telegram"),
+        )
+        return json.dumps(resultado, ensure_ascii=False, default=str)
+
+    def desativar_modo_secretario() -> str:
+        """Desativa imediatamente o atendimento autônomo do Modo Secretário no WhatsApp."""
+        from tools.hermes_tools import execute
+        from tools.tool_context import ToolContext
+
+        resultado = execute("desativar_modo_secretario", {}, ToolContext(_db=db, canal="telegram"))
+        return json.dumps(resultado, ensure_ascii=False, default=str)
+
+    def consultar_status_modo_secretario() -> str:
+        """Consulta se o Modo Secretário está ativo, seus contatos e a expiração."""
+        from tools.hermes_tools import execute
+        from tools.tool_context import ToolContext
+
+        resultado = execute("consultar_status_modo_secretario", {}, ToolContext(_db=db, canal="telegram"))
+        return json.dumps(resultado, ensure_ascii=False, default=str)
+
     tools_list = [
 
         consultar_historico_acoes,
@@ -5505,6 +5567,9 @@ def _process_telegram_message(db, data: dict):
         propor_lancamento_financeiro,
         schedule_whatsapp_message,
         agendar_lembrete_acao,
+        ativar_modo_secretario,
+        desativar_modo_secretario,
+        consultar_status_modo_secretario,
     ]
 
 

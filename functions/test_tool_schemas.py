@@ -6,7 +6,9 @@ teste aqui usa rede: eles inspecionam o payload antes do envio.
 """
 import ast
 import inspect
+import json
 import unittest
+from unittest import mock
 
 from google.genai import types
 
@@ -106,6 +108,24 @@ class TestToolSchemas(unittest.TestCase):
         self.assertEqual(len(self.declaracoes), len(self.ferramentas))
         self.assertIn("criar_acao_no_sistema", [d.name for d in self.declaracoes])
 
+    def test_secretario_presente_no_payload_gemini_e_no_mcp(self):
+        import mcp_server
+
+        nomes = {d.name for d in self.declaracoes}
+        with mock.patch.object(mcp_server, "_access_config", return_value={"confirm_tools": set()}):
+            mcp = {t["name"]: t for t in mcp_server._handle_tools_list()["tools"]}
+        for nome in ("ativar_modo_secretario", "desativar_modo_secretario", "consultar_status_modo_secretario"):
+            self.assertIn(nome, nomes)
+            self.assertIn(nome, mcp)
+            self.assertFalse(mcp[nome]["_meta"]["needsConfirmation"])
+
+    def test_secretario_aceita_contatos_e_duracao_opcionais(self):
+        decl = next(d for d in self.declaracoes if d.name == "ativar_modo_secretario")
+        self.assertFalse(decl.parameters.required)
+        self.assertEqual(decl.parameters.properties["contatos"].type, types.Type.ARRAY)
+        self.assertEqual(decl.parameters.properties["contatos"].items.type, types.Type.STRING)
+        self.assertEqual(decl.parameters.properties["duracao_horas"].type, types.Type.NUMBER)
+
     def test_sem_object_sem_properties(self):
         """OBJECT sem `properties` é o schema gerado para um parâmetro `dict`."""
         for nome, caminho, schema in self._schemas():
@@ -140,6 +160,81 @@ class TestToolSchemas(unittest.TestCase):
         self.assertIn("task_id", item["properties"])
         self.assertIn("data_limite", item["properties"]["alteracoes"]["properties"])
         self.assertEqual(dados.get("required"), ["itens"])
+
+
+class TestSecretarioTelegramExecucao(unittest.TestCase):
+    """Executa os corpos reais das closures, isolando apenas o transporte Telegram.
+
+    O teste de schemas acima lê a lista efetiva de ferramentas enviada ao SDK;
+    aqui verificamos que as mesmas closures chegam ao handler e ao banco.
+    """
+
+    def setUp(self):
+        from test_secretario_whatsapp import _MockDb
+
+        self.db = _MockDb()
+        arvore = ast.parse(inspect.getsource(core._process_telegram_message))
+        nomes = {"ativar_modo_secretario", "desativar_modo_secretario", "consultar_status_modo_secretario"}
+        nos = [n for n in arvore.body[0].body if isinstance(n, ast.FunctionDef) and n.name in nomes]
+        self.assertEqual({n.name for n in nos}, nomes)
+        modulo = ast.Module(body=nos, type_ignores=[])
+        self.tools = {"db": self.db, "json": json}
+        exec(compile(ast.fix_missing_locations(modulo), "<closures-secretario-reais>", "exec"), self.tools)
+
+    def test_ativar_30_minutos_consultar_e_desativar_numero_nao_cadastrado(self):
+        from datetime import datetime, timedelta, timezone
+        agora = datetime(2026, 9, 5, 15, 0, tzinfo=timezone.utc)
+        with mock.patch("secretario_whatsapp._agora_sp", return_value=agora), mock.patch(
+            "tools.hermes_tools._destinatario_whatsapp_previa", return_value={"encontrado": False}
+        ):
+            ativado = json.loads(self.tools["ativar_modo_secretario"](["2799826-0015"], 0.5))
+            self.assertTrue(ativado["success"])
+            self.assertEqual(ativado["chats_allowlist"], ["27998260015@c.us"])
+            status = json.loads(self.tools["consultar_status_modo_secretario"]())
+            self.assertTrue(status["enabled"])
+            self.assertEqual(datetime.fromisoformat(status["desativa_em"]), agora + timedelta(minutes=30))
+            with mock.patch("secretario_whatsapp._agora_sp", return_value=agora + timedelta(minutes=31)):
+                self.assertFalse(json.loads(self.tools["consultar_status_modo_secretario"]())["enabled"])
+            self.assertFalse(json.loads(self.tools["desativar_modo_secretario"]())["enabled"])
+            self.assertFalse(json.loads(self.tools["consultar_status_modo_secretario"]())["enabled"])
+
+    def test_ativar_sem_argumentos_preserva_allowlist(self):
+        self.db.collection("system").document("settings").set({
+            "whatsapp_secretario": {"enabled": False, "chats_allowlist": ["teste@c.us"]},
+        })
+        result = json.loads(self.tools["ativar_modo_secretario"]())
+        self.assertEqual(result["chats_allowlist"], ["teste@c.us"])
+        self.assertIsNone(result["desativa_em"])
+
+    def test_falha_do_handler_nao_vira_sucesso(self):
+        with mock.patch("tools.hermes_tools.execute", side_effect=RuntimeError("falha de persistência")):
+            with self.assertRaisesRegex(RuntimeError, "falha de persistência"):
+                self.tools["ativar_modo_secretario"]()
+
+    def test_roundtrip_gemini_recebe_tools_e_executa_na_ordem(self):
+        ferramentas = [self.tools.get(f.__name__, f) for f in _stub_das_ferramentas_do_telegram()]
+        client = _FakeClient()
+        client.chats = mock.Mock()
+        chamadas = types.GenerateContentResponse(candidates=[types.Candidate(content=types.Content(parts=[
+            types.Part(function_call=types.FunctionCall(name="ativar_modo_secretario", args={"contatos": [], "duracao_horas": 0.5})),
+            types.Part(function_call=types.FunctionCall(name="consultar_status_modo_secretario", args={})),
+            types.Part(function_call=types.FunctionCall(name="desativar_modo_secretario", args={})),
+        ]))])
+        final = types.GenerateContentResponse(candidates=[types.Candidate(content=types.Content(parts=[types.Part(text="Concluído")]))])
+        with mock.patch("google.genai.Client", return_value=client), mock.patch.object(
+            core, "send_message_logged", side_effect=[chamadas, final]
+        ) as send:
+            resposta = core._run_gemini_turn(
+                db=self.db, gemini_key="fake", system_instruction="teste", history=[],
+                user_message_parts=[types.Part(text="Teste do secretário")],
+                tools_list=ferramentas, function_map={f.__name__: f for f in ferramentas},
+            )
+        self.assertEqual(resposta, "Concluído")
+        config = client.chats.create.call_args.kwargs["config"]
+        self.assertIn("ativar_modo_secretario", {d.name for d in config.tools[0].function_declarations})
+        retornos = send.call_args_list[1].args[1]
+        estados = [json.loads(p.function_response.response["result"])["enabled"] for p in retornos]
+        self.assertEqual(estados, [True, True, False])
 
 
 class TestThinkingConfig(unittest.TestCase):

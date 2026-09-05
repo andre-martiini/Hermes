@@ -19,7 +19,26 @@ vez de cada canal reimplementar as suas.
 
 ## O que está exposto
 
-**60 tools**, todo o catálogo de `functions/tools/registry.py` que tem executor e
+### Diagnóstico de ferramentas ausentes por canal
+
+O Telegram monta suas próprias closures e `tools_list` em
+`functions/hermes_core_logic.py::_process_telegram_message`; registrar uma tool
+em `registry.py` não a expõe automaticamente nesse canal. Ativação, desativação
+e consulta do Modo Secretário estão ligadas aos mesmos handlers do MCP por
+`ToolContext(canal="telegram")`. Os testes em `test_tool_schemas.py` verificam
+as declarações enviadas ao Gemini e a execução dos handlers.
+
+Se uma ferramenta não aparecer no Cowork, conferir `tools/list` autenticado no
+endpoint configurado antes de concluir que falta deploy. Compare com
+`https://gestao-hermes.web.app/mcp` e a revisão de `mcpServer` no Cloud Functions.
+Se o servidor devolver a ferramenta e a sessão não a mostrar, atualizar a
+conexão/catálogo do cliente e conferir se ele aponta ao mesmo endpoint.
+Merge e build local, sozinhos, não comprovam publicação: verificar também o
+SHA e o resultado do workflow de deploy e uma chamada MCP somente de leitura.
+
+### Catálogo
+
+Todo o catálogo de `functions/tools/registry.py` que tem executor e
 schema. `tools/list` publica exatamente o que é chamável — uma tool sem handler
 ou sem schema simplesmente não aparece, em vez de falhar na chamada.
 
