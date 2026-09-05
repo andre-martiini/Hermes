@@ -148,8 +148,10 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
     def setUp(self):
         self.telegram_patcher1 = mock.patch("hermes_core_logic._get_telegram_token", return_value="fake-token")
         self.telegram_patcher2 = mock.patch("main._resolve_default_telegram_chat_id", return_value="123456")
+        self.telegram_patcher3 = mock.patch("hermes_core_logic._send_telegram_message", return_value="tg-info-default")
         self.telegram_patcher1.start()
         self.telegram_patcher2.start()
+        self.telegram_patcher3.start()
 
         self.db = _MockDb()
         # Configura system/settings com whatsapp_secretario habilitado para 5511999999999@c.us
@@ -165,6 +167,7 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
     def tearDown(self):
         self.telegram_patcher1.stop()
         self.telegram_patcher2.stop()
+        self.telegram_patcher3.stop()
 
     def test_desligado_por_padrao(self):
         # Desabilita o toggle
@@ -226,7 +229,7 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
         doc = self.db.collection(sec.COLLECTION_CONVERSAS).document(chat_id).get().to_dict()
         self.assertEqual(doc.get("estado"), sec.ESTADO_ASSUMIDO_POR_ANDRE)
 
-    def test_fluxo_normal_gera_outbox_com_assinatura_e_janela(self):
+    def test_fluxo_normal_gera_outbox_com_assinatura_e_envio_imediato(self):
         chat_id = "5511999999999@c.us"
         msg = {
             "chat_id": chat_id,
@@ -245,7 +248,7 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
             }
 
         with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={"encontrado": True, "nome": "Carlos Parceiro", "chat_id": chat_id}):
-            with mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value="tg-999"):
+            with mock.patch("hermes_core_logic._send_telegram_message", return_value="tg-999"):
                 res = sec.processar_mensagem_secretario(self.db, msg, llm_runner=mock_llm)
 
         self.assertIsNotNone(res)
@@ -264,8 +267,8 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
         rascunho = outbox_docs[0].to_dict()
         self.assertTrue(rascunho["content"].startswith("**Hermes Bot:** "))
         self.assertEqual(rascunho["tipo"], sec.TIPO_OUTBOX_SECRETARIO)
-        self.assertEqual(rascunho["status"], outbox_aprovacao.STATUS_AGUARDANDO_JANELA)
-        self.assertIsNotNone(rascunho.get("envio_liberado_em"))
+        self.assertEqual(rascunho["status"], outbox_aprovacao.STATUS_PENDING)
+        self.assertIsNone(rascunho.get("envio_liberado_em"))
         self.assertEqual(rascunho.get("telegram_message_id"), "tg-999")
 
     def test_limite_duas_trocas_encerra_e_escala_para_atencao(self):
@@ -1171,6 +1174,67 @@ class TestSecretarioContatoPrioritario(unittest.TestCase):
         self.assertTrue(registry.needs_confirmation("cancelar_contato_prioritario_secretario"))
 
 
+class TestMontagemPromptSecretario(unittest.TestCase):
+    def test_primeira_mensagem_instrui_apresentacao_breve(self):
+        prompt = sec.montar_system_instruction_secretario(historico=[])
+        self.assertIn("Esta é a PRIMEIRA mensagem desta conversa.", prompt)
+        self.assertIn("Você pode se apresentar brevemente como assistente do André", prompt)
+        self.assertNotIn("Esta conversa JÁ ESTÁ EM ANDAMENTO", prompt)
+        self.assertNotIn("NÃO repita 'sou o assistente do André'", prompt)
+
+    def test_primeira_mensagem_com_historico_none(self):
+        prompt = sec.montar_system_instruction_secretario(historico=None)
+        self.assertIn("Esta é a PRIMEIRA mensagem desta conversa.", prompt)
+
+    def test_conversa_em_andamento_instrui_nao_repetir_apresentacao(self):
+        historico = [
+            {"role": "user", "content": "Oi André, tudo bem?"},
+            {"role": "assistant", "content": "**Hermes Bot:** Olá! Sou o assistente do André. Ele está em reunião."},
+        ]
+        prompt = sec.montar_system_instruction_secretario(historico=historico)
+        self.assertIn("Esta conversa JÁ ESTÁ EM ANDAMENTO", prompt)
+        self.assertIn("NÃO repita 'sou o assistente do André'", prompt)
+        self.assertIn("Vá direto ao ponto", prompt)
+        self.assertNotIn("Esta é a PRIMEIRA mensagem desta conversa.", prompt)
+
+    def test_conversa_com_briefing_prioritario(self):
+        briefing = {
+            "assunto": "Proposta Comercial",
+            "o_que_precisa_saber": "Valor final fechado",
+        }
+        prompt = sec.montar_system_instruction_secretario(historico=[], briefing=briefing)
+        self.assertIn("Esta é a PRIMEIRA mensagem desta conversa.", prompt)
+        self.assertIn("BRIEFING PRIORITÁRIO ATIVO:", prompt)
+        self.assertIn("Proposta Comercial", prompt)
+        self.assertIn("Valor final fechado", prompt)
+
+    def test_fallback_sem_chave_claude_varia_por_historico(self):
+        db = _MockDb()
+        db.collection("system").document("api_keys").set({})
+
+        # 1. Primeira mensagem (sem histórico)
+        res1 = sec._executar_llm_secretario(
+            db=db,
+            chat_name="Carlos",
+            texto_mensagem="Oi",
+            historico=[],
+            agora_sp="2026-09-05 12:00:00 BRT",
+        )
+        self.assertIn("Olá! O André está indisponível no momento.", res1["resposta_para_contato"])
+
+        # 2. Conversa em andamento (com histórico)
+        res2 = sec._executar_llm_secretario(
+            db=db,
+            chat_name="Carlos",
+            texto_mensagem="Tem previsão?",
+            historico=[{"role": "user", "content": "Oi"}],
+            agora_sp="2026-09-05 12:05:00 BRT",
+        )
+        self.assertNotIn("Olá! O André está indisponível no momento.", res2["resposta_para_contato"])
+        self.assertIn("Anotei sua mensagem e vou repassar ao André assim que possível.", res2["resposta_para_contato"])
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

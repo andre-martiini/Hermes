@@ -222,9 +222,6 @@ def _tipos_promovidos(db) -> set[str]:
             promovidos = {str(t).strip().lower() for t in lista if str(t).strip()}
     except Exception as err:
         print(f"[OutboxAprovacao] Falha ao ler tipos_promovidos de system/mcp_access: {err}")
-    # O tipo secretario_whatsapp é promovido para autonomia com janela de cancelamento
-    # por definição arquitetural do Modo Secretário (veto humano garantido).
-    promovidos.add("secretario_whatsapp")
     return promovidos
 
 
@@ -240,6 +237,7 @@ def criar_rascunho(
     telegram_token: str | None = None,
     chat_id: str | int | None = None,
     tipo: str = "outro",
+    envio_imediato: bool = False,
 ) -> dict:
     """Cria um rascunho de WhatsApp e envia o card de aprovação ao Telegram."""
     contact_number = str(contact_number or "").strip()
@@ -287,13 +285,19 @@ def criar_rascunho(
     destinatario_nome = res_dest.get("nome") or contact_number
     destino_real = res_dest.get("chat_id") or contact_number
 
-    # Verifica se o tipo de rascunho está promovido para autonomia com janela
-    promovidos = _tipos_promovidos(db)
-    is_promovido = tipo_limpo.lower() in promovidos
-    janela_min = _obter_janela_cancelamento_min(db) if is_promovido else 0
-    agora_utc = datetime.datetime.now(timezone.utc)
-    envio_liberado_em = (agora_utc + datetime.timedelta(minutes=janela_min)) if is_promovido else None
-    status_inicial = STATUS_AGUARDANDO_JANELA if is_promovido else STATUS_AGUARDANDO
+    # Verifica se o tipo de rascunho tem envio imediato ou está promovido para autonomia com janela
+    if envio_imediato:
+        is_promovido = False
+        janela_min = 0
+        envio_liberado_em = None
+        status_inicial = STATUS_PENDING
+    else:
+        promovidos = _tipos_promovidos(db)
+        is_promovido = tipo_limpo.lower() in promovidos
+        janela_min = _obter_janela_cancelamento_min(db) if is_promovido else 0
+        agora_utc = datetime.datetime.now(timezone.utc)
+        envio_liberado_em = (agora_utc + datetime.timedelta(minutes=janela_min)) if is_promovido else None
+        status_inicial = STATUS_AGUARDANDO_JANELA if is_promovido else STATUS_AGUARDANDO
 
     doc_ref = db.collection(COLLECTION).document()
     outbox_id = doc_ref.id
@@ -316,22 +320,36 @@ def criar_rascunho(
 
     doc_ref.set(payload)
 
-    # Dispara o card no Telegram
+    # Dispara o card no Telegram (ou notificação informativa para envio imediato)
     telegram_msg_id = None
     try:
-        from hermes_core_logic import _get_telegram_token, _send_telegram_message_with_keyboard
+        from hermes_core_logic import (
+            _get_telegram_token,
+            _send_telegram_message,
+            _send_telegram_message_with_keyboard,
+        )
         from main import _resolve_default_telegram_chat_id
 
         token = telegram_token or _get_telegram_token(db)
         target_chat = chat_id or _resolve_default_telegram_chat_id(db)
         if token and target_chat:
-            if is_promovido:
+            if envio_imediato:
+                # Notificação puramente informativa (sem botões) para visibilidade do que foi respondido
+                texto_info = (
+                    f"🤖 <b>Hermes Bot respondeu a {html.escape(destinatario_nome)}:</b>\n\n"
+                    f"{html.escape(message)}"
+                )
+                telegram_msg_id = _send_telegram_message(token, target_chat, texto_info)
+            elif is_promovido:
                 card_text, card_keyboard = montar_card_telegram_promovido(
                     destinatario_nome=destinatario_nome,
                     motivo=motivo,
                     content=message,
                     outbox_id=outbox_id,
                     minutos_janela=janela_min,
+                )
+                telegram_msg_id = _send_telegram_message_with_keyboard(
+                    token, target_chat, card_text, card_keyboard
                 )
             else:
                 card_text, card_keyboard = montar_card_telegram(
@@ -340,13 +358,24 @@ def criar_rascunho(
                     content=message,
                     outbox_id=outbox_id,
                 )
-            telegram_msg_id = _send_telegram_message_with_keyboard(
-                token, target_chat, card_text, card_keyboard
-            )
+                telegram_msg_id = _send_telegram_message_with_keyboard(
+                    token, target_chat, card_text, card_keyboard
+                )
             if telegram_msg_id:
                 doc_ref.update({"telegram_message_id": telegram_msg_id})
     except Exception as tg_err:
         print(f"[OutboxAprovacao] Falha ao enviar card Telegram para {outbox_id}: {tg_err}")
+
+    if envio_imediato:
+        return {
+            "status": STATUS_PENDING,
+            "outbox_id": outbox_id,
+            "destinatario_nome": destinatario_nome,
+            "telegram_notificado": bool(telegram_msg_id),
+            "instrucao": (
+                "Rascunho criado com envio imediato e status pending para entrega pelo worker WhatsApp."
+            ),
+        }
 
     if is_promovido and not telegram_msg_id:
         # Se a emissão do card Telegram falhou, degrada para aprovação regular
