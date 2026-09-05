@@ -123,6 +123,10 @@ _CATALOG: dict[str, str] = {
     # Observabilidade de execucoes do agente
     "registrar_execucao_agente": "Registra uma execucao de rotina agendada do agente para observabilidade e metricas",
     "consultar_execucoes_agente": "Consulta o historico de execucoes recentes de rotinas agendadas do agente",
+    # Modo Secretário no WhatsApp (Contato Prioritário)
+    "preparar_contato_prioritario_secretario": "Registra um briefing prioritário para o Modo Secretário no WhatsApp atender um contato específico durante a indisponibilidade do André",
+    "consultar_contatos_prioritarios_secretario": "Lista os briefings prioritários cadastrados para o Modo Secretário no WhatsApp",
+    "cancelar_contato_prioritario_secretario": "Cancela ou encerra antecipadamente o briefing prioritário de um contato no Modo Secretário",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {

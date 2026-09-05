@@ -35,8 +35,10 @@ import atencao
 import outbox_aprovacao
 
 COLLECTION_CONVERSAS = "whatsapp_secretario_conversas"
+COLLECTION_PRIORITARIOS = "secretario_contatos_prioritarios"
 PREFIXO_ASSINATURA = "**Hermes Bot:** "
 DEFAULT_MAX_TROCAS = 2
+DEFAULT_MAX_TROCAS_PRIORITARIO = 6
 DEFAULT_JANELA_MIN = 10
 TIPO_OUTBOX_SECRETARIO = "secretario_whatsapp"
 ORIGEM_SECRETARIO = "secretario_whatsapp"
@@ -46,9 +48,15 @@ ESTADO_ESCALADO = "escalado"
 ESTADO_ASSUMIDO_POR_ANDRE = "assumido_por_andre"
 ESTADO_ENCERRADO = "encerrado"
 
+STATUS_PRIORITARIO_ATIVO = "ativo"
+STATUS_PRIORITARIO_CONCLUIDO = "concluido"
+STATUS_PRIORITARIO_EXPIRADO = "expirado"
+STATUS_PRIORITARIO_CANCELADO = "cancelado"
+
 TIPO_ATENCAO_DECISAO_FORCADA = "secretario_decisao_forcada"
 TIPO_ATENCAO_INSISTENCIA = "secretario_insistencia"
 TIPO_ATENCAO_ASSUNTO_SENSIVEL = "secretario_assunto_sensivel"
+TIPO_ATENCAO_INVESTIGACAO_CONCLUIDA = "secretario_investigacao_concluida"
 
 _MODELO_CLAUDE = os.environ.get("SECRETARIO_MODEL", "claude-fable-5")
 _MODELO_FALLBACK = os.environ.get("SECRETARIO_FALLBACK_MODEL", "claude-opus-4-8")
@@ -132,6 +140,7 @@ def obter_config_secretario(db) -> dict:
             "enabled": bool(cfg.get("enabled", False)),
             "chats_allowlist": [str(x).strip() for x in (cfg.get("chats_allowlist") or []) if str(x).strip()],
             "max_trocas": int(cfg.get("max_trocas", DEFAULT_MAX_TROCAS)),
+            "max_trocas_prioritario": int(cfg.get("max_trocas_prioritario", DEFAULT_MAX_TROCAS_PRIORITARIO)),
             "janela_cancelamento_min": int(cfg.get("janela_cancelamento_min", DEFAULT_JANELA_MIN)),
         }
     except Exception as exc:
@@ -140,8 +149,328 @@ def obter_config_secretario(db) -> dict:
             "enabled": False,
             "chats_allowlist": [],
             "max_trocas": DEFAULT_MAX_TROCAS,
+            "max_trocas_prioritario": DEFAULT_MAX_TROCAS_PRIORITARIO,
             "janela_cancelamento_min": DEFAULT_JANELA_MIN,
         }
+
+
+# ---------------------------------------------------------------------------
+# Gestão de Contatos Prioritários Pré-Avisados (Briefing e Investigação)
+# ---------------------------------------------------------------------------
+
+def _agora_sp() -> datetime.datetime:
+    """Retorna datetime atual no fuso horário de Brasília (UTC-3)."""
+    return datetime.datetime.now(timezone.utc).astimezone(
+        datetime.timezone(datetime.timedelta(hours=-3))
+    )
+
+
+def _calcular_validade_iso(validade_horas: float | None = None, agora: datetime.datetime | None = None) -> str:
+    """Calcula timestamp ISO da validade do briefing prioritário.
+    
+    Se validade_horas for omitido ou None, o padrão é o final do dia corrente em SP (23:59:59).
+    """
+    ref = agora or _agora_sp()
+    if validade_horas is not None and float(validade_horas) > 0:
+        valido_ate = ref + datetime.timedelta(hours=float(validade_horas))
+    else:
+        valido_ate = ref.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return valido_ate.isoformat()
+
+
+def _esta_expirado(valido_ate_iso: str | None, agora: datetime.datetime | None = None) -> bool:
+    """Verifica se o timestamp ISO informado já expirou em relação ao instante de referência."""
+    if not valido_ate_iso:
+        return False
+    try:
+        limite = datetime.datetime.fromisoformat(str(valido_ate_iso))
+        ref = agora or _agora_sp()
+        if limite.tzinfo is None:
+            limite = limite.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=-3)))
+        return ref > limite
+    except Exception as exc:
+        print(f"[SecretarioWhatsApp] Erro ao parsear validade_iso '{valido_ate_iso}': {exc}")
+        return False
+
+
+def _garantir_chat_na_allowlist(db, chat_id: str) -> None:
+    """Garante que o chat_id esteja presente em system/settings.whatsapp_secretario.chats_allowlist."""
+    try:
+        ref = db.collection("system").document("settings")
+        snap = ref.get()
+        data = (snap.to_dict() or {}) if snap.exists else {}
+        sec_cfg = dict(data.get("whatsapp_secretario") or {})
+        allowlist = list(sec_cfg.get("chats_allowlist") or [])
+        if not chat_na_allowlist(chat_id, allowlist):
+            allowlist.append(chat_id)
+            sec_cfg["chats_allowlist"] = allowlist
+            ref.set({"whatsapp_secretario": sec_cfg}, merge=True)
+    except Exception as exc:
+        print(f"[SecretarioWhatsApp] Erro ao adicionar chat_id '{chat_id}' na allowlist: {exc}")
+
+
+def resolver_identificador_contato(db, identificador_contato: str, ctx=None) -> tuple[str, str]:
+    """Resolve um nome, telefone ou JID para (chat_id, chat_name)."""
+    identificador = str(identificador_contato or "").strip()
+    if not identificador:
+        raise ValueError("Identificador do contato não pode ser vazio.")
+
+    # Se já for um JID válido (@c.us ou @lid)
+    if "@" in identificador and (identificador.endswith("@c.us") or identificador.endswith("@lid")):
+        chat_name = identificador
+        try:
+            doc = db.collection("whatsapp_chats").document(identificador).get()
+            if doc.exists:
+                chat_name = str((doc.to_dict() or {}).get("chat_name") or identificador)
+        except Exception:
+            pass
+        return identificador, chat_name
+
+    # Tenta usar _destinatario_whatsapp_previa
+    try:
+        from tools import hermes_tools
+        if ctx is None:
+            class _SimpleCtx:
+                def __init__(self, db_inst):
+                    self.db = db_inst
+                    self.user_uid = "system"
+            ctx = _SimpleCtx(db)
+        
+        previa = hermes_tools._destinatario_whatsapp_previa(ctx, identificador)
+        if previa.get("encontrado") and previa.get("chat_id"):
+            return str(previa["chat_id"]).strip(), str(previa.get("nome") or identificador).strip()
+    except Exception as exc:
+        print(f"[SecretarioWhatsApp] Aviso ao resolver via previa: {exc}")
+
+    # Fallback 1: busca por nome ou telefone em perfil_pessoas
+    try:
+        termo_lower = identificador.lower()
+        for doc in db.collection("perfil_pessoas").limit(200).stream():
+            data = doc.to_dict() or {}
+            nome = str(data.get("nome") or "").strip()
+            telefone = str(data.get("telefone") or "").strip()
+            w_id = str(data.get("whatsapp_chat_id") or "").strip()
+            if termo_lower == nome.lower() or termo_lower in nome.lower():
+                chat_id = w_id or (f"{extrair_digitos(telefone)}@c.us" if extrair_digitos(telefone) else "")
+                if chat_id:
+                    return chat_id, nome or identificador
+            if extrair_digitos(identificador) and extrair_digitos(identificador) == extrair_digitos(telefone):
+                chat_id = w_id or f"{extrair_digitos(telefone)}@c.us"
+                return chat_id, nome or identificador
+    except Exception as exc:
+        print(f"[SecretarioWhatsApp] Aviso ao buscar em perfil_pessoas: {exc}")
+
+    # Fallback 2: busca por chat_name em whatsapp_chats
+    try:
+        termo_lower = identificador.lower()
+        for doc in db.collection("whatsapp_chats").limit(200).stream():
+            data = doc.to_dict() or {}
+            chat_name = str(data.get("chat_name") or "").strip()
+            chat_id = str(data.get("chat_id") or doc.id).strip()
+            if termo_lower == chat_name.lower() or termo_lower in chat_name.lower():
+                return chat_id, chat_name or identificador
+    except Exception as exc:
+        print(f"[SecretarioWhatsApp] Aviso ao buscar em whatsapp_chats: {exc}")
+
+    # Fallback 3: se possui dígitos suficientes, monta chat_id puro @c.us
+    digitos = extrair_digitos(identificador)
+    if len(digitos) >= 8:
+        return f"{digitos}@c.us", identificador
+
+    raise ValueError(f"Não foi possível identificar um contato do WhatsApp correspondente a '{identificador}'.")
+
+
+def preparar_contato_prioritario(
+    db,
+    identificador_contato: str,
+    assunto: str,
+    o_que_precisa_saber: str,
+    validade_horas: float | None = None,
+    ctx=None,
+    agora_sp: datetime.datetime | None = None,
+) -> dict:
+    """Registra um briefing prioritário para o modo secretário conduzir investigação ativa."""
+    try:
+        chat_id, chat_name = resolver_identificador_contato(db, identificador_contato, ctx=ctx)
+    except Exception as exc:
+        return {"erro": str(exc)}
+
+    assunto_limpo = str(assunto or "").strip()
+    if not assunto_limpo:
+        return {"erro": "O parâmetro 'assunto' é obrigatório."}
+
+    saber_limpo = str(o_que_precisa_saber or "").strip()
+    if not saber_limpo:
+        return {"erro": "O parâmetro 'o_que_precisa_saber' é obrigatório."}
+
+    valido_ate = _calcular_validade_iso(validade_horas, agora=agora_sp)
+
+    # Garante inclusão na allowlist para atendimento sem descarte silencioso
+    _garantir_chat_na_allowlist(db, chat_id)
+
+    doc_ref = db.collection(COLLECTION_PRIORITARIOS).document(chat_id)
+    doc_data = {
+        "chat_id": chat_id,
+        "chat_name": chat_name,
+        "assunto": assunto_limpo,
+        "o_que_precisa_saber": saber_limpo,
+        "status": STATUS_PRIORITARIO_ATIVO,
+        "valido_ate": valido_ate,
+        "resumo_estruturado": None,
+        "informacao_obtida": None,
+        "criado_em": firestore.SERVER_TIMESTAMP,
+        "atualizado_em": firestore.SERVER_TIMESTAMP,
+    }
+    doc_ref.set(doc_data, merge=True)
+
+    return {
+        "status": "ok",
+        "mensagem": f"Briefing prioritário registrado com sucesso para {chat_name}.",
+        "chat_id": chat_id,
+        "chat_name": chat_name,
+        "assunto": assunto_limpo,
+        "o_que_precisa_saber": saber_limpo,
+        "valido_ate": valido_ate,
+    }
+
+
+def consultar_contatos_prioritarios(
+    db,
+    apenas_ativos: bool = True,
+    agora_sp: datetime.datetime | None = None,
+) -> dict:
+    """Consulta briefings prioritários cadastrados, atualizando automaticamente os expirados."""
+    itens = []
+    try:
+        for doc in db.collection(COLLECTION_PRIORITARIOS).stream():
+            dados = doc.to_dict() or {}
+            dados["id"] = doc.id
+            status = dados.get("status")
+            valido_ate = dados.get("valido_ate")
+
+            # Verifica se expirou
+            if status == STATUS_PRIORITARIO_ATIVO and _esta_expirado(valido_ate, agora=agora_sp):
+                doc.reference.update({
+                    "status": STATUS_PRIORITARIO_EXPIRADO,
+                    "atualizado_em": firestore.SERVER_TIMESTAMP,
+                })
+                dados["status"] = STATUS_PRIORITARIO_EXPIRADO
+
+            if apenas_ativos:
+                if dados.get("status") == STATUS_PRIORITARIO_ATIVO:
+                    itens.append(dados)
+            else:
+                itens.append(dados)
+    except Exception as exc:
+        print(f"[SecretarioWhatsApp] Erro ao consultar contatos prioritários: {exc}")
+        return {"erro": str(exc), "contatos_prioritarios": []}
+
+    return {
+        "total": len(itens),
+        "apenas_ativos": apenas_ativos,
+        "contatos_prioritarios": itens,
+    }
+
+
+def cancelar_contato_prioritario(
+    db,
+    identificador_contato: str,
+    ctx=None,
+) -> dict:
+    """Cancela um briefing prioritário antes de sua expiração."""
+    identificador = str(identificador_contato or "").strip()
+    if not identificador:
+        return {"erro": "Identificador do contato não informado."}
+
+    chat_id = None
+    chat_name = None
+    try:
+        chat_id, chat_name = resolver_identificador_contato(db, identificador, ctx=ctx)
+    except Exception:
+        pass
+
+    doc_ref = None
+    if chat_id:
+        ref = db.collection(COLLECTION_PRIORITARIOS).document(chat_id)
+        if ref.get().exists:
+            doc_ref = ref
+
+    if not doc_ref:
+        termo_lower = identificador.lower()
+        digitos = extrair_digitos(identificador)
+        for doc in db.collection(COLLECTION_PRIORITARIOS).stream():
+            d = doc.to_dict() or {}
+            c_id = str(d.get("chat_id") or doc.id)
+            c_name = str(d.get("chat_name") or "")
+            if (c_id == identificador or
+                (digitos and digitos == extrair_digitos(c_id)) or
+                (termo_lower in c_name.lower()) or
+                (termo_lower == c_name.lower())):
+                doc_ref = doc.reference
+                chat_id = c_id
+                chat_name = c_name
+                break
+
+    if not doc_ref:
+        return {"erro": f"Nenhum briefing prioritário encontrado para '{identificador}'."}
+
+    doc_ref.update({
+        "status": STATUS_PRIORITARIO_CANCELADO,
+        "atualizado_em": firestore.SERVER_TIMESTAMP,
+    })
+
+    return {
+        "status": "ok",
+        "mensagem": f"Briefing prioritário para {chat_name or chat_id} foi cancelado com sucesso.",
+        "chat_id": chat_id,
+        "chat_name": chat_name,
+    }
+
+
+def obter_briefing_ativo(
+    db,
+    chat_id: str,
+    agora_sp: datetime.datetime | None = None,
+) -> dict | None:
+    """Retorna o briefing prioritário ativo para o chat_id ou None se não houver ou expirou."""
+    if not chat_id:
+        return None
+
+    c_id = str(chat_id).strip()
+    doc_ref = db.collection(COLLECTION_PRIORITARIOS).document(c_id)
+    snap = doc_ref.get()
+
+    dados = None
+    if snap.exists:
+        dados = snap.to_dict()
+    else:
+        digitos = extrair_digitos(c_id)
+        if digitos:
+            for doc in db.collection(COLLECTION_PRIORITARIOS).stream():
+                d = doc.to_dict() or {}
+                if extrair_digitos(str(d.get("chat_id") or doc.id)) == digitos:
+                    dados = d
+                    doc_ref = doc.reference
+                    break
+
+    if not dados:
+        return None
+
+    if dados.get("status") != STATUS_PRIORITARIO_ATIVO:
+        return None
+
+    valido_ate = dados.get("valido_ate")
+    if _esta_expirado(valido_ate, agora=agora_sp):
+        try:
+            doc_ref.update({
+                "status": STATUS_PRIORITARIO_EXPIRADO,
+                "atualizado_em": firestore.SERVER_TIMESTAMP,
+            })
+        except Exception:
+            pass
+        return None
+
+    return dados
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +502,7 @@ GUARDRAILS INEGOCIÁVEIS (SIGA RIGOROSAMENTE):
 """
 
 
-def _construir_tools_secretario(db) -> tuple[list[dict], dict, dict]:
+def _construir_tools_secretario(db, briefing: dict | None = None) -> tuple[list[dict], dict, dict]:
     """Cria as declarações de ferramentas e o function_map para o LLM."""
     resultado_final = {}
 
@@ -204,6 +533,25 @@ def _construir_tools_secretario(db) -> tuple[list[dict], dict, dict]:
             "resumo_recado": str(resumo_recado or "").strip(),
             "forcou_decisao": bool(forcou_decisao),
             "assunto_sensivel": bool(assunto_sensivel),
+            "investigacao_concluida": False,
+        })
+        return {"status": "ok"}
+
+    def _concluir_investigacao_prioritaria_fn(
+        resposta_para_contato: str,
+        resumo_estruturado: str,
+        informacao_obtida: bool = True,
+        forcou_decisao: bool = False,
+        assunto_sensivel: bool = False,
+    ) -> dict:
+        resultado_final.update({
+            "resposta_para_contato": prefixar_assinatura(resposta_para_contato),
+            "resumo_estruturado": str(resumo_estruturado or "").strip(),
+            "resumo_recado": str(resumo_estruturado or "").strip(),
+            "informacao_obtida": bool(informacao_obtida),
+            "investigacao_concluida": True,
+            "forcou_decisao": bool(forcou_decisao),
+            "assunto_sensivel": bool(assunto_sensivel),
         })
         return {"status": "ok"}
 
@@ -222,7 +570,7 @@ def _construir_tools_secretario(db) -> tuple[list[dict], dict, dict]:
         },
         {
             "name": "finalizar_atendimento",
-            "description": "Emite a resposta final formatada para envio ao WhatsApp e a avaliação de risco do contato.",
+            "description": "Emite a resposta intermediária ou geral formatada para envio ao WhatsApp e a avaliação de risco do contato.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -253,6 +601,39 @@ def _construir_tools_secretario(db) -> tuple[list[dict], dict, dict]:
         "finalizar_atendimento": _finalizar_atendimento_fn,
     }
 
+    if briefing:
+        tools.append({
+            "name": "concluir_investigacao_prioritaria",
+            "description": "Conclui a investigação prioritária quando a informação requerida pelo André foi obtida com sucesso ou quando o contato confirmou que não pode fornecê-la.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "resposta_para_contato": {
+                        "type": "string",
+                        "description": "Mensagem exata a ser enviada no WhatsApp para o contato (começando com '**Hermes Bot:** ').",
+                    },
+                    "resumo_estruturado": {
+                        "type": "string",
+                        "description": "Resposta objetiva e estruturada ao que o André precisava saber.",
+                    },
+                    "informacao_obtida": {
+                        "type": "boolean",
+                        "description": "True se a informação que o André precisava saber foi obtida; False se não foi possível obter.",
+                    },
+                    "forcou_decisao": {
+                        "type": "boolean",
+                        "description": "True se a mensagem tentou forçar uma confirmação de compromisso ou decisão imediata.",
+                    },
+                    "assunto_sensivel": {
+                        "type": "boolean",
+                        "description": "True se o contato perguntou ou mencionou assuntos financeiros ou de saúde do André.",
+                    },
+                },
+                "required": ["resposta_para_contato", "resumo_estruturado", "informacao_obtida"],
+            },
+        })
+        function_map["concluir_investigacao_prioritaria"] = _concluir_investigacao_prioritaria_fn
+
     return tools, function_map, resultado_final
 
 
@@ -262,6 +643,7 @@ def _executar_llm_secretario(
     texto_mensagem: str,
     historico: list[dict],
     agora_sp: str,
+    briefing: dict | None = None,
 ) -> dict:
     """Executa o loop de decisões com a Claude Messages API."""
     import anthropic
@@ -279,17 +661,44 @@ def _executar_llm_secretario(
             "resumo_recado": texto_mensagem[:150],
             "forcou_decisao": False,
             "assunto_sensivel": False,
+            "investigacao_concluida": False,
         }
 
-    tools, function_map, resultado_coletado = _construir_tools_secretario(db)
+    tools, function_map, resultado_coletado = _construir_tools_secretario(db, briefing=briefing)
     client = anthropic.Anthropic(api_key=claude_key)
+
+    system_instruction = SECRETARIO_SYSTEM_PROMPT
+    if briefing:
+        assunto_br = briefing.get("assunto")
+        o_que_saber = briefing.get("o_que_precisa_saber")
+        system_instruction += f"""
+
+BRIEFING PRIORITÁRIO ATIVO:
+O André pré-avisou que está aguardando uma resposta específica deste contato.
+- Assunto: {assunto_br}
+- O que o André precisa saber: {o_que_saber}
+
+DIRETRIZES DE INVESTIGAÇÃO ATIVA:
+1. Conduza a conversa buscando ativamente entender e obter as informações necessárias sobre o assunto pré-avisado com cortesia.
+2. Se faltarem detalhes importantes para responder ao que o André precisa saber, faça perguntas objetivas de esclarecimento e invoque `finalizar_atendimento`.
+3. Assim que você tiver obtido a informação combinada (ou se o contato afirmar categoricamente que não tem a informação/não pode responder), invoque OBRIGATORIAMENTE a ferramenta `concluir_investigacao_prioritaria`.
+4. MANTENHA TODOS OS GUARDRAILS INEGOCIÁVEIS:
+   - Se o interlocutor perguntar sobre agenda e o André estiver livre, NUNCA confirme disponibilidade nem compromisso.
+   - NUNCA revele dados de finanças ou de saúde do André; recuse polidamente e marque `assunto_sensivel=true`.
+"""
 
     user_msg = (
         f"Data/hora atual: {agora_sp}\n"
         f"Interlocutor: {chat_name}\n"
         f"Nova mensagem recebida: \"{texto_mensagem}\"\n\n"
-        "Analise a mensagem, consulte a agenda se necessário e chame `finalizar_atendimento` com a resposta."
     )
+    if briefing:
+        user_msg += (
+            "Analise a mensagem no contexto do briefing prioritário. Se a informação foi obtida ou não pode ser obtida, "
+            "chame `concluir_investigacao_prioritaria`. Se precisar investigar mais, chame `finalizar_atendimento`."
+        )
+    else:
+        user_msg += "Analise a mensagem, consulte a agenda se necessário e chame `finalizar_atendimento` com a resposta."
 
     formatted_history = []
     for h in (historico or []):
@@ -302,7 +711,7 @@ def _executar_llm_secretario(
         claude_provider.run_tool_loop(
             client=client,
             model=_MODELO_CLAUDE,
-            system_instruction=SECRETARIO_SYSTEM_PROMPT,
+            system_instruction=system_instruction,
             tools=tools,
             function_map=function_map,
             history=formatted_history,
@@ -324,6 +733,7 @@ def _executar_llm_secretario(
         "resumo_recado": texto_mensagem[:150],
         "forcou_decisao": False,
         "assunto_sensivel": False,
+        "investigacao_concluida": False,
     }
 
 
@@ -349,6 +759,61 @@ def processar_mensagem_from_me(db, mensagem: dict) -> None:
             "estado": ESTADO_ASSUMIDO_POR_ANDRE,
             "atualizado_em": firestore.SERVER_TIMESTAMP,
         })
+
+
+def registrar_investigacao_concluida_atencao(
+    db,
+    chat_id: str,
+    chat_name: str,
+    wa_message_id: str,
+    assunto: str,
+    o_que_precisa_saber: str,
+    resumo_estruturado: str,
+    informacao_obtida: bool,
+    trocas_count: int,
+) -> str:
+    """Insere um item com prioridade MÉDIA na fila de atenção para entrega do resumo estruturado ao André."""
+    chave_dedupe = f"secretario_investigacao:{chat_id}:{wa_message_id}"
+    doc_ref = db.collection(atencao.COLLECTION).document(chave_dedupe)
+
+    status_str = "Informação obtida com sucesso." if informacao_obtida else "Informação não obtida."
+    titulo = f"WhatsApp ({chat_name}): Investigação concluída — {assunto}"[:120]
+    resumo = (
+        f"Contato prioritário: {chat_name}\n"
+        f"Assunto: {assunto}\n"
+        f"Objetivo do André: {o_que_precisa_saber}\n"
+        f"Status: {status_str}\n"
+        f"Resumo estruturado: {resumo_estruturado}"
+    )[:500]
+
+    item = {
+        "origem": ORIGEM_SECRETARIO,
+        "tipo": TIPO_ATENCAO_INVESTIGACAO_CONCLUIDA,
+        "prioridade": atencao.PRIORIDADE_MEDIA,
+        "titulo": titulo,
+        "resumo": resumo,
+        "sugestao": "Revisar as respostas coletadas pelo secretário.",
+        "estado": atencao.ESTADO_ABERTO,
+        "chave_dedupe": chave_dedupe,
+        "acao_id": None,
+        "etapa_id": None,
+        "pessoa": chat_name,
+        "prazo": None,
+        "evidencia": {
+            "chat_id": chat_id,
+            "chat_name": chat_name,
+            "wa_message_id": wa_message_id,
+            "assunto": assunto,
+            "o_que_precisa_saber": o_que_precisa_saber,
+            "resumo_estruturado": resumo_estruturado,
+            "informacao_obtida": informacao_obtida,
+            "trocas_count": trocas_count,
+        },
+        "criado_em": firestore.SERVER_TIMESTAMP,
+        "atualizado_em": firestore.SERVER_TIMESTAMP,
+    }
+    doc_ref.set(item, merge=True)
+    return chave_dedupe
 
 
 def escalar_para_atencao(
@@ -446,8 +911,9 @@ def processar_mensagem_secretario(
     if not cfg.get("enabled"):
         return None
 
-    # Fast path 4: Allowlist restrita
-    if not chat_na_allowlist(chat_id, cfg.get("chats_allowlist")):
+    # Fast path 4: Verifica briefing ativo ou allowlist
+    briefing = obter_briefing_ativo(db, chat_id)
+    if not briefing and not chat_na_allowlist(chat_id, cfg.get("chats_allowlist")):
         return None
 
     texto_msg = str(
@@ -462,7 +928,10 @@ def processar_mensagem_secretario(
     chat_name = str(mensagem.get("chat_name") or chat_id).strip()
     wa_message_id = str(mensagem.get("wa_message_id") or mensagem.get("id") or "msg").strip()
 
-    max_trocas = cfg.get("max_trocas", DEFAULT_MAX_TROCAS)
+    if briefing:
+        max_trocas = int(cfg.get("max_trocas_prioritario", DEFAULT_MAX_TROCAS_PRIORITARIO))
+    else:
+        max_trocas = int(cfg.get("max_trocas", DEFAULT_MAX_TROCAS))
 
     # 1. Carrega ou inicializa o estado da conversa
     doc_conversa_ref = db.collection(COLLECTION_CONVERSAS).document(chat_id)
@@ -479,53 +948,108 @@ def processar_mensagem_secretario(
         historico = []
         estado_atual = ESTADO_EM_ATENDIMENTO
 
-    # 2. Verifica se atingiu o limite de trocas (Regra 4: ~2 trocas)
+    # 2. Verifica se atingiu o limite de trocas
     if trocas_atuais >= max_trocas:
-        resposta_fechamento = (
-            f"{PREFIXO_ASSINATURA}Entendido. Já anotei todos os detalhes e vou repassar diretamente "
-            "ao André assim que ele estiver disponível."
-        )
-        resumo_fechamento = f"Interlocutor continuou conversa após {trocas_atuais} trocas: {texto_msg[:100]}"
+        if briefing:
+            resposta_fechamento = (
+                f"{PREFIXO_ASSINATURA}Entendido. Já anotei todas as informações e vou repassar diretamente "
+                "ao André assim que ele estiver disponível."
+            )
+            resumo_fechamento = f"Teto prioritário atingido ({max_trocas} trocas). Última mensagem: {texto_msg[:120]}"
 
-        # Escala pro André via avaliar_interrupcao_atencao (prioridade alta)
-        item_id = escalar_para_atencao(
-            db=db,
-            chat_id=chat_id,
-            chat_name=chat_name,
-            wa_message_id=wa_message_id,
-            motivo="Limite de trocas atingido — aguardando retorno do André",
-            tipo_atencao=TIPO_ATENCAO_INSISTENCIA,
-            resumo_recado=resumo_fechamento,
-            texto_mensagem=texto_msg,
-            trocas_count=trocas_atuais,
-            forcou_decisao=True,
-        )
+            # Marca briefing como concluído
+            db.collection(COLLECTION_PRIORITARIOS).document(chat_id).update({
+                "status": STATUS_PRIORITARIO_CONCLUIDO,
+                "resumo_estruturado": resumo_fechamento,
+                "informacao_obtida": False,
+                "concluido_em": firestore.SERVER_TIMESTAMP,
+                "atualizado_em": firestore.SERVER_TIMESTAMP,
+            })
 
-        # Envia mensagem de encerramento via outbox
-        enviar_resposta_via_outbox(
-            db=db,
-            chat_id=chat_id,
-            chat_name=chat_name,
-            texto_resposta=resposta_fechamento,
-            resumo_recado=resumo_fechamento,
-        )
+            # Registra item na fila atencao com prioridade média
+            item_id = registrar_investigacao_concluida_atencao(
+                db=db,
+                chat_id=chat_id,
+                chat_name=chat_name,
+                wa_message_id=wa_message_id,
+                assunto=str(briefing.get("assunto") or "Assunto prioritário"),
+                o_que_precisa_saber=str(briefing.get("o_que_precisa_saber") or ""),
+                resumo_estruturado=resumo_fechamento,
+                informacao_obtida=False,
+                trocas_count=trocas_atuais + 1,
+            )
 
-        doc_conversa_ref.set({
-            "chat_id": chat_id,
-            "chat_name": chat_name,
-            "estado": ESTADO_ESCALADO,
-            "trocas_count": trocas_atuais + 1,
-            "ultimo_recado": resumo_fechamento,
-            "escalado": True,
-            "item_atencao_id": item_id,
-            "atualizado_em": firestore.SERVER_TIMESTAMP,
-        }, merge=True)
+            # Envia mensagem de encerramento via outbox
+            enviar_resposta_via_outbox(
+                db=db,
+                chat_id=chat_id,
+                chat_name=chat_name,
+                texto_resposta=resposta_fechamento,
+                resumo_recado=resumo_fechamento,
+            )
 
-        return {
-            "status": "escalado_insistencia",
-            "chat_id": chat_id,
-            "trocas_count": trocas_atuais + 1,
-        }
+            doc_conversa_ref.set({
+                "chat_id": chat_id,
+                "chat_name": chat_name,
+                "estado": ESTADO_ENCERRADO,
+                "trocas_count": trocas_atuais + 1,
+                "ultimo_recado": resumo_fechamento,
+                "escalado": True,
+                "item_atencao_id": item_id,
+                "atualizado_em": firestore.SERVER_TIMESTAMP,
+            }, merge=True)
+
+            return {
+                "status": "concluido_limite_prioritario",
+                "chat_id": chat_id,
+                "trocas_count": trocas_atuais + 1,
+            }
+        else:
+            resposta_fechamento = (
+                f"{PREFIXO_ASSINATURA}Entendido. Já anotei todos os detalhes e vou repassar diretamente "
+                "ao André assim que ele estiver disponível."
+            )
+            resumo_fechamento = f"Interlocutor continuou conversa após {trocas_atuais} trocas: {texto_msg[:100]}"
+
+            # Escala pro André via avaliar_interrupcao_atencao (prioridade alta)
+            item_id = escalar_para_atencao(
+                db=db,
+                chat_id=chat_id,
+                chat_name=chat_name,
+                wa_message_id=wa_message_id,
+                motivo="Limite de trocas atingido — aguardando retorno do André",
+                tipo_atencao=TIPO_ATENCAO_INSISTENCIA,
+                resumo_recado=resumo_fechamento,
+                texto_mensagem=texto_msg,
+                trocas_count=trocas_atuais,
+                forcou_decisao=True,
+            )
+
+            # Envia mensagem de encerramento via outbox
+            enviar_resposta_via_outbox(
+                db=db,
+                chat_id=chat_id,
+                chat_name=chat_name,
+                texto_resposta=resposta_fechamento,
+                resumo_recado=resumo_fechamento,
+            )
+
+            doc_conversa_ref.set({
+                "chat_id": chat_id,
+                "chat_name": chat_name,
+                "estado": ESTADO_ESCALADO,
+                "trocas_count": trocas_atuais + 1,
+                "ultimo_recado": resumo_fechamento,
+                "escalado": True,
+                "item_atencao_id": item_id,
+                "atualizado_em": firestore.SERVER_TIMESTAMP,
+            }, merge=True)
+
+            return {
+                "status": "escalado_insistencia",
+                "chat_id": chat_id,
+                "trocas_count": trocas_atuais + 1,
+            }
 
     # 3. Execução da decisão via LLM (Claude)
     agora_sp = datetime.datetime.now(timezone.utc).astimezone(
@@ -533,13 +1057,26 @@ def processar_mensagem_secretario(
     ).strftime("%Y-%m-%d %H:%M:%S BRT")
 
     if llm_runner is not None:
-        decisao = llm_runner(
-            db=db,
-            chat_name=chat_name,
-            texto_mensagem=texto_msg,
-            historico=historico,
-            agora_sp=agora_sp,
-        )
+        import inspect
+        sig = inspect.signature(llm_runner)
+        accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+        if "briefing" in sig.parameters or accepts_kwargs:
+            decisao = llm_runner(
+                db=db,
+                chat_name=chat_name,
+                texto_mensagem=texto_msg,
+                historico=historico,
+                agora_sp=agora_sp,
+                briefing=briefing,
+            )
+        else:
+            decisao = llm_runner(
+                db=db,
+                chat_name=chat_name,
+                texto_mensagem=texto_msg,
+                historico=historico,
+                agora_sp=agora_sp,
+            )
     else:
         decisao = _executar_llm_secretario(
             db=db,
@@ -547,16 +1084,21 @@ def processar_mensagem_secretario(
             texto_mensagem=texto_msg,
             historico=historico,
             agora_sp=agora_sp,
+            briefing=briefing,
         )
 
     resposta_texto = prefixar_assinatura(decisao.get("resposta_para_contato") or "")
     resumo_recado = str(decisao.get("resumo_recado") or texto_msg[:120]).strip()
     forcou_decisao = bool(decisao.get("forcou_decisao"))
     assunto_sensivel = bool(decisao.get("assunto_sensivel"))
+    investigacao_concluida = bool(decisao.get("investigacao_concluida"))
+    resumo_estruturado = str(decisao.get("resumo_estruturado") or resumo_recado).strip()
+    informacao_obtida = bool(decisao.get("informacao_obtida", True))
 
-    # 4. Se forçou decisão ou assunto sensível, escala para a fila de atenção (alta prioridade)
+    # 4. Avaliação de risco e conclusão
     item_atencao_id = None
     if forcou_decisao or assunto_sensivel:
+        # Guardrails prioritários têm precedência imediata com alta prioridade
         tipo_at = TIPO_ATENCAO_ASSUNTO_SENSIVEL if assunto_sensivel else TIPO_ATENCAO_DECISAO_FORCADA
         motivo_at = "Tentativa de forçar decisão/compromisso" if forcou_decisao else "Menção a finanças/saúde"
         item_atencao_id = escalar_para_atencao(
@@ -570,6 +1112,26 @@ def processar_mensagem_secretario(
             texto_mensagem=texto_msg,
             trocas_count=trocas_atuais + 1,
             forcou_decisao=forcou_decisao,
+        )
+    elif briefing and investigacao_concluida:
+        # Conclusão bem-sucedida ou finalização da investigação com prioridade média
+        db.collection(COLLECTION_PRIORITARIOS).document(chat_id).update({
+            "status": STATUS_PRIORITARIO_CONCLUIDO,
+            "resumo_estruturado": resumo_estruturado,
+            "informacao_obtida": informacao_obtida,
+            "concluido_em": firestore.SERVER_TIMESTAMP,
+            "atualizado_em": firestore.SERVER_TIMESTAMP,
+        })
+        item_atencao_id = registrar_investigacao_concluida_atencao(
+            db=db,
+            chat_id=chat_id,
+            chat_name=chat_name,
+            wa_message_id=wa_message_id,
+            assunto=str(briefing.get("assunto") or "Assunto prioritário"),
+            o_que_precisa_saber=str(briefing.get("o_que_precisa_saber") or ""),
+            resumo_estruturado=resumo_estruturado,
+            informacao_obtida=informacao_obtida,
+            trocas_count=trocas_atuais + 1,
         )
 
     # 5. Envia a resposta gerada via outbox com janela de cancelamento
@@ -595,7 +1157,12 @@ def processar_mensagem_secretario(
         "timestamp": datetime.datetime.now(timezone.utc).isoformat(),
     })
 
-    novo_estado = ESTADO_ESCALADO if (forcou_decisao or assunto_sensivel) else ESTADO_EM_ATENDIMENTO
+    if forcou_decisao or assunto_sensivel:
+        novo_estado = ESTADO_ESCALADO
+    elif briefing and investigacao_concluida:
+        novo_estado = ESTADO_ENCERRADO
+    else:
+        novo_estado = ESTADO_EM_ATENDIMENTO
 
     payload_conversa = {
         "chat_id": chat_id,
@@ -604,7 +1171,7 @@ def processar_mensagem_secretario(
         "trocas_count": trocas_atuais + 1,
         "historico_mensagens": novo_historico[-10:],  # mantém até os últimos 10 turnos
         "ultimo_recado": resumo_recado,
-        "escalado": bool(forcou_decisao or assunto_sensivel),
+        "escalado": bool(forcou_decisao or assunto_sensivel or (briefing and investigacao_concluida)),
         "atualizado_em": firestore.SERVER_TIMESTAMP,
     }
     if not snap_conversa.exists:
@@ -614,10 +1181,13 @@ def processar_mensagem_secretario(
 
     doc_conversa_ref.set(payload_conversa, merge=True)
 
+    status_retorno = "investigacao_concluida" if (briefing and investigacao_concluida) else "ok"
+
     return {
-        "status": "ok",
+        "status": status_retorno,
         "chat_id": chat_id,
         "trocas_count": trocas_atuais + 1,
         "outbox_res": outbox_res,
-        "escalado": bool(forcou_decisao or assunto_sensivel),
+        "escalado": bool(forcou_decisao or assunto_sensivel or (briefing and investigacao_concluida)),
+        "investigacao_concluida": bool(briefing and investigacao_concluida),
     }

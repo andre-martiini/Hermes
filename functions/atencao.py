@@ -40,6 +40,7 @@ TIPO_ROTINA_SAUDE_AUSENTE = "rotina_saude_ausente"
 TIPO_SECRETARIO_DECISAO_FORCADA = "secretario_decisao_forcada"
 TIPO_SECRETARIO_INSISTENCIA = "secretario_insistencia"
 TIPO_SECRETARIO_ASSUNTO_SENSIVEL = "secretario_assunto_sensivel"
+TIPO_SECRETARIO_INVESTIGACAO_CONCLUIDA = "secretario_investigacao_concluida"
 
 # Prioridades
 PRIORIDADE_ALTA = "alta"
