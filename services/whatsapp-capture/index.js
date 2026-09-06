@@ -593,15 +593,36 @@ async function repairMissingMedia() {
                 await docSnap.ref.set({ media_repair_attempts: attempts }, { merge: true }).catch(() => {});
                 console.error(`[MediaRepair] Falha em ${docSnap.id} (tentativa ${attempts}/${MEDIA_REPAIR_MAX_ATTEMPTS}):`, e.message || e);
                 if (attempts >= MEDIA_REPAIR_MAX_ATTEMPTS) {
-                    exhausted.push(`${data.chat_name || data.chat_id} (${data.message_type})`);
+                    exhausted.push({
+                        chatId: data.chat_id,
+                        label: `${data.chat_name || data.chat_id} (${data.message_type})`,
+                    });
                 }
             }
         }
         if (exhausted.length) {
-            await sendTelegramAlert(
-                `⚠️ Hermes WhatsApp: não consegui recuperar a mídia de ${exhausted.length} mensagem(ns) mesmo após ${MEDIA_REPAIR_MAX_ATTEMPTS} tentativas: ` +
-                `${exhausted.slice(0, 5).join(', ')}${exhausted.length > 5 ? '…' : ''}. O conteúdo pode não estar mais disponível.`
-            );
+            // Só alerta por Telegram sobre chats que o agente efetivamente monitora
+            // (chatsAllowlist). Chats capturados apenas por causa de `capturar_todos`
+            // (ex.: contatos inativos, sem interação atual) têm a mídia recuperada
+            // normalmente, mas não geram notificação — evita ruído sobre conversas
+            // que não se acompanha mais. Se a config ainda não carregou (allowlistLoaded
+            // false — não deveria acontecer aqui, já que repairMissingMedia só roda minutos
+            // após o client ficar pronto, mas serve de rede de segurança), falha aberto e
+            // alerta de tudo: silenciar por engano é pior que um alerta a mais.
+            const alertable = allowlistLoaded
+                ? exhausted.filter((item) => chatsAllowlist.has(item.chatId))
+                : exhausted;
+            const silenced = exhausted.length - alertable.length;
+            if (silenced) {
+                console.log(`[MediaRepair] ${silenced} falha(s) de mídia silenciada(s) (chat fora da allowlist monitorada).`);
+            }
+            if (alertable.length) {
+                const labels = alertable.map((item) => item.label);
+                await sendTelegramAlert(
+                    `⚠️ Hermes WhatsApp: não consegui recuperar a mídia de ${alertable.length} mensagem(ns) mesmo após ${MEDIA_REPAIR_MAX_ATTEMPTS} tentativas: ` +
+                    `${labels.slice(0, 5).join(', ')}${labels.length > 5 ? '…' : ''}. O conteúdo pode não estar mais disponível.`
+                );
+            }
         }
     } catch (e) {
         console.error('[MediaRepair] Falha na varredura:', e);
