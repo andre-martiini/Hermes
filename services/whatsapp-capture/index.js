@@ -605,8 +605,13 @@ async function repairMissingMedia() {
             // (chatsAllowlist). Chats capturados apenas por causa de `capturar_todos`
             // (ex.: contatos inativos, sem interação atual) têm a mídia recuperada
             // normalmente, mas não geram notificação — evita ruído sobre conversas
-            // que não se acompanha mais.
-            const alertable = exhausted.filter((item) => chatsAllowlist.has(item.chatId));
+            // que não se acompanha mais. Se a config ainda não carregou (allowlistLoaded
+            // false — não deveria acontecer aqui, já que repairMissingMedia só roda minutos
+            // após o client ficar pronto, mas serve de rede de segurança), falha aberto e
+            // alerta de tudo: silenciar por engano é pior que um alerta a mais.
+            const alertable = allowlistLoaded
+                ? exhausted.filter((item) => chatsAllowlist.has(item.chatId))
+                : exhausted;
             const silenced = exhausted.length - alertable.length;
             if (silenced) {
                 console.log(`[MediaRepair] ${silenced} falha(s) de mídia silenciada(s) (chat fora da allowlist monitorada).`);
