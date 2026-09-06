@@ -577,6 +577,30 @@ def marcar_degradacao(db, hoje: str, motivo: str) -> None:
         print(f"[Elevacao] Falha ao gravar o estado da varredura: {exc}")
 
 
+def marcar_tentativa(db, hoje: str, motivo: str | None) -> None:
+    """Grava quando a rotina tentou rodar pela ultima vez, e por que nao avancou.
+
+    Diferente de `marcar_degradacao`: aquele so e tocado depois que a rodada
+    chega a olhar a janela de tarefas. Uma trava de volume (`semana_cheia`,
+    `teto_do_mes`), a falta de objetivo elegivel, marcador indisponivel ou
+    historico indisponivel barram ANTES disso — e nesses casos o aviso de
+    degradacao no dashboard fica com a data da ultima vez que a rodada
+    realmente chegou la, por mais que ela tenha sido tentada toda semana desde
+    entao. Esta marca cobre TODA tentativa, com ou sem sucesso, para o resumo
+    matinal poder dizer "a ultima tentativa foi hoje" mesmo quando o aviso de
+    degradacao continua com uma data antiga.
+
+    `motivo=None` significa que a rodada rodou (produziu proposta ou concluiu
+    que nao havia nada com corpo) — nao que algo deu errado.
+    """
+    try:
+        _marcador_de_varredura(db).set(
+            {"ultima_tentativa": {"data": str(hoje)[:10], "motivo": motivo or None}},
+            merge=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Elevacao] Falha ao gravar a ultima tentativa: {exc}")
+
+
 def _filtro(campo: str, op: str, valor):
     """`FieldFilter` num lugar so, para o filtro morar na consulta e nao no `for`.
 
@@ -1227,7 +1251,32 @@ def mensagem_da_rodada(rodada: dict, limite_candidatos: int = LIMITE_CANDIDATAS)
     )
 
 
+# Motivos que interrompem a rodada ANTES dela chegar a olhar a janela de
+# tarefas — os unicos em que a rotina pode ter sido barrada semana apos semana
+# sem o card de degradacao (`varredura_degradada`) registrar nada disso, porque
+# aquele so e tocado depois deste ponto. `nenhuma_acao_com_corpo`, falha no
+# modelo e sucesso ficam de fora de proposito: nesses a rodada chegou ate la, e
+# `marcar_degradacao`/`marcar_varredura` ja tem a data de hoje.
+_BLOQUEIOS_ANTES_DA_JANELA = frozenset({
+    "sem_anthropic", "historico_indisponivel", "semana_cheia",
+    "teto_do_mes", "nenhum_objetivo_elegivel", "marcador_indisponivel",
+})
+
+
 def rodar_deteccao(db, hoje: str, carga_semana, claude_key: str) -> dict:
+    """Ponto de entrada do agendador: roda uma rodada e sempre registra a tentativa.
+
+    A gravacao fica aqui fora, e nao dentro de `_rodar_uma_rodada`, para cobrir
+    todo caminho de saida com uma linha so — inclusive `sem_anthropic`, que
+    nunca chega em `preparar_rodada`. Ver `marcar_tentativa`.
+    """
+    resultado = _rodar_uma_rodada(db, hoje, carga_semana, claude_key)
+    motivo = resultado.get("motivo")
+    marcar_tentativa(db, hoje, motivo if motivo in _BLOQUEIOS_ANTES_DA_JANELA else None)
+    return resultado
+
+
+def _rodar_uma_rodada(db, hoje: str, carga_semana, claude_key: str) -> dict:
     """Uma rodada completa: prepara, chama o modelo uma vez, grava o que passar.
 
     O modulo inteiro fica sem importar `firebase_functions` de proposito — o
