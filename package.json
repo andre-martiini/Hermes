@@ -10,6 +10,7 @@
     "watch:pages": "python hermes_cli.py watch-pages",
     "sync:pages": "python hermes_cli.py sync-watch-pages",
     "test": "vitest run",
+    "test:rules": "firebase emulators:exec --project demo-hermes-rules-test --only firestore \"vitest run --config tests/rules/vitest.config.ts\"",
     "whatsapp:worker": "npm --prefix services/whatsapp-capture start"
   },
   "dependencies": {
@@ -27,6 +28,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/jest": "^30.0.0",
@@ -37,6 +39,7 @@
     "@vitejs/plugin-react": "^5.2.0",
     "@vitest/browser": "^4.0.18",
     "autoprefixer": "^10.4.27",
+    "firebase-tools": "^15.29.0",
     "jest": "^30.2.0",
     "jest-environment-jsdom": "^30.2.0",
     "jsdom": "^28.1.0",
