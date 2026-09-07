@@ -181,3 +181,574 @@ pendencias:
   - "aplicar_edicao_rascunho (outbox_aprovacao.py) e a notificação de falha por Telegram em atencao_whatsapp.py seguem como pendências já registradas no bloco da sub-entrega 1, ainda não fechadas."
 proximo_pacote: "P01 (sub-entrega 3/N)"
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 7782388d8958d017d4832031a9492359ebade9c8
+pacote: P01 (sub-entrega 3/N — agent_requests.py e core/idempotency.py)
+# Continuação da divisão do pacote "G" P01 (seção 8 do plano). Cobre o passo
+# 3 (agent_requests.py — achado A01: enfileirar_ou_atualizar/concluir liam e
+# escreviam fora de transação) e o passo 4 (core/idempotency.py — falha na
+# verificação de idempotência não pode virar "pode processar" silenciosamente).
+# Descobriu um bloqueio de infraestrutura genuinamente novo (ver
+# arquivos_bloqueados): main.py excede o limite de tamanho da escrita via
+# Argos, então a parte do passo 4 que amarra core/idempotency.py ao único
+# chamador de produção (githubWebhook) fica pendente de aplicação manual ou
+# de uma solução de infraestrutura — ver decisão p01-idempotency-main-py-bloqueado.
+# Sem espera de 90 minutos em relação à sub-entrega 2: mesmo pacote "G",
+# decisão já registrada nos blocos anteriores.
+estado: pronto_para_revisao
+# Estados: nao_iniciado, em_execucao, pronto_para_revisao,
+# validado, publicado, ativo, bloqueado, opt_in
+inicio: "2026-09-07T03:05:00Z"
+fim: "2026-09-07T03:15:00Z"
+arquivos_alterados:
+  - functions/agent_requests.py
+  - functions/test_agent_requests.py
+  - functions/core/idempotency.py
+  - functions/test_idempotency.py (novo)
+  - functions/test_atencao_whatsapp.py
+arquivos_bloqueados:
+  - path: functions/main.py
+    mudanca: "githubWebhook: capturar a exceção de core.idempotency.check_and_register e responder 503 (sem processar o evento) em vez de deixá-la propagar sem tratamento — texto exato já pronto localmente, só não publicado."
+    motivo: "functions/main.py tem 681.703 caracteres; a ferramenta de escrita do Argos (argos_escrever_arquivo_repositorio) limita o parâmetro conteudo a 200.000 caracteres e só aceita substituição integral do arquivo (não há modo patch/diff). Não há como publicar NENHUMA mudança em main.py por esse caminho, por menor que seja, enquanto o arquivo permanecer acima desse limite — não é específico desta mudança."
+decisoes:
+  - id: p01-a01-agent-requests-transacional
+    motivo: "A01: enfileirar_ou_atualizar() fazia get() seguido de set()/update() fora de transação; uma chamada concorrente a concluir() podia decidir o status do pedido entre a leitura e a escrita daqui (ex.: enfileirar_ou_atualizar lê 'pendente', concluir() termina o pedido nesse meio-tempo, e enfileirar_ou_atualizar ainda assim sobrescreve payload/timestamps de um pedido que virou terminal — ou o inverso). Mesmo achado, mesma direção do fix já aplicado a outbox_aprovacao.py e promocao_autonomia.py nas sub-entregas 1-2: leitura e escrita de cada função agora acontecem dentro de uma única transação atômica (@firestore.transactional); falha real da transação retorna {'erro': ...} em vez de cair para escrita fora de transação. Escopo deliberadamente restrito ao que o passo 3 do plano pede ('transformar enfileiramento/conclusão legados em transições condicionais') — o protocolo completo de lease/geração/heartbeat descrito na seção 4.5 do plano fica para P04, não é implementado aqui."
+    autoridade: existente_ou_nova
+  - id: p01-idempotency-check-and-register-propaga-excecao
+    motivo: "P01 passo 4: core/idempotency.py::check_and_register capturava qualquer exceção da verificação transacional e retornava True — ou seja, uma falha real (Firestore indisponível, contenção esgotando tentativas) virava silenciosamente 'trate como novo, pode processar', arriscando duplicar exatamente o efeito que a idempotência existe para evitar. Corrigido: a exceção agora propaga para o chamador. O único chamador de produção é functions/main.py::githubWebhook (confirmado por grep no repo inteiro); o texto que captura essa exceção e responde 503 sem processar o evento está pronto localmente mas não foi publicado nesta sub-entrega — ver arquivos_bloqueados. Mesmo sem essa amarração publicada, a correção já muda o comportamento em produção hoje: o call site atual (sem try/except) deixa a exceção subir sem tratamento pela função HTTP, e o runtime padrão do Cloud Functions (Python, 2ª geração) responde 5xx automaticamente a uma exceção não tratada — o achado central (nunca converter falha de idempotência em permissão de processar) já fica fechado; o que falta é só a resposta 503 explícita com log específico, mais limpa que o 500 genérico do runtime."
+    autoridade: existente_ou_nova
+  - id: p01-idempotency-main-py-bloqueado
+    motivo: "Descoberta operacional nesta sub-entrega, não um achado do plano: qualquer mudança em functions/main.py (16.184 linhas, 681.703 caracteres) é impossível de publicar via argos_escrever_arquivo_repositorio, cujo parâmetro conteudo tem limite de 200.000 caracteres e não aceita patch/diff — só substituição integral. Isso não é específico deste fix; bloqueia TODA futura mudança em main.py enquanto ele permanecer deste tamanho, o que é provável de recorrer em pacotes futuros do plano (main.py concentra a maior parte das Cloud Functions do Hermes). Três caminhos possíveis, nenhum decidido: (1) uma nova tool no Argos MCP que aceite diff/patch em vez de conteúdo integral; (2) aumentar o limite de conteúdo da tool atual, se não houver uma razão de fundo para o teto de 200.000; (3) dividir main.py em módulos menores — mudança estrutural maior, fora do escopo de uma sub-entrega, mas que resolveria o problema de raiz e ajudaria a legibilidade/revisão independente do limite da ferramenta. Registrado para André decidir; não bloqueia a continuidade do plano porque o achado de segurança em si (check_and_register) já está fechado (ver decisão anterior) — só a resposta HTTP explícita fica pendente."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+    - "cd functions && venv/bin/python -m unittest test_agent_requests -v"
+    - "cd functions && venv/bin/python -m unittest test_idempotency -v"
+    - "cd functions && venv/bin/python -m unittest test_atencao_whatsapp -v"
+  resultados:
+    - "Python (unittest, suíte completa): 1166/1166 passando (1155 anteriores + 7 de agent_requests.py + 4 de test_idempotency.py, novo; 0 regressões)"
+    - "test_agent_requests: 21/21 (7 novos: 3 de enfileirar_ou_atualizar — new/update com falha de transação, sem suporte a transação — e 2 de concluir, com os mesmos dois cenários, mais os 2 já existentes de cada função revalidados sob o novo caminho transacional)"
+    - "test_idempotency: 4/4, novo arquivo — chave nova, chave repetida, falha real de transação propaga exceção, ausência de suporte a transação propaga exceção"
+    - "test_atencao_whatsapp: 35/35 (0 novos; mocks atualizados para o protocolo de transação real, sem o que o teste de TestHookAgentRequests quebraria contra o novo enfileirar_ou_atualizar transacional)"
+    - "Não incluído nesta sub-entrega: um teste novo para o caminho 503 de githubWebhook (test_github_webhook.py) já foi escrito localmente, mas fica sem publicar até main.py poder ser atualizado — publicá-lo sozinho faria o teste falhar contra o main.py real, que ainda não tem a captura da exceção."
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio da implementação): confirmou, por leitura do código-fonte instalado de google.cloud.firestore_v1.transaction, que @firestore.transactional limpa e reinicia o estado da transação a cada tentativa (sem escrita parcial vazando entre retries), que só exceptions.Aborted é retentado automaticamente (qualquer outra propaga na hora, batendo com o except Exception externo), que o caminho 503 de githubWebhook (quando aplicado) retorna antes de qualquer escrita, e que core/idempotency.py não engole mais nenhuma exceção. Veredito: a correção transacional é correta e fecha a corrida pretendida."
+  - "Achado da própria revisão (corrigido nesta sub-entrega, não deixado pendente): faltava um teste provando que uma falha de transação ao ATUALIZAR um pedido pendente já existente (não só ao criar um novo) deixa o documento intocado em enfileirar_ou_atualizar — adicionado test_transacao_falha_ao_atualizar_pedido_existente_nao_corrompe."
+  - "Achado da própria revisão (aceito como conhecido, não corrigido): o except Exception ao redor de _exec(transaction) em enfileirar_ou_atualizar/concluir captura qualquer exceção, não só falhas de contenção/transação — um bug não relacionado a concorrência dentro de _exec seria reportado com a mesma mensagem de 'falha ao enfileirar/atualizar de forma atômica', o que pode confundir uma investigação futura. Comportamento ainda seguro (sempre falha fechado, sem corrupção), só a mensagem de log é potencialmente enganosa; mesmo padrão já usado em outbox_aprovacao.py e promocao_autonomia.py nas sub-entregas anteriores, então não é uma regressão introduzida aqui."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "BLOQUEADO (ver arquivos_bloqueados e decisão p01-idempotency-main-py-bloqueado): aplicar manualmente em functions/main.py, dentro de githubWebhook, a captura da exceção de core.idempotency.check_and_register com resposta 503 (texto pronto, não publicado); depois disso, publicar o teste correspondente já escrito em test_github_webhook.py (test_falha_idempotencia_retorna_503_sem_anotar)."
+  - "O mesmo bloqueio de tamanho de main.py deve recorrer em pacotes futuros do plano — vale decidir entre André e a próxima sessão qual dos três caminhos (nova tool de diff no Argos, aumento do limite atual, ou dividir main.py em módulos) seguir antes que isso vire um padrão de 'sempre aplicar manualmente' para um arquivo tão central."
+  - "P01 segue em aberto: mcp_jobs.py (passos 5-6), firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados."
+  - "achado do mesmo padrão de A04 em argos_autorizacao.py:242,348, aplicar_edicao_rascunho sem proteção transacional, e a notificação de falha por Telegram como mitigação não estrutural seguem como pendências já registradas nos blocos anteriores, ainda não fechadas."
+proximo_pacote: "P01 (sub-entrega 4/N)"
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 7782388d8958d017d4832031a9492359ebade9c8
+pacote: "P01 (sub-entrega 3.1/N — resposta ao achado do Codex na PR #188)"
+# Não é uma nova sub-entrega de escopo do plano; é a resposta ao ciclo de
+# revisão da sub-entrega 3/N (PR #188, ainda pronto_para_revisao, não
+# reescrita — só complementada aqui por ser um bloco novo). Mesmos arquivos
+# (functions/core/idempotency.py, functions/test_idempotency.py), commit novo
+# na mesma branch (claude/p01-agent-requests-idempotencia), seguindo a
+# orientação da skill de shipping para responder a comentários de revisão.
+estado: pronto_para_revisao
+inicio: "2026-09-07T03:20:00Z"
+fim: "2026-09-07T03:55:00Z"
+arquivos_alterados:
+  - functions/core/idempotency.py
+  - functions/test_idempotency.py
+decisoes:
+  - id: p01-codex-preserva-eventos-apos-commit-ambiguo
+    motivo: "Achado real do Codex na PR #188 (não rubber-stamp): check_and_register (sub-entrega 3/N) usava um único sentinela — 'documento existe' = 'já processado, pular'. Se o COMMIT da transação que cria esse sentinela for ambíguo (cliente recebe timeout/erro, mas o Firestore já escreveu no servidor), uma reentrega legítima do GitHub encontraria o sentinela e pularia o evento para sempre, mesmo que o processamento de fato nunca tenha rodado — perda silenciosa e permanente de evento. Corrigido separando o sentinela em dois estados: RESERVADO (tentativa começou) e CONCLUIDO (efeito terminou de verdade, via novo mark_complete()). Só CONCLUIDO é duplicata; RESERVADO recente levanta ReservaEmAndamentoError (nem sucesso nem duplicata); RESERVADO expirado (RESERVA_EXPIRA_APOS=5min) permite retomar."
+    autoridade: existente_ou_nova
+  - id: p01-idempotency-tri-state-string-rejeitado
+    motivo: "Primeira tentativa de fix fez check_and_register devolver uma de três strings (novo/duplicata/em_andamento) em vez de bool. Identificado ANTES de publicar, por raciocínio próprio sobre o call site de produção: o main.py HOJE implantado faz `if not check_and_register(...)`, e `not \"qualquer string não-vazia\"` é sempre False em Python — ou seja, TODA entrega (mesmo duplicata genuína) passaria a ser tratada como nova, desligando silenciosamente a deduplicação inteira do webhook assim que esta PR fosse mergeada, já que main.py não pode ser editado no mesmo lote (ver bloqueio de tamanho, sub-entrega 3/N). Revertido para bool + uma exceção nova (ReservaEmAndamentoError) para o terceiro caso — compatível de verdade com o contrato bool já implantado, com zero edição adicional de main.py necessária para a correção ter efeito de segurança (uma exceção não capturada nunca vira 200, ver decisão seguinte)."
+    autoridade: existente_ou_nova
+  - id: p01-idempotency-docstring-corrigida-pos-revisao
+    motivo: "A revisão adversarial final (design bool+exceção) apontou que a docstring de ReservaEmAndamentoError afirmava existir um `except Exception` no chamador (main.py) já capturando a exceção — falso: `git show HEAD:functions/main.py` confirma que a chamada a check_and_register lá não tem NENHUM try/except ao redor. Verificado o comportamento real: uma exceção não capturada sobe até o crash_handler do functions_framework (500 via error handler registrado em flask, nunca 200) — ou seja, a correção já é segura em produção mesmo sem essa edição de main.py, só não é tão 'limpa' (500 genérico com o texto da exceção no corpo, em vez de um 503 específico e logado) quanto ficaria com o rascunho local de main.py aplicado. Docstring corrigida para descrever esse caminho real em vez do caminho que só existe no rascunho bloqueado."
+    autoridade: existente_ou_nova
+  - id: p01-idempotency-fencing-token-aceito-como-latente
+    motivo: "Achado da revisão adversarial: mark_complete() não é transacional e não verifica se está completando a MESMA reserva que check_and_register concedeu (sem fencing token) — em teoria, se uma tentativa ficasse presa por mais de RESERVA_EXPIRA_APOS (5min) e só então terminasse e chamasse mark_complete, poderia finalizar incorretamente a reserva de uma tentativa seguinte que já tinha retomado o processamento. Aceito como limitação latente, não corrigido: o timeout configurado da função (githubWebhook) fica bem abaixo de 5 minutos, então uma tentativa presa é encerrada pelo runtime antes de chegar a esse ponto — mesmo precedente de decisão usado para o protocolo de lease do P04 (aceitar uma janela teórica não explorável nas condições operacionais atuais, documentar, não bloquear a entrega)."
+    autoridade: existente_ou_nova
+  - id: p01-anotar-eventos-nao-idempotente-mantido-best-effort
+    motivo: "A revisão adversarial sugeriu (no rascunho local de main.py, ainda bloqueado) só chamar mark_complete quando anotar_evento_github_em_tarefas não tiver nenhuma falha parcial. Rejeitado deliberadamente: anotar_evento_github_em_tarefas já trata falha por tarefa como best-effort (uma tarefa falhar não derruba as outras, achado já aceito em sub-entrega anterior) e NÃO é idempotente — se mark_complete ficasse condicionado a zero falhas, uma reentrega subsequente reprocessaria TODAS as tarefas do evento, inclusive as que já tinham sido anotadas com sucesso na tentativa anterior, duplicando anotações. Manter mark_complete incondicional ao término da chamada (independente de falhas parciais internas) é estritamente melhor dado que o efeito interno já não é idempotente — consistente com a decisão de design já tomada para essa função. Registrado aqui para não reabrir a discussão sem essa nota."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest test_idempotency test_github_webhook -v"
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "Python (unittest, suíte completa): 1175/1175 passando (1166 da sub-entrega 3/N + 9 novos de test_idempotency.py reescrito para o design reserva/conclusão; 0 regressões)"
+    - "test_idempotency: 9/9 (reserva recente levanta ReservaEmAndamentoError sem reescrever; reserva expirada permite reprocessar; documento legado sem status tratado como reserva expirada; mark_complete bloqueia reentrega mesmo após a reserva expirar; mark_complete preserva reserved_at original; mark_complete numa chave sem reserva prévia não quebra — achado da revisão; mais os 3 já existentes revalidados sob o novo design)"
+    - "test_github_webhook: 16/16 no rascunho local (ainda não publicado — mesmo bloqueio de main.py da sub-entrega 3/N)"
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio, dedicada a este design final — as duas revisões anteriores foram sobre designs já superados: a original de sentinela único e a intermediária tri-state) — leu o diff local completo contra origin/main, o código-fonte instalado de google.cloud.firestore_v1.transaction (confirmou que só google.api_core.exceptions.Aborted é retentado automaticamente pelo decorator, e que uma exceção levantada dentro da função decorada nunca é retentada), e o código-fonte instalado de functions_framework/flask (confirmou o caminho até crash_handler/500). Achados: a imprecisão de docstring (corrigida, ver decisão), a ausência de fencing token em mark_complete (aceita como latente, ver decisão), e a sugestão sobre anotar_evento_github_em_tarefas não-idempotente (rejeitada com justificativa, ver decisão). Verificou como sólido: a lógica de arbitragem entre reservas concorrentes via retry de Aborted, a ordem correta dos except no rascunho de main.py (ReservaEmAndamentoError antes do Exception genérico, sem sombreamento), e o uso correto de merge=True+SERVER_TIMESTAMP em mark_complete."
+  - "Autocorreção antes de publicar (não veio de nenhum revisor, achado por raciocínio próprio sobre o call site de produção real): o design tri-state por string teria desligado silenciosamente toda a deduplicação do webhook GitHub em produção assim que mergeado — ver decisão p01-idempotency-tri-state-string-rejeitado. Nenhum código desse design chegou a ser publicado."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "Mesmo bloqueio já registrado na sub-entrega 3/N: functions/main.py (agora ~682KB, ligeiramente maior) e functions/test_github_webhook.py seguem sem publicar, à espera de uma das três soluções já propostas para o limite de escrita do Argos (nova tool de diff, aumento do limite, ou divisão de main.py em módulos)."
+  - "Limitação latente aceita (ver decisão p01-idempotency-fencing-token-aceito-como-latente): se este módulo (core/idempotency.py) vier a ser reusado por um chamador com tempo de execução não necessariamente bem abaixo de RESERVA_EXPIRA_APOS (5min) — o docstring já cita 'update_id de bot' como exemplo genérico — reavaliar a necessidade de um fencing token antes de reusar."
+  - "P01 segue em aberto: mcp_jobs.py (passos 5-6), firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados."
+proximo_pacote: "P01 (sub-entrega 4/N)"
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 0d18c8a6da7a2c4bea316d6f1455757182fc5973
+pacote: "P01 (sub-entrega 3.2/N — segunda rodada de comentários do Codex na PR #188)"
+# Continuação do ciclo de resposta a comentários do Codex nesta mesma PR
+# (sub-entregas 3/N e 3.1/N). Comentário automático não dispara em push
+# simples (só em "PR opened", "marked ready" ou comentário "@codex review")
+# — foi preciso comentar "@codex review" explicitamente para obter uma nova
+# passada sobre os commits da sub-entrega 3.1/N. Achado real (P1), não
+# rubber-stamp: consequência direta do mesmo bloqueio de main.py já
+# registrado, não um bug novo em core/idempotency.py.
+estado: pronto_para_revisao
+inicio: "2026-09-07T04:02:00Z"
+fim: "2026-09-07T04:12:00Z"
+arquivos_alterados:
+  - functions/core/idempotency.py
+decisoes:
+  - id: p01-codex-mark-complete-sem-chamador-documentado
+    motivo: "Achado do Codex (P1, 'Call mark_complete after successful webhook processing'), confirmado por busca no repositório inteiro: main.py — único chamador de produção — não chama mark_complete em NENHUM caminho hoje, só check_and_register. Consequência: toda entrega processada com sucesso fica RESERVADA para sempre (nunca CONCLUIDA); reentrega dentro de RESERVA_EXPIRA_APOS (5min) ainda é barrada sem duplicar efeito (levanta ReservaEmAndamentoError), mas reentrega tardia (após a janela expirar) é tratada como nova e o efeito é reprocessado — isso agora vale para QUALQUER entrega bem-sucedida comum reentregada tardiamente, não só o caso ambíguo original que motivou a sub-entrega 3.1/N. O fix que o Codex sugere (chamar mark_complete nos dois caminhos do webhook) já existe no rascunho local de main.py desde a sub-entrega 3.1/N — não é um gap de implementação, é o MESMO bloqueio de main.py (limite de 200k caracteres do Argos) já registrado em p01-idempotency-main-py-bloqueado, só que agora com uma consequência mais precisa e mais séria do que a registrada até aqui (antes: 'falta só a resposta HTTP explícita'; agora: 'falta a peça que fecha a deduplicação de fato'). Nenhuma mudança de comportamento nesta sub-entrega — só documentação explícita no docstring do módulo, para que a lacuna não seja lida como resolvida só porque os testes unitários deste arquivo (que testam o módulo isolado, não main.py) continuam passando."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "Python (unittest, suíte completa): 1175/1175 passando (sem mudança — só docstring, nenhum teste alterado)"
+evidencias:
+  - "Sem revisão adversarial dedicada nesta sub-entrega: mudança é documentação pura (docstring), sem alteração de comportamento ou lógica — julgada desnecessária para este escopo específico, diferente das sub-entregas 3/N e 3.1/N que mudaram comportamento real."
+  - "Resposta publicada diretamente no comentário do Codex na PR #188 (via argos_comentar_issue_repositorio), reconhecendo o achado como correto, explicando o bloqueio de main.py e a consequência prática, e registrando a decisão de desbloqueio como pendente para André."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "IMPORTANTE PARA DECISÃO DE MERGE: mesclar esta PR #188 antes de main.py ser desbloqueado troca o comportamento de produção de 'sentinela único permanente, mas fail-open em falha real de transação' (o que está implantado hoje) para 'reserva com janela de 5 minutos, sem nunca alcançar CONCLUIDO' — ou seja, deduplicação deixa de ser permanente e passa a valer só dentro dessa janela até main.py poder chamar mark_complete. Continua estritamente mais seguro que hoje quanto a nunca fingir sucesso silencioso, mas reentregas legítimas e comuns que cheguem mais de 5 minutos depois da original passam a reprocessar o evento (duplicar anotação em tarefas) — um comportamento que o sentinela único antigo não tinha para o caso comum (só falhava no caso de erro real de transação, ou quando a própria tentativa original nunca terminava). Registrado explicitamente para André avaliar antes de decidir mesclar: aceitar essa janela temporariamente, ou aguardar main.py ser desbloqueado (um dos 3 caminhos já propostos) antes do merge."
+  - "Mesmo bloqueio já registrado nas sub-entregas 3/N e 3.1/N: functions/main.py e functions/test_github_webhook.py seguem sem publicar."
+  - "P01 segue em aberto: mcp_jobs.py (passos 5-6), firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados."
+proximo_pacote: "P01 (sub-entrega 4/N)"
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 9922fd6f29cfc7f5fba9a5b854379f3ff2db82f2
+pacote: "P01 (sub-entrega 4/N — mcp_jobs.py)"
+# Continuação da divisão do pacote "G" P01 (seção 8 do plano). Cobre os
+# passos 5-6 (achado A10) em functions/mcp_jobs.py — execução assíncrona das
+# tools longas do canal MCP via gatilho Firestore. PR #189, empilhada sobre
+# claude/p01-agent-requests-idempotencia (PR #188, ainda pronto_para_revisao).
+# Sem espera de 90 minutos em relação às sub-entregas anteriores: mesmo
+# pacote "G", decisão já registrada nos blocos anteriores.
+estado: pronto_para_revisao
+inicio: "2026-09-07T04:20:00Z"
+fim: "2026-09-07T04:46:00Z"
+arquivos_alterados:
+  - functions/mcp_jobs.py
+  - functions/test_mcp_jobs.py (novo)
+decisoes:
+  - id: p01-a10-mcp-jobs-claim-transacional
+    motivo: "Achado A10, passo 5: on_mcp_job_created (gatilho Firestore, at-least-once) podia rodar a mesma tool duas vezes numa reentrega do evento, porque a checagem de status usava o snapshot do próprio evento (potencialmente desatualizado) em vez de uma leitura fresca. Corrigido com _claim(db, ref): leitura+escrita transacional (@firestore.transactional) que só deixa UMA execução prosseguir por job, usando o campo status como sentinela (processing → em_execucao). Mesma ideia de core/idempotency.py (sub-entregas 3/N-3.2/N), adaptada: aqui é claim de execução de um job interno, não deduplicação por chave externa de webhook."
+    autoridade: existente_ou_nova
+  - id: p01-a10-mcp-jobs-classificacao-erro-resultado
+    motivo: "Achado A10, passo 6: o resultado da tool era gravado como done sempre que execute() retornava sem lançar exceção, mesmo quando o próprio resultado indicava erro (dict com chave 'erro' truthy, ou string começando com 'ERRO|'/'⚠️' — convenção já usada no caminho síncrono de mcp_server.py, não inventada aqui). Corrigido com _resultado_indica_erro(), que classifica como error em vez de done nesse caso — sem isso ler_job devolvia um 'sucesso' que não era, contrariando o critério de aceite do plano ('não há falso done quando handler relata erro')."
+    autoridade: existente_ou_nova
+  - id: p01-a10-mcp-jobs-expira-em-datetime
+    motivo: "Achado A10: expira_em era gravado como inteiro Unix (int(time.time()) + TTL), que o TTL do Firestore não reconhece (precisa Timestamp/datetime, não número). Corrigido nos dois pontos de escrita (_claim, ao marcar claim abandonado como error; _executar_job, nos caminhos done e error) para datetime timezone-aware."
+    autoridade: existente_ou_nova
+  - id: p01-a10-mcp-jobs-claim-abandonado-sem-retry-automatico
+    motivo: "Instrução explícita do plano (P01 passo 6): handler cujo efeito pode não ser idempotente não deve ser retentado automaticamente. Um claim em em_execucao mais velho que CLAIM_EXPIRA_APOS (600s) é tratado como abandonado (execução anterior morreu sem concluir — crash, timeout) e marcado error, nunca reprocessado automaticamente pela tentativa que encontrou o claim vencido; decisão de tentar de novo fica manual. CLAIM_EXPIRA_APOS (600s) deliberadamente excede o timeout_sec do gatilho (540s): o Cloud Functions mata a execução com segurança nessa marca, então qualquer execução ainda 'em andamento' aos 600s já foi encerrada à força pela plataforma — não é margem arbitrária, é garantia."
+    autoridade: existente_ou_nova
+  - id: p01-a10-mcp-jobs-timeout-e-claim-mesma-constante
+    motivo: "Achado da revisão adversarial: CLAIM_EXPIRA_APOS e o timeout_sec do gatilho eram dois números soltos sem vínculo no código — uma mudança futura em um sem atualizar o outro podia quebrar em silêncio a garantia de segurança (600 > 540) descrita na decisão anterior. Corrigido antes de publicar: os dois agora derivam de uma única constante _TIMEOUT_SEC (540), com uma asserção no import (assert CLAIM_EXPIRA_APOS > timedelta(seconds=_TIMEOUT_SEC)) e um teste dedicado (TestInvarianteClaimVsTimeout) garantindo a relação."
+    autoridade: existente_ou_nova
+  - id: p01-a10-mcp-jobs-ler-job-not-found-restaurado
+    motivo: "Achado da revisão adversarial: a reescrita inicial de ler_job() havia colapsado o status distinto 'not_found' (job inexistente ou de outro uid — mesma resposta para os dois, para não vazar existência a quem está adivinhando job_id) em 'error' genérico, e removido a guarda de job_id vazio que existia no código original. Nenhum caller de produção (só tools/hermes_tools.py::_consultar_job, um passthrough puro para a tool MCP) fazia match exaustivo nesse valor, mas era uma mudança de contrato público não solicitada e não documentada — restaurado para bater exatamente com o comportamento pré-existente antes de publicar, não deixado como divergência silenciosa."
+    autoridade: existente_ou_nova
+  - id: p01-a10-mcp-jobs-reaper-fora-de-escopo
+    motivo: "Achado da revisão adversarial, aceito como limitação documentada e não corrigido: a recuperação de um claim abandonado só roda quando uma NOVA entrega do evento do gatilho chega para o mesmo documento — 'at-least-once' garante pelo menos uma entrega bem-sucedida, não uma redisparada por crash. Se a instância que detém o claim morrer sem que o Cloud Functions redispare o evento, o job fica em_execucao indefinidamente (ler_job reporta 'processing' para sempre; expira_em só é gravado nos caminhos terminais, então o TTL do Firestore também não recupera esse caso). Resolver isso de verdade exigiria uma função agendada (reaper) varrendo em_execucao vencidos — fora do escopo do achado A10 tal como descrito no plano (dedupe de reentrega e classificação de erro), registrado aqui como candidato a pacote futuro, não como bug desta sub-entrega. Estritamente melhor que o código anterior, que não tinha proteção nenhuma contra reexecução por reentrega."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest test_mcp_jobs -v"
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "test_mcp_jobs (novo arquivo): 32/32 — claim ganho/recusado/concorrente, claim expirado marca error sem reprocessar, claim sem claimed_em tratado como abandonado, invariante CLAIM_EXPIRA_APOS > _TIMEOUT_SEC, classificação de erro (dict/string/exceção), truncamento de resultado grande, contrato de ler_job (not_found/processing/done/error, uid errado, job_id vazio), e o wrapper on_mcp_job_created em si (event.data None/inexistente, execução normal, reentrega de job já em_execucao não roda a tool de novo)"
+    - "Python (unittest, suíte completa): 1207/1207 passando (1175 anteriores + 32 novos; 0 regressões)"
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio da implementação): leu mcp_jobs.py, test_mcp_jobs.py e mcp_server.py (para comparar a convenção de classificação de erro), rastreou o protocolo real de transação/retry no código-fonte instalado de google.cloud.firestore_v1 (confirmou que uma transação concorrente perdedora recebe Aborted e é retentada pelo wrapper real, relendo estado fresco), e rodou a suíte de testes. Achados reais, todos endereçados antes de publicar (ver decisões p01-a10-mcp-jobs-timeout-e-claim-mesma-constante e p01-a10-mcp-jobs-ler-job-not-found-restaurado) ou aceitos e documentados explicitamente como fora de escopo (ver decisão p01-a10-mcp-jobs-reaper-fora-de-escopo, e a nota sobre o campo erro ser sempre string — já era o contrato antes desta sub-entrega, só estendido ao novo caminho de resultado-que-indica-erro)."
+  - "Achados de qualidade de teste da própria revisão, também endereçados: o mock de transação original não cobria claimed_em ausente/tipo inesperado (adicionado test_claim_em_execucao_sem_claimed_em_e_tratado_como_abandonado) e o wrapper decorado on_mcp_job_created não tinha nenhuma cobertura direta (adicionado TestOnMcpJobCreated, chamando .__wrapped__ para contornar a exigência de CloudEvent bruto do decorator do firebase-functions — nenhum outro trigger do repositório testa essa camada decorada, então isto é cobertura nova, não um padrão quebrado)."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "Limitação aceita, não corrigida (ver decisão p01-a10-mcp-jobs-reaper-fora-de-escopo): sem uma função agendada (reaper), um claim cuja instância morre sem o Cloud Functions redisparar o evento fica em_execucao indefinidamente. Candidato a P04 (durabilidade de execução) ou sub-entrega dedicada, não bloqueia esta entrega."
+  - "Mesmo bloqueio já registrado nas sub-entregas 3/N-3.2/N: functions/main.py e functions/test_github_webhook.py seguem sem publicar (limite de 200k caracteres do Argos)."
+  - "IMPORTANTE PARA DECISÃO DE MERGE (já registrada na sub-entrega 3.2/N, segue valendo): mesclar a PR #188 antes de main.py ser desbloqueado muda o comportamento de produção da deduplicação de webhook — ver pendência completa no bloco da sub-entrega 3.2/N. Não afeta diretamente esta PR #189 (mcp_jobs.py é um módulo independente, sem chamador em main.py), mas ambas as PRs seguem empilhadas na mesma cadeia e a decisão de merge de uma pode afetar a ordem de merge da outra."
+  - "P01 segue em aberto: firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados."
+proximo_pacote: "P01 (sub-entrega 5/N ou conclusão dos passos 7-10)"
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 9922fd6f29cfc7f5fba9a5b854379f3ff2db82f2
+pacote: "P01 (sub-entrega 4.1/N — resposta ao achado do Codex na PR #189)"
+# Não é uma nova sub-entrega de escopo do plano; é a resposta ao ciclo de
+# revisão da sub-entrega 4/N (PR #189, ainda pronto_para_revisao, não
+# reescrita — só complementada aqui por ser um bloco novo). Mesmos arquivos
+# (functions/mcp_jobs.py, functions/test_mcp_jobs.py), dois commits novos
+# na mesma branch (claude/p01-mcp-jobs-reentrega-claim), seguindo a
+# orientação da skill de shipping para responder a comentários de revisão
+# (mesmo padrão já usado nas sub-entregas 3.1/N e 3.2/N para a PR #188).
+estado: pronto_para_revisao
+inicio: "2026-09-07T04:55:00Z"
+fim: "2026-09-07T05:14:00Z"
+arquivos_alterados:
+  - functions/mcp_jobs.py
+  - functions/test_mcp_jobs.py
+decisoes:
+  - id: p01-codex-claim-jovem-levanta-em-vez-de-devolver-none
+    motivo: "Achado real do Codex na PR #189 (P1, 'Avoid acknowledging retries for an orphaned fresh claim'): _claim() (sub-entrega 4/N) devolvia None em silêncio ao encontrar um claim em_execucao ainda dentro de CLAIM_EXPIRA_APOS — e on_mcp_job_created então retornava normalmente, o que o Cloud Functions registra como invocação BEM-SUCEDIDA mesmo que a tool nunca tenha rodado para aquele job. Cenário: a transação que grava o claim comita no servidor mas a resposta se perde para o cliente (commit ambíguo — mesma classe de problema já corrigida em core/idempotency.py nas sub-entregas 3/N-3.1/N); a invocação que fazia essa gravação nunca chega a chamar _executar_job. Se uma entrega duplicada do MESMO evento (Pub/Sub at-least-once) chegar enquanto o claim ainda está 'jovem' — justamente a entrega mais provável de acontecer, por corrida de ack, não depois de CLAIM_EXPIRA_APOS — ela encontrava em_execucao recente e retornava sucesso sem a tool ter sido executada por ninguém. Corrigido: esse ramo agora levanta ClaimAindaValidoError (nova exceção, mesmo precedente de ReservaEmAndamentoError em core/idempotency.py) em vez de devolver None — a invocação falha visivelmente nos logs/métricas do Cloud Functions em vez de mentir."
+    autoridade: existente_ou_nova
+  - id: p01-codex-retry-false-hardcoded-para-firestore-trigger
+    motivo: "Autocorreção feita ao investigar o achado do Codex (não veio de nenhum revisor): a documentação anterior do módulo (sub-entrega 4/N) atribuía a duplicidade de entrega a uma política de retry-em-caso-de-erro do Cloud Functions/Eventarc. Verificado lendo o código-fonte instalado de firebase_functions.options: FirestoreOptions (classe usada por on_document_created) NÃO herda de EventHandlerOptions e não expõe nenhum campo retry — seu próprio _endpoint() grava retry=False de forma incondicional. Ou seja, para este gatilho específico, uma invocação que FALHA nunca é redisparada automaticamente pela plataforma — não é uma configuração ausente, é estruturalmente impossível nesta versão da lib. A duplicidade de entrega que este módulo protege vem da semântica at-least-once do Pub/Sub por trás do Eventarc (pode entregar o MESMO evento mais de uma vez mesmo após sucesso), não de retry-em-erro. Docstring do módulo corrigida para essa atribuição correta — isso também significa que levantar ClaimAindaValidoError (decisão anterior) NÃO desencadeia sozinho uma nova tentativa; só uma entrega duplicada independente do mesmo evento pode recuperar o job, ver limitação aceita já registrada na sub-entrega 4/N."
+    autoridade: existente_ou_nova
+  - id: p01-codex-claim-idade-na-mensagem-em-vez-de-janela-de-graca
+    motivo: "Achado da segunda revisão adversarial (dedicada a esta correção, não à sub-entrega 4/N original): levantar ClaimAindaValidoError para TODO claim jovem também captura o caso benigno — uma tentativa irmã genuinamente em andamento com sucesso —, fazendo essa invocação redundante (mas inofensiva) aparecer como falha nos logs/métricas junto com o caso realmente órfão, sem diferenciação. Considerado e rejeitado: uma 'janela de graça' separada (só levantar se o claim tiver mais que alguns segundos) — exigiria um segundo limiar arbitrário sem dado real sobre a distribuição de tempo das entregas duplicadas do Pub/Sub neste projeto, ao contrário de CLAIM_EXPIRA_APOS (derivado de _TIMEOUT_SEC, não inventado). Em vez disso: a mensagem da exceção agora inclui a idade real do claim (segundos desde claimed_em), para quem investigar um erro nos logs distinguir na hora um claim de poucos segundos (provável duplicata benigna) de um de vários minutos (provável órfão) sem o código precisar adivinhar um limiar. Custo aceito: ruído ocasional nos logs para o caso benigno; benefício: nunca mais perder silenciosamente o único sinal de um claim genuinamente órfão."
+    autoridade: existente_ou_nova
+  - id: p01-mcp-jobs-drift-transcricao-corrigido-antes-de-prosseguir
+    motivo: "Falha de processo própria, não achado de revisor: a verificação obrigatória por hash (git hash-object local vs. sha devolvido pelo Argos, exigida pela skill de shipping) pegou uma divergência real no primeiro envio de test_mcp_jobs.py — uma palavra extra ('já') inserida por engano numa docstring de comentário durante a transcrição do arquivo para a chamada da tool (sha local 251cfe0... vs. sha remoto 353ed60...). Sem código afetado (só texto de docstring), mas a skill é explícita que qualquer divergência de transcrição deve ser corrigida antes de prosseguir, não descartada como cosmética. Corrigido baixando o conteúdo publicado, aplicando a correção pontual por script (não retype manual, para não introduzir um segundo drift), confirmando hash idêntico ao local ANTES de reenviar, e publicando um commit de correção dedicado (f0642d2) explicando o motivo. Registrado aqui para reforçar por que a verificação de hash pós-escrita nunca pode ser pulada, mesmo para uma mudança aparentemente pequena."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest test_mcp_jobs -v"
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "test_mcp_jobs: 32/32 — 3 testes atualizados para esperar ClaimAindaValidoError em vez de None no ramo de claim jovem (test_claim_concorrente_apenas_um_ganha, test_claim_em_execucao_recente_levanta_sem_alterar_documento — renomeado de _nao_prossegue_nem_altera —, e test_event_reentrega_de_job_ja_em_execucao_nao_roda_tool_de_novo); nenhum teste assert sobre o texto da mensagem da exceção, então a inclusão da idade do claim na mensagem (decisão p01-codex-claim-idade-na-mensagem-em-vez-de-janela-de-graca) não exigiu mudança adicional de teste"
+    - "Python (unittest, suíte completa): 1207/1207 passando (mesmo total da sub-entrega 4/N — 0 regressões, 0 testes novos nesta rodada além dos 3 já recontados acima)"
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio, dedicada especificamente à resposta ao Codex — distinta da revisão da sub-entrega 4/N original): verificou que os testes atualizados não são vácuos revertendo o fix localmente, confirmando que os 3 testes falham sem ele, e restaurando o código; verificou de forma independente, relendo o código-fonte instalado, que (a) o rollback da transação ao levantar dentro de _txn não deixa nenhum estado parcial gravado, (b) a exceção propaga limpa através do wrapper não-decorado do gatilho (nenhum try/except em on_mcp_job_created ao redor de _claim), e (c) retry=False é de fato hardcoded para FirestoreOptions, não apenas o default. Não encontrou nenhum bug bloqueante; achado único foi o ruído de log para o caso benigno (ver decisão p01-codex-claim-idade-na-mensagem-em-vez-de-janela-de-graca)."
+  - "Verificação de hash pós-escrita (git hash-object local vs. sha do Argos) pegou uma divergência de transcrição real antes de ela ficar para trás no histórico — ver decisão p01-mcp-jobs-drift-transcricao-corrigido-antes-de-prosseguir. Commits publicados na branch claude/p01-mcp-jobs-reentrega-claim: 93f78606 (mcp_jobs.py), e68d6ce7 (test_mcp_jobs.py, com o drift), f0642d26 (correção do drift, hash final confirmado idêntico ao local)."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "Mesma limitação aceita da sub-entrega 4/N (não fechada por este fix, só deixada de ser mascarada como sucesso — ver decisão p01-codex-retry-false-hardcoded-para-firestore-trigger): sem uma função agendada (reaper), a recuperação de um claim genuinamente abandonado ainda depende de uma entrega duplicada tardia do mesmo evento chegar depois de CLAIM_EXPIRA_APOS. Candidato a P04, não bloqueia esta entrega."
+  - "Mesmo bloqueio já registrado nas sub-entregas 3/N-4/N: functions/main.py e functions/test_github_webhook.py seguem sem publicar (limite de 200k caracteres do Argos)."
+  - "IMPORTANTE PARA DECISÃO DE MERGE (já registrada na sub-entrega 3.2/N, segue valendo): mesclar a PR #188 antes de main.py ser desbloqueado muda o comportamento de produção da deduplicação de webhook. Não afeta diretamente a PR #189, mas ambas seguem empilhadas na mesma cadeia."
+  - "P01 segue em aberto: firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados. Falta ainda postar @codex review na PR #189 e aguardar/esgotar novo ciclo de comentários (protocolo padrão de 3min/5min) antes de seguir para os passos 7-10."
+proximo_pacote: "P01 (sub-entrega 5/N ou conclusão dos passos 7-10, após esgotar o ciclo de revisão do Codex na PR #189)"
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 9922fd6f29cfc7f5fba9a5b854379f3ff2db82f2
+pacote: "P01 (sub-entrega 4.2/N — segunda rodada do Codex na PR #189: recuperação de claim vencido na leitura)"
+# Não é uma nova sub-entrega de escopo do plano; é a resposta a uma SEGUNDA
+# rodada de comentário do Codex, chegada 3 minutos após o @codex review
+# postado ao final da sub-entrega 4.1/N (protocolo padrão de checagem
+# combinado com André). Mesmos arquivos (functions/mcp_jobs.py,
+# functions/test_mcp_jobs.py), dois commits novos na mesma branch
+# (claude/p01-mcp-jobs-reentrega-claim).
+estado: pronto_para_revisao
+inicio: "2026-09-07T05:24:00Z"
+fim: "2026-09-07T05:39:00Z"
+arquivos_alterados:
+  - functions/mcp_jobs.py
+  - functions/test_mcp_jobs.py
+decisoes:
+  - id: p01-codex-reaper-leve-na-leitura-de-ler-job
+    motivo: "Achado real do Codex na PR #189 (P1, segunda rodada, 'Add recovery instead of only raising for orphaned claims'): levantar ClaimAindaValidoError (sub-entrega 4.1/N) torna a falha visível nos logs, mas sozinho NÃO recupera o job — sem uma entrega duplicada tardia e independente do mesmo evento (não garantida, já que retry=False é hardcoded para este gatilho — achado confirmado na própria correção que motivou este achado), o job ficava em_execucao para sempre do ponto de vista de quem consulta via ler_job. Investigado o uso real do protocolo MCP (grep em mcp_server.py): o servidor já INSTRUI explicitamente o cliente MCP a chamar consultar_job/ler_job repetidamente enquanto o job estiver 'processing' ('Chame consultar_job com este job_id em alguns segundos... se ainda estiver processing, consulte de novo'). Ou seja, a consulta em loop já é o padrão de uso real, não uma suposição. Corrigido: ler_job() agora chama uma nova função _reaproveitar_claim_vencido_na_leitura(db, ref) sempre que encontra um job em_execucao — ela reexecuta, dentro de uma NOVA transação, a mesma checagem de expiração que _claim() já faz (mesmo limiar CLAIM_EXPIRA_APOS, mesma garantia de segurança de que a plataforma já matou a execução original), e marca error se o claim ainda estiver vencido no momento da consulta. Isso fecha a lacuna sem precisar de uma função agendada (reaper) nova — a própria consulta do cliente é o mecanismo de recuperação."
+    autoridade: existente_ou_nova
+  - id: p01-mcp-jobs-dados-claim-abandonado-extraido
+    motivo: "Refatoração feita ao implementar a decisão anterior, para evitar duplicação: os campos gravados ao marcar um claim vencido como abandonado (status=error, mensagem, concluido_em, expira_em) agora vêm de uma única função _dados_claim_abandonado(agora), chamada tanto por _claim() (entrega duplicada do evento encontra o claim vencido) quanto por _reaproveitar_claim_vencido_na_leitura() (consulta de ler_job encontra o claim vencido). Antes desta extração, os dois caminhos teriam o mesmo dict escrito duas vezes de forma independente — risco real de uma mudança futura (ex.: ajustar o texto da mensagem de erro) atualizar um caminho e esquecer o outro, silenciosamente. Comportamento de _claim() preservado exatamente (mesmo dict, agora vindo da função compartilhada)."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest test_mcp_jobs -v"
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "test_mcp_jobs: 38/38 (32 anteriores + 5 novos em TestReaproveitarClaimVencidoNaLeitura — claim vencido marca error e devolve dados atualizados, claim jovem não altera documento, claim sem claimed_em tratado como vencido, corrida com status já resolvido não sobrescreve, documento inexistente devolve None — + 1 novo em TestLerJob cobrindo a integração via ler_job; test_status_em_execucao_normaliza_para_processing ajustado para usar claimed_em recente, já que um claim sem claimed_em válido agora é corretamente reaproveitado como abandonado — mesmo tratamento que _claim() já dava a esse caso, comportamento correto e não uma regressão)"
+    - "Python (unittest, suíte completa): 1213/1213 passando (1207 da sub-entrega 4/N + 6 novos; 0 regressões)"
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio, dedicada especificamente a esta correção): traçou o protocolo real de transação do google.cloud.firestore_v1 instalado (commits são validados por concorrência otimista no servidor; uma transação perdedora recebe Aborted e é automaticamente retentada com leitura fresca — duas escritas concorrentes, ex. uma entrega duplicada tardia no ramo de _claim() colidindo com uma consulta de ler_job no mesmo job, não corrompem estado, uma vence e a outra apenas relê e não faz nada); confirmou que DatetimeWithNanoseconds (o tipo real que o Firestore usa para desserializar Timestamp) é subclasse de datetime, então isinstance(claimed_em, datetime) funciona igual em dados reais e nos testes; verificou que nenhum caminho novo permite dupla execução (a função nova nunca marca em_execucao, só rebaixa um claim vencido para error); e testou empiricamente a não-vacuidade de 3 testes (dois via _reaproveitar_claim_vencido_na_leitura virar no-op, um via desligar só a chamada em ler_job), restaurando o arquivo original e reconfirmando a suíte completa (1213/1213) depois. Único achado: a frase de abertura da docstring do módulo ainda dizia 'três problemas... mais um quarto achado do Codex' quando a lista já tinha 5 itens — corrigido para 'mais dois achados do Codex, pontos 4 e 5' antes de publicar. Nenhum bug de correção encontrado. Veredito: seguro para publicar."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "Limitação aceita, mais estreita que antes (ver decisão p01-codex-reaper-leve-na-leitura-de-ler-job): um claim genuinamente abandonado agora se recupera na próxima chamada a ler_job para esse job_id, não só numa entrega duplicada tardia por acaso. O que ainda não fecha é o caso em que NINGUÉM nunca mais consulta esse job_id (cliente desistiu, caiu, ou nunca chegou a perguntar) — aí o documento fica em_execucao indefinidamente no Firestore, sem limpeza automática (TTL só cobre os caminhos terminais). Resolver isso de verdade exigiria um reaper agendado independente de qualquer consulta, ou o protocolo completo de lease/heartbeat da seção 4.5 do plano — candidato a P04, não bloqueia esta entrega."
+  - "Mesmo bloqueio já registrado nas sub-entregas 3/N-4.1/N: functions/main.py e functions/test_github_webhook.py seguem sem publicar (limite de 200k caracteres do Argos)."
+  - "IMPORTANTE PARA DECISÃO DE MERGE (já registrada na sub-entrega 3.2/N, segue valendo): mesclar a PR #188 antes de main.py ser desbloqueado muda o comportamento de produção da deduplicação de webhook. Não afeta diretamente a PR #189, mas ambas seguem empilhadas na mesma cadeia."
+  - "P01 segue em aberto: firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados. Falta postar @codex review de novo na PR #189 e aguardar/esgotar mais um ciclo de comentários (protocolo padrão de 3min/5min) antes de seguir para os passos 7-10."
+proximo_pacote: "P01 (sub-entrega 5/N ou conclusão dos passos 7-10, após esgotar o ciclo de revisão do Codex na PR #189)"
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 9922fd6f29cfc7f5fba9a5b854379f3ff2db82f2
+pacote: "P01 (sub-entrega 4.3/N — terceira rodada do Codex na PR #189: recuperação de jobs órfãos antes do commit do claim + correção de linguagem sobre o timeout como garantia)"
+# Não é uma nova sub-entrega de escopo do plano; é a resposta a uma
+# TERCEIRA rodada de comentário do Codex, chegada dentro do protocolo
+# padrão de checagem (3min/5min) após o @codex review postado ao final da
+# sub-entrega 4.2/N. Mesmos arquivos (functions/mcp_jobs.py,
+# functions/test_mcp_jobs.py), dois commits novos na mesma branch
+# (claude/p01-mcp-jobs-reentrega-claim).
+estado: pronto_para_revisao
+inicio: "2026-09-07T05:46:00Z"
+fim: "2026-09-07T06:28:00Z"
+arquivos_alterados:
+  - functions/mcp_jobs.py
+  - functions/test_mcp_jobs.py
+decisoes:
+  - id: p01-codex-reap-processing-nunca-reivindicado
+    motivo: "Achado real do Codex na PR #189 (P1, terceira rodada, 'Recover jobs orphaned before the claim commits'): a recuperação da sub-entrega 4.2/N (_reaproveitar_claim_vencido_na_leitura) só cobre o status em_execucao — mas se a própria transação de _claim FALHAR antes de comitar a transição processing → em_execucao (ex.: Firestore DeadlineExceeded, indisponibilidade transitória durante a leitura ou a escrita da transação), a exceção escapa do gatilho (retry desligado, ver decisão p01-codex-retry-false-hardcoded-para-firestore-trigger da sub-entrega 4/N) e o documento fica processing para sempre, sem nenhum claimed_em chegar a ser gravado — o job nunca foi reivindicado por ninguém. A checagem da 4.2/N não enxerga esse job (o status não é em_execucao), então ele ficava sem NENHUMA recuperação — nem pela consulta em loop do cliente MCP, nem por entrega duplicada tardia. Corrigido com uma nova função irmã, _reaproveitar_processing_nunca_reivindicado_na_leitura, chamada por ler_job() quando encontra status processing — mesma ideia da 4.2/N (nova transação, mesma checagem de idade, marca error se vencido), mas usando criado_em_ts (gravado por criar_job desde sempre) como referência de idade em vez de claimed_em (que neste caminho nunca chegou a existir)."
+    autoridade: existente_ou_nova
+  - id: p01-codex-constante-propria-para-processing-nunca-reivindicado
+    motivo: "Achado da revisão adversarial desta correção (não veio do Codex): a primeira versão da função acima reaproveitava CLAIM_EXPIRA_APOS como limiar de idade — mas essa constante mede uma coisa diferente (duração máxima de uma EXECUÇÃO já em andamento, derivada de _TIMEOUT_SEC) da idade desde a criação até o primeiro claim (tempo de entrega/cold start do gatilho até a transação de claim sequer começar a rodar, sem relação com _TIMEOUT_SEC). Misturar os dois criaria falso positivo real: um job só entregue lentamente pelo gatilho (não quebrado) seria marcado 'nunca reivindicado' antes mesmo de a entrega genuína chegar — e quando ela enfim chegasse, _claim() encontraria o job já error e devolveria None em silêncio, então a tool nunca rodaria, sem nenhum sinal de falha visível em lugar nenhum (pior que o bug original: nem o log de ClaimAindaValidoError apareceria, porque _claim nem chega a levantar para um documento já error). O revisor reproduziu esse cenário de falso positivo empiricamente antes da correção. Corrigido introduzindo uma constante própria, PROCESSING_NUNCA_REIVINDICADO_APOS (30min), com justificativa independente e a mesma honestidade epistêmica já registrada para a decisão da 4.2/N sobre a janela de graça rejeitada (não há dado real sobre a distribuição de latência de entrega/cold-start neste projeto, por isso deliberadamente generosa — bem maior que CLAIM_EXPIRA_APOS, com um assert de import-time garantindo essa relação)."
+    autoridade: existente_ou_nova
+  - id: p01-codex-linguagem-timeout-nao-e-garantia
+    motivo: "Achado real do Codex na PR #189 (P1, terceira rodada, 'Avoid using the request timeout as an execution fence'): a docstring de CLAIM_EXPIRA_APOS (sub-entrega 4/N) descrevia a margem sobre _TIMEOUT_SEC como 'não é margem arbitrária, é garantia' de que a execução original já foi encerrada pela plataforma quando o claim é considerado vencido. O Codex apontou, corretamente, que isso overclaima a semântica real do Cloud Run/Cloud Functions Gen2: alcançar o timeout declarado da requisição faz a plataforma parar de rotear/esperar por ela, mas não garante estritamente que o processo subjacente parou de executar — em casos incomuns o código pode continuar rodando por um breve período além do timeout declarado. Corrigido removendo a linguagem de 'garantia' da docstring, substituída por uma descrição honesta citando esse achado do Codex e explicando que o Cloud Run não promete encerramento instantâneo — a margem continua sendo a melhor mitigação prática disponível sem o protocolo completo de lease/heartbeat (seção 4.5 do plano), só deixou de ser descrita como algo mais forte do que é."
+    autoridade: existente_ou_nova
+  - id: p01-codex-fencing-parcial-rejeitado-mesmo-precedente-idempotency
+    motivo: "Considerado e rejeitado como resposta adicional ao mesmo achado do Codex (timeout como fence): adicionar uma checagem de fencing token na escrita terminal de _executar_job (comparando um token gravado no momento do claim contra o valor atual antes de gravar done/error), para pelo menos detectar quando duas execuções da mesma tool correram em paralelo além do timeout. Rejeitado pelo mesmo motivo já registrado para core/idempotency.py::mark_complete: uma checagem parcial na escrita terminal não fecha o risco real, porque o efeito colateral no mundo real (a própria chamada da tool, ex. enviar uma mensagem, criar um registro) já aconteceu ANTES da escrita terminal — detectar a corrida na escrita não desfaz o efeito duplicado que já ocorreu. Fechar isso de verdade exige o protocolo completo de lease/heartbeat (seção 4.5 do plano, escopo do P04), não uma mitigação parcial que dá falsa sensação de segurança. Mantido como limitação aceita e documentada, não como código novo."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest test_mcp_jobs -v"
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "test_mcp_jobs: 45/45 (38 anteriores + 7 novos: 6 em TestReaproveitarProcessingNuncaReivindicadoNaLeitura — processing vencido marca error e devolve dados atualizados, processing jovem não altera documento, entrega lenta além de CLAIM_EXPIRA_APOS mas dentro de PROCESSING_NUNCA_REIVINDICADO_APOS não é falso positivo (regressão dedicada ao bug pego pela revisão), processing sem criado_em_ts tratado como vencido, corrida com status já mudado não altera, documento inexistente devolve None — + 1 em TestLerJob cobrindo a integração via ler_job; _job_basico ganhou criado_em_ts como default recente para não acionar o novo reap em testes que não o testam)"
+    - "Python (unittest, suíte completa): 1220/1220 passando (1213 da sub-entrega 4.2/N + 7 novos; 0 regressões), confirmado antes e depois da correção do bug de conflação de constante pego pela revisão"
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio, dedicada especificamente a esta correção) em DUAS rodadas: a primeira encontrou o bug real de conflação de constante (CLAIM_EXPIRA_APOS reaproveitada para um propósito diferente, com o cenário de falso positivo descrito na decisão p01-codex-constante-propria-para-processing-nunca-reivindicado reproduzido empiricamente); após a correção (nova constante PROCESSING_NUNCA_REIVINDICADO_APOS + teste de regressão dedicado), uma segunda rodada no MESMO revisor (contexto completo restabelecido, não um agente novo) confirmou que a correção fecha a lacuna, que o novo teste não é vácuo (verificado revertendo temporariamente a constante e confirmando que o teste falha), e reafirmou o veredito final de seguro para publicar."
+  - "Verificação de hash pós-escrita (git hash-object local vs. sha do Argos) confirmou publicação fiel de ambos os arquivos: functions/mcp_jobs.py (sha 4762bd44..., 37990 bytes, commit be214383) e functions/test_mcp_jobs.py (sha b2e19269..., 32417 bytes, commit 39bbb4da), sem nenhum drift de transcrição nesta rodada."
+  - "Descoberto nesta rodada: o parâmetro mensagem de argos_escrever_arquivo_repositorio tem limite de 2000 caracteres (não documentado nas rodadas anteriores por não ter sido atingido) — a primeira tentativa de publicar mcp_jobs.py falhou por exceder esse limite; mensagem de commit encurtada preservando o conteúdo essencial (os dois achados, o bug pego pela revisão e sua correção, a razão da rejeição do fencing parcial, contagens de teste, número de rodadas de revisão) e republicada com sucesso."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "Limitação aceita, ainda mais estreita que antes (ver decisões p01-codex-reap-processing-nunca-reivindicado e p01-codex-fencing-parcial-rejeitado-mesmo-precedente-idempotency): agora tanto um claim vencido (em_execucao) quanto um job nunca reivindicado (processing) se recuperam na próxima chamada a ler_job para esse job_id. O que ainda não fecha é (a) o caso em que NINGUÉM nunca mais consulta esse job_id, e (b) a garantia forte de que a execução original realmente parou antes do claim ser considerado vencido (Cloud Run não promete isso, ver decisão p01-codex-linguagem-timeout-nao-e-garantia). Resolver os dois de verdade exige o protocolo completo de lease/heartbeat da seção 4.5 do plano — candidato a P04, não bloqueia esta entrega."
+  - "Mesmo bloqueio já registrado nas sub-entregas 3/N-4.2/N: functions/main.py e functions/test_github_webhook.py seguem sem publicar (limite de 200k caracteres do Argos)."
+  - "IMPORTANTE PARA DECISÃO DE MERGE (já registrada na sub-entrega 3.2/N, segue valendo): mesclar a PR #188 antes de main.py ser desbloqueado muda o comportamento de produção da deduplicação de webhook. Não afeta diretamente a PR #189, mas ambas seguem empilhadas na mesma cadeia."
+  - "P01 segue em aberto: firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados. Falta postar @codex review de novo na PR #189 e aguardar/esgotar mais um ciclo de comentários (protocolo padrão de 3min/5min) antes de seguir para os passos 7-10."
+proximo_pacote: "P01 (sub-entrega 5/N ou conclusão dos passos 7-10, após esgotar o ciclo de revisão do Codex na PR #189)"
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: cf1b89814b3b64f06dca5b3712fac41a809f1b58
+pacote: "P01 (sub-entrega 5/N — passos 7-10: firestore.rules, testes, CI/deploy, plano de reversão, relatório do passo 10)"
+estado: pronto_para_revisao
+inicio: "2026-09-07T06:30:00Z"
+fim: "2026-09-07T07:20:00Z"
+arquivos_alterados:
+  - firestore.rules
+  - tests/rules/firestore.rules.test.ts (novo)
+  - tests/rules/vitest.config.ts (novo)
+  - vite.config.ts
+  - package.json
+  - docs/autonomia/relatorio-atencao-resolvidos-sem-evidencia.md (novo)
+arquivos_bloqueados:
+  - path: .github/workflows/pr.yml
+    mudanca: "adicionar job 'regras' rodando npm run test:rules (Firestore Emulator) no gate do PR"
+    motivo: "GitHub 403 — PAT do Argos sem escopo workflow; mesma limitação já documentada em P00 para deploy.yml. Confirmado por tentativa real nesta sub-entrega, não assumido por precedente."
+  - path: .github/workflows/deploy.yml
+    mudanca: "adicionar job de teste de firestore.rules (Firestore Emulator) antes do deploy, e incluir firestore:rules no --only do firebase deploy"
+    motivo: "GitHub 403 — mesmo bloqueio de escopo workflow do PAT. Requer aplicação manual pelo André (copiar o conteúdo do arquivo neste branch para .github/workflows/deploy.yml em main)."
+decisoes:
+  - id: p01-a16-catch-all-consolidado-single-match
+    motivo: "Achado A16 do plano (P01, passos 7-8): a regra geral antiga (match /{document=**} { allow read, write: if internalUser(); }) dava leitura/escrita irrestrita ao dono em coleções de política/autorização/execução que só Cloud Functions (Admin SDK) devem tocar — idempotency, mcp_audit_log, agent_requests, agent_runs, mcp_jobs, promocoes_autonomia_sugeridas, telegram_sessions, whitelist — além de nunca isolar de fato system/automations/atencao/promessas_abertas do cliente interno autenticado, apesar de blocos match aparentemente restritivos já existentes para essas coleções (o próprio achado A16 já diagnosticava isso: 'regra geral... sobrepondo restrições específicas'). A PRIMEIRA versão desta correção (8 blocos match irmãos com allow read, write: if false, ao lado do catch-all antigo inalterado) foi pega por uma revisão adversarial dedicada (agente general-purpose sem contexto prévio) como um NO-OP COMPLETO para o dono: no Firestore, quando mais de um bloco match casa com o mesmo caminho, o acesso é concedido pela UNIÃO (OR) das condições de todos os blocos que casam — não pelo bloco mais específico (comportamento diferente de CSS/nginx, confirmado pela documentação oficial do Firebase, citada pelo revisor com o exemplo de /cities/ dela). Um bloco irmão if false ao lado de um catch-all que devolve true para o dono resulta em false OR true = true — acesso idêntico ao de antes da mudança. Veredito da primeira rodada: 'NEEDS FIXES BEFORE SHIPPING'. Corrigido consolidando TODA a lógica de acesso num ÚNICO bloco match /{collectionId}/{document=**}, com duas funções booleanas (isColecaoNegadaPorCompleto, isColecaoSomenteLeitura) computando allow read/allow write diretamente na condição — eliminando estruturalmente todo bloco match irmão do arquivo (não há mais como essa classe de bug recorrer aqui), e fechando de brinde o bug pré-existente em system/automations/atencao/promessas_abertas como efeito colateral da consolidação."
+    autoridade: existente_ou_nova
+  - id: p01-a16-revisao-adversarial-duas-rodadas
+    motivo: "Mesmo padrão de revisão adversarial em duas rodadas já usado em outras sub-entregas deste pacote: a primeira rodada (agente dedicado, sem contexto prévio) encontrou o bug crítico de OR-entre-matches descrito acima. Após a correção (bloco único + funções booleanas), uma SEGUNDA rodada, com um agente NOVO e independente (sem memória da primeira — o agentId da primeira rodada não ficou disponível para continuação nesta sessão após a compactação de contexto, então a segunda rodada partiu do zero em vez de continuar o mesmo agente, mas cobriu o mesmo escopo com mais rigor: rederivou à mão a matriz de acesso completa (não-autenticado / autenticado não-dono / dono) para as 12 coleções nomeadas nas duas funções, conferiu cada string de nome de coleção contra os call sites reais no código (functions/, functions_node/, scripts/, hermes-voice-bridge/, services/), e revisou os testes e a config do vitest. Veredito final: SHIP, sem nenhum achado bloqueante ou não-bloqueante — só um nitpick de cobertura de teste (promessas_abertas sem teste dedicado, só atencao tinha), corrigido nesta mesma sub-entrega adicionando o teste faltante antes de publicar."
+    autoridade: existente_ou_nova
+  - id: p01-a16-mapeamento-acessos-frontend
+    motivo: "Passo 8 do plano ('Mapear acessos React/voz existentes e oferecer callables autenticados para operações legítimas que a nova regra impedir; não quebrar o aplicativo ao fechar o catch-all'): busca exaustiva por padrão (grep multi-passo, incluindo padrões de constante dinâmica) em todo o frontend React (.tsx/.ts) confirmou zero acesso legítimo direto às 8 coleções de controle listadas em isColecaoNegadaPorCompleto, e confirmou que voice-bridge/Node/whatsapp-capture usam o Admin SDK (não governado por estas regras, portanto não afetado). Esta averiguação foi re-verificada de forma independente pela revisão adversarial da primeira rodada e considerada sólida. Consequência prática: fechar essas 8 coleções não quebra nenhum fluxo legítimo hoje, então NENHUM callable novo precisou ser criado nesta sub-entrega — mantido como caminho correto para qualquer necessidade futura de leitura legítima dessas coleções (documentado como comentário no próprio firestore.rules), não reabertura da leitura direta."
+    autoridade: existente_ou_nova
+  - id: p01-a17-ci-deploy-preparado-mas-bloqueado
+    motivo: "Achado A17 (passo 9): 'incluir firestore:rules no deploy validado, com testes e plano de reversão'. Preparados: (1) job 'regras' em pr.yml testando firestore.rules contra o Firestore Emulator via @firebase/rules-unit-testing antes de qualquer merge; (2) mesmo teste como gate adicional em deploy.yml antes do deploy; (3) --only do firebase deploy em deploy.yml passa a incluir firestore:rules (antes só publicava hosting, functions, firestore:indexes, storage — as regras corrigidas nunca chegariam à produção sem isso, exatamente o que A17 apontava). As DUAS mudanças de workflow foram de fato TENTADAS via Argos nesta sub-entrega (não assumidas por precedente do P00) e ambas devolveram o mesmo GitHub 403 documentado em P00: o PAT do Argos não tem o escopo workflow do OAuth do GitHub. Ver arquivos_bloqueados e plano_reversao."
+    autoridade: existente_ou_nova
+  - id: p01-a17-plano-reversao
+    motivo: "Passo 9 exige explicitamente um plano de reversão para a mudança de firestore.rules, distinto da reversão geral do P01 já descrita no plano ('evitar reabrir regra ampla; oferecer correção específica de acesso, e documentar qualquer rollback emergencial de regra como incidente'). Documentado no campo plano_reversao deste bloco: comando isolado de rollback (firebase deploy --only firestore:rules, restaurando o firestore.rules anterior a partir do git history), sem depender de reverter nenhuma outra parte do deploy; e a exigência de documentar qualquer rollback emergencial de regra como incidente, nunca como reversão silenciosa."
+    autoridade: existente_ou_nova
+  - id: p01-passo10-relatorio-atencao-sem-limpeza-destrutiva
+    motivo: "Passo 10 ('Não fazer limpeza histórica destrutiva. Preparar relatório de registros de atenção resolvidos sem evidência de envio e proposta de reconciliação'): investigação de código (sub-agente dedicado, sem consulta a dados reais de produção — sem credenciais para isso neste ambiente) encontrou que o único requisito hoje para resolver um item de atencao via a tool resolver_item_atencao é um texto livre de desfecho não-vazio — nenhum vínculo estrutural com evidência real de que a ação subjacente aconteceu, embora o sistema já tenha uma fonte de evidência de entrega pronta e não utilizada (whatsapp_outbox, com status pending/sent/failed já rastreado desde o incidente documentado em schedule_whatsapp_message.py). Relatório completo com citação de arquivo:linha para cada caminho de resolução, avaliação de risco e proposta de reconciliação NÃO-destrutiva (campo opcional de evidência + script somente-leitura de relatório para revisão manual do André, nunca reversão automática) publicado em docs/autonomia/relatorio-atencao-resolvidos-sem-evidencia.md. atencao.py não está na lista de arquivos do P01 — implementação da proposta fica como trabalho futuro, não desta sub-entrega."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "npm test"
+    - "npx vitest list"
+    - "npx vitest run --config tests/rules/vitest.config.ts"
+  resultados:
+    - "Frontend (vitest, suíte padrão): 248/248 passando, 20/20 arquivos — sem regressão após a exclusão de tests/rules/ em vite.config.ts, confirmado antes e depois de todas as edições desta sub-entrega"
+    - "npx vitest list: zero matches para 'rules' — confirma que tests/rules/firestore.rules.test.ts não é descoberto pelo npm test padrão"
+    - "npx vitest run --config tests/rules/vitest.config.ts: 31 testes descobertos e carregados corretamente (30 originais + 1 adicionado nesta sub-entrega para promessas_abertas, pego pelo nitpick da revisão adversarial da segunda rodada), falha apenas no ponto esperado ('The host and port of the firestore emulator must be specified') — não executado ponta-a-ponta neste sandbox (ver limitação abaixo)"
+evidencias:
+  - "Revisão adversarial em duas rodadas independentes (ver decisões p01-a16-catch-all-consolidado-single-match e p01-a16-revisao-adversarial-duas-rodadas), com veredito final explícito SHIP na segunda rodada"
+  - "Busca exaustiva de acessos frontend/voz às coleções de controle (ver decisão p01-a16-mapeamento-acessos-frontend), re-verificada de forma independente pela primeira rodada de revisão"
+  - "Tentativa real (não assumida) de publicar pr.yml e deploy.yml via Argos, ambas confirmando o GitHub 403 de escopo workflow"
+  - "docs/autonomia/relatorio-atencao-resolvidos-sem-evidencia.md — relatório completo do passo 10, com citações de arquivo:linha"
+limitacao_ambiente:
+  - "Testes de firestore.rules (tests/rules/firestore.rules.test.ts) NÃO foram executados ponta-a-ponta neste sandbox: o Firestore Emulator precisa baixar um JAR de storage.googleapis.com, bloqueado pela política de egress da organização (confirmado via curl direto: CONNECT tunnel failed, response 403). Escritos e revisados (duas rodadas de revisão adversarial) contra a API pública documentada de @firebase/rules-unit-testing, e confirmado que carregam/parseiam corretamente e falham exatamente no ponto de conexão com o emulador — mas precisam rodar via 'npm run test:rules' num ambiente com rede irrestrita (máquina do André ou runner de CI) antes de serem considerados validados de ponta a ponta."
+plano_reversao:
+  escopo: "Específico para firestore.rules — não depende de reverter nenhuma outra parte do deploy (hosting, functions, indexes, storage)."
+  comando: "firebase deploy --only firestore:rules --project gestao-hermes --non-interactive --force, apontando para uma cópia do firestore.rules anterior recuperada do histórico do git (git show <commit-anterior>:firestore.rules > firestore.rules antes do deploy de rollback)."
+  quando_usar: "Se após o merge e deploy alguma operação legítima do frontend/voz for bloqueada pela nova regra (falha no mapeamento do passo 8) ou algum outro efeito inesperado em produção."
+  restricao: "Não reabrir a regra ampla (catch-all sem isColecaoNegadaPorCompleto) como correção temporária — mesmo em rollback de emergência. Se uma coleção legítima foi bloqueada por engano, a correção é adicioná-la explicitamente fora das duas funções de exclusão (ou removê-la de isColecaoNegadaPorCompleto/isColecaoSomenteLeitura conforme o caso), nunca voltar ao catch-all permissivo original."
+  documentacao_obrigatoria: "Qualquer rollback emergencial de regra em produção deve ser documentado como incidente (o que quebrou, quando, como foi revertido, causa raiz) — nunca como reversão silenciosa sem registro, por exigência explícita da seção de Reversão do P01 no plano."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "APLICAR MANUALMENTE: .github/workflows/pr.yml (job 'regras') e .github/workflows/deploy.yml (job de teste de regras + firestore:rules no --only) — Argos não tem escopo workflow no PAT, confirmado por tentativa real nesta sub-entrega. Mesmo bloqueio já documentado em P00 para o deploy.yml original; agora dois arquivos represados pelo mesmo motivo."
+  - "Rodar 'npm run test:rules' num ambiente com rede irrestrita (máquina do André ou CI) antes de considerar os testes de firestore.rules validados de ponta a ponta — não executados neste sandbox (ver limitacao_ambiente)."
+  - "Implementação da proposta de reconciliação do passo 10 (campo evidencia_resolucao + script de relatório somente-leitura) NÃO fica nesta sub-entrega — atencao.py está fora da lista de arquivos do P01. Candidato a pacote futuro ou sub-entrega dedicada, por decisão do André."
+  - "Mesmo bloqueio já registrado nas sub-entregas anteriores: functions/main.py e functions/test_github_webhook.py seguem sem publicar (limite de 200k caracteres do Argos) — segue represado na mesma cadeia de PRs, não resolvido nesta sub-entrega."
+  - "IMPORTANTE PARA DECISÃO DE MERGE (já registrada desde a sub-entrega 3.2/N, segue valendo): mesclar a PR #188 antes de main.py ser desbloqueado muda o comportamento de produção da deduplicação de webhook."
+  - "Com esta sub-entrega, os passos 7-10 do P01 estão todos com material pronto para revisão (regras corrigidas e testadas localmente, CI/deploy preparados mas bloqueados por permissão, plano de reversão documentado, relatório do passo 10 publicado). Falta abrir a PR desta sub-entrega, postar @codex review e esgotar o ciclo padrão de comentários (3min/5min) antes de considerar o P01 como pacote completo (todas as sub-entregas 1-5/N com todos os ciclos de Codex esgotados) e notificar o André, respeitando o intervalo de 90 minutos só depois disso, antes de iniciar o P02."
+proximo_pacote: "P01 — aguardar ciclo de revisão do Codex nesta nova PR; se não houver mais comentários pendentes em nenhuma das PRs empilhadas do P01 (#188, #189, esta nova), declarar P01 completo e notificar o André antes dos 90 minutos de intervalo para o P02."
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: cf1b89814b3b64f06dca5b3712fac41a809f1b58
+pacote: "P01 (sub-entrega 5.1/N — resposta ao achado do Codex na PR #190: exceção system/sync e system/copilot_soul)"
+# Não é uma nova sub-entrega de escopo do plano; é a resposta ao ciclo de
+# revisão da sub-entrega 5/N (PR #190, ainda pronto_para_revisao). Mesmos
+# arquivos (firestore.rules, tests/rules/firestore.rules.test.ts), dois
+# commits novos na mesma branch (claude/p01-firestore-rules-a16-a17),
+# seguindo a orientação da skill de shipping para responder a comentários
+# de revisão — mesmo padrão já usado nas sub-entregas 3.1/N-4.3/N.
+estado: pronto_para_revisao
+inicio: "2026-09-07T07:32:00Z"
+fim: "2026-09-07T07:39:00Z"
+arquivos_alterados:
+  - firestore.rules
+  - tests/rules/firestore.rules.test.ts
+decisoes:
+  - id: p01-codex-system-sync-copilot-soul-excecao
+    motivo: "Achado real do Codex na PR #190 (P1, 'Preserve access for existing client-backed system flows'): a busca de mapeamento de acessos da sub-entrega 5/N (decisão p01-a16-mapeamento-acessos-frontend) cobriu só as 8 coleções NOVAS que eu estava adicionando a isColecaoNegadaPorCompleto (idempotency, mcp_audit_log, agent_requests, agent_runs, mcp_jobs, promocoes_autonomia_sugeridas, telegram_sessions, whitelist). 'system' e 'automations' já constavam na lista, mas por já aparecerem 'negadas' nas regras ANTIGAS (via os blocos match irmãos se if false, que o próprio achado A16 provou serem um no-op por causa do OR entre matches), essa busca específica não as re-verificou. O Codex confirmou, corretamente: index.tsx lê e escreve system/sync (onSnapshot + setDoc, para iniciar/acompanhar/interromper a sincronização profunda) e KnowledgeView.tsx lê e escreve system/copilot_soul (onSnapshot + setDoc, para editar a personalidade) — os dois via o SDK CLIENTE (governado por estas regras), em produção, hoje. Negar 'system' por completo (como a sub-entrega 5/N publicou) quebraria as duas telas assim que a regra fosse deployada — exatamente o que o passo 8 do plano avisa para evitar ('não quebrar o aplicativo ao fechar o catch-all')."
+    autoridade: existente_ou_nova
+  - id: p01-codex-excecao-concessao-nao-negacao
+    motivo: "Corrigido com um novo bloco match /system/{docId}, irmão do bloco catch-all consolidado, concedendo read+write só quando docId in ['sync', 'copilot_soul'] e internalUser(). Isto é deliberadamente a direção OPOSTA do bug que o achado A16 corrigiu: ali, um bloco irmão de NEGAÇÃO (if false) ao lado de um catch-all permissivo era um no-op (false OR true = true, nada bloqueado de fato); aqui é um bloco irmão de CONCESSÃO estreita (docId in [...]) ao lado de um catch-all que já nega 'system' por completo — o resultado (true OR false = true só para esses dois documentos, false para qualquer outro doc de 'system', já que nem o bloco novo nem o catch-all liberam) é exatamente a exceção pretendida, sem reabrir o resto da coleção. Restrito a um único segmento de caminho (match /system/{docId}, não /system/{document=**}), então nenhum caminho aninhado sob system fica coberto por este bloco mesmo que algum vier a existir no futuro."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "npm test"
+    - "npx vitest run --config tests/rules/vitest.config.ts"
+  resultados:
+    - "Frontend (vitest, suíte padrão): 248/248 passando, sem regressão."
+    - "npx vitest run --config tests/rules/vitest.config.ts: 38 testes descobertos (31 anteriores + 7 novos: 1 cobrindo que outros documentos de system — google_credentials, api_keys, settings, whatsapp_worker — continuam bloqueados mesmo para o dono, e 6 cobrindo os três perfis × os dois documentos da exceção), falha apenas no ponto esperado (emulador não conectado neste sandbox)."
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio, dedicada especificamente a este achado do Codex): rederivou à mão a semântica OR para as três combinações relevantes (dono em system/sync, dono em outro doc de system, não-dono/público em qualquer doc de system) e confirmou que o resultado bate com o pretendido em todos os casos; confirmou por grep exaustivo no repo inteiro que não existe nenhum outro uso do SDK cliente para 'system' ou 'automations' além dos dois já corrigidos; confirmou, lendo os imports/require reais, que functions_node/index.js, services/whatsapp-capture/index.js e functions/upload-credentials.js usam admin.firestore() (Admin SDK, não governado por estas regras), não o SDK cliente. Único achado (nitpick, não corrigido): o teste de regressão de 'automations' só cobre o dono, não público/não-dono — mas esse caminho já existia antes desta correção e não foi tocado por ela. Veredito: SHIP."
+  - "Verificação de hash pós-escrita (git hash-object local vs. sha do Argos) confirmou publicação fiel dos dois arquivos: firestore.rules (sha d824fc89..., commit f925b3c3) e tests/rules/firestore.rules.test.ts (sha 3cc1dd76..., commit d1ce3cde), sem drift de transcrição."
+  - "Resposta publicada diretamente no comentário do Codex na PR #190 (via argos_comentar_issue_repositorio), reconhecendo o achado como correto e explicando a correção, com novo @codex review solicitado."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "Mesma pendência da sub-entrega 5/N: CI/deploy (.github/workflows/pr.yml, deploy.yml) seguem bloqueados por permissão (PAT do Argos sem escopo workflow) — precisam de aplicação manual pelo André."
+  - "Mesma pendência da sub-entrega 5/N: testes de firestore.rules não executados ponta-a-ponta neste sandbox (Firestore Emulator bloqueado por rede) — rodar npm run test:rules num ambiente com rede irrestrita antes de considerar validado de ponta a ponta."
+  - "Falta aguardar/esgotar mais um ciclo do protocolo padrão de checagem do Codex (3min/5min) nesta PR #190 antes de considerar o P01 completo."
+proximo_pacote: "P01 — aguardar ciclo de revisão do Codex nesta PR (#190); se esgotado sem novo comentário, declarar P01 completo (sub-entregas 1-5.1/N cobrindo os passos 1-10, PRs #186/#188/#189/#190) e notificar o André antes dos 90 minutos de intervalo para o P02."
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: cf1b89814b3b64f06dca5b3712fac41a809f1b58
+pacote: "P01 (fechamento do pacote — ciclo de revisão do Codex esgotado na PR #190)"
+# Não é uma nova sub-entrega de código; é o registro de fechamento do
+# pacote P01 inteiro, conforme a instrução permanente do André
+# ("após a conclusão de um pacote... estando tudo verde, você vai
+# aguardar 90 minutos para desenvolver o próximo pacote").
+estado: pacote_completo
+inicio: "2026-09-07T07:51:00Z"
+fim: "2026-09-07T07:56:00Z"
+arquivos_alterados: []
+decisoes:
+  - id: p01-codex-ciclo-esgotado-limpo
+    motivo: "Checagem programada (send_later, 3min após o pedido de @codex review da sub-entrega 5.1/N) encontrou, via busca no Gmail, a resposta do Codex ao commit d1ce3cdeb2 (o commit que publicou a correção da exceção system/sync e system/copilot_soul): 'Codex Review: Didn't find any major issues. Breezy!', postada em 2026-09-07T07:44:05Z — cerca de 12 minutos depois do pedido de revisão. Confirmado por leitura direta do corpo completo do e-mail (mcp__Gmail__get_message), não só do snippet. Também confirmado, por leitura do e-mail anterior no mesmo thread (07:32:12Z, revisado commit d5807eb165), que esse é exatamente o achado original já corrigido na sub-entrega 5.1/N — não um achado novo e diferente. Nenhum comentário adicional do Codex apareceu depois do e-mail das 07:44. Conclusão: o ciclo de revisão do Codex nesta PR está esgotado, com veredito limpo (sem novo achado pendente)."
+    autoridade: existente_ou_nova
+resumo_pacote:
+  descricao: "P01 — Fechar lacunas de segurança/autonomia em firestore.rules e preparar o CI/deploy para testá-las, conforme achados A16/A17 do plano; mais o relatório do passo 10 (evidência de resolução de itens de atenção)."
+  prs: ["#186", "#188", "#189", "#190"]
+  sub_entregas: "1/N a 5.1/N (passos 1 a 10 do P01), todas com revisão adversarial de pelo menos uma rodada (as de maior risco, duas rodadas independentes)"
+  achados_fechados:
+    - "A16: regra geral (catch-all) do Firestore sobrepondo restrições específicas por OR-entre-matches — consolidado num único bloco match com exclusão expressa na condição; achado real do Codex (system/sync, system/copilot_soul) corrigido com exceção pontual de concessão, sem reabrir o bug original."
+    - "A17: firestore:rules ausente do deploy validado — job de teste (Firestore Emulator) preparado em pr.yml e deploy.yml, e firestore:rules incluído no --only do deploy; plano de reversão específico documentado."
+    - "A01, A03, A04, A10: fechados em sub-entregas anteriores deste mesmo pacote (1/N-4.3/N)."
+  pendencias_carregadas_adiante:
+    - "APLICAR MANUALMENTE (bloqueio de permissão, não de conteúdo): .github/workflows/pr.yml e .github/workflows/deploy.yml desta sub-entrega, MAIS o deploy.yml original do P00 — Argos não tem escopo workflow no PAT do GitHub. Confirmado por tentativa real em cada sub-entrega, não assumido por precedente."
+    - "Bloqueio de escrita no Argos por limite de 200k caracteres em functions/main.py e functions/test_github_webhook.py — represado desde a sub-entrega 3/N, sem solução aplicada. Três caminhos propostos, decisão do André: (1) tool de diff no Argos, (2) aumentar o limite de conteúdo, (3) dividir main.py em módulos menores."
+    - "IMPORTANTE PARA DECISÃO DE MERGE (desde a sub-entrega 3.2/N): mesclar a PR #188 antes do desbloqueio de main.py muda o comportamento de produção da deduplicação de webhook — avaliar ordem de merge com isso em mente."
+    - "Proposta de reconciliação do passo 10 (campo evidencia_resolucao + script de relatório somente-leitura, documentada em docs/autonomia/relatorio-atencao-resolvidos-sem-evidencia.md) NÃO implementada — atencao.py está fora da lista de arquivos do P01. Candidata a pacote futuro, por decisão do André."
+    - "Testes de firestore.rules (tests/rules/firestore.rules.test.ts, 38 testes) escritos e revisados, mas NÃO executados ponta-a-ponta neste sandbox — Firestore Emulator bloqueado por política de rede (storage.googleapis.com). Rodar 'npm run test:rules' numa máquina/CI com rede irrestrita antes de considerar validado de ponta a ponta."
+    - "Merge de todas as PRs empilhadas (#186, #188, #189, #190) continua manual, pelo André — nenhuma foi mesclada por este agente."
+testes:
+  comandos: []
+  resultados:
+    - "Nenhum teste novo neste registro de fechamento — ver sub-entregas 5/N e 5.1/N para os resultados completos (248/248 frontend, 38/38 descoberta de testes de regras)."
+evidencias:
+  - "E-mail do Codex (2026-09-07T07:44:05Z, id 1a07ad309c38a9fe), lido por inteiro: 'Codex Review: Didn't find any major issues. Breezy!' referenciando o commit d1ce3cdeb2 — o commit que publicou a correção da exceção system/sync/copilot_soul."
+  - "Confirmado que o e-mail anterior no mesmo thread (07:32:12Z) é o achado ORIGINAL já corrigido, não um achado novo — evita duplo-processamento do mesmo achado."
+pendencias:
+  - "Ver resumo_pacote.pendencias_carregadas_adiante acima — consolida todas as pendências reais deste pacote inteiro, a serem comunicadas ao André."
+proximo_pacote: "P02 — Unificar identidade e política de autonomia. Por instrução permanente do André, aguardar 90 minutos após a notificação de fechamento do P01 antes de iniciar (intervalo entre pacotes completos, não entre sub-entregas)."
+```
