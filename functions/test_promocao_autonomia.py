@@ -164,7 +164,9 @@ class _MockCollection:
 
 class _MockTransaction:
     def __init__(self):
-        pass
+        self._read_only = False
+        self._id = b"mock-tx-id"
+        self._max_attempts = 5
 
     def get(self, doc_ref):
         return doc_ref.get()
@@ -175,8 +177,22 @@ class _MockTransaction:
     def set(self, doc_ref, data, merge=False):
         doc_ref.set(data, merge=merge)
 
-    def update(self, doc_ref, data):
-        doc_ref.update(data)
+    def _rollback(self):
+        pass
+
+    def _commit(self):
+        pass
+
+    def _clean_up(self):
+        # Espelha google.cloud.firestore_v1.transaction.Transaction._clean_up:
+        # o decorator @firestore.transactional chama isso antes de cada
+        # tentativa, então precisa existir para o mock ser um double fiel.
+        self._id = None
+
+    def _begin(self, retry_id=None):
+        # Espelha Transaction._begin: marca a transação como "em andamento"
+        # (in_progress checa self._id is not None) sem round-trip de rede.
+        self._id = retry_id or b"mock-tx-id"
 
 
 class _MockDb:
@@ -355,9 +371,11 @@ class TestLiberacaoECancelamento(unittest.TestCase):
 
     def setUp(self):
         self.db = _MockDb()
-        self.tx_patch = mock.patch("firebase_admin.firestore.transactional", side_effect=lambda fn: fn)
-        self.tx_patch.start()
-        self.addCleanup(self.tx_patch.stop)
+        # Nota: sem patch de firestore.transactional — o _MockTransaction acima
+        # implementa o protocolo real (_clean_up/_begin/_commit/_rollback/
+        # _max_attempts/_read_only), então estes testes exercitam o mesmo
+        # caminho de código de produção usado por aprovar_rascunho/
+        # descartar_rascunho (achado A04).
         self.outbox = self.db.collection(oa.COLLECTION)
 
     def test_liberar_rascunhos_promovidos_so_libera_vencidos(self):
