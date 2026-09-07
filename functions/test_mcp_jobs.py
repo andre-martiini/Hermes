@@ -33,6 +33,14 @@ vencido (`_reaproveitar_claim_vencido_na_leitura`) a cada consulta, para
 que a própria chamada em loop que o protocolo do canal MCP já faz o
 cliente executar feche a lacuna sem depender de uma entrega duplicada
 tardia (não garantida) nem de uma função agendada nova.
+
+Cobre também o achado do Codex na PR #189 (P1, terceira rodada, "Recover
+jobs orphaned before the claim commits"): a recuperação da segunda rodada
+só cobria o status `em_execucao` — um job cuja transação de claim nunca
+chegou a comitar (falha antes da escrita) fica `processing` para sempre,
+sem `claimed_em` nenhum, e ficava sem nenhuma recuperação. Corrigido com
+`_reaproveitar_processing_nunca_reivindicado_na_leitura`, mesma ideia mas
+usando `criado_em_ts` como referência de idade.
 """
 
 from __future__ import annotations
@@ -134,6 +142,12 @@ def _job_basico(**overrides) -> dict:
         "task_id": None,
         "status": mcp_jobs.STATUS_PROCESSING,
         "criado_em": 0,
+        # Todo job real tem isto desde a criação (criar_job grava via
+        # SERVER_TIMESTAMP, já resolvido em qualquer leitura posterior à
+        # escrita) — um valor recente por padrão para não acionar o reap de
+        # "processing nunca reivindicado" (ver TestReaproveitarProcessing-
+        # NuncaReivindicadoNaLeitura) em testes que não estão testando isso.
+        "criado_em_ts": datetime.now(timezone.utc),
     }
     dados.update(overrides)
     return dados
@@ -344,6 +358,111 @@ class TestReaproveitarClaimVencidoNaLeitura(unittest.TestCase):
     def test_documento_inexistente_devolve_none(self):
         ref = self.col.document("job-fantasma")
         self.assertIsNone(mcp_jobs._reaproveitar_claim_vencido_na_leitura(self.db, ref))
+
+
+class TestReaproveitarProcessingNuncaReivindicadoNaLeitura(unittest.TestCase):
+    """Testes de _reaproveitar_processing_nunca_reivindicado_na_leitura em
+    isolamento (mesmo estilo de TestReaproveitarClaimVencidoNaLeitura) —
+    achado do Codex na PR #189, terceira rodada: um job que nunca chegou a
+    ser reivindicado (a transação de _claim falhou antes de comitar) fica
+    'processing' para sempre sem isto, porque a checagem irmã só cobre
+    em_execucao."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.col = self.db.collection(mcp_jobs.COLECAO)
+
+    def test_processing_vencido_marca_error_e_devolve_dados_atualizados(self):
+        agora = datetime.now(timezone.utc)
+        self.col._docs["job-p1"] = _job_basico(
+            status=mcp_jobs.STATUS_PROCESSING,
+            criado_em_ts=agora - mcp_jobs.PROCESSING_NUNCA_REIVINDICADO_APOS - timedelta(seconds=1),
+        )
+        ref = self.col.document("job-p1")
+
+        resultado = mcp_jobs._reaproveitar_processing_nunca_reivindicado_na_leitura(self.db, ref)
+
+        self.assertIsNotNone(resultado)
+        self.assertEqual(resultado["status"], mcp_jobs.STATUS_ERROR)
+        self.assertIn("nao foi reivindicado", resultado["erro"])
+        doc = self.col._docs["job-p1"]
+        self.assertEqual(doc["status"], mcp_jobs.STATUS_ERROR)
+        self.assertIn("nao foi reivindicado", doc["erro"])
+        self.assertIsInstance(doc["expira_em"], datetime)
+
+    def test_processing_jovem_nao_altera_documento(self):
+        agora = datetime.now(timezone.utc)
+        self.col._docs["job-p2"] = _job_basico(
+            status=mcp_jobs.STATUS_PROCESSING,
+            criado_em_ts=agora - timedelta(seconds=5),
+        )
+        ref = self.col.document("job-p2")
+        doc_antes = dict(self.col._docs["job-p2"])
+
+        resultado = mcp_jobs._reaproveitar_processing_nunca_reivindicado_na_leitura(self.db, ref)
+
+        self.assertEqual(resultado["status"], mcp_jobs.STATUS_PROCESSING)
+        self.assertEqual(self.col._docs["job-p2"], doc_antes)
+
+    def test_entrega_lenta_alem_de_claim_expira_apos_nao_e_falso_positivo(self):
+        """Achado da revisão adversarial desta correção: a primeira versão
+        reaproveitava CLAIM_EXPIRA_APOS (limiar de duração de EXECUÇÃO) para
+        este caso, o que marcaria como 'nunca reivindicado' um job só
+        entregue lentamente pelo gatilho (cold start, contenção) — e pior,
+        quando o gatilho enfim disparasse, _claim encontraria o job já
+        error e devolveria None em silêncio, sem rodar a tool. Com o limiar
+        próprio (bem maior), um job mais velho que CLAIM_EXPIRA_APOS mas
+        ainda dentro de PROCESSING_NUNCA_REIVINDICADO_APOS não é tocado."""
+        agora = datetime.now(timezone.utc)
+        self.assertGreater(
+            mcp_jobs.PROCESSING_NUNCA_REIVINDICADO_APOS, mcp_jobs.CLAIM_EXPIRA_APOS
+        )
+        self.col._docs["job-p5"] = _job_basico(
+            status=mcp_jobs.STATUS_PROCESSING,
+            criado_em_ts=agora - mcp_jobs.CLAIM_EXPIRA_APOS - timedelta(seconds=1),
+        )
+        ref = self.col.document("job-p5")
+        doc_antes = dict(self.col._docs["job-p5"])
+
+        resultado = mcp_jobs._reaproveitar_processing_nunca_reivindicado_na_leitura(self.db, ref)
+
+        self.assertEqual(resultado["status"], mcp_jobs.STATUS_PROCESSING)
+        self.assertEqual(self.col._docs["job-p5"], doc_antes)
+
+    def test_processing_sem_criado_em_ts_e_tratado_como_vencido(self):
+        """Mesmo tratamento defensivo de claimed_em ausente em
+        _reaproveitar_claim_vencido_na_leitura: sem um datetime válido para
+        aferir idade, falha fechada em vez de travar para sempre."""
+        dados = _job_basico(status=mcp_jobs.STATUS_PROCESSING)
+        del dados["criado_em_ts"]
+        self.col._docs["job-p3"] = dados
+        ref = self.col.document("job-p3")
+
+        resultado = mcp_jobs._reaproveitar_processing_nunca_reivindicado_na_leitura(self.db, ref)
+
+        self.assertEqual(resultado["status"], mcp_jobs.STATUS_ERROR)
+        self.assertEqual(self.col._docs["job-p3"]["status"], mcp_jobs.STATUS_ERROR)
+
+    def test_status_ja_mudou_entre_leitura_e_esta_chamada_nao_altera(self):
+        """Corrida com um claim genuíno acontecendo entre a leitura inicial
+        de ler_job e esta chamada — não deve sobrescrever."""
+        agora = datetime.now(timezone.utc)
+        self.col._docs["job-p4"] = _job_basico(
+            status=mcp_jobs.STATUS_EM_EXECUCAO,
+            claimed_em=agora,
+        )
+        ref = self.col.document("job-p4")
+
+        resultado = mcp_jobs._reaproveitar_processing_nunca_reivindicado_na_leitura(self.db, ref)
+
+        self.assertEqual(resultado["status"], mcp_jobs.STATUS_EM_EXECUCAO)
+        self.assertEqual(self.col._docs["job-p4"]["status"], mcp_jobs.STATUS_EM_EXECUCAO)
+
+    def test_documento_inexistente_devolve_none(self):
+        ref = self.col.document("job-fantasma")
+        self.assertIsNone(
+            mcp_jobs._reaproveitar_processing_nunca_reivindicado_na_leitura(self.db, ref)
+        )
 
 
 class TestInvarianteClaimVsTimeout(unittest.TestCase):
@@ -567,6 +686,24 @@ class TestLerJob(unittest.TestCase):
         self.assertEqual(resultado["status"], "error")
         self.assertIn("abandonada", resultado["erro"])
         self.assertEqual(self.col._docs["job-vencido"]["status"], mcp_jobs.STATUS_ERROR)
+
+    def test_status_processing_nunca_reivindicado_e_reaproveitado_e_reporta_error(self):
+        """Achado do Codex na PR #189 (terceira rodada): um job cuja
+        transação de claim nunca chegou a comitar (status ficou
+        'processing' para sempre, sem claimed_em nenhum) também não fica
+        'processing' esperando algo que nunca vai acontecer — ler_job
+        recupera pela idade de criado_em_ts."""
+        agora = datetime.now(timezone.utc)
+        self.col._docs["job-nunca-claimed"] = _job_basico(
+            status=mcp_jobs.STATUS_PROCESSING,
+            criado_em_ts=agora - mcp_jobs.PROCESSING_NUNCA_REIVINDICADO_APOS - timedelta(seconds=1),
+        )
+
+        resultado = mcp_jobs.ler_job("user-1", "job-nunca-claimed")
+
+        self.assertEqual(resultado["status"], "error")
+        self.assertIn("nao foi reivindicado", resultado["erro"])
+        self.assertEqual(self.col._docs["job-nunca-claimed"]["status"], mcp_jobs.STATUS_ERROR)
 
     def test_status_done_traz_resultado(self):
         self.col._docs["job-d"] = _job_basico(status=mcp_jobs.STATUS_DONE, resultado="pronto")
