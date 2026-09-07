@@ -75,6 +75,13 @@ class TestAvaliarPiso(unittest.TestCase):
         self.assertEqual(d.decision, Decisao.REQUIRE_APPROVAL)
         self.assertEqual(d.reason_code, "floor_nao_contornavel")
         self.assertTrue(d.approval_required)
+        # Achado da revisão adversarial da correção do piso+estado (PR #191):
+        # a refatoração que uniu piso e matriz padrão numa única variável de
+        # decisão tinha deixado o `policy_id` do retorno final usar sempre
+        # `_POLICY_ID_PADRAO`, fazendo uma decisão do piso se identificar
+        # como se tivesse vindo da matriz de efeito da seção 5.1.
+        self.assertEqual(d.policy_id, "floor-confirmacao-obrigatoria")
+        self.assertIn("estado_autonomia", d.constraints_checked)
 
     def test_piso_nao_e_contornavel_por_mandato(self):
         mandato = Mandato(
@@ -85,6 +92,69 @@ class TestAvaliarPiso(unittest.TestCase):
             ferramenta="registrar_aporte_investimento",
             classe_efeito=ClasseEfeito.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
             mandatos_aplicaveis=(mandato,),
+        )
+        d = policy.avaliar(req, agora=_AGORA)
+        self.assertEqual(d.decision, Decisao.REQUIRE_APPROVAL)
+        self.assertEqual(d.reason_code, "floor_nao_contornavel")
+
+    def test_piso_e_apertado_para_deny_quando_pausado(self):
+        # Achado P1 #1 da segunda rodada da revisão do Codex (PR #191): antes
+        # desta correção, o piso retornava require_approval direto no passo
+        # 1, sem nunca consultar o estado de autonomia — um humano aprovando
+        # essa pendência ainda executaria o efeito apesar da pausa. Agora o
+        # mesmo aperto de estado que vale para mandato/matriz padrão também
+        # vale para o piso.
+        req = _req(
+            ferramenta="schedule_whatsapp_message",
+            classe_efeito=ClasseEfeito.COMPROMISSO_TERCEIROS,
+            estado_autonomia=EstadoAutonomia.PAUSADO,
+        )
+        d = policy.avaliar(req, agora=_AGORA)
+        self.assertEqual(d.decision, Decisao.DENY)
+        self.assertEqual(d.reason_code, "autonomia_pausada")
+        self.assertFalse(d.approval_required)
+        self.assertEqual(d.policy_id, policy._POLICY_ID_PADRAO)
+
+    def test_piso_com_mandato_ainda_e_apertado_para_prepare_only_quando_somente_preparacao(self):
+        # Reforça que o piso continua não-contornável por mandato mesmo
+        # depois da correção: presença de um mandato aplicável não muda
+        # nada — o ramo do piso nunca consulta `mandatos_aplicaveis`.
+        mandato = Mandato(
+            mandato_id="m1", finalidade="x",
+            destinatarios_recursos=("*",), classes_conteudo_permitidas=("geral",),
+        )
+        req = _req(
+            ferramenta="registrar_aporte_investimento",
+            classe_efeito=ClasseEfeito.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
+            estado_autonomia=EstadoAutonomia.SOMENTE_PREPARACAO,
+            mandatos_aplicaveis=(mandato,),
+        )
+        d = policy.avaliar(req, agora=_AGORA)
+        self.assertEqual(d.decision, Decisao.PREPARE_ONLY)
+        self.assertEqual(d.reason_code, "autonomia_somente_preparacao")
+        self.assertFalse(d.approval_required)
+
+    def test_piso_e_apertado_para_prepare_only_quando_somente_preparacao(self):
+        req = _req(
+            ferramenta="registrar_aporte_investimento",
+            classe_efeito=ClasseEfeito.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
+            estado_autonomia=EstadoAutonomia.SOMENTE_PREPARACAO,
+        )
+        d = policy.avaliar(req, agora=_AGORA)
+        self.assertEqual(d.decision, Decisao.PREPARE_ONLY)
+        self.assertEqual(d.reason_code, "autonomia_somente_preparacao")
+        self.assertFalse(d.approval_required)
+        self.assertEqual(d.policy_id, policy._POLICY_ID_PADRAO)
+
+    def test_piso_continua_require_approval_quando_ativo(self):
+        # Regressão: a correção acima não pode mudar o caso normal (estado
+        # ativo — mesmo teste de test_ferramenta_do_piso_sempre_require_approval
+        # repetido aqui para deixar explícito que o aperto só age quando o
+        # estado realmente está pausado/restrito).
+        req = _req(
+            ferramenta="schedule_whatsapp_message",
+            classe_efeito=ClasseEfeito.COMPROMISSO_TERCEIROS,
+            estado_autonomia=EstadoAutonomia.ATIVO,
         )
         d = policy.avaliar(req, agora=_AGORA)
         self.assertEqual(d.decision, Decisao.REQUIRE_APPROVAL)
@@ -388,6 +458,17 @@ class TestMandatoCobre(unittest.TestCase):
         req = _req(argumentos_resolvidos={"destinatario": "chefe@outraempresa.com"}, sensibilidade="geral")
         self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
 
+    def test_destinos_vazio_nao_cobre_regressao_seguranca(self):
+        # Achado P1 #2 da segunda rodada da revisão do Codex (PR #191):
+        # `destinos and not (...)` pulava a checagem inteira quando
+        # `destinatarios_recursos` vinha vazio (`set()` é falso em Python),
+        # tratando um mandato SEM escopo de destino como se cobrisse
+        # QUALQUER destinatário — o oposto do que o contrato pede (destino é
+        # uma condição mínima do mandato, seção 5.3). Agora falha fechado.
+        m = self._mandato(destinatarios_recursos=())
+        req = _req(argumentos_resolvidos={"destinatario": "qualquer@example.com"}, sensibilidade="geral")
+        self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
+
     def test_classe_conteudo_fora_da_lista_nao_cobre(self):
         m = self._mandato(destinatarios_recursos=("*",), classes_conteudo_permitidas=("geral",))
         req = _req(sensibilidade="financeiro")
@@ -397,6 +478,13 @@ class TestMandatoCobre(unittest.TestCase):
         m = self._mandato(destinatarios_recursos=("*",), classes_conteudo_permitidas=("financeiro",))
         req = _req(sensibilidade="financeiro")
         self.assertTrue(policy.mandato_cobre(m, req, _AGORA))
+
+    def test_classes_vazio_nao_cobre_regressao_seguranca(self):
+        # Mesmo achado, mesmo raciocínio para `classes_conteudo_permitidas`
+        # vazio: sem classe declarada, o mandato não cobre nada.
+        m = self._mandato(destinatarios_recursos=("*",), classes_conteudo_permitidas=())
+        req = _req(sensibilidade="geral")
+        self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
 
     def test_sensibilidade_ausente_nao_cobre_mandato_restrito_regressao_seguranca(self):
         # Achado P1 #2 da revisão do Codex (PR #191): a versão original só
