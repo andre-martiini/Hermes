@@ -53,10 +53,11 @@ _CATALOG: dict[str, str] = {
     "listar_rascunhos_pendentes": "Lista rascunhos de mensagens de WhatsApp aguardando aprovação no Telegram",
     "aprovar_rascunho_whatsapp": "Aprova um rascunho de WhatsApp pendente no outbox (via Cowork) para entrega imediata",
     "descartar_rascunho_whatsapp": "Descarta um rascunho de WhatsApp pendente no outbox (via Cowork)",
-    # Portao humano via Telegram para o conector Claude-Argos: aprovar plano e
-    # enfileirar execucao sao "ato humano" por desenho no Argos; este trio faz
-    # o Andre decidir pelo Telegram antes de qualquer uma das duas ser chamada.
-    "solicitar_autorizacao_argos": "Pede ao André, por um card no Telegram, autorização para aprovar um plano ou enfileirar uma execução no Argos",
+    # Portao humano via Telegram para o conector Claude-Argos: aprovar plano,
+    # enfileirar execucao e mesclar PR sao "ato humano" por desenho no Argos;
+    # este trio faz o Andre decidir pelo Telegram antes de qualquer uma delas
+    # ser chamada.
+    "solicitar_autorizacao_argos": "Pede ao André, por um card no Telegram, autorização para aprovar um plano, enfileirar uma execução ou mesclar um PR no Argos",
     "consultar_autorizacao_argos": "Consulta o estado de uma solicitação de autorização do Argos (aguardando, aprovado, recusado ou expirado)",
     "consumir_autorizacao_argos": "Marca uma autorização aprovada do Argos como usada — uso único, chamar só imediatamente antes de agir no Argos",
     "confirmar_acao": "Executa uma confirmação MCP persistida uma única vez",
