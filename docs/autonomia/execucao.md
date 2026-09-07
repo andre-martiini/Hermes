@@ -754,3 +754,73 @@ pendencias:
   - "Todas as pendências já registradas nos blocos das sub-entregas 1/N a 7/N que não foram tocadas por esta revisão continuam abertas: validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP, Mandato.classes_conteudo_permitidas texto livre sem enum fechado, Mandato.usos_na_janela_atual e Mandato.orcamento_maximo sem wrapper de I/O real, o bug de tipo em autonomy/policy.py::preparar_politica (contornado na wrapper, não corrigido no motor), a pergunta de design sobre o default de origem_humana (levar ao André só ao fim do pacote inteiro)."
 proximo_pacote: "P02 (sub-entrega 9/N -- revisão da 6/N e 7/N concluída sem achado bloqueante; decidir entre continuar o passo 1 do plano (decidir TipoPrincipal de um canal específico e religar esse canal a decisao_piso(), já pronta para reuso), ou levar ao André agora o achado operacional da sub-entrega 6/N sobre o teto de 200000 caracteres do Argos em hermes_core_logic.py, já que não depende de mais trabalho autônomo para ser decidido)"
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 7174571086bde0aabca63aa609dbc5269dae258e
+pacote: "P02 (sub-entrega 9/N -- split hermes_core_logic.py/telegram_utils.py + identidade em mcp_jobs.py::on_mcp_job_created, passos 1 e 6 do plano)"
+# Duas decisões de André, ambas relatadas e autorizadas fora deste registro,
+# endereçadas juntas nesta sub-entrega porque a segunda dependia da primeira:
+# (a) "Limite de 200.000 caracteres do Argos: Autorizo a extração para um
+# módulo menor." -- resolve a pendência operacional registrada nos blocos
+# das sub-entregas 6/N e 8/N (hermes_core_logic.py com 276257 caracteres,
+# estruturalmente inalcançável por argos_escrever_arquivo_repositorio).
+# (b) "Ambos sempre sem humano presente" -- decide que tanto
+# mcp_jobs.py::on_mcp_job_created quanto outbox_aprovacao.py/
+# revisao_semanal.py devem usar origem_humana=False quando/se vierem a
+# construir Principal. Só o primeiro foi efetivamente religado nesta
+# sub-entrega -- ver decisão p02-sub9-escopo-outbox-revisao-nao-religados
+# abaixo para o porquê.
+estado: pronto_para_revisao
+inicio: "2026-09-07T20:31:42Z"
+fim: "2026-09-07T22:19:00Z"
+arquivos_alterados:
+  - functions/telegram_utils.py (novo -- 105 funções + 39 constantes extraídas de hermes_core_logic.py, ordem relativa original preservada)
+  - functions/hermes_core_logic.py (reduzido a docstring do módulo, imports, init do Firebase Admin, bloco de reexport de telegram_utils.py e as 5 funções que ficaram: _process_telegram_message, _handle_telegram_callback, telegramWebhook, on_telegram_inbound, on_health_log_red_flag)
+  - functions/mcp_jobs.py (on_mcp_job_created agora constrói Principal e chama autonomy.policy.decisao_piso antes de executar a tool)
+  - functions/test_tool_schemas.py (patch de send_message_logged retargetado de hermes_core_logic para telegram_utils -- ver decisão p02-sub9-bare-name-resolution)
+  - functions/test_mcp_jobs.py (novo -- nenhuma cobertura existia para on_mcp_job_created antes desta sub-entrega)
+decisoes:
+  - id: p02-sub9-extracao-mecanica-hermes-core-logic
+    motivo: "Extração puramente mecânica (preserva comportamento): 105 funções e 39 constantes movidas para telegram_utils.py na ordem relativa original, hermes_core_logic.py passa a reexportar tudo de telegram_utils via `from telegram_utils import (...)` para preservar o atributo `hermes_core_logic.<nome>` onde algo externo dependa dele. Verificado por comparação AST antes/depois (nenhuma mudança de nó além da localização física) e pela suíte completa rodando duas vezes -- estado original vs. estado pós-split -- com contagem idêntica de linhas de erro de rede pré-existentes em ambos os logs, confirmando ausência de qualquer regressão além da já descrita abaixo."
+    autoridade: existente_ou_nova
+  - id: p02-sub9-bare-name-resolution
+    motivo: "Único efeito colateral real do split: `_run_gemini_turn` (agora em telegram_utils.py) chama `send_message_logged` como nome livre, que resolve pelo __globals__ de telegram_utils.py, não de hermes_core_logic.py -- quebrou test_tool_schemas.py, que fazia mock.patch.object(core, 'send_message_logged', ...). Corrigido retargetando o patch para telegram_utils. Generalizado: qualquer chamada interna a um nome reexportado (ex.: _send_telegram_message_with_keyboard, _send_telegram_message, generate_content_logged chamados de dentro de telegram_utils.py) tem o mesmo risco latente para futuros testes que tentem mockar via hermes_core_logic.<nome> -- documentado explicitamente no docstring de telegram_utils.py e num comentário de aviso acima do bloco de reexport em hermes_core_logic.py, já que hoje nenhum teste exercita essas chamadas nessa profundidade (nenhuma regressão atual, só lacuna de descoberta futura)."
+    autoridade: existente_ou_nova
+  - id: p02-sub9-mcp-jobs-runner-servico-origem-humana-false
+    motivo: "mcp_jobs.py::on_mcp_job_created retoma uma tool MCP assincronamente, já fora do ciclo do request HTTP original, sem nenhuma garantia de que o dono ainda está acompanhando a sessão -- exatamente o caso que a docstring de tool_context.py::principal_de (sub-entrega 5/N) cita como motivo para o tipo do principal ser sempre explícito, nunca inferido de ctx.canal (compartilhado com o cliente MCP interativo). Decisão de André aplicada: sempre TipoPrincipal.RUNNER_SERVICO, sempre origem_humana=False, nunca DONO_INTERATIVO/CLIENTE_ASSISTIDO só porque o uid bate com o dono. Preflight via autonomy.policy.decisao_piso adicionado antes de qualquer execução (passo 6 do plano)."
+    autoridade: existente_ou_nova
+  - id: p02-sub9-escopo-outbox-revisao-nao-religados
+    motivo: "outbox_aprovacao.py e revisao_semanal.py NÃO foram religados a principal_de()/decisao_piso() nesta sub-entrega, apesar da decisão de André cobrir os dois. Investigação concreta (leitura de outbox_aprovacao.py::aprovar_rascunho/liberar_rascunhos_promovidos, revisao_semanal.py::revisar_semana_propor_reagendamento, e do bloco em main.py que os chama a partir de um tick de scheduler) mostrou que os dois são varreduras em lote sem o formato de chamada nome+argumentos de uma tool única que decisao_piso() foi desenhada para avaliar -- diferente de mcp_jobs.py, que tem esse formato real (job.tool + job.arguments). Forçar uma wiring sintética nesses dois só para ter algo chamando decisao_piso() seria teatro de segurança, não segurança real: não há uma decisão de política natural do tipo 'permitir esta tool com estes argumentos' para um sweep batch. Escopo deliberadamente limitado a mcp_jobs.py, que tem o encaixe real. Confirmado são pela revisão adversarial independente desta sub-entrega (ver evidências)."
+    autoridade: existente_ou_nova
+  - id: p02-sub9-hash-whitespace-hermes-core-logic
+    motivo: "O commit ed76b25562dd7384faf4890ed1611097d56c641d de hermes_core_logic.py (shipado nesta sub-entrega) difere do conteúdo local verificado (hash 0118badb39dbd330d14d8d9f5d788e6a307a0811) em exatamente 12 linhas em branco que perderam espaços em branco à direita (trailing whitespace) durante a transcrição para o parâmetro `conteudo` da API de escrita do Argos -- nenhuma delas dentro de string/docstring, todas fora de qualquer literal, sem nenhum efeito de comportamento (confirmado por diff linha a linha antes do envio: as 12 linhas eram e continuam sendo linhas em branco, só a presença de espaços à direita muda). Hash de destino calculado e conferido ANTES do envio (via cópia local com as mesmas 12 linhas normalizadas, gerada por script, não por nova digitação manual) e o sha retornado pelo Argos bateu exatamente com o valor previsto -- a verificação de integridade cumpriu seu papel mesmo não sendo byte-idêntica ao arquivo de trabalho local. Não corrigido com um novo commit: reenviar o arquivo inteiro (única forma de 'patch' que a API de escrita permite) para consertar 12 bytes de espaço em branco invisível teria um risco de nova transcrição maior que o problema que resolveria."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "Antes da correção do achado HIGH da revisão: 1304/1304 (baseline pré-split preservado) após a extração + fix do bare-name-resolution."
+    - "Depois de test_mcp_jobs.py (novo, cobertura de on_mcp_job_created: ALLOW, DENY, PREPARE_ONLY, princípio RUNNER_SERVICO/origem_humana=False) e da correção do achado HIGH (REQUIRE_APPROVAL/DEFER também bloqueiam): 1313/1313 passando, 0 falhas, 0 erros."
+evidencias:
+  - "Revisão adversarial independente (subagente sem contexto da implementação) sobre o diff de mcp_jobs.py + test_mcp_jobs.py. Achado HIGH: a wiring inicial só bloqueava Decisao.DENY e Decisao.PREPARE_ONLY, deixando REQUIRE_APPROVAL e DEFER caírem no fluxo de execução direta -- copiava o padrão de mcp_server.py::_handle_tools_call sem perceber que a segurança desse padrão para REQUIRE_APPROVAL depende de um fluxo de confirmação real que mcp_server.py tem e mcp_jobs.py (trigger assíncrono fire-and-forget) não tem. Corrigido: bloqueia em qualquer decisão != ALLOW. Sem esta correção, no dia em que uma das três tools assíncronas fosse classificada em CLASSE_EFEITO_PISO com autonomia ATIVA (caso comum, não raro), o código executaria sem aprovação -- exatamente o cenário que este preflight existe para impedir."
+  - "Mesma revisão, dois achados MEDIUM (documentação do risco de bare-name-resolution para outras chamadas internas de telegram_utils.py -- ver decisão p02-sub9-bare-name-resolution; e ler_job() misturava bloqueio de política com erro de execução genérico no mesmo campo `erro` sem forma estruturada de distinguir os dois -- corrigido com campo aditivo `bloqueio_politica: {decision, reason_code}`, sem quebrar o contrato existente de `status`/`erro`) e um achado LOW (faltava um teste fixando que as três tools assíncronas de mcp_jobs.py não estão hoje classificadas em CLASSE_EFEITO_PISO, o que tornaria uma futura classificação silenciosa sem nenhum teste avisando -- corrigido com TestClasseEfeitoPisoNaoCobreTresToolsAssincronas)."
+  - "Mesma revisão confirmou como sã a decisão de não religar outbox_aprovacao.py/revisao_semanal.py nesta sub-entrega (ver decisão p02-sub9-escopo-outbox-revisao-nao-religados)."
+  - "Todos os 5 commits desta sub-entrega verificados individualmente por hash+parent antes de prosseguir para o próximo: mcp_jobs.py (commit 7dd012116553cb363308b044ebc742c553631670, sha c174012eb239fdf7778f1316fc23c648cdcbbe47), test_tool_schemas.py (commit 677c02b4aaea98f741bc460c543f18d2145a1de7, sha 402ad986a961a963b7c112692cce2c76caa48b90), test_mcp_jobs.py (commit 1eeefb6f058581d1e5d9e8aa9403ae2ed45ab18f, sha 166f321105b4a61f2f5057cb7a05c444eddb028a), telegram_utils.py (commit 7e1e28c52be33c1d0e956b47753707e36df71ba9, sha af8fd87405ac0736998f84c7f9c7b4508ce75af2, match exato no primeiro envio apesar de 125949 bytes), hermes_core_logic.py (commit 7174571086bde0aabca63aa609dbc5269dae258e, sha ed76b25562dd7384faf4890ed1611097d56c641d -- ver decisão p02-sub9-hash-whitespace-hermes-core-logic para a única divergência, cosmética, do arquivo de trabalho local)."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: o teto de 200000 caracteres do Argos em hermes_core_logic.py (pendência registrada nos blocos das sub-entregas 6/N e 8/N) -- extração autorizada por André, arquivo original agora com 3136 linhas / ~14KB de reexport contra os 154KB originais, telegram_utils.py concentra o restante em 125949 bytes, ambos dentro do limite."
+  - "Passo 1 do plano segue PARCIALMENTE aberto: mcp_jobs.py agora constrói Principal e passa pelo preflight; outbox_aprovacao.py e revisao_semanal.py continuam sem construir Principal nenhum, por decisão deliberada de escopo (ver p02-sub9-escopo-outbox-revisao-nao-religados), não por esquecimento. Telegram (hermes_core_logic.py/telegram_utils.py) também continua sem construir Principal."
+  - "Novo, não-bloqueante: risco latente de bare-name-resolution para _send_telegram_message_with_keyboard, _send_telegram_message e generate_content_logged (chamadas internas dentro de telegram_utils.py, hoje sem nenhum teste que as exercite nessa profundidade) documentado mas não coberto por teste -- endereçar se/quando um teste futuro tentar mockar um desses três via hermes_core_logic.<nome>."
+  - "Novo, não-bloqueante: o commit de hermes_core_logic.py tem 12 linhas em branco sem os espaços em branco à direita que o arquivo de trabalho local tem -- puramente cosmético, sem efeito de comportamento, caracterizado e verificado por hash previsto batendo exatamente (ver decisão p02-sub9-hash-whitespace-hermes-core-logic)."
+  - "Oportunidade não solicitada, só registrada: com o teto de 200000 caracteres resolvido, hermes_core_logic.py::schedule_whatsapp_message (a função original, não a closure de mesmo nome dentro de _process_telegram_message) volta a ser candidata a religar em decisao_piso() -- tentativa que a sub-entrega 6/N teve que reverter justamente por causa do teto agora resolvido. Não iniciado nesta sub-entrega; vale levar a André."
+  - "Todas as pendências já registradas nos blocos das sub-entregas 1/N a 8/N que não foram tocadas por esta sub-entrega continuam abertas: duplicação entre autonomy/policy.py::decisao_piso() e mcp_server.py::_decisao_piso_mcp, decisao_piso()/avaliar() não protegida contra principal malformado, validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP, Mandato.classes_conteudo_permitidas texto livre sem enum fechado, Mandato.usos_na_janela_atual e Mandato.orcamento_maximo sem wrapper de I/O real, o bug de tipo em autonomy/policy.py::preparar_politica, a pergunta de design sobre o default de origem_humana (levar ao André só ao fim do pacote inteiro)."
+proximo_pacote: "P02 (sub-entrega 10/N -- candidata a decidir: religar hermes_core_logic.py::schedule_whatsapp_message a decisao_piso() agora que o teto de 200000 caracteres está resolvido, ou continuar o passo 1 do plano nos canais ainda sem Principal (Telegram, outbox_aprovacao.py, revisao_semanal.py). Trabalho autônomo pausado ao final desta sub-entrega para atender a um pedido explícito de André: investigação da integração sistema-decisao-investimentos/Hermes (Bloco 1, Parte B) -- abrir PR retroativa para o branch codex/d5-registry-contact-number (já em produção sem PR) e verificar se existe MCP tool expondo POST /carteira/confirmar."
+```
