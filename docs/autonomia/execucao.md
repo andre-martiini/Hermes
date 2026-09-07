@@ -354,3 +354,67 @@ pendencias:
   - "P01 segue em aberto: mcp_jobs.py (passos 5-6), firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados."
 proximo_pacote: "P01 (sub-entrega 4/N)"
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 9922fd6f29cfc7f5fba9a5b854379f3ff2db82f2
+pacote: "P01 (sub-entrega 4/N — mcp_jobs.py)"
+# Continuação da divisão do pacote "G" P01 (seção 8 do plano). Cobre os
+# passos 5-6 (achado A10) em functions/mcp_jobs.py — execução assíncrona das
+# tools longas do canal MCP via gatilho Firestore. PR #189, empilhada sobre
+# claude/p01-agent-requests-idempotencia (PR #188, ainda pronto_para_revisao).
+# Sem espera de 90 minutos em relação às sub-entregas anteriores: mesmo
+# pacote "G", decisão já registrada nos blocos anteriores.
+estado: pronto_para_revisao
+inicio: "2026-09-07T04:20:00Z"
+fim: "2026-09-07T04:46:00Z"
+arquivos_alterados:
+  - functions/mcp_jobs.py
+  - functions/test_mcp_jobs.py (novo)
+decisoes:
+  - id: p01-a10-mcp-jobs-claim-transacional
+    motivo: "Achado A10, passo 5: on_mcp_job_created (gatilho Firestore, at-least-once) podia rodar a mesma tool duas vezes numa reentrega do evento, porque a checagem de status usava o snapshot do próprio evento (potencialmente desatualizado) em vez de uma leitura fresca. Corrigido com _claim(db, ref): leitura+escrita transacional (@firestore.transactional) que só deixa UMA execução prosseguir por job, usando o campo status como sentinela (processing → em_execucao). Mesma ideia de core/idempotency.py (sub-entregas 3/N-3.2/N), adaptada: aqui é claim de execução de um job interno, não deduplicação por chave externa de webhook."
+    autoridade: existente_ou_nova
+  - id: p01-a10-mcp-jobs-classificacao-erro-resultado
+    motivo: "Achado A10, passo 6: o resultado da tool era gravado como done sempre que execute() retornava sem lançar exceção, mesmo quando o próprio resultado indicava erro (dict com chave 'erro' truthy, ou string começando com 'ERRO|'/'⚠️' — convenção já usada no caminho síncrono de mcp_server.py, não inventada aqui). Corrigido com _resultado_indica_erro(), que classifica como error em vez de done nesse caso — sem isso ler_job devolvia um 'sucesso' que não era, contrariando o critério de aceite do plano ('não há falso done quando handler relata erro')."
+    autoridade: existente_ou_nova
+  - id: p01-a10-mcp-jobs-expira-em-datetime
+    motivo: "Achado A10: expira_em era gravado como inteiro Unix (int(time.time()) + TTL), que o TTL do Firestore não reconhece (precisa Timestamp/datetime, não número). Corrigido nos dois pontos de escrita (_claim, ao marcar claim abandonado como error; _executar_job, nos caminhos done e error) para datetime timezone-aware."
+    autoridade: existente_ou_nova
+  - id: p01-a10-mcp-jobs-claim-abandonado-sem-retry-automatico
+    motivo: "Instrução explícita do plano (P01 passo 6): handler cujo efeito pode não ser idempotente não deve ser retentado automaticamente. Um claim em em_execucao mais velho que CLAIM_EXPIRA_APOS (600s) é tratado como abandonado (execução anterior morreu sem concluir — crash, timeout) e marcado error, nunca reprocessado automaticamente pela tentativa que encontrou o claim vencido; decisão de tentar de novo fica manual. CLAIM_EXPIRA_APOS (600s) deliberadamente excede o timeout_sec do gatilho (540s): o Cloud Functions mata a execução com segurança nessa marca, então qualquer execução ainda 'em andamento' aos 600s já foi encerrada à força pela plataforma — não é margem arbitrária, é garantia."
+    autoridade: existente_ou_nova
+  - id: p01-a10-mcp-jobs-timeout-e-claim-mesma-constante
+    motivo: "Achado da revisão adversarial: CLAIM_EXPIRA_APOS e o timeout_sec do gatilho eram dois números soltos sem vínculo no código — uma mudança futura em um sem atualizar o outro podia quebrar em silêncio a garantia de segurança (600 > 540) descrita na decisão anterior. Corrigido antes de publicar: os dois agora derivam de uma única constante _TIMEOUT_SEC (540), com uma asserção no import (assert CLAIM_EXPIRA_APOS > timedelta(seconds=_TIMEOUT_SEC)) e um teste dedicado (TestInvarianteClaimVsTimeout) garantindo a relação."
+    autoridade: existente_ou_nova
+  - id: p01-a10-mcp-jobs-ler-job-not-found-restaurado
+    motivo: "Achado da revisão adversarial: a reescrita inicial de ler_job() havia colapsado o status distinto 'not_found' (job inexistente ou de outro uid — mesma resposta para os dois, para não vazar existência a quem está adivinhando job_id) em 'error' genérico, e removido a guarda de job_id vazio que existia no código original. Nenhum caller de produção (só tools/hermes_tools.py::_consultar_job, um passthrough puro para a tool MCP) fazia match exaustivo nesse valor, mas era uma mudança de contrato público não solicitada e não documentada — restaurado para bater exatamente com o comportamento pré-existente antes de publicar, não deixado como divergência silenciosa."
+    autoridade: existente_ou_nova
+  - id: p01-a10-mcp-jobs-reaper-fora-de-escopo
+    motivo: "Achado da revisão adversarial, aceito como limitação documentada e não corrigido: a recuperação de um claim abandonado só roda quando uma NOVA entrega do evento do gatilho chega para o mesmo documento — 'at-least-once' garante pelo menos uma entrega bem-sucedida, não uma redisparada por crash. Se a instância que detém o claim morrer sem que o Cloud Functions redispare o evento, o job fica em_execucao indefinidamente (ler_job reporta 'processing' para sempre; expira_em só é gravado nos caminhos terminais, então o TTL do Firestore também não recupera esse caso). Resolver isso de verdade exigiria uma função agendada (reaper) varrendo em_execucao vencidos — fora do escopo do achado A10 tal como descrito no plano (dedupe de reentrega e classificação de erro), registrado aqui como candidato a pacote futuro, não como bug desta sub-entrega. Estritamente melhor que o código anterior, que não tinha proteção nenhuma contra reexecução por reentrega."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest test_mcp_jobs -v"
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "test_mcp_jobs (novo arquivo): 32/32 — claim ganho/recusado/concorrente, claim expirado marca error sem reprocessar, claim sem claimed_em tratado como abandonado, invariante CLAIM_EXPIRA_APOS > _TIMEOUT_SEC, classificação de erro (dict/string/exceção), truncamento de resultado grande, contrato de ler_job (not_found/processing/done/error, uid errado, job_id vazio), e o wrapper on_mcp_job_created em si (event.data None/inexistente, execução normal, reentrega de job já em_execucao não roda a tool de novo)"
+    - "Python (unittest, suíte completa): 1207/1207 passando (1175 anteriores + 32 novos; 0 regressões)"
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio da implementação): leu mcp_jobs.py, test_mcp_jobs.py e mcp_server.py (para comparar a convenção de classificação de erro), rastreou o protocolo real de transação/retry no código-fonte instalado de google.cloud.firestore_v1 (confirmou que uma transação concorrente perdedora recebe Aborted e é retentada pelo wrapper real, relendo estado fresco), e rodou a suíte de testes. Achados reais, todos endereçados antes de publicar (ver decisões p01-a10-mcp-jobs-timeout-e-claim-mesma-constante e p01-a10-mcp-jobs-ler-job-not-found-restaurado) ou aceitos e documentados explicitamente como fora de escopo (ver decisão p01-a10-mcp-jobs-reaper-fora-de-escopo, e a nota sobre o campo erro ser sempre string — já era o contrato antes desta sub-entrega, só estendido ao novo caminho de resultado-que-indica-erro)."
+  - "Achados de qualidade de teste da própria revisão, também endereçados: o mock de transação original não cobria claimed_em ausente/tipo inesperado (adicionado test_claim_em_execucao_sem_claimed_em_e_tratado_como_abandonado) e o wrapper decorado on_mcp_job_created não tinha nenhuma cobertura direta (adicionado TestOnMcpJobCreated, chamando .__wrapped__ para contornar a exigência de CloudEvent bruto do decorator do firebase-functions — nenhum outro trigger do repositório testa essa camada decorada, então isto é cobertura nova, não um padrão quebrado)."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "Limitação aceita, não corrigida (ver decisão p01-a10-mcp-jobs-reaper-fora-de-escopo): sem uma função agendada (reaper), um claim cuja instância morre sem o Cloud Functions redisparar o evento fica em_execucao indefinidamente. Candidato a P04 (durabilidade de execução) ou sub-entrega dedicada, não bloqueia esta entrega."
+  - "Mesmo bloqueio já registrado nas sub-entregas 3/N-3.2/N: functions/main.py e functions/test_github_webhook.py seguem sem publicar (limite de 200k caracteres do Argos)."
+  - "IMPORTANTE PARA DECISÃO DE MERGE (já registrada na sub-entrega 3.2/N, segue valendo): mesclar a PR #188 antes de main.py ser desbloqueado muda o comportamento de produção da deduplicação de webhook — ver pendência completa no bloco da sub-entrega 3.2/N. Não afeta diretamente esta PR #189 (mcp_jobs.py é um módulo independente, sem chamador em main.py), mas ambas as PRs seguem empilhadas na mesma cadeia e a decisão de merge de uma pode afetar a ordem de merge da outra."
+  - "P01 segue em aberto: firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados."
+proximo_pacote: "P01 (sub-entrega 5/N ou conclusão dos passos 7-10)"
+```
