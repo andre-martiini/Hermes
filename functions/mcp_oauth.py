@@ -174,6 +174,19 @@ def _erro_oauth(codigo: str, descricao: str, status: int = 400) -> https_fn.Resp
     return _json({"error": codigo, "error_description": descricao}, status=status)
 
 
+def _log_seguro(valor: object, *, max_len: int = 200) -> str:
+    """Sanitiza um valor antes de ir para uma linha de log de rota nao autenticada.
+
+    `/oauth/token` aceita corpo de qualquer chamador, sem autenticacao previa.
+    Sem isto, um `client_id` ou `grant_type` forjado com quebra de linha
+    poderia injetar linhas de log falsas no Cloud Logging — exatamente o tipo
+    de coisa que confundiria a proxima investigacao, que e a razao de este
+    log existir. Trunca tambem por volume, nao so por seguranca.
+    """
+    texto = "".join(c if c.isprintable() else "?" for c in str(valor))
+    return texto[:max_len]
+
+
 # --------------------------------------------------------------------------
 # Tokens
 # --------------------------------------------------------------------------
@@ -552,7 +565,11 @@ def _handle_token(req: https_fn.Request) -> https_fn.Response:
     # So grant_type e client_id — nunca code, verifier, refresh_token ou o
     # token emitido. Existe para responder, sem abrir o Firestore, "chegou a
     # tentar trocar o token, e com que grant?" ao investigar um cliente novo.
-    print(f"[mcp_oauth] /oauth/token pedido: grant_type={grant} client_id={client_id}")
+    # Os dois valores vem de um corpo nao autenticado, entao passam por
+    # `_log_seguro` antes de ir para o log (ver docstring de `_log_seguro`).
+    grant_log = _log_seguro(grant)
+    client_id_log = _log_seguro(client_id)
+    print(f"[mcp_oauth] /oauth/token pedido: grant_type={grant_log} client_id={client_id_log}")
 
     if grant == "authorization_code":
         resp = _token_por_codigo(dados, client_id)
@@ -561,11 +578,18 @@ def _handle_token(req: https_fn.Request) -> https_fn.Response:
     else:
         resp = _erro_oauth("unsupported_grant_type", f"grant_type nao suportado: {grant}")
 
-    print(f"[mcp_oauth] /oauth/token resultado: grant_type={grant} status={resp.status_code}")
+    print(f"[mcp_oauth] /oauth/token resultado: grant_type={grant_log} client_id={client_id_log} status={resp.status_code}")
     return resp
 
 
 def _resposta_token(uid: str, client_id: str, scope: str, resource: str) -> https_fn.Response:
+    # `scope` e `resource` nao sao segredo (sao o que o cliente pediu no
+    # `/oauth/authorize`, visivel na propria URL de autorizacao); logar os
+    # dois aqui, no unico caminho de sucesso, deixa verificavel se um cliente
+    # esta de fato recebendo o `resource`/`aud` esperado — util para
+    # investigar hipoteses de audiencia sem abrir excecao ao "nunca logar
+    # segredo": nenhum dos dois valores concede acesso por si so.
+    print(f"[mcp_oauth] /oauth/token emitido: scope={_log_seguro(scope)} resource={_log_seguro(resource)}")
     return _json({
         "access_token": emitir_access_token(uid, client_id, scope, resource),
         "token_type": "Bearer",
