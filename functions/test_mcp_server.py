@@ -307,5 +307,68 @@ class TestPisoSemHookNaoBurlaConfirmacaoComConfirmedTrue(unittest.TestCase):
         self.assertFalse(resultado.get("isError", False))
 
 
+class TestFerramentasDePoliticaViaMcp(unittest.TestCase):
+    """P02 sub-entrega 3/N: consultar_politica/simular_politica/preparar_politica
+    não estão em `CLASSE_EFEITO_PISO` nem em `confirm_tools` por padrão —
+    `_exige_confirmacao` é `False` para as três, então passam direto pelo
+    fluxo genérico de execução deste método (`execute_tool`), sem preflight
+    de política nem prévia de confirmação.
+
+    Achado da revisão adversarial desta sub-entrega: as duas respostas de
+    erro mais comuns dessas tools (lote de `simular_politica` com pedido
+    inválido; `preparar_politica` com `base_version` desatualizada — a
+    salvaguarda central da tool) eram serializadas como uma string JSON
+    plana, sem o prefixo `ERRO|` que `_looks_like_error` reconhece — o
+    protocolo MCP via `isError` reportava sucesso para uma chamada que, na
+    prática, não fez o que foi pedido. Os testes abaixo provam a correção
+    no ponto onde um cliente MCP real observaria a diferença: o `isError`
+    devolvido por `_handle_tools_call`, não só o texto interno da resposta.
+    """
+
+    def _params(self, nome, argumentos=None):
+        return {"name": nome, "arguments": argumentos or {}}
+
+    def test_simular_politica_lote_invalido_marca_iserror(self):
+        ctx = _ctx()
+        resultado = mcp_server._handle_tools_call(
+            self._params("simular_politica", {"pedidos": [
+                {"ferramenta": "tool_sem_classe_efeito_conhecida"},
+            ]}),
+            ctx=ctx,
+        )
+        self.assertTrue(resultado.get("isError"))
+        self.assertIn("pedidos_invalidos", resultado["content"][0]["text"])
+
+    def test_simular_politica_lote_valido_nao_marca_iserror(self):
+        ctx = _ctx()
+        resultado = mcp_server._handle_tools_call(
+            self._params("simular_politica", {"pedidos": [
+                {"ferramenta": "pausar_conversa"},
+            ]}),
+            ctx=ctx,
+        )
+        self.assertFalse(resultado.get("isError", False))
+
+    def test_preparar_politica_versao_base_errada_marca_iserror(self):
+        ctx = _ctx()
+        resultado = mcp_server._handle_tools_call(
+            self._params("preparar_politica", {"politica_proposta": {}, "base_version": 999}),
+            ctx=ctx,
+        )
+        self.assertTrue(resultado.get("isError"))
+        self.assertIn("não bate", resultado["content"][0]["text"])
+
+    def test_preparar_politica_valida_nao_marca_iserror(self):
+        ctx = _ctx()
+        resultado = mcp_server._handle_tools_call(
+            self._params("preparar_politica", {
+                "politica_proposta": {},
+                "base_version": mcp_server.autonomy_policy._POLICY_VERSION_PADRAO,
+            }),
+            ctx=ctx,
+        )
+        self.assertFalse(resultado.get("isError", False))
+
+
 if __name__ == "__main__":
     unittest.main()
