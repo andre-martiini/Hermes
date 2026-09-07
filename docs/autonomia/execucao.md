@@ -327,3 +327,71 @@ pendencias:
   - "Todas as pendências já registradas no bloco da sub-entrega 1/N que não foram tocadas nesta sub-entrega continuam abertas: orcamento_restante não lido, Mandato.classes_conteudo_permitidas ainda é texto livre sem enum fechado, Mandato.usos_na_janela_atual sem wrapper de I/O real, canais além de MCP (web/Telegram/voz) não consultam autonomy.policy."
 proximo_pacote: "P02 (sub-entrega 3/N — candidata: passo 7 do plano, expor consultar_politica/simular_politica/preparar_politica de autonomy/policy.py como tools MCP, reaproveitando as funções puras já existentes e testadas)"
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 0e332f0c7aaacba09927ba0eccf37e743fcd28c0
+pacote: "P02 (sub-entrega 3/N — tools MCP de política: consultar/simular/preparar)"
+# Continuação de P02 (pacote "G", seção 8 do plano). Cobre o passo 7
+# ("expor consultar_politica/simular_politica/preparar_politica como tools
+# MCP"), a candidata de menor risco identificada no bloco da sub-entrega 2/N:
+# as três funções já existiam PURAS e testadas em autonomy/policy.py desde a
+# sub-entrega 1/N (test_policy.py), sem nenhum canal expô-las. Esta
+# sub-entrega adiciona só wrappers finos em tools/hermes_tools.py (parsing de
+# args, validação de forma, tradução de erro para a convenção ERRO| do
+# arquivo) — nenhuma lógica de decisão nova, o motor de autonomy/policy.py
+# não foi alterado.
+estado: pronto_para_revisao
+# Estados: nao_iniciado, em_execucao, pronto_para_revisao,
+# validado, publicado, ativo, bloqueado, opt_in
+inicio: "2026-09-07T16:20:00Z"
+fim: "2026-09-07T17:05:00Z"
+arquivos_alterados:
+  - functions/tools/registry.py
+  - functions/tools/hermes_tools.py
+  - functions/tools/schemas/consultar_politica.json (novo)
+  - functions/tools/schemas/simular_politica.json (novo)
+  - functions/tools/schemas/preparar_politica.json (novo)
+  - functions/test_hermes_tools.py
+  - functions/test_mcp_server.py
+  - docs/autonomia/execucao.md
+decisoes:
+  - id: p02-sub3-wrappers-finos-sobre-motor-puro
+    motivo: "consultar_politica/simular_politica/preparar_politica em tools/hermes_tools.py são wrappers finos: consultar e simular são leitura pura (nenhum toca ctx.db — provado em test_nenhum_toca_firestore_sem_precisar), preparar só calcula um diff e nunca persiste (mesmo contrato já documentado na docstring de autonomy.policy.preparar_politica desde a sub-entrega 1/N). simular_politica constrói um Principal/PolicyRequest HIPOTÉTICO inteiramente a partir do que o chamador declarou no pedido — diferente de mcp_server._principal_mcp (sub-entrega 2/N), que reflete o principal REAL do canal autenticado — porque o propósito da tool é justamente explorar cenários de outros tipos de principal (rotina_cowork, runner_servico, ...), não só o do canal MCP atual."
+    autoridade: existente_ou_nova
+  - id: p02-sub3-achado-adversarial-bool-coercao-origem-humana
+    motivo: "Achado real da revisão adversarial, verificado por reprodução direta antes de aceitar: bool(\"false\") é True em Python (truthiness de string não vazia, não parsing de JSON) — um pedido de simular_politica com origem_humana=\"false\" (erro plausível de um cliente MCP montando o JSON à mão, já que o schema declara boolean mas nada impede o cliente de mandar string) inverteria SILENCIOSAMENTE o resultado da simulação: reproduzido com origem_humana=\"false\" (string) => decision=allow, e o mesmo pedido com origem_humana=False (bool) => decision=prepare_only. É o oposto exato do que a tool existe para evitar (mostrar o efeito real de um cenário antes de propô-lo de verdade). Corrigido em _principal_simulado: origem_humana que não é None nem bool levanta ValueError explícito em vez de ser coagido por bool(...)."
+    autoridade: existente_ou_nova
+  - id: p02-sub3-achado-adversarial-string-iterada-como-lista
+    motivo: "Achado real da revisão adversarial: autonomy.policy.preparar_politica() faz set(politica_proposta.get(\"ferramentas_com_confirmacao_obrigatoria\", atual)) sem checar o tipo — uma STRING passada em vez de lista (erro plausível: \"ferramentas_com_confirmacao_obrigatoria\": \"pausar_conversa\" em vez de [...]) é iterada caractere por caractere pelo set(), e o diff resultante (\"remover as 5 tools reais do piso, adicionar um bando de letras soltas\") sai como se fosse válido — exatamente no único tool cujo propósito é proteger o piso de confirmação obrigatória de uma mudança não revisada. A função pura em si NÃO foi alterada (fora do escopo desta sub-entrega mexer no motor — ver pendências abaixo); a validação de forma (lista de strings) foi adicionada em _preparar_politica, ANTES de chamar o motor puro, então o bug de tipo do motor continua latente mas inalcançável por este caminho de entrada."
+    autoridade: existente_ou_nova
+  - id: p02-sub3-achado-adversarial-iserror-nao-marcado
+    motivo: "Achado real da revisão adversarial, o mais sério dos quatro por afetar o SINAL do protocolo, não só o conteúdo: tanto o lote inválido de simular_politica quanto a base_version desatualizada de preparar_politica (a salvaguarda central da tool, o que impede sobrescrever uma proposta concorrente não vista) retornavam um json.dumps(...) — uma STRING contendo uma chave \"erro\" dentro — mas mcp_server._handle_tools_call só deriva isError=True de um dict com .get(\"erro\"), ou de uma string com o prefixo ERRO| (via _looks_like_error). Uma string JSON com \"erro\" dentro não bate em nenhum dos dois mecanismos: o payload virava uma resposta \"bem-sucedida\" do ponto de vista do protocolo MCP, para uma chamada que na prática não fez o que foi pedido. Corrigido prefixando ambas as respostas com ERRO| (mantendo o payload estruturado, ex. pedidos_invalidos, depois do prefixo). Testado em dois níveis: no wrapper (test_hermes_tools.py, checando o prefixo na string) e no dispatch real (test_mcp_server.py::TestFerramentasDePoliticaViaMcp, checando isError em _handle_tools_call — o ponto onde um cliente MCP de verdade observaria a diferença, por recomendação explícita do próprio revisor)."
+    autoridade: existente_ou_nova
+  - id: p02-sub3-achado-adversarial-typeerror-argumentos-resolvidos
+    motivo: "Achado real da revisão adversarial: argumentos_resolvidos (campo livre do pedido de simular_politica, usado só para registro/hash, não validado) quando não-mapeável (ex.: um inteiro) fazia dict(argumentos_resolvidos) levantar TypeError — não capturado pelo except (ValueError, KeyError) original do laço que processa cada pedido do lote, escapando cru até hermes_tools.execute() em vez de virar um erro por índice como os demais campos inválidos do mesmo pedido. Corrigido com checagem de isinstance(..., dict) explícita em _policy_request_simulado, mais TypeError adicionado ao except do laço como defesa em profundidade."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+    - "cd functions && venv/bin/python -m unittest test_policy test_contracts test_mcp_server test_hermes_tools test_mcp_oauth -v"
+  resultados:
+    - "Python (unittest, suíte completa): 1280/1280 passando (1261 anteriores da sub-entrega 2/N + 19 testes novos: 15 em TestFerramentasDePolitica — test_hermes_tools.py — e 4 em TestFerramentasDePoliticaViaMcp — test_mcp_server.py, contagem conferida por AST, não de memória; 0 regressões)"
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio da implementação, instruído a rodar a suíte real e reproduzir achados com execução de código, não só inspeção): encontrou os 4 achados reais listados acima, todos verificados contra o conteúdo real dos arquivos antes de aceitar (achado #1 reproduzido com origem_humana=\"false\" vs False produzindo decisões diferentes para o mesmo pedido)."
+  - "PR #192 (https://github.com/andre-martiini/Hermes/pull/192) — mesma PR aberta desde a sub-entrega 1/N (branch claude/p02-autonomy-policy-contracts); commits desta sub-entrega adicionados ao mesmo branch. Comentário https://github.com/andre-martiini/Hermes/pull/192#issuecomment-5573743251 documenta esta sub-entrega (os 4 achados, arquivos alterados, contagem de testes); @codex review pedido novamente ao final."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "O bug de tipo em autonomy/policy.py::preparar_politica (set() iterando string caractere por caractere quando ferramentas_com_confirmacao_obrigatoria não é lista — achado adversarial #2 acima) foi CONTORNADO na wrapper (_preparar_politica valida a forma antes de chamar o motor), NÃO corrigido na função pura — o motor em si continua aceitando o mesmo input malformado se chamado diretamente (ex.: de um teste, ou de um futuro segundo chamador que não passe pela wrapper). Corrigir a função pura fica para quando autonomy/policy.py for revisitado por outro motivo, para não misturar escopo."
+  - "P02 segue MATERIALMENTE em aberto — dos passos 1-9 do plano (seção 'Unificar identidade e política de autonomia'), esta sub-entrega fecha o passo 7. Ainda não endereçados: passo 1 (taxonomia completa de principals span todos os canais — só o canal MCP tem _principal_mcp desde a sub-entrega 2/N; tools/tool_context.py, mcp_oauth.py, web, Telegram e voz seguem sem o modelo de identidade unificado), passo 2 (evolução de claims/scopes OAuth com validação de issuer/audience/subject/expiração/cliente), passo 3 (vínculo autenticado executor→capacidades), passo 8 (revalidar versão, revogação, escopo E ORÇAMENTO no despacho — orcamento_restante existe no contrato desde a sub-entrega 1/N mas não é lido em lugar nenhum, nem pelas tools novas desta sub-entrega — simular_politica aceita orcamento_restante no pedido só para repassar ao motor, que já o ignora)."
+  - "Decisão de design a levar ao André quando o PACOTE P02 inteiro estiver completo (não antes — mantido das sub-entregas 1/N e 2/N, ainda não é hora): o gate de origem_humana nos defaults da matriz PREPARACAO_INTERNA/ESCRITA_INTERNA_REVERSIVEL (rodadas 3 e 5 do Codex, exige também eh_dono()) — a pergunta de fundo ainda vale: origem_humana deveria mesmo ter default True no contrato? Esta sub-entrega não muda essa resposta (simular_politica expõe o campo para o CHAMADOR declarar explicitamente por tipo de principal simulado, mas não altera o default do dataclass Principal em si)."
+  - "Todas as pendências já registradas nos blocos das sub-entregas 1/N e 2/N que não foram tocadas nesta sub-entrega continuam abertas: Mandato.classes_conteudo_permitidas ainda é texto livre sem enum fechado, Mandato.usos_na_janela_atual sem wrapper de I/O real, canais além de MCP (web/Telegram/voz) não consultam autonomy.policy, o mesmo padrão de gap de confirmação sem hook para tools configuráveis só por system/mcp_access.confirm_tools (fora do piso hardcoded) segue teoricamente possível."
+proximo_pacote: "P02 (sub-entrega 4/N — candidata a decidir: passo 1, taxonomia de principals nos demais canais, ou passo 8, leitura de orcamento_restante no despacho)"
+```
