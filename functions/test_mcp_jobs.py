@@ -17,14 +17,22 @@ Cobre o achado do plano de autonomia (P01 passo 5-6, achado A10):
 5. `ler_job` preserva o contrato público de três valores (`processing` /
    `done` / `error`) mesmo com o novo estado interno `em_execucao`.
 
-Cobre também o achado do Codex na PR #189 (P1): encontrar um claim
-`em_execucao` ainda dentro de `CLAIM_EXPIRA_APOS` deve LEVANTAR
+Cobre também o achado do Codex na PR #189 (P1, primeira rodada): encontrar
+um claim `em_execucao` ainda dentro de `CLAIM_EXPIRA_APOS` deve LEVANTAR
 `ClaimAindaValidoError`, não devolver None em silêncio — devolver None
 silenciosamente faria `on_mcp_job_created` retornar normalmente, e o Cloud
 Functions registraria essa invocação como bem-sucedida mesmo que a tool
 nunca tenha rodado para aquele job (ver docstring de `mcp_jobs.py` para o
 cenário completo: commit ambíguo do claim + entrega duplicada do Pub/Sub
 chegando enquanto o claim ainda parece válido).
+
+Cobre também o achado do Codex na PR #189 (P1, segunda rodada, "Add
+recovery instead of only raising for orphaned claims"): levantar sozinho
+não RECUPERA o job — `ler_job` agora reexecuta a mesma checagem de claim
+vencido (`_reaproveitar_claim_vencido_na_leitura`) a cada consulta, para
+que a própria chamada em loop que o protocolo do canal MCP já faz o
+cliente executar feche a lacuna sem depender de uma entrega duplicada
+tardia (não garantida) nem de uma função agendada nova.
 """
 
 from __future__ import annotations
@@ -266,6 +274,78 @@ class TestClaim(unittest.TestCase):
         self.assertEqual(self.col._docs["job-7"]["status"], mcp_jobs.STATUS_ERROR)
 
 
+class TestReaproveitarClaimVencidoNaLeitura(unittest.TestCase):
+    """Testes de _reaproveitar_claim_vencido_na_leitura em isolamento (mesmo
+    estilo de TestClaim para _claim) — achado do Codex na PR #189, segunda
+    rodada: ler_job precisa recuperar um claim vencido, não só reportar
+    'processing' para sempre enquanto ninguém mais entrega o evento."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.col = self.db.collection(mcp_jobs.COLECAO)
+
+    def test_claim_vencido_marca_error_e_devolve_dados_atualizados(self):
+        agora = datetime.now(timezone.utc)
+        self.col._docs["job-r1"] = _job_basico(
+            status=mcp_jobs.STATUS_EM_EXECUCAO,
+            claimed_em=agora - mcp_jobs.CLAIM_EXPIRA_APOS - timedelta(seconds=1),
+        )
+        ref = self.col.document("job-r1")
+
+        resultado = mcp_jobs._reaproveitar_claim_vencido_na_leitura(self.db, ref)
+
+        self.assertIsNotNone(resultado)
+        self.assertEqual(resultado["status"], mcp_jobs.STATUS_ERROR)
+        self.assertIn("abandonada", resultado["erro"])
+        doc = self.col._docs["job-r1"]
+        self.assertEqual(doc["status"], mcp_jobs.STATUS_ERROR)
+        self.assertIn("abandonada", doc["erro"])
+        self.assertIsInstance(doc["expira_em"], datetime)
+
+    def test_claim_jovem_nao_altera_documento(self):
+        agora = datetime.now(timezone.utc)
+        self.col._docs["job-r2"] = _job_basico(
+            status=mcp_jobs.STATUS_EM_EXECUCAO,
+            claimed_em=agora - timedelta(seconds=5),
+        )
+        ref = self.col.document("job-r2")
+        doc_antes = dict(self.col._docs["job-r2"])
+
+        resultado = mcp_jobs._reaproveitar_claim_vencido_na_leitura(self.db, ref)
+
+        self.assertEqual(resultado["status"], mcp_jobs.STATUS_EM_EXECUCAO)
+        self.assertEqual(self.col._docs["job-r2"], doc_antes)
+
+    def test_claim_sem_claimed_em_e_tratado_como_vencido(self):
+        """Mesmo tratamento de _claim para claimed_em ausente/tipo
+        inesperado (legado/corrompido): não trava a leitura para sempre
+        tratando como reserva válida."""
+        self.col._docs["job-r3"] = _job_basico(status=mcp_jobs.STATUS_EM_EXECUCAO)
+        ref = self.col.document("job-r3")
+
+        resultado = mcp_jobs._reaproveitar_claim_vencido_na_leitura(self.db, ref)
+
+        self.assertEqual(resultado["status"], mcp_jobs.STATUS_ERROR)
+        self.assertEqual(self.col._docs["job-r3"]["status"], mcp_jobs.STATUS_ERROR)
+
+    def test_status_ja_resolvido_entre_a_leitura_de_ler_job_e_esta_chamada_nao_altera(self):
+        """Simula a corrida que a própria docstring da função descreve:
+        entre a leitura inicial de ler_job e esta chamada, outra coisa (uma
+        execução legítima concluindo) já resolveu o job — não deve
+        sobrescrever."""
+        self.col._docs["job-r4"] = _job_basico(status=mcp_jobs.STATUS_DONE, resultado="ok")
+        ref = self.col.document("job-r4")
+
+        resultado = mcp_jobs._reaproveitar_claim_vencido_na_leitura(self.db, ref)
+
+        self.assertEqual(resultado["status"], mcp_jobs.STATUS_DONE)
+        self.assertEqual(self.col._docs["job-r4"]["status"], mcp_jobs.STATUS_DONE)
+
+    def test_documento_inexistente_devolve_none(self):
+        ref = self.col.document("job-fantasma")
+        self.assertIsNone(mcp_jobs._reaproveitar_claim_vencido_na_leitura(self.db, ref))
+
+
 class TestInvarianteClaimVsTimeout(unittest.TestCase):
     def test_claim_expira_apos_excede_timeout_do_gatilho(self):
         """CLAIM_EXPIRA_APOS precisa ser estritamente maior que o timeout_sec
@@ -453,10 +533,40 @@ class TestLerJob(unittest.TestCase):
 
     def test_status_em_execucao_normaliza_para_processing(self):
         """Contrato público preservado: em_execucao (estado interno) deve
-        aparecer como 'processing' para quem consulta de fora."""
-        self.col._docs["job-w"] = _job_basico(status=mcp_jobs.STATUS_EM_EXECUCAO)
+        aparecer como 'processing' para quem consulta de fora — enquanto o
+        claim ainda for jovem. Um claim sem claimed_em válido, ou vencido,
+        é reaproveitado por ler_job e vira 'error' (ver
+        test_status_em_execucao_com_claim_vencido_e_reaproveitado_e_reporta_error
+        logo abaixo, e TestReaproveitarClaimVencidoNaLeitura para os testes
+        unitários da função interna), então este teste usa um claimed_em
+        recente para exercitar especificamente o caminho de normalização,
+        não o de reaproveitamento."""
+        agora = datetime.now(timezone.utc)
+        self.col._docs["job-w"] = _job_basico(
+            status=mcp_jobs.STATUS_EM_EXECUCAO, claimed_em=agora
+        )
         resultado = mcp_jobs.ler_job("user-1", "job-w")
         self.assertEqual(resultado["status"], "processing")
+        # Claim jovem: ler_job não deve ter alterado o documento.
+        self.assertEqual(self.col._docs["job-w"]["status"], mcp_jobs.STATUS_EM_EXECUCAO)
+
+    def test_status_em_execucao_com_claim_vencido_e_reaproveitado_e_reporta_error(self):
+        """Ponto central do achado do Codex na PR #189 (segunda rodada):
+        um claim vencido não fica 'processing' para sempre esperando uma
+        entrega duplicada tardia — a própria chamada a ler_job (que o
+        protocolo do canal MCP já instrui o cliente a repetir em loop)
+        recupera o job, reportando 'error' em vez de 'processing'."""
+        agora = datetime.now(timezone.utc)
+        self.col._docs["job-vencido"] = _job_basico(
+            status=mcp_jobs.STATUS_EM_EXECUCAO,
+            claimed_em=agora - mcp_jobs.CLAIM_EXPIRA_APOS - timedelta(seconds=1),
+        )
+
+        resultado = mcp_jobs.ler_job("user-1", "job-vencido")
+
+        self.assertEqual(resultado["status"], "error")
+        self.assertIn("abandonada", resultado["erro"])
+        self.assertEqual(self.col._docs["job-vencido"]["status"], mcp_jobs.STATUS_ERROR)
 
     def test_status_done_traz_resultado(self):
         self.col._docs["job-d"] = _job_basico(status=mcp_jobs.STATUS_DONE, resultado="pronto")
