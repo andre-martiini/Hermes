@@ -139,6 +139,12 @@ _CATALOG: dict[str, str] = {
     "ativar_modo_secretario": "Ativa o Modo Secretário no WhatsApp com contatos autorizados e duração opcional",
     "desativar_modo_secretario": "Desativa imediatamente o Modo Secretário no WhatsApp",
     "consultar_status_modo_secretario": "Consulta o status atual do Modo Secretário (ativo, contatos na allowlist e expiração)",
+    # Motor de política de autonomia (P02 passo 7, autonomy/policy.py) — leitura
+    # e simulação, nunca aplicação direta: `preparar_politica` só devolve um
+    # diff, nunca persiste nada sozinho.
+    "consultar_politica": "Consulta a política de autonomia vigente para um escopo: permissões, limites, versão e origem",
+    "simular_politica": "Avalia um lote de pedidos hipotéticos contra a política de autonomia, sem aplicar nada",
+    "preparar_politica": "Prepara uma proposta de mudança na política de autonomia contra uma versão base, devolvendo um diff explícito",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {
@@ -244,6 +250,12 @@ _VOICE_EXCLUDED: set[str] = {
     # nao sabe estornar. Consultar por voz continua liberado.
     "registrar_aporte_investimento",
     "registrar_execucao_investimento",
+    # `simular_politica` recebe um lote de pedidos estruturados (cada um com
+    # principal, ferramenta, classe de efeito etc.) — inviável de ditar; e
+    # `preparar_politica` propõe mudança na própria política de confirmação
+    # obrigatória, decisão de dono que voz não deveria facilitar por engano.
+    "simular_politica",
+    "preparar_politica",
 }
 
 _schema_cache: dict[str, dict] = {}
