@@ -7,8 +7,8 @@ roda a tool de verdade em segundo plano e grava o resultado no mesmo
 documento.
 
 Achado do plano de autonomia (P01 passo 5-6, achado A10) — três problemas
-no desenho original, todos corrigidos aqui (mais um quarto, achado do
-Codex na PR #189, ver abaixo):
+no desenho original, todos corrigidos aqui (mais dois achados do Codex na
+PR #189, pontos 4 e 5 abaixo):
 
 1. Reentrega do evento do gatilho podia rodar a MESMA tool duas vezes,
    porque a checagem de status usava o snapshot do próprio evento
@@ -81,6 +81,24 @@ Codex na PR #189, ver abaixo):
    único sinal de um claim genuinamente órfão — dado que hoje esse sinal,
    quando existe, não tem nenhuma outra forma de aparecer (ver "Limitação
    aceita" abaixo).
+5. Achado do Codex na PR #189 (segunda rodada, P1, "Add recovery instead of
+   only raising for orphaned claims"): levantar `ClaimAindaValidoError`
+   (ponto 4) torna a falha visível nos logs, mas sozinho não RECUPERA o
+   job — sem uma entrega duplicada tardia e independente do mesmo evento
+   (não garantida, ver ponto 1), o job continuava `em_execucao` para
+   sempre do ponto de vista de quem consulta via `ler_job`. Corrigido com
+   `_reaproveitar_claim_vencido_na_leitura`: a própria chamada a `ler_job`
+   agora reexecuta a mesma checagem de claim vencido que `_claim` faz, e
+   marca `error` se encontrar um claim `em_execucao` mais velho que
+   `CLAIM_EXPIRA_APOS` — mesma transação, mesmo limiar, mesma garantia de
+   segurança (ver `CLAIM_EXPIRA_APOS` abaixo). Isso funciona sem precisar
+   de uma função agendada (reaper) nova porque o protocolo do canal MCP
+   (ver `mcp_server.py`) já instrui o cliente a chamar `ler_job`
+   repetidamente enquanto o job estiver `processing` — a consulta em loop
+   que já acontece na prática É o mecanismo de recuperação, não uma peça
+   nova de infraestrutura. Ver a limitação aceita (abaixo) para o que
+   ainda não fecha: um job cujo cliente para de consultar antes de o claim
+   vencer.
 
 Reserva de execução (claim) tem sua própria expiração — `CLAIM_EXPIRA_APOS`
 — separada da reserva de idempotência: se uma execução for interrompida sem
@@ -100,26 +118,28 @@ constante (`_TIMEOUT_SEC`) com uma asserção no import garantindo a relação,
 para que uma mudança futura em um não quebre a garantia do outro em
 silêncio.
 
-Limitação aceita (não corrigida aqui, fora do escopo do achado A10): mesmo
-depois da correção do ponto 4, a recuperação de um claim genuinamente
-abandonado ainda depende de uma nova entrega do MESMO evento chegar tarde
-o bastante (depois de `CLAIM_EXPIRA_APOS`) para cair no ramo que marca
-`error` — e não há garantia de que uma entrega assim chegue, já que o
-Pub/Sub não promete reentregas espaçadas no tempo, só "pelo menos uma"
-entrega (que já pode ter acontecido). Sem essa entrega tardia, o job fica
-`em_execucao` indefinidamente (`ler_job` reporta "processing" para sempre;
-`expira_em` só é gravado nos caminhos terminais, então o TTL do Firestore
-também não recupera esse caso) — mas agora pelo menos a tentativa que
-encontrou o claim jovem e recusou prosseguir fica registrada como falha
-visível, em vez de mascarada como sucesso (ver ponto 4). Resolver isso de
-verdade exigiria uma função agendada (reaper) varrendo `em_execucao`
-vencidos, ou o protocolo completo de lease/heartbeat da seção 4.5 do plano
-— ambos fora do escopo deste fix (que resolve o achado A10 tal como
-descrito no plano: dedupe de reentrega e classificação de erro) e mais
-próximos do escopo de P04 (durabilidade de execução), mesmo precedente já
-usado para `agent_requests.py` (achado A01, sub-entrega 3/N). Ainda assim,
-isso é estritamente melhor que o código anterior, que não tinha proteção
-nenhuma contra reexecução por reentrega nem sinalizava o problema.
+Limitação aceita (não corrigida aqui, fora do escopo do achado A10): depois
+da correção do ponto 5, um claim genuinamente abandonado se recupera na
+PRÓXIMA vez que alguém chamar `ler_job` para esse job (ou, como antes, se
+uma entrega duplicada tardia do mesmo evento chegar por acaso) — não
+depende mais só da sorte de uma reentrega tardia. O que ainda não fecha é o
+caso em que NINGUÉM nunca mais consulta esse job_id de novo (cliente MCP
+desistiu, caiu, ou nunca chegou a perguntar) — aí não há nem entrega
+duplicada nem chamada a `ler_job` para acionar a recuperação, e o job fica
+`em_execucao` indefinidamente no Firestore (`expira_em` só é gravado nos
+caminhos terminais, então o TTL também não recupera esse caso; é um
+documento órfão, não um job cujo estado alguém consulta errado). Esse
+resíduo é inofensivo para quem usa o sistema (ninguém está esperando por
+uma resposta que não vai checar) mas continua sem limpeza automática.
+Resolver isso de verdade exigiria uma função agendada (reaper) varrendo
+`em_execucao` vencidos independente de qualquer consulta, ou o protocolo
+completo de lease/heartbeat da seção 4.5 do plano — fora do escopo deste
+fix (que resolve o achado A10 tal como descrito no plano: dedupe de
+reentrega e classificação de erro) e mais próximo do escopo de P04
+(durabilidade de execução), mesmo precedente já usado para
+`agent_requests.py` (achado A01, sub-entrega 3/N). Ainda assim, isso é
+estritamente melhor que a correção do ponto 4 sozinha, que dependia
+inteiramente de uma entrega duplicada tardia e não garantida.
 
 `ler_job` preserva o contrato público original: `not_found` (job
 inexistente ou de outro uid — mesma resposta para os dois casos, para não
@@ -192,13 +212,16 @@ class ClaimAindaValidoError(RuntimeError):
     `FirestoreOptions._endpoint`, não configurável nesta versão da lib —
     ver ponto 1 da docstring do módulo), então uma invocação que levanta
     esta exceção simplesmente falha e fica assim, sem redisparada
-    automática do Cloud Functions. A única forma de este job ainda ser
-    recuperado é uma entrega duplicada independente do mesmo evento (via
-    at-least-once do Pub/Sub, não retry) chegar mais tarde, depois de
-    `CLAIM_EXPIRA_APOS`, caindo no ramo que marca o claim como abandonado —
-    ver a limitação aceita na docstring do módulo. Levantar em vez de
-    engolir não resolve essa limitação de fundo, só impede que ela seja
-    mascarada como sucesso."""
+    automática do Cloud Functions. A recuperação deste job específico
+    depende de outra coisa acontecer depois de `CLAIM_EXPIRA_APOS`: uma
+    entrega duplicada independente do mesmo evento (via at-least-once do
+    Pub/Sub, não retry), OU — desde o ponto 5 da docstring do módulo,
+    achado da segunda rodada do Codex na PR #189 — a próxima chamada a
+    `ler_job` para este job_id, que reexecuta a mesma checagem via
+    `_reaproveitar_claim_vencido_na_leitura`. Ver a limitação aceita na
+    docstring do módulo para o que ainda não fecha (nenhuma das duas coisas
+    acontece). Levantar em vez de engolir não resolve essa limitação de
+    fundo sozinho, só impede que ela seja mascarada como sucesso."""
 
 
 def _db():
@@ -240,7 +263,8 @@ def ler_job(uid, job_id) -> dict:
     if not job_id:
         return {"erro": "job_id obrigatorio.", "status": "not_found"}
 
-    ref = _db().collection(COLECAO).document(str(job_id))
+    db = _db()
+    ref = db.collection(COLECAO).document(str(job_id))
     snap = ref.get()
     if not snap.exists:
         return {"erro": f"Job '{job_id}' nao encontrado.", "status": "not_found"}
@@ -249,6 +273,18 @@ def ler_job(uid, job_id) -> dict:
         # Mesma resposta de inexistente: confirmar que o id existe ja
         # vazaria informacao para quem esta tentando adivinhar.
         return {"erro": f"Job '{job_id}' nao encontrado.", "status": "not_found"}
+
+    if job.get("status") == STATUS_EM_EXECUCAO:
+        # Achado do Codex na PR #189 (segunda rodada, P1: "Add recovery
+        # instead of only raising for orphaned claims"): sem isto, um claim
+        # vencido só se recupera se uma entrega duplicada tardia e
+        # independente do MESMO evento chegar por acaso (não garantida, já
+        # que retry está desligado — ver docstring do módulo). O protocolo
+        # do canal MCP (mcp_server.py instrui o cliente a chamar esta
+        # função de novo enquanto o job estiver "processing") já faz o
+        # cliente consultar em loop — reaproveitado aqui como o mecanismo
+        # de recuperação, sem precisar de uma função agendada (reaper) nova.
+        job = _reaproveitar_claim_vencido_na_leitura(db, ref) or job
 
     status = job.get("status")
     resposta = {"job_id": job_id, "tool": job.get("tool"), "status": status}
@@ -270,6 +306,75 @@ def ler_job(uid, job_id) -> dict:
         resposta["mensagem"] = "ainda processando"
 
     return resposta
+
+
+def _dados_claim_abandonado(agora: datetime) -> dict:
+    """Campos gravados quando um claim `em_execucao` mais velho que
+    `CLAIM_EXPIRA_APOS` é considerado abandonado (execução anterior morreu
+    sem concluir — crash, timeout) e marcado `error` sem reprocessar
+    automaticamente (P01 passo 6: efeito da tool pode não ser idempotente).
+    Compartilhado entre `_claim` (uma nova entrega do evento do gatilho
+    encontra o claim vencido) e `_reaproveitar_claim_vencido_na_leitura`
+    (uma consulta de `ler_job` encontra o claim vencido) — mesma regra,
+    uma única definição, para as duas nunca poderem divergir em silêncio."""
+    return {
+        "status": STATUS_ERROR,
+        "erro": (
+            "Execucao anterior nao concluiu dentro do prazo "
+            f"({CLAIM_EXPIRA_APOS.total_seconds():.0f}s) e foi "
+            "considerada abandonada; nao reprocessada automaticamente "
+            "pois o efeito da tool pode nao ser idempotente."
+        ),
+        "concluido_em": int(time.time()),
+        "expira_em": agora + timedelta(seconds=_TTL_SEC),
+    }
+
+
+def _reaproveitar_claim_vencido_na_leitura(db, ref) -> dict | None:
+    """Reexecuta, a partir de uma leitura de `ler_job`, a mesma checagem e
+    o mesmo abandono de claim vencido que `_claim` faz a partir de uma nova
+    entrega do evento do gatilho — achado do Codex na PR #189 (segunda
+    rodada, P1: 'Add recovery instead of only raising for orphaned
+    claims'). Sem isto, um claim `em_execucao` vencido só se recupera se
+    uma entrega duplicada tardia e independente do MESMO evento chegar por
+    acaso (não garantida — retry está desligado para este gatilho, ver
+    docstring do módulo); o job ficaria `processing` para sempre do ponto
+    de vista de quem consulta. Com isto, a própria chamada a `ler_job` —
+    que o protocolo do canal MCP já instrui o cliente a repetir enquanto o
+    job estiver `processing` (ver mcp_server.py) — fecha essa lacuna sem
+    precisar de uma função agendada (reaper) nova.
+
+    Leitura+escrita dentro de uma transação, para não correr com uma
+    conclusão genuína (`_executar_job` terminando bem no meio da consulta)
+    nem com um novo claim legítimo. Devolve o dict do job já atualizado
+    (com `status`/`erro`/etc. refletindo o abandono) se marcou como
+    abandonado agora; devolve o dict do job tal como está (sem tocar nada)
+    se o claim não está mais vencido ou já não é mais `em_execucao` — nesse
+    caso outra coisa (uma execução legítima, um novo claim) já resolveu a
+    situação entre a leitura inicial de `ler_job` e esta chamada. Devolve
+    None se o documento sumiu (não deveria acontecer dentro do TTL de 3
+    dias, mas `ler_job` já trata None como 'usar o dict antigo')."""
+    agora = datetime.now(timezone.utc)
+
+    @firestore.transactional
+    def _txn(transaction, ref):
+        snap = ref.get(transaction=transaction)
+        if not snap.exists:
+            return None
+        job = snap.to_dict() or {}
+        if job.get("status") != STATUS_EM_EXECUCAO:
+            return job
+
+        claimed_em = job.get("claimed_em")
+        if isinstance(claimed_em, datetime) and (agora - claimed_em) < CLAIM_EXPIRA_APOS:
+            return job
+
+        campos = _dados_claim_abandonado(agora)
+        transaction.update(ref, campos)
+        return {**job, **campos}
+
+    txn = db.transaction()
+    return _txn(txn, ref)
 
 
 def _claim(db, ref):
@@ -326,17 +431,7 @@ def _claim(db, ref):
             # Claim abandonado (execução anterior morreu sem concluir e sem
             # erro registrado — crash, timeout). Não reprocessar
             # automaticamente: marcar como erro para decisão manual.
-            transaction.update(ref, {
-                "status": STATUS_ERROR,
-                "erro": (
-                    "Execucao anterior nao concluiu dentro do prazo "
-                    f"({CLAIM_EXPIRA_APOS.total_seconds():.0f}s) e foi "
-                    "considerada abandonada; nao reprocessada automaticamente "
-                    "pois o efeito da tool pode nao ser idempotente."
-                ),
-                "concluido_em": int(time.time()),
-                "expira_em": agora + timedelta(seconds=_TTL_SEC),
-            })
+            transaction.update(ref, _dados_claim_abandonado(agora))
             return None
 
         # status == STATUS_PROCESSING (ou legado sem status reconhecido):
