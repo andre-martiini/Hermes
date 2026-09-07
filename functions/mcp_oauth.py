@@ -549,11 +549,20 @@ def _handle_token(req: https_fn.Request) -> https_fn.Response:
     grant = dados.get("grant_type")
     client_id = dados.get("client_id") or ""
 
+    # So grant_type e client_id — nunca code, verifier, refresh_token ou o
+    # token emitido. Existe para responder, sem abrir o Firestore, "chegou a
+    # tentar trocar o token, e com que grant?" ao investigar um cliente novo.
+    print(f"[mcp_oauth] /oauth/token pedido: grant_type={grant} client_id={client_id}")
+
     if grant == "authorization_code":
-        return _token_por_codigo(dados, client_id)
-    if grant == "refresh_token":
-        return _token_por_refresh(dados, client_id)
-    return _erro_oauth("unsupported_grant_type", f"grant_type nao suportado: {grant}")
+        resp = _token_por_codigo(dados, client_id)
+    elif grant == "refresh_token":
+        resp = _token_por_refresh(dados, client_id)
+    else:
+        resp = _erro_oauth("unsupported_grant_type", f"grant_type nao suportado: {grant}")
+
+    print(f"[mcp_oauth] /oauth/token resultado: grant_type={grant} status={resp.status_code}")
+    return resp
 
 
 def _resposta_token(uid: str, client_id: str, scope: str, resource: str) -> https_fn.Response:
