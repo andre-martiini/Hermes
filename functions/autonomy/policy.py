@@ -281,7 +281,20 @@ def _decisao_padrao_por_classe(
         # sem mandato), preparar internamente ainda é seguro por ser
         # reversível/observável, mas não deve fechar o ciclo sozinho —
         # rebaixa para PREPARE_ONLY em vez de ALLOW.
-        if principal.origem_humana:
+        #
+        # Exige também `eh_dono()` (achado do Codex sobre a PR #192): o
+        # comentário acima já dizia que a exceção é para "dono interativo ou
+        # cliente assistido", mas o código só checava a flag booleana
+        # `origem_humana` — nada no sistema de tipos impede um
+        # `ROTINA_COWORK`/`RUNNER_SERVICO`/`TERCEIRO_PORTAL` de ser
+        # construído com `origem_humana=True` (o próprio default do
+        # contrato). Sem essa checagem extra, um terceiro num portal
+        # público com "humano presente" (ele mesmo, não o dono) recebia o
+        # mesmo ALLOW que o dono interativo — a garantia de que é o DONO
+        # presente, não qualquer humano, é o que preserva a baixa fricção
+        # da seção 5 sem abrir mão da restrição de autoconcessão do passo 3
+        # de `avaliar()`.
+        if principal.origem_humana and principal.eh_dono():
             return Decisao.ALLOW, "preparacao_interna_permitida_por_padrao", False
         return (
             Decisao.PREPARE_ONLY,
@@ -292,8 +305,10 @@ def _decisao_padrao_por_classe(
         # Mesma correção — nenhum mandato foi consultado para chegar aqui. A
         # seção 5.1 define, para "Escrita interna reversível", a regra
         # "Executar dentro do mandato": sem mandato vigente, mesmo raciocínio
-        # de `origem_humana` acima.
-        if principal.origem_humana:
+        # de `origem_humana` acima — inclusive o `eh_dono()` adicional
+        # (achado do Codex sobre a PR #192, mesmo raciocínio do ramo
+        # PREPARACAO_INTERNA logo acima).
+        if principal.origem_humana and principal.eh_dono():
             return Decisao.ALLOW, "escrita_interna_reversivel_permitida_por_padrao", False
         return (
             Decisao.PREPARE_ONLY,
