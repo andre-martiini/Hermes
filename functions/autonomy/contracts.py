@@ -175,6 +175,18 @@ class Mandato:
     revogação. "Tipos 'outro' e rótulos livres não podem habilitar envio
     autônomo" (seção 5.3) — por isso `classes_conteudo_permitidas` é uma
     tupla fechada, nunca um texto livre interpretado depois.
+
+    `usos_na_janela_atual` (adicionado após revisão do Codex na PR #191):
+    o dado de contagem de uso que `autonomy.policy.mandato_cobre()` compara
+    contra `limite_por_janela` — esta classe é só o tipo, não faz I/O, então
+    quem monta o `Mandato` (um wrapper com acesso a Firestore/histórico,
+    ainda não implementado nesta sub-entrega, já que mandatos persistidos
+    ficam para a sub-entrega seguinte) precisa RESOLVER e preencher este
+    campo antes de colocar o mandato em `PolicyRequest.mandatos_aplicaveis`.
+    `None` (o default) significa "contagem não verificada" — `mandato_cobre`
+    não aplica o limite quando não sabe a contagem, mas o campo existe desde
+    já para que o wrapper futuro tenha onde escrever, em vez de a checagem
+    ficar sem nenhum lugar para acontecer.
     """
 
     mandato_id: str
@@ -183,6 +195,7 @@ class Mandato:
     classes_conteudo_permitidas: tuple[str, ...]
     limite_por_janela: int | None = None
     janela_dias: int | None = None
+    usos_na_janela_atual: int | None = None
     horario_permitido_inicio: str | None = None   # "HH:MM", None = sem restrição
     horario_permitido_fim: str | None = None
     valido_ate: datetime | None = None
