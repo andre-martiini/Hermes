@@ -253,3 +253,61 @@ pendencias:
   - "achado do mesmo padrão de A04 em argos_autorizacao.py:242,348, aplicar_edicao_rascunho sem proteção transacional, e a notificação de falha por Telegram como mitigação não estrutural seguem como pendências já registradas nos blocos anteriores, ainda não fechadas."
 proximo_pacote: "P01 (sub-entrega 4/N)"
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 7782388d8958d017d4832031a9492359ebade9c8
+pacote: "P01 (sub-entrega 3.1/N — resposta ao achado do Codex na PR #188)"
+# Não é uma nova sub-entrega de escopo do plano; é a resposta ao ciclo de
+# revisão da sub-entrega 3/N (PR #188, ainda pronto_para_revisao, não
+# reescrita — só complementada aqui por ser um bloco novo). Mesmos arquivos
+# (functions/core/idempotency.py, functions/test_idempotency.py), commit novo
+# na mesma branch (claude/p01-agent-requests-idempotencia), seguindo a
+# orientação da skill de shipping para responder a comentários de revisão.
+estado: pronto_para_revisao
+inicio: "2026-09-07T03:20:00Z"
+fim: "2026-09-07T03:55:00Z"
+arquivos_alterados:
+  - functions/core/idempotency.py
+  - functions/test_idempotency.py
+decisoes:
+  - id: p01-codex-preserva-eventos-apos-commit-ambiguo
+    motivo: "Achado real do Codex na PR #188 (não rubber-stamp): check_and_register (sub-entrega 3/N) usava um único sentinela — 'documento existe' = 'já processado, pular'. Se o COMMIT da transação que cria esse sentinela for ambíguo (cliente recebe timeout/erro, mas o Firestore já escreveu no servidor), uma reentrega legítima do GitHub encontraria o sentinela e pularia o evento para sempre, mesmo que o processamento de fato nunca tenha rodado — perda silenciosa e permanente de evento. Corrigido separando o sentinela em dois estados: RESERVADO (tentativa começou) e CONCLUIDO (efeito terminou de verdade, via novo mark_complete()). Só CONCLUIDO é duplicata; RESERVADO recente levanta ReservaEmAndamentoError (nem sucesso nem duplicata); RESERVADO expirado (RESERVA_EXPIRA_APOS=5min) permite retomar."
+    autoridade: existente_ou_nova
+  - id: p01-idempotency-tri-state-string-rejeitado
+    motivo: "Primeira tentativa de fix fez check_and_register devolver uma de três strings (novo/duplicata/em_andamento) em vez de bool. Identificado ANTES de publicar, por raciocínio próprio sobre o call site de produção: o main.py HOJE implantado faz `if not check_and_register(...)`, e `not \"qualquer string não-vazia\"` é sempre False em Python — ou seja, TODA entrega (mesmo duplicata genuína) passaria a ser tratada como nova, desligando silenciosamente a deduplicação inteira do webhook assim que esta PR fosse mergeada, já que main.py não pode ser editado no mesmo lote (ver bloqueio de tamanho, sub-entrega 3/N). Revertido para bool + uma exceção nova (ReservaEmAndamentoError) para o terceiro caso — compatível de verdade com o contrato bool já implantado, com zero edição adicional de main.py necessária para a correção ter efeito de segurança (uma exceção não capturada nunca vira 200, ver decisão seguinte)."
+    autoridade: existente_ou_nova
+  - id: p01-idempotency-docstring-corrigida-pos-revisao
+    motivo: "A revisão adversarial final (design bool+exceção) apontou que a docstring de ReservaEmAndamentoError afirmava existir um `except Exception` no chamador (main.py) já capturando a exceção — falso: `git show HEAD:functions/main.py` confirma que a chamada a check_and_register lá não tem NENHUM try/except ao redor. Verificado o comportamento real: uma exceção não capturada sobe até o crash_handler do functions_framework (500 via error handler registrado em flask, nunca 200) — ou seja, a correção já é segura em produção mesmo sem essa edição de main.py, só não é tão 'limpa' (500 genérico com o texto da exceção no corpo, em vez de um 503 específico e logado) quanto ficaria com o rascunho local de main.py aplicado. Docstring corrigida para descrever esse caminho real em vez do caminho que só existe no rascunho bloqueado."
+    autoridade: existente_ou_nova
+  - id: p01-idempotency-fencing-token-aceito-como-latente
+    motivo: "Achado da revisão adversarial: mark_complete() não é transacional e não verifica se está completando a MESMA reserva que check_and_register concedeu (sem fencing token) — em teoria, se uma tentativa ficasse presa por mais de RESERVA_EXPIRA_APOS (5min) e só então terminasse e chamasse mark_complete, poderia finalizar incorretamente a reserva de uma tentativa seguinte que já tinha retomado o processamento. Aceito como limitação latente, não corrigido: o timeout configurado da função (githubWebhook) fica bem abaixo de 5 minutos, então uma tentativa presa é encerrada pelo runtime antes de chegar a esse ponto — mesmo precedente de decisão usado para o protocolo de lease do P04 (aceitar uma janela teórica não explorável nas condições operacionais atuais, documentar, não bloquear a entrega)."
+    autoridade: existente_ou_nova
+  - id: p01-anotar-eventos-nao-idempotente-mantido-best-effort
+    motivo: "A revisão adversarial sugeriu (no rascunho local de main.py, ainda bloqueado) só chamar mark_complete quando anotar_evento_github_em_tarefas não tiver nenhuma falha parcial. Rejeitado deliberadamente: anotar_evento_github_em_tarefas já trata falha por tarefa como best-effort (uma tarefa falhar não derruba as outras, achado já aceito em sub-entrega anterior) e NÃO é idempotente — se mark_complete ficasse condicionado a zero falhas, uma reentrega subsequente reprocessaria TODAS as tarefas do evento, inclusive as que já tinham sido anotadas com sucesso na tentativa anterior, duplicando anotações. Manter mark_complete incondicional ao término da chamada (independente de falhas parciais internas) é estritamente melhor dado que o efeito interno já não é idempotente — consistente com a decisão de design já tomada para essa função. Registrado aqui para não reabrir a discussão sem essa nota."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest test_idempotency test_github_webhook -v"
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "Python (unittest, suíte completa): 1175/1175 passando (1166 da sub-entrega 3/N + 9 novos de test_idempotency.py reescrito para o design reserva/conclusão; 0 regressões)"
+    - "test_idempotency: 9/9 (reserva recente levanta ReservaEmAndamentoError sem reescrever; reserva expirada permite reprocessar; documento legado sem status tratado como reserva expirada; mark_complete bloqueia reentrega mesmo após a reserva expirar; mark_complete preserva reserved_at original; mark_complete numa chave sem reserva prévia não quebra — achado da revisão; mais os 3 já existentes revalidados sob o novo design)"
+    - "test_github_webhook: 16/16 no rascunho local (ainda não publicado — mesmo bloqueio de main.py da sub-entrega 3/N)"
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio, dedicada a este design final — as duas revisões anteriores foram sobre designs já superados: a original de sentinela único e a intermediária tri-state) — leu o diff local completo contra origin/main, o código-fonte instalado de google.cloud.firestore_v1.transaction (confirmou que só google.api_core.exceptions.Aborted é retentado automaticamente pelo decorator, e que uma exceção levantada dentro da função decorada nunca é retentada), e o código-fonte instalado de functions_framework/flask (confirmou o caminho até crash_handler/500). Achados: a imprecisão de docstring (corrigida, ver decisão), a ausência de fencing token em mark_complete (aceita como latente, ver decisão), e a sugestão sobre anotar_evento_github_em_tarefas não-idempotente (rejeitada com justificativa, ver decisão). Verificou como sólido: a lógica de arbitragem entre reservas concorrentes via retry de Aborted, a ordem correta dos except no rascunho de main.py (ReservaEmAndamentoError antes do Exception genérico, sem sombreamento), e o uso correto de merge=True+SERVER_TIMESTAMP em mark_complete."
+  - "Autocorreção antes de publicar (não veio de nenhum revisor, achado por raciocínio próprio sobre o call site de produção real): o design tri-state por string teria desligado silenciosamente toda a deduplicação do webhook GitHub em produção assim que mergeado — ver decisão p01-idempotency-tri-state-string-rejeitado. Nenhum código desse design chegou a ser publicado."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "Mesmo bloqueio já registrado na sub-entrega 3/N: functions/main.py (agora ~682KB, ligeiramente maior) e functions/test_github_webhook.py seguem sem publicar, à espera de uma das três soluções já propostas para o limite de escrita do Argos (nova tool de diff, aumento do limite, ou divisão de main.py em módulos)."
+  - "Limitação latente aceita (ver decisão p01-idempotency-fencing-token-aceito-como-latente): se este módulo (core/idempotency.py) vier a ser reusado por um chamador com tempo de execução não necessariamente bem abaixo de RESERVA_EXPIRA_APOS (5min) — o docstring já cita 'update_id de bot' como exemplo genérico — reavaliar a necessidade de um fencing token antes de reusar."
+  - "P01 segue em aberto: mcp_jobs.py (passos 5-6), firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados."
+proximo_pacote: "P01 (sub-entrega 4/N)"
+```
