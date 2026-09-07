@@ -707,3 +707,48 @@ pendencias:
   - "Falta aguardar/esgotar mais um ciclo do protocolo padrão de checagem do Codex (3min/5min) nesta PR #190 antes de considerar o P01 completo."
 proximo_pacote: "P01 — aguardar ciclo de revisão do Codex nesta PR (#190); se esgotado sem novo comentário, declarar P01 completo (sub-entregas 1-5.1/N cobrindo os passos 1-10, PRs #186/#188/#189/#190) e notificar o André antes dos 90 minutos de intervalo para o P02."
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: cf1b89814b3b64f06dca5b3712fac41a809f1b58
+pacote: "P01 (fechamento do pacote — ciclo de revisão do Codex esgotado na PR #190)"
+# Não é uma nova sub-entrega de código; é o registro de fechamento do
+# pacote P01 inteiro, conforme a instrução permanente do André
+# ("após a conclusão de um pacote... estando tudo verde, você vai
+# aguardar 90 minutos para desenvolver o próximo pacote").
+estado: pacote_completo
+inicio: "2026-09-07T07:51:00Z"
+fim: "2026-09-07T07:56:00Z"
+arquivos_alterados: []
+decisoes:
+  - id: p01-codex-ciclo-esgotado-limpo
+    motivo: "Checagem programada (send_later, 3min após o pedido de @codex review da sub-entrega 5.1/N) encontrou, via busca no Gmail, a resposta do Codex ao commit d1ce3cdeb2 (o commit que publicou a correção da exceção system/sync e system/copilot_soul): 'Codex Review: Didn't find any major issues. Breezy!', postada em 2026-09-07T07:44:05Z — cerca de 12 minutos depois do pedido de revisão. Confirmado por leitura direta do corpo completo do e-mail (mcp__Gmail__get_message), não só do snippet. Também confirmado, por leitura do e-mail anterior no mesmo thread (07:32:12Z, revisado commit d5807eb165), que esse é exatamente o achado original já corrigido na sub-entrega 5.1/N — não um achado novo e diferente. Nenhum comentário adicional do Codex apareceu depois do e-mail das 07:44. Conclusão: o ciclo de revisão do Codex nesta PR está esgotado, com veredito limpo (sem novo achado pendente)."
+    autoridade: existente_ou_nova
+resumo_pacote:
+  descricao: "P01 — Fechar lacunas de segurança/autonomia em firestore.rules e preparar o CI/deploy para testá-las, conforme achados A16/A17 do plano; mais o relatório do passo 10 (evidência de resolução de itens de atenção)."
+  prs: ["#186", "#188", "#189", "#190"]
+  sub_entregas: "1/N a 5.1/N (passos 1 a 10 do P01), todas com revisão adversarial de pelo menos uma rodada (as de maior risco, duas rodadas independentes)"
+  achados_fechados:
+    - "A16: regra geral (catch-all) do Firestore sobrepondo restrições específicas por OR-entre-matches — consolidado num único bloco match com exclusão expressa na condição; achado real do Codex (system/sync, system/copilot_soul) corrigido com exceção pontual de concessão, sem reabrir o bug original."
+    - "A17: firestore:rules ausente do deploy validado — job de teste (Firestore Emulator) preparado em pr.yml e deploy.yml, e firestore:rules incluído no --only do deploy; plano de reversão específico documentado."
+    - "A01, A03, A04, A10: fechados em sub-entregas anteriores deste mesmo pacote (1/N-4.3/N)."
+  pendencias_carregadas_adiante:
+    - "APLICAR MANUALMENTE (bloqueio de permissão, não de conteúdo): .github/workflows/pr.yml e .github/workflows/deploy.yml desta sub-entrega, MAIS o deploy.yml original do P00 — Argos não tem escopo workflow no PAT do GitHub. Confirmado por tentativa real em cada sub-entrega, não assumido por precedente."
+    - "Bloqueio de escrita no Argos por limite de 200k caracteres em functions/main.py e functions/test_github_webhook.py — represado desde a sub-entrega 3/N, sem solução aplicada. Três caminhos propostos, decisão do André: (1) tool de diff no Argos, (2) aumentar o limite de conteúdo, (3) dividir main.py em módulos menores."
+    - "IMPORTANTE PARA DECISÃO DE MERGE (desde a sub-entrega 3.2/N): mesclar a PR #188 antes do desbloqueio de main.py muda o comportamento de produção da deduplicação de webhook — avaliar ordem de merge com isso em mente."
+    - "Proposta de reconciliação do passo 10 (campo evidencia_resolucao + script de relatório somente-leitura, documentada em docs/autonomia/relatorio-atencao-resolvidos-sem-evidencia.md) NÃO implementada — atencao.py está fora da lista de arquivos do P01. Candidata a pacote futuro, por decisão do André."
+    - "Testes de firestore.rules (tests/rules/firestore.rules.test.ts, 38 testes) escritos e revisados, mas NÃO executados ponta-a-ponta neste sandbox — Firestore Emulator bloqueado por política de rede (storage.googleapis.com). Rodar 'npm run test:rules' numa máquina/CI com rede irrestrita antes de considerar validado de ponta a ponta."
+    - "Merge de todas as PRs empilhadas (#186, #188, #189, #190) continua manual, pelo André — nenhuma foi mesclada por este agente."
+testes:
+  comandos: []
+  resultados:
+    - "Nenhum teste novo neste registro de fechamento — ver sub-entregas 5/N e 5.1/N para os resultados completos (248/248 frontend, 38/38 descoberta de testes de regras)."
+evidencias:
+  - "E-mail do Codex (2026-09-07T07:44:05Z, id 1a07ad309c38a9fe), lido por inteiro: 'Codex Review: Didn't find any major issues. Breezy!' referenciando o commit d1ce3cdeb2 — o commit que publicou a correção da exceção system/sync/copilot_soul."
+  - "Confirmado que o e-mail anterior no mesmo thread (07:32:12Z) é o achado ORIGINAL já corrigido, não um achado novo — evita duplo-processamento do mesmo achado."
+pendencias:
+  - "Ver resumo_pacote.pendencias_carregadas_adiante acima — consolida todas as pendências reais deste pacote inteiro, a serem comunicadas ao André."
+proximo_pacote: "P02 — Unificar identidade e política de autonomia. Por instrução permanente do André, aguardar 90 minutos após a notificação de fechamento do P01 antes de iniciar (intervalo entre pacotes completos, não entre sub-entregas)."
+```
