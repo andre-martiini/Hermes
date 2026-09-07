@@ -348,6 +348,16 @@ def mandato_cobre(mandato: Mandato, request: PolicyRequest, agora: datetime) -> 
     entre os cobertos, a classe de conteúdo está entre as permitidas, e o
     horário (se restrito) bate.
 
+    Limitação documentada (achado da revisão adversarial da quarta rodada,
+    PR #191): a matriz de efeito (seção 5.1 do plano) fala em "mandato e
+    orçamento válidos" para preparação interna, mas `PolicyRequest.orcamento_
+    restante` não é lido em nenhum ponto desta função nem de `avaliar()` —
+    checagem de orçamento ainda não está implementada. Mesma categoria dos
+    gaps já documentados para `classes_conteudo_permitidas` (texto livre,
+    não enum fechado) e `usos_na_janela_atual` (populado por um wrapper com
+    I/O que ainda não existe): reconhecido, não escondido, fica para uma
+    sub-entrega futura que precisar de fato de orçamento por mandato.
+
     Limite por janela (correção pós-revisão do Codex, PR #191): esta função
     é pura e não tem acesso a histórico de uso — `mandato.usos_na_janela_atual`
     é o dado JÁ RESOLVIDO que o chamador (thin wrapper com I/O, análogo a
@@ -364,7 +374,18 @@ def mandato_cobre(mandato: Mandato, request: PolicyRequest, agora: datetime) -> 
     """
     if mandato.revogado:
         return False
-    if mandato.valido_ate is not None and agora > mandato.valido_ate:
+    # Validade (correção pós-revisão do Codex, PR #191, quarta rodada): a
+    # versão anterior só rejeitava quando `valido_ate` estava PREENCHIDO e no
+    # passado — um mandato sem `valido_ate` (o default do contrato) cobria
+    # indefinidamente, apesar de "validade" ser uma das condições mínimas do
+    # mandato (seção 5.3 do plano) e de cada outro campo opcional desta
+    # função já ter sido fechado no mesmo sentido (limite por janela,
+    # finalidade/missão, destinos, classes — todos falham fechado quando o
+    # dado não foi resolvido, em vez de tratar ausência como "sem
+    # restrição"). Agora: sem `valido_ate` resolvido, o mandato não cobre.
+    if mandato.valido_ate is None:
+        return False
+    if agora > mandato.valido_ate:
         return False
     if mandato.limite_por_janela is not None:
         # Correção pós-revisão do Codex (PR #191, terceira rodada): a versão
@@ -447,7 +468,24 @@ def mandato_cobre(mandato: Mandato, request: PolicyRequest, agora: datetime) -> 
         # por um enum fechado; esta função só compara os valores que recebe.
         return False
 
-    if mandato.horario_permitido_inicio and mandato.horario_permitido_fim:
+    # Janela de horário parcialmente configurada (correção pós-revisão do
+    # Codex, PR #191, quarta rodada): a versão anterior só aplicava a
+    # restrição quando os DOIS extremos vinham preenchidos (`and`) — um
+    # mandato com só `horario_permitido_inicio` OU só `horario_permitido_fim`
+    # (dado parcial/malformado; os dois campos são independentemente
+    # opcionais no contrato) pulava a checagem inteira, cobrindo qualquer
+    # horário como se não houvesse restrição nenhuma. Mesmo raciocínio já
+    # aplicado aos outros campos desta função: um dado parcialmente resolvido
+    # não é "sem restrição", é "não resolvido" — falha fechada.
+    # `is not None` na checagem externa, não truthiness (achado da revisão
+    # adversarial desta própria correção): `"" or ""` é falsy, então um
+    # mandato com os dois campos presentes mas vazios (`""`) escapava até
+    # da checagem de configuração parcial logo abaixo — o mesmo padrão de
+    # bug que esta rodada fechou em `estado_autonomia_atual`, reintroduzido
+    # aqui por usar `or`/`and` sobre o valor em vez de identidade com None.
+    if mandato.horario_permitido_inicio is not None or mandato.horario_permitido_fim is not None:
+        if not (mandato.horario_permitido_inicio and mandato.horario_permitido_fim):
+            return False
         inicio, fim = mandato.horario_permitido_inicio, mandato.horario_permitido_fim
         hora_atual = agora.strftime("%H:%M")
         if inicio <= fim:
@@ -590,6 +628,7 @@ def preparar_politica(politica_proposta: dict, *, base_version: int) -> dict:
 # ---------------------------------------------------------------------------
 
 _ESTADO_DOC = ("system", "autonomy_state")
+_AUSENTE = object()  # sentinela: distingue "chave ausente" de "valor presente e falsy"
 
 
 def estado_autonomia_atual(db, dominio: str = "global") -> EstadoAutonomia:
@@ -622,7 +661,25 @@ def estado_autonomia_atual(db, dominio: str = "global") -> EstadoAutonomia:
         return EstadoAutonomia.ATIVO
 
     dados = snap.to_dict() or {}
-    valor = dados.get(dominio) or dados.get("global") or EstadoAutonomia.ATIVO.value
+    # Correção pós-revisão do Codex (PR #191, quarta rodada): a versão
+    # anterior usava `dados.get(dominio) or dados.get("global") or ATIVO`,
+    # que trata um valor PRESENTE MAS FALSY (`""`, `None` gravado
+    # explicitamente — por exemplo um documento em escrita parcial) do
+    # mesmo jeito que uma chave AUSENTE, caindo direto em ATIVO sem nunca
+    # passar pelo `except ValueError` abaixo. O docstring desta função
+    # promete SOMENTE_PREPARACAO para "valor gravado que não é um dos três
+    # esperados" — um valor falsy presente é exatamente esse caso, não o
+    # de "nada configurado". Agora a chave é procurada por AUSÊNCIA
+    # (`dict.get(..., _AUSENTE)`), não por truthiness: só cai em ATIVO
+    # quando nem `dominio` nem "global" existem no documento; um valor
+    # presente e falsy segue para `EstadoAutonomia(valor)`, que lança
+    # `ValueError` e cai no fail-closed de baixo, como qualquer outro valor
+    # gravado inválido.
+    valor = dados.get(dominio, _AUSENTE)
+    if valor is _AUSENTE:
+        valor = dados.get("global", _AUSENTE)
+    if valor is _AUSENTE:
+        valor = EstadoAutonomia.ATIVO.value
     try:
         return EstadoAutonomia(valor)
     except ValueError:
