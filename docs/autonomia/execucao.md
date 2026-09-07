@@ -418,3 +418,59 @@ pendencias:
   - "P01 segue em aberto: firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados."
 proximo_pacote: "P01 (sub-entrega 5/N ou conclusão dos passos 7-10)"
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 9922fd6f29cfc7f5fba9a5b854379f3ff2db82f2
+pacote: "P01 (sub-entrega 4.1/N — resposta ao achado do Codex na PR #189)"
+# Não é uma nova sub-entrega de escopo do plano; é a resposta ao ciclo de
+# revisão da sub-entrega 4/N (PR #189, ainda pronto_para_revisao, não
+# reescrita — só complementada aqui por ser um bloco novo). Mesmos arquivos
+# (functions/mcp_jobs.py, functions/test_mcp_jobs.py), dois commits novos
+# na mesma branch (claude/p01-mcp-jobs-reentrega-claim), seguindo a
+# orientação da skill de shipping para responder a comentários de revisão
+# (mesmo padrão já usado nas sub-entregas 3.1/N e 3.2/N para a PR #188).
+estado: pronto_para_revisao
+inicio: "2026-09-07T04:55:00Z"
+fim: "2026-09-07T05:14:00Z"
+arquivos_alterados:
+  - functions/mcp_jobs.py
+  - functions/test_mcp_jobs.py
+decisoes:
+  - id: p01-codex-claim-jovem-levanta-em-vez-de-devolver-none
+    motivo: "Achado real do Codex na PR #189 (P1, 'Avoid acknowledging retries for an orphaned fresh claim'): _claim() (sub-entrega 4/N) devolvia None em silêncio ao encontrar um claim em_execucao ainda dentro de CLAIM_EXPIRA_APOS — e on_mcp_job_created então retornava normalmente, o que o Cloud Functions registra como invocação BEM-SUCEDIDA mesmo que a tool nunca tenha rodado para aquele job. Cenário: a transação que grava o claim comita no servidor mas a resposta se perde para o cliente (commit ambíguo — mesma classe de problema já corrigida em core/idempotency.py nas sub-entregas 3/N-3.1/N); a invocação que fazia essa gravação nunca chega a chamar _executar_job. Se uma entrega duplicada do MESMO evento (Pub/Sub at-least-once) chegar enquanto o claim ainda está 'jovem' — justamente a entrega mais provável de acontecer, por corrida de ack, não depois de CLAIM_EXPIRA_APOS — ela encontrava em_execucao recente e retornava sucesso sem a tool ter sido executada por ninguém. Corrigido: esse ramo agora levanta ClaimAindaValidoError (nova exceção, mesmo precedente de ReservaEmAndamentoError em core/idempotency.py) em vez de devolver None — a invocação falha visivelmente nos logs/métricas do Cloud Functions em vez de mentir."
+    autoridade: existente_ou_nova
+  - id: p01-codex-retry-false-hardcoded-para-firestore-trigger
+    motivo: "Autocorreção feita ao investigar o achado do Codex (não veio de nenhum revisor): a documentação anterior do módulo (sub-entrega 4/N) atribuía a duplicidade de entrega a uma política de retry-em-caso-de-erro do Cloud Functions/Eventarc. Verificado lendo o código-fonte instalado de firebase_functions.options: FirestoreOptions (classe usada por on_document_created) NÃO herda de EventHandlerOptions e não expõe nenhum campo retry — seu próprio _endpoint() grava retry=False de forma incondicional. Ou seja, para este gatilho específico, uma invocação que FALHA nunca é redisparada automaticamente pela plataforma — não é uma configuração ausente, é estruturalmente impossível nesta versão da lib. A duplicidade de entrega que este módulo protege vem da semântica at-least-once do Pub/Sub por trás do Eventarc (pode entregar o MESMO evento mais de uma vez mesmo após sucesso), não de retry-em-erro. Docstring do módulo corrigida para essa atribuição correta — isso também significa que levantar ClaimAindaValidoError (decisão anterior) NÃO desencadeia sozinho uma nova tentativa; só uma entrega duplicada independente do mesmo evento pode recuperar o job, ver limitação aceita já registrada na sub-entrega 4/N."
+    autoridade: existente_ou_nova
+  - id: p01-codex-claim-idade-na-mensagem-em-vez-de-janela-de-graca
+    motivo: "Achado da segunda revisão adversarial (dedicada a esta correção, não à sub-entrega 4/N original): levantar ClaimAindaValidoError para TODO claim jovem também captura o caso benigno — uma tentativa irmã genuinamente em andamento com sucesso —, fazendo essa invocação redundante (mas inofensiva) aparecer como falha nos logs/métricas junto com o caso realmente órfão, sem diferenciação. Considerado e rejeitado: uma 'janela de graça' separada (só levantar se o claim tiver mais que alguns segundos) — exigiria um segundo limiar arbitrário sem dado real sobre a distribuição de tempo das entregas duplicadas do Pub/Sub neste projeto, ao contrário de CLAIM_EXPIRA_APOS (derivado de _TIMEOUT_SEC, não inventado). Em vez disso: a mensagem da exceção agora inclui a idade real do claim (segundos desde claimed_em), para quem investigar um erro nos logs distinguir na hora um claim de poucos segundos (provável duplicata benigna) de um de vários minutos (provável órfão) sem o código precisar adivinhar um limiar. Custo aceito: ruído ocasional nos logs para o caso benigno; benefício: nunca mais perder silenciosamente o único sinal de um claim genuinamente órfão."
+    autoridade: existente_ou_nova
+  - id: p01-mcp-jobs-drift-transcricao-corrigido-antes-de-prosseguir
+    motivo: "Falha de processo própria, não achado de revisor: a verificação obrigatória por hash (git hash-object local vs. sha devolvido pelo Argos, exigida pela skill de shipping) pegou uma divergência real no primeiro envio de test_mcp_jobs.py — uma palavra extra ('já') inserida por engano numa docstring de comentário durante a transcrição do arquivo para a chamada da tool (sha local 251cfe0... vs. sha remoto 353ed60...). Sem código afetado (só texto de docstring), mas a skill é explícita que qualquer divergência de transcrição deve ser corrigida antes de prosseguir, não descartada como cosmética. Corrigido baixando o conteúdo publicado, aplicando a correção pontual por script (não retype manual, para não introduzir um segundo drift), confirmando hash idêntico ao local ANTES de reenviar, e publicando um commit de correção dedicado (f0642d2) explicando o motivo. Registrado aqui para reforçar por que a verificação de hash pós-escrita nunca pode ser pulada, mesmo para uma mudança aparentemente pequena."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest test_mcp_jobs -v"
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "test_mcp_jobs: 32/32 — 3 testes atualizados para esperar ClaimAindaValidoError em vez de None no ramo de claim jovem (test_claim_concorrente_apenas_um_ganha, test_claim_em_execucao_recente_levanta_sem_alterar_documento — renomeado de _nao_prossegue_nem_altera —, e test_event_reentrega_de_job_ja_em_execucao_nao_roda_tool_de_novo); nenhum teste assert sobre o texto da mensagem da exceção, então a inclusão da idade do claim na mensagem (decisão p01-codex-claim-idade-na-mensagem-em-vez-de-janela-de-graca) não exigiu mudança adicional de teste"
+    - "Python (unittest, suíte completa): 1207/1207 passando (mesmo total da sub-entrega 4/N — 0 regressões, 0 testes novos nesta rodada além dos 3 já recontados acima)"
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio, dedicada especificamente à resposta ao Codex — distinta da revisão da sub-entrega 4/N original): verificou que os testes atualizados não são vácuos revertendo o fix localmente, confirmando que os 3 testes falham sem ele, e restaurando o código; verificou de forma independente, relendo o código-fonte instalado, que (a) o rollback da transação ao levantar dentro de _txn não deixa nenhum estado parcial gravado, (b) a exceção propaga limpa através do wrapper não-decorado do gatilho (nenhum try/except em on_mcp_job_created ao redor de _claim), e (c) retry=False é de fato hardcoded para FirestoreOptions, não apenas o default. Não encontrou nenhum bug bloqueante; achado único foi o ruído de log para o caso benigno (ver decisão p01-codex-claim-idade-na-mensagem-em-vez-de-janela-de-graca)."
+  - "Verificação de hash pós-escrita (git hash-object local vs. sha do Argos) pegou uma divergência de transcrição real antes de ela ficar para trás no histórico — ver decisão p01-mcp-jobs-drift-transcricao-corrigido-antes-de-prosseguir. Commits publicados na branch claude/p01-mcp-jobs-reentrega-claim: 93f78606 (mcp_jobs.py), e68d6ce7 (test_mcp_jobs.py, com o drift), f0642d26 (correção do drift, hash final confirmado idêntico ao local)."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "Mesma limitação aceita da sub-entrega 4/N (não fechada por este fix, só deixada de ser mascarada como sucesso — ver decisão p01-codex-retry-false-hardcoded-para-firestore-trigger): sem uma função agendada (reaper), a recuperação de um claim genuinamente abandonado ainda depende de uma entrega duplicada tardia do mesmo evento chegar depois de CLAIM_EXPIRA_APOS. Candidato a P04, não bloqueia esta entrega."
+  - "Mesmo bloqueio já registrado nas sub-entregas 3/N-4/N: functions/main.py e functions/test_github_webhook.py seguem sem publicar (limite de 200k caracteres do Argos)."
+  - "IMPORTANTE PARA DECISÃO DE MERGE (já registrada na sub-entrega 3.2/N, segue valendo): mesclar a PR #188 antes de main.py ser desbloqueado muda o comportamento de produção da deduplicação de webhook. Não afeta diretamente a PR #189, mas ambas seguem empilhadas na mesma cadeia."
+  - "P01 segue em aberto: firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados. Falta ainda postar @codex review na PR #189 e aguardar/esgotar novo ciclo de comentários (protocolo padrão de 3min/5min) antes de seguir para os passos 7-10."
+proximo_pacote: "P01 (sub-entrega 5/N ou conclusão dos passos 7-10, após esgotar o ciclo de revisão do Codex na PR #189)"
+```
