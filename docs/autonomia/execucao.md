@@ -658,3 +658,52 @@ pendencias:
   - "Com esta sub-entrega, os passos 7-10 do P01 estão todos com material pronto para revisão (regras corrigidas e testadas localmente, CI/deploy preparados mas bloqueados por permissão, plano de reversão documentado, relatório do passo 10 publicado). Falta abrir a PR desta sub-entrega, postar @codex review e esgotar o ciclo padrão de comentários (3min/5min) antes de considerar o P01 como pacote completo (todas as sub-entregas 1-5/N com todos os ciclos de Codex esgotados) e notificar o André, respeitando o intervalo de 90 minutos só depois disso, antes de iniciar o P02."
 proximo_pacote: "P01 — aguardar ciclo de revisão do Codex nesta nova PR; se não houver mais comentários pendentes em nenhuma das PRs empilhadas do P01 (#188, #189, esta nova), declarar P01 completo e notificar o André antes dos 90 minutos de intervalo para o P02."
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: cf1b89814b3b64f06dca5b3712fac41a809f1b58
+pacote: "P01 (sub-entrega 5.1/N — resposta ao achado do Codex na PR #190: exceção system/sync e system/copilot_soul)"
+# Não é uma nova sub-entrega de escopo do plano; é a resposta ao ciclo de
+# revisão da sub-entrega 5/N (PR #190, ainda pronto_para_revisao). Mesmos
+# arquivos (firestore.rules, tests/rules/firestore.rules.test.ts), dois
+# commits novos na mesma branch (claude/p01-firestore-rules-a16-a17),
+# seguindo a orientação da skill de shipping para responder a comentários
+# de revisão — mesmo padrão já usado nas sub-entregas 3.1/N-4.3/N.
+estado: pronto_para_revisao
+inicio: "2026-09-07T07:32:00Z"
+fim: "2026-09-07T07:39:00Z"
+arquivos_alterados:
+  - firestore.rules
+  - tests/rules/firestore.rules.test.ts
+decisoes:
+  - id: p01-codex-system-sync-copilot-soul-excecao
+    motivo: "Achado real do Codex na PR #190 (P1, 'Preserve access for existing client-backed system flows'): a busca de mapeamento de acessos da sub-entrega 5/N (decisão p01-a16-mapeamento-acessos-frontend) cobriu só as 8 coleções NOVAS que eu estava adicionando a isColecaoNegadaPorCompleto (idempotency, mcp_audit_log, agent_requests, agent_runs, mcp_jobs, promocoes_autonomia_sugeridas, telegram_sessions, whitelist). 'system' e 'automations' já constavam na lista, mas por já aparecerem 'negadas' nas regras ANTIGAS (via os blocos match irmãos se if false, que o próprio achado A16 provou serem um no-op por causa do OR entre matches), essa busca específica não as re-verificou. O Codex confirmou, corretamente: index.tsx lê e escreve system/sync (onSnapshot + setDoc, para iniciar/acompanhar/interromper a sincronização profunda) e KnowledgeView.tsx lê e escreve system/copilot_soul (onSnapshot + setDoc, para editar a personalidade) — os dois via o SDK CLIENTE (governado por estas regras), em produção, hoje. Negar 'system' por completo (como a sub-entrega 5/N publicou) quebraria as duas telas assim que a regra fosse deployada — exatamente o que o passo 8 do plano avisa para evitar ('não quebrar o aplicativo ao fechar o catch-all')."
+    autoridade: existente_ou_nova
+  - id: p01-codex-excecao-concessao-nao-negacao
+    motivo: "Corrigido com um novo bloco match /system/{docId}, irmão do bloco catch-all consolidado, concedendo read+write só quando docId in ['sync', 'copilot_soul'] e internalUser(). Isto é deliberadamente a direção OPOSTA do bug que o achado A16 corrigiu: ali, um bloco irmão de NEGAÇÃO (if false) ao lado de um catch-all permissivo era um no-op (false OR true = true, nada bloqueado de fato); aqui é um bloco irmão de CONCESSÃO estreita (docId in [...]) ao lado de um catch-all que já nega 'system' por completo — o resultado (true OR false = true só para esses dois documentos, false para qualquer outro doc de 'system', já que nem o bloco novo nem o catch-all liberam) é exatamente a exceção pretendida, sem reabrir o resto da coleção. Restrito a um único segmento de caminho (match /system/{docId}, não /system/{document=**}), então nenhum caminho aninhado sob system fica coberto por este bloco mesmo que algum vier a existir no futuro."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "npm test"
+    - "npx vitest run --config tests/rules/vitest.config.ts"
+  resultados:
+    - "Frontend (vitest, suíte padrão): 248/248 passando, sem regressão."
+    - "npx vitest run --config tests/rules/vitest.config.ts: 38 testes descobertos (31 anteriores + 7 novos: 1 cobrindo que outros documentos de system — google_credentials, api_keys, settings, whatsapp_worker — continuam bloqueados mesmo para o dono, e 6 cobrindo os três perfis × os dois documentos da exceção), falha apenas no ponto esperado (emulador não conectado neste sandbox)."
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio, dedicada especificamente a este achado do Codex): rederivou à mão a semântica OR para as três combinações relevantes (dono em system/sync, dono em outro doc de system, não-dono/público em qualquer doc de system) e confirmou que o resultado bate com o pretendido em todos os casos; confirmou por grep exaustivo no repo inteiro que não existe nenhum outro uso do SDK cliente para 'system' ou 'automations' além dos dois já corrigidos; confirmou, lendo os imports/require reais, que functions_node/index.js, services/whatsapp-capture/index.js e functions/upload-credentials.js usam admin.firestore() (Admin SDK, não governado por estas regras), não o SDK cliente. Único achado (nitpick, não corrigido): o teste de regressão de 'automations' só cobre o dono, não público/não-dono — mas esse caminho já existia antes desta correção e não foi tocado por ela. Veredito: SHIP."
+  - "Verificação de hash pós-escrita (git hash-object local vs. sha do Argos) confirmou publicação fiel dos dois arquivos: firestore.rules (sha d824fc89..., commit f925b3c3) e tests/rules/firestore.rules.test.ts (sha 3cc1dd76..., commit d1ce3cde), sem drift de transcrição."
+  - "Resposta publicada diretamente no comentário do Codex na PR #190 (via argos_comentar_issue_repositorio), reconhecendo o achado como correto e explicando a correção, com novo @codex review solicitado."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "Mesma pendência da sub-entrega 5/N: CI/deploy (.github/workflows/pr.yml, deploy.yml) seguem bloqueados por permissão (PAT do Argos sem escopo workflow) — precisam de aplicação manual pelo André."
+  - "Mesma pendência da sub-entrega 5/N: testes de firestore.rules não executados ponta-a-ponta neste sandbox (Firestore Emulator bloqueado por rede) — rodar npm run test:rules num ambiente com rede irrestrita antes de considerar validado de ponta a ponta."
+  - "Falta aguardar/esgotar mais um ciclo do protocolo padrão de checagem do Codex (3min/5min) nesta PR #190 antes de considerar o P01 completo."
+proximo_pacote: "P01 — aguardar ciclo de revisão do Codex nesta PR (#190); se esgotado sem novo comentário, declarar P01 completo (sub-entregas 1-5.1/N cobrindo os passos 1-10, PRs #186/#188/#189/#190) e notificar o André antes dos 90 minutos de intervalo para o P02."
+```
