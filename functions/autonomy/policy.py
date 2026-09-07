@@ -728,6 +728,66 @@ def estado_autonomia_atual(db, dominio: str = "global") -> EstadoAutonomia:
         return EstadoAutonomia.SOMENTE_PREPARACAO
 
 
+def decisao_piso(db, principal: Principal, nome: str, argumentos: dict) -> PolicyDecision | None:
+    """Preflight de `avaliar()` para os tools do piso — orquestra
+    `estado_autonomia_atual()` + `PolicyRequest` + `avaliar()` +
+    `registrar_decisao()` num único ponto reutilizável por qualquer canal
+    (P02 sub-entrega 6/N). Extraída da lógica que `mcp_server.py::
+    _decisao_piso_mcp` já tinha desde a sub-entrega 2/N — essa função
+    continua com sua própria implementação por ora (ver pendência em
+    docs/autonomia/execucao.md sobre a duplicação; não refeita nesta
+    sub-entrega para não mexer num caminho de código sensível já testado).
+
+    O candidato natural para o segundo consumidor real, nesta mesma
+    sub-entrega, era o fechamento do agendamento de WhatsApp via Telegram
+    (hermes_core_logic.py::schedule_whatsapp_message, que tem sua própria
+    confirmação por botões mas não consulta autonomy.policy em nenhum
+    ponto) — chegou a ser implementado e testado, mas teve que ser
+    REVERTIDO: hermes_core_logic.py sozinho, sem NENHUMA mudança desta
+    sub-entrega, já tem 276257 caracteres — acima do limite de 200000 de
+    `mcp__Argos__argos_escrever_arquivo_repositorio.conteudo` (a API de
+    escrita do Argos exige o arquivo INTEIRO, não um diff/patch), então
+    esse arquivo é estruturalmente inalcançável por este mecanismo de
+    shipping, para QUALQUER mudança, não só a desta sub-entrega. Ver
+    docs/autonomia/execucao.md (P02 sub-entrega 6/N) para os detalhes e o
+    que isso bloqueia. Esta função em si (`decisao_piso`) não depende de
+    hermes_core_logic.py e continua sendo entregue nesta sub-entrega, pronta
+    para o dia em que esse arquivo puder ser alcançado (ex.: extraindo os
+    handlers de Telegram para um módulo menor, ou uma via de escrita que
+    aceite diffs).
+
+    Retorna `None` quando `nome` não está classificado em
+    `CLASSE_EFEITO_PISO` (mesmo contrato de `mcp_server.py::
+    _decisao_piso_mcp`: um tool exigindo confirmação só por config, sem
+    classe_efeito conhecida, não passa pelo motor).
+
+    `db` já deve estar RESOLVIDO (cliente Firestore de verdade), diferente
+    de `mcp_server.py::_decisao_piso_mcp`, que lida com `ctx.db` (property
+    lazy que pode falhar na PRÓPRIA inicialização, fora do try/except
+    interno de `estado_autonomia_atual`/`registrar_decisao` — por isso
+    aquela função ainda tem uma camada extra de try/except que esta não
+    precisa). Tanto `estado_autonomia_atual` quanto `registrar_decisao` já
+    são fail-safe internamente (a primeira cai em SOMENTE_PREPARACAO numa
+    falha de LEITURA; a segunda só loga numa falha de ESCRITA) — nenhuma
+    das duas deixa uma exceção escapar para quem chamou `decisao_piso`.
+    """
+    classe_efeito = CLASSE_EFEITO_PISO.get(nome)
+    if classe_efeito is None:
+        return None
+
+    estado = estado_autonomia_atual(db)
+    request = PolicyRequest(
+        principal=principal,
+        ferramenta=nome,
+        classe_efeito=classe_efeito,
+        argumentos_resolvidos=argumentos,
+        estado_autonomia=estado,
+    )
+    decisao = avaliar(request)
+    registrar_decisao(db, request, decisao)
+    return decisao
+
+
 def registrar_decisao(db, request: PolicyRequest, decision: PolicyDecision) -> None:
     """Registra a decisão com motivo, sem copiar conteúdo sensível integral
     (P02 passo 9) — grava só as CHAVES dos argumentos (não os valores), o
