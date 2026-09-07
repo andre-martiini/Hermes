@@ -32,6 +32,18 @@
  * (regressão contra o achado A16 quebrar o app ao fechar o catch-all,
  * achado A16 passo 8).
  *
+ * Cobre também um achado real do Codex na revisão da PR #190: a busca
+ * inicial desta sub-entrega não pegou que index.tsx lê/escreve
+ * system/sync (sincronização profunda) e KnowledgeView.tsx lê/escreve
+ * system/copilot_soul (personalidade) diretamente pelo cliente — negar
+ * "system" por completo teria quebrado essas duas telas. Corrigido com um
+ * bloco `match /system/{docId}` irmão, concedendo acesso só a esses dois
+ * documentos (ver firestore.rules para por que essa direção de bloco
+ * irmão — concessão estreita, não negação — não sofre do mesmo problema
+ * de OR que o achado A16 corrigiu). Testado abaixo nos dois sentidos: os
+ * dois documentos funcionam, e qualquer outro documento de "system"
+ * continua bloqueado.
+ *
  * IMPORTANTE (honestidade epistêmica, ver docs/autonomia/execucao.md sub-
  * entrega 5/N): este arquivo foi escrito seguindo a API pública documentada
  * de @firebase/rules-unit-testing (initializeTestEnvironment/assertFails/
@@ -135,7 +147,7 @@ describe('firestore.rules — coleções de controle (achado A16)', () => {
 
 describe('firestore.rules — coleções já denegadas por completo (regressão)', () => {
   for (const colecao of ['system', 'automations']) {
-    it(`"${colecao}": nem o dono tem acesso direto (comportamento pré-existente, não deve regredir)`, async () => {
+    it(`"${colecao}": nem o dono tem acesso direto a um documento genérico (comportamento pré-existente, não deve regredir)`, async () => {
       const db = testEnv
         .authenticatedContext('dono-uid', {
           email: DONO_EMAIL,
@@ -143,6 +155,55 @@ describe('firestore.rules — coleções já denegadas por completo (regressão)
         })
         .firestore();
       const ref = doc(db, colecao, 'doc-teste');
+      await assertFails(getDoc(ref));
+      await assertFails(setDoc(ref, { x: 1 }));
+    });
+  }
+
+  it('"system": documentos além da exceção continuam bloqueados (google_credentials, api_keys — só Admin SDK)', async () => {
+    const db = testEnv
+      .authenticatedContext('dono-uid', {
+        email: DONO_EMAIL,
+        email_verified: true,
+      })
+      .firestore();
+    for (const docId of ['google_credentials', 'api_keys', 'settings', 'whatsapp_worker']) {
+      const ref = doc(db, 'system', docId);
+      await assertFails(getDoc(ref));
+      await assertFails(setDoc(ref, { x: 1 }));
+    }
+  });
+});
+
+describe('firestore.rules — exceção pontual em "system" para fluxos do frontend (achado do Codex na PR #190)', () => {
+  for (const docId of ['sync', 'copilot_soul']) {
+    it(`dono (internalUser) pode ler e escrever system/${docId} (index.tsx / KnowledgeView.tsx usam diretamente)`, async () => {
+      const db = testEnv
+        .authenticatedContext('dono-uid', {
+          email: DONO_EMAIL,
+          email_verified: true,
+        })
+        .firestore();
+      const ref = doc(db, 'system', docId);
+      await assertSucceeds(setDoc(ref, { x: 1 }));
+      await assertSucceeds(getDoc(ref));
+    });
+
+    it(`usuário público não pode ler nem escrever system/${docId}`, async () => {
+      const db = testEnv.unauthenticatedContext().firestore();
+      const ref = doc(db, 'system', docId);
+      await assertFails(getDoc(ref));
+      await assertFails(setDoc(ref, { x: 1 }));
+    });
+
+    it(`cliente autenticado mas não-dono não pode ler nem escrever system/${docId}`, async () => {
+      const db = testEnv
+        .authenticatedContext('terceiro-uid', {
+          email: 'terceiro@example.com',
+          email_verified: true,
+        })
+        .firestore();
+      const ref = doc(db, 'system', docId);
       await assertFails(getDoc(ref));
       await assertFails(setDoc(ref, { x: 1 }));
     });
