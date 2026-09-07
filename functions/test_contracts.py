@@ -101,6 +101,7 @@ class TestDefaultsDeContrato(unittest.TestCase):
         self.assertFalse(m.revogado)
         self.assertIsNone(m.valido_ate)
         self.assertIsNone(m.limite_por_janela)
+        self.assertIsNone(m.usos_na_janela_atual)
 
 
 if __name__ == "__main__":
