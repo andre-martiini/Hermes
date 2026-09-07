@@ -474,3 +474,51 @@ pendencias:
   - "P01 segue em aberto: firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados. Falta ainda postar @codex review na PR #189 e aguardar/esgotar novo ciclo de comentários (protocolo padrão de 3min/5min) antes de seguir para os passos 7-10."
 proximo_pacote: "P01 (sub-entrega 5/N ou conclusão dos passos 7-10, após esgotar o ciclo de revisão do Codex na PR #189)"
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 9922fd6f29cfc7f5fba9a5b854379f3ff2db82f2
+pacote: "P01 (sub-entrega 4.2/N — segunda rodada do Codex na PR #189: recuperação de claim vencido na leitura)"
+# Não é uma nova sub-entrega de escopo do plano; é a resposta a uma SEGUNDA
+# rodada de comentário do Codex, chegada 3 minutos após o @codex review
+# postado ao final da sub-entrega 4.1/N (protocolo padrão de checagem
+# combinado com André). Mesmos arquivos (functions/mcp_jobs.py,
+# functions/test_mcp_jobs.py), dois commits novos na mesma branch
+# (claude/p01-mcp-jobs-reentrega-claim).
+estado: pronto_para_revisao
+inicio: "2026-09-07T05:24:00Z"
+fim: "2026-09-07T05:39:00Z"
+arquivos_alterados:
+  - functions/mcp_jobs.py
+  - functions/test_mcp_jobs.py
+decisoes:
+  - id: p01-codex-reaper-leve-na-leitura-de-ler-job
+    motivo: "Achado real do Codex na PR #189 (P1, segunda rodada, 'Add recovery instead of only raising for orphaned claims'): levantar ClaimAindaValidoError (sub-entrega 4.1/N) torna a falha visível nos logs, mas sozinho NÃO recupera o job — sem uma entrega duplicada tardia e independente do mesmo evento (não garantida, já que retry=False é hardcoded para este gatilho — achado confirmado na própria correção que motivou este achado), o job ficava em_execucao para sempre do ponto de vista de quem consulta via ler_job. Investigado o uso real do protocolo MCP (grep em mcp_server.py): o servidor já INSTRUI explicitamente o cliente MCP a chamar consultar_job/ler_job repetidamente enquanto o job estiver 'processing' ('Chame consultar_job com este job_id em alguns segundos... se ainda estiver processing, consulte de novo'). Ou seja, a consulta em loop já é o padrão de uso real, não uma suposição. Corrigido: ler_job() agora chama uma nova função _reaproveitar_claim_vencido_na_leitura(db, ref) sempre que encontra um job em_execucao — ela reexecuta, dentro de uma NOVA transação, a mesma checagem de expiração que _claim() já faz (mesmo limiar CLAIM_EXPIRA_APOS, mesma garantia de segurança de que a plataforma já matou a execução original), e marca error se o claim ainda estiver vencido no momento da consulta. Isso fecha a lacuna sem precisar de uma função agendada (reaper) nova — a própria consulta do cliente é o mecanismo de recuperação."
+    autoridade: existente_ou_nova
+  - id: p01-mcp-jobs-dados-claim-abandonado-extraido
+    motivo: "Refatoração feita ao implementar a decisão anterior, para evitar duplicação: os campos gravados ao marcar um claim vencido como abandonado (status=error, mensagem, concluido_em, expira_em) agora vêm de uma única função _dados_claim_abandonado(agora), chamada tanto por _claim() (entrega duplicada do evento encontra o claim vencido) quanto por _reaproveitar_claim_vencido_na_leitura() (consulta de ler_job encontra o claim vencido). Antes desta extração, os dois caminhos teriam o mesmo dict escrito duas vezes de forma independente — risco real de uma mudança futura (ex.: ajustar o texto da mensagem de erro) atualizar um caminho e esquecer o outro, silenciosamente. Comportamento de _claim() preservado exatamente (mesmo dict, agora vindo da função compartilhada)."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest test_mcp_jobs -v"
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "test_mcp_jobs: 38/38 (32 anteriores + 5 novos em TestReaproveitarClaimVencidoNaLeitura — claim vencido marca error e devolve dados atualizados, claim jovem não altera documento, claim sem claimed_em tratado como vencido, corrida com status já resolvido não sobrescreve, documento inexistente devolve None — + 1 novo em TestLerJob cobrindo a integração via ler_job; test_status_em_execucao_normaliza_para_processing ajustado para usar claimed_em recente, já que um claim sem claimed_em válido agora é corretamente reaproveitado como abandonado — mesmo tratamento que _claim() já dava a esse caso, comportamento correto e não uma regressão)"
+    - "Python (unittest, suíte completa): 1213/1213 passando (1207 da sub-entrega 4/N + 6 novos; 0 regressões)"
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio, dedicada especificamente a esta correção): traçou o protocolo real de transação do google.cloud.firestore_v1 instalado (commits são validados por concorrência otimista no servidor; uma transação perdedora recebe Aborted e é automaticamente retentada com leitura fresca — duas escritas concorrentes, ex. uma entrega duplicada tardia no ramo de _claim() colidindo com uma consulta de ler_job no mesmo job, não corrompem estado, uma vence e a outra apenas relê e não faz nada); confirmou que DatetimeWithNanoseconds (o tipo real que o Firestore usa para desserializar Timestamp) é subclasse de datetime, então isinstance(claimed_em, datetime) funciona igual em dados reais e nos testes; verificou que nenhum caminho novo permite dupla execução (a função nova nunca marca em_execucao, só rebaixa um claim vencido para error); e testou empiricamente a não-vacuidade de 3 testes (dois via _reaproveitar_claim_vencido_na_leitura virar no-op, um via desligar só a chamada em ler_job), restaurando o arquivo original e reconfirmando a suíte completa (1213/1213) depois. Único achado: a frase de abertura da docstring do módulo ainda dizia 'três problemas... mais um quarto achado do Codex' quando a lista já tinha 5 itens — corrigido para 'mais dois achados do Codex, pontos 4 e 5' antes de publicar. Nenhum bug de correção encontrado. Veredito: seguro para publicar."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "Limitação aceita, mais estreita que antes (ver decisão p01-codex-reaper-leve-na-leitura-de-ler-job): um claim genuinamente abandonado agora se recupera na próxima chamada a ler_job para esse job_id, não só numa entrega duplicada tardia por acaso. O que ainda não fecha é o caso em que NINGUÉM nunca mais consulta esse job_id (cliente desistiu, caiu, ou nunca chegou a perguntar) — aí o documento fica em_execucao indefinidamente no Firestore, sem limpeza automática (TTL só cobre os caminhos terminais). Resolver isso de verdade exigiria um reaper agendado independente de qualquer consulta, ou o protocolo completo de lease/heartbeat da seção 4.5 do plano — candidato a P04, não bloqueia esta entrega."
+  - "Mesmo bloqueio já registrado nas sub-entregas 3/N-4.1/N: functions/main.py e functions/test_github_webhook.py seguem sem publicar (limite de 200k caracteres do Argos)."
+  - "IMPORTANTE PARA DECISÃO DE MERGE (já registrada na sub-entrega 3.2/N, segue valendo): mesclar a PR #188 antes de main.py ser desbloqueado muda o comportamento de produção da deduplicação de webhook. Não afeta diretamente a PR #189, mas ambas seguem empilhadas na mesma cadeia."
+  - "P01 segue em aberto: firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados. Falta postar @codex review de novo na PR #189 e aguardar/esgotar mais um ciclo de comentários (protocolo padrão de 3min/5min) antes de seguir para os passos 7-10."
+proximo_pacote: "P01 (sub-entrega 5/N ou conclusão dos passos 7-10, após esgotar o ciclo de revisão do Codex na PR #189)"
+```
