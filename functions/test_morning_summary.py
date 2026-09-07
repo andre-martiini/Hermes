@@ -25,6 +25,7 @@ from morning_summary import (
     _coletar_estrategia,
     _coletar_avisos_do_sistema,
     _coletar_passivo_de_elevacao,
+    _coletar_ultima_tentativa_elevacao,
     _ultima_medida,
     _shift,
 )
@@ -660,6 +661,106 @@ class TestAvisosDoSistema(unittest.TestCase):
                 raise RuntimeError("indisponivel")
         self.assertEqual(_coletar_avisos_do_sistema(_DbQuebrado()), [])
 
+
+
+class TestUltimaTentativaElevacao(unittest.TestCase):
+    """Diz quando a rotina de elevacao tentou rodar, mesmo quando nada avancou.
+
+    `_coletar_avisos_do_sistema` so muda quando a rodada chega a olhar a janela
+    de tarefas — uma trava de volume (semana cheia, teto do mes) barra antes
+    disso toda semana sem deixar rastro, e o aviso antigo fica com uma data que
+    parece atual mas nao e. Esta chave e o `_coletar_ultima_tentativa_elevacao`
+    existem para cobrir exatamente essa lacuna.
+    """
+
+    @staticmethod
+    def _db(estado):
+        return _FakeDb({"system_usage": {"elevacoes_sugeridas": estado}})
+
+    def test_sem_documento_nao_mostra_nada(self):
+        self.assertIsNone(_coletar_ultima_tentativa_elevacao(self._db(None)))
+
+    def test_sem_tentativa_gravada_nao_mostra_nada(self):
+        self.assertIsNone(_coletar_ultima_tentativa_elevacao(self._db({})))
+
+    def test_mostra_a_data_e_o_motivo_do_bloqueio(self):
+        t = _coletar_ultima_tentativa_elevacao(self._db(
+            {"ultima_tentativa": {"data": "2026-09-06", "motivo": "semana_cheia"}}))
+        self.assertEqual(t, {"data": "2026-09-06", "motivo": "semana_cheia"})
+
+    def test_motivo_none_significa_que_rodou(self):
+        """Tentativa registrada sem motivo e sucesso, nao ausencia de dado."""
+        t = _coletar_ultima_tentativa_elevacao(self._db(
+            {"ultima_tentativa": {"data": "2026-09-06", "motivo": None}}))
+        self.assertEqual(t, {"data": "2026-09-06", "motivo": None})
+
+    def test_falha_de_leitura_nao_derruba_o_resumo(self):
+        class _DbQuebrado:
+            def collection(self, _n):
+                raise RuntimeError("indisponivel")
+        self.assertIsNone(_coletar_ultima_tentativa_elevacao(_DbQuebrado()))
+
+
+class TestAvisoDeVarreduraComTentativaRecente(unittest.TestCase):
+    """O aviso de degradacao ganha uma nota quando ha tentativa mais nova.
+
+    Sem isso, um aviso de "candidatas demais" gravado em 30/08 continua no
+    resumo com essa mesma data mesmo que a rotina tenha sido barrada por semana
+    cheia em toda tentativa desde entao — o usuario le a data antiga como se
+    fosse o estado atual, sem saber que a rotina nem chegou a reavaliar.
+    """
+
+    @staticmethod
+    def _db(estado):
+        return _FakeDb({"system_usage": {"elevacoes_sugeridas": estado}})
+
+    def test_tentativa_mais_recente_acrescenta_nota_ao_aviso(self):
+        avisos = _coletar_avisos_do_sistema(self._db({
+            "varredura_degradada": {"data": "2026-08-30", "motivo": "candidatas_demais"},
+            "ultima_tentativa": {"data": "2026-09-06", "motivo": "semana_cheia"},
+        }))
+        self.assertEqual(len(avisos), 1)
+        self.assertEqual(avisos[0]["desde"], "2026-08-30")
+        self.assertIn("2026-09-06", avisos[0]["detalhe"])
+        self.assertIn("semana_cheia", avisos[0]["detalhe"])
+
+    def test_tentativa_igual_ao_aviso_nao_acrescenta_nota(self):
+        """Tentativa e aviso da mesma data: sao a mesma rodada, nada a esclarecer."""
+        avisos = _coletar_avisos_do_sistema(self._db({
+            "varredura_degradada": {"data": "2026-09-06", "motivo": "candidatas_demais"},
+            "ultima_tentativa": {"data": "2026-09-06", "motivo": None},
+        }))
+        self.assertEqual(len(avisos), 1)
+        self.assertNotIn("Última tentativa", avisos[0]["detalhe"])
+
+    def test_sem_tentativa_gravada_nao_acrescenta_nota(self):
+        avisos = _coletar_avisos_do_sistema(self._db({
+            "varredura_degradada": {"data": "2026-08-30", "motivo": "indice_ausente"},
+        }))
+        self.assertEqual(len(avisos), 1)
+        self.assertNotIn("Última tentativa", avisos[0]["detalhe"])
+
+    def test_sem_aviso_ativo_tentativa_nao_inventa_um(self):
+        """Sem degradacao para explicar, nao ha aviso — so a chave separada."""
+        avisos = _coletar_avisos_do_sistema(self._db({
+            "ultima_tentativa": {"data": "2026-09-06", "motivo": "semana_cheia"},
+        }))
+        self.assertEqual(avisos, [])
+
+    def test_tentativa_mais_antiga_nao_gera_nota_invertida(self):
+        """Achado da revisao adversarial: `!=` bastava para disparar a nota
+
+        mesmo com uma tentativa mais ANTIGA que o proprio aviso — o que
+        produziria uma frase sem sentido ("ultima tentativa" apontando para o
+        passado, debaixo de um aviso mais recente). A comparacao precisa ser de
+        recencia de verdade (`>`), nao so "diferente"."""
+        avisos = _coletar_avisos_do_sistema(self._db({
+            "varredura_degradada": {"data": "2026-09-06", "motivo": "candidatas_demais"},
+            "ultima_tentativa": {"data": "2020-01-01", "motivo": "semana_cheia"},
+        }))
+        self.assertEqual(len(avisos), 1)
+        self.assertNotIn("Última tentativa", avisos[0]["detalhe"])
+        self.assertNotIn("2020-01-01", avisos[0]["detalhe"])
 
 
 class TestRotinasVerificaveis(unittest.TestCase):
