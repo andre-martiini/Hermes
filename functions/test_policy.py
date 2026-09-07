@@ -198,6 +198,7 @@ class TestAvaliarAutoconcessao(unittest.TestCase):
         mandato = Mandato(
             mandato_id="m1", finalidade="lembrete recorrente",
             destinatarios_recursos=("*",), classes_conteudo_permitidas=("geral",),
+            valido_ate=_AGORA + timedelta(days=1),
         )
         req = _req(
             classe_efeito=ClasseEfeito.COMPROMISSO_TERCEIROS,
@@ -246,6 +247,7 @@ class TestAvaliarAutoconcessao(unittest.TestCase):
         mandato = Mandato(
             mandato_id="m1", finalidade="rotina agendada",
             destinatarios_recursos=("*",), classes_conteudo_permitidas=("geral",),
+            valido_ate=_AGORA + timedelta(days=1),
         )
         req = _req(
             classe_efeito=ClasseEfeito.COMPROMISSO_TERCEIROS,
@@ -270,6 +272,7 @@ class TestAvaliarMandatoNaoEscapaSomentePreparacao(unittest.TestCase):
         mandato = Mandato(
             mandato_id="m1", finalidade="lembrete recorrente",
             destinatarios_recursos=("*",), classes_conteudo_permitidas=("geral",),
+            valido_ate=_AGORA + timedelta(days=1),
         )
         req = _req(
             classe_efeito=ClasseEfeito.COMPROMISSO_TERCEIROS,
@@ -289,6 +292,7 @@ class TestAvaliarMandatoNaoEscapaSomentePreparacao(unittest.TestCase):
         mandato = Mandato(
             mandato_id="m1", finalidade="lembrete recorrente",
             destinatarios_recursos=("*",), classes_conteudo_permitidas=("geral",),
+            valido_ate=_AGORA + timedelta(days=1),
         )
         req = _req(
             classe_efeito=ClasseEfeito.COMPROMISSO_TERCEIROS,
@@ -308,6 +312,7 @@ class TestAvaliarMandatoRebaixaDecisaoPadrao(unittest.TestCase):
         mandato = Mandato(
             mandato_id="m1", finalidade="coordenar agenda",
             destinatarios_recursos=("*",), classes_conteudo_permitidas=("geral",),
+            valido_ate=_AGORA + timedelta(days=1),
         )
         req = _req(
             classe_efeito=ClasseEfeito.COORDENACAO_LIMITADA,
@@ -421,6 +426,7 @@ class TestAvaliarOrigemHumana(unittest.TestCase):
         mandato = Mandato(
             mandato_id="m1", finalidade="preparar minuta semanal",
             destinatarios_recursos=("*",), classes_conteudo_permitidas=("geral",),
+            valido_ate=_AGORA + timedelta(days=1),
         )
         req = _req(
             classe_efeito=ClasseEfeito.PREPARACAO_INTERNA,
@@ -476,6 +482,16 @@ class TestMandatoCobre(unittest.TestCase):
             finalidade="avisar fornecedor",
             destinatarios_recursos=("fulano@example.com",),
             classes_conteudo_permitidas=("geral",),
+            # Quarta rodada da revisão do Codex (PR #191): `valido_ate=None`
+            # (o default do contrato) agora NÃO cobre — ver
+            # `test_sem_validade_nao_cobre_regressao_seguranca` abaixo. Cada
+            # teste desta classe que não é sobre validade em si precisa de um
+            # mandato válido para exercitar a checagem que de fato pretende
+            # testar, então o fixture já vem com uma validade futura por
+            # padrão (mesmo raciocínio de `missao=m.finalidade` no comentário
+            # abaixo); `test_expirado_nao_cobre`/`test_ainda_valido_cobre`
+            # sobrescrevem explicitamente.
+            valido_ate=_AGORA + timedelta(days=1),
         )
         base.update(overrides)
         return Mandato(**base)
@@ -503,6 +519,18 @@ class TestMandatoCobre(unittest.TestCase):
         m = self._mandato(valido_ate=_AGORA + timedelta(days=1), destinatarios_recursos=("*",))
         req = _req(sensibilidade="geral", missao=m.finalidade)
         self.assertTrue(policy.mandato_cobre(m, req, _AGORA))
+
+    def test_sem_validade_nao_cobre_regressao_seguranca(self):
+        # Achado P1 da quarta rodada da revisão do Codex (PR #191): a versão
+        # anterior só rejeitava quando `valido_ate` estava PREENCHIDO e no
+        # passado — um mandato sem `valido_ate` (o default do contrato)
+        # cobria indefinidamente, apesar de "validade" ser uma das condições
+        # mínimas do mandato (seção 5.3) e de cada outro campo opcional desta
+        # função já ter sido fechado no mesmo sentido. Agora falha fechado:
+        # sem validade resolvida, o mandato não cobre.
+        m = self._mandato(valido_ate=None, destinatarios_recursos=("*",))
+        req = _req(sensibilidade="geral", missao=m.finalidade)
+        self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
 
     def test_destinatario_fora_da_lista_nao_cobre(self):
         m = self._mandato(destinatarios_recursos=("fulano@example.com",))
@@ -633,6 +661,38 @@ class TestMandatoCobre(unittest.TestCase):
         m = self._mandato(destinatarios_recursos=("*",))
         req = _req(sensibilidade="geral", missao=m.finalidade)
         self.assertTrue(policy.mandato_cobre(m, req, _AGORA))
+
+    def test_horario_so_com_inicio_nao_cobre_regressao_seguranca(self):
+        # Achado P1 da quarta rodada da revisão do Codex (PR #191): a versão
+        # anterior só aplicava a restrição de horário quando os DOIS
+        # extremos vinham preenchidos (`and`) — um mandato com só
+        # `horario_permitido_inicio` (dado parcial/malformado; os dois
+        # campos são independentemente opcionais no contrato) pulava a
+        # checagem inteira, cobrindo qualquer horário como se não houvesse
+        # restrição nenhuma. Agora falha fechado.
+        m = self._mandato(destinatarios_recursos=("*",), horario_permitido_inicio="09:00")
+        req = _req(sensibilidade="geral", missao=m.finalidade)
+        self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
+
+    def test_horario_so_com_fim_nao_cobre_regressao_seguranca(self):
+        m = self._mandato(destinatarios_recursos=("*",), horario_permitido_fim="18:00")
+        req = _req(sensibilidade="geral", missao=m.finalidade)
+        self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
+
+    def test_horario_com_strings_vazias_nao_cobre_regressao_seguranca(self):
+        # Achado da revisão adversarial da própria correção acima: a checagem
+        # externa original usava `inicio or fim` (truthiness), então
+        # `"" or ""` era falsy e pulava a checagem de horário inteira — os
+        # dois campos "presentes" mas vazios escapavam até da checagem de
+        # configuração parcial, o mesmo padrão de bug que esta rodada fechou
+        # em `estado_autonomia_atual` (valor presente e falsy tratado como
+        # ausente). Corrigido para `is not None`.
+        m = self._mandato(
+            destinatarios_recursos=("*",),
+            horario_permitido_inicio="", horario_permitido_fim="",
+        )
+        req = _req(sensibilidade="geral", missao=m.finalidade)
+        self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
 
     def test_janela_noturna_cobre_horario_apos_meia_noite(self):
         # Achado #3 da revisão adversarial: janela "22:00"-"06:00" (cruza a
@@ -841,6 +901,33 @@ class TestEstadoAutonomiaAtual(unittest.TestCase):
         snap.to_dict.return_value = {"global": "valor-desconhecido-de-versao-futura"}
         db.collection.return_value.document.return_value.get.return_value = snap
         self.assertEqual(policy.estado_autonomia_atual(db), EstadoAutonomia.SOMENTE_PREPARACAO)
+
+    def test_valor_vazio_presente_cai_para_somente_preparacao_regressao_seguranca(self):
+        # Achado P1 da quarta rodada da revisão do Codex (PR #191): a versão
+        # anterior usava `dados.get(dominio) or dados.get("global") or
+        # ATIVO`, que tratava um valor PRESENTE MAS FALSY (`""` — por
+        # exemplo um documento em escrita parcial) do mesmo jeito que uma
+        # chave AUSENTE, caindo direto em ATIVO sem nunca passar pelo
+        # fail-closed. Agora a chave é procurada por ausência, não por
+        # truthiness: um valor presente e vazio é tratado como valor
+        # inválido (mesmo caminho de `test_valor_invalido_no_documento_...`
+        # acima), não como "nada configurado".
+        db = MagicMock()
+        snap = MagicMock(exists=True)
+        snap.to_dict.return_value = {"global": ""}
+        db.collection.return_value.document.return_value.get.return_value = snap
+        self.assertEqual(policy.estado_autonomia_atual(db), EstadoAutonomia.SOMENTE_PREPARACAO)
+
+    def test_documento_existe_mas_vazio_retorna_ativo(self):
+        # Diferente do caso acima: aqui NENHUMA chave (nem `dominio` nem
+        # "global") está presente no documento — isso ainda é "nada
+        # configurado para este domínio", não um valor corrompido, e
+        # continua caindo em ATIVO, igual ao documento totalmente ausente.
+        db = MagicMock()
+        snap = MagicMock(exists=True)
+        snap.to_dict.return_value = {}
+        db.collection.return_value.document.return_value.get.return_value = snap
+        self.assertEqual(policy.estado_autonomia_atual(db), EstadoAutonomia.ATIVO)
 
     def test_le_estado_do_dominio_pedido(self):
         db = MagicMock()
