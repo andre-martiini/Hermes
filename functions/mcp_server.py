@@ -126,6 +126,14 @@ _CORS_ORIGINS = [
     "http://127.0.0.1:5173",
 ]
 
+# TTL do `server/discover` — capacidades e identidade do servidor so mudam em
+# deploy, entao 5 min (mesmo criterio do cache de discovery OAuth em
+# mcp_oauth.py) evita re-fetch constante sem arriscar informacao desatualizada
+# por muito tempo. `cacheScope="public"`: a resposta nao contem dado do
+# usuario (a autorizacao de quem pode USAR o Hermes continua sendo feita por
+# fora, no OAuth) e e identica para qualquer cliente autenticado.
+_DISCOVER_TTL_MS = 300_000
+
 # Compartilhado entre `initialize` (era legada) e `server/discover` (era
 # moderna, 2026-07-28+) — as duas formas de um cliente aprender a usar o
 # Hermes antes da primeira chamada real. Extrair para uma constante evita as
@@ -580,19 +588,26 @@ def _handle_initialize(params: dict) -> dict:
 
 
 def _handle_server_discover(params: dict) -> dict:
-    """`server/discover` — mandatorio a partir da revisao 2026-07-28 do MCP.
+    """`server/discover` — a especificacao MCP 2026-07-28 exige que todo
+    servidor o implemente ("Servers MUST implement it"); o Hermes nao tinha
+    handler nenhum, entao qualquer chamada caia no `-32601 Metodo
+    desconhecido` generico.
 
-    A revisao 2026-07-28 substitui o handshake por `initialize` por metadados
-    "_meta" em cada request; `server/discover` e o jeito de um cliente novo
-    aprender versao/capacidades/identidade do servidor num unico request,
-    tipicamente ANTES de tentar `tools/list`. Servidores dessa revisao devem
-    implementa-lo (a especificacao usa "MUST"); o Hermes nao o tinha, entao
-    um cliente que faca dele a primeira chamada pos-OAuth recebia
-    `-32601 Metodo desconhecido` em vez de uma resposta de descoberta —
-    indistinguivel, para esse cliente, de um servidor fora do ar.
-    Continuamos respondendo no formato "legado" para tudo o mais
-    (`initialize` + `tools/list` avulsos); isto so cobre o request extra que
-    um cliente moderno pode fazer antes disso.
+    IMPORTANTE (verificado na propria especificacao, nao suposto): chamar
+    `server/discover` e OPCIONAL para o cliente — a especificacao so o marca
+    como recomendado (`SHOULD`) num cenario especifico, a sondagem de
+    compatibilidade no transporte stdio, que nao e o caso do Hermes (HTTP).
+    Em Streamable HTTP a especificacao descreve outro mecanismo de deteccao
+    (tentar um request "moderno" e inspecionar o corpo de um eventual `400`).
+    Isto significa que implementar este metodo cobre uma lacuna real e
+    obrigatoria da especificacao, mas **nao ha confirmacao de que seja o que
+    o ChatGPT tenta chamar** — os logs da investigacao que motivou esta
+    mudanca mostram ZERO requisicoes chegando a `/mcp` apos o OAuth, em
+    qualquer tentativa; ou seja, nenhuma chamada a `server/discover` (nem a
+    nenhum outro metodo) foi de fato observada falhando aqui. A causa do
+    "action discovery failed" relatado pode estar inteiramente do lado do
+    ChatGPT, antes de qualquer requisicao de rede. Ver PR para o relato
+    completo dessa investigacao.
     """
     return {
         "resultType": "complete",
@@ -602,6 +617,12 @@ def _handle_server_discover(params: dict) -> dict:
             "io.modelcontextprotocol/serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
         },
         "instructions": _INSTRUCTIONS,
+        # MUST pela especificacao (server/utilities/caching) para todo
+        # resultado com resultType "complete" de server/discover: sem estes
+        # dois campos a propria resposta que anuncia conformidade com a
+        # revisao 2026-07-28 seria no-conformante com ela.
+        "ttlMs": _DISCOVER_TTL_MS,
+        "cacheScope": "public",
     }
 
 
