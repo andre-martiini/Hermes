@@ -183,10 +183,13 @@ class Mandato:
     ainda não implementado nesta sub-entrega, já que mandatos persistidos
     ficam para a sub-entrega seguinte) precisa RESOLVER e preencher este
     campo antes de colocar o mandato em `PolicyRequest.mandatos_aplicaveis`.
-    `None` (o default) significa "contagem não verificada" — `mandato_cobre`
-    não aplica o limite quando não sabe a contagem, mas o campo existe desde
-    já para que o wrapper futuro tenha onde escrever, em vez de a checagem
-    ficar sem nenhum lugar para acontecer.
+    `None` (o default) significa "contagem não verificada" — terceira rodada
+    da revisão do Codex (PR #191): quando `limite_por_janela` está declarado
+    mas a contagem ainda é `None`, `mandato_cobre` trata o mandato como NÃO
+    coberto (falha fechada), em vez de pular o limite como se não existisse.
+    O campo existe desde já para que o wrapper futuro (ainda não
+    implementado nesta sub-entrega) tenha onde escrever a contagem
+    resolvida, em vez de a checagem ficar sem nenhum lugar para acontecer.
     """
 
     mandato_id: str
