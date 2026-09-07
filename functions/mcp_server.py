@@ -37,7 +37,7 @@ from firebase_admin import firestore
 
 from tools import registry
 from tools.hermes_tools import ToolNotAvailable, execute as execute_tool, preview as preview_tool
-from tools.tool_context import ToolContext, principal_de
+from tools.tool_context import ToolContext
 from copilot_context import build_mcp_voice_context
 from autonomy import policy as autonomy_policy
 from autonomy.contracts import (
@@ -391,16 +391,13 @@ def _principal_mcp(ctx: ToolContext) -> Principal:
     docs/autonomia/execucao.md (pendência da sub-entrega 1/N): este é o
     canal do próprio dono, então o valor está correto, mas escrevê-lo aqui
     documenta a decisão em vez de deixá-la implícita no default.
-
-    Desde a sub-entrega 5/N, a construção em si (uid/canal → `Principal`,
-    default de `origem_humana` por tipo) é `tools.tool_context.principal_de`
-    — compartilhado com qualquer canal futuro que precise da mesma lógica.
-    Esta função continua existindo, com o mesmo nome e assinatura, só para
-    preservar a decisão do TIPO (CLIENTE_ASSISTIDO, nunca inferido) e o
-    raciocínio documentado acima; `test_mcp_server.py::TestPrincipalMcp`
-    prova que o resultado não mudou.
     """
-    return principal_de(ctx, TipoPrincipal.CLIENTE_ASSISTIDO, origem_humana=True)
+    return Principal(
+        uid=ctx.user_uid,
+        tipo=TipoPrincipal.CLIENTE_ASSISTIDO,
+        canal=ctx.canal,
+        origem_humana=True,
+    )
 
 
 def _decisao_piso_mcp(ctx: ToolContext, nome: str, argumentos: dict) -> PolicyDecision | None:
@@ -749,30 +746,24 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
                            is_error=is_err)
             return _text_result(result, is_error=is_err)
         else:
-            # Compatibilidade para tools antigas sem hook de prévia: `_confirmed`
-            # continua bastando. Uma tool com hook nunca executa por este caminho,
-            # pois precisa da prévia concreta apresentada ao usuario.
-            #
-            # EXCETO para o piso (P02 sub-entrega 2/N — achado da revisão
-            # adversarial desta sub-entrega, verificado ponta a ponta contra o
-            # dispatch real: `criar_rascunho_email`, `registrar_aporte_investimento`
-            # e `registrar_execucao_investimento` não têm hook de prévia
-            # — `tools/hermes_tools.py::preview()` devolve `None` para as três —
-            # então uma ÚNICA chamada `tools/call` com `_confirmed=true` (sem
-            # `_confirmation_id`) executava direto por este ramo: sem nunca criar
-            # uma confirmação real, sem nunca passar por `_decisao_piso_mcp`
-            # (chamado só no ramo de CRIAÇÃO de confirmação, no `elif` abaixo), e
-            # sem o "sim" explícito que o comentário de
-            # `_CONFIRMACAO_OBRIGATORIA` promete ser inegociável para o piso
-            # ("uma lista vazia em produção não pode tornar o envio de mensagem
-            # executável sem o 'sim' do usuário" — o mesmo vale, a fortiori, para
-            # as duas escritas de investimento, que não têm desfazer nenhum).
-            # Esta era exatamente a lacuna de governança que este preflight
-            # deveria fechar; a compatibilidade legada não pode reabri-la para o
-            # piso. Fechado: tools do piso sempre exigem o confirmation_id de uma
-            # confirmação real e persistida, hook de prévia ou não. Tools de
-            # confirmação obrigatória só por config (fora do piso hardcoded)
-            # continuam pela compatibilidade antiga, inalterada.
+            # Tools do piso sempre exigem o confirmation_id de uma confirmação
+            # real e persistida, hook de prévia ou não (P02 sub-entrega 2/N —
+            # achado da revisão adversarial daquela sub-entrega, verificado
+            # ponta a ponta contra o dispatch real: `criar_rascunho_email`,
+            # `registrar_aporte_investimento` e `registrar_execucao_investimento`
+            # não têm hook de prévia — `tools/hermes_tools.py::preview()`
+            # devolve `None` para as três — então uma ÚNICA chamada `tools/call`
+            # com `_confirmed=true` (sem `_confirmation_id`) executava direto
+            # por este ramo: sem nunca criar uma confirmação real, sem nunca
+            # passar por `_decisao_piso_mcp` (chamado só no ramo de CRIAÇÃO de
+            # confirmação, no `elif` abaixo), e sem o "sim" explícito que o
+            # comentário de `_CONFIRMACAO_OBRIGATORIA` promete ser inegociável
+            # para o piso ("uma lista vazia em produção não pode tornar o envio
+            # de mensagem executável sem o 'sim' do usuário" — o mesmo vale, a
+            # fortiori, para as duas escritas de investimento, que não têm
+            # desfazer nenhum). Esta era exatamente a lacuna de governança que
+            # este preflight deveria fechar; a compatibilidade legada não pode
+            # reabri-la para o piso.
             if name in autonomy_policy.FLOOR_CONFIRMACAO_OBRIGATORIA:
                 return _text_result({
                     "erro": (
@@ -783,12 +774,42 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
                     ),
                 }, is_error=True)
             try:
-                if preview_tool(name, ctx, arguments) is not None:
-                    return _text_result({
-                        "erro": "Esta confirmação precisa do confirmation_id devolvido pela prévia.",
-                    }, is_error=True)
+                proposta_previa = preview_tool(name, ctx, arguments)
             except Exception as exc:
                 return _text_result({"erro": str(exc)}, is_error=True)
+            if proposta_previa is not None:
+                return _text_result({
+                    "erro": "Esta confirmação precisa do confirmation_id devolvido pela prévia.",
+                }, is_error=True)
+            # Achado de segurança (P02 sub-entrega 4/N), mesma classe do fechado
+            # acima para o piso: uma tool de confirmação obrigatória só por
+            # config (`system/mcp_access.confirm_tools`, fora do piso
+            # hardcoded) que também não tem hook de prévia (`preview_tool`
+            # devolve `None`) caía exatamente no mesmo atalho — `_confirmed=true`
+            # sem `_confirmation_id` executava direto, sem nunca criar uma
+            # confirmação real nem passar por qualquer preflight de política. A
+            # sub-entrega 2/N já tinha identificado esta lacuna na sua própria
+            # revisão adversarial ("o mesmo tipo de gap... ainda é teoricamente
+            # possível para uma tool adicionada só por config... vale endereçar
+            # quando uma futura sub-entrega tratar de tools configuráveis via
+            # política" — docs/autonomia/execucao.md) e deixou o atalho aberto
+            # deliberadamente, chamando-o de "compatibilidade legada" — mas hoje
+            # `system/mcp_access.confirm_tools` está vazio em produção (ver o
+            # comentário no topo deste arquivo sobre o contorno de 27/08/2026) e
+            # nenhuma tool nesse estado (confirmação por config, sem hook) foi
+            # identificada como configurada — fechar isto não muda nenhum
+            # comportamento observável hoje, só a lacuna teórica para quando
+            # alguém configurar uma tool assim no futuro. Fechado: TODA tool que
+            # exige confirmação (piso ou config) sempre exige o confirmation_id
+            # de uma confirmação real, hook de prévia ou não — a mesma garantia
+            # do piso, sem mais exceção "legada".
+            return _text_result({
+                "erro": (
+                    "Esta ação exige confirmação e não tem prévia disponível: "
+                    "repita a chamada sem '_confirmed' para criar uma "
+                    "confirmação e receber o confirmation_id."
+                ),
+            }, is_error=True)
     elif _exige_confirmacao(name):
         # Preflight do motor de política (P02 sub-entrega 2/N) — só decide
         # algo para tools classificados em `CLASSE_EFEITO_PISO` (ver
