@@ -262,15 +262,44 @@ def _decisao_padrao_por_classe(
     if classe == ClasseEfeito.OBSERVACAO_AUTORIZADA:
         return Decisao.ALLOW, "observacao_autorizada", False
     if classe == ClasseEfeito.PREPARACAO_INTERNA:
-        # Correção pós-revisão do Codex (PR #191): este é o ramo da matriz
-        # PADRÃO — chamado só quando NÃO há mandato cobrindo (ver `avaliar()`,
-        # passo 4/5). O reason_code antigo ("...com_mandato_valido") mentia
-        # sobre a origem da decisão e corrompia a trilha de auditoria
-        # (`registrar_decisao` grava exatamente este texto).
-        return Decisao.ALLOW, "preparacao_interna_permitida_por_padrao", False
+        # Correção pós-revisão do Codex (PR #191, segunda rodada): este é o
+        # ramo da matriz PADRÃO — chamado só quando NÃO há mandato cobrindo
+        # (ver `avaliar()`, passo 4/5). O reason_code antigo
+        # ("...com_mandato_valido") mentia sobre a origem da decisão e
+        # corrompia a trilha de auditoria (`registrar_decisao` grava
+        # exatamente este texto).
+        #
+        # Gate por `origem_humana` (correção pós-revisão do Codex, terceira
+        # rodada): a matriz de efeito (seção 5.1 do plano) define, para
+        # "Preparação interna", a regra "Executar com mandato e orçamento
+        # válidos" — ou seja, SEM mandato vigente, o padrão não é ALLOW
+        # incondicional. A exceção que preserva a "pouca fricção" prometida
+        # na seção 5 é quando um humano está de fato presente/dirigindo o
+        # pedido agora (`origem_humana=True` — dono interativo ou cliente
+        # assistido em tempo real, que já é a própria confirmação); sem essa
+        # presença (rotina do Cowork ou runner de serviço agindo sozinho,
+        # sem mandato), preparar internamente ainda é seguro por ser
+        # reversível/observável, mas não deve fechar o ciclo sozinho —
+        # rebaixa para PREPARE_ONLY em vez de ALLOW.
+        if principal.origem_humana:
+            return Decisao.ALLOW, "preparacao_interna_permitida_por_padrao", False
+        return (
+            Decisao.PREPARE_ONLY,
+            "preparacao_interna_requer_mandato_ou_humano_presente",
+            False,
+        )
     if classe == ClasseEfeito.ESCRITA_INTERNA_REVERSIVEL:
-        # Mesma correção — nenhum mandato foi consultado para chegar aqui.
-        return Decisao.ALLOW, "escrita_interna_reversivel_permitida_por_padrao", False
+        # Mesma correção — nenhum mandato foi consultado para chegar aqui. A
+        # seção 5.1 define, para "Escrita interna reversível", a regra
+        # "Executar dentro do mandato": sem mandato vigente, mesmo raciocínio
+        # de `origem_humana` acima.
+        if principal.origem_humana:
+            return Decisao.ALLOW, "escrita_interna_reversivel_permitida_por_padrao", False
+        return (
+            Decisao.PREPARE_ONLY,
+            "escrita_interna_reversivel_requer_mandato_ou_humano_presente",
+            False,
+        )
     if classe == ClasseEfeito.COORDENACAO_LIMITADA:
         # "Exigir política específica previamente aprovada" — sem mandato
         # explícito cobrindo (já checado antes de chegar aqui), decide-se
@@ -313,41 +342,59 @@ def _destino_coberto(destino_mandato: str, destinatario_pedido: str) -> bool:
 
 def mandato_cobre(mandato: Mandato, request: PolicyRequest, agora: datetime) -> bool:
     """Um mandato cobre um pedido se: não revogado, ainda válido, dentro do
-    limite de uso da janela (quando conhecido), a finalidade bate com a
-    missão do pedido (quando ambas informadas), o destino está entre os
-    cobertos, a classe de conteúdo está entre as permitidas, e o horário (se
-    restrito) bate.
+    limite de uso da janela (falha fechada quando a contagem é desconhecida
+    e há limite declarado), a finalidade bate exatamente com a missão do
+    pedido (falha fechada quando a missão não foi informada), o destino está
+    entre os cobertos, a classe de conteúdo está entre as permitidas, e o
+    horário (se restrito) bate.
 
     Limite por janela (correção pós-revisão do Codex, PR #191): esta função
     é pura e não tem acesso a histórico de uso — `mandato.usos_na_janela_atual`
     é o dado JÁ RESOLVIDO que o chamador (thin wrapper com I/O, análogo a
     `estado_autonomia_atual` no fim deste arquivo — ainda não implementado
     nesta sub-entrega) precisa preencher antes de incluir o mandato em
-    `mandatos_aplicaveis`. Quando `None` (nada resolveu a contagem ainda), o
-    limite simplesmente não é aplicado — mas o campo existe desde já, então
-    o limite deixa de ser "documentado mas sem lugar nenhum para ser
-    checado" (era assim que o Codex encontrou o gap: nada no repositório
-    populava ou lia essa contagem).
+    `mandatos_aplicaveis`. Terceira rodada da revisão do Codex: quando há
+    `limite_por_janela` declarado mas a contagem ainda é `None` (nada
+    resolveu ainda), o mandato NÃO cobre — contagem desconhecida contra um
+    limite declarado falha fechado, não é tratada como "sem limite". O campo
+    existe desde já para que o wrapper futuro tenha onde escrever, em vez de
+    o limite ficar "documentado mas sem lugar nenhum para ser checado" (era
+    assim que o Codex encontrou o gap original: nada no repositório populava
+    ou lia essa contagem).
     """
     if mandato.revogado:
         return False
     if mandato.valido_ate is not None and agora > mandato.valido_ate:
         return False
-    if (
-        mandato.limite_por_janela is not None
-        and mandato.usos_na_janela_atual is not None
-        and mandato.usos_na_janela_atual >= mandato.limite_por_janela
-    ):
-        return False
+    if mandato.limite_por_janela is not None:
+        # Correção pós-revisão do Codex (PR #191, terceira rodada): a versão
+        # anterior só rejeitava quando `usos_na_janela_atual` já estava
+        # PREENCHIDO e no limite — quando o chamador ainda não tinha
+        # resolvido a contagem (`None`, o padrão do contrato), o limite era
+        # simplesmente ignorado e o mandato cobria como se não houvesse
+        # limite nenhum. Um mandato com `limite_por_janela` declarado exige
+        # que a contagem tenha sido resolvida para contar como coberto —
+        # contagem desconhecida não passa por um limite declarado (falha
+        # fechada, mesmo raciocínio já aplicado a `sensibilidade=None`
+        # contra um mandato que declara `classes_conteudo_permitidas`).
+        if mandato.usos_na_janela_atual is None:
+            return False
+        if mandato.usos_na_janela_atual >= mandato.limite_por_janela:
+            return False
 
     # Finalidade do mandato vs. missão do pedido (correção pós-revisão do
-    # Codex): só rejeita em caso de DIVERGÊNCIA EXPLÍCITA entre as duas —
-    # `missao`/`finalidade` são texto livre, então não há como inferir
-    # equivalência semântica aqui (uma correspondência mais forte que
-    # igualdade exata fica para quando mandatos ganharem uma categoria
-    # estruturada, não texto livre). Não bloqueia quando `missao` não foi
-    # informada pelo chamador — hoje nenhum chamador a preenche ainda.
-    if request.missao is not None and mandato.finalidade and request.missao != mandato.finalidade:
+    # Codex, terceira rodada): a versão anterior só comparava quando AMBOS
+    # `missao` e `finalidade` vinham preenchidos — como `Mandato.finalidade`
+    # é campo obrigatório (`str`, sem default — seção 5.3: "condições
+    # mínimas" inclui finalidade), todo mandato real já declara uma; a
+    # checagem antiga então nunca disparava quando o chamador simplesmente
+    # não preenchia `missao` (`None`, o default de `PolicyRequest`),
+    # deixando QUALQUER mandato cobrir pedidos sem missão declarada — o
+    # mesmo padrão de fail-open já fechado para `sensibilidade`/
+    # `destinatarios_recursos`/`classes_conteudo_permitidas`. Agora a
+    # comparação é incondicional: `missao` ausente nunca bate com a
+    # `finalidade` (sempre presente) do mandato.
+    if request.missao != mandato.finalidade:
         return False
 
     destinos = set(mandato.destinatarios_recursos)
