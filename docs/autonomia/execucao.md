@@ -258,3 +258,71 @@ pendencias:
   - "Ao religar Principal de verdade na sub-entrega 2/N, cuidado deliberado necessário: Principal.origem_humana tem default True no contrato — qualquer construção de Principal para ator sem humano presente (rotina_cowork, runner_servico) precisa passar origem_humana=False explicitamente, nunca depender do default"
 proximo_pacote: "P02 (sub-entrega 2/N — preflight em tool_context.py/mcp_server.py)"
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 8b845dd4bbd53e6495d7ab9ba1892056ce4a033f
+pacote: P02 (sub-entrega 2/N — preflight real em mcp_server.py)
+# Continuação de P02 (pacote "G", seção 8 do plano). Sub-entrega 1/N introduziu
+# functions/autonomy/{contracts,policy}.py como módulo puro, ainda não
+# consultado por nenhum canal. Esta sub-entrega religa o canal MCP
+# (functions/mcp_server.py) para consultar autonomy.policy.avaliar() como
+# preflight real antes de criar a prévia de confirmação dos 5 tools do piso —
+# cobre o passo 6 do plano ("inserir preflight obrigatório no executor de
+# domínio") só para o canal MCP, e só para o piso hardcoded, não para chamadas
+# internas de módulo nem para os demais canais (web/Telegram/voz). Note-se que
+# o plano nomeia functions/tools/tool_context.py entre os arquivos de P02;
+# nesta sub-entrega ele foi lido mas não precisou de alteração — o Principal do
+# canal MCP é montado inteiramente a partir de campos que ToolContext já tinha
+# (user_uid, canal), sem precisar de campo novo.
+estado: pronto_para_revisao
+# Estados: nao_iniciado, em_execucao, pronto_para_revisao,
+# validado, publicado, ativo, bloqueado, opt_in
+inicio: "2026-09-07T14:50:00Z"
+fim: "2026-09-07T16:07:00Z"
+arquivos_alterados:
+  - functions/mcp_server.py
+  - functions/test_mcp_server.py (novo)
+  - functions/test_hermes_tools.py
+  - functions/test_policy.py
+decisoes:
+  - id: p02-sub2-fonte-unica-floor
+    motivo: "_CONFIRMACAO_OBRIGATORIA em mcp_server.py deixa de ser um `set[str]` literal duplicado e vira um alias direto de autonomy_policy.FLOOR_CONFIRMACAO_OBRIGATORIA (frozenset). Antes, test_policy.py::test_floor_identico_ao_mcp_server existia só para travar as duas constantes na mesma coisa manualmente; agora esse teste é redundante com o próprio Python, mas foi mantido como trava de regressão (se alguém reintroduzir um set literal, o teste volta a pegar a divergência)."
+    autoridade: existente_ou_nova
+  - id: p02-sub2-principal-mcp-cliente-assistido
+    motivo: "_principal_mcp(ctx) constrói o Principal do canal MCP como TipoPrincipal.CLIENTE_ASSISTIDO (não DONO_INTERATIVO, que pressupõe clique de UI por chamada; não ROTINA_COWORK/RUNNER_SERVICO, que pressupõem ausência de sessão). O servidor MCP é de acesso único (_is_uid_allowed restringe a autenticação a um só uid dono — sem uid configurado, acesso negado por padrão), então toda chamada que chega ao preflight já veio de um cliente MCP hospedado com o dono acompanhando a sessão em tempo real. origem_humana=True é passado explicitamente (nunca herdado do default do dataclass) — documenta a decisão em vez de deixá-la implícita, seguindo a pendência já registrada no bloco da sub-entrega 1/N sobre cuidado ao religar Principal de verdade."
+    autoridade: existente_ou_nova
+  - id: p02-sub2-decisao-piso-mcp-fail-closed-em-ctx-db
+    motivo: "_decisao_piso_mcp(ctx, nome, argumentos) chama autonomy_policy.estado_autonomia_atual(ctx.db) e autonomy_policy.registrar_decisao(ctx.db, ...). Cada uma dessas chamadas tem try/except PRÓPRIO em volta (não confiando só no try/except interno das duas funções de policy.py), porque ctx.db é uma property lazy que inicializa firestore.client() sob demanda e é avaliada como ARGUMENTO da chamada — ou seja, ANTES de entrar no corpo de estado_autonomia_atual/registrar_decisao, fora do try/except que existe dentro delas. Sem essa camada extra, uma falha na própria inicialização do Firestore (não só uma falha de leitura do documento) propagaria e derrubaria a chamada MCP inteira com um erro interno opaco (-32000), em vez do tratamento gracioso que o resto do arquivo já dá a falha de Firestore. Falha em resolver estado cai em SOMENTE_PREPARACAO (fail closed); falha em registrar a decisão só loga e segue (auditoria nunca derruba a chamada)."
+    autoridade: existente_ou_nova
+  - id: p02-sub2-achado-adversarial-bypass-confirmed-true-sem-hook
+    motivo: "ACHADO DE SEGURANÇA da revisão adversarial desta sub-entrega, pré-existente no código (não introduzido por esta sub-entrega, mas dentro do escopo que ela deveria fechar): em _handle_tools_call, o ramo `if _exige_confirmacao(name) and confirmed is True:` sem confirmation_id caía em `if preview_tool(name, ctx, arguments) is not None: bloqueia` — e tools/hermes_tools.py::preview() só implementa hook para pausar_conversa e schedule_whatsapp_message, devolvendo None para as outras três do piso (criar_rascunho_email, registrar_aporte_investimento, registrar_execucao_investimento). Ou seja, uma ÚNICA chamada tools/call com _confirmed=true e SEM _confirmation_id executava essas três tools DIRETO — sem nunca criar uma confirmação real, sem nunca passar por _decisao_piso_mcp (só chamado no ramo de CRIAÇÃO de confirmação, no elif irmão), e sem o 'sim' explícito que o comentário de _CONFIRMACAO_OBRIGATORIA promete ser inegociável para o piso. As duas tools de investimento não têm desfazer nenhum — é o mesmo tipo de efeito que a decisão p01-a04 (sub-entrega anterior) tratou como crítico em outro contexto. CORRIGIDO: bloco novo, restrito ao piso hardcoded (autonomy_policy.FLOOR_CONFIRMACAO_OBRIGATORIA), que recusa esse atalho ANTES mesmo de checar o hook de prévia, sempre exigindo confirmation_id de uma confirmação real e persistida. Tools de confirmação obrigatória só por config (fora do piso, via system/mcp_access.confirm_tools) mantêm a compatibilidade legada de sempre, sem mudança — o fechamento foi deliberadamente restrito ao piso, não ampliado por analogia."
+    autoridade: existente_ou_nova
+  - id: p02-sub2-fix-firebase-app-nao-inicializado-em-teste
+    motivo: "A primeira versão de _decisao_piso_mcp (antes do try/except descrito acima) derrubava 3 testes pré-existentes de test_hermes_tools.py (TestCamadaJsonRpc::test_destinatario_desconhecido_nao_cria_confirmacao, test_gate_inclui_preview_quando_a_tool_oferece_hook, test_gating_do_canal_barra_antes_de_executar) com 'The default Firebase app does not exist.' — esses testes mockavam _criar_confirmacao/preview_tool mas nunca precisavam de um app Firebase real até o preflight passar a existir. Diagnosticado com um script de reprodução isolado: mesmo com estado_autonomia_atual mockada, ctx.db (o argumento) já tentava firestore.client() de verdade antes da função mockada ser chamada. Corrigido em duas camadas: (1) o try/except em ctx.db descrito na decisão acima; (2) o helper _gating() de test_hermes_tools.py passou a mockar também firebase_admin.firestore.client (retornando um MagicMock) e autonomy_policy.registrar_decisao, além de estado_autonomia_atual (fixada em ATIVO, o estado real de produção hoje, já que system/autonomy_state ainda não é escrito por nada)."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+    - "cd functions && venv/bin/python -m unittest test_policy test_contracts test_mcp_server test_hermes_tools test_mcp_oauth -v"
+  resultados:
+    - "Python (unittest, suíte completa): 1261/1261 passando (99 da sub-entrega 1/N + 16 testes novos de test_mcp_server.py + 3 testes pré-existentes de test_hermes_tools.py corrigidos pelo fix de Firebase app; 0 regressões)"
+    - "test_mcp_server.py (arquivo novo — mcp_server.py não tinha nenhum teste próprio antes desta sub-entrega): 16/16 (_principal_mcp, _decisao_piso_mcp para os 4 estados de autonomia, mapeamento DENY/PREPARE_ONLY/ALLOW em _handle_tools_call, e 6 testes de regressão do achado de segurança provando ponta a ponta contra o dispatch real que as 3 tools do piso sem hook NUNCA executam sem confirmation_id)"
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio da implementação): encontrou o achado de bypass do _confirmed=true sem hook (único achado real) — verificado por inspeção direta do código real, não aceito às cegas. Fix aplicado e a MESMA revisão re-verificou com uma bateria mais agressiva de tentativas de exploit (21 checagens adicionais, todas passaram) mais um traço ponta a ponta do fluxo legítimo (criar→confirmar→executar→replay) contra um Firestore falso mínimo, confirmando fechamento do bypass e preservação do comportamento legítimo/anti-adulteração."
+  - "PR #192 (https://github.com/andre-martiini/Hermes/pull/192) — mesma PR aberta desde a sub-entrega 1/N (branch claude/p02-autonomy-policy-contracts); commits desta sub-entrega adicionados ao mesmo branch. @codex review pedido novamente ao final desta sub-entrega."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "Recomendação explícita da revisão adversarial desta sub-entrega, registrada e não escondida: o mesmo tipo de gap (tool de confirmação obrigatória sem hook de prévia executando via _confirmed=true sem confirmation_id) ainda é teoricamente possível para uma tool adicionada só por config (system/mcp_access.confirm_tools), fora do piso hardcoded — o fechamento desta sub-entrega foi deliberadamente restrito ao piso. Hoje não há tool nesse estado em produção (nenhuma tool configurável sem hook foi identificada), mas é uma lacuna de design que vale endereçar quando o passo 7 do plano (tools consultar/simular/preparar_politica) ou uma futura sub-entrega tratar de tools configuráveis via política."
+  - "P02 segue MATERIALMENTE em aberto — auditoria contra o texto verbatim do plano (passos 1-9, seção 'Unificar identidade e política de autonomia') mostra que sub-entregas 1/N e 2/N cobrem só o passo 9 (registrar decisões), o passo 6 (preflight obrigatório) parcialmente — só canal MCP, só piso hardcoded, chamadas internas de módulo NÃO passam pela política ainda —, o passo 5 (preservar as 5 confirmações), e metade do passo 4 (modelar políticas/decisões; falta 'importar configuração existente e apresentar diferenças antes de ativar permissões novas'). Passos claramente NÃO endereçados ainda: passo 1 (taxonomia completa de principals span todos os canais — só o canal MCP tem _principal_mcp; tools/tool_context.py, mcp_oauth.py, web, Telegram e voz seguem sem o modelo de identidade unificado), passo 2 (evolução de claims/scopes OAuth com validação de issuer/audience/subject/expiração/cliente), passo 3 (vínculo autenticado executor→capacidades), passo 7 (as 3 tools MCP consultar_politica/simular_politica/preparar_politica — as funções PURAS já existem em policy.py com testes, mas não são expostas como tools MCP; candidata natural para a sub-entrega 3/N por ser a de menor risco/maior reaproveitamento), passo 8 (revalidar versão, revogação, escopo E ORÇAMENTO no despacho — orcamento_restante existe no contrato mas não é lido em lugar nenhum)."
+  - "Decisão de design a levar ao André quando o PACOTE P02 inteiro estiver completo (não antes — mantido da sub-entrega 1/N, ainda não é hora): o gate de origem_humana nos defaults da matriz PREPARACAO_INTERNA/ESCRITA_INTERNA_REVERSIVEL, reforçado pelas rodadas 3 e 5 do Codex (exige também eh_dono()) — a pergunta de fundo ainda vale: origem_humana deveria mesmo ter default True no contrato? Esta sub-entrega reforça a resposta prática (o único canal religado até agora, _principal_mcp, passa origem_humana=True explicitamente e é sempre eh_dono()==True), mas não fecha a pergunta de design para canais futuros que ainda vão precisar decidir isso por conta própria (rotina_cowork, runner_servico)."
+  - "Todas as pendências já registradas no bloco da sub-entrega 1/N que não foram tocadas nesta sub-entrega continuam abertas: orcamento_restante não lido, Mandato.classes_conteudo_permitidas ainda é texto livre sem enum fechado, Mandato.usos_na_janela_atual sem wrapper de I/O real, canais além de MCP (web/Telegram/voz) não consultam autonomy.policy."
+proximo_pacote: "P02 (sub-entrega 3/N — candidata: passo 7 do plano, expor consultar_politica/simular_politica/preparar_politica de autonomy/policy.py como tools MCP, reaproveitando as funções puras já existentes e testadas)"
+```
