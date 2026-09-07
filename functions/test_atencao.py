@@ -415,6 +415,32 @@ class TestFilaAtencaoTools(unittest.TestCase):
         self.assertEqual(doc.to_dict()["estado"], ESTADO_RESOLVIDO)
         self.assertEqual(doc.to_dict()["desfecho"], "Cartório respondeu")
 
+    def test_resolver_item_com_acao_id_registra_no_diario(self):
+        """Regressão (achado da revisão adversarial da P02 sub-entrega 5/N):
+        `resolver_item` sem `ctx` explícito (o caso comum — quem chama
+        `resolver_item_atencao` no MCP não tem um `ToolContext` à mão) e com
+        `acao_id` preenchido deve registrar a nota no diário da tarefa via
+        `ToolContext(_db=db, ...)`. Antes da correção, `ToolContext(db=db,
+        ...)` levantava `TypeError` (o campo do dataclass é `_db`, não
+        `db`), engolido em silêncio pelo `except Exception` ao redor — o
+        item ficava resolvido, mas o diário nunca era escrito."""
+        db = MockDb({
+            COLLECTION: {
+                "item-1": {
+                    "estado": "aberto",
+                    "titulo": "Cobrança de certidão",
+                    "acao_id": "tarefa-42",
+                }
+            },
+            "tarefas": {
+                "tarefa-42": {"titulo": "Renovar certidão"}
+            },
+        })
+        res = resolver_item(db, "item-1", ESTADO_RESOLVIDO, "Cartório respondeu")
+        self.assertEqual(res.get("status"), "ok")
+        tarefa_doc = db.collection("tarefas").document("tarefa-42")
+        self.assertIn("acompanhamento", tarefa_doc.to_dict())
+
 
 class TestAvaliarInterrupcaoAtencao(unittest.TestCase):
     def setUp(self):
@@ -987,4 +1013,3 @@ class TestDetectarAtencaoAcoesIntegracao(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
