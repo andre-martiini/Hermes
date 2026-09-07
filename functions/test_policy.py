@@ -47,6 +47,7 @@ def _req(
     argumentos_resolvidos=None,
     sensibilidade=None,
     missao=None,
+    orcamento_restante=None,
 ):
     return PolicyRequest(
         principal=principal or _principal(),
@@ -57,6 +58,7 @@ def _req(
         mandatos_aplicaveis=mandatos_aplicaveis,
         sensibilidade=sensibilidade,
         missao=missao,
+        orcamento_restante=orcamento_restante,
     )
 
 
@@ -794,6 +796,55 @@ class TestMandatoCobre(unittest.TestCase):
         m = self._mandato(destinatarios_recursos=("*",), limite_por_janela=1)
         req = _req(sensibilidade="geral")
         self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
+
+    def test_orcamento_maximo_com_saldo_desconhecido_nao_cobre_regressao_seguranca(self):
+        # P02 passo 8, sub-entrega 4/N: mesmo raciocínio fail-closed já
+        # aplicado a `limite_por_janela`/`usos_na_janela_atual` — um teto de
+        # orçamento DECLARADO no mandato exige que o chamador tenha
+        # RESOLVIDO `PolicyRequest.orcamento_restante`; enquanto ninguém
+        # resolve esse saldo (`None`, o default), o mandato não cobre. Não
+        # precisa de `missao=` — orçamento é checado antes da missão.
+        m = self._mandato(destinatarios_recursos=("*",), orcamento_maximo=1000.0)
+        req = _req(sensibilidade="geral")
+        self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
+
+    def test_orcamento_restante_esgotado_nao_cobre(self):
+        m = self._mandato(destinatarios_recursos=("*",), orcamento_maximo=1000.0)
+        req = _req(sensibilidade="geral", missao=m.finalidade, orcamento_restante=0.0)
+        self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
+
+    def test_orcamento_restante_negativo_nao_cobre(self):
+        m = self._mandato(destinatarios_recursos=("*",), orcamento_maximo=1000.0)
+        req = _req(sensibilidade="geral", missao=m.finalidade, orcamento_restante=-50.0)
+        self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
+
+    def test_orcamento_restante_nan_nao_cobre_regressao_seguranca(self):
+        # Achado da revisão adversarial desta sub-entrega: `float('nan')`
+        # não é `None` nem `<= 0` (TODA comparação com NaN é `False`,
+        # inclusive `nan <= 0`), então uma primeira versão desta checagem
+        # (`if request.orcamento_restante <= 0: return False`) deixava um
+        # saldo NaN passar como se fosse positivo válido — o oposto do
+        # fail-closed que esta checagem existe para garantir. Reproduzível
+        # hoje via `simular_politica` MCP: `json.loads` aceita o token
+        # `NaN` por padrão, e `hermes_tools._principal_simulado` repassa
+        # `orcamento_restante` sem validar o tipo.
+        m = self._mandato(destinatarios_recursos=("*",), orcamento_maximo=1000.0)
+        req = _req(sensibilidade="geral", missao=m.finalidade, orcamento_restante=float("nan"))
+        self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
+
+    def test_orcamento_restante_positivo_cobre(self):
+        m = self._mandato(destinatarios_recursos=("*",), orcamento_maximo=1000.0)
+        req = _req(sensibilidade="geral", missao=m.finalidade, orcamento_restante=250.0)
+        self.assertTrue(policy.mandato_cobre(m, req, _AGORA))
+
+    def test_sem_orcamento_maximo_declarado_cobre_mesmo_sem_orcamento_restante(self):
+        # Mandato sem teto de orçamento (default `orcamento_maximo=None`) —
+        # nem toda finalidade tem dimensão financeira; a ausência de
+        # `orcamento_restante` no pedido não pode bloquear um mandato que
+        # nunca declarou teto nenhum.
+        m = self._mandato(destinatarios_recursos=("*",))
+        req = _req(sensibilidade="geral", missao=m.finalidade)
+        self.assertTrue(policy.mandato_cobre(m, req, _AGORA))
 
     def test_finalidade_diferente_da_missao_nao_cobre(self):
         # Achado P1 #3 da revisão do Codex (PR #191): antes, um mandato
