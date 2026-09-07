@@ -6,6 +6,24 @@ não possam ambas concluir que a chave é nova.
 O sentinela tem dois estados: RESERVADO (uma tentativa começou a processar) e
 CONCLUIDO (o processamento com efeito terminou de verdade). Só CONCLUIDO é
 tratado como duplicata — ver check_and_register/mark_complete abaixo.
+
+ATENÇÃO (achado do Codex na PR #188, segunda rodada): este módulo só cumpre
+a promessa acima se o chamador chamar mark_complete() após o efeito
+terminar com sucesso. Hoje (`functions/main.py`, o único chamador de
+produção via githubWebhook) NENHUM caminho chama mark_complete — o rascunho
+local que faz isso está pronto mas não pode ser publicado enquanto main.py
+estiver acima do limite de escrita do Argos (ver docs/autonomia/execucao.md).
+Consequência prática enquanto isso não for corrigido: toda entrega que main.py
+processa com sucesso fica RESERVADA para sempre (nunca CONCLUÍDA); uma
+reentrega da MESMA chave dentro de RESERVA_EXPIRA_APOS ainda é barrada (levanta
+ReservaEmAndamentoError, sem duplicar efeito), mas uma reentrega que chegar
+DEPOIS da janela expirar é tratada como nova e o efeito é reprocessado — isso
+vale tanto para o caso ambíguo original quanto, agora, para qualquer entrega
+bem-sucedida comum reentregue tardiamente. É estritamente melhor do que o
+design de sentinela único anterior (nunca finge sucesso silencioso dentro da
+janela), mas não fecha a deduplicação de fato até mark_complete ter um
+chamador real — não tratar esta ressalva como resolvida só porque os testes
+deste arquivo passam; eles testam o módulo isolado, não main.py.
 """
 
 from datetime import datetime, timezone, timedelta
