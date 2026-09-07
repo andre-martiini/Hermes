@@ -199,8 +199,18 @@ class Mandato:
     limite_por_janela: int | None = None
     janela_dias: int | None = None
     usos_na_janela_atual: int | None = None
-    horario_permitido_inicio: str | None = None   # "HH:MM", None = sem restrição
+    # "HH:MM". Os dois só significam "sem restrição de horário" quando AMBOS
+    # são None — quarta rodada da revisão do Codex (PR #191):
+    # `autonomy.policy.mandato_cobre()` falha fechado quando só um dos dois
+    # está preenchido (configuração parcial), em vez de tratar isso como
+    # "sem restrição". Preencha os dois ou nenhum.
+    horario_permitido_inicio: str | None = None
     horario_permitido_fim: str | None = None
+    # `None` (o default) significa "validade não resolvida" — quarta rodada
+    # da revisão do Codex (PR #191): `mandato_cobre()` passou a falhar
+    # fechado quando `valido_ate` é `None`, em vez de tratar ausência de
+    # validade como "cobre indefinidamente". Todo mandato real precisa desta
+    # data preenchida para cobrir algo.
     valido_ate: datetime | None = None
     origem_autorizacao: str = ""       # referência a como/quando o dono concedeu isto
     forma_revogacao: str = ""
