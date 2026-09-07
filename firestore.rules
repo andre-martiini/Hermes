@@ -16,34 +16,65 @@ service cloud.firestore {
         && request.auth.token.email == "andre.martiini@gmail.com";
     }
 
-    match /system/{document=**} {
-      allow read, write: if false;
+    // Coleções sem NENHUM acesso direto do cliente, nem leitura: dados
+    // internos de plataforma (system, automations) e coleções de
+    // política/autorização/execução que o achado A16 do plano de
+    // autonomia (P01, passo 7) mirou — idempotência de webhooks, log de
+    // auditoria de tools MCP, fila de trabalho autônomo, execuções de
+    // rotina, jobs assíncronos do canal MCP, decisões de promoção de
+    // autonomia, sessões do bridge de voz, allowlist de chats do
+    // Telegram. Só Cloud Functions (Admin SDK — não governado por estas
+    // regras) devem ler ou escrever nelas; nenhuma delas é lida pelo
+    // frontend React nem pelas pontes de voz hoje (confirmado por busca
+    // exaustiva no código-fonte na sub-entrega 5/N, revisada de forma
+    // independente — ver docs/autonomia/execucao.md). Se um uso legítimo
+    // de leitura surgir no futuro, o caminho correto é uma Cloud
+    // Function/callable dedicada, não reabrir a leitura direta aqui.
+    function isColecaoNegadaPorCompleto(collectionId) {
+      return collectionId in [
+        'system', 'automations',
+        'idempotency', 'mcp_audit_log', 'agent_requests', 'agent_runs',
+        'mcp_jobs', 'promocoes_autonomia_sugeridas', 'telegram_sessions',
+        'whitelist'
+      ];
     }
 
-    match /automations/{document=**} {
-      allow read, write: if false;
+    // Coleções com leitura liberada ao dono (visibilidade na UI), mas
+    // escrita direta do cliente bloqueada: quem decide o estado é sempre
+    // o servidor (detectores de atenção, scheduler de promessas).
+    function isColecaoSomenteLeitura(collectionId) {
+      return collectionId in ['atencao', 'promessas_abertas'];
     }
 
-    match /public_configs/{document=**} {
-      allow read, write: if internalUser();
-    }
-
-    match /whatsapp_messages/{document=**} {
-      allow read, write: if internalUser();
-    }
-
-    match /atencao/{document=**} {
-      allow read: if internalUser();
-      allow write: if false;
-    }
-
-    match /promessas_abertas/{document=**} {
-      allow read: if internalUser();
-      allow write: if false;
-    }
-
-    match /{document=**} {
-      allow read, write: if internalUser();
+    // ÚNICA regra deste arquivo (deliberado — ver nota abaixo). Cobre
+    // toda coleção não listada nas duas funções acima com o
+    // comportamento histórico: leitura/escrita liberadas para o dono
+    // (internalUser). "public_configs" e "whatsapp_messages", que antes
+    // tinham blocos `match` próprios idênticos a este resultado, ficam
+    // cobertas por este mesmo ramo sem precisar de bloco dedicado.
+    //
+    // IMPORTANTE — por que não existem blocos `match` específicos por
+    // coleção neste arquivo (achado A16 do plano, confirmado por revisão
+    // adversarial nesta sub-entrega antes de publicar): quando mais de um
+    // bloco `match` casa com o mesmo caminho, o Firestore concede acesso
+    // se QUALQUER UM deles permitir — não é "o mais específico vence".
+    // Um bloco irmão como `match /idempotency/{document=**} { allow
+    // read, write: if false; }` ao lado de um catch-all permissivo NÃO
+    // bloqueia nada: o catch-all ainda casa com o mesmo caminho e
+    // devolve true para o dono, e o resultado final é a união (OR) dos
+    // dois — exatamente o defeito que o achado A16 descreve ("regra
+    // geral... sobrepondo restrições específicas"; as restrições de
+    // system/atencao já existiam no arquivo antes desta sub-entrega e
+    // sofriam do mesmo problema, nunca isolando de fato essas coleções
+    // do cliente interno — fechado aqui junto). Por isso toda a lógica de
+    // exclusão vive DENTRO da condição deste único bloco, via as duas
+    // funções acima, em vez de blocos `match` adicionais.
+    match /{collectionId}/{document=**} {
+      allow read: if internalUser()
+        && !isColecaoNegadaPorCompleto(collectionId);
+      allow write: if internalUser()
+        && !isColecaoNegadaPorCompleto(collectionId)
+        && !isColecaoSomenteLeitura(collectionId);
     }
   }
 }
