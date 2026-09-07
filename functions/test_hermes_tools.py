@@ -752,7 +752,7 @@ class TestSinalDeIntencao(unittest.TestCase):
 class TestToolsLongas(unittest.TestCase):
     """Tools acima de um minuto nao podem rodar dentro do request.
 
-    Pela URL do Hosting — a que Cowork, Desktop e celular usam — o corte é 60s, e
+    Pela URL do Hosting — a que Cowork, Desktop e celular usam — o corte e 60s, e
     o cliente recebe erro de gateway sem explicacao.
     """
 
