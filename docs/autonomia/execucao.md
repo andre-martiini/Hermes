@@ -181,3 +181,75 @@ pendencias:
   - "aplicar_edicao_rascunho (outbox_aprovacao.py) e a notificação de falha por Telegram em atencao_whatsapp.py seguem como pendências já registradas no bloco da sub-entrega 1, ainda não fechadas."
 proximo_pacote: "P01 (sub-entrega 3/N)"
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 7782388d8958d017d4832031a9492359ebade9c8
+pacote: P01 (sub-entrega 3/N — agent_requests.py e core/idempotency.py)
+# Continuação da divisão do pacote "G" P01 (seção 8 do plano). Cobre o passo
+# 3 (agent_requests.py — achado A01: enfileirar_ou_atualizar/concluir liam e
+# escreviam fora de transação) e o passo 4 (core/idempotency.py — falha na
+# verificação de idempotência não pode virar "pode processar" silenciosamente).
+# Descobriu um bloqueio de infraestrutura genuinamente novo (ver
+# arquivos_bloqueados): main.py excede o limite de tamanho da escrita via
+# Argos, então a parte do passo 4 que amarra core/idempotency.py ao único
+# chamador de produção (githubWebhook) fica pendente de aplicação manual ou
+# de uma solução de infraestrutura — ver decisão p01-idempotency-main-py-bloqueado.
+# Sem espera de 90 minutos em relação à sub-entrega 2: mesmo pacote "G",
+# decisão já registrada nos blocos anteriores.
+estado: pronto_para_revisao
+# Estados: nao_iniciado, em_execucao, pronto_para_revisao,
+# validado, publicado, ativo, bloqueado, opt_in
+inicio: "2026-09-07T03:05:00Z"
+fim: "2026-09-07T03:15:00Z"
+arquivos_alterados:
+  - functions/agent_requests.py
+  - functions/test_agent_requests.py
+  - functions/core/idempotency.py
+  - functions/test_idempotency.py (novo)
+  - functions/test_atencao_whatsapp.py
+arquivos_bloqueados:
+  - path: functions/main.py
+    mudanca: "githubWebhook: capturar a exceção de core.idempotency.check_and_register e responder 503 (sem processar o evento) em vez de deixá-la propagar sem tratamento — texto exato já pronto localmente, só não publicado."
+    motivo: "functions/main.py tem 681.703 caracteres; a ferramenta de escrita do Argos (argos_escrever_arquivo_repositorio) limita o parâmetro conteudo a 200.000 caracteres e só aceita substituição integral do arquivo (não há modo patch/diff). Não há como publicar NENHUMA mudança em main.py por esse caminho, por menor que seja, enquanto o arquivo permanecer acima desse limite — não é específico desta mudança."
+decisoes:
+  - id: p01-a01-agent-requests-transacional
+    motivo: "A01: enfileirar_ou_atualizar() fazia get() seguido de set()/update() fora de transação; uma chamada concorrente a concluir() podia decidir o status do pedido entre a leitura e a escrita daqui (ex.: enfileirar_ou_atualizar lê 'pendente', concluir() termina o pedido nesse meio-tempo, e enfileirar_ou_atualizar ainda assim sobrescreve payload/timestamps de um pedido que virou terminal — ou o inverso). Mesmo achado, mesma direção do fix já aplicado a outbox_aprovacao.py e promocao_autonomia.py nas sub-entregas 1-2: leitura e escrita de cada função agora acontecem dentro de uma única transação atômica (@firestore.transactional); falha real da transação retorna {'erro': ...} em vez de cair para escrita fora de transação. Escopo deliberadamente restrito ao que o passo 3 do plano pede ('transformar enfileiramento/conclusão legados em transições condicionais') — o protocolo completo de lease/geração/heartbeat descrito na seção 4.5 do plano fica para P04, não é implementado aqui."
+    autoridade: existente_ou_nova
+  - id: p01-idempotency-check-and-register-propaga-excecao
+    motivo: "P01 passo 4: core/idempotency.py::check_and_register capturava qualquer exceção da verificação transacional e retornava True — ou seja, uma falha real (Firestore indisponível, contenção esgotando tentativas) virava silenciosamente 'trate como novo, pode processar', arriscando duplicar exatamente o efeito que a idempotência existe para evitar. Corrigido: a exceção agora propaga para o chamador. O único chamador de produção é functions/main.py::githubWebhook (confirmado por grep no repo inteiro); o texto que captura essa exceção e responde 503 sem processar o evento está pronto localmente mas não foi publicado nesta sub-entrega — ver arquivos_bloqueados. Mesmo sem essa amarração publicada, a correção já muda o comportamento em produção hoje: o call site atual (sem try/except) deixa a exceção subir sem tratamento pela função HTTP, e o runtime padrão do Cloud Functions (Python, 2ª geração) responde 5xx automaticamente a uma exceção não tratada — o achado central (nunca converter falha de idempotência em permissão de processar) já fica fechado; o que falta é só a resposta 503 explícita com log específico, mais limpa que o 500 genérico do runtime."
+    autoridade: existente_ou_nova
+  - id: p01-idempotency-main-py-bloqueado
+    motivo: "Descoberta operacional nesta sub-entrega, não um achado do plano: qualquer mudança em functions/main.py (16.184 linhas, 681.703 caracteres) é impossível de publicar via argos_escrever_arquivo_repositorio, cujo parâmetro conteudo tem limite de 200.000 caracteres e não aceita patch/diff — só substituição integral. Isso não é específico deste fix; bloqueia TODA futura mudança em main.py enquanto ele permanecer deste tamanho, o que é provável de recorrer em pacotes futuros do plano (main.py concentra a maior parte das Cloud Functions do Hermes). Três caminhos possíveis, nenhum decidido: (1) uma nova tool no Argos MCP que aceite diff/patch em vez de conteúdo integral; (2) aumentar o limite de conteúdo da tool atual, se não houver uma razão de fundo para o teto de 200.000; (3) dividir main.py em módulos menores — mudança estrutural maior, fora do escopo de uma sub-entrega, mas que resolveria o problema de raiz e ajudaria a legibilidade/revisão independente do limite da ferramenta. Registrado para André decidir; não bloqueia a continuidade do plano porque o achado de segurança em si (check_and_register) já está fechado (ver decisão anterior) — só a resposta HTTP explícita fica pendente."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+    - "cd functions && venv/bin/python -m unittest test_agent_requests -v"
+    - "cd functions && venv/bin/python -m unittest test_idempotency -v"
+    - "cd functions && venv/bin/python -m unittest test_atencao_whatsapp -v"
+  resultados:
+    - "Python (unittest, suíte completa): 1166/1166 passando (1155 anteriores + 7 de agent_requests.py + 4 de test_idempotency.py, novo; 0 regressões)"
+    - "test_agent_requests: 21/21 (7 novos: 3 de enfileirar_ou_atualizar — new/update com falha de transação, sem suporte a transação — e 2 de concluir, com os mesmos dois cenários, mais os 2 já existentes de cada função revalidados sob o novo caminho transacional)"
+    - "test_idempotency: 4/4, novo arquivo — chave nova, chave repetida, falha real de transação propaga exceção, ausência de suporte a transação propaga exceção"
+    - "test_atencao_whatsapp: 35/35 (0 novos; mocks atualizados para o protocolo de transação real, sem o que o teste de TestHookAgentRequests quebraria contra o novo enfileirar_ou_atualizar transacional)"
+    - "Não incluído nesta sub-entrega: um teste novo para o caminho 503 de githubWebhook (test_github_webhook.py) já foi escrito localmente, mas fica sem publicar até main.py poder ser atualizado — publicá-lo sozinho faria o teste falhar contra o main.py real, que ainda não tem a captura da exceção."
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio da implementação): confirmou, por leitura do código-fonte instalado de google.cloud.firestore_v1.transaction, que @firestore.transactional limpa e reinicia o estado da transação a cada tentativa (sem escrita parcial vazando entre retries), que só exceptions.Aborted é retentado automaticamente (qualquer outra propaga na hora, batendo com o except Exception externo), que o caminho 503 de githubWebhook (quando aplicado) retorna antes de qualquer escrita, e que core/idempotency.py não engole mais nenhuma exceção. Veredito: a correção transacional é correta e fecha a corrida pretendida."
+  - "Achado da própria revisão (corrigido nesta sub-entrega, não deixado pendente): faltava um teste provando que uma falha de transação ao ATUALIZAR um pedido pendente já existente (não só ao criar um novo) deixa o documento intocado em enfileirar_ou_atualizar — adicionado test_transacao_falha_ao_atualizar_pedido_existente_nao_corrompe."
+  - "Achado da própria revisão (aceito como conhecido, não corrigido): o except Exception ao redor de _exec(transaction) em enfileirar_ou_atualizar/concluir captura qualquer exceção, não só falhas de contenção/transação — um bug não relacionado a concorrência dentro de _exec seria reportado com a mesma mensagem de 'falha ao enfileirar/atualizar de forma atômica', o que pode confundir uma investigação futura. Comportamento ainda seguro (sempre falha fechado, sem corrupção), só a mensagem de log é potencialmente enganosa; mesmo padrão já usado em outbox_aprovacao.py e promocao_autonomia.py nas sub-entregas anteriores, então não é uma regressão introduzida aqui."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "BLOQUEADO (ver arquivos_bloqueados e decisão p01-idempotency-main-py-bloqueado): aplicar manualmente em functions/main.py, dentro de githubWebhook, a captura da exceção de core.idempotency.check_and_register com resposta 503 (texto pronto, não publicado); depois disso, publicar o teste correspondente já escrito em test_github_webhook.py (test_falha_idempotencia_retorna_503_sem_anotar)."
+  - "O mesmo bloqueio de tamanho de main.py deve recorrer em pacotes futuros do plano — vale decidir entre André e a próxima sessão qual dos três caminhos (nova tool de diff no Argos, aumento do limite atual, ou dividir main.py em módulos) seguir antes que isso vire um padrão de 'sempre aplicar manualmente' para um arquivo tão central."
+  - "P01 segue em aberto: mcp_jobs.py (passos 5-6), firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados."
+  - "achado do mesmo padrão de A04 em argos_autorizacao.py:242,348, aplicar_edicao_rascunho sem proteção transacional, e a notificação de falha por Telegram como mitigação não estrutural seguem como pendências já registradas nos blocos anteriores, ainda não fechadas."
+proximo_pacote: "P01 (sub-entrega 4/N)"
+```
