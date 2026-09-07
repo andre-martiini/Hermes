@@ -1251,15 +1251,22 @@ def mensagem_da_rodada(rodada: dict, limite_candidatos: int = LIMITE_CANDIDATAS)
     )
 
 
-# Motivos que interrompem a rodada ANTES dela chegar a olhar a janela de
-# tarefas — os unicos em que a rotina pode ter sido barrada semana apos semana
-# sem o card de degradacao (`varredura_degradada`) registrar nada disso, porque
-# aquele so e tocado depois deste ponto. `nenhuma_acao_com_corpo`, falha no
-# modelo e sucesso ficam de fora de proposito: nesses a rodada chegou ate la, e
-# `marcar_degradacao`/`marcar_varredura` ja tem a data de hoje.
-_BLOQUEIOS_ANTES_DA_JANELA = frozenset({
+# Motivos que significam que a rodada NAO terminou de avaliar a janela de
+# tarefas — os que vale a pena preservar em `ultima_tentativa`. A maioria barra
+# ANTES da rodada chegar a olhar a janela (sem o card de degradacao,
+# `varredura_degradada`, registrar nada disso, porque aquele so e tocado
+# depois deste ponto). `falha_no_modelo` e diferente: acontece DEPOIS de
+# `preparar_rodada` ja ter rodado, mas `_rodar_uma_rodada` pula
+# `marcar_varredura` de proposito nesse caminho (as candidatas nao foram
+# julgadas) — entao o marcador tambem nao avancou ali, e o motivo precisa
+# sobreviver pelo mesmo argumento. Achado da revisao do Codex na PR: antes
+# deste ajuste, `falha_no_modelo` caia no `else None` do wrapper abaixo e
+# ficava indistinguivel de sucesso. `nenhuma_acao_com_corpo` e sucesso real
+# ficam de fora: nesses a rodada de fato terminou de olhar a janela.
+_MOTIVOS_DE_BLOQUEIO_OU_FALHA = frozenset({
     "sem_anthropic", "historico_indisponivel", "semana_cheia",
     "teto_do_mes", "nenhum_objetivo_elegivel", "marcador_indisponivel",
+    "falha_no_modelo",
 })
 
 
@@ -1268,11 +1275,26 @@ def rodar_deteccao(db, hoje: str, carga_semana, claude_key: str) -> dict:
 
     A gravacao fica aqui fora, e nao dentro de `_rodar_uma_rodada`, para cobrir
     todo caminho de saida com uma linha so — inclusive `sem_anthropic`, que
-    nunca chega em `preparar_rodada`. Ver `marcar_tentativa`.
+    nunca chega em `preparar_rodada`.
+
+    O `try/except` cobre um segundo achado da revisao do Codex: se
+    `_rodar_uma_rodada` levantar uma excecao que ela mesma nao previu (por
+    exemplo, uma consulta ao Firestore sem guarda propria, como a de
+    `estrategia_pessoal` em `preparar_rodada`, durante uma instabilidade), a
+    tentativa precisa ficar registrada mesmo assim — sem isso ela desaparecia
+    em silencio, igual ao problema original que esta funcao existe para
+    resolver. A excecao continua subindo depois de gravar, para nao mudar o
+    que quem chama (o agendador) enxerga hoje.
+
+    Ver `marcar_tentativa`.
     """
-    resultado = _rodar_uma_rodada(db, hoje, carga_semana, claude_key)
+    try:
+        resultado = _rodar_uma_rodada(db, hoje, carga_semana, claude_key)
+    except Exception:
+        marcar_tentativa(db, hoje, "erro_inesperado")
+        raise
     motivo = resultado.get("motivo")
-    marcar_tentativa(db, hoje, motivo if motivo in _BLOQUEIOS_ANTES_DA_JANELA else None)
+    marcar_tentativa(db, hoje, motivo if motivo in _MOTIVOS_DE_BLOQUEIO_OU_FALHA else None)
     return resultado
 
 
