@@ -41,7 +41,15 @@ from tools.tool_context import ToolContext
 from copilot_context import build_mcp_voice_context
 
 MCP_PROTOCOL_VERSION = "2025-06-18"
-_SUPPORTED_PROTOCOL_VERSIONS = {"2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"}
+# "2026-07-28" e a revisao atual da especificacao (o primeiro "era moderna",
+# com `_meta`/`server/discover` por requisicao em vez do handshake antigo por
+# `initialize`); os demais valores cobrem clientes na era "legada". O Hermes
+# continua respondendo no estilo legado — so nao rejeita quem se anuncia com a
+# versao nova. Ver `_handle_server_discover` sobre o motivo de anunciar o
+# metodo mesmo sem migrar o transporte inteiro.
+_SUPPORTED_PROTOCOL_VERSIONS = {
+    "2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28",
+}
 SERVER_NAME = "hermes-mcp"
 SERVER_VERSION = "0.2.0"
 
@@ -117,6 +125,49 @@ _CORS_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
+
+# Compartilhado entre `initialize` (era legada) e `server/discover` (era
+# moderna, 2026-07-28+) — as duas formas de um cliente aprender a usar o
+# Hermes antes da primeira chamada real. Extrair para uma constante evita as
+# duas respostas divergirem sem que ninguem decida isso de proposito.
+_INSTRUCTIONS = (
+    "Hermes e o sistema de gestao pessoal e profissional do usuario: "
+    "acoes, agenda, financas, saude, contatos, acervo e memoria.\n\n"
+    "- Comece uma conversa nova com `obter_estado_atual` para se situar "
+    "no dia, em vez de perguntar ao usuario o que esta acontecendo.\n"
+    "- Quando o usuario afirmar um fato duravel sobre si, sobre pessoas "
+    "ou sobre como as coisas funcionam, grave com `salvar_memoria_global`. "
+    "O Hermes so aprende o que for gravado explicitamente.\n"
+    "- O trabalho e organizado como macroacao dividida em subtarefas "
+    "(`plano_acao`). O controle fino vive na subtarefa: `editar_plano_acao` "
+    "marca cada etapa como `em_andamento`, `aguardando_terceiro` (com "
+    "`aguardando_de`) ou `feito`, e da data propria a ela. Vale marcar — "
+    "etapa esperando terceiro nao acumula adiamento, e a faixa da acao e "
+    "deduzida dessas marcacoes. Omitir um campo preserva o valor atual.\n"
+    "- Para editar acoes prefira `editar_acao` e `editar_acoes_em_lote`. "
+    "As tools `preparar_*` existem para a interface web, que renderiza um "
+    "card de confirmacao, e exigem uma segunda chamada para gravar.\n"
+    "- Tools longas devolvem status `processing` com um `job_id`; busque o "
+    "resultado com `consultar_job`.\n"
+    "- `schedule_whatsapp_message` manda mensagem para terceiros em nome "
+    "do usuario. Mostre o destinatario e o texto exato e espere ele "
+    "concordar antes de chamar — e o unico efeito que nao da para "
+    "desfazer de dentro do Hermes. Se o servidor responder pedindo "
+    "confirmacao, chame `confirmar_acao` com o `confirmation_id` devolvido.\n"
+    "- Para anexar arquivo, a ordem de preferencia e: `drive_file_id` "
+    "(arquivo que ja esta no Drive — peca ao usuario para joga-lo la pelo "
+    "celular se ainda nao estiver), `gmail_message_id`, `url`, e por fim "
+    "`preparar_upload`. NUNCA transcreva o arquivo para base64 nem o suba "
+    "por outro conector: base64 gerado por modelo chega truncado e grava "
+    "sem erro. `conteudo_base64` existe so para arquivo minusculo e exige "
+    "sha256 do arquivo de origem.\n"
+    "- Leitura de WhatsApp pode estar liberada em todas as conversas ou "
+    "restrita a uma lista — `listar_conversas_whatsapp` diz qual e o caso. "
+    "Uma recusa com motivo `chat_nao_monitorado` e o limite funcionando, "
+    "nao um erro a contornar: peca ao usuario que libere a conversa. E "
+    "mesmo com acesso amplo, leia o que a pergunta pede: ha terceiros "
+    "nessas conversas que nao sabem que um agente le."
+)
 
 
 class McpError(Exception):
@@ -226,9 +277,12 @@ def mcpServer(req: https_fn.Request) -> https_fn.Response:
         canal="mcp",
     )
 
+    dispatch_started = time.monotonic()
     try:
         if method == "initialize":
             result = _handle_initialize(params)
+        elif method == "server/discover":
+            result = _handle_server_discover(params)
         elif method == "ping":
             result = {}
         elif method == "tools/list":
@@ -246,13 +300,21 @@ def mcpServer(req: https_fn.Request) -> https_fn.Response:
         elif method == "resources/read":
             result = _handle_resources_read(params, uid=uid)
         else:
+            _log_mcp_call(method, ok=False, error_code=-32601,
+                          latency_ms=(time.monotonic() - dispatch_started) * 1000)
             return _json_rpc_error(rpc_id, -32601, f"Metodo desconhecido: {method}")
     except McpError as mcp_err:
+        _log_mcp_call(method, ok=False, error_code=mcp_err.code,
+                      latency_ms=(time.monotonic() - dispatch_started) * 1000)
         return _json_rpc_error(rpc_id, mcp_err.code, mcp_err.message)
     except Exception as exc:  # noqa: BLE001 — nunca vazar stack trace ao cliente
         print(f"[mcp_server] Erro inesperado em method={method}: {exc}")
+        _log_mcp_call(method, ok=False, error_code=-32000,
+                      latency_ms=(time.monotonic() - dispatch_started) * 1000)
         return _json_rpc_error(rpc_id, -32000, "Erro interno no servidor MCP")
 
+    _log_mcp_call(method, ok=True, result=result,
+                  latency_ms=(time.monotonic() - dispatch_started) * 1000)
     return _json_response({"jsonrpc": "2.0", "id": rpc_id, "result": result})
 
 
@@ -513,44 +575,33 @@ def _handle_initialize(params: dict) -> dict:
         # nao da para deduzir da lista de tools — em especial a captura de
         # memoria, que no copiloto web era subproduto da conversa e aqui depende
         # de chamada explicita.
-        "instructions": (
-            "Hermes e o sistema de gestao pessoal e profissional do usuario: "
-            "acoes, agenda, financas, saude, contatos, acervo e memoria.\n\n"
-            "- Comece uma conversa nova com `obter_estado_atual` para se situar "
-            "no dia, em vez de perguntar ao usuario o que esta acontecendo.\n"
-            "- Quando o usuario afirmar um fato duravel sobre si, sobre pessoas "
-            "ou sobre como as coisas funcionam, grave com `salvar_memoria_global`. "
-            "O Hermes so aprende o que for gravado explicitamente.\n"
-            "- O trabalho e organizado como macroacao dividida em subtarefas "
-            "(`plano_acao`). O controle fino vive na subtarefa: `editar_plano_acao` "
-            "marca cada etapa como `em_andamento`, `aguardando_terceiro` (com "
-            "`aguardando_de`) ou `feito`, e da data propria a ela. Vale marcar — "
-            "etapa esperando terceiro nao acumula adiamento, e a faixa da acao e "
-            "deduzida dessas marcacoes. Omitir um campo preserva o valor atual.\n"
-            "- Para editar acoes prefira `editar_acao` e `editar_acoes_em_lote`. "
-            "As tools `preparar_*` existem para a interface web, que renderiza um "
-            "card de confirmacao, e exigem uma segunda chamada para gravar.\n"
-            "- Tools longas devolvem status `processing` com um `job_id`; busque o "
-            "resultado com `consultar_job`.\n"
-            "- `schedule_whatsapp_message` manda mensagem para terceiros em nome "
-            "do usuario. Mostre o destinatario e o texto exato e espere ele "
-            "concordar antes de chamar — e o unico efeito que nao da para "
-            "desfazer de dentro do Hermes. Se o servidor responder pedindo "
-            "confirmacao, chame `confirmar_acao` com o `confirmation_id` devolvido.\n"
-            "- Para anexar arquivo, a ordem de preferencia e: `drive_file_id` "
-            "(arquivo que ja esta no Drive — peca ao usuario para joga-lo la pelo "
-            "celular se ainda nao estiver), `gmail_message_id`, `url`, e por fim "
-            "`preparar_upload`. NUNCA transcreva o arquivo para base64 nem o suba "
-            "por outro conector: base64 gerado por modelo chega truncado e grava "
-            "sem erro. `conteudo_base64` existe so para arquivo minusculo e exige "
-            "sha256 do arquivo de origem.\n"
-            "- Leitura de WhatsApp pode estar liberada em todas as conversas ou "
-            "restrita a uma lista — `listar_conversas_whatsapp` diz qual e o caso. "
-            "Uma recusa com motivo `chat_nao_monitorado` e o limite funcionando, "
-            "nao um erro a contornar: peca ao usuario que libere a conversa. E "
-            "mesmo com acesso amplo, leia o que a pergunta pede: ha terceiros "
-            "nessas conversas que nao sabem que um agente le."
-        ),
+        "instructions": _INSTRUCTIONS,
+    }
+
+
+def _handle_server_discover(params: dict) -> dict:
+    """`server/discover` — mandatorio a partir da revisao 2026-07-28 do MCP.
+
+    A revisao 2026-07-28 substitui o handshake por `initialize` por metadados
+    "_meta" em cada request; `server/discover` e o jeito de um cliente novo
+    aprender versao/capacidades/identidade do servidor num unico request,
+    tipicamente ANTES de tentar `tools/list`. Servidores dessa revisao devem
+    implementa-lo (a especificacao usa "MUST"); o Hermes nao o tinha, entao
+    um cliente que faca dele a primeira chamada pos-OAuth recebia
+    `-32601 Metodo desconhecido` em vez de uma resposta de descoberta —
+    indistinguivel, para esse cliente, de um servidor fora do ar.
+    Continuamos respondendo no formato "legado" para tudo o mais
+    (`initialize` + `tools/list` avulsos); isto so cobre o request extra que
+    um cliente moderno pode fazer antes disso.
+    """
+    return {
+        "resultType": "complete",
+        "supportedVersions": sorted(_SUPPORTED_PROTOCOL_VERSIONS),
+        "capabilities": {"tools": {}, "resources": {}, "prompts": {}},
+        "_meta": {
+            "io.modelcontextprotocol/serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
+        },
+        "instructions": _INSTRUCTIONS,
     }
 
 
@@ -863,6 +914,56 @@ def _audit_log(
         })
     except Exception as exc:
         print(f"[mcp_server] Falha ao gravar audit log (tool={tool}): {exc}")
+
+
+def _mcp_call_log_info(
+    method: str,
+    *,
+    ok: bool,
+    latency_ms: float,
+    result: dict | None = None,
+    error_code: int | None = None,
+) -> dict:
+    """Monta o registro de uma chamada JSON-RPC ao `/mcp`, sem I/O.
+
+    Existe porque o access log generico do Cloud Run (o que ja usamos para
+    diagnosticar a integracao com o ChatGPT) mostra status/duracao/tamanho por
+    HTTP request, mas nao o METODO JSON-RPC dentro do corpo — a pergunta mais
+    comum ao investigar um cliente novo ("chegou a chamar tools/list? quantas
+    tools voltaram?") exigia abrir cada linha manualmente. So numeros e nomes
+    de metodo/tool: nunca argumento, token, code, verifier ou qualquer dado
+    pessoal do usuario.
+    """
+    info: dict = {"method": method, "ok": ok, "latency_ms": round(latency_ms, 1)}
+    if error_code is not None:
+        info["error_code"] = error_code
+    if ok and isinstance(result, dict):
+        if method == "tools/list":
+            info["tool_count"] = len(result.get("tools") or [])
+        elif method == "tools/call":
+            info["is_error"] = bool(result.get("isError"))
+        elif method == "server/discover":
+            info["supported_versions"] = result.get("supportedVersions")
+        try:
+            info["response_bytes"] = len(json.dumps(result, ensure_ascii=False, default=str))
+        except Exception:
+            pass
+    return info
+
+
+def _log_mcp_call(
+    method: str,
+    *,
+    ok: bool,
+    latency_ms: float,
+    result: dict | None = None,
+    error_code: int | None = None,
+) -> None:
+    try:
+        info = _mcp_call_log_info(method, ok=ok, latency_ms=latency_ms, result=result, error_code=error_code)
+        print(f"[mcp_server] chamada: {json.dumps(info, ensure_ascii=False)}")
+    except Exception as exc:  # noqa: BLE001 — instrumentacao nunca derruba a chamada
+        print(f"[mcp_server] Falha ao logar chamada (method={method}): {exc}")
 
 
 def _json_response(payload: dict, status: int = 200) -> https_fn.Response:
