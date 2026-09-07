@@ -434,7 +434,7 @@ class TestLerJob(unittest.TestCase):
 
     def test_uid_nao_bate_nao_vaza_job_de_outro_usuario(self):
         """Mesma resposta (not_found) tanto para job inexistente quanto para
-        job de outro usuário — confirmar que o id existe já vazaria
+        job de outro usuário — confirmar que o id existe vazaria
         informação para quem está tentando adivinhar."""
         self.col._docs["job-y"] = _job_basico(uid="outro-user", status=mcp_jobs.STATUS_DONE)
         resultado_outro_uid = mcp_jobs.ler_job("user-1", "job-y")
