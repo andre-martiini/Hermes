@@ -588,9 +588,10 @@ class TestDecidirPromocaoAutonomia(unittest.TestCase):
 
     def setUp(self):
         self.db = _MockDb()
-        self.tx_patch = mock.patch("firebase_admin.firestore.transactional", side_effect=lambda fn: fn)
-        self.tx_patch.start()
-        self.addCleanup(self.tx_patch.stop)
+        # Sem patch de firestore.transactional — o _MockTransaction implementa
+        # o protocolo real (_clean_up/_begin/_commit/_rollback/_max_attempts/
+        # _read_only), então estes testes exercitam o mesmo caminho de código
+        # de produção usado por aprovar_rascunho/descartar_rascunho (A04).
         self.promocoes = self.db.collection(pa.COL_PROMOCOES)
         self.promocoes._docs["confirmacao_reuniao"] = {
             "tipo": "confirmacao_reuniao",
@@ -645,15 +646,70 @@ class TestDecidirPromocaoAutonomia(unittest.TestCase):
         self.assertFalse(res_repetida["ok"])
         self.assertIn("já estava decidida", res_repetida["erro"])
 
+    def test_transacao_falha_retorna_erro_sem_escrever(self):
+        """Achado A04 (mesmo padrão de outbox_aprovacao.py::aprovar_rascunho/
+        descartar_rascunho): se a transação falhar de verdade — não só por
+        incompatibilidade de mock —, a decisão é recusada em vez de cair para
+        uma escrita get+update não protegida. Duas decisões concorrentes sobre
+        o mesmo tipo não podem ambas ler status pendente e ambas escrever."""
+
+        class _TransacaoQuebrada(_MockTransaction):
+            def _begin(self, retry_id=None):
+                raise RuntimeError("Firestore indisponível (simulado)")
+
+        class _DbTransacaoQuebrada(_MockDb):
+            def transaction(self):
+                return _TransacaoQuebrada()
+
+        db_quebrado = _DbTransacaoQuebrada()
+        promocoes = db_quebrado.collection(pa.COL_PROMOCOES)
+        promocoes._docs["confirmacao_reuniao"] = {
+            "tipo": "confirmacao_reuniao",
+            "status": pa.STATUS_PENDENTE,
+            "amostra": 10,
+            "taxa_sem_edicao": 0.95,
+        }
+
+        res = pa.decidir_promocao_autonomia(db_quebrado, tipo="confirmacao_reuniao", decisao="aceitar")
+        self.assertFalse(res["ok"])
+        self.assertIn("erro", res)
+        # Nada deve ter mudado: nem o status da sugestão, nem mcp_access.
+        self.assertEqual(promocoes._docs["confirmacao_reuniao"]["status"], pa.STATUS_PENDENTE)
+        self.assertNotIn("mcp_access", db_quebrado.collection("system")._docs)
+
+    def test_sem_suporte_a_transacao_retorna_erro_sem_escrever(self):
+        class _DbSemTransacao:
+            """Sem método .transaction() — simula um backend/mock incompatível."""
+
+            def __init__(self, real_db):
+                self._real = real_db
+
+            def collection(self, name):
+                return self._real.collection(name)
+
+        db_sem_tx = _DbSemTransacao(_MockDb())
+        promocoes = db_sem_tx.collection(pa.COL_PROMOCOES)
+        promocoes._docs["confirmacao_reuniao"] = {
+            "tipo": "confirmacao_reuniao",
+            "status": pa.STATUS_PENDENTE,
+            "amostra": 10,
+            "taxa_sem_edicao": 0.95,
+        }
+
+        res = pa.decidir_promocao_autonomia(db_sem_tx, tipo="confirmacao_reuniao", decisao="aceitar")
+        self.assertFalse(res["ok"])
+        self.assertIn("sem suporte a transação", res["erro"].lower())
+        self.assertEqual(promocoes._docs["confirmacao_reuniao"]["status"], pa.STATUS_PENDENTE)
+
 
 class TestListarPromocoesPendentesETools(unittest.TestCase):
     """Testes de listagem de sugestões e integração com hermes_tools."""
 
     def setUp(self):
         self.db = _MockDb()
-        self.tx_patch = mock.patch("firebase_admin.firestore.transactional", side_effect=lambda fn: fn)
-        self.tx_patch.start()
-        self.addCleanup(self.tx_patch.stop)
+        # Sem patch de firestore.transactional — mesmo motivo de
+        # TestDecidirPromocaoAutonomia/TestLiberacaoECancelamento: o
+        # _MockTransaction implementa o protocolo real.
         self.promocoes = self.db.collection(pa.COL_PROMOCOES)
         self.promocoes._docs["tipo1"] = {
             "tipo": "tipo1",
