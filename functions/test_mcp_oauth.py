@@ -201,6 +201,43 @@ class TestErrosRfc6749(unittest.TestCase):
                         "refresh-nao-deveria-aparecer-no-log"):
             self.assertNotIn(segredo, linhas)
 
+    def test_client_id_com_quebra_de_linha_nao_injeta_log_falso(self):
+        """`/oauth/token` nao e autenticado: um client_id malicioso com '\\n'
+        poderia forjar uma segunda linha de log fake (por exemplo, um
+        'status=200' que nunca aconteceu) se fosse interpolado cru."""
+        class _Req:
+            form = None
+            def get_json(self, silent=False):
+                return {
+                    "grant_type": "senha_magica",
+                    "client_id": "cliente\n[mcp_oauth] /oauth/token resultado: status=200 (forjado)",
+                }
+
+        with mock.patch("builtins.print") as mock_print:
+            mcp_oauth._handle_token(_Req())
+
+        linhas = [str(c.args[0]) for c in mock_print.call_args_list]
+        # Nenhuma linha de log deve conter uma quebra de linha real — o
+        # client_id malicioso vira uma unica linha com '?' no lugar do '\n'.
+        for linha in linhas:
+            self.assertNotIn("\n", linha)
+
+
+class TestLogSeguro(unittest.TestCase):
+    """Sanitizacao usada nos logs de `/oauth/token`, rota sem autenticacao."""
+
+    def test_remove_caracteres_de_controle(self):
+        self.assertEqual(mcp_oauth._log_seguro("a\nb\tc"), "a?b?c")
+
+    def test_trunca_por_tamanho(self):
+        self.assertEqual(len(mcp_oauth._log_seguro("x" * 500)), 200)
+
+    def test_valor_normal_passa_intacto(self):
+        self.assertEqual(mcp_oauth._log_seguro("authorization_code"), "authorization_code")
+
+    def test_aceita_valores_nao_string(self):
+        self.assertEqual(mcp_oauth._log_seguro(None), "None")
+
 
 class TestDesafio401(unittest.TestCase):
     """Sem este header no 401, o Claude nunca descobre o authorization server."""
@@ -398,13 +435,12 @@ class _PostReq:
 @mock.patch.object(mcp_server, "_check_rate_limit", lambda uid: None)
 @mock.patch.object(mcp_server, "_authenticate", lambda req: "uid-teste")
 class TestServerDiscover(unittest.TestCase):
-    """`server/discover` — mandatório na revisão 2026-07-28 do MCP.
-
-    Reproduz, sem rede, exatamente a chamada que um cliente "moderno" (que já
-    fala a revisão atual da especificação) faz antes de `tools/list`. Antes
-    desta correção, o Hermes não conhecia o método e devolvia
-    `-32601 Metodo desconhecido` — o mesmo resultado, do ponto de vista do
-    cliente, de um servidor que não sabe fazer descoberta de ferramentas.
+    """`server/discover` — a especificacao MCP 2026-07-28 exige que todo
+    servidor o implemente. Chama-lo antes de `tools/list` e OPCIONAL para o
+    cliente (a especificacao so recomenda isso como sondagem de compatibilidade
+    no transporte stdio) — o que estes testes cobrem e a obrigacao do lado do
+    SERVIDOR: responder corretamente quando o metodo e chamado, o que quer que
+    o motive.
     """
 
     def setUp(self):
@@ -442,6 +478,22 @@ class TestServerDiscover(unittest.TestCase):
         _resp, discover = self._chamar()
         _resp2, initialize = self._chamar(method="initialize", params={})
         self.assertEqual(discover["result"]["instructions"], initialize["result"]["instructions"])
+
+    def test_capabilities_iguais_as_do_initialize(self):
+        """As duas formas de descoberta tem de anunciar as mesmas capacidades."""
+        _resp, discover = self._chamar()
+        _resp2, initialize = self._chamar(method="initialize", params={})
+        self.assertEqual(discover["result"]["capabilities"], initialize["result"]["capabilities"])
+
+    def test_tem_dicas_de_cache_exigidas_pela_especificacao(self):
+        """server/utilities/caching (2026-07-28): resultType "complete" exige
+        ttlMs (inteiro >= 0) e cacheScope. Sem isto a propria resposta que
+        anuncia suporte a revisao 2026-07-28 nao seria conformante com ela."""
+        _resp, corpo = self._chamar()
+        resultado = corpo["result"]
+        self.assertIsInstance(resultado["ttlMs"], int)
+        self.assertGreaterEqual(resultado["ttlMs"], 0)
+        self.assertIn(resultado["cacheScope"], ("public", "private"))
 
 
 class TestVersoesDeProtocolo(unittest.TestCase):
