@@ -576,7 +576,73 @@ class TestAprovacaoOutboxWhatsApp(unittest.TestCase):
         _processar_aprovacao_outbox(db, msg2)
         mock_listar.assert_not_called()
 
+    @mock.patch("atencao_whatsapp._obter_whatsapp_owner_chat_id")
+    @mock.patch("outbox_aprovacao.listar_rascunhos")
+    @mock.patch("outbox_aprovacao.descartar_rascunho")
+    @mock.patch("hermes_core_logic._send_telegram_message")
+    @mock.patch("hermes_core_logic._get_telegram_token", return_value="tok")
+    @mock.patch("main._resolve_default_telegram_chat_id", return_value="123")
+    def test_processar_aprovacao_outbox_avisa_telegram_se_descarte_falhar(
+        self, mock_chat, mock_token, mock_send, mock_descartar, mock_listar, mock_owner_id
+    ):
+        """Achado do Codex na PR #186: sem isso, uma falha protegida (A04) do
+        descarte via WhatsApp era descartada em silêncio pelo handler, e o
+        rascunho podia acabar enviado mesmo assim por liberar_rascunhos_promovidos."""
+        mock_owner_id.return_value = self.owner_chat_id
+        mock_listar.return_value = {"total": 1, "rascunhos": self.rascunho_unico}
+        mock_descartar.return_value = {
+            "status": "erro_transacao",
+            "erro": "Firestore indisponível (simulado)",
+        }
+
+        db = mock.MagicMock()
+        msg = {
+            "from_me": True,
+            "chat_id": self.owner_chat_id,
+            "content": "descarta",
+        }
+        _processar_aprovacao_outbox(db, msg)
+
+        mock_descartar.assert_called_once_with(db, outbox_id="outbox-abc-123")
+        mock_send.assert_called_once()
+        texto_enviado = mock_send.call_args[0][2]
+        self.assertIn("não processado", texto_enviado.lower())
+
+    @mock.patch("atencao_whatsapp._obter_whatsapp_owner_chat_id")
+    @mock.patch("outbox_aprovacao.listar_rascunhos")
+    @mock.patch("outbox_aprovacao.aprovar_rascunho")
+    @mock.patch("hermes_core_logic._send_telegram_message")
+    def test_processar_aprovacao_outbox_nao_avisa_quando_sucesso(
+        self, mock_send, mock_aprovar, mock_listar, mock_owner_id
+    ):
+        mock_owner_id.return_value = self.owner_chat_id
+        mock_listar.return_value = {"total": 1, "rascunhos": self.rascunho_unico}
+        mock_aprovar.return_value = {"status": "ok", "outbox_id": "outbox-abc-123"}
+
+        db = mock.MagicMock()
+        msg = {"from_me": True, "chat_id": self.owner_chat_id, "content": "sim"}
+        _processar_aprovacao_outbox(db, msg)
+
+        mock_send.assert_not_called()
+
+    @mock.patch("atencao_whatsapp._obter_whatsapp_owner_chat_id")
+    @mock.patch("outbox_aprovacao.listar_rascunhos")
+    @mock.patch("outbox_aprovacao.aprovar_rascunho")
+    @mock.patch("hermes_core_logic._send_telegram_message")
+    def test_processar_aprovacao_outbox_nao_avisa_quando_already_decided(
+        self, mock_send, mock_aprovar, mock_listar, mock_owner_id
+    ):
+        # already_decided/not_found não são falhas de A04 — não devem gerar alerta.
+        mock_owner_id.return_value = self.owner_chat_id
+        mock_listar.return_value = {"total": 1, "rascunhos": self.rascunho_unico}
+        mock_aprovar.return_value = {"status": "already_decided", "erro": "já decidido"}
+
+        db = mock.MagicMock()
+        msg = {"from_me": True, "chat_id": self.owner_chat_id, "content": "sim"}
+        _processar_aprovacao_outbox(db, msg)
+
+        mock_send.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
-

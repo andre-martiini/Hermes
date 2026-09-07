@@ -543,6 +543,52 @@ def _obter_whatsapp_owner_chat_id(db) -> str | None:
     return None
 
 
+def _alertar_se_falha_outbox(db, acao: str, outbox_id: str, resultado) -> None:
+    """Avisa o dono quando aprovar/descartar/editar via WhatsApp falha de forma
+    protegida (status erro_transacao/erro_configuracao — achado A04).
+
+    Este handler roda uma vez por trigger Firestore, sem retry automático: se o
+    status de erro for descartado em silêncio, a mensagem do dono no self-chat
+    (por exemplo, um "cancela" para um envio autônomo) é consumida sem que o
+    rascunho tenha mudado de estado — e liberar_rascunhos_promovidos pode
+    seguir enviando o rascunho como se o dono nunca tivesse respondido. Como o
+    Firestore genuinamente não mudou, o card de controle no Telegram continua
+    válido; avisar por lá dá ao dono um caminho de retry que não depende deste
+    handler ter funcionado.
+    """
+    try:
+        status = resultado.get("status") if hasattr(resultado, "get") else None
+    except Exception:
+        status = None
+    if status not in ("erro_transacao", "erro_configuracao"):
+        return
+
+    try:
+        erro = resultado.get("erro")
+    except Exception:
+        erro = None
+    print(
+        f"[AtencaoWhatsApp] Falha ao processar '{acao}' via WhatsApp para outbox {outbox_id} "
+        f"(status={status}): {erro}. Rascunho não mudou de estado — avisando o dono pelo Telegram."
+    )
+    try:
+        from hermes_core_logic import _get_telegram_token, _send_telegram_message
+        from main import _resolve_default_telegram_chat_id
+
+        token = _get_telegram_token(db)
+        target_chat = _resolve_default_telegram_chat_id(db)
+        if token and target_chat:
+            texto = (
+                "⚠️ <b>Comando de WhatsApp não processado</b>\n"
+                f"Tentei {acao} um rascunho a partir de uma mensagem sua no self-chat, mas a "
+                "operação falhou de forma segura (nada foi alterado). Use os botões do card "
+                "deste rascunho aqui no Telegram para decidir — ele continua válido."
+            )
+            _send_telegram_message(token, target_chat, texto)
+    except Exception as notify_err:
+        print(f"[AtencaoWhatsApp] Falha ao notificar dono sobre falha de '{acao}' via Telegram: {notify_err}")
+
+
 def _processar_aprovacao_outbox(db, mensagem: dict) -> None:
     """Consome a mensagem no self-chat do dono para aprovar, descartar ou editar
     rascunhos de WhatsApp pendentes no outbox."""
@@ -571,12 +617,15 @@ def _processar_aprovacao_outbox(db, mensagem: dict) -> None:
     outbox_id = decisao.get("outbox_id")
 
     if acao == "aprovar" and outbox_id:
-        outbox_aprovacao.aprovar_rascunho(db, outbox_id=outbox_id, aprovado_via="whatsapp")
+        res = outbox_aprovacao.aprovar_rascunho(db, outbox_id=outbox_id, aprovado_via="whatsapp")
+        _alertar_se_falha_outbox(db, "aprovar", outbox_id, res)
     elif acao == "descartar" and outbox_id:
-        outbox_aprovacao.descartar_rascunho(db, outbox_id=outbox_id)
+        res = outbox_aprovacao.descartar_rascunho(db, outbox_id=outbox_id)
+        _alertar_se_falha_outbox(db, "descartar", outbox_id, res)
     elif acao == "editar" and outbox_id:
         novo_texto = decisao.get("novo_texto") or ""
-        outbox_aprovacao.aplicar_edicao_rascunho(db, outbox_id=outbox_id, novo_texto=novo_texto)
+        res = outbox_aprovacao.aplicar_edicao_rascunho(db, outbox_id=outbox_id, novo_texto=novo_texto)
+        _alertar_se_falha_outbox(db, "editar", outbox_id, res)
     elif acao == "ambiguo":
         qtd = decisao.get("quantidade", 0)
         print(f"[AtencaoWhatsApp] Resposta no self-chat ambígua: {qtd} rascunhos pendentes no outbox.")

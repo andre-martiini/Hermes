@@ -121,6 +121,17 @@ class _MockTransaction:
     def _commit(self):
         pass
 
+    def _clean_up(self):
+        # Espelha google.cloud.firestore_v1.transaction.Transaction._clean_up:
+        # o decorator @firestore.transactional chama isso antes de cada
+        # tentativa, então precisa existir para o mock ser um double fiel.
+        self._id = None
+
+    def _begin(self, retry_id=None):
+        # Espelha Transaction._begin: marca a transação como "em andamento"
+        # (in_progress checa self._id is not None) sem round-trip de rede.
+        self._id = retry_id or b"mock-tx-id"
+
 
 class _MockDb:
     def __init__(self):
@@ -205,9 +216,11 @@ class TestAprovacaoTransicao(unittest.TestCase):
     def setUp(self):
         self.db = _MockDb()
         self.outbox = self.db.collection(oa.COLLECTION)
-        self.tx_patch = mock.patch("firebase_admin.firestore.transactional", side_effect=lambda fn: fn)
-        self.tx_patch.start()
-        self.addCleanup(self.tx_patch.stop)
+        # Nota: nenhum patch de firestore.transactional aqui — o
+        # _MockTransaction acima implementa o protocolo real
+        # (_clean_up/_begin/_commit/_rollback/_max_attempts/_read_only),
+        # então estes testes exercitam o mesmo caminho de código de
+        # produção (achado A04), igual TestDescarte já fazia.
 
     def test_aprovar_rascunho_sucesso(self):
         self.outbox._docs["job-1"] = {
@@ -258,7 +271,7 @@ class TestAprovacaoTransicao(unittest.TestCase):
                 self.db,
                 item_id="item-atencao-77",
                 novo_estado="resolvido",
-                desfecho="mensagem aprovada e enviada",
+                desfecho="mensagem aprovada e enviada para a fila",
                 ctx=None,
             )
 
@@ -363,6 +376,91 @@ class TestDescarte(unittest.TestCase):
             mock_edit.assert_called_once()
             texto_editado = mock_edit.call_args[0][3]
             self.assertIn("Motivo: Mensagem já enviada por email", texto_editado)
+
+
+class _BrokenMockTransaction(_MockTransaction):
+    """Simula falha real de transação (ex.: Firestore indisponível ao iniciar
+    a transação). Falha em ``_begin`` — antes de qualquer leitura/escrita —
+    para provar que, quando a transação nem chega a começar, nenhuma escrita
+    desprotegida acontece como fallback."""
+
+    def _begin(self, retry_id=None):
+        raise RuntimeError("Firestore indisponível (simulado)")
+
+
+class _MockDbTransacaoQuebrada(_MockDb):
+    def transaction(self):
+        return _BrokenMockTransaction(self)
+
+
+class _MockDbSemTransacao:
+    """Mock de DB que não implementa .transaction() — simula um backend sem
+    suporte a transação real (achado A04: não deve haver fallback para
+    escrita desprotegida nesse caso)."""
+
+    def __init__(self, real_db):
+        self._real = real_db
+
+    def collection(self, name):
+        return self._real.collection(name)
+
+
+class TestSemFallbackParaEscritaDesprotegida(unittest.TestCase):
+    """Achado A04: quando a transação atômica falha (ou não existe), a função
+    deve retornar erro explícito — nunca cair para uma escrita não
+    protegida que arrisque condição de corrida com liberar_rascunhos_promovidos."""
+
+    def setUp(self):
+        self.real_db = _MockDb()
+        self.outbox = self.real_db.collection(oa.COLLECTION)
+
+    def test_aprovar_com_falha_de_transacao_retorna_erro_sem_escrever(self):
+        self.outbox._docs["job-falha"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "destinatario_nome": "Marcos",
+        }
+        db_quebrado = _MockDbTransacaoQuebrada()
+        db_quebrado._cols[oa.COLLECTION] = self.outbox
+
+        res = oa.aprovar_rascunho(db_quebrado, "job-falha")
+        self.assertEqual(res["status"], "erro_transacao")
+        self.assertIn("erro", res)
+        # Documento não deve ter sido alterado por nenhum caminho alternativo.
+        self.assertEqual(self.outbox._docs["job-falha"]["status"], oa.STATUS_AGUARDANDO)
+
+    def test_aprovar_sem_suporte_a_transacao_retorna_erro_sem_escrever(self):
+        self.outbox._docs["job-sem-tx"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "destinatario_nome": "Marcos",
+        }
+        db_sem_tx = _MockDbSemTransacao(self.real_db)
+
+        res = oa.aprovar_rascunho(db_sem_tx, "job-sem-tx")
+        self.assertEqual(res["status"], "erro_configuracao")
+        self.assertEqual(self.outbox._docs["job-sem-tx"]["status"], oa.STATUS_AGUARDANDO)
+
+    def test_descartar_com_falha_de_transacao_retorna_erro_sem_escrever(self):
+        self.outbox._docs["job-falha-desc"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "destinatario_nome": "Marcos",
+        }
+        db_quebrado = _MockDbTransacaoQuebrada()
+        db_quebrado._cols[oa.COLLECTION] = self.outbox
+
+        res = oa.descartar_rascunho(db_quebrado, "job-falha-desc")
+        self.assertEqual(res["status"], "erro_transacao")
+        self.assertEqual(self.outbox._docs["job-falha-desc"]["status"], oa.STATUS_AGUARDANDO)
+
+    def test_descartar_sem_suporte_a_transacao_retorna_erro_sem_escrever(self):
+        self.outbox._docs["job-sem-tx-desc"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "destinatario_nome": "Marcos",
+        }
+        db_sem_tx = _MockDbSemTransacao(self.real_db)
+
+        res = oa.descartar_rascunho(db_sem_tx, "job-sem-tx-desc")
+        self.assertEqual(res["status"], "erro_configuracao")
+        self.assertEqual(self.outbox._docs["job-sem-tx-desc"]["status"], oa.STATUS_AGUARDANDO)
 
 
 class TestEdicao(unittest.TestCase):
