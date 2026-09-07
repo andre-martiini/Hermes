@@ -37,7 +37,7 @@ from firebase_admin import firestore
 
 from tools import registry
 from tools.hermes_tools import ToolNotAvailable, execute as execute_tool, preview as preview_tool
-from tools.tool_context import ToolContext
+from tools.tool_context import ToolContext, principal_de
 from copilot_context import build_mcp_voice_context
 from autonomy import policy as autonomy_policy
 from autonomy.contracts import (
@@ -391,13 +391,16 @@ def _principal_mcp(ctx: ToolContext) -> Principal:
     docs/autonomia/execucao.md (pendência da sub-entrega 1/N): este é o
     canal do próprio dono, então o valor está correto, mas escrevê-lo aqui
     documenta a decisão em vez de deixá-la implícita no default.
+
+    Desde a sub-entrega 5/N, a construção em si (uid/canal → `Principal`,
+    default de `origem_humana` por tipo) é `tools.tool_context.principal_de`
+    — compartilhado com qualquer canal futuro que precise da mesma lógica.
+    Esta função continua existindo, com o mesmo nome e assinatura, só para
+    preservar a decisão do TIPO (CLIENTE_ASSISTIDO, nunca inferido) e o
+    raciocínio documentado acima; `test_mcp_server.py::TestPrincipalMcp`
+    prova que o resultado não mudou.
     """
-    return Principal(
-        uid=ctx.user_uid,
-        tipo=TipoPrincipal.CLIENTE_ASSISTIDO,
-        canal=ctx.canal,
-        origem_humana=True,
-    )
+    return principal_de(ctx, TipoPrincipal.CLIENTE_ASSISTIDO, origem_humana=True)
 
 
 def _decisao_piso_mcp(ctx: ToolContext, nome: str, argumentos: dict) -> PolicyDecision | None:
