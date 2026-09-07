@@ -429,9 +429,13 @@ class TestCamadaJsonRpc(unittest.TestCase):
         self.assertEqual(payload["result"]["serverInfo"]["name"], "hermes-mcp")
 
     def test_ping_responde_vazio(self):
+        # "vazio" no sentido do protocolo: sem corpo alem do que a revisao
+        # 2026-07-28 exige em todo resultado "complete" (ver mcp_server.py,
+        # comentario de escopo no topo do arquivo, e a correcao do achado do
+        # Codex na PR #193 sobre resultType ausente em todo o dispatch).
         resp = self._post({"jsonrpc": "2.0", "id": 7, "method": "ping"})
         payload = json.loads(resp.get_data(as_text=True))
-        self.assertEqual(payload["result"], {})
+        self.assertEqual(payload["result"], {"resultType": "complete"})
 
     def test_metodo_desconhecido_com_id_vira_erro(self):
         resp = self._post({"jsonrpc": "2.0", "id": 2, "method": "nao/existe"})
@@ -441,7 +445,7 @@ class TestCamadaJsonRpc(unittest.TestCase):
     def test_resources_templates_list_vazio(self):
         resp = self._post({"jsonrpc": "2.0", "id": 3, "method": "resources/templates/list"})
         payload = json.loads(resp.get_data(as_text=True))
-        self.assertEqual(payload["result"], {"resourceTemplates": []})
+        self.assertEqual(payload["result"], {"resourceTemplates": [], "resultType": "complete"})
 
     def test_tools_list_publica_o_catalogo(self):
         resp = self._post({"jsonrpc": "2.0", "id": 4, "method": "tools/list"})

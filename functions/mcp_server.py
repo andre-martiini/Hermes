@@ -1,10 +1,33 @@
 """Servidor MCP do Hermes.
 
 Expoe, via uma unica Cloud Function HTTP (`mcpServer`), o catalogo de tools do
-Hermes sobre JSON-RPC 2.0: `initialize`, `tools/list`, `tools/call`,
-`resources/list`, `resources/templates/list`, `resources/read`, `ping`.
+Hermes sobre JSON-RPC 2.0: `initialize`, `server/discover`, `tools/list`,
+`tools/call`, `resources/list`, `resources/templates/list`, `resources/read`,
+`ping`.
 
 Decisoes de escopo:
+
+- Conformidade com a revisao 2026-07-28: `_SUPPORTED_PROTOCOL_VERSIONS` inclui
+  essa versao (desde a PR #193, para o discovery do ChatGPT), entao QUALQUER
+  resultado "complete" devolvido por este dispatch leva `resultType` — nao so
+  `server/discover`/`tools/list`/`tools/call` (o achado original do Codex na
+  PR #193, reproduzido ao vivo em 07/09/2026: toda chamada de `tools/call` —
+  nao um subconjunto de handlers — falhava por falta do campo), mas tambem
+  `ping`, `resources/list`, `resources/read`, `resources/templates/list`,
+  `prompts/list` e `prompts/get` (mesma exigencia, mesmo risco, fechados na
+  mesma correcao para nao deixar a proxima chamada nova descobrir a mesma
+  lacuna de novo). `tools/list` e `server/discover` tambem levam
+  `ttlMs`/`cacheScope` por serem catalogos cacheaveis (ver `_CATALOG_TTL_MS`);
+  os demais nao, pelo mesmo raciocinio que ja valia para `tools/call`
+  (resultado por chamada, nao um catalogo). O UNICO metodo que continua fora
+  disso e o proprio `initialize`: o resultado dele e a propria negociacao de
+  versao, entao gate-lo pela versao que ele ainda esta negociando nao faz
+  sentido — ele responde no formato legado (sem `_meta` por chamada), como
+  sempre respondeu. O restante do contrato da revisao 2026-07-28 (metadado de
+  versao/cliente por requisicao em `_meta`, MRTR/elicitation real) tambem NAO
+  esta implementado — isso cobre exatamente o que um cliente 2026-nativo
+  comum verifica antes de aceitar uma resposta como valida, sem se
+  comprometer com o resto do contrato sem necessidade real ainda.
 
 - Deploy como Cloud Function Python (mesmo codebase de functions/main.py),
   nao um servico Cloud Run separado — evita infraestrutura nova e min-instances
@@ -126,13 +149,16 @@ _CORS_ORIGINS = [
     "http://127.0.0.1:5173",
 ]
 
-# TTL do `server/discover` — capacidades e identidade do servidor so mudam em
-# deploy, entao 5 min (mesmo criterio do cache de discovery OAuth em
-# mcp_oauth.py) evita re-fetch constante sem arriscar informacao desatualizada
-# por muito tempo. `cacheScope="public"`: a resposta nao contem dado do
-# usuario (a autorizacao de quem pode USAR o Hermes continua sendo feita por
-# fora, no OAuth) e e identica para qualquer cliente autenticado.
-_DISCOVER_TTL_MS = 300_000
+# TTL de respostas "catalogo" (`server/discover` e `tools/list`) — capacidades,
+# identidade e schema das tools so mudam em deploy, entao 5 min (mesmo criterio
+# do cache de discovery OAuth em mcp_oauth.py) evita re-fetch constante sem
+# arriscar informacao desatualizada por muito tempo. `cacheScope="public"`:
+# nenhuma das duas respostas contem dado do usuario (a autorizacao de quem pode
+# USAR o Hermes continua sendo feita por fora, no OAuth; `tools/list` nao
+# recebe uid nem ctx — ver `_handle_tools_list`) e e identica para qualquer
+# cliente autenticado. Compartilhada entre as duas por ser exatamente o mesmo
+# raciocinio — nao duas coincidencias que podem divergir sem ninguem notar.
+_CATALOG_TTL_MS = 300_000
 
 # Compartilhado entre `initialize` (era legada) e `server/discover` (era
 # moderna, 2026-07-28+) — as duas formas de um cliente aprender a usar o
@@ -292,7 +318,10 @@ def mcpServer(req: https_fn.Request) -> https_fn.Response:
         elif method == "server/discover":
             result = _handle_server_discover(params)
         elif method == "ping":
-            result = {}
+            # "complete" tambem aqui por consistencia com todo o resto do
+            # dispatch (ver comentario de escopo no topo do arquivo) — nao ha
+            # razao para um pong ser a unica resposta sem o campo.
+            result = {"resultType": "complete"}
         elif method == "tools/list":
             result = _handle_tools_list()
         elif method == "tools/call":
@@ -304,7 +333,7 @@ def mcpServer(req: https_fn.Request) -> https_fn.Response:
         elif method == "prompts/get":
             result = _handle_prompts_get(params)
         elif method == "resources/templates/list":
-            result = {"resourceTemplates": []}
+            result = {"resourceTemplates": [], "resultType": "complete"}
         elif method == "resources/read":
             result = _handle_resources_read(params, uid=uid)
         else:
@@ -621,12 +650,25 @@ def _handle_server_discover(params: dict) -> dict:
         # resultado com resultType "complete" de server/discover: sem estes
         # dois campos a propria resposta que anuncia conformidade com a
         # revisao 2026-07-28 seria no-conformante com ela.
-        "ttlMs": _DISCOVER_TTL_MS,
+        "ttlMs": _CATALOG_TTL_MS,
         "cacheScope": "public",
     }
 
 
 def _handle_tools_list() -> dict:
+    """Catalogo de tools do canal MCP.
+
+    `resultType`/`ttlMs`/`cacheScope`: mesmo achado do Codex na PR #193 sobre
+    `tools/call` (ver `_text_result`) tambem apontou este metodo — um cliente
+    que negocia "2026-07-28" (possivel desde que essa versao entrou em
+    `_SUPPORTED_PROTOCOL_VERSIONS` na mesma PR) exige `resultType` em TODO
+    resultado "complete", e como `tools/list` e uma resposta-catalogo (nao
+    muda por chamada, so por deploy — ver `_CATALOG_TTL_MS`), o mesmo raciocinio
+    de cache de `server/discover` (secao server/utilities/caching da
+    especificacao) se aplica igual. `tools/call` NAO leva `ttlMs`/`cacheScope`
+    de proposito: cada chamada tem argumentos e efeito proprios, nao e um
+    catalogo cacheavel do mesmo jeito.
+    """
     tools = []
     for name in registry.list_mcp_enabled_tools():
         try:
@@ -656,7 +698,12 @@ def _handle_tools_list() -> dict:
                 "voiceEnabled": registry.is_voice_enabled(name),
             },
         })
-    return {"tools": tools}
+    return {
+        "tools": tools,
+        "resultType": "complete",
+        "ttlMs": _CATALOG_TTL_MS,
+        "cacheScope": "public",
+    }
 
 
 def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
@@ -804,7 +851,11 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
             is_error=is_error,
         )
 
-    return {"content": [{"type": "text", "text": text}], "isError": is_error}
+    # Mesmo motivo do `resultType` em `_text_result` acima — este e o unico
+    # retorno de `tools/call` que nao passa por ela (monta o envelope direto
+    # porque `text` aqui pode ja vir como string crua do executor, nao um
+    # payload dict a serializar).
+    return {"content": [{"type": "text", "text": text}], "isError": is_error, "resultType": "complete"}
 
 
 def _looks_like_error(result) -> bool:
@@ -823,6 +874,25 @@ def _text_result(payload: dict, *, is_error: bool) -> dict:
     return {
         "content": [{"type": "text", "text": json.dumps(payload, ensure_ascii=False)}],
         "isError": is_error,
+        # Fecha o achado do Codex na PR #193 (07/09/2026): `_SUPPORTED_PROTOCOL_
+        # VERSIONS` passou a incluir "2026-07-28" (para o `server/discover` do
+        # ChatGPT), mas nenhum retorno de `tools/call` levava `resultType` — um
+        # cliente 2026-nativo que negocia essa versao (por `initialize` ou por
+        # `server/discover`) passa a EXIGIR o campo em toda resposta; sem ele
+        # cada chamada de tool era rejeitada por validacao de schema, mesmo com
+        # a chamada tendo sido executada com sucesso no servidor. Reproduzido ao
+        # vivo nesta investigacao (relato do dono, 07/09/2026): TODA chamada
+        # falhava, nao so um subconjunto de handlers — o formato de resposta e
+        # unico para qualquer tool, entao a lacuna era uniforme. "complete" e o
+        # unico valor que faz sentido aqui (nenhuma tool do Hermes usa o fluxo
+        # de multiplas idas-e-vindas do proprio protocolo — MRTR/elicitation —
+        # que e o outro caso previsto, "input_required"; os fluxos de
+        # confirmacao do Hermes sao caseiros, dentro do payload JSON, nao o
+        # mecanismo nativo do protocolo). Em conexoes de era anterior a 2026 o
+        # campo e ignorado pelo cliente (a especificacao descreve isso como
+        # "estranho e descartado antes da validacao"), entao adiciona-lo aqui
+        # incondicionalmente nao quebra nenhum cliente legado.
+        "resultType": "complete",
     }
 
 
@@ -854,7 +924,7 @@ def _handle_prompts_list() -> dict:
                 + (f" Aciona em: {', '.join(gatilhos[:6])}." if gatilhos else "")
             ),
         })
-    return {"prompts": prompts}
+    return {"prompts": prompts, "resultType": "complete"}
 
 
 def _handle_prompts_get(params: dict) -> dict:
@@ -887,6 +957,7 @@ def _handle_prompts_get(params: dict) -> dict:
                 ),
             },
         }],
+        "resultType": "complete",
     }
 
 
@@ -897,7 +968,8 @@ def _handle_resources_list() -> dict:
             "name": "Contexto do copiloto Hermes",
             "description": "Persona, perfil do usuario autenticado e memorias recentes — para compor o system prompt de um cliente externo.",
             "mimeType": "text/plain",
-        }]
+        }],
+        "resultType": "complete",
     }
 
 
@@ -908,7 +980,7 @@ def _handle_resources_read(params: dict, *, uid: str) -> dict:
 
     db = firestore.client()
     text = build_mcp_voice_context(db, uid=uid)
-    return {"contents": [{"uri": uri, "mimeType": "text/plain", "text": text}]}
+    return {"contents": [{"uri": uri, "mimeType": "text/plain", "text": text}], "resultType": "complete"}
 
 
 # --------------------------------------------------------------------------
