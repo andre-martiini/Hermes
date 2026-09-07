@@ -1,0 +1,64 @@
+{
+  "name": "simular_politica",
+  "description": "Avalia um lote de pedidos hipotéticos contra a política de autonomia vigente SEM aplicar nada — mostra o que seria permitido, bloqueado, exigiria aprovação ou ficaria só em preparação. Use para conferir o efeito de uma mudança antes de propô-la de verdade com preparar_politica.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "pedidos": {
+        "type": "array",
+        "description": "Lista de pedidos hipotéticos a avaliar. Nenhuma simulação roda se algum pedido for inválido — corrija todos e tente de novo.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "ferramenta": {
+              "type": "string",
+              "description": "Nome da tool sendo simulada."
+            },
+            "principal_tipo": {
+              "type": "string",
+              "description": "Tipo do principal que faria o pedido: dono_interativo, cliente_assistido, rotina_cowork, runner_servico ou terceiro_portal. Padrão: cliente_assistido (o tipo do próprio canal MCP)."
+            },
+            "origem_humana": {
+              "type": "boolean",
+              "description": "Se um humano está presente/acompanhando em tempo real. Padrão: true para dono_interativo/cliente_assistido, false para os demais tipos."
+            },
+            "canal": {
+              "type": "string",
+              "description": "Canal simulado (web, telegram, mcp, voz, whatsapp...). Padrão: 'mcp'."
+            },
+            "uid": {
+              "type": "string",
+              "description": "uid simulado do principal, se relevante para o cenário."
+            },
+            "classe_efeito": {
+              "type": "string",
+              "description": "Classe de efeito da ação: observacao_autorizada, preparacao_interna, escrita_interna_reversivel, coordenacao_limitada, compromisso_terceiros ou efeito_financeiro_destrutivo_institucional. Se omitida, tenta resolver automaticamente para ferramentas do piso de confirmação obrigatória (ver consultar_politica); para as demais é obrigatória."
+            },
+            "argumentos_resolvidos": {
+              "type": "object",
+              "description": "Argumentos que a ferramenta receberia, só para registro/hash — não são validados."
+            },
+            "missao": {
+              "type": "string",
+              "description": "Missão declarada do pedido, se houver."
+            },
+            "sensibilidade": {
+              "type": "string",
+              "description": "Sensibilidade do conteúdo, ex.: 'financeiro', 'terceiros'."
+            },
+            "orcamento_restante": {
+              "type": "number",
+              "description": "Orçamento restante conhecido para este pedido, se houver."
+            },
+            "estado_autonomia": {
+              "type": "string",
+              "description": "Estado de autonomia a simular: ativo, somente_preparacao ou pausado. Padrão: ativo."
+            }
+          },
+          "required": ["ferramenta"]
+        }
+      }
+    },
+    "required": ["pedidos"]
+  }
+}
