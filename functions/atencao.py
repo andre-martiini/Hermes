@@ -743,7 +743,18 @@ def resolver_item(
                     },
                 )
             else:
-                dummy_ctx = ToolContext(db=db, user_uid=None, task_id=acao_id)
+                # `_db`, não `db` (achado da revisão adversarial da P02
+                # sub-entrega 5/N, tools/tool_context.py): o campo do
+                # dataclass é `_db` — `db` só existe como *property* de
+                # leitura. `ToolContext(db=db, ...)` levantava TypeError
+                # ("unexpected keyword argument 'db'") ANTES mesmo de chamar
+                # `registrar_no_diario`, e o `except Exception` logo abaixo
+                # engolia o erro em silêncio — todo desfecho resolvido com
+                # `acao_id` preenchido, chamado sem `ctx` explícito (o
+                # padrão desta função), perdia a nota no diário da ação sem
+                # nenhum sinal. Reproduzido diretamente antes da correção:
+                # `ToolContext(db=object())` levanta `TypeError`.
+                dummy_ctx = ToolContext(_db=db, user_uid=None, task_id=acao_id)
                 registrar_no_diario(
                     dummy_ctx,
                     {
@@ -900,4 +911,3 @@ def avaliar_interrupcao_atencao(db, now: datetime | None = None) -> dict:
         "notificados": notificados,
         "pulados_janela": pulados_janela,
     }
-
