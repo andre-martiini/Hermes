@@ -577,6 +577,30 @@ def marcar_degradacao(db, hoje: str, motivo: str) -> None:
         print(f"[Elevacao] Falha ao gravar o estado da varredura: {exc}")
 
 
+def marcar_tentativa(db, hoje: str, motivo: str | None) -> None:
+    """Grava quando a rotina tentou rodar pela ultima vez, e por que nao avancou.
+
+    Diferente de `marcar_degradacao`: aquele so e tocado depois que a rodada
+    chega a olhar a janela de tarefas. Uma trava de volume (`semana_cheia`,
+    `teto_do_mes`), a falta de objetivo elegivel, marcador indisponivel ou
+    historico indisponivel barram ANTES disso — e nesses casos o aviso de
+    degradacao no dashboard fica com a data da ultima vez que a rodada
+    realmente chegou la, por mais que ela tenha sido tentada toda semana desde
+    entao. Esta marca cobre TODA tentativa, com ou sem sucesso, para o resumo
+    matinal poder dizer "a ultima tentativa foi hoje" mesmo quando o aviso de
+    degradacao continua com uma data antiga.
+
+    `motivo=None` significa que a rodada rodou (produziu proposta ou concluiu
+    que nao havia nada com corpo) — nao que algo deu errado.
+    """
+    try:
+        _marcador_de_varredura(db).set(
+            {"ultima_tentativa": {"data": str(hoje)[:10], "motivo": motivo or None}},
+            merge=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Elevacao] Falha ao gravar a ultima tentativa: {exc}")
+
+
 def _filtro(campo: str, op: str, valor):
     """`FieldFilter` num lugar so, para o filtro morar na consulta e nao no `for`.
 
@@ -1227,7 +1251,54 @@ def mensagem_da_rodada(rodada: dict, limite_candidatos: int = LIMITE_CANDIDATAS)
     )
 
 
+# Motivos que significam que a rodada NAO terminou de avaliar a janela de
+# tarefas — os que vale a pena preservar em `ultima_tentativa`. A maioria barra
+# ANTES da rodada chegar a olhar a janela (sem o card de degradacao,
+# `varredura_degradada`, registrar nada disso, porque aquele so e tocado
+# depois deste ponto). `falha_no_modelo` e diferente: acontece DEPOIS de
+# `preparar_rodada` ja ter rodado, mas `_rodar_uma_rodada` pula
+# `marcar_varredura` de proposito nesse caminho (as candidatas nao foram
+# julgadas) — entao o marcador tambem nao avancou ali, e o motivo precisa
+# sobreviver pelo mesmo argumento. Achado da revisao do Codex na PR: antes
+# deste ajuste, `falha_no_modelo` caia no `else None` do wrapper abaixo e
+# ficava indistinguivel de sucesso. `nenhuma_acao_com_corpo` e sucesso real
+# ficam de fora: nesses a rodada de fato terminou de olhar a janela.
+_MOTIVOS_DE_BLOQUEIO_OU_FALHA = frozenset({
+    "sem_anthropic", "historico_indisponivel", "semana_cheia",
+    "teto_do_mes", "nenhum_objetivo_elegivel", "marcador_indisponivel",
+    "falha_no_modelo",
+})
+
+
 def rodar_deteccao(db, hoje: str, carga_semana, claude_key: str) -> dict:
+    """Ponto de entrada do agendador: roda uma rodada e sempre registra a tentativa.
+
+    A gravacao fica aqui fora, e nao dentro de `_rodar_uma_rodada`, para cobrir
+    todo caminho de saida com uma linha so — inclusive `sem_anthropic`, que
+    nunca chega em `preparar_rodada`.
+
+    O `try/except` cobre um segundo achado da revisao do Codex: se
+    `_rodar_uma_rodada` levantar uma excecao que ela mesma nao previu (por
+    exemplo, uma consulta ao Firestore sem guarda propria, como a de
+    `estrategia_pessoal` em `preparar_rodada`, durante uma instabilidade), a
+    tentativa precisa ficar registrada mesmo assim — sem isso ela desaparecia
+    em silencio, igual ao problema original que esta funcao existe para
+    resolver. A excecao continua subindo depois de gravar, para nao mudar o
+    que quem chama (o agendador) enxerga hoje.
+
+    Ver `marcar_tentativa`.
+    """
+    try:
+        resultado = _rodar_uma_rodada(db, hoje, carga_semana, claude_key)
+    except Exception:
+        marcar_tentativa(db, hoje, "erro_inesperado")
+        raise
+    motivo = resultado.get("motivo")
+    marcar_tentativa(db, hoje, motivo if motivo in _MOTIVOS_DE_BLOQUEIO_OU_FALHA else None)
+    return resultado
+
+
+def _rodar_uma_rodada(db, hoje: str, carga_semana, claude_key: str) -> dict:
     """Uma rodada completa: prepara, chama o modelo uma vez, grava o que passar.
 
     O modulo inteiro fica sem importar `firebase_functions` de proposito — o

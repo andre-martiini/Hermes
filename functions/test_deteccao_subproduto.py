@@ -1693,6 +1693,172 @@ class TestADecisaoDoUsuario(unittest.TestCase):
         self.assertEqual(r["sugestoes"][0]["sugestao_id"], "s1")
 
 
+class TestUltimaTentativaSempreRegistrada(unittest.TestCase):
+    """`rodar_deteccao` grava quando tentou, mesmo quando nem chega a olhar nada.
+
+    O aviso de degradacao (`varredura_degradada`) so e tocado depois que a
+    rodada chega a olhar a janela de tarefas — uma trava de volume (semana
+    cheia, teto do mes), falta de objetivo elegivel, ou marcador/historico
+    indisponivel barram antes disso, TODA semana, sem deixar rastro nenhum de
+    que a rotina sequer tentou. E o defeito real por tras do card do resumo
+    matinal ficar com uma data de semanas atras: nao e que o problema daquele
+    dia persista, e que nenhuma rodada desde entao chegou perto de reavaliar.
+    """
+
+    @staticmethod
+    def _tentativa(db):
+        return (ds._marcador_de_varredura(db).get().to_dict() or {}).get("ultima_tentativa")
+
+    def _com_objetivo(self, db=None):
+        db = db or _Db()
+        db.collection("estrategia_pessoal").dados["intel"] = {
+            "objetivoMacro": "Autoridade intelectual", "pilar": "intelectual",
+            "gerida_por_acoes": True}
+        return db
+
+    def test_semana_cheia_registra_a_tentativa_de_hoje(self):
+        db = _Db()
+        cheia = [{"data": HOJE, "total": ds.SEMANA_CHEIA_ACOES + 1}]
+        r = ds.rodar_deteccao(db, HOJE, cheia, "chave-fake")
+        self.assertEqual(r["motivo"], "semana_cheia")
+        self.assertEqual(self._tentativa(db), {"data": HOJE, "motivo": "semana_cheia"})
+
+    def test_teto_do_mes_registra_a_tentativa(self):
+        db = _Db()
+        for i in range(ds.TETO_POR_MES):
+            db.collection(ds.COL_ELEVACOES).dados[f"s{i}"] = {
+                "task_id": f"t{i}", "criada_em": HOJE, "status": ds.STATUS_PENDENTE}
+        r = ds.rodar_deteccao(db, HOJE, [], "chave-fake")
+        self.assertEqual(r["motivo"], "teto_do_mes")
+        self.assertEqual(self._tentativa(db)["motivo"], "teto_do_mes")
+
+    def test_sem_objetivo_elegivel_registra_a_tentativa(self):
+        db = _Db()  # sem nenhum objetivo em estrategia_pessoal
+        r = ds.rodar_deteccao(db, HOJE, [], "chave-fake")
+        self.assertEqual(r["motivo"], "nenhum_objetivo_elegivel")
+        self.assertEqual(self._tentativa(db)["motivo"], "nenhum_objetivo_elegivel")
+
+    def test_marcador_indisponivel_registra_a_tentativa(self):
+        """So a LEITURA do marcador falha; a ESCRITA de `ultima_tentativa` depois
+        continua funcionando — sao operacoes diferentes no mesmo documento, e o
+        teste precisa provar que uma nao arrasta a outra.
+
+        A verificacao le o dicionario interno do fake diretamente, e nao via
+        `.get()`/`_tentativa()`: o proprio `.get()` esta quebrado de proposito
+        (e o que faz `ultima_varredura`/`cursor_do_passivo` levantarem), entao
+        usa-lo tambem para conferir o resultado destruiria a propria checagem.
+        """
+        class _RefSoLeituraQuebrada(_Ref):
+            def get(self, transaction=None):
+                raise RuntimeError("indisponivel")
+
+        class _ColSoLeituraQuebrada(_Colecao):
+            def document(self, doc_id=None):
+                ref = _Colecao.document(self, doc_id)
+                quebrado = _RefSoLeituraQuebrada(self.dados, ref.id)
+                quebrado._subcols = ref._subcols
+                return quebrado
+
+        db = self._com_objetivo(_Db())
+        db.cols["system_usage"] = _ColSoLeituraQuebrada()
+
+        r = ds.rodar_deteccao(db, HOJE, [], "chave-fake")
+        self.assertEqual(r["motivo"], "marcador_indisponivel")
+        gravado = db.cols["system_usage"].dados.get(ds.COL_ELEVACOES, {}).get("ultima_tentativa")
+        self.assertEqual(gravado, {"data": HOJE, "motivo": "marcador_indisponivel"})
+
+    def test_historico_indisponivel_registra_a_tentativa(self):
+        class _DbSemHistorico(_Db):
+            def collection(self, nome):
+                if nome == ds.COL_ELEVACOES:
+                    raise RuntimeError("indisponivel")
+                return super().collection(nome)
+
+        db = self._com_objetivo(_DbSemHistorico())
+        r = ds.rodar_deteccao(db, HOJE, [], "chave-fake")
+        self.assertEqual(r["motivo"], "historico_indisponivel")
+        self.assertEqual(self._tentativa(db)["motivo"], "historico_indisponivel")
+
+    def test_rodada_sem_nada_com_corpo_registra_motivo_None(self):
+        """`rodou=True`-like: olhou a janela inteira e nao achou nada — nao e falha."""
+        db = self._com_objetivo()
+        r = ds.rodar_deteccao(db, HOJE, [], "chave-fake")
+        self.assertEqual(r["motivo"], "nenhuma_acao_com_corpo")
+        self.assertIsNone(self._tentativa(db)["motivo"])
+
+    def test_tentativa_anterior_e_sobrescrita_pela_mais_recente(self):
+        """E o ultimo estado, nao um historico — cada tentativa substitui a anterior."""
+        db = _Db()
+        cheia = [{"data": HOJE, "total": ds.SEMANA_CHEIA_ACOES + 1}]
+        ds.rodar_deteccao(db, HOJE, cheia, "chave-fake")
+        self.assertEqual(self._tentativa(db)["data"], HOJE)
+
+        depois = "2026-09-05"
+        db2 = self._com_objetivo(db)
+        ds.rodar_deteccao(db2, depois, [], "chave-fake")
+        tentativa = self._tentativa(db2)
+        self.assertEqual(tentativa["data"], depois)
+        # "nenhuma_acao_com_corpo" olhou a janela inteira — nao e um bloqueio de
+        # antes da janela, entao a tentativa registra sucesso (motivo None).
+        self.assertIsNone(tentativa["motivo"])
+
+    def test_falha_ao_gravar_tentativa_nao_derruba_a_chamada(self):
+        """Telemetria nao pode ser o motivo de uma rodada real falhar."""
+        class _DbEscritaQuebrada(_Db):
+            def collection(self, nome):
+                if nome == "system_usage":
+                    class _ColQuebrada:
+                        def document(self, _id):
+                            class _RefQuebrada:
+                                def set(self, *a, **kw):
+                                    raise RuntimeError("indisponivel na escrita")
+                                def get(self, *a, **kw):
+                                    return _Snap({}, "elevacoes_sugeridas")
+                            return _RefQuebrada()
+                    return _ColQuebrada()
+                return super().collection(nome)
+
+        db = self._com_objetivo(_DbEscritaQuebrada())
+        # Nao deve levantar, mesmo com a gravacao da tentativa falhando.
+        r = ds.rodar_deteccao(db, HOJE, [], "chave-fake")
+        self.assertEqual(r["motivo"], "nenhuma_acao_com_corpo")
+
+    def test_falha_no_modelo_preserva_o_motivo_e_nao_vira_sucesso(self):
+        """Achado da revisao do Codex na PR: a lista de bloqueios so cobria os
+        que vem ANTES da janela, entao `falha_no_modelo` caia no `else None` do
+        wrapper e ficava indistinguivel de sucesso — mas nesse caminho
+        `_rodar_uma_rodada` pula `marcar_varredura` de proposito, porque as
+        candidatas nao foram julgadas. O motivo precisa sobreviver."""
+        original = ds._rodar_uma_rodada
+        ds._rodar_uma_rodada = lambda *a, **kw: {"rodou": False, "motivo": "falha_no_modelo"}
+        self.addCleanup(setattr, ds, "_rodar_uma_rodada", original)
+
+        db = self._com_objetivo()
+        r = ds.rodar_deteccao(db, HOJE, [], "chave-fake")
+        self.assertEqual(r["motivo"], "falha_no_modelo")
+        self.assertEqual(self._tentativa(db)["motivo"], "falha_no_modelo")
+
+    def test_erro_inesperado_dentro_da_rodada_ainda_registra_a_tentativa(self):
+        """Segundo achado da revisao do Codex: se `_rodar_uma_rodada` levantar
+        uma excecao que ela mesma nao previu (ex.: uma consulta ao Firestore
+        sem guarda propria, como `estrategia_pessoal` em `preparar_rodada`,
+        durante uma instabilidade), a tentativa tem de ficar registrada mesmo
+        assim — e a excecao continua subindo, para o agendador continuar vendo
+        a falha como via antes desta mudanca."""
+        original = ds._rodar_uma_rodada
+
+        def _explode(*_a, **_kw):
+            raise RuntimeError("Firestore indisponivel")
+
+        ds._rodar_uma_rodada = _explode
+        self.addCleanup(setattr, ds, "_rodar_uma_rodada", original)
+
+        db = _Db()
+        with self.assertRaises(RuntimeError):
+            ds.rodar_deteccao(db, HOJE, [], "chave-fake")
+        self.assertEqual(self._tentativa(db)["motivo"], "erro_inesperado")
+
+
 class TestOTextoDoCard(unittest.TestCase):
 
     def test_cada_linha_responde_uma_pergunta_do_usuario(self):
