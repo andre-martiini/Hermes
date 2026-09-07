@@ -24,12 +24,25 @@ service cloud.firestore {
     // rotina, jobs assíncronos do canal MCP, decisões de promoção de
     // autonomia, sessões do bridge de voz, allowlist de chats do
     // Telegram. Só Cloud Functions (Admin SDK — não governado por estas
-    // regras) devem ler ou escrever nelas; nenhuma delas é lida pelo
-    // frontend React nem pelas pontes de voz hoje (confirmado por busca
-    // exaustiva no código-fonte na sub-entrega 5/N, revisada de forma
-    // independente — ver docs/autonomia/execucao.md). Se um uso legítimo
-    // de leitura surgir no futuro, o caminho correto é uma Cloud
-    // Function/callable dedicada, não reabrir a leitura direta aqui.
+    // regras) devem ler ou escrever nelas. Busca exaustiva no código-fonte
+    // (sub-entrega 5/N) confirmou zero acesso direto do frontend React às
+    // 8 coleções de política/autorização/execução e a "automations" — mas
+    // o Codex (revisão da PR #190) pegou DUAS exceções reais em "system"
+    // que essa busca inicial não cobriu, corretas e ainda hoje em uso:
+    // index.tsx lê/escreve system/sync (sincronização profunda, iniciar/
+    // acompanhar/interromper) e KnowledgeView.tsx lê/escreve
+    // system/copilot_soul (edição da personalidade). Essas duas exceções
+    // são concedidas de volta, de forma explícita e restrita a esses dois
+    // documentos, no bloco match /system/{docId} logo abaixo — não pelo
+    // resto desta função. O restante de "system" (ex.: google_credentials,
+    // api_keys, settings, whatsapp_worker — todos só Admin SDK, em
+    // functions_node/index.js e services/whatsapp-capture/index.js) segue
+    // sem nenhum acesso de cliente. Se outro uso legítimo de leitura
+    // surgir no futuro para qualquer coleção listada aqui, o caminho
+    // preferível é uma Cloud Function/callable dedicada; uma exceção
+    // pontual de documento (como as duas abaixo) só se justifica quando o
+    // fluxo já está em produção e migrar para callable é trabalho maior
+    // que esta sub-entrega comporta.
     function isColecaoNegadaPorCompleto(collectionId) {
       return collectionId in [
         'system', 'automations',
@@ -46,29 +59,53 @@ service cloud.firestore {
       return collectionId in ['atencao', 'promessas_abertas'];
     }
 
-    // ÚNICA regra deste arquivo (deliberado — ver nota abaixo). Cobre
-    // toda coleção não listada nas duas funções acima com o
-    // comportamento histórico: leitura/escrita liberadas para o dono
-    // (internalUser). "public_configs" e "whatsapp_messages", que antes
-    // tinham blocos `match` próprios idênticos a este resultado, ficam
-    // cobertas por este mesmo ramo sem precisar de bloco dedicado.
+    // Exceção pontual e explícita dentro de "system" (achado do Codex na
+    // revisão da PR #190, não coberto pela busca inicial da sub-entrega
+    // 5/N — ver decisão registrada em docs/autonomia/execucao.md): dois
+    // documentos que o frontend React já lê/escreve diretamente em
+    // produção. Isto é um bloco `match` IRMÃO do catch-all abaixo, e por
+    // isso combina com ele por UNIÃO (OR) — mas na direção OPOSTA ao bug
+    // que o achado A16 corrigiu: ali um bloco irmão de NEGAÇÃO (if false)
+    // ao lado de um catch-all permissivo era um no-op perigoso (false OR
+    // true = true, nada ficava de fato bloqueado); aqui é um bloco irmão
+    // de CONCESSÃO estreita (docId in [...]) ao lado de um catch-all que
+    // já nega "system" por completo — o resultado (true OR false = true
+    // só para estes dois documentos, false para qualquer outro doc de
+    // "system") é exatamente a exceção pretendida, sem reabrir o resto da
+    // coleção. Restrito a um único segmento de documento (match
+    // /system/{docId}, não /system/{document=**}), então não alcança
+    // nenhum caminho aninhado sob "system" mesmo que algum vier a existir.
+    match /system/{docId} {
+      allow read, write: if internalUser()
+        && docId in ['sync', 'copilot_soul'];
+    }
+
+    // Regra principal deste arquivo. Cobre toda coleção não listada nas
+    // duas funções acima com o comportamento histórico: leitura/escrita
+    // liberadas para o dono (internalUser). "public_configs" e
+    // "whatsapp_messages", que antes tinham blocos `match` próprios
+    // idênticos a este resultado, ficam cobertas por este mesmo ramo sem
+    // precisar de bloco dedicado.
     //
-    // IMPORTANTE — por que não existem blocos `match` específicos por
-    // coleção neste arquivo (achado A16 do plano, confirmado por revisão
-    // adversarial nesta sub-entrega antes de publicar): quando mais de um
-    // bloco `match` casa com o mesmo caminho, o Firestore concede acesso
-    // se QUALQUER UM deles permitir — não é "o mais específico vence".
-    // Um bloco irmão como `match /idempotency/{document=**} { allow
-    // read, write: if false; }` ao lado de um catch-all permissivo NÃO
-    // bloqueia nada: o catch-all ainda casa com o mesmo caminho e
-    // devolve true para o dono, e o resultado final é a união (OR) dos
-    // dois — exatamente o defeito que o achado A16 descreve ("regra
-    // geral... sobrepondo restrições específicas"; as restrições de
-    // system/atencao já existiam no arquivo antes desta sub-entrega e
-    // sofriam do mesmo problema, nunca isolando de fato essas coleções
-    // do cliente interno — fechado aqui junto). Por isso toda a lógica de
-    // exclusão vive DENTRO da condição deste único bloco, via as duas
-    // funções acima, em vez de blocos `match` adicionais.
+    // IMPORTANTE — por que não existem blocos `match` de NEGAÇÃO
+    // específicos por coleção neste arquivo (achado A16 do plano,
+    // confirmado por revisão adversarial nesta sub-entrega antes de
+    // publicar): quando mais de um bloco `match` casa com o mesmo
+    // caminho, o Firestore concede acesso se QUALQUER UM deles permitir
+    // — não é "o mais específico vence". Um bloco irmão como `match
+    // /idempotency/{document=**} { allow read, write: if false; }` ao
+    // lado deste catch-all NÃO bloquearia nada: o catch-all ainda casa
+    // com o mesmo caminho e devolveria true para o dono, e o resultado
+    // final seria a união (OR) dos dois — exatamente o defeito que o
+    // achado A16 descreve ("regra geral... sobrepondo restrições
+    // específicas"; as restrições de system/atencao já existiam no
+    // arquivo antes desta sub-entrega e sofriam do mesmo problema, nunca
+    // isolando de fato essas coleções do cliente interno — fechado aqui
+    // junto). Por isso toda a lógica de EXCLUSÃO vive DENTRO da condição
+    // deste bloco, via as duas funções acima — nunca como bloco `match`
+    // de negação adicional. O único bloco `match` irmão deste arquivo
+    // (acima) é uma CONCESSÃO estreita, não uma negação, e por isso não
+    // sofre do mesmo problema (ver comentário acima dele).
     match /{collectionId}/{document=**} {
       allow read: if internalUser()
         && !isColecaoNegadaPorCompleto(collectionId);
