@@ -14,6 +14,7 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 
+from autonomy import policy as autonomy_policy
 from tools import hermes_tools, registry
 
 _HERMES_TOOLS_PATH = os.path.join(os.path.dirname(__file__), "tools", "hermes_tools.py")
@@ -248,6 +249,170 @@ class TestVoz(unittest.TestCase):
         for nome in registry.list_mcp_enabled_tools():
             if registry.is_voice_enabled(nome):
                 self.assertTrue(registry.is_mcp_enabled(nome))
+
+
+class TestFerramentasDePolitica(unittest.TestCase):
+    """P02 sub-entrega 3/N: consultar_politica/simular_politica/preparar_politica
+    expostas como tools MCP, reaproveitando as funções puras de autonomy/policy.py
+    (já testadas em test_policy.py — aqui só o wrapper: parsing de args, erros
+    de entrada, e que nenhum dos três materializa Firestore)."""
+
+    def test_registradas_habilitadas_e_sem_confirmacao(self):
+        from tools import registry as _registry
+
+        for nome in ("consultar_politica", "simular_politica", "preparar_politica"):
+            self.assertTrue(hermes_tools.has_tool(nome))
+            self.assertIn(nome, _registry.list_mcp_enabled_tools())
+            self.assertFalse(_registry.needs_confirmation(nome))
+
+    def test_nenhum_toca_firestore_sem_precisar(self):
+        from tools.tool_context import ToolContext
+
+        ctx = ToolContext()
+        hermes_tools.execute("consultar_politica", {}, ctx)
+        hermes_tools.execute("simular_politica", {"pedidos": [
+            {"ferramenta": "pausar_conversa"},
+        ]}, ctx)
+        hermes_tools.execute("preparar_politica", {
+            "politica_proposta": {}, "base_version": autonomy_policy._POLICY_VERSION_PADRAO,
+        }, ctx)
+        self.assertIsNone(ctx._db, "tool de política materializou Firestore sem precisar")
+
+    def test_consultar_politica_default_e_mcp(self):
+        from tools.tool_context import ToolContext
+
+        sem_args = json.loads(hermes_tools.execute("consultar_politica", {}, ToolContext()))
+        com_escopo = json.loads(hermes_tools.execute("consultar_politica", {"escopo": "mcp"}, ToolContext()))
+        self.assertEqual(sem_args, com_escopo)
+        self.assertEqual(sem_args["escopo"], "mcp")
+
+    def test_simular_politica_resolve_classe_efeito_do_piso(self):
+        from tools.tool_context import ToolContext
+
+        r = json.loads(hermes_tools.execute("simular_politica", {"pedidos": [
+            {"ferramenta": "pausar_conversa"},
+        ]}, ToolContext()))
+        self.assertEqual(r["total"], 1)
+
+    def test_simular_politica_ferramenta_fora_do_piso_exige_classe_efeito(self):
+        from tools.tool_context import ToolContext
+
+        r = hermes_tools.execute("simular_politica", {"pedidos": [
+            {"ferramenta": "consultar_agenda"},
+        ]}, ToolContext())
+        self.assertIsInstance(r, str)
+        self.assertTrue(r.startswith("ERRO|"))
+        dados = json.loads(r[len("ERRO|"):])
+        self.assertEqual(len(dados["pedidos_invalidos"]), 1)
+        self.assertEqual(dados["pedidos_invalidos"][0]["indice"], 0)
+
+    def test_simular_politica_pedido_invalido_nao_executa_nenhum(self):
+        """Um pedido invalido no meio do lote invalida o lote inteiro — nao
+        roda so os validos (ver comentario em hermes_tools._simular_politica)."""
+        from tools.tool_context import ToolContext
+        from unittest.mock import patch
+
+        with patch.object(autonomy_policy, "simular_politica") as mock_simular:
+            r = hermes_tools.execute("simular_politica", {"pedidos": [
+                {"ferramenta": "pausar_conversa"},
+                {"ferramenta": "consultar_agenda"},  # sem classe_efeito conhecida
+            ]}, ToolContext())
+        mock_simular.assert_not_called()
+        self.assertTrue(r.startswith("ERRO|"))
+        self.assertIn("pedidos_invalidos", r)
+
+    def test_simular_politica_sem_pedidos_e_erro(self):
+        from tools.tool_context import ToolContext
+
+        r = hermes_tools.execute("simular_politica", {"pedidos": []}, ToolContext())
+        self.assertTrue(r.startswith("ERRO|"))
+
+    def test_simular_politica_tipo_de_principal_invalido_e_reportado_por_indice(self):
+        from tools.tool_context import ToolContext
+
+        r = hermes_tools.execute("simular_politica", {"pedidos": [
+            {"ferramenta": "pausar_conversa", "principal_tipo": "nao_existe"},
+        ]}, ToolContext())
+        self.assertTrue(r.startswith("ERRO|"))
+        dados = json.loads(r[len("ERRO|"):])
+        self.assertEqual(dados["pedidos_invalidos"][0]["indice"], 0)
+
+    def test_simular_politica_origem_humana_string_e_rejeitada_nao_coagida(self):
+        """Achado da revisão adversarial: `bool("false")` é `True` — uma
+        string em vez de booleano NÃO pode ser silenciosamente coagida, ou a
+        simulação mentiria sobre o próprio cenário que o chamador pediu."""
+        from tools.tool_context import ToolContext
+
+        r = hermes_tools.execute("simular_politica", {"pedidos": [
+            {"ferramenta": "pausar_conversa", "origem_humana": "false"},
+        ]}, ToolContext())
+        self.assertTrue(r.startswith("ERRO|"))
+        dados = json.loads(r[len("ERRO|"):])
+        self.assertEqual(dados["pedidos_invalidos"][0]["indice"], 0)
+        self.assertIn("origem_humana", dados["pedidos_invalidos"][0]["erro"])
+
+    def test_simular_politica_origem_humana_bool_de_verdade_continua_aceita(self):
+        from tools.tool_context import ToolContext
+
+        r = hermes_tools.execute("simular_politica", {"pedidos": [
+            {"ferramenta": "pausar_conversa", "origem_humana": False},
+        ]}, ToolContext())
+        self.assertFalse(r.startswith("ERRO|"))
+        self.assertEqual(json.loads(r)["total"], 1)
+
+    def test_simular_politica_argumentos_resolvidos_tipo_errado_e_reportado_por_indice(self):
+        """Achado da revisão adversarial: `dict(5)` levanta `TypeError`, não
+        capturado pelo `except (ValueError, KeyError)` original — escapava
+        cru em vez de virar um erro por índice como os demais campos."""
+        from tools.tool_context import ToolContext
+
+        r = hermes_tools.execute("simular_politica", {"pedidos": [
+            {"ferramenta": "pausar_conversa", "argumentos_resolvidos": 5},
+        ]}, ToolContext())
+        self.assertTrue(r.startswith("ERRO|"))
+        dados = json.loads(r[len("ERRO|"):])
+        self.assertEqual(dados["pedidos_invalidos"][0]["indice"], 0)
+
+    def test_preparar_politica_delega_para_o_motor_puro(self):
+        from tools.tool_context import ToolContext
+
+        r = json.loads(hermes_tools.execute("preparar_politica", {
+            "politica_proposta": {"ferramentas_com_confirmacao_obrigatoria": ["pausar_conversa"]},
+            "base_version": autonomy_policy._POLICY_VERSION_PADRAO,
+        }, ToolContext()))
+        self.assertIsNotNone(r["diff"])
+        self.assertTrue(r["exige_justificativa_explicita"])
+
+    def test_preparar_politica_versao_base_errada_e_recusada_pelo_motor(self):
+        from tools.tool_context import ToolContext
+
+        r = hermes_tools.execute("preparar_politica", {
+            "politica_proposta": {}, "base_version": 999,
+        }, ToolContext())
+        self.assertTrue(r.startswith("ERRO|"))
+        dados = json.loads(r[len("ERRO|"):])
+        self.assertIsNone(dados["diff"])
+        self.assertIn("erro", dados)
+
+    def test_preparar_politica_base_version_ausente_e_erro_de_entrada(self):
+        from tools.tool_context import ToolContext
+
+        r = hermes_tools.execute("preparar_politica", {"politica_proposta": {}}, ToolContext())
+        self.assertTrue(r.startswith("ERRO|"))
+
+    def test_preparar_politica_ferramentas_como_string_e_rejeitada_nao_iterada(self):
+        """Achado da revisão adversarial: sem checagem de tipo, uma string em
+        vez de lista era iterada caractere por caractere por `set(...)` dentro
+        do motor puro, produzindo um diff sem sentido mas 'bem-sucedido' —
+        exatamente no tool que protege o piso de confirmação obrigatória."""
+        from tools.tool_context import ToolContext
+
+        r = hermes_tools.execute("preparar_politica", {
+            "politica_proposta": {"ferramentas_com_confirmacao_obrigatoria": "pausar_conversa"},
+            "base_version": autonomy_policy._POLICY_VERSION_PADRAO,
+        }, ToolContext())
+        self.assertTrue(r.startswith("ERRO|"))
+        self.assertIn("lista de strings", r)
 
 
 try:
