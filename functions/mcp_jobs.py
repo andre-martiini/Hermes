@@ -7,8 +7,8 @@ roda a tool de verdade em segundo plano e grava o resultado no mesmo
 documento.
 
 Achado do plano de autonomia (P01 passo 5-6, achado A10) — três problemas
-no desenho original, todos corrigidos aqui (mais dois achados do Codex na
-PR #189, pontos 4 e 5 abaixo):
+no desenho original, todos corrigidos aqui (mais três achados do Codex na
+PR #189, pontos 4-6 abaixo):
 
 1. Reentrega do evento do gatilho podia rodar a MESMA tool duas vezes,
    porque a checagem de status usava o snapshot do próprio evento
@@ -99,6 +99,37 @@ PR #189, pontos 4 e 5 abaixo):
    nova de infraestrutura. Ver a limitação aceita (abaixo) para o que
    ainda não fecha: um job cujo cliente para de consultar antes de o claim
    vencer.
+6. Achado do Codex na PR #189 (terceira rodada, P1, "Recover jobs orphaned
+   before the claim commits"): a recuperação do ponto 5 só cobre o status
+   `em_execucao` — mas se a própria transação de `_claim` FALHAR antes de
+   comitar a transição `processing` → `em_execucao` (ex.: Firestore
+   `DeadlineExceeded`, indisponibilidade transitória durante a leitura ou
+   a escrita da transação), a exceção escapa do gatilho (retry desligado,
+   ver ponto 1) e o documento fica `processing` para sempre, sem nenhum
+   `claimed_em` chegar a ser gravado — o job nunca foi reivindicado por
+   ninguém. A checagem do ponto 5 não enxerga esse job (o status não é
+   `em_execucao`), então ele ficava sem NENHUMA recuperação: nem por
+   entrega duplicada tardia (o Pub/Sub pode simplesmente nunca reentregar
+   um evento específico), nem por consulta via `ler_job`. Corrigido com
+   `_reaproveitar_processing_nunca_reivindicado_na_leitura` — mesma ideia
+   do ponto 5, usando `criado_em_ts` (gravado por `criar_job`, sempre
+   presente desde a criação do job) como referência de idade em vez de
+   `claimed_em` (que nunca chegou a ser gravado neste cenário específico).
+   Limiar DELIBERADAMENTE separado de `CLAIM_EXPIRA_APOS`: a primeira
+   versão desta correção reaproveitava `CLAIM_EXPIRA_APOS` aqui, mas a
+   revisão adversarial pegou que isso mistura duas coisas diferentes —
+   `CLAIM_EXPIRA_APOS` mede quanto tempo uma EXECUÇÃO pode durar (derivado
+   de `_TIMEOUT_SEC`, com o teto que a plataforma impõe), não quanto
+   tempo a ENTREGA do gatilho e a primeira tentativa de claim podem
+   legitimamente demorar (cold start, contenção de `max_instances`, pico
+   de criação de jobs) — sem o mesmo teto imposto pela plataforma. Usar o
+   mesmo valor fazia um job só lentamente entregue (não quebrado) ser
+   marcado `error` prematuramente, e pior: quando o gatilho enfim
+   disparasse, `_claim` encontraria o job já `error` e devolveria None em
+   silêncio — a tool nunca rodaria, sem sinal de nada quebrado. Corrigido
+   com um limiar próprio, `PROCESSING_NUNCA_REIVINDICADO_APOS` (30min,
+   deliberadamente bem mais generoso, ver a constante para a justificativa
+   completa).
 
 Reserva de execução (claim) tem sua própria expiração — `CLAIM_EXPIRA_APOS`
 — separada da reserva de idempotência: se uma execução for interrompida sem
@@ -110,13 +141,22 @@ do plano (P01 passo 6): não retry automático de handler cujo efeito pode
 não ser idempotente.
 
 `CLAIM_EXPIRA_APOS` (600s) é deliberadamente maior que `_TIMEOUT_SEC` (540s,
-o `timeout_sec` do gatilho): o Cloud Functions mata a execução com
-segurança nessa marca, então qualquer execução que ainda estivesse "em
-andamento" aos 600s já foi encerrada à força pela plataforma — não é uma
-margem arbitrária, é uma garantia. Os dois valores são derivados da mesma
-constante (`_TIMEOUT_SEC`) com uma asserção no import garantindo a relação,
-para que uma mudança futura em um não quebre a garantia do outro em
-silêncio.
+o `timeout_sec` do gatilho): a intenção é que qualquer execução ainda "em
+andamento" aos 600s já tenha sido encerrada pela plataforma. Achado do
+Codex na PR #189 (terceira rodada, P1, "Avoid using the request timeout as
+an execution fence"), aceito como correto: essa margem NÃO é uma garantia
+matematicamente absoluta, como uma versão anterior desta docstring
+afirmava ("não é margem arbitrária, é garantia") — corrigido aqui. A
+documentação do Cloud Run (que sustenta Cloud Functions 2ª geração) não
+promete que o processo do handler é encerrado no instante exato em que o
+timeout da requisição é declarado, só que a plataforma para de
+rotear/aguardar aquela requisição; em cenários incomuns o código em
+execução pode continuar rodando por um tempo indeterminado além disso. Os
+dois valores continuam derivados da mesma constante (`_TIMEOUT_SEC`), com
+uma asserção no import garantindo a relação entre eles — mas a relação em
+si é a melhor aproximação disponível sem um mecanismo de heartbeat/lease
+de verdade, não uma prova. Ver a limitação aceita adicional abaixo para o
+risco residual que isso deixa em aberto.
 
 Limitação aceita (não corrigida aqui, fora do escopo do achado A10): depois
 da correção do ponto 5, um claim genuinamente abandonado se recupera na
@@ -140,6 +180,34 @@ reentrega e classificação de erro) e mais próximo do escopo de P04
 `agent_requests.py` (achado A01, sub-entrega 3/N). Ainda assim, isso é
 estritamente melhor que a correção do ponto 4 sozinha, que dependia
 inteiramente de uma entrega duplicada tardia e não garantida.
+
+Limitação aceita adicional (achado do Codex na PR #189, terceira rodada,
+P1: "Avoid using the request timeout as an execution fence"): mesmo com a
+recuperação dos pontos 5-6, o mecanismo inteiro depende de
+`CLAIM_EXPIRA_APOS` realmente significar "a execução anterior já parou" —
+e essa premissa não é uma garantia absoluta da plataforma (ver acima). Se
+uma execução sobreviver de verdade além do timeout declarado, ela pode:
+(a) gravar um resultado tardio que sobrescreve silenciosamente o `error`
+de "abandonado" que a recuperação já gravou, sem que ninguém veja; e mais
+grave, (b) já ter produzido efeitos colaterais reais fora do Firestore (a
+tool em si, ex.: enviar mensagem, criar objetivo) ANTES de chegar a essa
+gravação tardia. Considerado e rejeitado como correção parcial: um
+"fencing check" na escrita final de `_executar_job` (só gravar se
+`claimed_em` no documento ainda for o mesmo que esta execução leu ao
+ganhar o claim) — rejeitado porque não fecha o risco de verdade, só o
+sintoma no Firestore: pelo momento em que a escrita final aconteceria, o
+efeito colateral real (b) já ocorreu; um fencing check impediria só a
+gravação tardia de sobrescrever o documento, não a duplicação do efeito
+que motivou tudo isso. Fechar isso de verdade exige um mecanismo de
+ownership/heartbeat cooperativo (a própria execução verificando
+periodicamente se ainda é a dona do claim, e abortando se não for) — o
+protocolo completo de lease/heartbeat da seção 4.5 do plano, mesmo escopo
+de P04 já citado acima, e mesmo precedente já aceito para
+`core/idempotency.py::mark_complete` (ausência de fencing token, sub-
+entrega 3.1/N desta mesma cadeia de PRs) pela mesma razão prática: o
+tempo de execução esperado hoje fica bem abaixo dessa janela, tornando a
+corrida teórica e não observada operacionalmente até hoje — mas
+genuinamente não fechada por este fix.
 
 `ler_job` preserva o contrato público original: `not_found` (job
 inexistente ou de outro uid — mesma resposta para os dois casos, para não
@@ -184,6 +252,34 @@ CLAIM_EXPIRA_APOS = timedelta(seconds=_TIMEOUT_SEC + 60)
 
 assert CLAIM_EXPIRA_APOS > timedelta(seconds=_TIMEOUT_SEC), (
     "CLAIM_EXPIRA_APOS precisa exceder _TIMEOUT_SEC — ver docstring do módulo"
+)
+
+# Limiar SEPARADO de CLAIM_EXPIRA_APOS, para um job que nunca chegou a ser
+# reivindicado (status ainda `processing`, sem claimed_em nenhum) — achado
+# da revisão adversarial da terceira rodada do Codex na PR #189: a primeira
+# versão desta correção reaproveitava CLAIM_EXPIRA_APOS aqui, mas essa
+# constante mede uma coisa diferente (por quanto tempo uma EXECUÇÃO pode
+# durar, derivada de _TIMEOUT_SEC) de "quanto tempo a entrega do gatilho e
+# a primeira tentativa de claim podem legitimamente demorar" — que não tem
+# o mesmo teto imposto pela plataforma. Usar o mesmo valor (600s) fazia um
+# job só lentamente entregue (cold start, contenção de max_instances, pico
+# de criação de jobs) sob demora normal de entrega ser marcado `error`
+# prematuramente — e pior, quando o gatilho enfim disparasse, `_claim`
+# encontraria o job já `error` e devolveria None em silêncio, sem rodar a
+# tool e sem sinal de nada quebrado. Sem dado real sobre a distribuição de
+# latência de entrega deste gatilho neste projeto (mesma limitação já
+# reconhecida na rejeição da "janela de graça" de ClaimAindaValidoError,
+# ver docstring do módulo), o valor abaixo é deliberadamente generoso —
+# muito maior que qualquer demora de entrega plausível em operação normal
+# — para que só um caso genuinamente anômalo (não apenas lento) dispare
+# esta recuperação.
+PROCESSING_NUNCA_REIVINDICADO_APOS = timedelta(minutes=30)
+
+assert PROCESSING_NUNCA_REIVINDICADO_APOS > CLAIM_EXPIRA_APOS, (
+    "PROCESSING_NUNCA_REIVINDICADO_APOS precisa exceder CLAIM_EXPIRA_APOS — "
+    "senão um job só lentamente entregue (não quebrado) seria marcado "
+    "'nunca reivindicado' antes mesmo de uma execução legítima ter tempo "
+    "de terminar, ver comentário acima"
 )
 
 # Mesma convenção de mcp_server.py (_looks_like_error / checagem de "erro"
@@ -285,6 +381,17 @@ def ler_job(uid, job_id) -> dict:
         # cliente consultar em loop — reaproveitado aqui como o mecanismo
         # de recuperação, sem precisar de uma função agendada (reaper) nova.
         job = _reaproveitar_claim_vencido_na_leitura(db, ref) or job
+    elif job.get("status") == STATUS_PROCESSING:
+        # Achado do Codex na PR #189 (terceira rodada, P1: "Recover jobs
+        # orphaned before the claim commits"): a checagem acima só cobre um
+        # job que chegou a ser claimeado (em_execucao) — mas se a própria
+        # transação de _claim falhar ANTES de comitar essa transição (ex.:
+        # Firestore indisponível na hora), o job fica "processing" para
+        # sempre, sem claimed_em nenhum, e a checagem acima nunca o
+        # alcança. Mesmo princípio (mesmo limiar, mesma ideia de reap on
+        # read), mas usando criado_em_ts em vez de claimed_em como
+        # referência de idade — ver ponto 6 da docstring do módulo.
+        job = _reaproveitar_processing_nunca_reivindicado_na_leitura(db, ref) or job
 
     status = job.get("status")
     resposta = {"job_id": job_id, "tool": job.get("tool"), "status": status}
@@ -370,6 +477,97 @@ def _reaproveitar_claim_vencido_na_leitura(db, ref) -> dict | None:
             return job
 
         campos = _dados_claim_abandonado(agora)
+        transaction.update(ref, campos)
+        return {**job, **campos}
+
+    txn = db.transaction()
+    return _txn(txn, ref)
+
+
+def _dados_job_nunca_reivindicado(agora: datetime) -> dict:
+    """Campos gravados quando um job em `processing` mais velho que
+    `PROCESSING_NUNCA_REIVINDICADO_APOS` nunca chegou a ser reivindicado
+    (claim) por nenhuma execução — achado do Codex na PR #189 (terceira
+    rodada, P1: "Recover jobs orphaned before the claim commits"): se a
+    transação de `_claim` falhar ANTES de comitar a transição `processing`
+    → `em_execucao` (ex.: Firestore `DeadlineExceeded`, indisponibilidade
+    transitória), a exceção escapa do gatilho (retry desligado, ver
+    docstring do módulo) e o documento fica `processing` para sempre, sem
+    nenhum `claimed_em` gravado.
+
+    Usa `PROCESSING_NUNCA_REIVINDICADO_APOS`, não `CLAIM_EXPIRA_APOS`: são
+    limiares para coisas diferentes (ver definição de
+    `PROCESSING_NUNCA_REIVINDICADO_APOS`, achado da revisão adversarial
+    desta correção) — reaproveitar o limiar de execução aqui marcaria como
+    'nunca reivindicado' um job que só está esperando uma entrega de
+    gatilho legitimamente lenta (cold start, contenção), fazendo `_claim`
+    encontrá-lo já `error` quando o gatilho enfim disparasse, e devolver
+    None em silêncio sem rodar a tool.
+
+    Mensagem deliberadamente diferente de `_dados_claim_abandonado`: o
+    cenário aqui é distinto (o job nunca foi reivindicado por ninguém, não
+    "uma execução começou e morreu no meio") — misturar as duas mensagens
+    tornaria os logs mais difíceis de diagnosticar."""
+    return {
+        "status": STATUS_ERROR,
+        "erro": (
+            "Job nao foi reivindicado (claim) por nenhuma execucao dentro "
+            f"do prazo ({PROCESSING_NUNCA_REIVINDICADO_APOS.total_seconds():.0f}s "
+            "desde a criacao); considerado abandonado e nao reprocessado "
+            "automaticamente."
+        ),
+        "concluido_em": int(time.time()),
+        "expira_em": agora + timedelta(seconds=_TTL_SEC),
+    }
+
+
+def _reaproveitar_processing_nunca_reivindicado_na_leitura(db, ref) -> dict | None:
+    """Reexecuta, a partir de uma leitura de `ler_job`, uma checagem de
+    idade para um job que nunca chegou a ser reivindicado (claim) por
+    nenhuma execução — achado do Codex na PR #189 (terceira rodada, P1:
+    "Recover jobs orphaned before the claim commits"). Irmã de
+    `_reaproveitar_claim_vencido_na_leitura` (mesmo formato de transação),
+    mas para o status `processing` em vez de `em_execucao` — cobre o caso
+    em que a própria transação de `_claim` nunca chegou a comitar a
+    transição de status (ver ponto 6 da docstring do módulo), então não há
+    `claimed_em` nenhum para usar como referência de idade.
+
+    Usa `criado_em_ts` (datetime, gravado por `criar_job` via
+    `SERVER_TIMESTAMP` e já resolvido em qualquer leitura posterior à
+    escrita) comparado contra `PROCESSING_NUNCA_REIVINDICADO_APOS` — NÃO
+    `CLAIM_EXPIRA_APOS`, ver a definição da constante para o porquê (achado
+    da revisão adversarial desta correção: são limiares para riscos
+    diferentes, não intercambiáveis). Mesmo padrão defensivo de
+    `_claim`/`_reaproveitar_claim_vencido_na_leitura` para `claimed_em`:
+    se o campo não for um datetime válido — não deveria acontecer,
+    `criar_job` sempre grava — trata como vencido também (falha fechada,
+    para nunca deixar um job sem idade auferível preso para sempre em vez
+    de arriscar tratar como se ainda estivesse dentro da janela normal).
+
+    Leitura+escrita dentro de uma transação, pela mesma razão de
+    `_reaproveitar_claim_vencido_na_leitura`: não correr com um claim
+    genuíno acontecendo entre a leitura inicial de `ler_job` e esta
+    chamada. Devolve o dict do job atualizado se marcou como abandonado
+    agora; devolve o dict tal como está se o job não está mais
+    `processing` ou ainda não venceu; None se o documento sumiu."""
+    agora = datetime.now(timezone.utc)
+
+    @firestore.transactional
+    def _txn(transaction, ref):
+        snap = ref.get(transaction=transaction)
+        if not snap.exists:
+            return None
+        job = snap.to_dict() or {}
+        if job.get("status") != STATUS_PROCESSING:
+            return job
+
+        criado_em_ts = job.get("criado_em_ts")
+        if isinstance(criado_em_ts, datetime) and (
+            agora - criado_em_ts
+        ) < PROCESSING_NUNCA_REIVINDICADO_APOS:
+            return job
+
+        campos = _dados_job_nunca_reivindicado(agora)
         transaction.update(ref, campos)
         return {**job, **campos}
 
