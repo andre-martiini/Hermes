@@ -237,9 +237,15 @@ def _decisao_padrao_por_classe(
     if classe == ClasseEfeito.OBSERVACAO_AUTORIZADA:
         return Decisao.ALLOW, "observacao_autorizada", False
     if classe == ClasseEfeito.PREPARACAO_INTERNA:
-        return Decisao.ALLOW, "preparacao_interna_com_mandato_valido", False
+        # Correção pós-revisão do Codex (PR #191): este é o ramo da matriz
+        # PADRÃO — chamado só quando NÃO há mandato cobrindo (ver `avaliar()`,
+        # passo 4/5). O reason_code antigo ("...com_mandato_valido") mentia
+        # sobre a origem da decisão e corrompia a trilha de auditoria
+        # (`registrar_decisao` grava exatamente este texto).
+        return Decisao.ALLOW, "preparacao_interna_permitida_por_padrao", False
     if classe == ClasseEfeito.ESCRITA_INTERNA_REVERSIVEL:
-        return Decisao.ALLOW, "escrita_interna_reversivel_dentro_do_mandato", False
+        # Mesma correção — nenhum mandato foi consultado para chegar aqui.
+        return Decisao.ALLOW, "escrita_interna_reversivel_permitida_por_padrao", False
     if classe == ClasseEfeito.COORDENACAO_LIMITADA:
         # "Exigir política específica previamente aprovada" — sem mandato
         # explícito cobrindo (já checado antes de chegar aqui), decide-se
@@ -281,21 +287,42 @@ def _destino_coberto(destino_mandato: str, destinatario_pedido: str) -> bool:
 
 
 def mandato_cobre(mandato: Mandato, request: PolicyRequest, agora: datetime) -> bool:
-    """Um mandato cobre um pedido se: não revogado, ainda válido, o destino
-    está entre os cobertos, a classe de conteúdo está entre as permitidas, o
-    horário (se restrito) bate, e o limite por janela não foi excedido.
+    """Um mandato cobre um pedido se: não revogado, ainda válido, dentro do
+    limite de uso da janela (quando conhecido), a finalidade bate com a
+    missão do pedido (quando ambas informadas), o destino está entre os
+    cobertos, a classe de conteúdo está entre as permitidas, e o horário (se
+    restrito) bate.
 
-    O limite por janela (contagem de uso recente) não é verificado aqui —
-    esta função é pura e não tem acesso a histórico de uso; o chamador que
-    monta `mandatos_aplicaveis` já deve excluir um mandato cujo limite da
-    janela atual foi atingido (thin wrapper com I/O, análogo a
-    `estado_autonomia_atual` no fim deste arquivo). Documentado explicitamente
-    para não ser lido como "limite não implementado" — é implementado fora
-    desta função pura de propósito.
+    Limite por janela (correção pós-revisão do Codex, PR #191): esta função
+    é pura e não tem acesso a histórico de uso — `mandato.usos_na_janela_atual`
+    é o dado JÁ RESOLVIDO que o chamador (thin wrapper com I/O, análogo a
+    `estado_autonomia_atual` no fim deste arquivo — ainda não implementado
+    nesta sub-entrega) precisa preencher antes de incluir o mandato em
+    `mandatos_aplicaveis`. Quando `None` (nada resolveu a contagem ainda), o
+    limite simplesmente não é aplicado — mas o campo existe desde já, então
+    o limite deixa de ser "documentado mas sem lugar nenhum para ser
+    checado" (era assim que o Codex encontrou o gap: nada no repositório
+    populava ou lia essa contagem).
     """
     if mandato.revogado:
         return False
     if mandato.valido_ate is not None and agora > mandato.valido_ate:
+        return False
+    if (
+        mandato.limite_por_janela is not None
+        and mandato.usos_na_janela_atual is not None
+        and mandato.usos_na_janela_atual >= mandato.limite_por_janela
+    ):
+        return False
+
+    # Finalidade do mandato vs. missão do pedido (correção pós-revisão do
+    # Codex): só rejeita em caso de DIVERGÊNCIA EXPLÍCITA entre as duas —
+    # `missao`/`finalidade` são texto livre, então não há como inferir
+    # equivalência semântica aqui (uma correspondência mais forte que
+    # igualdade exata fica para quando mandatos ganharem uma categoria
+    # estruturada, não texto livre). Não bloqueia quando `missao` não foi
+    # informada pelo chamador — hoje nenhum chamador a preenche ainda.
+    if request.missao is not None and mandato.finalidade and request.missao != mandato.finalidade:
         return False
 
     destinos = set(mandato.destinatarios_recursos)
@@ -310,7 +337,16 @@ def mandato_cobre(mandato: Mandato, request: PolicyRequest, agora: datetime) -> 
         return False
 
     classes = set(mandato.classes_conteudo_permitidas)
-    if classes and request.sensibilidade is not None and request.sensibilidade not in classes:
+    if classes and request.sensibilidade not in classes:
+        # Correção pós-revisão do Codex (PR #191): a versão original só
+        # rejeitava quando `sensibilidade` estava PREENCHIDA e fora da
+        # lista — como o contrato permite `sensibilidade=None` por padrão,
+        # um mandato restrito a ("geral",) cobria qualquer pedido cujo
+        # chamador simplesmente não preenchesse o campo, inclusive um
+        # efeito financeiro/destrutivo. Agora: ausência de classificação
+        # NÃO passa por um mandato que declara classes — falha fechado, não
+        # aberto (`None not in {"geral"}` é True, então isto também barra
+        # o caso ausente, não só o caso "fora da lista").
         return False
 
     if mandato.horario_permitido_inicio and mandato.horario_permitido_fim:
@@ -374,7 +410,16 @@ def simular_politica(pedidos: list[PolicyRequest], *, agora: datetime | None = N
     """Avalia um lote de pedidos hipotéticos SEM aplicar nada — proposta e
     exemplos → efeitos permitidos/bloqueados (linha 413 do plano). Usado
     para conferir o efeito de uma mudança de mandato/estado antes de
-    ativá-la de verdade."""
+    ativá-la de verdade.
+
+    Correção pós-revisão do Codex (PR #191): a versão original computava
+    `requer_aprovacao` por subtração (`total - permitidos - bloqueados`),
+    o que misturava `PREPARE_ONLY` e `DEFER` dentro de "requer aprovação" —
+    um resultado `PREPARE_ONLY` (por exemplo, autonomia em
+    "somente_preparação") tem `approval_required=False` no `to_dict()`, mas
+    aparecia contado como se exigisse aprovação. Agora cada decisão é
+    contada pelo seu próprio valor, sem inferência por subtração.
+    """
     agora = agora or datetime.now(timezone.utc)
     resultados = []
     for pedido in pedidos:
@@ -384,13 +429,16 @@ def simular_politica(pedidos: list[PolicyRequest], *, agora: datetime | None = N
             "principal_tipo": pedido.principal.tipo.value,
             "decisao": decisao.to_dict(),
         })
-    permitidos = sum(1 for r in resultados if r["decisao"]["decision"] == Decisao.ALLOW.value)
-    bloqueados = sum(1 for r in resultados if r["decisao"]["decision"] == Decisao.DENY.value)
+    contagem = {d.value: 0 for d in Decisao}
+    for r in resultados:
+        contagem[r["decisao"]["decision"]] += 1
     return {
         "total": len(resultados),
-        "permitidos": permitidos,
-        "bloqueados": bloqueados,
-        "requer_aprovacao": len(resultados) - permitidos - bloqueados,
+        "permitidos": contagem[Decisao.ALLOW.value],
+        "bloqueados": contagem[Decisao.DENY.value],
+        "requer_aprovacao": contagem[Decisao.REQUIRE_APPROVAL.value],
+        "somente_preparacao": contagem[Decisao.PREPARE_ONLY.value],
+        "adiados": contagem[Decisao.DEFER.value],
         "resultados": resultados,
     }
 
