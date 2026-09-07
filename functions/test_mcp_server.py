@@ -288,12 +288,19 @@ class TestPisoSemHookNaoBurlaConfirmacaoComConfirmedTrue(unittest.TestCase):
         # de prévia (redundante para tools do piso, mas não regressivo).
         mock_preview.assert_not_called()
 
-    def test_tool_confirm_gated_so_por_config_mantem_compatibilidade_antiga(self):
+    def test_tool_confirm_gated_so_por_config_tambem_exige_confirmation_id(self):
         # Fora do piso hardcoded (só por `system/mcp_access.confirm_tools`):
-        # a compatibilidade legada ("_confirmed=true bem sucedido quando a
-        # tool não tem hook") continua exatamente como era — o fechamento
-        # desta correção é deliberadamente restrito ao piso, não ampliado
-        # por analogia a tools fora dele.
+        # ATUALIZADO na sub-entrega 7/N — a "compatibilidade legada"
+        # ("_confirmed=true bem sucedido quando a tool não tem hook") foi
+        # deliberadamente fechada aqui também, mesma lacuna de governança já
+        # fechada para o piso na sub-entrega 2/N (ver docstring da classe).
+        # A sub-entrega 2/N tinha restringido o fechamento só ao piso e
+        # registrado esta mesma lacuna como pendência explícita em
+        # docs/autonomia/execucao.md ("vale endereçar quando uma futura
+        # sub-entrega tratar de tools configuráveis via política") — este é
+        # aquele endereçamento. Não é ampliação por analogia do PISO (que
+        # continua sendo só os 5 nomes fixos); é o fechamento do MESMO atalho
+        # de bypass para qualquer tool que `_exige_confirmacao()` cubra.
         ctx = _ctx()
         with patch.object(
             mcp_server, "_access_config", return_value={"confirm_tools": {"tool_admin_extra"}}
@@ -303,8 +310,45 @@ class TestPisoSemHookNaoBurlaConfirmacaoComConfirmedTrue(unittest.TestCase):
             resultado = mcp_server._handle_tools_call(
                 self._params("tool_admin_extra"), ctx=ctx
             )
-        mock_execute.assert_called_once()
+        mock_execute.assert_not_called()
+        self.assertTrue(resultado.get("isError"))
+        self.assertIn("confirmation_id", resultado["content"][0]["text"])
+
+    def test_tool_confirm_gated_so_por_config_com_confirmation_id_real_ainda_funciona(self):
+        # O caminho legítimo (confirmation_id de uma confirmação real e
+        # persistida) continua funcionando normalmente para tools de
+        # confirmação só por config — só o atalho sem confirmation_id fica
+        # fechado, mesmo padrão já provado para o piso acima.
+        ctx = _ctx()
+        with patch.object(
+            mcp_server, "_access_config", return_value={"confirm_tools": {"tool_admin_extra"}}
+        ), patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), patch.object(
+            mcp_server, "_executar_confirmacao", return_value={"ok": True}
+        ) as mock_executar:
+            resultado = mcp_server._handle_tools_call(
+                self._params("tool_admin_extra", confirmation_id="confirmacao-real-456"),
+                ctx=ctx,
+            )
+        mock_executar.assert_called_once()
         self.assertFalse(resultado.get("isError", False))
+
+    def test_tool_confirm_gated_so_por_config_com_hook_continua_bloqueada_como_antes(self):
+        # Tool de confirmação só por config QUE TEM hook de prévia: já era
+        # bloqueada antes desta sub-entrega (preview_tool(...) is not None);
+        # continua bloqueada agora, comportamento observável inalterado.
+        ctx = _ctx()
+        with patch.object(
+            mcp_server, "_access_config", return_value={"confirm_tools": {"tool_admin_extra"}}
+        ), patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), patch.object(
+            mcp_server, "execute_tool"
+        ) as mock_execute, patch.object(
+            mcp_server, "preview_tool", return_value={"status": "aguardando_confirmacao"}
+        ):
+            resultado = mcp_server._handle_tools_call(
+                self._params("tool_admin_extra"), ctx=ctx
+            )
+        mock_execute.assert_not_called()
+        self.assertTrue(resultado.get("isError"))
 
 
 class TestFerramentasDePoliticaViaMcp(unittest.TestCase):
