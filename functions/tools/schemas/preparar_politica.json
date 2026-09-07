@@ -1,0 +1,25 @@
+{
+  "name": "preparar_politica",
+  "description": "Prepara uma proposta de mudança na política de autonomia (hoje: o conjunto de ferramentas no piso de confirmação obrigatória) contra a versão base informada — devolve um diff explícito. Só PREPARA: não aplica nada, não persiste nada, e não substitui a decisão explícita do dono para remover algo do piso.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "politica_proposta": {
+        "type": "object",
+        "description": "Política proposta. Hoje só 'ferramentas_com_confirmacao_obrigatoria' é lido.",
+        "properties": {
+          "ferramentas_com_confirmacao_obrigatoria": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Conjunto proposto de ferramentas exigindo confirmação obrigatória."
+          }
+        }
+      },
+      "base_version": {
+        "type": "integer",
+        "description": "Versão da política que serviu de base para esta proposta (devolvida por consultar_politica). Se não bater com a versão vigente, a chamada falha para evitar sobrescrever uma versão não vista."
+      }
+    },
+    "required": ["politica_proposta", "base_version"]
+  }
+}
