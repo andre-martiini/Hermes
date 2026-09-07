@@ -1058,5 +1058,82 @@ class TestRegistrarDecisao(unittest.TestCase):
             self.fail(f"registrar_decisao não deveria propagar exceção, levantou: {exc}")
 
 
+class TestDecisaoPiso(unittest.TestCase):
+    """`decisao_piso()` — P02 sub-entrega 6/N: orquestração de
+    estado_autonomia_atual()+PolicyRequest+avaliar()+registrar_decisao() num
+    único ponto reutilizável por qualquer canal. O candidato natural para o
+    primeiro consumidor novo era hermes_core_logic.py::
+    schedule_whatsapp_message (canal Telegram) — chegou a ser implementado
+    nesta sub-entrega, mas foi revertido: hermes_core_logic.py tem 276257
+    caracteres, acima do limite de 200000 da API de escrita do Argos (ver
+    docstring de decisao_piso() e docs/autonomia/execucao.md). Esta função
+    segue testada e pronta para esse ou outro consumidor futuro."""
+
+    def _db_com_estado(self, valor=None, existe=True):
+        db = MagicMock()
+        snap = MagicMock(exists=existe)
+        snap.to_dict.return_value = {"global": valor} if valor is not None else {}
+        db.collection.return_value.document.return_value.get.return_value = snap
+        return db
+
+    def test_ferramenta_fora_do_piso_retorna_none_sem_tocar_firestore(self):
+        db = MagicMock()
+        principal = _principal()
+        resultado = policy.decisao_piso(db, principal, "ler_algo", {})
+        self.assertIsNone(resultado)
+        db.collection.assert_not_called()
+
+    def test_estado_ativo_retorna_require_approval_e_registra(self):
+        db = self._db_com_estado(existe=False)  # documento ausente -> ATIVO
+        principal = _principal(tipo=TipoPrincipal.DONO_INTERATIVO)
+        resultado = policy.decisao_piso(
+            db, principal, "schedule_whatsapp_message",
+            {"contact_number": "551199999999", "message": "oi"},
+        )
+        self.assertEqual(resultado.decision, Decisao.REQUIRE_APPROVAL)
+        # registrar_decisao foi chamado: uma segunda leitura/escrita em
+        # policy_decisions, além da leitura de system/autonomy_state.
+        self.assertIn(
+            "policy_decisions",
+            [c.args[0] for c in db.collection.call_args_list if c.args],
+        )
+
+    def test_estado_pausado_bloqueia_com_deny(self):
+        db = self._db_com_estado(valor="pausado")
+        principal = _principal(tipo=TipoPrincipal.DONO_INTERATIVO)
+        resultado = policy.decisao_piso(db, principal, "schedule_whatsapp_message", {})
+        self.assertEqual(resultado.decision, Decisao.DENY)
+
+    def test_estado_somente_preparacao_bloqueia_com_prepare_only(self):
+        db = self._db_com_estado(valor="somente_preparacao")
+        principal = _principal(tipo=TipoPrincipal.DONO_INTERATIVO)
+        resultado = policy.decisao_piso(db, principal, "schedule_whatsapp_message", {})
+        self.assertEqual(resultado.decision, Decisao.PREPARE_ONLY)
+
+    def test_falha_ao_ler_estado_nao_propaga_excecao_e_cai_fechado(self):
+        # estado_autonomia_atual() já é fail-safe internamente (cai em
+        # SOMENTE_PREPARACAO numa falha de leitura) — este teste prova que
+        # decisao_piso() não introduz nenhum caminho novo de propagação por
+        # cima dela.
+        db = MagicMock()
+        db.collection.return_value.document.return_value.get.side_effect = RuntimeError("boom")
+        principal = _principal(tipo=TipoPrincipal.DONO_INTERATIVO)
+        try:
+            resultado = policy.decisao_piso(db, principal, "schedule_whatsapp_message", {})
+        except Exception as exc:  # pragma: no cover - falharia o teste se levantasse
+            self.fail(f"decisao_piso não deveria propagar exceção, levantou: {exc}")
+        self.assertEqual(resultado.decision, Decisao.PREPARE_ONLY)
+
+    def test_falha_ao_registrar_decisao_nao_propaga_excecao(self):
+        db = self._db_com_estado(existe=False)
+        db.collection.return_value.add.side_effect = RuntimeError("firestore indisponivel")
+        principal = _principal(tipo=TipoPrincipal.DONO_INTERATIVO)
+        try:
+            resultado = policy.decisao_piso(db, principal, "schedule_whatsapp_message", {})
+        except Exception as exc:  # pragma: no cover - falharia o teste se levantasse
+            self.fail(f"decisao_piso não deveria propagar exceção, levantou: {exc}")
+        self.assertEqual(resultado.decision, Decisao.REQUIRE_APPROVAL)
+
+
 if __name__ == "__main__":
     unittest.main()
