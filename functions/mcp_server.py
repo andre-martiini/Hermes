@@ -39,6 +39,15 @@ from tools import registry
 from tools.hermes_tools import ToolNotAvailable, execute as execute_tool, preview as preview_tool
 from tools.tool_context import ToolContext
 from copilot_context import build_mcp_voice_context
+from autonomy import policy as autonomy_policy
+from autonomy.contracts import (
+    Decisao,
+    EstadoAutonomia,
+    Principal,
+    PolicyDecision,
+    PolicyRequest,
+    TipoPrincipal,
+)
 
 MCP_PROTOCOL_VERSION = "2025-06-18"
 _SUPPORTED_PROTOCOL_VERSIONS = {"2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"}
@@ -83,10 +92,19 @@ _access_cache: dict[str, object] | None = None
 # candidata nova e decisao explicita, tomada uma vez, com o motivo escrito aqui —
 # e nao "parece do mesmo tipo, entao entra". Piso que cresce por default vira o
 # problema que ele resolve: gating que ninguem escolheu, governando por inercia.
-_CONFIRMACAO_OBRIGATORIA: set[str] = {
-    "schedule_whatsapp_message", "pausar_conversa", "criar_rascunho_email",
-    "registrar_aporte_investimento", "registrar_execucao_investimento",
-}
+#
+# Fonte única (P02 sub-entrega 2/N, docs/autonomia/execucao.md): ate aqui este
+# conjunto era mantido em duplicata, tambem em `autonomy/policy.py::
+# FLOOR_CONFIRMACAO_OBRIGATORIA` (sub-entrega 1/N), com um teste de regressao
+# em test_policy.py garantindo que os dois nunca divergissem. Agora so existe
+# la — este nome continua existindo como ALIAS local (nada mais neste arquivo
+# precisou mudar: `_CONFIRMACAO_PADRAO`, `_access_config()` e
+# `_exige_confirmacao()` seguem lendo esta variavel, sem saber que ela agora
+# aponta para o modulo de politica). O comentario acima (motivo de cada tool
+# estar aqui, e de o conjunto nao crescer por habito) continua sendo a fonte
+# de verdade em prosa — mantido aqui, e nao so em policy.py, porque e este
+# arquivo que o dono le quando mexe no canal MCP.
+_CONFIRMACAO_OBRIGATORIA: frozenset[str] = autonomy_policy.FLOOR_CONFIRMACAO_OBRIGATORIA
 _CONFIRMACAO_PADRAO: set[str] = set(_CONFIRMACAO_OBRIGATORIA)
 _CONFIRMACAO_TTL = timedelta(minutes=10)
 _WHATSAPP_JOB_ID_RE = re.compile(r"\bjob_id=([A-Za-z0-9_-]+)")
@@ -351,6 +369,102 @@ def _exige_confirmacao(nome: str) -> bool:
     # Conferir tambem aqui torna a garantia independente de caches antigos e de
     # quem construir uma configuracao de teste/manual fora de `_access_config`.
     return nome in _CONFIRMACAO_OBRIGATORIA or nome in _access_config()["confirm_tools"]
+
+
+def _principal_mcp(ctx: ToolContext) -> Principal:
+    """Constrói o `Principal` (autonomy/contracts.py) deste canal, para o
+    preflight do motor de política (P02 sub-entrega 2/N).
+
+    O servidor MCP é de acesso único: `_is_uid_allowed` já restringe a
+    própria autenticação a um único uid dono (ver `_authenticate` — sem uid
+    configurado em `system/mcp_access.allowed_uids` ou na env var, o acesso é
+    negado). Toda chamada que chega até aqui já foi autenticada por um
+    cliente MCP hospedado (Claude.ai, Claude Desktop, Claude Code) com o
+    dono efetivamente acompanhando a sessão em tempo real — mesmo sem clique
+    de UI por chamada individual —, que é exatamente a definição de
+    `TipoPrincipal.CLIENTE_ASSISTIDO`, não `DONO_INTERATIVO` (não há UI de
+    clique aqui) nem `ROTINA_COWORK`/`RUNNER_SERVICO` (não há job assíncrono
+    sem sessão neste caminho).
+
+    `origem_humana=True` é passado explicitamente, nunca herdado do default
+    do dataclass — cuidado deliberado registrado em
+    docs/autonomia/execucao.md (pendência da sub-entrega 1/N): este é o
+    canal do próprio dono, então o valor está correto, mas escrevê-lo aqui
+    documenta a decisão em vez de deixá-la implícita no default.
+    """
+    return Principal(
+        uid=ctx.user_uid,
+        tipo=TipoPrincipal.CLIENTE_ASSISTIDO,
+        canal=ctx.canal,
+        origem_humana=True,
+    )
+
+
+def _decisao_piso_mcp(ctx: ToolContext, nome: str, argumentos: dict) -> PolicyDecision | None:
+    """Preflight de `autonomy.policy.avaliar()` para os tools do piso.
+
+    Retorna `None` quando `nome` não está classificado em
+    `autonomy_policy.CLASSE_EFEITO_PISO` — hoje isso cobre exatamente os
+    tools do piso hardcoded (`FLOOR_CONFIRMACAO_OBRIGATORIA`); um tool
+    exigindo confirmação só por config (`system/mcp_access.confirm_tools`,
+    além do piso) não tem `classe_efeito` conhecida e continua pelo fluxo de
+    confirmação antigo, sem passar pelo motor — limitação documentada em
+    docs/autonomia/execucao.md (P02 sub-entrega 2/N): classificar tools
+    configuráveis fica para quando houver uma fonte de classificação além do
+    dicionário hardcoded `CLASSE_EFEITO_PISO`.
+
+    Chamado uma única vez, na CRIAÇÃO da prévia de confirmação (dentro de
+    `_handle_tools_call`) — não é repetido no momento de EXECUTAR uma
+    confirmação já criada (`_executar_confirmacao`). Reavaliar a política no
+    momento da execução (para cobrir o caso raro de o estado de autonomia
+    mudar dentro da janela de 10 minutos da confirmação) ainda não está
+    implementado; registrado como limitação conhecida, não escondida, em
+    docs/autonomia/execucao.md.
+    """
+    classe_efeito = autonomy_policy.CLASSE_EFEITO_PISO.get(nome)
+    if classe_efeito is None:
+        return None
+
+    # `estado_autonomia_atual` já captura falha de LEITURA do documento
+    # (Firestore indisponível, valor corrompido) e cai em SOMENTE_PREPARACAO
+    # — mas `ctx.db` (a property que inicializa o cliente Firestore sob
+    # demanda) é avaliado como ARGUMENTO desta chamada, fora do try/except
+    # que existe dentro dela; se a própria inicialização falhar (achado dos
+    # testes de regressão desta sub-entrega: `test_hermes_tools.py::
+    # TestCamadaJsonRpc` mocka `_criar_confirmacao`/`preview_tool` mas nunca
+    # precisava de um app Firebase real até este preflight passar a existir
+    # — "The default Firebase app does not exist" em ambiente de teste, e o
+    # mesmo aconteceria em produção sob uma falha real de inicialização), a
+    # exceção nunca chegaria a entrar em `estado_autonomia_atual` para ser
+    # tratada. Mesmo raciocínio de falha fechada, um nível acima: nunca
+    # deixar uma falha em resolver o ESTADO propagar e derrubar a chamada
+    # inteira do MCP com um erro interno opaco (-32000, sem o tratamento
+    # gracioso que o resto deste arquivo dá a falha de Firestore — ver
+    # `except Exception` ao redor de `_criar_confirmacao` mais abaixo) —
+    # cai no mesmo SOMENTE_PREPARACAO que uma falha de leitura já cairia.
+    try:
+        estado = autonomy_policy.estado_autonomia_atual(ctx.db)
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar a chamada por falha de preflight
+        print(f"[mcp_server] Falha ao resolver estado de autonomia para preflight de '{nome}': {exc}")
+        estado = EstadoAutonomia.SOMENTE_PREPARACAO
+
+    request = PolicyRequest(
+        principal=_principal_mcp(ctx),
+        ferramenta=nome,
+        classe_efeito=classe_efeito,
+        argumentos_resolvidos=argumentos,
+        estado_autonomia=estado,
+    )
+    decisao = autonomy_policy.avaliar(request)
+    try:
+        # Mesmo raciocínio do bloco acima: `registrar_decisao` já não deixa
+        # uma falha de ESCRITA (dentro dela) derrubar a chamada, mas de novo
+        # `ctx.db` como argumento é avaliado fora do try dela — auditoria
+        # nunca pode ser a razão de uma tool do piso falhar.
+        autonomy_policy.registrar_decisao(ctx.db, request, decisao)
+    except Exception as exc:  # noqa: BLE001 — telemetria nunca derruba a decisão
+        print(f"[mcp_server] Falha ao registrar decisão de política para '{nome}': {exc}")
+    return decisao
 
 
 def _criar_confirmacao(ctx: ToolContext, nome: str, argumentos: dict, previa: dict | None) -> str:
@@ -635,6 +749,36 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
             # Compatibilidade para tools antigas sem hook de prévia: `_confirmed`
             # continua bastando. Uma tool com hook nunca executa por este caminho,
             # pois precisa da prévia concreta apresentada ao usuario.
+            #
+            # EXCETO para o piso (P02 sub-entrega 2/N — achado da revisão
+            # adversarial desta sub-entrega, verificado ponta a ponta contra o
+            # dispatch real: `criar_rascunho_email`, `registrar_aporte_investimento`
+            # e `registrar_execucao_investimento` não têm hook de prévia
+            # — `tools/hermes_tools.py::preview()` devolve `None` para as três —
+            # então uma ÚNICA chamada `tools/call` com `_confirmed=true` (sem
+            # `_confirmation_id`) executava direto por este ramo: sem nunca criar
+            # uma confirmação real, sem nunca passar por `_decisao_piso_mcp`
+            # (chamado só no ramo de CRIAÇÃO de confirmação, no `elif` abaixo), e
+            # sem o "sim" explícito que o comentário de
+            # `_CONFIRMACAO_OBRIGATORIA` promete ser inegociável para o piso
+            # ("uma lista vazia em produção não pode tornar o envio de mensagem
+            # executável sem o 'sim' do usuário" — o mesmo vale, a fortiori, para
+            # as duas escritas de investimento, que não têm desfazer nenhum).
+            # Esta era exatamente a lacuna de governança que este preflight
+            # deveria fechar; a compatibilidade legada não pode reabri-la para o
+            # piso. Fechado: tools do piso sempre exigem o confirmation_id de uma
+            # confirmação real e persistida, hook de prévia ou não. Tools de
+            # confirmação obrigatória só por config (fora do piso hardcoded)
+            # continuam pela compatibilidade antiga, inalterada.
+            if name in autonomy_policy.FLOOR_CONFIRMACAO_OBRIGATORIA:
+                return _text_result({
+                    "erro": (
+                        "Esta ação faz parte do piso de confirmação obrigatória e "
+                        "exige o confirmation_id de uma confirmação real: repita a "
+                        "chamada sem '_confirmed' para receber a prévia e o "
+                        "confirmation_id."
+                    ),
+                }, is_error=True)
             try:
                 if preview_tool(name, ctx, arguments) is not None:
                     return _text_result({
@@ -643,6 +787,38 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
             except Exception as exc:
                 return _text_result({"erro": str(exc)}, is_error=True)
     elif _exige_confirmacao(name):
+        # Preflight do motor de política (P02 sub-entrega 2/N) — só decide
+        # algo para tools classificados em `CLASSE_EFEITO_PISO` (ver
+        # `_decisao_piso_mcp`); os demais tools de confirmação obrigatória
+        # (adicionados só por config) seguem direto para o fluxo abaixo,
+        # inalterado. `DENY`/`PREPARE_ONLY` decidem e retornam aqui, ANTES de
+        # criar qualquer prévia de confirmação — hoje (`system/autonomy_state`
+        # ainda não é escrito por nada em produção) `estado_autonomia_atual`
+        # sempre resolve ATIVO, então este bloco produz sempre
+        # `REQUIRE_APPROVAL` e cai no mesmo fluxo de sempre, sem mudar
+        # comportamento visível; ele só passa a ter efeito no dia em que
+        # `system/autonomy_state` for escrito pela primeira vez.
+        decisao_piso = _decisao_piso_mcp(ctx, name, arguments)
+        if decisao_piso is not None and decisao_piso.decision == Decisao.DENY:
+            return _text_result({
+                "status": "denied",
+                "tool": name,
+                "reason_code": decisao_piso.reason_code,
+                "message": decisao_piso.motivo_legivel or (
+                    "Ação bloqueada pela política de autonomia vigente."
+                ),
+            }, is_error=True)
+        if decisao_piso is not None and decisao_piso.decision == Decisao.PREPARE_ONLY:
+            return _text_result({
+                "status": "prepare_only",
+                "tool": name,
+                "reason_code": decisao_piso.reason_code,
+                "message": (
+                    "Autonomia está em modo somente-preparação: esta ação não "
+                    "pode ser confirmada/executada agora. "
+                    + (decisao_piso.motivo_legivel or "")
+                ).strip(),
+            }, is_error=False)
         try:
             proposal = preview_tool(name, ctx, arguments)
         except Exception as exc:  # prévia inválida deve apontar o dado, sem mutar
