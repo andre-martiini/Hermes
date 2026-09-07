@@ -173,96 +173,69 @@ def decidir_promocao_autonomia(db, tipo: str, decisao: str) -> dict:
     agora_utc = datetime.datetime.now(timezone.utc)
     server_ts = firestore.SERVER_TIMESTAMP if hasattr(firestore, "SERVER_TIMESTAMP") else agora_utc
 
-    # Execução transacional
-    success = False
-    transaction_result = {}
+    # Achado A04 (aplicado aqui como em outbox_aprovacao.py::aprovar_rascunho/
+    # descartar_rascunho): sem transação, ou se ela falhar por qualquer motivo
+    # real (não só incompatibilidade de mock), a decisão é recusada em vez de
+    # cair para uma escrita get+update não protegida. Duas decisões
+    # concorrentes sobre o mesmo tipo (ex.: "aceitar" e "nunca" quase
+    # simultâneos) não podem ambas ler status pendente e ambas escrever.
+    if not hasattr(db, "transaction"):
+        return {
+            "ok": False,
+            "erro": "Backend Firestore sem suporte a transação; decisão recusada para evitar condição de corrida.",
+        }
 
-    if hasattr(db, "transaction"):
-        try:
-            tx = db.transaction()
+    try:
+        tx = db.transaction()
 
-            @firestore.transactional
-            def _exec_decidir(transaction):
-                sug_snap = sug_ref.get(transaction=transaction)
-                if not sug_snap.exists:
-                    return {"ok": False, "erro": f"Sugestão para o tipo '{tipo_limpo}' não encontrada."}
+        @firestore.transactional
+        def _exec_decidir(transaction):
+            sug_snap = sug_ref.get(transaction=transaction)
+            if not sug_snap.exists:
+                return {"ok": False, "erro": f"Sugestão para o tipo '{tipo_limpo}' não encontrada."}
 
-                sug_dados = sug_snap.to_dict() or {}
-                if sug_dados.get("status") != STATUS_PENDENTE:
-                    return {
-                        "ok": False,
-                        "erro": f"Sugestão já estava decidida com status '{sug_dados.get('status')}'.",
-                    }
+            sug_dados = sug_snap.to_dict() or {}
+            if sug_dados.get("status") != STATUS_PENDENTE:
+                return {
+                    "ok": False,
+                    "erro": f"Sugestão já estava decidida com status '{sug_dados.get('status')}'.",
+                }
 
-                if decisao_limpa == "aceitar":
-                    mcp_snap = mcp_ref.get(transaction=transaction)
-                    tipos_atuais = []
-                    if mcp_snap.exists:
-                        tipos_atuais = list((mcp_snap.to_dict() or {}).get("tipos_promovidos") or [])
-                    tipos_set = {str(t).strip().lower() for t in tipos_atuais if str(t).strip()}
-                    if tipo_limpo not in tipos_set:
-                        tipos_atuais.append(tipo_limpo)
+            if decisao_limpa == "aceitar":
+                mcp_snap = mcp_ref.get(transaction=transaction)
+                tipos_atuais = []
+                if mcp_snap.exists:
+                    tipos_atuais = list((mcp_snap.to_dict() or {}).get("tipos_promovidos") or [])
+                tipos_set = {str(t).strip().lower() for t in tipos_atuais if str(t).strip()}
+                if tipo_limpo not in tipos_set:
+                    tipos_atuais.append(tipo_limpo)
 
-                    transaction.set(
-                        mcp_ref,
-                        {
-                            "tipos_promovidos": tipos_atuais,
-                            "atualizado_em": server_ts,
-                        },
-                        merge=True,
-                    )
-
-                transaction.update(
-                    sug_ref,
+                transaction.set(
+                    mcp_ref,
                     {
-                        "status": novo_status,
-                        "decidida_em": server_ts,
-                        "decisao": decisao_limpa,
+                        "tipos_promovidos": tipos_atuais,
+                        "atualizado_em": server_ts,
                     },
+                    merge=True,
                 )
-                return {"ok": True, "tipo": tipo_limpo, "decisao": decisao_limpa, "status": novo_status}
 
-            transaction_result = _exec_decidir(tx)
-            success = True
-        except Exception as tx_err:
-            print(f"[PromocaoAutonomia] Transação falhou ou mock sem suporte: {tx_err}")
-
-    if not success:
-        # Fallback defensivo para mock simples
-        sug_snap = sug_ref.get()
-        if not sug_snap.exists:
-            return {"ok": False, "erro": f"Sugestão para o tipo '{tipo_limpo}' não encontrada."}
-
-        sug_dados = sug_snap.to_dict() or {}
-        if sug_dados.get("status") != STATUS_PENDENTE:
-            return {
-                "ok": False,
-                "erro": f"Sugestão já estava decidida com status '{sug_dados.get('status')}'.",
-            }
-
-        if decisao_limpa == "aceitar":
-            mcp_snap = mcp_ref.get()
-            tipos_atuais = []
-            if mcp_snap.exists:
-                tipos_atuais = list((mcp_snap.to_dict() or {}).get("tipos_promovidos") or [])
-            tipos_set = {str(t).strip().lower() for t in tipos_atuais if str(t).strip()}
-            if tipo_limpo not in tipos_set:
-                tipos_atuais.append(tipo_limpo)
-
-            mcp_ref.set(
+            transaction.update(
+                sug_ref,
                 {
-                    "tipos_promovidos": tipos_atuais,
-                    "atualizado_em": server_ts,
+                    "status": novo_status,
+                    "decidida_em": server_ts,
+                    "decisao": decisao_limpa,
                 },
-                merge=True,
             )
+            return {"ok": True, "tipo": tipo_limpo, "decisao": decisao_limpa, "status": novo_status}
 
-        sug_ref.update({
-            "status": novo_status,
-            "decidida_em": server_ts,
-            "decisao": decisao_limpa,
-        })
-        transaction_result = {"ok": True, "tipo": tipo_limpo, "decisao": decisao_limpa, "status": novo_status}
+        transaction_result = _exec_decidir(tx)
+    except Exception as tx_err:
+        print(f"[PromocaoAutonomia] Transação Firestore de decisão falhou: {tx_err}")
+        return {
+            "ok": False,
+            "erro": f"Não foi possível decidir de forma atômica: {tx_err}",
+        }
 
     if not transaction_result.get("ok"):
         return transaction_result
