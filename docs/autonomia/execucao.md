@@ -33,7 +33,7 @@ testes:
   comandos:
     - "npm install && npm test"
     - "python -m venv functions/venv && functions/venv/bin/pip install -r functions/requirements.txt"
-    - "cd functions && ../venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
   resultados:
     - "Frontend (vitest): 248/248 passando, 20/20 arquivos"
     - "Python (unittest): 1146/1146 passando (com tentativas de rede real não bloqueadas — ver baseline.md seção 3)"
