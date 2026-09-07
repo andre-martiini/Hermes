@@ -418,6 +418,35 @@ class TestAvaliarOrigemHumana(unittest.TestCase):
         self.assertEqual(d.decision, Decisao.ALLOW)
         self.assertEqual(d.reason_code, "escrita_interna_reversivel_permitida_por_padrao")
 
+    def test_preparacao_interna_origem_humana_sem_ser_dono_nao_da_allow_regressao_seguranca(self):
+        # Achado do Codex sobre a PR #192: `origem_humana=True` sozinho não
+        # é suficiente — nada no sistema de tipos impede um `TERCEIRO_PORTAL`
+        # (ou ROTINA_COWORK/RUNNER_SERVICO) de ser construído com
+        # `origem_humana=True` (o próprio default do contrato). Um terceiro
+        # com humano presente NO PORTAL não é o mesmo que o dono presente —
+        # a exceção de baixa fricção da seção 5 é para o DONO, não para
+        # "qualquer humano". Agora exige também `eh_dono()`.
+        req = _req(
+            classe_efeito=ClasseEfeito.PREPARACAO_INTERNA,
+            principal=_principal(tipo=TipoPrincipal.TERCEIRO_PORTAL, uid=None, origem_humana=True),
+        )
+        d = policy.avaliar(req, agora=_AGORA)
+        self.assertEqual(d.decision, Decisao.PREPARE_ONLY)
+        self.assertEqual(d.reason_code, "preparacao_interna_requer_mandato_ou_humano_presente")
+
+    def test_escrita_interna_reversivel_origem_humana_sem_ser_dono_nao_da_allow_regressao_seguranca(self):
+        # Mesmo achado, ramo ESCRITA_INTERNA_REVERSIVEL — ROTINA_COWORK com
+        # origem_humana=True (ex.: configurada por engano, ou um futuro
+        # canal que confunde "humano configurou a rotina" com "humano
+        # presente agora") não deve receber o mesmo passe do dono interativo.
+        req = _req(
+            classe_efeito=ClasseEfeito.ESCRITA_INTERNA_REVERSIVEL,
+            principal=_principal(tipo=TipoPrincipal.ROTINA_COWORK, uid=None, origem_humana=True),
+        )
+        d = policy.avaliar(req, agora=_AGORA)
+        self.assertEqual(d.decision, Decisao.PREPARE_ONLY)
+        self.assertEqual(d.reason_code, "escrita_interna_reversivel_requer_mandato_ou_humano_presente")
+
     def test_mandato_libera_preparacao_interna_mesmo_sem_humano_presente(self):
         # Regressão: um mandato vigente cobre o pedido pelo passo 4/5 de
         # `avaliar()`, que nunca chega a chamar `_decisao_padrao_por_classe`
