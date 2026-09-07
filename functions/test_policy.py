@@ -39,6 +39,7 @@ def _req(
     mandatos_aplicaveis=(),
     argumentos_resolvidos=None,
     sensibilidade=None,
+    missao=None,
 ):
     return PolicyRequest(
         principal=principal or _principal(),
@@ -48,6 +49,7 @@ def _req(
         estado_autonomia=estado_autonomia,
         mandatos_aplicaveis=mandatos_aplicaveis,
         sensibilidade=sensibilidade,
+        missao=missao,
     )
 
 
@@ -131,6 +133,7 @@ class TestAvaliarAutoconcessao(unittest.TestCase):
             classe_efeito=ClasseEfeito.COMPROMISSO_TERCEIROS,
             principal=_principal(tipo=TipoPrincipal.RUNNER_SERVICO, uid=None, origem_humana=False),
             mandatos_aplicaveis=(mandato,),
+            sensibilidade="geral",
         )
         d = policy.avaliar(req, agora=_AGORA)
         self.assertEqual(d.decision, Decisao.ALLOW)
@@ -177,6 +180,7 @@ class TestAvaliarAutoconcessao(unittest.TestCase):
             classe_efeito=ClasseEfeito.COMPROMISSO_TERCEIROS,
             principal=_principal(tipo=TipoPrincipal.ROTINA_COWORK, uid=None, origem_humana=False),
             mandatos_aplicaveis=(mandato,),
+            sensibilidade="geral",
         )
         d = policy.avaliar(req, agora=_AGORA)
         self.assertEqual(d.decision, Decisao.ALLOW)
@@ -200,6 +204,7 @@ class TestAvaliarMandatoNaoEscapaSomentePreparacao(unittest.TestCase):
             principal=_principal(tipo=TipoPrincipal.RUNNER_SERVICO, uid=None, origem_humana=False),
             mandatos_aplicaveis=(mandato,),
             estado_autonomia=EstadoAutonomia.SOMENTE_PREPARACAO,
+            sensibilidade="geral",
         )
         d = policy.avaliar(req, agora=_AGORA)
         self.assertEqual(d.decision, Decisao.PREPARE_ONLY)
@@ -217,6 +222,7 @@ class TestAvaliarMandatoNaoEscapaSomentePreparacao(unittest.TestCase):
             principal=_principal(tipo=TipoPrincipal.RUNNER_SERVICO, uid=None, origem_humana=False),
             mandatos_aplicaveis=(mandato,),
             estado_autonomia=EstadoAutonomia.ATIVO,
+            sensibilidade="geral",
         )
         d = policy.avaliar(req, agora=_AGORA)
         self.assertEqual(d.decision, Decisao.ALLOW)
@@ -232,6 +238,7 @@ class TestAvaliarMandatoRebaixaDecisaoPadrao(unittest.TestCase):
         req = _req(
             classe_efeito=ClasseEfeito.COORDENACAO_LIMITADA,
             mandatos_aplicaveis=(mandato,),
+            sensibilidade="geral",
         )
         d = policy.avaliar(req, agora=_AGORA)
         self.assertEqual(d.decision, Decisao.ALLOW)
@@ -252,10 +259,15 @@ class TestAvaliarMatrizEfeitoPadrao(unittest.TestCase):
     def test_preparacao_interna_allow(self):
         d = policy.avaliar(_req(classe_efeito=ClasseEfeito.PREPARACAO_INTERNA), agora=_AGORA)
         self.assertEqual((d.decision, d.approval_required), (Decisao.ALLOW, False))
+        # Achado P2 #1 da revisão do Codex (PR #191): o reason_code não pode
+        # alegar mandato quando a decisão veio da matriz padrão (sem
+        # mandato nenhum em mandatos_aplicaveis aqui).
+        self.assertEqual(d.reason_code, "preparacao_interna_permitida_por_padrao")
 
     def test_escrita_interna_reversivel_allow(self):
         d = policy.avaliar(_req(classe_efeito=ClasseEfeito.ESCRITA_INTERNA_REVERSIVEL), agora=_AGORA)
         self.assertEqual((d.decision, d.approval_required), (Decisao.ALLOW, False))
+        self.assertEqual(d.reason_code, "escrita_interna_reversivel_permitida_por_padrao")
 
     def test_coordenacao_limitada_require_approval(self):
         d = policy.avaliar(_req(classe_efeito=ClasseEfeito.COORDENACAO_LIMITADA), agora=_AGORA)
@@ -328,27 +340,27 @@ class TestMandatoCobre(unittest.TestCase):
 
     def test_expirado_nao_cobre(self):
         m = self._mandato(valido_ate=_AGORA - timedelta(days=1), destinatarios_recursos=("*",))
-        req = _req()
+        req = _req(sensibilidade="geral")
         self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
 
     def test_ainda_valido_cobre(self):
         m = self._mandato(valido_ate=_AGORA + timedelta(days=1), destinatarios_recursos=("*",))
-        req = _req()
+        req = _req(sensibilidade="geral")
         self.assertTrue(policy.mandato_cobre(m, req, _AGORA))
 
     def test_destinatario_fora_da_lista_nao_cobre(self):
         m = self._mandato(destinatarios_recursos=("fulano@example.com",))
-        req = _req(argumentos_resolvidos={"destinatario": "ciclano@example.com"})
+        req = _req(argumentos_resolvidos={"destinatario": "ciclano@example.com"}, sensibilidade="geral")
         self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
 
     def test_destinatario_na_lista_cobre(self):
         m = self._mandato(destinatarios_recursos=("fulano@example.com",))
-        req = _req(argumentos_resolvidos={"destinatario": "fulano@example.com"})
+        req = _req(argumentos_resolvidos={"destinatario": "fulano@example.com"}, sensibilidade="geral")
         self.assertTrue(policy.mandato_cobre(m, req, _AGORA))
 
     def test_curinga_cobre_qualquer_destinatario(self):
         m = self._mandato(destinatarios_recursos=("*",))
-        req = _req(argumentos_resolvidos={"destinatario": "qualquer@example.com"})
+        req = _req(argumentos_resolvidos={"destinatario": "qualquer@example.com"}, sensibilidade="geral")
         self.assertTrue(policy.mandato_cobre(m, req, _AGORA))
 
     def test_substring_nao_ancorada_nao_cobre_regressao_seguranca(self):
@@ -358,19 +370,22 @@ class TestMandatoCobre(unittest.TestCase):
         # destinatário composto que embute o domínio autorizado como parte
         # de um domínio diferente.
         m = self._mandato(destinatarios_recursos=("@empresa.com",))
-        req = _req(argumentos_resolvidos={"destinatario": "chefe@empresa.com.malicioso.net"})
+        req = _req(
+            argumentos_resolvidos={"destinatario": "chefe@empresa.com.malicioso.net"},
+            sensibilidade="geral",
+        )
         self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
 
     def test_dominio_com_arroba_cobre_destinatario_legitimo(self):
         # O padrão de domínio "@dominio" continua funcionando para o caso
         # legítimo (sufixo exato, âncora no "@" real).
         m = self._mandato(destinatarios_recursos=("@empresa.com",))
-        req = _req(argumentos_resolvidos={"destinatario": "chefe@empresa.com"})
+        req = _req(argumentos_resolvidos={"destinatario": "chefe@empresa.com"}, sensibilidade="geral")
         self.assertTrue(policy.mandato_cobre(m, req, _AGORA))
 
     def test_dominio_com_arroba_nao_cobre_domino_parecido(self):
         m = self._mandato(destinatarios_recursos=("@empresa.com",))
-        req = _req(argumentos_resolvidos={"destinatario": "chefe@outraempresa.com"})
+        req = _req(argumentos_resolvidos={"destinatario": "chefe@outraempresa.com"}, sensibilidade="geral")
         self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
 
     def test_classe_conteudo_fora_da_lista_nao_cobre(self):
@@ -383,13 +398,25 @@ class TestMandatoCobre(unittest.TestCase):
         req = _req(sensibilidade="financeiro")
         self.assertTrue(policy.mandato_cobre(m, req, _AGORA))
 
+    def test_sensibilidade_ausente_nao_cobre_mandato_restrito_regressao_seguranca(self):
+        # Achado P1 #2 da revisão do Codex (PR #191): a versão original só
+        # rejeitava quando `sensibilidade` estava preenchida e fora da
+        # lista — como o contrato permite `sensibilidade=None` por padrão,
+        # um mandato restrito a ("geral",) cobria por engano qualquer
+        # pedido cujo chamador não preenchesse o campo, inclusive um efeito
+        # financeiro/destrutivo. Agora falha fechado: ausência de
+        # classificação NÃO passa por um mandato que declara classes.
+        m = self._mandato(destinatarios_recursos=("*",), classes_conteudo_permitidas=("geral",))
+        req = _req(sensibilidade=None)
+        self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
+
     def test_fora_do_horario_permitido_nao_cobre(self):
         m = self._mandato(
             destinatarios_recursos=("*",),
             horario_permitido_inicio="09:00",
             horario_permitido_fim="18:00",
         )
-        req = _req()
+        req = _req(sensibilidade="geral")
         agora_fora = datetime(2026, 9, 7, 22, 0, tzinfo=timezone.utc)
         self.assertFalse(policy.mandato_cobre(m, req, agora_fora))
 
@@ -399,13 +426,13 @@ class TestMandatoCobre(unittest.TestCase):
             horario_permitido_inicio="09:00",
             horario_permitido_fim="18:00",
         )
-        req = _req()
+        req = _req(sensibilidade="geral")
         agora_dentro = datetime(2026, 9, 7, 10, 0, tzinfo=timezone.utc)
         self.assertTrue(policy.mandato_cobre(m, req, agora_dentro))
 
     def test_sem_restricao_de_horario_sempre_cobre(self):
         m = self._mandato(destinatarios_recursos=("*",))
-        req = _req()
+        req = _req(sensibilidade="geral")
         self.assertTrue(policy.mandato_cobre(m, req, _AGORA))
 
     def test_janela_noturna_cobre_horario_apos_meia_noite(self):
@@ -416,7 +443,7 @@ class TestMandatoCobre(unittest.TestCase):
             horario_permitido_inicio="22:00",
             horario_permitido_fim="06:00",
         )
-        req = _req()
+        req = _req(sensibilidade="geral")
         agora_02h = datetime(2026, 9, 7, 2, 0, tzinfo=timezone.utc)
         self.assertTrue(policy.mandato_cobre(m, req, agora_02h))
 
@@ -426,7 +453,7 @@ class TestMandatoCobre(unittest.TestCase):
             horario_permitido_inicio="22:00",
             horario_permitido_fim="06:00",
         )
-        req = _req()
+        req = _req(sensibilidade="geral")
         agora_23h = datetime(2026, 9, 7, 23, 0, tzinfo=timezone.utc)
         self.assertTrue(policy.mandato_cobre(m, req, agora_23h))
 
@@ -436,9 +463,58 @@ class TestMandatoCobre(unittest.TestCase):
             horario_permitido_inicio="22:00",
             horario_permitido_fim="06:00",
         )
-        req = _req()
+        req = _req(sensibilidade="geral")
         agora_meio_dia = datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc)
         self.assertFalse(policy.mandato_cobre(m, req, agora_meio_dia))
+
+    def test_limite_por_janela_excedido_nao_cobre(self):
+        # Achado P1 #1 da revisão do Codex (PR #191): agora há um lugar
+        # concreto (`Mandato.usos_na_janela_atual`) para o chamador
+        # informar a contagem já resolvida, e `mandato_cobre` aplica o
+        # limite quando essa contagem é conhecida.
+        m = self._mandato(
+            destinatarios_recursos=("*",), limite_por_janela=1, usos_na_janela_atual=1,
+        )
+        req = _req(sensibilidade="geral")
+        self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
+
+    def test_limite_por_janela_nao_excedido_cobre(self):
+        m = self._mandato(
+            destinatarios_recursos=("*",), limite_por_janela=3, usos_na_janela_atual=2,
+        )
+        req = _req(sensibilidade="geral")
+        self.assertTrue(policy.mandato_cobre(m, req, _AGORA))
+
+    def test_limite_por_janela_com_contagem_desconhecida_nao_bloqueia(self):
+        # `usos_na_janela_atual=None` (default) — comportamento documentado:
+        # nenhum chamador resolve essa contagem ainda nesta sub-entrega, e
+        # não é este o momento de fail-closed nisso (o limite em si é
+        # opt-in por chamador, ao contrário das outras checagens).
+        m = self._mandato(destinatarios_recursos=("*",), limite_por_janela=1)
+        req = _req(sensibilidade="geral")
+        self.assertTrue(policy.mandato_cobre(m, req, _AGORA))
+
+    def test_finalidade_diferente_da_missao_nao_cobre(self):
+        # Achado P1 #3 da revisão do Codex (PR #191): antes, um mandato
+        # emitido para um propósito podia cobrir por coincidência um pedido
+        # de propósito totalmente diferente, desde que destino/classe/
+        # horário batessem.
+        m = self._mandato(destinatarios_recursos=("*",), finalidade="avisar fornecedor sobre atraso")
+        req = _req(sensibilidade="geral", missao="cobrar fatura em aberto")
+        self.assertFalse(policy.mandato_cobre(m, req, _AGORA))
+
+    def test_finalidade_igual_a_missao_cobre(self):
+        m = self._mandato(destinatarios_recursos=("*",), finalidade="avisar fornecedor sobre atraso")
+        req = _req(sensibilidade="geral", missao="avisar fornecedor sobre atraso")
+        self.assertTrue(policy.mandato_cobre(m, req, _AGORA))
+
+    def test_missao_nao_informada_nao_bloqueia(self):
+        # `missao=None` (default do PolicyRequest, nenhum chamador a
+        # preenche ainda) — não há como comparar o que não foi informado,
+        # então não bloqueia (mesmo raciocínio do limite por janela acima).
+        m = self._mandato(destinatarios_recursos=("*",), finalidade="avisar fornecedor sobre atraso")
+        req = _req(sensibilidade="geral")
+        self.assertTrue(policy.mandato_cobre(m, req, _AGORA))
 
 
 class TestConsultarPolitica(unittest.TestCase):
@@ -477,6 +553,29 @@ class TestSimularPolitica(unittest.TestCase):
         # registrar_aporte_investimento está no piso -> require_approval, não deny.
         self.assertEqual(r["bloqueados"], 0)
         self.assertEqual(r["requer_aprovacao"], 1)
+        self.assertEqual(r["somente_preparacao"], 0)
+        self.assertEqual(r["adiados"], 0)
+
+    def test_nao_conflaciona_prepare_only_com_requer_aprovacao(self):
+        # Achado P2 #2 da revisão do Codex (PR #191): a versão original
+        # computava requer_aprovacao por subtração (total - permitidos -
+        # bloqueados), o que contava um PREPARE_ONLY como se exigisse
+        # aprovação — mas `approval_required` é False nesse caso.
+        pedidos = [
+            _req(
+                ferramenta="editar_algo_reversivel",
+                classe_efeito=ClasseEfeito.ESCRITA_INTERNA_REVERSIVEL,
+                estado_autonomia=EstadoAutonomia.SOMENTE_PREPARACAO,
+            ),
+        ]
+        r = policy.simular_politica(pedidos, agora=_AGORA)
+        self.assertEqual(r["total"], 1)
+        self.assertEqual(r["permitidos"], 0)
+        self.assertEqual(r["bloqueados"], 0)
+        self.assertEqual(r["requer_aprovacao"], 0)
+        self.assertEqual(r["somente_preparacao"], 1)
+        self.assertEqual(r["resultados"][0]["decisao"]["decision"], Decisao.PREPARE_ONLY.value)
+        self.assertFalse(r["resultados"][0]["decisao"]["approval_required"])
 
     def test_nao_muta_nada_apenas_le(self):
         pedidos = [_req()]
