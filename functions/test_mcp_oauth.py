@@ -172,6 +172,35 @@ class TestErrosRfc6749(unittest.TestCase):
         corpo = json.loads(mcp_oauth._handle_token(_Req()).get_data(as_text=True))
         self.assertEqual(corpo["error"], "unsupported_grant_type")
 
+    def test_token_endpoint_loga_so_grant_type_e_client_id(self):
+        """Instrumentacao minima do /oauth/token: nunca code, verifier ou token.
+
+        `_handle_token` roda inteiro sem Firestore quando o grant e desconhecido
+        (o unico caminho testavel sem mocks aqui), o que basta para confirmar
+        que o log so referencia os dois campos que nao sao segredo.
+        """
+        class _Req:
+            form = None
+            def get_json(self, silent=False):
+                return {
+                    "grant_type": "senha_magica",
+                    "client_id": "cliente-teste",
+                    "code": "codigo-nao-deveria-aparecer-no-log",
+                    "code_verifier": "verifier-nao-deveria-aparecer-no-log",
+                    "refresh_token": "refresh-nao-deveria-aparecer-no-log",
+                }
+
+        with mock.patch("builtins.print") as mock_print:
+            mcp_oauth._handle_token(_Req())
+
+        linhas = " | ".join(str(c.args[0]) for c in mock_print.call_args_list)
+        self.assertIn("grant_type=senha_magica", linhas)
+        self.assertIn("client_id=cliente-teste", linhas)
+        for segredo in ("codigo-nao-deveria-aparecer-no-log",
+                        "verifier-nao-deveria-aparecer-no-log",
+                        "refresh-nao-deveria-aparecer-no-log"):
+            self.assertNotIn(segredo, linhas)
+
 
 class TestDesafio401(unittest.TestCase):
     """Sem este header no 401, o Claude nunca descobre o authorization server."""
@@ -351,6 +380,114 @@ class TestRoteamento(unittest.TestCase):
     def test_rota_desconhecida_404(self):
         resp = self.handler(self._Req("/oauth/inexistente"))
         self.assertEqual(resp.status_code, 404)
+
+
+class _PostReq:
+    """Fake mínimo de `https_fn.Request` para POSTs autenticados a `/mcp`."""
+
+    def __init__(self, body, path="/mcp", headers=None):
+        self.path = path
+        self.method = "POST"
+        self.headers = headers if headers is not None else {"Authorization": "Bearer token-de-teste"}
+        self._body = body
+
+    def get_json(self, silent=False):
+        return self._body
+
+
+@mock.patch.object(mcp_server, "_check_rate_limit", lambda uid: None)
+@mock.patch.object(mcp_server, "_authenticate", lambda req: "uid-teste")
+class TestServerDiscover(unittest.TestCase):
+    """`server/discover` — mandatório na revisão 2026-07-28 do MCP.
+
+    Reproduz, sem rede, exatamente a chamada que um cliente "moderno" (que já
+    fala a revisão atual da especificação) faz antes de `tools/list`. Antes
+    desta correção, o Hermes não conhecia o método e devolvia
+    `-32601 Metodo desconhecido` — o mesmo resultado, do ponto de vista do
+    cliente, de um servidor que não sabe fazer descoberta de ferramentas.
+    """
+
+    def setUp(self):
+        import inspect
+        self.handler = inspect.unwrap(mcp_server.mcpServer)
+
+    def _chamar(self, method="server/discover", params=None, rpc_id="d1"):
+        req = _PostReq({"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params or {}})
+        resp = self.handler(req)
+        return resp, json.loads(resp.get_data(as_text=True))
+
+    def test_nao_e_mais_metodo_desconhecido(self):
+        _resp, corpo = self._chamar()
+        self.assertNotIn("error", corpo, corpo)
+
+    def test_resultado_tem_o_formato_de_discoverresult(self):
+        _resp, corpo = self._chamar()
+        resultado = corpo["result"]
+        self.assertEqual(resultado["resultType"], "complete")
+        self.assertIsInstance(resultado["supportedVersions"], list)
+        self.assertIn(mcp_server.MCP_PROTOCOL_VERSION, resultado["supportedVersions"])
+        self.assertIn("2026-07-28", resultado["supportedVersions"])
+        for capacidade in ("tools", "resources", "prompts"):
+            self.assertIn(capacidade, resultado["capabilities"])
+        self.assertTrue(resultado["instructions"])
+
+    def test_server_info_identifica_o_hermes(self):
+        _resp, corpo = self._chamar()
+        server_info = corpo["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]
+        self.assertEqual(server_info["name"], mcp_server.SERVER_NAME)
+        self.assertEqual(server_info["version"], mcp_server.SERVER_VERSION)
+
+    def test_instructions_iguais_as_do_initialize(self):
+        """As duas eras devem orientar o cliente da mesma forma."""
+        _resp, discover = self._chamar()
+        _resp2, initialize = self._chamar(method="initialize", params={})
+        self.assertEqual(discover["result"]["instructions"], initialize["result"]["instructions"])
+
+
+class TestVersoesDeProtocolo(unittest.TestCase):
+    def test_versao_atual_da_especificacao_esta_no_conjunto_suportado(self):
+        """2026-07-28 é a revisão "current" do MCP (modelcontextprotocol.io) —
+        um cliente que só fala essa era não pode cair no branch de "versão
+        desconhecida" do handshake legado."""
+        self.assertIn("2026-07-28", mcp_server._SUPPORTED_PROTOCOL_VERSIONS)
+
+
+class TestLogDeChamadaMcp(unittest.TestCase):
+    """Instrumentação mínima: método, status, duração, contagem de tools e
+    tamanho da resposta — nunca argumento, token ou conteúdo pessoal."""
+
+    def test_tools_list_registra_contagem_e_tamanho(self):
+        info = mcp_server._mcp_call_log_info(
+            "tools/list", ok=True, latency_ms=12.345,
+            result={"tools": [{"name": "a"}, {"name": "b"}, {"name": "c"}]},
+        )
+        self.assertEqual(info["tool_count"], 3)
+        self.assertEqual(info["method"], "tools/list")
+        self.assertTrue(info["ok"])
+        self.assertGreater(info["response_bytes"], 0)
+        self.assertNotIn("arguments", info)
+        self.assertNotIn("tools", info)
+
+    def test_tools_call_registra_apenas_se_deu_erro(self):
+        info = mcp_server._mcp_call_log_info(
+            "tools/call", ok=True, latency_ms=5.0,
+            result={"content": [{"type": "text", "text": "conteudo do usuario, nao deve vazar"}], "isError": True},
+        )
+        self.assertTrue(info["is_error"])
+        self.assertNotIn("conteudo do usuario, nao deve vazar", json.dumps(info))
+
+    def test_erro_registra_codigo_sem_result(self):
+        info = mcp_server._mcp_call_log_info("tools/call", ok=False, latency_ms=1.0, error_code=-32003)
+        self.assertEqual(info["error_code"], -32003)
+        self.assertFalse(info["ok"])
+        self.assertNotIn("response_bytes", info)
+
+    def test_server_discover_registra_versoes_suportadas(self):
+        info = mcp_server._mcp_call_log_info(
+            "server/discover", ok=True, latency_ms=2.0,
+            result={"supportedVersions": ["2025-06-18", "2026-07-28"]},
+        )
+        self.assertEqual(info["supported_versions"], ["2025-06-18", "2026-07-28"])
 
 
 if __name__ == "__main__":
