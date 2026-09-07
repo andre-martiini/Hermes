@@ -502,22 +502,61 @@ def _coletar_avisos_do_sistema(db) -> list[dict]:
     avisos = []
     try:
         snap = db.collection("system_usage").document("elevacoes_sugeridas").get()
-        degradada = (snap.to_dict() or {}).get("varredura_degradada") if snap.exists else None
+        dados = (snap.to_dict() or {}) if snap.exists else {}
     except Exception as exc:
         print(f"[ResumoMatinal] Falha ao consultar o estado da varredura: {exc}")
         return avisos
 
+    degradada = dados.get("varredura_degradada")
     motivo = degradada.get("motivo") if isinstance(degradada, dict) else None
     texto = _AVISOS_DE_VARREDURA.get(motivo)
     if texto:
-        avisos.append({
+        aviso = {
             "id": f"elevacao_{motivo}",
             "gravidade": "atencao",
             "titulo": texto["titulo"],
             "detalhe": texto["detalhe"],
             "desde": degradada.get("data"),
-        })
+        }
+        # A trava de volume (semana cheia, teto do mes) barra a rodada ANTES de
+        # ela tocar `varredura_degradada` — entao este aviso pode ficar com data
+        # antiga por semanas seguidas mesmo com a rotina tentando toda semana.
+        # `ultima_tentativa` cobre toda tentativa, com ou sem sucesso; quando ela
+        # e mais recente que o aviso (comparacao real de data, nao so diferente:
+        # as datas sao ISO `YYYY-MM-DD`, entao comparam certo por ordem de
+        # string), as tentativas recentes nem chegaram a reavaliar o que esta
+        # aqui — e o texto abaixo deixa isso explicito em vez de deixar a data
+        # antiga passar por informacao atual.
+        tentativa = dados.get("ultima_tentativa")
+        if (isinstance(tentativa, dict) and tentativa.get("data")
+                and str(tentativa["data"]) > str(degradada.get("data") or "")):
+            aviso["detalhe"] += (
+                f" Última tentativa de rodar: {tentativa['data']}, sem reavaliar "
+                f"isto (motivo: {tentativa.get('motivo') or 'não registrado'})."
+            )
+        avisos.append(aviso)
     return avisos
+
+
+def _coletar_ultima_tentativa_elevacao(db) -> dict | None:
+    """Quando a rotina de elevacao tentou rodar pela ultima vez, e o que houve.
+
+    Companheiro de `_coletar_avisos_do_sistema`: aquele so muda quando a rodada
+    chega a olhar a janela de tarefas. Uma trava de volume (semana cheia, teto
+    do mes) barra antes disso toda semana, sem tocar no aviso — entao sem esta
+    chave nao ha como distinguir "ninguem tentou" de "tentou e nao avancou".
+    """
+    try:
+        snap = db.collection("system_usage").document("elevacoes_sugeridas").get()
+    except Exception as exc:
+        print(f"[ResumoMatinal] Falha ao consultar a ultima tentativa de elevacao: {exc}")
+        return None
+    if not snap.exists:
+        return None
+    tentativa = (snap.to_dict() or {}).get("ultima_tentativa")
+    if not isinstance(tentativa, dict) or not tentativa.get("data"):
+        return None
+    return {"data": tentativa.get("data"), "motivo": tentativa.get("motivo")}
 
 
 def _coletar_filas(db, hoje: str) -> dict:
@@ -1173,6 +1212,7 @@ def build_morning_summary(db, date_str: str | None = None) -> dict:
     filas = _coletar_filas(db, hoje)
     avisos_do_sistema = _coletar_avisos_do_sistema(db)
     passivo_elevacao = _coletar_passivo_de_elevacao(db)
+    ultima_tentativa_elevacao = _coletar_ultima_tentativa_elevacao(db)
     saude = _coletar_saude(db, hoje, ontem)
     # Depende de `saude`: o pilar saúde não é gerido por ações, seu movimento vem
     # dos registros do módulo Saúde.
@@ -1219,6 +1259,7 @@ def build_morning_summary(db, date_str: str | None = None) -> dict:
         "avisos_do_sistema": avisos_do_sistema,
         # Fora de `filas` e fora de `avisos`: não espera decisão e não é defeito.
         "passivo_elevacao": passivo_elevacao,
+        "ultima_tentativa_elevacao": ultima_tentativa_elevacao,
         "saude": saude,
         "estrategia": estrategia,
         "ontem": ontem_data,
