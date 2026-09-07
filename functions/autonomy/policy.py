@@ -363,15 +363,22 @@ def mandato_cobre(mandato: Mandato, request: PolicyRequest, agora: datetime) -> 
     entre os cobertos, a classe de conteúdo está entre as permitidas, e o
     horário (se restrito) bate.
 
-    Limitação documentada (achado da revisão adversarial da quarta rodada,
-    PR #191): a matriz de efeito (seção 5.1 do plano) fala em "mandato e
-    orçamento válidos" para preparação interna, mas `PolicyRequest.orcamento_
-    restante` não é lido em nenhum ponto desta função nem de `avaliar()` —
-    checagem de orçamento ainda não está implementada. Mesma categoria dos
-    gaps já documentados para `classes_conteudo_permitidas` (texto livre,
-    não enum fechado) e `usos_na_janela_atual` (populado por um wrapper com
-    I/O que ainda não existe): reconhecido, não escondido, fica para uma
-    sub-entrega futura que precisar de fato de orçamento por mandato.
+    Orçamento (fechado na sub-entrega 4/N do P02, docs/autonomia/execucao.md
+    — antes disso, `PolicyRequest.orcamento_restante` não era lido em nenhum
+    ponto desta função nem de `avaliar()`, apesar de a matriz de efeito
+    (seção 5.1 do plano) exigir "mandato e orçamento válidos" para
+    preparação interna): quando `Mandato.orcamento_maximo` está declarado, o
+    mandato só cobre se `orcamento_restante` tiver sido RESOLVIDO (mesmo
+    raciocínio fail-closed de `usos_na_janela_atual`, logo abaixo — saldo
+    desconhecido contra um teto declarado não passa) e ainda restar
+    orçamento positivo. Mandatos sem `orcamento_maximo` declarado (o
+    default, `None`) não são afetados — nem toda finalidade tem dimensão
+    financeira. Resolver o saldo real (consumo até agora vs. teto) continua
+    sendo responsabilidade de um wrapper com I/O ainda não implementado,
+    mesma divisão já descrita para `usos_na_janela_atual`. Gap ainda aberto,
+    categoria diferente: `classes_conteudo_permitidas` continua texto livre,
+    não enum fechado (ver comentário mais abaixo, na checagem de
+    `sensibilidade`).
 
     Limite por janela (correção pós-revisão do Codex, PR #191): esta função
     é pura e não tem acesso a histórico de uso — `mandato.usos_na_janela_atual`
@@ -416,6 +423,23 @@ def mandato_cobre(mandato: Mandato, request: PolicyRequest, agora: datetime) -> 
         if mandato.usos_na_janela_atual is None:
             return False
         if mandato.usos_na_janela_atual >= mandato.limite_por_janela:
+            return False
+
+    # Orçamento (P02 passo 8, sub-entrega 4/N — ver docstring desta função
+    # acima para o histórico do gap): mesmo raciocínio fail-closed do limite
+    # por janela, logo acima — um teto DECLARADO exige saldo RESOLVIDO.
+    if mandato.orcamento_maximo is not None:
+        if request.orcamento_restante is None:
+            return False
+        # `not (> 0)`, não `<= 0` (achado da revisão adversarial desta
+        # sub-entrega): `orcamento_restante = float('nan')` faz TODAS as
+        # comparações (`<=`, `<`, `>`, `>=`, `==`) retornarem `False` — um
+        # saldo NaN não é "None" nem "<= 0", então a checagem `<= 0` deixava
+        # passar como se fosse um saldo positivo válido, exatamente o
+        # oposto do fail-closed que esta checagem existe para garantir.
+        # `not (x > 0)` rejeita NaN corretamente (`nan > 0` já é `False`,
+        # então a negação vira `True` e a função retorna `False` abaixo).
+        if not (request.orcamento_restante > 0):
             return False
 
     # Finalidade do mandato vs. missão do pedido (correção pós-revisão do
