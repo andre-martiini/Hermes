@@ -225,7 +225,7 @@ class _MockDocRef:
         self.col = col
         self.id = doc_id
 
-    def get(self):
+    def get(self, transaction=None):
         data = self.col._docs.get(self.id)
         return _MockDocSnap(self.id, data)
 
@@ -286,6 +286,38 @@ class _MockCollection:
         return [_MockDocSnap(k, v) for k, v in self._docs.items()]
 
 
+class _MockTransaction:
+    """Espelha o suficiente de google.cloud.firestore_v1.transaction.Transaction
+    para que @firestore.transactional (usado por
+    agent_requests.enfileirar_ou_atualizar) funcione sobre os mocks acima."""
+
+    def __init__(self):
+        self._read_only = False
+        self._id = b"mock-tx-id"
+        self._max_attempts = 5
+
+    def get(self, doc_ref):
+        return doc_ref.get()
+
+    def set(self, doc_ref, data, merge=False):
+        doc_ref.set(data, merge=merge)
+
+    def update(self, doc_ref, data):
+        doc_ref.update(data)
+
+    def _rollback(self):
+        pass
+
+    def _commit(self):
+        pass
+
+    def _clean_up(self):
+        self._id = None
+
+    def _begin(self, retry_id=None):
+        self._id = retry_id or b"mock-tx-id"
+
+
 class _MockDB:
     def __init__(self):
         self._collections: dict[str, _MockCollection] = {}
@@ -294,6 +326,9 @@ class _MockDB:
         if name not in self._collections:
             self._collections[name] = _MockCollection(self, name)
         return self._collections[name]
+
+    def transaction(self):
+        return _MockTransaction()
 
 
 class TestHookAgentRequests(unittest.TestCase):
