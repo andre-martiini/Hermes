@@ -1,11 +1,18 @@
 """Testes de `autonomy/policy.py` — motor de decisão puro + wrappers de I/O.
 
-O teste mais importante deste arquivo é `test_floor_identico_ao_mcp_server`:
-`FLOOR_CONFIRMACAO_OBRIGATORIA` (novo, ainda não consultado por nenhum canal)
-precisa continuar EXATAMENTE igual a `mcp_server._CONFIRMACAO_OBRIGATORIA`
-(o que hoje decide de verdade) enquanto as duas fontes coexistirem — uma
-divergência aqui reabriria em silêncio exatamente a lacuna de governança que
-o P02 existe para fechar.
+`test_floor_identico_ao_mcp_server` mudou de sentido na sub-entrega 2/N do
+P02 (docs/autonomia/execucao.md): antes disso, `FLOOR_CONFIRMACAO_OBRIGATORIA`
+e `mcp_server._CONFIRMACAO_OBRIGATORIA` eram DUAS constantes duplicadas que
+precisavam ser mantidas manualmente iguais; agora `mcp_server.py` importa
+este conjunto diretamente (`_CONFIRMACAO_OBRIGATORIA` é um alias, não uma
+cópia), então o teste hoje é redundante com o próprio Python — mas continua
+valendo como trava de regressão: se algum dia alguém reintroduzir um `set`
+literal duplicado em `mcp_server.py` (em vez do alias), este teste volta a
+ser o que pega a divergência antes de produção. Os testes do preflight que a
+sub-entrega 2/N adicionou de fato (mapeamento de `PolicyDecision` para a
+resposta do canal MCP, construção do `Principal` do canal) vivem em
+`test_mcp_server.py`, não aqui — este arquivo continua sendo só sobre o
+motor `avaliar()` em si, sem I/O nem canal.
 """
 
 import unittest
