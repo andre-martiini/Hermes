@@ -16,6 +16,15 @@ Cobre o achado do plano de autonomia (P01 passo 5-6, achado A10):
    (compatibilidade com TTL do Firestore).
 5. `ler_job` preserva o contrato público de três valores (`processing` /
    `done` / `error`) mesmo com o novo estado interno `em_execucao`.
+
+Cobre também o achado do Codex na PR #189 (P1): encontrar um claim
+`em_execucao` ainda dentro de `CLAIM_EXPIRA_APOS` deve LEVANTAR
+`ClaimAindaValidoError`, não devolver None em silêncio — devolver None
+silenciosamente faria `on_mcp_job_created` retornar normalmente, e o Cloud
+Functions registraria essa invocação como bem-sucedida mesmo que a tool
+nunca tenha rodado para aquele job (ver docstring de `mcp_jobs.py` para o
+cenário completo: commit ambíguo do claim + entrega duplicada do Pub/Sub
+chegando enquanto o claim ainda parece válido).
 """
 
 from __future__ import annotations
@@ -169,19 +178,22 @@ class TestClaim(unittest.TestCase):
         self.assertIsInstance(doc["claimed_em"], datetime)
 
     def test_claim_concorrente_apenas_um_ganha(self):
-        """Duas 'invocações' tentando o claim da mesma reentrega de evento —
-        só a primeira deve prosseguir; a segunda encontra em_execucao
-        recente e recua sem tocar o documento."""
+        """Duas 'invocações' tentando o claim da mesma entrega duplicada de
+        evento — só a primeira deve prosseguir; a segunda encontra
+        em_execucao recente e LEVANTA ClaimAindaValidoError (achado do
+        Codex na PR #189: não pode devolver None em silêncio aqui, ou a
+        invocação seria registrada como bem-sucedida sem a tool ter
+        rodado), sem tocar o documento."""
         self.col._docs["job-2"] = _job_basico()
         ref = self.col.document("job-2")
 
         primeira = mcp_jobs._claim(self.db, ref)
         doc_apos_primeira = dict(self.col._docs["job-2"])
 
-        segunda = mcp_jobs._claim(self.db, ref)
+        with self.assertRaises(mcp_jobs.ClaimAindaValidoError):
+            mcp_jobs._claim(self.db, ref)
 
         self.assertIsNotNone(primeira)
-        self.assertIsNone(segunda)
         # Documento não foi alterado pela segunda tentativa.
         self.assertEqual(self.col._docs["job-2"], doc_apos_primeira)
 
@@ -219,7 +231,13 @@ class TestClaim(unittest.TestCase):
         self.assertIn("abandonada", doc["erro"])
         self.assertIsInstance(doc["expira_em"], datetime)
 
-    def test_claim_em_execucao_recente_nao_prossegue_nem_altera(self):
+    def test_claim_em_execucao_recente_levanta_sem_alterar_documento(self):
+        """Achado do Codex na PR #189: um claim jovem é ambíguo (tentativa
+        irmã em andamento, ou claim órfão de uma tentativa que já morreu) —
+        levanta ClaimAindaValidoError em vez de devolver None em silêncio,
+        para a invocação nunca ser registrada como sucesso sem a tool ter
+        rodado. O documento não é tocado (a transação não escreveu nada
+        antes de levantar)."""
         agora = datetime.now(timezone.utc)
         self.col._docs["job-6"] = _job_basico(
             status=mcp_jobs.STATUS_EM_EXECUCAO,
@@ -228,7 +246,9 @@ class TestClaim(unittest.TestCase):
         ref = self.col.document("job-6")
         doc_antes = dict(self.col._docs["job-6"])
 
-        self.assertIsNone(mcp_jobs._claim(self.db, ref))
+        with self.assertRaises(mcp_jobs.ClaimAindaValidoError):
+            mcp_jobs._claim(self.db, ref)
+
         self.assertEqual(self.col._docs["job-6"], doc_antes)
 
     def test_claim_documento_inexistente_devolve_none(self):
@@ -305,9 +325,13 @@ class TestOnMcpJobCreated(unittest.TestCase):
         self.assertEqual(self.col._docs["job-evt"]["status"], mcp_jobs.STATUS_DONE)
 
     def test_event_reentrega_de_job_ja_em_execucao_nao_roda_tool_de_novo(self):
-        """O cenário central do achado A10: reentrega do MESMO evento (job já
-        claimeado por uma invocação anterior recente) não deve rodar a tool
-        de novo."""
+        """O cenário central do achado A10: uma entrega duplicada do MESMO
+        evento (job já claimeado por uma invocação anterior recente) não
+        deve rodar a tool de novo. Achado do Codex na PR #189: essa
+        invocação também não pode retornar normalmente (silenciosamente
+        'com sucesso') — deve levantar ClaimAindaValidoError, propagada por
+        _claim através do wrapper do gatilho sem tratamento (nenhum
+        try/except em on_mcp_job_created ao redor de _claim)."""
         agora = datetime.now(timezone.utc)
         self.col._docs["job-dup"] = _job_basico(
             status=mcp_jobs.STATUS_EM_EXECUCAO,
@@ -317,10 +341,11 @@ class TestOnMcpJobCreated(unittest.TestCase):
         snap.reference = self.col.document("job-dup")
 
         with patch("tools.hermes_tools.execute") as mock_execute:
-            mcp_jobs.on_mcp_job_created.__wrapped__(self._FakeEvent(data=snap))
+            with self.assertRaises(mcp_jobs.ClaimAindaValidoError):
+                mcp_jobs.on_mcp_job_created.__wrapped__(self._FakeEvent(data=snap))
 
         mock_execute.assert_not_called()
-        # Estado não foi alterado pela reentrega.
+        # Estado não foi alterado pela entrega duplicada.
         self.assertEqual(self.col._docs["job-dup"]["status"], mcp_jobs.STATUS_EM_EXECUCAO)
 
 
@@ -409,7 +434,7 @@ class TestLerJob(unittest.TestCase):
 
     def test_uid_nao_bate_nao_vaza_job_de_outro_usuario(self):
         """Mesma resposta (not_found) tanto para job inexistente quanto para
-        job de outro usuário — confirmar que o id existe vazaria
+        job de outro usuário — confirmar que o id existe já vazaria
         informação para quem está tentando adivinhar."""
         self.col._docs["job-y"] = _job_basico(uid="outro-user", status=mcp_jobs.STATUS_DONE)
         resultado_outro_uid = mcp_jobs.ler_job("user-1", "job-y")
