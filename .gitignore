@@ -43,6 +43,7 @@ scripts/dados_cadastrais_seed.json
 # Python
 __pycache__/
 *.pyc
+functions/venv/
 
 functions_node/.cache/
 
