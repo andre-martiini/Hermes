@@ -1823,6 +1823,41 @@ class TestUltimaTentativaSempreRegistrada(unittest.TestCase):
         r = ds.rodar_deteccao(db, HOJE, [], "chave-fake")
         self.assertEqual(r["motivo"], "nenhuma_acao_com_corpo")
 
+    def test_falha_no_modelo_preserva_o_motivo_e_nao_vira_sucesso(self):
+        """Achado da revisao do Codex na PR: a lista de bloqueios so cobria os
+        que vem ANTES da janela, entao `falha_no_modelo` caia no `else None` do
+        wrapper e ficava indistinguivel de sucesso — mas nesse caminho
+        `_rodar_uma_rodada` pula `marcar_varredura` de proposito, porque as
+        candidatas nao foram julgadas. O motivo precisa sobreviver."""
+        original = ds._rodar_uma_rodada
+        ds._rodar_uma_rodada = lambda *a, **kw: {"rodou": False, "motivo": "falha_no_modelo"}
+        self.addCleanup(setattr, ds, "_rodar_uma_rodada", original)
+
+        db = self._com_objetivo()
+        r = ds.rodar_deteccao(db, HOJE, [], "chave-fake")
+        self.assertEqual(r["motivo"], "falha_no_modelo")
+        self.assertEqual(self._tentativa(db)["motivo"], "falha_no_modelo")
+
+    def test_erro_inesperado_dentro_da_rodada_ainda_registra_a_tentativa(self):
+        """Segundo achado da revisao do Codex: se `_rodar_uma_rodada` levantar
+        uma excecao que ela mesma nao previu (ex.: uma consulta ao Firestore
+        sem guarda propria, como `estrategia_pessoal` em `preparar_rodada`,
+        durante uma instabilidade), a tentativa tem de ficar registrada mesmo
+        assim — e a excecao continua subindo, para o agendador continuar vendo
+        a falha como via antes desta mudanca."""
+        original = ds._rodar_uma_rodada
+
+        def _explode(*_a, **_kw):
+            raise RuntimeError("Firestore indisponivel")
+
+        ds._rodar_uma_rodada = _explode
+        self.addCleanup(setattr, ds, "_rodar_uma_rodada", original)
+
+        db = _Db()
+        with self.assertRaises(RuntimeError):
+            ds.rodar_deteccao(db, HOJE, [], "chave-fake")
+        self.assertEqual(self._tentativa(db)["motivo"], "erro_inesperado")
+
 
 class TestOTextoDoCard(unittest.TestCase):
 
