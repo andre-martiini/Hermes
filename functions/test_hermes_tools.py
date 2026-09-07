@@ -469,6 +469,25 @@ class TestCamadaJsonRpc(unittest.TestCase):
         27/08/2026. Pior: com o gating desligado, o teste passava a exercitar o
         caminho de ENVIO de verdade, e o que evitou uma mensagem enfileirada foi
         um argumento obrigatorio faltando na chamada. Sorte, nao desenho.
+
+        `estado_autonomia_atual` também é fixado em ATIVO (P02 sub-entrega 2/N,
+        docs/autonomia/execucao.md): estes testes rodam sem app Firebase
+        inicializado, e o `ToolContext` real que `mcpServer()` constrói não tem
+        `_db` pré-preenchido, então `ctx.db` (a property) tentaria
+        `firestore.client()` de verdade e levantaria "The default Firebase app
+        does not exist" — ANTES mesmo de `estado_autonomia_atual` (mockada
+        abaixo) ser chamada, porque `ctx.db` é avaliado como argumento da
+        chamada, não dentro dela. `mcp_server._decisao_piso_mcp` já captura
+        isso e cai em SOMENTE_PREPARACAO (fail closed) para nunca derrubar a
+        chamada — mas isso rebaixaria as decisões do piso para `prepare_only`
+        aqui, mascarando o que estes testes querem exercitar (o fluxo de
+        `confirmation_required` de sempre). Por isso `firestore.client` também
+        é mockado, para que `ctx.db` resolva sem erro; o valor em si nunca é
+        usado de verdade, porque `estado_autonomia_atual`/`registrar_decisao`
+        também estão mockadas. ATIVO é o estado real de produção hoje (o
+        documento `system/autonomy_state` ainda não é escrito por nada — ver
+        `estado_autonomia_atual`), então fixá-lo aqui reflete o comportamento
+        real, não o esconde.
         """
         anterior = mcp_server._access_cache
         mcp_server._access_cache = {
@@ -476,10 +495,16 @@ class TestCamadaJsonRpc(unittest.TestCase):
             "confirm_tools": set(tools),
             "expires_at": float("inf"),
         }
-        try:
-            yield
-        finally:
-            mcp_server._access_cache = anterior
+        with patch(
+            "firebase_admin.firestore.client", return_value=MagicMock(),
+        ), patch.object(
+            mcp_server.autonomy_policy, "estado_autonomia_atual",
+            return_value=mcp_server.EstadoAutonomia.ATIVO,
+        ), patch.object(mcp_server.autonomy_policy, "registrar_decisao"):
+            try:
+                yield
+            finally:
+                mcp_server._access_cache = anterior
 
     def test_gating_do_canal_barra_antes_de_executar(self):
         """Com a tool na politica, a chamada para na confirmacao — nao envia nada."""
