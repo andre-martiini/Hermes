@@ -450,63 +450,54 @@ def aprovar_rascunho(
 
     # Transação atômica
     agora_utc = datetime.datetime.now(timezone.utc)
-    transaction_result = {}
 
-    transaction_success = False
-    if hasattr(db, "transaction"):
-        try:
-            transaction = db.transaction()
+    # Sem suporte a transação real, não há como garantir exclusão mútua com
+    # liberar_rascunhos_promovidos (achado A04) — recusa em vez de arriscar
+    # uma escrita não protegida.
+    if not hasattr(db, "transaction"):
+        return {
+            "status": "erro_configuracao",
+            "erro": "Backend Firestore sem suporte a transação; aprovação recusada para evitar condição de corrida.",
+        }
 
-            @firestore.transactional
-            def _exec_approve(tx):
-                snap = doc_ref.get(transaction=tx)
-                if not snap.exists:
-                    return {"status": "not_found", "erro": f"Rascunho '{outbox_id}' não encontrado."}
-                data = snap.to_dict() or {}
-                valido, motivo = validar_transicao_aprovacao(data.get("status"))
-                if not valido:
-                    return {
-                        "status": "already_decided",
-                        "erro": f"Rascunho {motivo}",
-                        "dados": data,
-                    }
+    try:
+        transaction = db.transaction()
 
-                tx.update(
-                    doc_ref,
-                    {
-                        "status": STATUS_PENDING,
-                        "aprovado_em": firestore.SERVER_TIMESTAMP,
-                        "aprovado_via": aprovado_via,
-                        "scheduled_for": agora_utc,
-                    },
-                )
-                return {"status": "ok", "dados": data}
+        @firestore.transactional
+        def _exec_approve(tx):
+            snap = doc_ref.get(transaction=tx)
+            if not snap.exists:
+                return {"status": "not_found", "erro": f"Rascunho '{outbox_id}' não encontrado."}
+            data = snap.to_dict() or {}
+            valido, motivo = validar_transicao_aprovacao(data.get("status"))
+            if not valido:
+                return {
+                    "status": "already_decided",
+                    "erro": f"Rascunho {motivo}",
+                    "dados": data,
+                }
 
-            transaction_result = _exec_approve(transaction)
-            transaction_success = True
-        except Exception as tx_err:
-            print(f"[OutboxAprovacao] Transação Firestore falhou ou mock sem suporte: {tx_err}")
+            tx.update(
+                doc_ref,
+                {
+                    "status": STATUS_PENDING,
+                    "aprovado_em": firestore.SERVER_TIMESTAMP,
+                    "aprovado_via": aprovado_via,
+                    "scheduled_for": agora_utc,
+                },
+            )
+            return {"status": "ok", "dados": data}
 
-    if not transaction_success:
-        # Fallback sem transaction real (testes / mocks simples)
-        snap = doc_ref.get()
-        if not snap.exists:
-            return {"status": "not_found", "erro": f"Rascunho '{outbox_id}' não encontrado."}
-        data = snap.to_dict() or {}
-        valido, motivo = validar_transicao_aprovacao(data.get("status"))
-        if not valido:
-            return {
-                "status": "already_decided",
-                "erro": f"Rascunho {motivo}",
-                "dados": data,
-            }
-        doc_ref.update({
-            "status": STATUS_PENDING,
-            "aprovado_em": agora_utc,
-            "aprovado_via": aprovado_via,
-            "scheduled_for": agora_utc,
-        })
-        transaction_result = {"status": "ok", "dados": data}
+        transaction_result = _exec_approve(transaction)
+    except Exception as tx_err:
+        # Falha real de transação (ex.: Aborted após esgotar tentativas). Não há
+        # fallback para escrita desprotegida — retorna erro explícito em vez de
+        # arriscar uma condição de corrida com liberar_rascunhos_promovidos.
+        print(f"[OutboxAprovacao] Transação Firestore de aprovação falhou: {tx_err}")
+        return {
+            "status": "erro_transacao",
+            "erro": f"Não foi possível aprovar de forma atômica: {tx_err}",
+        }
 
     if transaction_result.get("status") != "ok":
         return transaction_result
@@ -525,7 +516,7 @@ def aprovar_rascunho(
                 db,
                 item_id=item_atencao_id,
                 novo_estado="resolvido",
-                desfecho="mensagem aprovada e enviada",
+                desfecho="mensagem aprovada e enviada para a fila",
                 ctx=ctx,
             )
         except Exception as at_err:
@@ -600,58 +591,52 @@ def descartar_rascunho(
 
     doc_ref = db.collection(COLLECTION).document(outbox_id)
     agora_utc = datetime.datetime.now(timezone.utc)
-    transaction_result = {}
-    transaction_success = False
 
-    if hasattr(db, "transaction"):
-        try:
-            transaction = db.transaction()
-
-            @firestore.transactional
-            def _exec_discard(tx):
-                snap = doc_ref.get(transaction=tx)
-                if not snap.exists:
-                    return {"status": "not_found", "erro": f"Rascunho '{outbox_id}' não encontrado."}
-                data = snap.to_dict() or {}
-                valido, mot = validar_transicao_descarte(data.get("status"))
-                if not valido:
-                    return {
-                        "status": "already_decided",
-                        "erro": f"Rascunho {mot}",
-                        "dados": data,
-                    }
-
-                update_fields = {
-                    "status": STATUS_DESCARTADO,
-                    "descartado_em": firestore.SERVER_TIMESTAMP if hasattr(firestore, "SERVER_TIMESTAMP") else agora_utc,
-                }
-                if motivo:
-                    update_fields["descartado_motivo"] = str(motivo).strip()
-
-                tx.update(doc_ref, update_fields)
-                return {"status": "ok", "dados": data}
-
-            transaction_result = _exec_discard(transaction)
-            transaction_success = True
-        except Exception as tx_err:
-            print(f"[OutboxAprovacao] Transação Firestore de descarte falhou ou mock sem suporte: {tx_err}")
-
-    if not transaction_success:
-        snap = doc_ref.get()
-        if not snap.exists:
-            return {"status": "not_found", "erro": f"Rascunho '{outbox_id}' não encontrado."}
-        data = snap.to_dict() or {}
-        valido, mot = validar_transicao_descarte(data.get("status"))
-        if not valido:
-            return {"status": "already_decided", "erro": f"Rascunho {mot}", "dados": data}
-        update_fields = {
-            "status": STATUS_DESCARTADO,
-            "descartado_em": agora_utc,
+    # Sem suporte a transação real, não há como garantir exclusão mútua com
+    # liberar_rascunhos_promovidos (achado A04) — recusa em vez de arriscar
+    # uma escrita não protegida.
+    if not hasattr(db, "transaction"):
+        return {
+            "status": "erro_configuracao",
+            "erro": "Backend Firestore sem suporte a transação; descarte recusado para evitar condição de corrida.",
         }
-        if motivo:
-            update_fields["descartado_motivo"] = str(motivo).strip()
-        doc_ref.update(update_fields)
-        transaction_result = {"status": "ok", "dados": data}
+
+    try:
+        transaction = db.transaction()
+
+        @firestore.transactional
+        def _exec_discard(tx):
+            snap = doc_ref.get(transaction=tx)
+            if not snap.exists:
+                return {"status": "not_found", "erro": f"Rascunho '{outbox_id}' não encontrado."}
+            data = snap.to_dict() or {}
+            valido, mot = validar_transicao_descarte(data.get("status"))
+            if not valido:
+                return {
+                    "status": "already_decided",
+                    "erro": f"Rascunho {mot}",
+                    "dados": data,
+                }
+
+            update_fields = {
+                "status": STATUS_DESCARTADO,
+                "descartado_em": firestore.SERVER_TIMESTAMP if hasattr(firestore, "SERVER_TIMESTAMP") else agora_utc,
+            }
+            if motivo:
+                update_fields["descartado_motivo"] = str(motivo).strip()
+
+            tx.update(doc_ref, update_fields)
+            return {"status": "ok", "dados": data}
+
+        transaction_result = _exec_discard(transaction)
+    except Exception as tx_err:
+        # Falha real de transação. Sem fallback para escrita desprotegida —
+        # retorna erro explícito em vez de arriscar uma condição de corrida.
+        print(f"[OutboxAprovacao] Transação Firestore de descarte falhou: {tx_err}")
+        return {
+            "status": "erro_transacao",
+            "erro": f"Não foi possível descartar de forma atômica: {tx_err}",
+        }
 
     if transaction_result.get("status") != "ok":
         return transaction_result
