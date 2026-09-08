@@ -219,3 +219,44 @@ decisoes:
   - id: p02-codex-rodada-2
     motivo: "3 achados: piso de confirmação obrigatória não passava pelo aperto de pausado/somente_preparação; destinatarios_recursos/classes_conteudo_permitidas vazios (tupla vazia, falsy) eram tratados como 'sem restrição' em vez de 'não cobre nada'. A revisão adversarial da própria correção pegou um 3º achado nela mesma: policy_id/constraints_checked do retorno final ficavam incorretos quando a decisão vinha do piso."
     autoridade: existente_ou_nova
+  - id: p02-codex-rodada-3
+    motivo: "limite_por_janela declarado com usos_na_janela_atual=None (contagem desconhecida) pulava o limite; missao não informada não era comparada contra finalidade (mandato cobria pedido sem missão nenhuma); preparação interna/escrita interna reversível sem mandato viravam ALLOW incondicional — passaram a exigir Principal.origem_humana=True (dono interativo/cliente assistido em tempo real) ou caem para PREPARE_ONLY, conforme a leitura de 'mandato e orçamento válidos' da seção 5.1 do plano."
+    autoridade: existente_ou_nova
+  - id: p02-codex-rodada-4
+    motivo: "valido_ate=None (default do contrato) cobria indefinidamente — agora falha fechado; janela de horário parcialmente configurada (só início ou só fim) pulava a restrição inteira — agora falha fechado; estado_autonomia_atual() tratava valor presente-e-falsy ('') do mesmo jeito que chave ausente, caindo em ATIVO — corrigido com sentinela (_AUSENTE = object()) para distinguir por identidade, não truthiness. A revisão adversarial desta própria rodada pegou 1 achado nela mesma: a correção da janela de horário usava 'inicio or fim' (truthiness) como guarda externa, reintroduzindo o mesmo padrão de bug (strings vazias em ambos os campos escapavam) — corrigido para 'is not None'."
+    autoridade: existente_ou_nova
+  - id: p02-pr-191-mesclada-cedo-demais
+    motivo: "Descoberta em 2026-09-07 ~14:43 UTC: André mesclou a PR #191 em main em 2026-09-07T10:11:11-03:00, usando o commit 23d983698 — o estado do branch logo após a RODADA 1 do Codex, não depois das rodadas 2-4 que continuei a enviar ao mesmo branch nas horas seguintes (via API de escrita do Argos, sem checar se a PR ainda estava aberta). Como uma PR mesclada não aceita mais commits no mesmo merge, as rodadas 2-4 nunca chegaram a main. Isso também resolve um mistério registrado nas rodadas anteriores: o 'Reviewed commit 4965f9e923...' que o Codex citava repetidamente, e que eu tinha catalogado como SHA sintético/inexistente (checagem incompleta: git log --all de um clone que nunca tinha buscado origin/main), é na verdade o próprio commit de merge da PR #191 — o Codex estava revisando main (congelado nesse estado desde o merge) a cada chamada de @codex review, não o branch em evolução; por isso repetia achados que eu já tinha corrigido no branch mas que continuavam presentes em main. Risco real avaliado como baixo: autonomy/policy.py ainda não é consultado por nenhum canal (mcp_server.py, tool_context.py) — é exatamente o que a sub-entrega 2/N vai religar — então os gaps das rodadas 2-4 estão em main mas ainda não estão em uso por nenhum caminho real hoje. Ainda assim, precisam chegar a main antes da sub-entrega 2/N ligar o preflight de verdade. Abri a PR #192 (mesmo branch → main) carregando as rodadas 2-4 completas, com nota explicativa em #191 e pedido de @codex review em #192."
+    autoridade: existente_ou_nova
+  - id: p02-codex-rodada-5
+    motivo: "Achado do Codex sobre a PR #192 (não #191 — já reaberto o ciclo de revisão no branch correto), verificado contra o tip real do branch (e9c6dc301c), não um commit obsoleto: _decisao_padrao_por_classe() concedia ALLOW nos ramos PREPARACAO_INTERNA e ESCRITA_INTERNA_REVERSIVEL checando só principal.origem_humana (bool, default True no contrato). O comentário no código já dizia que a exceção de baixa fricção é para 'dono interativo ou cliente assistido', mas nada no sistema de tipos impedia um Principal do tipo ROTINA_COWORK/RUNNER_SERVICO/TERCEIRO_PORTAL de ser construído com origem_humana=True — um terceiro com humano presente NO PORTAL (ele mesmo, não o dono) recebia o mesmo passe do dono interativo. Corrigido: os dois ramos agora exigem 'if principal.origem_humana and principal.eh_dono():' (eh_dono() só é True para DONO_INTERATIVO/CLIENTE_ASSISTIDO), restaurando a garantia que o comentário original já descrevia. A revisão adversarial desta correção (sub-agente independente) buscou outras ocorrências do mesmo padrão (origem_humana sem eh_dono()) no arquivo inteiro — nenhuma encontrada — e confirmou ausência de regressão nos call-sites e testes existentes."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && python -m unittest test_policy test_contracts -v"
+    - "cd functions && python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "test_policy.py + test_contracts.py: 99/99 passando (97 após as 4 rodadas do Codex + 2 testes de regressão da rodada 5, gate eh_dono())"
+    - "Suíte completa do repositório: sem regressão nova nos arquivos desta sub-entrega; falhas pré-existentes seguem restritas a test_deteccao_subproduto.py e loaders de test_gmail_bill_pdf/test_mp4_repair, sem relação com autonomy/"
+evidencias:
+  - "PR #191 (https://github.com/andre-martiini/Hermes/pull/191) — mesclada em main, mas só com a rodada 1 de correções; comentário de nota explicando a situação e redirecionando para #192"
+  - "PR #192 (https://github.com/andre-martiini/Hermes/pull/192) — aberta, carrega as rodadas 2-5 completas; comentário https://github.com/andre-martiini/Hermes/pull/192#issuecomment-5572607248 documenta a rodada 5 (gate eh_dono()); aguardando nova resposta do Codex e merge manual do André"
+  - "5 rodadas de revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio da implementação), uma por rodada de correção — pegaram 2 achados reais nas próprias correções (rodada 2: policy_id/constraints_checked; rodada 4: truthiness na janela de horário), ambos corrigidos com teste de regressão dedicado; a rodada 5 não encontrou achados adicionais"
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "PR #192 ainda não mesclada — rodada 5 de correção (gate eh_dono()) enviada e @codex review pedido de novo; resposta ainda não confirmada; merge continua manual, do André"
+  - "PolicyRequest.orcamento_restante existe no contrato e é citado em comentário referenciando 'mandato e orçamento válidos' (seção 5.1), mas não é lido em nenhum ponto de mandato_cobre() nem de avaliar() — checagem de orçamento não implementada"
+  - "Mandato.classes_conteudo_permitidas ainda é texto livre (tupla de strings), sem enum fechado — a seção 5.3 do plano pede que 'tipos outro e rótulos livres não possam habilitar envio autônomo', mas a validação de quais strings são aceitáveis ainda não existe"
+  - "Mandato.usos_na_janela_atual ainda não tem wrapper de I/O real que resolva a contagem a partir de Firestore/histórico — só o campo e a checagem fail-closed existem; quem monta o Mandato ainda precisa preencher isso manualmente"
+  - "NENHUM canal (mcp_server.py, tool_context.py, web, Telegram, voz) consulta autonomy.policy ainda — é o objeto da sub-entrega 2/N"
+  - "Decisão de design a levar ao André quando o PACOTE P02 inteiro estiver completo (não antes, conforme seu pedido de só ser notificado ao fim do pacote): o gate de origem_humana nos defaults da matriz PREPARACAO_INTERNA/ESCRITA_INTERNA_REVERSIVEL (rodada 3), agora reforçado pela rodada 5 (exige também eh_dono(), não só a flag booleana) — a pergunta de fundo que ainda vale levantar é se origem_humana deveria mesmo ter default True no contrato, e como canais futuros devem defini-lo explicitamente; se tiver dúvida ou proposta melhor, ele pediu para ser avisado"
+  - "Ao religar Principal de verdade na sub-entrega 2/N, cuidado deliberado necessário: Principal.origem_humana tem default True no contrato — qualquer construção de Principal para ator sem humano presente (rotina_cowork, runner_servico) precisa passar origem_humana=False explicitamente, nunca depender do default"
+proximo_pacote: "P02 (sub-entrega 2/N — preflight em tool_context.py/mcp_server.py)"
+```
+
+---
