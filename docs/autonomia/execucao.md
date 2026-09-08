@@ -824,3 +824,112 @@ pendencias:
   - "Todas as pendências já registradas nos blocos das sub-entregas 1/N a 8/N que não foram tocadas por esta sub-entrega continuam abertas: duplicação entre autonomy/policy.py::decisao_piso() e mcp_server.py::_decisao_piso_mcp, decisao_piso()/avaliar() não protegida contra principal malformado, validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP, Mandato.classes_conteudo_permitidas texto livre sem enum fechado, Mandato.usos_na_janela_atual e Mandato.orcamento_maximo sem wrapper de I/O real, o bug de tipo em autonomy/policy.py::preparar_politica, a pergunta de design sobre o default de origem_humana (levar ao André só ao fim do pacote inteiro)."
 proximo_pacote: "P02 (sub-entrega 10/N -- candidata a decidir: religar hermes_core_logic.py::schedule_whatsapp_message a decisao_piso() agora que o teto de 200000 caracteres está resolvido, ou continuar o passo 1 do plano nos canais ainda sem Principal (Telegram, outbox_aprovacao.py, revisao_semanal.py). Trabalho autônomo pausado ao final desta sub-entrega para atender a um pedido explícito de André: investigação da integração sistema-decisao-investimentos/Hermes (Bloco 1, Parte B) -- abrir PR retroativa para o branch codex/d5-registry-contact-number (já em produção sem PR) e verificar se existe MCP tool expondo POST /carteira/confirmar."
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 7174571086bde0aabca63aa609dbc5269dae258e
+pacote: "P02 (sub-entrega 10/N -- preflight de política no confirm_whatsapp do Telegram -- e 11/N -- modularização de hermes_core_logic.py/telegram_utils.py por área -- combinadas nesta entrada de catch-up: as duas foram implementadas e shipadas juntas na PR #199, sem uma entrada própria neste registro no momento do envio; escrita agora, retroativamente, para fechar essa lacuna)"
+# CATCH-UP: esta entrada documenta trabalho já mesclado (PR #199,
+# https://github.com/andre-martiini/Hermes/pull/199, merge commit
+# 054a748dada12fe5753c7f192ef02f7352bbe5c3, mesclado manualmente por André)
+# antes de existir uma entrada no registro. Reconstruída a partir do
+# histórico real de commits da branch claude/p02-modularizacao-telegram-por-area
+# (não de memória) -- ver evidencias abaixo para os hashes conferidos.
+estado: mesclado
+inicio: "2026-09-08T12:00:00Z"
+fim: "2026-09-08T13:15:44Z"
+arquivos_alterados:
+  - functions/hermes_core_logic.py (reduzido de 3012+ linhas a um shim de reexportação -- 12 módulos de área extraídos)
+  - functions/telegram_handlers_core.py (novo -- entry points do Firebase, _process_telegram_message, _handle_telegram_callback)
+  - functions/telegram_message_deterministic.py (novo -- try_deterministic_reply, respostas sem LLM)
+  - functions/telegram_message_tools.py (novo -- os 21 closures de ferramentas do Gemini via factory function)
+  - functions/telegram_callbacks_sessao.py (novo -- callbacks de sessão/notificações/reagendamento em lote/cards do Copiloto Web/diário/outbox)
+  - functions/telegram_callbacks_confirmacoes.py (novo -- callbacks de confirmação de ação/financeiro/WhatsApp; é aqui que mora o preflight da sub-entrega 10/N)
+  - functions/telegram_callbacks_saude.py (novo -- callbacks de check-in de saúde)
+  - functions/telegram_callbacks_contatos.py (novo -- callbacks de mesclagem de contatos e vínculo de e-mail)
+  - functions/autonomy/policy.py (docstring de decisao_piso() atualizada para registrar que o consumidor cogitado na sub-entrega 6/N -- e revertido por causa do teto de 200000 caracteres -- foi implementado de fato nesta sub-entrega, sem mudança funcional)
+  - functions/test_confirm_whatsapp_telegram_policy.py (novo -- cobertura do preflight no ramo confirm_whatsapp)
+  - functions/test_revisao_semanal.py (ajuste de mocks para os novos módulos)
+  - functions/test_tool_schemas.py (retarget de mocks/stubs/AST para os módulos novos, mesmo padrão de risco de bare-name-resolution já documentado na sub-entrega 9/N)
+decisoes:
+  - id: p02-sub10-confirm-whatsapp-preflight-decisao-piso
+    motivo: "Sub-entrega 10/N propriamente dita: o ramo `confirm_whatsapp` de `_handle_telegram_callback` (agora em telegram_callbacks_confirmacoes.py) -- o clique no botão \"Confirmar\" do agendamento de WhatsApp via Telegram, único ponto do fluxo com `db` resolvido e acesso à política -- passou a construir um `Principal(tipo=TipoPrincipal.DONO_INTERATIVO, origem_humana=True)` e chamar `autonomy_policy.decisao_piso(db, principal, \"schedule_whatsapp_message\", pending)` antes de enviar. DENY bloqueia com mensagem ao usuário; PREPARE_ONLY informa que a ação não pode ser confirmada agora; qualquer outra decisão segue o fluxo de envio já existente. Este era o consumidor real que a sub-entrega 6/N tentou religar e teve que reverter (arquivo acima do teto de 200000 caracteres do Argos) -- resolvido pela extração desta mesma sub-entrega."
+    autoridade: existente_ou_nova
+  - id: p02-sub11-modularizacao-por-area
+    motivo: "Sub-entrega 11/N (numeração informal -- shipada na mesma PR sem entrada própria neste registro): hermes_core_logic.py (o que sobrou dele após a sub-entrega 9/N já ter extraído telegram_utils.py) foi dividido por ÁREA FUNCIONAL em 7 módulos novos (handlers core, respostas determinísticas, ferramentas do Gemini, e 4 famílias de callbacks -- sessão, confirmações, saúde, contatos), com hermes_core_logic.py reduzido a um shim de reexportação. Mesmo raciocínio da extração mecânica da sub-entrega 9/N (preservar comportamento, não redesenhar) e mesmo risco documentado de bare-name-resolution para chamadas internas entre os novos módulos."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py' (conforme mensagens de commit da branch; não re-executado nesta entrada de catch-up -- ver pendências)"
+  resultados:
+    - "Não capturados no momento do envio original nesta forma estruturada; a suíte completa foi confirmada 1369/1369 no início da sub-entrega 12/N (bloco seguinte), sem regressão visível herdada desta sub-entrega."
+evidencias:
+  - "Histórico de commits da branch claude/p02-modularizacao-telegram-por-area (git log 7174571086bde0aabca63aa609dbc5269dae258e..054a748dada12fe5753c7f192ef02f7352bbe5c3), PR #199 (https://github.com/andre-martiini/Hermes/pull/199), merge commit 054a748dada12fe5753c7f192ef02f7352bbe5c3 -- 12 arquivos alterados, 3640 inserções, 3016 remoções (git show --stat)."
+  - "Diff de functions/autonomy/policy.py na própria branch (git diff 7389f4809 40e5f0523 -- functions/autonomy/policy.py) confirma que a docstring de decisao_piso() foi atualizada para apontar o preflight real no ramo confirm_whatsapp, referenciando esta mesma entrada de catch-up como o lugar onde os detalhes ficariam registrados -- a docstring já antecipava esta lacuna de documentação."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: a lacuna de documentação em si -- PR #199 mesclada sem entrada neste registro no momento do envio. Reconstruída retroativamente, sem acesso ao contexto original de execução (revisão adversarial, contagem exata de testes no momento do envio, decisões descartadas durante a implementação não ficaram registradas em lugar nenhum e não puderam ser recuperadas aqui)."
+  - "Passo 1 do plano segue PARCIALMENTE aberto: Telegram (via confirm_whatsapp) agora constrói Principal e passa pelo preflight, mas só nesse ramo -- outbox_aprovacao.py e revisao_semanal.py continuam sem construir Principal nenhum (mesma decisão de escopo da sub-entrega 9/N)."
+  - "Mesmo risco de bare-name-resolution já documentado na sub-entrega 9/N (decisão p02-sub9-bare-name-resolution) agora se aplica também às chamadas entre os 7 módulos novos desta sub-entrega -- não confirmado se algum teste futuro já tropeçou nisso."
+  - "Todas as pendências já registradas nos blocos das sub-entregas 1/N a 9/N que não foram tocadas por esta entrada continuam abertas."
+proximo_pacote: "P02 sub-entrega 12/N -- ver bloco seguinte."
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 054a748dada12fe5753c7f192ef02f7352bbe5c3
+pacote: "P02 sub-entrega 12/N -- decisao_piso()/_decisao_piso_mcp protegidas contra falha em avaliar() (fail-closed em vez de propagar exceção)"
+# Continuação autônoma autorizada por André ("Pode adiantar o início do
+# próximo módulo para agora"), a partir do achado não-bloqueante já
+# registrado desde a sub-entrega 8/N (p02-sub8-achado-nao-bloqueante-avaliar-sem-protecao):
+# na época, decisao_piso() não tinha nenhum consumidor real fora dos
+# testes, então o risco era teórico. Desde as sub-entregas 9/N (mcp_jobs.py)
+# e 10/N (confirm_whatsapp do Telegram), decisao_piso() e _decisao_piso_mcp
+# (mcp_server.py, consumidor real desde a sub-entrega 2/N) têm consumidores
+# reais -- o gatilho que a pendência original previa para endereçar isto.
+estado: pronto_para_revisao
+inicio: "2026-09-08T17:30:00Z"
+fim: "2026-09-08T18:18:16Z"
+arquivos_alterados:
+  - functions/autonomy/policy.py (nova função decisao_erro_avaliacao(); decisao_piso() chama avaliar() dentro de try/except)
+  - functions/mcp_server.py (_decisao_piso_mcp chama autonomy_policy.avaliar() dentro de try/except, mesma correção; registrar_decisao também protegida por try/except próprio)
+  - functions/test_policy.py (testes de decisao_erro_avaliacao() isolada + testes do guard em decisao_piso(), via mock.patch)
+  - functions/test_mcp_server.py (testes equivalentes para _decisao_piso_mcp, achado da revisão adversarial -- ver evidências)
+decisoes:
+  - id: p02-sub12-deny-nao-require-approval-nem-prepare-only
+    motivo: "decisao_erro_avaliacao() sempre retorna Decisao.DENY, nunca SOMENTE_PREPARACAO/PREPARE_ONLY nem REQUIRE_APPROVAL. Raciocínio (documentado na própria docstring da função): uma falha de avaliação INTERNA (exceção dentro de avaliar(), não um estado de autonomia restrito) não é a mesma coisa que \"autonomia está pausada/em preparação\" -- usar PREPARE_ONLY faria um erro interno se disfarçar de estado normal do sistema. REQUIRE_APPROVAL também foi rejeitado por ser a decisão de SUCESSO normal do piso -- usá-la para um erro faria a chamada parecer \"tudo bem, só precisa da confirmação de sempre\", escondendo que algo quebrou."
+    autoridade: existente_ou_nova
+  - id: p02-sub12-descoberta-veio-do-piso-nao-toca-principal
+    motivo: "Descoberta ao escrever o teste de regressão (registrada honestamente, não escondida): avaliar() só acessa request.principal no ramo NÃO-piso (veio_do_piso=False) -- o ramo do piso decide sem tocar principal (só o passo 6, estado_autonomia, é consultado). Como decisao_piso()/_decisao_piso_mcp só chamam avaliar() com classe_efeito vindo de CLASSE_EFEITO_PISO, e hoje CLASSE_EFEITO_PISO tem exatamente as mesmas chaves de FLOOR_CONFIRMACAO_OBRIGATORIA (travado por novo teste, test_classe_efeito_piso_cobre_exatamente_o_floor), toda chamada por estes dois caminhos reais cai no ramo do piso -- ou seja, um principal malformado NÃO derruba avaliar() hoje por este caminho específico. Esta correção é defesa em profundidade contra as duas tabelas divergirem no futuro (são mantidas separadamente por design), não a correção de um crash ao vivo. Os testes de regressão usam mock.patch.object(avaliar, side_effect=...) em vez de um principal malformado de verdade, porque um principal malformado de verdade não reproduz a falha hoje."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "Antes da mudança: 1369/1369."
+    - "Depois da mudança + achado da revisão adversarial corrigido: 1373/1373, 0 falhas, 0 erros."
+evidencias:
+  - "Revisão adversarial independente (Agent tool, general-purpose, sem contexto da implementação) sobre o diff dos 4 arquivos. Achado único: nenhuma cobertura de teste para a mesma correção em mcp_server.py::_decisao_piso_mcp -- todos os testes novos cobriam só autonomy.policy.decisao_piso(). Corrigido: dois testes adicionados a test_mcp_server.py::TestDecisaoPisoMcp (falha em avaliar() bloqueia com DENY; falha em avaliar() não impede registrar_decisao de ser tentado). A revisão também confirmou, de forma independente, o raciocínio de p02-sub12-descoberta-veio-do-piso-nao-toca-principal, a fail-safety pré-existente de registrar_decisao(), e a ausência de risco de regressão em quem consome PolicyDecision (callers ramificam pelo enum Decisao, nunca pelo reason_code string). Um nit cosmético (espaçamento de linha em branco) foi apontado e deliberadamente não corrigido -- sem efeito funcional, sem lint configurado para isso."
+  - "4 commits verificados individualmente por hash antes de prosseguir: autonomy/policy.py (commit 4ddef30414f5b37c7bdc2c2bebe08934f2133fbc, sha 6a7b9fcd4178105e9d44bb191a3a8a3638203a18), mcp_server.py (commit fe120fceb941d666e0ecb95644c3adb3419a59c1, sha c7ee3dff1d37307702ab3072c289e75c994e6215), test_policy.py (commit 800d99b902170d84f26c8e6b28665dfb5c4f608a, sha 9ea1f66d504be068d97c2aed1a29f7526b29a9f1), test_mcp_server.py (commit 9490e05352f1fc4f1e2626059d04b028fce25689, sha d19b7534b355976217991539397d2d3f7bccc76c) -- todos batendo exatamente no primeiro envio."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: a pendência não-bloqueante registrada desde a sub-entrega 8/N (p02-sub8-achado-nao-bloqueante-avaliar-sem-protecao) -- decisao_piso()/avaliar() agora protegida contra falha de avaliação, nos dois consumidores reais (autonomy.policy.decisao_piso e mcp_server._decisao_piso_mcp)."
+  - "Novo, não-bloqueante: a garantia de que um principal malformado nunca derruba avaliar() por este caminho depende inteiramente de CLASSE_EFEITO_PISO e FLOOR_CONFIRMACAO_OBRIGATORIA continuarem tendo exatamente as mesmas chaves -- travado por teste (test_classe_efeito_piso_cobre_exatamente_o_floor), mas se essa invariante um dia quebrar, o guard fail-closed desta sub-entrega passa a ser a ÚNICA proteção real contra um principal malformado quebrar decisao_piso()/_decisao_piso_mcp."
+  - "Duplicação entre autonomy/policy.py::decisao_piso() e mcp_server.py::_decisao_piso_mcp permanece (pendência já registrada desde a sub-entrega 6/N) -- a correção desta sub-entrega foi aplicada duas vezes, manualmente, exatamente por causa dessa duplicação; não endereçada agora para não mexer em caminho de código sensível já testado nos dois lados."
+  - "Todas as pendências já registradas nos blocos anteriores que não foram tocadas por esta sub-entrega continuam abertas: passo 1 do plano parcialmente aberto (outbox_aprovacao.py/revisao_semanal.py sem Principal), risco de bare-name-resolution nos módulos de área, validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP, Mandato.classes_conteudo_permitidas texto livre sem enum fechado, Mandato.usos_na_janela_atual/orcamento_maximo sem wrapper de I/O real, bug de tipo em preparar_politica, pergunta de design sobre o default de origem_humana."
+proximo_pacote: "P02 -- a decidir com André: religar outbox_aprovacao.py/revisao_semanal.py a Principal/decisao_piso() (passo 1 do plano, escopo há duas sub-entregas deliberadamente deixado de fora), resolver a duplicação entre decisao_piso() e _decisao_piso_mcp, ou revisitar a lista de pendências acumuladas para levar ao André antes de mais trabalho autônomo."
+```
