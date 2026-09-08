@@ -72,7 +72,7 @@ de segurança própria.
 """
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import mcp_server
 from autonomy.contracts import Decisao, EstadoAutonomia, PolicyDecision, TipoPrincipal
@@ -200,6 +200,55 @@ class TestDecisaoPisoMcp(unittest.TestCase):
         decisao_registrada = mock_registrar.call_args.args[2]
         self.assertIs(decisao_registrada, decisao)
         self.assertEqual(decisao_registrada.decision, Decisao.DENY)
+
+    def test_delega_para_decisao_piso_quando_ctx_db_resolve(self):
+        # P02 sub-entrega 13/N: prova a delegação em si, não só um
+        # comportamento indireto compatível com ela — `_decisao_piso_mcp`
+        # deve chamar `autonomy_policy.decisao_piso(db, principal, nome,
+        # argumentos)` exatamente uma vez, com o `db` já resolvido de
+        # `ctx.db` (não a property, o valor) e o `Principal` de
+        # `_principal_mcp(ctx)`, sem reimplementar o lookup de
+        # classe_efeito/estado/avaliar/registrar em paralelo.
+        ctx = _ctx(uid="dono-uid-delega")
+        sentinela = PolicyDecision(
+            decision=Decisao.REQUIRE_APPROVAL,
+            policy_id="p",
+            policy_version="v",
+            reason_code="sentinela",
+            constraints_checked=(),
+            operation_hash="hash",
+            motivo_legivel="sentinela de teste",
+        )
+        with patch.object(
+            mcp_server.autonomy_policy, "decisao_piso", return_value=sentinela
+        ) as mock_decisao_piso:
+            resultado = mcp_server._decisao_piso_mcp(ctx, "pausar_conversa", {"x": 1})
+        self.assertIs(resultado, sentinela)
+        mock_decisao_piso.assert_called_once()
+        args = mock_decisao_piso.call_args.args
+        self.assertIs(args[0], ctx.db)
+        self.assertEqual(args[1].uid, "dono-uid-delega")
+        self.assertEqual(args[1].tipo, TipoPrincipal.CLIENTE_ASSISTIDO)
+        self.assertEqual(args[2], "pausar_conversa")
+        self.assertEqual(args[3], {"x": 1})
+
+    def test_ctx_db_indisponivel_cai_em_somente_preparacao_sem_registrar(self):
+        # P02 sub-entrega 13/N: quando a property `ctx.db` lança na própria
+        # inicialização (ex.: app Firebase não existe), não há `db` para
+        # delegar a `decisao_piso()` nem para registrar a decisão — o
+        # fallback deve, mesmo assim, produzir uma decisão fail-closed
+        # coerente com SOMENTE_PREPARACAO (mesmo resultado do código
+        # anterior a esta sub-entrega), sem tentar `registrar_decisao`.
+        ctx = _ctx()
+        with patch.object(
+            type(ctx), "db", new_callable=PropertyMock, side_effect=RuntimeError("Firebase indisponível")
+        ), patch.object(mcp_server.autonomy_policy, "registrar_decisao") as mock_registrar, patch.object(
+            mcp_server.autonomy_policy, "decisao_piso"
+        ) as mock_decisao_piso:
+            decisao = mcp_server._decisao_piso_mcp(ctx, "criar_rascunho_email", {})
+        self.assertEqual(decisao.decision, Decisao.PREPARE_ONLY)
+        mock_registrar.assert_not_called()
+        mock_decisao_piso.assert_not_called()
 
 
 class TestHandleToolsCallPreflight(unittest.TestCase):
