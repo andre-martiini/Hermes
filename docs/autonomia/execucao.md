@@ -376,7 +376,7 @@ decisoes:
 testes:
   comandos:
     - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
-    - "cd functions && venv/bin/python -m unittest test_policy test_contracts test_mcp_server test_hermes_tools -v"
+    - "cd functions && venv/bin/python -m unittest test_policy test_contracts test_mcp_server test_hermes_tools test_mcp_oauth -v"
   resultados:
     - "Python (unittest, suíte completa): 1280/1280 passando (1261 anteriores da sub-entrega 2/N + 19 testes novos: 15 em TestFerramentasDePolitica — test_hermes_tools.py — e 4 em TestFerramentasDePoliticaViaMcp — test_mcp_server.py, contagem conferida por AST, não de memória; 0 regressões)"
 evidencias:
