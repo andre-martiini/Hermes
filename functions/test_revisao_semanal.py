@@ -229,13 +229,13 @@ class TestCallbackReagendamentoLote(unittest.TestCase):
         self.query_id = "qid-123"
         self.chat_id = "12345"
 
-    @patch("hermes_core_logic._send_telegram_message")
-    @patch("hermes_core_logic._answer_callback_query")
-    @patch("hermes_core_logic._persist_copilot_message")
-    @patch("hermes_core_logic._save_session")
-    @patch("hermes_core_logic._ensure_copilot_session", return_value="copilot-sess-1")
-    @patch("hermes_core_logic._get_session", return_value={})
-    @patch("hermes_core_logic._get_allowed_chat_id", return_value=None)
+    @patch("telegram_callbacks_sessao._send_telegram_message")
+    @patch("telegram_callbacks_sessao._answer_callback_query")
+    @patch("telegram_handlers_core._persist_copilot_message")
+    @patch("telegram_handlers_core._save_session")
+    @patch("telegram_handlers_core._ensure_copilot_session", return_value="copilot-sess-1")
+    @patch("telegram_handlers_core._get_session", return_value={})
+    @patch("telegram_handlers_core._get_allowed_chat_id", return_value=None)
     @patch("main.confirmarReagendamentoEmLote")
     def test_callback_aplicar_sucesso(
         self,
@@ -291,13 +291,13 @@ class TestCallbackReagendamentoLote(unittest.TestCase):
         mock_send_msg.assert_called_once()
         self.assertIn("✅ Reagendamento em lote aplicado", mock_send_msg.call_args[0][2])
 
-    @patch("hermes_core_logic._send_telegram_message")
-    @patch("hermes_core_logic._answer_callback_query")
-    @patch("hermes_core_logic._persist_copilot_message")
-    @patch("hermes_core_logic._save_session")
-    @patch("hermes_core_logic._ensure_copilot_session", return_value="copilot-sess-1")
-    @patch("hermes_core_logic._get_session", return_value={})
-    @patch("hermes_core_logic._get_allowed_chat_id", return_value=None)
+    @patch("telegram_callbacks_sessao._send_telegram_message")
+    @patch("telegram_callbacks_sessao._answer_callback_query")
+    @patch("telegram_handlers_core._persist_copilot_message")
+    @patch("telegram_handlers_core._save_session")
+    @patch("telegram_handlers_core._ensure_copilot_session", return_value="copilot-sess-1")
+    @patch("telegram_handlers_core._get_session", return_value={})
+    @patch("telegram_handlers_core._get_allowed_chat_id", return_value=None)
     @patch("main.confirmarReagendamentoEmLote")
     def test_callback_aplicar_ja_processada_evita_duplo_clique(
         self,
@@ -336,13 +336,13 @@ class TestCallbackReagendamentoLote(unittest.TestCase):
         mock_answer_cb.assert_called_with(self.token, self.query_id, "Proposta já processada (aplicado).")
         mock_send_msg.assert_not_called()
 
-    @patch("hermes_core_logic._send_telegram_message")
-    @patch("hermes_core_logic._answer_callback_query")
-    @patch("hermes_core_logic._persist_copilot_message")
-    @patch("hermes_core_logic._save_session")
-    @patch("hermes_core_logic._ensure_copilot_session", return_value="copilot-sess-1")
-    @patch("hermes_core_logic._get_session", return_value={})
-    @patch("hermes_core_logic._get_allowed_chat_id", return_value=None)
+    @patch("telegram_callbacks_sessao._send_telegram_message")
+    @patch("telegram_callbacks_sessao._answer_callback_query")
+    @patch("telegram_handlers_core._persist_copilot_message")
+    @patch("telegram_handlers_core._save_session")
+    @patch("telegram_handlers_core._ensure_copilot_session", return_value="copilot-sess-1")
+    @patch("telegram_handlers_core._get_session", return_value={})
+    @patch("telegram_handlers_core._get_allowed_chat_id", return_value=None)
     @patch("main.confirmarReagendamentoEmLote")
     def test_callback_descartar(
         self,
