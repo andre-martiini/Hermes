@@ -738,23 +738,23 @@ def decisao_piso(db, principal: Principal, nome: str, argumentos: dict) -> Polic
     docs/autonomia/execucao.md sobre a duplicação; não refeita nesta
     sub-entrega para não mexer num caminho de código sensível já testado).
 
-    O candidato natural para o segundo consumidor real, nesta mesma
-    sub-entrega, era o fechamento do agendamento de WhatsApp via Telegram
-    (hermes_core_logic.py::schedule_whatsapp_message, que tem sua própria
-    confirmação por botões mas não consulta autonomy.policy em nenhum
-    ponto) — chegou a ser implementado e testado, mas teve que ser
-    REVERTIDO: hermes_core_logic.py sozinho, sem NENHUMA mudança desta
-    sub-entrega, já tem 276257 caracteres — acima do limite de 200000 de
-    `mcp__Argos__argos_escrever_arquivo_repositorio.conteudo` (a API de
-    escrita do Argos exige o arquivo INTEIRO, não um diff/patch), então
-    esse arquivo é estruturalmente inalcançável por este mecanismo de
-    shipping, para QUALQUER mudança, não só a desta sub-entrega. Ver
-    docs/autonomia/execucao.md (P02 sub-entrega 6/N) para os detalhes e o
-    que isso bloqueia. Esta função em si (`decisao_piso`) não depende de
-    hermes_core_logic.py e continua sendo entregue nesta sub-entrega, pronta
-    para o dia em que esse arquivo puder ser alcançado (ex.: extraindo os
-    handlers de Telegram para um módulo menor, ou uma via de escrita que
-    aceite diffs).
+    O segundo consumidor real, cogitado desde a sub-entrega 6/N, era o
+    fechamento do agendamento de WhatsApp via Telegram
+    (hermes_core_logic.py::_handle_telegram_callback, ramo
+    `confirm_whatsapp` — o clique no botão "Confirmar", único ponto do
+    fluxo com `db` resolvido e acesso à política; a closure de tool-calling
+    que monta a prévia, mais abaixo no mesmo arquivo, não tem nenhum dos
+    dois). Na sub-entrega 6/N isso teve que ser REVERTIDO: o arquivo
+    tinha 276257 caracteres, acima do limite de 200000 de
+    `mcp__Argos__argos_escrever_arquivo_repositorio.conteudo` (escrita
+    sempre do arquivo INTEIRO, sem diff/patch). Uma sub-entrega posterior
+    extraiu os handlers de Telegram para telegram_utils.py, reduzindo
+    hermes_core_logic.py para bem abaixo do limite; a sub-entrega 10/N
+    então implementou este preflight de fato no ramo `confirm_whatsapp`
+    (hoje em `telegram_callbacks_confirmacoes.py`, depois que a sub-entrega
+    de modularização por área de 2026-09-08 dividiu o arquivo de novo —
+    ver docstring de `telegram_handlers_core.py`) — ver o próprio código lá
+    e docs/autonomia/execucao.md (P02 sub-entrega 10/N).
 
     Retorna `None` quando `nome` não está classificado em
     `CLASSE_EFEITO_PISO` (mesmo contrato de `mcp_server.py::
