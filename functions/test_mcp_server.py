@@ -157,6 +157,50 @@ class TestDecisaoPisoMcp(unittest.TestCase):
         self.assertIs(request_usado.principal.origem_humana, True)
         self.assertEqual(request_usado.ferramenta, "registrar_aporte_investimento")
 
+    def test_falha_em_avaliar_nao_propaga_excecao_e_bloqueia_com_deny(self):
+        # Mesmo fix de `autonomy.policy::decisao_piso` (P02 sub-entrega
+        # 12/N), aplicado aqui: `autonomy_policy.avaliar(request)` é chamada
+        # dentro de um try/except, caindo em
+        # `autonomy_policy.decisao_erro_avaliacao(...)` (DENY fail-closed)
+        # em vez de propagar. Mockado via `patch.object(mcp_server.
+        # autonomy_policy, "avaliar", ...)` pelo mesmo motivo de
+        # test_policy.py::TestDecisaoPiso::
+        # test_falha_em_avaliar_nao_propaga_excecao_e_bloqueia_com_deny: o
+        # ramo do piso de `avaliar()` não toca `principal` hoje (ver
+        # test_policy.py::TestFloorIdenticoAoMcpServer::
+        # test_classe_efeito_piso_cobre_exatamente_o_floor), então simular
+        # um `principal` malformado de verdade não reproduziria a exceção —
+        # o mock exercita o try/except diretamente, não uma consequência
+        # indireta de dados malformados.
+        ctx = _ctx()
+        with patch.object(
+            mcp_server.autonomy_policy, "estado_autonomia_atual", return_value=EstadoAutonomia.ATIVO
+        ), patch.object(
+            mcp_server.autonomy_policy, "avaliar", side_effect=AttributeError("boom")
+        ), patch.object(mcp_server.autonomy_policy, "registrar_decisao") as mock_registrar:
+            decisao = mcp_server._decisao_piso_mcp(ctx, "schedule_whatsapp_message", {"x": "y"})
+        self.assertEqual(decisao.decision, Decisao.DENY)
+        self.assertEqual(decisao.reason_code, "erro_interno_avaliacao_politica")
+        # registrar_decisao ainda é tentado, mesmo com a decisão de fallback
+        # (auditoria não depende de avaliar() ter tido sucesso).
+        mock_registrar.assert_called_once()
+
+    def test_falha_em_avaliar_nao_impede_registrar_decisao_de_ser_tentado(self):
+        # Variante que confirma a ORDEM: mesmo quando avaliar() falha, a
+        # tentativa de registrar_decisao ainda acontece com a decisão de
+        # fallback (não com None nem interrompendo a função antes dela) —
+        # complementa o teste acima verificando o valor passado adiante.
+        ctx = _ctx()
+        with patch.object(
+            mcp_server.autonomy_policy, "estado_autonomia_atual", return_value=EstadoAutonomia.ATIVO
+        ), patch.object(
+            mcp_server.autonomy_policy, "avaliar", side_effect=RuntimeError("boom")
+        ), patch.object(mcp_server.autonomy_policy, "registrar_decisao") as mock_registrar:
+            decisao = mcp_server._decisao_piso_mcp(ctx, "pausar_conversa", {})
+        decisao_registrada = mock_registrar.call_args.args[2]
+        self.assertIs(decisao_registrada, decisao)
+        self.assertEqual(decisao_registrada.decision, Decisao.DENY)
+
 
 class TestHandleToolsCallPreflight(unittest.TestCase):
     """Integração: `_handle_tools_call` mapeando `PolicyDecision` para a
