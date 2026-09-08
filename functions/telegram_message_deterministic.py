@@ -337,3 +337,4 @@ def try_deterministic_reply(db, token, chat_id, text, session, gemini_key, respo
         return True
 
     return False
+
