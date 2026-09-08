@@ -705,7 +705,7 @@ pendencias:
   - "Duplicação entre autonomy/policy.py::decisao_piso() e mcp_server.py::_decisao_piso_mcp permanece (pendência já registrada no bloco da sub-entrega 6/N)."
   - "hermes_core_logic.py (276257 caracteres) permanece estruturalmente inalcançável por mcp__Argos__argos_escrever_arquivo_repositorio (pendência já registrada no bloco da sub-entrega 6/N) -- vale levar ao André."
   - "Passo 1 do plano segue MATERIALMENTE em aberto: só o canal MCP constrói Principal e passa pelo preflight. Telegram, outbox_aprovacao.py, revisao_semanal.py e mcp_jobs.py continuam sem construir Principal nenhum."
-  - "Todas as pendências já registradas nos blocos das sub-entregas 1/N a 6/N que não foram tocadas nesta sub-entrega continuam abertas: validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP, Mandato.classes_conteudo_permitidas texto livre sem enum fechado, Mandato.usos_na_janela_atual e Mandato.orcamento_maximo sem wrapper de I/O real, o bug de tipo em autonomy/policy.py::preparar_politica (contornado na wrapper, não corrigido no motor), a pergunta de design sobre o default de origem_humana (levar ao André só ao fim do pacote inteiro)."
+  - "Todas as pendências já registradas nos blocos das sub-entregas 1/N a 6/N que não foram tocadas nesta sub-entrega continuam abertas: validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP, Mandato.classes_conteudo_permitidas texto livre sem enum fechado, Mandato.usos_na_janela_atual e Mandato.orcamento_maximo sem wrapper de I/O real, o bug de tipo em autonomy/policy.py::preparar_politica, a pergunta de design sobre o default de origem_humana (levar ao André só ao fim do pacote inteiro)."
 proximo_pacote: "P02 (sub-entrega 8/N -- candidata a decidir: despachar a revisão adversarial pendente desta sub-entrega e da 6/N antes de seguir adiante, ou continuar o passo 1 decidindo o TipoPrincipal de um canal específico agora que decisao_piso() está pronto para reuso)"
 ```
 
@@ -1060,4 +1060,3 @@ pendencias:
   - "IMPORTANTE PARA DECISÃO DE MERGE (já registrada na sub-entrega 3.2/N, segue valendo): mesclar a PR #188 antes de main.py ser desbloqueado muda o comportamento de produção da deduplicação de webhook — ver pendência completa no bloco da sub-entrega 3.2/N. Não afeta diretamente esta PR #189 (mcp_jobs.py é um módulo independente, sem chamador em main.py), mas ambas as PRs seguem empilhadas na mesma cadeia e a decisão de merge de uma pode afetar a ordem de merge da outra."
   - "P01 segue em aberto: firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados."
 proximo_pacote: "P01 (sub-entrega 5/N ou conclusão dos passos 7-10)"
-```
