@@ -793,10 +793,14 @@ def decisao_piso(db, principal: Principal, nome: str, argumentos: dict) -> Polic
     `estado_autonomia_atual()` + `PolicyRequest` + `avaliar()` +
     `registrar_decisao()` num único ponto reutilizável por qualquer canal
     (P02 sub-entrega 6/N). Extraída da lógica que `mcp_server.py::
-    _decisao_piso_mcp` já tinha desde a sub-entrega 2/N — essa função
-    continua com sua própria implementação por ora (ver pendência em
-    docs/autonomia/execucao.md sobre a duplicação; não refeita nesta
-    sub-entrega para não mexer num caminho de código sensível já testado).
+    _decisao_piso_mcp` já tinha desde a sub-entrega 2/N — as duas
+    implementações ficaram em paralelo por várias sub-entregas (pendência
+    registrada desde a 6/N; custou aplicar manualmente a mesma correção
+    fail-closed duas vezes na sub-entrega 12/N). Desde a sub-entrega 13/N,
+    `_decisao_piso_mcp` DELEGA para esta função no caminho feliz (quando
+    `ctx.db` resolve); ela só mantém lógica própria para o caso em que
+    `ctx.db`, uma property lazy, lança na própria inicialização — algo que
+    não se aplica aqui, já que este `db` chega como argumento já resolvido.
 
     O segundo consumidor real, cogitado desde a sub-entrega 6/N, era o
     fechamento do agendamento de WhatsApp via Telegram
