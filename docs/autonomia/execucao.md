@@ -376,7 +376,7 @@ decisoes:
 testes:
   comandos:
     - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
-    - "cd functions && venv/bin/python -m unittest test_policy test_contracts test_mcp_server test_hermes_tools test_mcp_oauth -v"
+    - "cd functions && venv/bin/python -m unittest test_policy test_contracts test_mcp_server test_hermes_tools -v"
   resultados:
     - "Python (unittest, suíte completa): 1280/1280 passando (1261 anteriores da sub-entrega 2/N + 19 testes novos: 15 em TestFerramentasDePolitica — test_hermes_tools.py — e 4 em TestFerramentasDePoliticaViaMcp — test_mcp_server.py, contagem conferida por AST, não de memória; 0 regressões)"
 evidencias:
@@ -932,4 +932,44 @@ pendencias:
   - "Duplicação entre autonomy/policy.py::decisao_piso() e mcp_server.py::_decisao_piso_mcp permanece (pendência já registrada desde a sub-entrega 6/N) -- a correção desta sub-entrega foi aplicada duas vezes, manualmente, exatamente por causa dessa duplicação; não endereçada agora para não mexer em caminho de código sensível já testado nos dois lados."
   - "Todas as pendências já registradas nos blocos anteriores que não foram tocadas por esta sub-entrega continuam abertas: passo 1 do plano parcialmente aberto (outbox_aprovacao.py/revisao_semanal.py sem Principal), risco de bare-name-resolution nos módulos de área, validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP, Mandato.classes_conteudo_permitidas texto livre sem enum fechado, Mandato.usos_na_janela_atual/orcamento_maximo sem wrapper de I/O real, bug de tipo em preparar_politica, pergunta de design sobre o default de origem_humana."
 proximo_pacote: "P02 -- a decidir com André: religar outbox_aprovacao.py/revisao_semanal.py a Principal/decisao_piso() (passo 1 do plano, escopo há duas sub-entregas deliberadamente deixado de fora), resolver a duplicação entre decisao_piso() e _decisao_piso_mcp, ou revisitar a lista de pendências acumuladas para levar ao André antes de mais trabalho autônomo."
+```
+
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: aa4254d08837b49f2ac7100a4bc165e2fad0a21d
+pacote: P02
+estado: pronto_para_revisao
+inicio: "2026-09-08T18:30:00Z"
+fim: "2026-09-08T19:53:00Z"
+arquivos_alterados:
+  - functions/autonomy/policy.py (docstring de decisao_piso() registra a delegação; sem mudança funcional)
+  - functions/mcp_server.py (_decisao_piso_mcp delega para autonomy_policy.decisao_piso() no caminho feliz)
+  - functions/test_mcp_server.py (2 testes novos: a delegação em si e o fallback quando ctx.db falha)
+decisoes:
+  - id: p02-sub13-delegacao-decisao-piso
+    motivo: "Duplicação registrada desde a sub-entrega 6/N e que custou aplicar a correção fail-closed da sub-entrega 12/N duas vezes, manualmente. _decisao_piso_mcp agora delega para autonomy_policy.decisao_piso(db, principal, nome, argumentos) no caminho feliz (quando ctx.db resolve sem lançar). A única razão legítima para _decisao_piso_mcp continuar existindo como função própria: ctx.db é uma property lazy que pode lançar na própria inicialização (ex.: \"The default Firebase app does not exist\") -- falha que decisao_piso() não precisa tratar, já que recebe db como argumento já resolvido."
+    autoridade: existente_ou_nova
+  - id: p02-sub13-simplificacao-fallback-ctx-db
+    motivo: "Quando ctx.db falha, o código antigo fazia uma segunda tentativa condenada de ctx.db dentro do próprio try/except de registrar_decisao (sempre falhando de forma idêntica, nunca produzindo registro). O código novo pula essa segunda tentativa -- simplificação inofensiva, documentada e coberta por test_ctx_db_indisponivel_cai_em_somente_preparacao_sem_registrar."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover"
+  resultado: "1369 -> 1371 (baseline pré-refatoração medido diretamente via git stash, não o número documentado antes; refatoração acrescentou exatamente 2 testes, sem outra oscilação)"
+evidencias:
+  - "Revisão adversarial independente (subagente general-purpose sem contexto da implementação, dispatado antes do PR): nenhum problema bloqueante encontrado; confirmado que todo caminho de _decisao_piso_mcp termina em DENY/PREPARE_ONLY/REQUIRE_APPROVAL, nunca ALLOW nu."
+  - "3 commits verificados individualmente por hash antes de prosseguir: autonomy/policy.py (commit e6a37c8f96dfcb98e8eddb043307e82e0d2e4609, sha f2e16910a1bdf564901c7718f3595af4b7c2e8ce), mcp_server.py (commit c8b4e892453412b6940e192fda68c859b7dd098e, sha f1e55b931618cae21a2244dd73913cb581dc9392), test_mcp_server.py (commit 4e78fd1bdae9b250c01ea0ed818018c621f9e13f, sha 732dcc20d377719401b2f69518b981898b01f621) -- todos batendo exatamente no primeiro envio, cadeia de parents conferida."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: a duplicação entre autonomy/policy.py::decisao_piso() e mcp_server.py::_decisao_piso_mcp, registrada desde a sub-entrega 6/N."
+  - "Todas as pendências já registradas nos blocos anteriores que não foram tocadas por esta sub-entrega continuam abertas: passo 1 do plano parcialmente aberto (outbox_aprovacao.py/revisao_semanal.py sem Principal), risco de bare-name-resolution nos módulos de área, validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP, Mandato.classes_conteudo_permitidas texto livre sem enum fechado, Mandato.usos_na_janela_atual/orcamento_maximo sem wrapper de I/O real, bug de tipo em preparar_politica, pergunta de design sobre o default de origem_humana, dependência de CLASSE_EFEITO_PISO/FLOOR_CONFIRMACAO_OBRIGATORIA continuarem com as mesmas chaves (travado por teste, mas não uma garantia estrutural)."
+proximo_pacote: "P02 -- a decidir com André: religar outbox_aprovacao.py/revisao_semanal.py a Principal/decisao_piso() (passo 1 do plano, escopo há várias sub-entregas deliberadamente deixado de fora -- decisão de produto/design, não só engenharia), ou revisitar a lista de pendências acumuladas para levar ao André antes de mais trabalho autônomo."
 ```
