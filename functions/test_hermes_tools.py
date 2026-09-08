@@ -373,6 +373,47 @@ class TestFerramentasDePolitica(unittest.TestCase):
         dados = json.loads(r[len("ERRO|"):])
         self.assertEqual(dados["pedidos_invalidos"][0]["indice"], 0)
 
+    def test_simular_politica_orcamento_restante_tipo_errado_e_reportado_por_indice(self):
+        """Antes desta correção, um `orcamento_restante` não numérico (ex.:
+        string) passava intacto até `mandato_cobre()`, onde a comparação
+        `orcamento_restante > 0` levanta TypeError -- capturado só pelo
+        `except Exception` amplo em torno da chamada em lote a
+        `autonomy_policy.simular_politica`, abortando TODOS os pedidos do
+        lote com uma mensagem genérica em vez de reportar por índice como os
+        demais campos inválidos (mesma classe de achado já corrigida para
+        `argumentos_resolvidos` e `origem_humana` acima)."""
+        from tools.tool_context import ToolContext
+
+        r = hermes_tools.execute("simular_politica", {"pedidos": [
+            {"ferramenta": "pausar_conversa", "orcamento_restante": "muito"},
+        ]}, ToolContext())
+        self.assertTrue(r.startswith("ERRO|"))
+        dados = json.loads(r[len("ERRO|"):])
+        self.assertEqual(dados["pedidos_invalidos"][0]["indice"], 0)
+        self.assertIn("orcamento_restante", dados["pedidos_invalidos"][0]["erro"])
+
+    def test_simular_politica_orcamento_restante_bool_e_rejeitado(self):
+        """`bool` é subclasse de `int` em Python -- `orcamento_restante=True`
+        passaria despercebido por um `isinstance(x, (int, float))` ingênuo
+        sem ser um saldo numérico válido."""
+        from tools.tool_context import ToolContext
+
+        r = hermes_tools.execute("simular_politica", {"pedidos": [
+            {"ferramenta": "pausar_conversa", "orcamento_restante": True},
+        ]}, ToolContext())
+        self.assertTrue(r.startswith("ERRO|"))
+        dados = json.loads(r[len("ERRO|"):])
+        self.assertIn("orcamento_restante", dados["pedidos_invalidos"][0]["erro"])
+
+    def test_simular_politica_orcamento_restante_numerico_continua_aceito(self):
+        from tools.tool_context import ToolContext
+
+        r = hermes_tools.execute("simular_politica", {"pedidos": [
+            {"ferramenta": "pausar_conversa", "orcamento_restante": 10.5},
+        ]}, ToolContext())
+        self.assertFalse(r.startswith("ERRO|"))
+        self.assertEqual(json.loads(r)["total"], 1)
+
     def test_preparar_politica_delega_para_o_motor_puro(self):
         from tools.tool_context import ToolContext
 
@@ -942,7 +983,7 @@ class TestSinalDeIntencao(unittest.TestCase):
 class TestToolsLongas(unittest.TestCase):
     """Tools acima de um minuto nao podem rodar dentro do request.
 
-    Pela URL do Hosting — a que Cowork, Desktop e celular usam — o corte e 60s, e
+    Pela URL do Hosting — a que Cowork, Desktop e celular usam — o corte é 60s, e
     o cliente recebe erro de gateway sem explicacao.
     """
 
