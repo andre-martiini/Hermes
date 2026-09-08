@@ -523,72 +523,75 @@ def _decisao_piso_mcp(ctx: ToolContext, nome: str, argumentos: dict) -> PolicyDe
     implementado; registrado como limitação conhecida, não escondida, em
     docs/autonomia/execucao.md.
 
-    `autonomy_policy.avaliar(request)` é chamada dentro de um try/except
-    (P02 sub-entrega 12/N, mesmo fix aplicado em `autonomy.policy::
-    decisao_piso`, o outro consumidor real do motor) — defesa em
-    profundidade contra um `principal` malformado propagar `AttributeError`
-    em vez de bloquear fail-closed. `_principal_mcp(ctx)` em si nunca falha
-    assim hoje (só lê `ctx.user_uid`/`ctx.canal`, nunca `ctx.db`), e o ramo
-    do motor que este preflight sempre exercita (piso) nem chega a tocar
-    `principal` — ver `autonomy.policy.decisao_erro_avaliacao()` para o
-    detalhe honesto de por que o risco prático é baixo hoje mesmo assim, e
-    por que DENY (não SOMENTE_PREPARACAO/PREPARE_ONLY) é a resposta certa
-    quando o guard entra em ação.
+    P02 sub-entrega 13/N — fim da duplicação: no caminho feliz (Firestore
+    acessível), esta função agora DELEGA inteiramente para
+    `autonomy_policy.decisao_piso(db, principal, nome, argumentos)`, em vez
+    de reimplementar em paralelo o mesmo lookup de classe_efeito + resolução
+    de estado + `PolicyRequest` + `avaliar()` com fallback fail-closed +
+    `registrar_decisao()`. Essa duplicação (registrada como pendência desde
+    a sub-entrega 6/N) já tinha custo real: a correção fail-closed da
+    sub-entrega 12/N precisou ser aplicada manualmente duas vezes, uma em
+    cada função. A ÚNICA razão para esta função continuar existindo, em vez
+    de os chamadores usarem `decisao_piso()` diretamente, é a diferença de
+    como `db` chega: `decisao_piso()` recebe um `db` já resolvido (nunca
+    lança ao ser passado como argumento); aqui, `ctx.db` é uma property lazy
+    que pode lançar na PRÓPRIA inicialização do cliente Firestore (ex.: "The
+    default Firebase app does not exist") — falha que fica FORA de qualquer
+    try/except de `decisao_piso()`/`estado_autonomia_atual()`/
+    `registrar_decisao()`, já que todos eles protegem falha de LEITURA/
+    ESCRITA usando um `db` válido, não a resolução do próprio `db`. Por
+    isso `ctx.db` é isolado aqui, numa única tentativa, antes de delegar.
+
+    Quando essa tentativa falha (`db is None`): sem um `db` utilizável não
+    há como chamar `decisao_piso()` (ela pressupõe `db` resolvido) nem
+    registrar a decisão de verdade. O fallback abaixo reproduz o mesmo
+    resultado observável do código anterior a esta sub-entrega
+    (`estado=SOMENTE_PREPARACAO`, `avaliar()` com o mesmo guard fail-closed
+    de `decisao_erro_avaliacao()`, sem tentativa de registro). Simplificação
+    deliberada em relação ao código anterior: antes, uma segunda tentativa
+    de acessar `ctx.db` acontecia dentro do try/except de
+    `registrar_decisao`, e falhava do mesmo jeito na prática (nada indica
+    que `ctx.db` se recupere entre duas chamadas na mesma requisição) —
+    nunca produzia um registro; esta versão não repete a tentativa, sem
+    mudança de comportamento observável hoje (ver
+    `test_ctx_db_indisponivel_cai_em_somente_preparacao_sem_registrar`).
     """
     classe_efeito = autonomy_policy.CLASSE_EFEITO_PISO.get(nome)
     if classe_efeito is None:
         return None
 
-    # `estado_autonomia_atual` já captura falha de LEITURA do documento
-    # (Firestore indisponível, valor corrompido) e cai em SOMENTE_PREPARACAO
-    # — mas `ctx.db` (a property que inicializa o cliente Firestore sob
-    # demanda) é avaliado como ARGUMENTO desta chamada, fora do try/except
-    # que existe dentro dela; se a própria inicialização falhar (achado dos
-    # testes de regressão desta sub-entrega: `test_hermes_tools.py::
-    # TestCamadaJsonRpc` mocka `_criar_confirmacao`/`preview_tool` mas nunca
-    # precisava de um app Firebase real até este preflight passar a existir
-    # — "The default Firebase app does not exist" em ambiente de teste, e o
-    # mesmo aconteceria em produção sob uma falha real de inicialização), a
-    # exceção nunca chegaria a entrar em `estado_autonomia_atual` para ser
-    # tratada. Mesmo raciocínio de falha fechada, um nível acima: nunca
-    # deixar uma falha em resolver o ESTADO propagar e derrubar a chamada
-    # inteira do MCP com um erro interno opaco (-32000, sem o tratamento
-    # gracioso que o resto deste arquivo dá a falha de Firestore — ver
-    # `except Exception` ao redor de `_criar_confirmacao` mais abaixo) —
-    # cai no mesmo SOMENTE_PREPARACAO que uma falha de leitura já cairia.
     try:
-        estado = autonomy_policy.estado_autonomia_atual(ctx.db)
-    except Exception as exc:  # noqa: BLE001 — nunca derrubar a chamada por falha de preflight
-        print(f"[mcp_server] Falha ao resolver estado de autonomia para preflight de '{nome}': {exc}")
-        estado = EstadoAutonomia.SOMENTE_PREPARACAO
+        db = ctx.db
+    except Exception as exc:  # noqa: BLE001 — nunca derrubar a chamada por falha ao resolver o cliente Firestore
+        print(f"[mcp_server] Falha ao resolver ctx.db para preflight de '{nome}': {exc}")
+        db = None
 
+    principal = _principal_mcp(ctx)
+
+    if db is not None:
+        return autonomy_policy.decisao_piso(db, principal, nome, argumentos)
+
+    # `db` inutilizável: sem `registrar_decisao` possível (não há onde
+    # gravar), mas a decisão em si ainda precisa existir, fail-closed —
+    # mesmo raciocínio de `decisao_piso()`, sem o passo de auditoria.
     request = PolicyRequest(
-        principal=_principal_mcp(ctx),
+        principal=principal,
         ferramenta=nome,
         classe_efeito=classe_efeito,
         argumentos_resolvidos=argumentos,
-        estado_autonomia=estado,
+        estado_autonomia=EstadoAutonomia.SOMENTE_PREPARACAO,
     )
     try:
-        decisao = autonomy_policy.avaliar(request)
+        return autonomy_policy.avaliar(request)
     except Exception as exc:  # noqa: BLE001 — principal malformado nunca deixa a tool do piso passar sem confirmação
-        print(f"[mcp_server] Falha ao avaliar política do piso para '{nome}': {exc}")
-        decisao = autonomy_policy.decisao_erro_avaliacao(
+        print(f"[mcp_server] Falha ao avaliar política do piso (sem db) para '{nome}': {exc}")
+        return autonomy_policy.decisao_erro_avaliacao(
             request,
             motivo_legivel=(
                 f"Falha interna ao avaliar a política de autonomia para '{nome}'; "
                 "bloqueado por segurança."
             ),
         )
-    try:
-        # Mesmo raciocínio do bloco acima: `registrar_decisao` já não deixa
-        # uma falha de ESCRITA (dentro dela) derrubar a chamada, mas de novo
-        # `ctx.db` como argumento é avaliado fora do try dela — auditoria
-        # nunca pode ser a razão de uma tool do piso falhar.
-        autonomy_policy.registrar_decisao(ctx.db, request, decisao)
-    except Exception as exc:  # noqa: BLE001 — telemetria nunca derruba a decisão
-        print(f"[mcp_server] Falha ao registrar decisão de política para '{nome}': {exc}")
-    return decisao
 
 
 def _criar_confirmacao(ctx: ToolContext, nome: str, argumentos: dict, previa: dict | None) -> str:
