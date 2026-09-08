@@ -750,11 +750,10 @@ def decisao_piso(db, principal: Principal, nome: str, argumentos: dict) -> Polic
     sempre do arquivo INTEIRO, sem diff/patch). Uma sub-entrega posterior
     extraiu os handlers de Telegram para telegram_utils.py, reduzindo
     hermes_core_logic.py para bem abaixo do limite; a sub-entrega 10/N
-    então implementou este preflight de fato no ramo `confirm_whatsapp`
-    (hoje em `telegram_callbacks_confirmacoes.py`, depois que a sub-entrega
-    de modularização por área de 2026-09-08 dividiu o arquivo de novo —
-    ver docstring de `telegram_handlers_core.py`) — ver o próprio código lá
-    e docs/autonomia/execucao.md (P02 sub-entrega 10/N).
+    então implementou este preflight de fato no ramo `confirm_whatsapp` —
+    ver o próprio código lá e docs/autonomia/execucao.md (P02 sub-entrega
+    10/N, ou o corpo do PR que a entregou, se o arquivo já tiver
+    ultrapassado também o teto de escrita nessa data).
 
     Retorna `None` quando `nome` não está classificado em
     `CLASSE_EFEITO_PISO` (mesmo contrato de `mcp_server.py::
