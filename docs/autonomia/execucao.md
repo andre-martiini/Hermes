@@ -901,52 +901,47 @@ proximo_pacote: "P01 (sub-entrega 4/N)"
 
 ```yaml
 plano: plano-hermes-autonomo-2026-09-06
-base_commit: 9922fd6f29cfc7f5fba9a5b854379f3ff2db82f2
-pacote: "P01 (sub-entrega 4/N — mcp_jobs.py)"
-# Continuação da divisão do pacote "G" P01 (seção 8 do plano). Cobre os
-# passos 5-6 (achado A10) em functions/mcp_jobs.py — execução assíncrona das
-# tools longas do canal MCP via gatilho Firestore. PR #189, empilhada sobre
-# claude/p01-agent-requests-idempotencia (PR #188, ainda pronto_para_revisao).
-# Sem espera de 90 minutos em relação às sub-entregas anteriores: mesmo
-# pacote "G", decisão já registrada nos blocos anteriores.
+base_commit: 7782388d8958d017d4832031a9492359ebade9c8
+pacote: "P01 (sub-entrega 3.1/N — resposta ao achado do Codex na PR #188)"
+# Não é uma nova sub-entrega de escopo do plano; é a resposta ao ciclo de
+# revisão da sub-entrega 3/N (PR #188, ainda pronto_para_revisao, não
+# reescrita — só complementada aqui por ser um bloco novo). Mesmos arquivos
+# (functions/core/idempotency.py, functions/test_idempotency.py), commit novo
+# na mesma branch (claude/p01-agent-requests-idempotencia), seguindo a
+# orientação da skill de shipping para responder a comentários de revisão.
 estado: pronto_para_revisao
-inicio: "2026-09-07T04:20:00Z"
-fim: "2026-09-07T04:46:00Z"
+inicio: "2026-09-07T03:20:00Z"
+fim: "2026-09-07T03:55:00Z"
 arquivos_alterados:
-  - functions/mcp_jobs.py
-  - functions/test_mcp_jobs.py (novo)
+  - functions/core/idempotency.py
+  - functions/test_idempotency.py
 decisoes:
-  - id: p01-a10-mcp-jobs-claim-transacional
-    motivo: "Achado A10, passo 5: on_mcp_job_created (gatilho Firestore, at-least-once) podia rodar a mesma tool duas vezes numa reentrega do evento, porque a checagem de status usava o snapshot do próprio evento (potencialmente desatualizado) em vez de uma leitura fresca. Corrigido com _claim(db, ref): leitura+escrita transacional (@firestore.transactional) que só deixa UMA execução prosseguir por job, usando o campo status como sentinela (processing → em_execucao). Mesma ideia de core/idempotency.py (sub-entregas 3/N-3.2/N), adaptada: aqui é claim de execução de um job interno, não deduplicação por chave externa de webhook."
+  - id: p01-codex-preserva-eventos-apos-commit-ambiguo
+    motivo: "Achado real do Codex na PR #188 (não rubber-stamp): check_and_register (sub-entrega 3/N) usava um único sentinela — 'documento existe' = 'já processado, pular'. Se o COMMIT da transação que cria esse sentinela for ambíguo (cliente recebe timeout/erro, mas o Firestore já escreveu no servidor), uma reentrega legítima do GitHub encontraria o sentinela e pularia o evento para sempre, mesmo que o processamento de fato nunca tenha rodado — perda silenciosa e permanente de evento. Corrigido separando o sentinela em dois estados: RESERVADO (tentativa começou) e CONCLUIDO (efeito terminou de verdade, via novo mark_complete()). Só CONCLUIDO é duplicata; RESERVADO recente levanta ReservaEmAndamentoError (nem sucesso nem duplicata); RESERVADO expirado (RESERVA_EXPIRA_APOS=5min) permite retomar."
     autoridade: existente_ou_nova
-  - id: p01-a10-mcp-jobs-classificacao-erro-resultado
-    motivo: "Achado A10, passo 6: o resultado da tool era gravado como done sempre que execute() retornava sem lançar exceção, mesmo quando o próprio resultado indicava erro (dict com chave 'erro' truthy, ou string começando com 'ERRO|'/'⚠️' — convenção já usada no caminho síncrono de mcp_server.py, não inventada aqui). Corrigido com _resultado_indica_erro(), que classifica como error em vez de done nesse caso — sem isso ler_job devolvia um 'sucesso' que não era, contrariando o critério de aceite do plano ('não há falso done quando handler relata erro')."
+  - id: p01-idempotency-tri-state-string-rejeitado
+    motivo: "Primeira tentativa de fix fez check_and_register devolver uma de três strings (novo/duplicata/em_andamento) em vez de bool. Identificado ANTES de publicar, por raciocínio próprio sobre o call site de produção: o main.py HOJE implantado faz `if not check_and_register(...)`, e `not \"qualquer string não-vazia\"` é sempre False em Python — ou seja, TODA entrega (mesmo duplicata genuína) passaria a ser tratada como nova, desligando silenciosamente a deduplicação inteira do webhook assim que esta PR fosse mergeada, já que main.py não pode ser editado no mesmo lote (ver bloqueio de tamanho, sub-entrega 3/N). Revertido para bool + uma exceção nova (ReservaEmAndamentoError) para o terceiro caso — compatível de verdade com o contrato bool já implantado, com zero edição adicional de main.py necessária para a correção ter efeito de segurança (uma exceção não capturada nunca vira 200, ver decisão seguinte)."
     autoridade: existente_ou_nova
-  - id: p01-a10-mcp-jobs-expira-em-datetime
-    motivo: "Achado A10: expira_em era gravado como inteiro Unix (int(time.time()) + TTL), que o TTL do Firestore não reconhece (precisa Timestamp/datetime, não número). Corrigido nos dois pontos de escrita (_claim, ao marcar claim abandonado como error; _executar_job, nos caminhos done e error) para datetime timezone-aware."
+  - id: p01-idempotency-docstring-corrigida-pos-revisao
+    motivo: "A revisão adversarial final (design bool+exceção) apontou que a docstring de ReservaEmAndamentoError afirmava existir um `except Exception` no chamador (main.py) já capturando a exceção — falso: `git show HEAD:functions/main.py` confirma que a chamada a check_and_register lá não tem NENHUM try/except ao redor. Verificado o comportamento real: uma exceção não capturada sobe até o crash_handler do functions_framework (500 via error handler registrado em flask, nunca 200) — ou seja, a correção já é segura em produção mesmo sem essa edição de main.py, só não é tão 'limpa' (500 genérico com o texto da exceção no corpo, em vez de um 503 específico e logado) quanto ficaria com o rascunho local de main.py aplicado. Docstring corrigida para descrever esse caminho real em vez do caminho que só existe no rascunho bloqueado."
     autoridade: existente_ou_nova
-  - id: p01-a10-mcp-jobs-claim-abandonado-sem-retry-automatico
-    motivo: "Instrução explícita do plano (P01 passo 6): handler cujo efeito pode não ser idempotente não deve ser retentado automaticamente. Um claim em em_execucao mais velho que CLAIM_EXPIRA_APOS (600s) é tratado como abandonado (execução anterior morreu sem concluir — crash, timeout) e marcado error, nunca reprocessado automaticamente pela tentativa que encontrou o claim vencido; decisão de tentar de novo fica manual. CLAIM_EXPIRA_APOS (600s) deliberadamente excede o timeout_sec do gatilho (540s): o Cloud Functions mata a execução com segurança nessa marca, então qualquer execução ainda 'em andamento' aos 600s já foi encerrada à força pela plataforma — não é margem arbitrária, é garantia."
+  - id: p01-idempotency-fencing-token-aceito-como-latente
+    motivo: "Achado da revisão adversarial: mark_complete() não é transacional e não verifica se está completando a MESMA reserva que check_and_register concedeu (sem fencing token) — em teoria, se uma tentativa ficasse presa por mais de RESERVA_EXPIRA_APOS (5min) e só então terminasse e chamasse mark_complete, poderia finalizar incorretamente a reserva de uma tentativa seguinte que já tinha retomado o processamento. Aceito como limitação latente, não corrigido: o timeout configurado da função (githubWebhook) fica bem abaixo de 5 minutos, então uma tentativa presa é encerrada pelo runtime antes de chegar a esse ponto — mesmo precedente de decisão usado para o protocolo de lease do P04 (aceitar uma janela teórica não explorável nas condições operacionais atuais, documentar, não bloquear a entrega)."
     autoridade: existente_ou_nova
-  - id: p01-a10-mcp-jobs-timeout-e-claim-mesma-constante
-    motivo: "Achado da revisão adversarial: CLAIM_EXPIRA_APOS e o timeout_sec do gatilho eram dois números soltos sem vínculo no código — uma mudança futura em um sem atualizar o outro podia quebrar em silêncio a garantia de segurança (600 > 540) descrita na decisão anterior. Corrigido antes de publicar: os dois agora derivam de uma única constante _TIMEOUT_SEC (540), com uma asserção no import (assert CLAIM_EXPIRA_APOS > timedelta(seconds=_TIMEOUT_SEC)) e um teste dedicado (TestInvarianteClaimVsTimeout) garantindo a relação."
-    autoridade: existente_ou_nova
-  - id: p01-a10-mcp-jobs-ler-job-not-found-restaurado
-    motivo: "Achado da revisão adversarial: a reescrita inicial de ler_job() havia colapsado o status distinto 'not_found' (job inexistente ou de outro uid — mesma resposta para os dois, para não vazar existência a quem está adivinhando job_id) em 'error' genérico, e removido a guarda de job_id vazio que existia no código original. Nenhum caller de produção (só tools/hermes_tools.py::_consultar_job, um passthrough puro para a tool MCP) fazia match exaustivo nesse valor, mas era uma mudança de contrato público não solicitada e não documentada — restaurado para bater exatamente com o comportamento pré-existente antes de publicar, não deixado como divergência silenciosa."
-    autoridade: existente_ou_nova
-  - id: p01-a10-mcp-jobs-reaper-fora-de-escopo
-    motivo: "Achado da revisão adversarial, aceito como limitação documentada e não corrigido: a recuperação de um claim abandonado só roda quando uma NOVA entrega do evento do gatilho chega para o mesmo documento — 'at-least-once' garante pelo menos uma entrega bem-sucedida, não uma redisparada por crash. Se a instância que detém o claim morrer sem que o Cloud Functions redispare o evento, o job fica em_execucao indefinidamente (ler_job reporta 'processing' para sempre; expira_em só é gravado nos caminhos terminais, então o TTL do Firestore também não recupera esse caso). Resolver isso de verdade exigiria uma função agendada (reaper) varrendo em_execucao vencidos — fora do escopo do achado A10 tal como descrito no plano (dedupe de reentrega e classificação de erro), registrado aqui como candidato a pacote futuro, não como bug desta sub-entrega. Estritamente melhor que o código anterior, que não tinha proteção nenhuma contra reexecução por reentrega."
+  - id: p01-anotar-eventos-nao-idempotente-mantido-best-effort
+    motivo: "A revisão adversarial sugeriu (no rascunho local de main.py, ainda bloqueado) só chamar mark_complete quando anotar_evento_github_em_tarefas não tiver nenhuma falha parcial. Rejeitado deliberadamente: anotar_evento_github_em_tarefas já trata falha por tarefa como best-effort (uma tarefa falhar não derruba as outras, achado já aceito em sub-entrega anterior) e NÃO é idempotente — se mark_complete ficasse condicionado a zero falhas, uma reentrega subsequente reprocessaria TODAS as tarefas do evento, inclusive as que já tinham sido anotadas com sucesso na tentativa anterior, duplicando anotações. Manter mark_complete incondicional ao término da chamada (independente de falhas parciais internas) é estritamente melhor dado que o efeito interno já não é idempotente — consistente com a decisão de design já tomada para essa função. Registrado aqui para não reabrir a discussão sem essa nota."
     autoridade: existente_ou_nova
 testes:
   comandos:
-    - "cd functions && venv/bin/python -m unittest test_mcp_jobs -v"
+    - "cd functions && venv/bin/python -m unittest test_idempotency test_github_webhook -v"
     - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
   resultados:
-    - "test_mcp_jobs (novo arquivo): 32/32 — claim ganho/recusado/concorrente, claim expirado marca error sem reprocessar, claim sem claimed_em tratado como abandonado, invariante CLAIM_EXPIRA_APOS > _TIMEOUT_SEC, classificação de erro (dict/string/exceção), truncamento de resultado grande, contrato de ler_job (not_found/processing/done/error, uid errado, job_id vazio), e o wrapper on_mcp_job_created em si (event.data None/inexistente, execução normal, reentrega de job já em_execucao não roda a tool de novo)"
-    - "Python (unittest, suíte completa): 1207/1207 passando (1175 anteriores + 32 novos; 0 regressões)"
+    - "Python (unittest, suíte completa): 1175/1175 passando (1166 da sub-entrega 3/N + 9 novos de test_idempotency.py reescrito para o design reserva/conclusão; 0 regressões)"
+    - "test_idempotency: 9/9 (reserva recente levanta ReservaEmAndamentoError sem reescrever; reserva expirada permite reprocessar; documento legado sem status tratado como reserva expirada; mark_complete bloqueia reentrega mesmo após a reserva expirar; mark_complete preserva reserved_at original; mark_complete numa chave sem reserva prévia não quebra — achado da revisão; mais os 3 já existentes revalidados sob o novo design)"
+    - "test_github_webhook: 16/16 no rascunho local (ainda não publicado — mesmo bloqueio de main.py da sub-entrega 3/N)"
 evidencias:
-  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio da implementação): leu mcp_jobs.py, test_mcp_jobs.py e mcp_server.py (para comparar a convenção de classificação de erro), rastreou o protocolo real de transação/retry no código-fonte instalado de google.cloud.firestore_v1 (confirmou que uma transação concorrente perdedora recebe Aborted e é retentada pelo wrapper real, relendo estado fresco), e rodou a suíte de testes. Achados reais, todos endereçados antes de publicar (ver decisões p01-a10-mcp-jobs-timeout-e-claim-mesma-constante e p01-a10-mcp-jobs-ler-job-not-found-restaurado) ou aceitos e documentados explicitamente como fora de escopo (ver decisão p01-a10-mcp-jobs-reaper-fora-de-escopo, e a nota sobre o campo erro ser sempre string — já era o contrato antes desta sub-entrega, só estendido ao novo caminho de resultado-que-indica-erro)."
-  - "Achados de qualidade de teste da própria revisão, também endereçados: o mock de transação original não cobria claimed_em ausente/tipo inesperado (adicionado test_claim_em_execucao_sem_claimed_em_e_tratado_como_abandonado) e o wrapper decorado on_mcp_job_created não tinha nenhuma cobertura direta (adicionado TestOnMcpJobCreated, chamando .__wrapped__ para contornar a exigência de CloudEvent bruto do decorator do firebase-functions — nenhum outro trigger do repositório testa essa camada decorada, então isto é cobertura nova, não um padrão quebrado)."
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio, dedicada a este design final — as duas revisões anteriores foram sobre designs já superados: a original de sentinela único e a intermediária tri-state) — leu o diff local completo contra origin/main, o código-fonte instalado de google.cloud.firestore_v1.transaction (confirmou que só google.api_core.exceptions.Aborted é retentado automaticamente pelo decorator, e que uma exceção levantada dentro da função decorada nunca é retentada), e o código-fonte instalado de functions_framework/flask (confirmou o caminho até crash_handler/500). Achados: a imprecisão de docstring (corrigida, ver decisão), a ausência de fencing token em mark_complete (aceita como latente, ver decisão), e a sugestão sobre anotar_evento_github_em_tarefas não-idempotente (rejeitada com justificativa, ver decisão). Verificou como sólido: a lógica de arbitragem entre reservas concorrentes via retry de Aborted, a ordem correta dos except no rascunho de main.py (ReservaEmAndamentoError antes do Exception genérico, sem sombreamento), e o uso correto de merge=True+SERVER_TIMESTAMP em mark_complete."
+  - "Autocorreção antes de publicar (não veio de nenhum revisor, achado por raciocínio próprio sobre o call site de produção real): o design tri-state por string teria desligado silenciosamente toda a deduplicação do webhook GitHub em produção assim que mergeado — ver decisão p01-idempotency-tri-state-string-rejeitado. Nenhum código desse design chegou a ser publicado."
 migracao:
   dry_run: null
   executada: false
@@ -954,9 +949,8 @@ flags:
   antes: {}
   depois: {}
 pendencias:
-  - "Limitação aceita, não corrigida (ver decisão p01-a10-mcp-jobs-reaper-fora-de-escopo): sem uma função agendada (reaper), um claim cuja instância morre sem o Cloud Functions redisparar o evento fica em_execucao indefinidamente. Candidato a P04 (durabilidade de execução) ou sub-entrega dedicada, não bloqueia esta entrega."
-  - "Mesmo bloqueio já registrado nas sub-entregas 3/N-3.2/N: functions/main.py e functions/test_github_webhook.py seguem sem publicar (limite de 200k caracteres do Argos)."
-  - "IMPORTANTE PARA DECISÃO DE MERGE (já registrada na sub-entrega 3.2/N, segue valendo): mesclar a PR #188 antes de main.py ser desbloqueado muda o comportamento de produção da deduplicação de webhook. Não afeta diretamente esta PR #189 (mcp_jobs.py é um módulo independente, sem chamador em main.py), mas ambas as PRs seguem empilhadas na mesma cadeia e a decisão de merge de uma pode afetar a ordem de merge da outra."
-  - "P01 segue em aberto: firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados."
-proximo_pacote: "P01 (sub-entrega 5/N ou conclusão dos passos 7-10)"
+  - "Mesmo bloqueio já registrado na sub-entrega 3/N: functions/main.py (agora ~682KB, ligeiramente maior) e functions/test_github_webhook.py seguem sem publicar, à espera de uma das três soluções já propostas para o limite de escrita do Argos (nova tool de diff, aumento do limite, ou divisão de main.py em módulos)."
+  - "Limitação latente aceita (ver decisão p01-idempotency-fencing-token-aceito-como-latente): se este módulo (core/idempotency.py) vier a ser reusado por um chamador com tempo de execução não necessariamente bem abaixo de RESERVA_EXPIRA_APOS (5min) — o docstring já cita 'update_id de bot' como exemplo genérico — reavaliar a necessidade de um fencing token antes de reusar."
+  - "P01 segue em aberto: mcp_jobs.py (passos 5-6), firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados."
+proximo_pacote: "P01 (sub-entrega 4/N)"
 ```
