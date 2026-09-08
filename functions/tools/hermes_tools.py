@@ -2192,6 +2192,20 @@ def _policy_request_simulado(pedido: dict) -> PolicyRequest:
         # em vez de virar um erro por índice como os demais campos.
         raise ValueError("'argumentos_resolvidos' deve ser um objeto")
 
+    orcamento_restante = pedido.get("orcamento_restante")
+    if orcamento_restante is not None and (
+        isinstance(orcamento_restante, bool) or not isinstance(orcamento_restante, (int, float))
+    ):
+        # Gap pré-existente, registrado desde a sub-entrega 4/N (não é
+        # regressão desta correção): um valor não numérico chegava intacto
+        # até `mandato_cobre()`, onde `orcamento_restante > 0` levanta
+        # TypeError — capturado só pelo `except Exception` amplo em torno de
+        # `autonomy_policy.simular_politica(pedidos)` (fora deste loop),
+        # abortando o LOTE inteiro com uma mensagem genérica em vez de
+        # reportar por índice como os demais campos inválidos. `bool` é
+        # excluído deliberadamente (é subclasse de `int` em Python, mas
+        # `orcamento_restante=true` não é um saldo numérico válido).
+        raise ValueError("'orcamento_restante' deve ser numérico (int ou float)")
     return PolicyRequest(
         principal=_principal_simulado(pedido),
         ferramenta=ferramenta,
@@ -2199,7 +2213,7 @@ def _policy_request_simulado(pedido: dict) -> PolicyRequest:
         argumentos_resolvidos=argumentos_resolvidos,
         missao=pedido.get("missao"),
         sensibilidade=pedido.get("sensibilidade"),
-        orcamento_restante=pedido.get("orcamento_restante"),
+        orcamento_restante=orcamento_restante,
         estado_autonomia=EstadoAutonomia(str(pedido.get("estado_autonomia") or "ativo")),
     )
 

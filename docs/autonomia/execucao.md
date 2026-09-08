@@ -973,3 +973,56 @@ pendencias:
   - "Todas as pendências já registradas nos blocos anteriores que não foram tocadas por esta sub-entrega continuam abertas: passo 1 do plano parcialmente aberto (outbox_aprovacao.py/revisao_semanal.py sem Principal), risco de bare-name-resolution nos módulos de área, validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP, Mandato.classes_conteudo_permitidas texto livre sem enum fechado, Mandato.usos_na_janela_atual/orcamento_maximo sem wrapper de I/O real, bug de tipo em preparar_politica, pergunta de design sobre o default de origem_humana, dependência de CLASSE_EFEITO_PISO/FLOOR_CONFIRMACAO_OBRIGATORIA continuarem com as mesmas chaves (travado por teste, mas não uma garantia estrutural)."
 proximo_pacote: "P02 -- a decidir com André: religar outbox_aprovacao.py/revisao_semanal.py a Principal/decisao_piso() (passo 1 do plano, escopo há várias sub-entregas deliberadamente deixado de fora -- decisão de produto/design, não só engenharia), ou revisitar a lista de pendências acumuladas para levar ao André antes de mais trabalho autônomo."
 ```
+
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 9bf088faf0cf24033872f134b1376fca265ce2e6
+pacote: "P02 sub-entrega 14/N -- validação de tipo no motor de política: preparar_politica() (motor puro) e orcamento_restante (wrapper MCP de simular_politica)"
+# Continuação autônoma autorizada por André ("Mantenha a criação dos
+# próximos módulos com intervalo de 1 hora, por favor.") -- disparada por
+# lembrete agendado 1h após o envio da sub-entrega 13/N. Escolhida entre as
+# pendências acumuladas por serem as duas únicas puramente de engenharia
+# (sem decisão de produto/design pendente), ambas já tinham a correção
+# adiada explicitamente "para quando autonomy/policy.py ou hermes_tools.py
+# forem revisitados por outro motivo" -- este é esse motivo.
+estado: pronto_para_revisao
+inicio: "2026-09-08T21:30:00Z"
+fim: "2026-09-08T22:20:00Z"
+arquivos_alterados:
+  - functions/autonomy/policy.py (preparar_politica() agora valida o tipo de ferramentas_com_confirmacao_obrigatoria antes de construir o set(), em vez de confiar só na validação da wrapper MCP)
+  - functions/tools/hermes_tools.py (_policy_request_simulado valida orcamento_restante é numérico antes de construir o PolicyRequest, reportando erro por índice em vez de abortar o lote inteiro)
+  - functions/test_policy.py (6 testes novos em TestPrepararPolitica)
+  - functions/test_hermes_tools.py (3 testes novos em TestFerramentasDePolitica)
+decisoes:
+  - id: p02-sub14-preparar-politica-corrige-o-motor-nao-so-a-wrapper
+    motivo: "Achado real da revisão adversarial da sub-entrega 3/N (registrado, nunca corrigido no motor até agora): `set(politica_proposta.get(\"ferramentas_com_confirmacao_obrigatoria\", atual))` sem checar tipo -- uma STRING em vez de lista é iterada caractere por caractere pelo set(), produzindo um diff que parece válido (\"remover as 5 tools reais do piso, adicionar um bando de letras soltas\") sem erro nenhum, exatamente na função cujo propósito é proteger o piso de confirmação obrigatória. A wrapper MCP (_preparar_politica) já validava antes de chamar o motor desde a sub-entrega 3/N -- essa defesa continua no lugar, inalterada. Esta sub-entrega fecha o motor puro também, para qualquer chamador direto (teste, script, futuro segundo consumidor) que não passe pela wrapper. Aceita list/tuple/set/frozenset de strings (não só list) -- nenhum chamador real depende do tipo específico da coleção de entrada, e o retorno é sempre uma lista ordenada independente do tipo recebido."
+    autoridade: existente_ou_nova
+  - id: p02-sub14-none-explicito-tratado-igual-a-ausente
+    motivo: "Achado da revisão adversarial desta própria sub-entrega: chave PRESENTE com valor None (ex.: {\"ferramentas_com_confirmacao_obrigatoria\": None}) é um caso diferente de chave ausente para dict.get(chave, default) -- o default só vale quando a chave não existe. Antes desta correção, isso levantaria TypeError dentro de set(None), mascarado pelo except Exception amplo da wrapper MCP. Agora os dois casos (ausente e None explícito) usam o piso atual, sem erro -- coberto por teste novo."
+    autoridade: existente_ou_nova
+  - id: p02-sub14-orcamento-restante-erro-por-indice-nao-por-lote
+    motivo: "Gap pré-existente, registrado desde a sub-entrega 4/N (não é regressão desta correção, é o fechamento dela): orcamento_restante vindo de um pedido de simular_politica chegava intacto até mandato_cobre() (autonomy/policy.py, não alterado nesta sub-entrega), onde a comparação `orcamento_restante > 0` levanta TypeError para um valor não numérico -- capturado só pelo except Exception amplo em torno da chamada em lote a autonomy_policy.simular_politica(pedidos), que fica FORA do loop por-pedido. Um único pedido inválido no meio de um lote abortava a simulação inteira com mensagem genérica, em vez de ser reportado por índice como os demais campos (argumentos_resolvidos, origem_humana, já corrigidos em sub-entregas anteriores). Validação adicionada em _policy_request_simulado, levantando ValueError capturado pelo try/except por-índice já existente em _simular_politica. bool excluído explicitamente do isinstance (int, float) -- é subclasse de int em Python, mas orcamento_restante=true não é um saldo numérico válido."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "Antes desta sub-entrega (main pós-merge da sub-entrega 13/N, commit 9bf088faf): 1371/1371."
+    - "Depois desta sub-entrega, incluindo os 2 testes extras pedidos pela revisão adversarial (lista vazia, None explícito): 1380/1380, 0 falhas, 0 erros."
+evidencias:
+  - "Revisão adversarial independente (Agent tool, general-purpose, sem contexto da implementação) sobre o diff dos 4 arquivos. Veredito: nenhum achado bloqueante. Confirmado por grep que preparar_politica() só é chamado pela wrapper MCP e por testes (tuple/set/frozenset só alcançáveis por um chamador Python direto, nunca via protocolo MCP/JSON, onde arrays sempre desserializam como list); confirmado que mcp_server.py nunca popula orcamento_restante a partir de input externo (fica no default None do dataclass), então _policy_request_simulado é o único ponto que precisava da validação. 3 achados não-bloqueantes endereçados antes de prosseguir: (1) este registro em execucao.md -- estava faltando no diff original submetido à revisão; (2) comentário em hermes_tools.py citava 'sub-entrega 5/N' em vez de 'sub-entrega 4/N' para a origem da pendência -- corrigido; (3) faltavam testes para lista vazia e None explícito -- 2 testes adicionados (ver decisão p02-sub14-none-explicito-tratado-igual-a-ausente acima; lista vazia já era o comportamento correto pré-existente, só não estava testado)."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: o bug de tipo em autonomy/policy.py::preparar_politica, registrado desde a sub-entrega 3/N (motor puro corrigido; a validação da wrapper MCP permanece como defesa em profundidade, não removida)."
+  - "RESOLVIDO por esta entrada: validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP, registrada desde a sub-entrega 4/N."
+  - "Todas as pendências já registradas nos blocos anteriores que não foram tocadas por esta sub-entrega continuam abertas: passo 1 do plano parcialmente aberto (outbox_aprovacao.py/revisao_semanal.py sem Principal -- decisão de produto/design, não só engenharia), risco de bare-name-resolution nos módulos de área, Mandato.classes_conteudo_permitidas texto livre sem enum fechado, Mandato.usos_na_janela_atual/orcamento_maximo sem wrapper de I/O real, pergunta de design sobre o default de origem_humana, dependência de CLASSE_EFEITO_PISO/FLOOR_CONFIRMACAO_OBRIGATORIA continuarem com as mesmas chaves (travado por teste, mas não uma garantia estrutural)."
+proximo_pacote: "P02 -- as pendências de engenharia autocontida (sem decisão de produto/design) estão resgatadas por ora. As restantes exigem decisão do André antes de prosseguir autonomamente: (1) religar outbox_aprovacao.py/revisao_semanal.py a Principal/decisao_piso() (passo 1 do plano) -- escopo de produto, não só técnico; (2) o default de origem_humana quando não informado; (3) se Mandato.classes_conteudo_permitidas deve virar enum fechado (taxonomia é decisão de produto) ou se basta validação técnica. Recomendação: levar a lista consolidada ao André antes de abrir mais uma sub-entrega sozinha."
+```

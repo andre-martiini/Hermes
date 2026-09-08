@@ -638,7 +638,34 @@ def preparar_politica(politica_proposta: dict, *, base_version: int) -> dict:
         }
 
     atual = set(FLOOR_CONFIRMACAO_OBRIGATORIA)
-    proposto = set(politica_proposta.get("ferramentas_com_confirmacao_obrigatoria", atual))
+    ferramentas_propostas = politica_proposta.get("ferramentas_com_confirmacao_obrigatoria")
+    # Corrige no motor o bug de tipo que a sub-entrega 3/N só tinha contornado
+    # na wrapper MCP (tools/hermes_tools.py::_preparar_politica — ver
+    # pendências registradas desde então em docs/autonomia/execucao.md):
+    # `set("pausar_conversa")` itera a STRING caractere por caractere em vez
+    # de tratá-la como um item só, produzindo um diff que parece válido
+    # ("remover as 5 tools reais do piso, adicionar um bando de letras
+    # soltas") sem erro nenhum — exatamente na função cujo propósito é
+    # proteger o piso de confirmação obrigatória de uma mudança não revisada.
+    # A wrapper MCP continua validando antes de chamar (defesa em
+    # profundidade não removida), mas agora o motor puro também se protege
+    # para qualquer chamador direto (teste, script, futuro segundo
+    # consumidor) que não passe por ela.
+    if ferramentas_propostas is None:
+        proposto = set(atual)
+    elif isinstance(ferramentas_propostas, str) or not isinstance(
+        ferramentas_propostas, (list, tuple, set, frozenset)
+    ) or not all(isinstance(f, str) for f in ferramentas_propostas):
+        return {
+            "diff": None,
+            "erro": (
+                "'ferramentas_com_confirmacao_obrigatoria' deve ser uma lista de "
+                "strings, não um valor único — uma string aqui seria iterada "
+                "caractere por caractere."
+            ),
+        }
+    else:
+        proposto = set(ferramentas_propostas)
     adicionadas = sorted(proposto - atual)
     removidas = sorted(atual - proposto)
 
