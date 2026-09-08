@@ -954,3 +954,46 @@ pendencias:
   - "P01 segue em aberto: mcp_jobs.py (passos 5-6), firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados."
 proximo_pacote: "P01 (sub-entrega 4/N)"
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 0d18c8a6da7a2c4bea316d6f1455757182fc5973
+pacote: "P01 (sub-entrega 3.2/N — segunda rodada de comentários do Codex na PR #188)"
+# Continuação do ciclo de resposta a comentários do Codex nesta mesma PR
+# (sub-entregas 3/N e 3.1/N). Comentário automático não dispara em push
+# simples (só em "PR opened", "marked ready" ou comentário "@codex review")
+# — foi preciso comentar "@codex review" explicitamente para obter uma nova
+# passada sobre os commits da sub-entrega 3.1/N. Achado real (P1), não
+# rubber-stamp: consequência direta do mesmo bloqueio de main.py já
+# registrado, não um bug novo em core/idempotency.py.
+estado: pronto_para_revisao
+inicio: "2026-09-07T04:02:00Z"
+fim: "2026-09-07T04:12:00Z"
+arquivos_alterados:
+  - functions/core/idempotency.py
+decisoes:
+  - id: p01-codex-mark-complete-sem-chamador-documentado
+    motivo: "Achado do Codex (P1, 'Call mark_complete after successful webhook processing'), confirmado por busca no repositório inteiro: main.py — único chamador de produção — não chama mark_complete em NENHUM caminho hoje, só check_and_register. Consequência: toda entrega processada com sucesso fica RESERVADA para sempre (nunca CONCLUIDA); reentrega dentro de RESERVA_EXPIRA_APOS (5min) ainda é barrada sem duplicar efeito (levanta ReservaEmAndamentoError), mas reentrega tardia (após a janela expirar) é tratada como nova e o efeito é reprocessado — isso agora vale para QUALQUER entrega bem-sucedida comum reentregada tardiamente, não só o caso ambíguo original que motivou a sub-entrega 3.1/N. O fix que o Codex sugere (chamar mark_complete nos dois caminhos do webhook) já existe no rascunho local de main.py desde a sub-entrega 3.1/N — não é um gap de implementação, é o MESMO bloqueio de main.py (limite de 200k caracteres do Argos) já registrado em p01-idempotency-main-py-bloqueado, só que agora com uma consequência mais precisa e mais séria do que a registrada até aqui (antes: 'falta só a resposta HTTP explícita'; agora: 'falta a peça que fecha a deduplicação de fato'). Nenhuma mudança de comportamento nesta sub-entrega — só documentação explícita no docstring do módulo, para que a lacuna não seja lida como resolvida só porque os testes unitários deste arquivo (que testam o módulo isolado, não main.py) continuam passando."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "Python (unittest, suíte completa): 1175/1175 passando (sem mudança — só docstring, nenhum teste alterado)"
+evidencias:
+  - "Sem revisão adversarial dedicada nesta sub-entrega: mudança é documentação pura (docstring), sem alteração de comportamento ou lógica — julgada desnecessária para este escopo específico, diferente das sub-entregas 3/N e 3.1/N que mudaram comportamento real."
+  - "Resposta publicada diretamente no comentário do Codex na PR #188 (via argos_comentar_issue_repositorio), reconhecendo o achado como correto, explicando o bloqueio de main.py e a consequência prática, e registrando a decisão de desbloqueio como pendente para André."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "IMPORTANTE PARA DECISÃO DE MERGE: mesclar esta PR #188 antes de main.py ser desbloqueado troca o comportamento de produção de 'sentinela único permanente, mas fail-open em falha real de transação' (o que está implantado hoje) para 'reserva com janela de 5 minutos, sem nunca alcançar CONCLUIDO' — ou seja, deduplicação deixa de ser permanente e passa a valer só dentro dessa janela até main.py poder chamar mark_complete. Continua estritamente mais seguro que hoje quanto a nunca fingir sucesso silencioso, mas reentregas legítimas e comuns que cheguem mais de 5 minutos depois da original passam a reprocessar o evento (duplicar anotação em tarefas) — um comportamento que o sentinela único antigo não tinha para o caso comum (só falhava no caso de erro real de transação, ou quando a própria tentativa original nunca terminava). Registrado explicitamente para André avaliar antes de decidir mesclar: aceitar essa janela temporariamente, ou aguardar main.py ser desbloqueado (um dos 3 caminhos já propostos) antes do merge."
+  - "Mesmo bloqueio já registrado nas sub-entregas 3/N e 3.1/N: functions/main.py e functions/test_github_webhook.py seguem sem publicar."
+  - "P01 segue em aberto: mcp_jobs.py (passos 5-6), firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados."
+proximo_pacote: "P01 (sub-entrega 4/N)"
+```
