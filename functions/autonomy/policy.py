@@ -728,6 +728,66 @@ def estado_autonomia_atual(db, dominio: str = "global") -> EstadoAutonomia:
         return EstadoAutonomia.SOMENTE_PREPARACAO
 
 
+def decisao_erro_avaliacao(request: PolicyRequest, *, motivo_legivel: str) -> PolicyDecision:
+    """Decisão de fallback fail-closed para quando `avaliar()` não pôde ser
+    executada — hoje, na prática, um `principal` malformado (`None`, ou um
+    objeto sem `.eh_dono()`/`.tipo`/`.origem_humana`) propagando
+    `AttributeError` de dentro de `avaliar()` (P02 sub-entrega 12/N, achado
+    já registrado como pendência não-bloqueante desde a sub-entrega 8/N —
+    ver decisão `p02-sub8-achado-nao-bloqueante-avaliar-sem-protecao` em
+    docs/autonomia/execucao.md — endereçado agora porque `decisao_piso()`
+    passou a ter consumidores reais fora dos testes: `mcp_jobs.py`
+    (sub-entrega 9/N) e o clique de "Confirmar" do Telegram (sub-entrega
+    10/N), ambos construindo `Principal` fora do controle deste módulo).
+
+    DENY, não SOMENTE_PREPARACAO/PREPARE_ONLY: um erro interno ao AVALIAR a
+    política não é a mesma coisa que "autonomia está restrita agora" — é
+    "não sei dizer se isto pode ser feito", e um tool do piso (compromisso
+    com terceiros ou efeito financeiro/destrutivo/institucional) nunca deve
+    prosseguir sob incerteza sobre quem está pedindo. `require_approval`
+    também foi descartado deliberadamente: é a decisão de sucesso normal do
+    próprio piso (seção 5.2), e devolvê-la aqui faria um erro interno
+    parecer "tudo certo, só falta a confirmação de sempre" — o resultado
+    visível para o dono nos dois casos seria idêntico ao caminho feliz.
+
+    Só usa dados de `request` que não dependem de `principal` estar bem
+    formado (`ferramenta`/`argumentos_resolvidos`, via `_hash_operacao` —
+    nenhum dos dois vem de `principal`), então é seguro chamar mesmo quando
+    `request.principal` é exatamente a causa da falha.
+
+    Honestidade sobre o risco real hoje (achado da revisão desta própria
+    sub-entrega, não escondido): `avaliar()` só acessa `request.principal`
+    no ramo NÃO-piso (`veio_do_piso=False`, checagem `eh_dono()` do passo
+    3) — o ramo do piso (passo 1) decide sem tocar `principal` nenhuma vez,
+    só consulta `request.estado_autonomia` no aperto do passo 6. Como
+    `decisao_piso()`/`_decisao_piso_mcp` só chamam `avaliar()` com
+    `classe_efeito` vindo de `CLASSE_EFEITO_PISO`, e essa tabela tem hoje
+    exatamente as mesmas chaves de `FLOOR_CONFIRMACAO_OBRIGATORIA`
+    (travado por `test_policy.py::
+    TestFloorIdenticoAoMcpServer.test_classe_efeito_piso_cobre_exatamente_o_floor`),
+    todo request que chega a `avaliar()` por esses dois caminhos tem
+    `veio_do_piso=True` — ou seja, com o código de hoje, um `principal`
+    malformado passado a `decisao_piso()`/`_decisao_piso_mcp` NÃO derruba
+    `avaliar()` na prática; este guard é defesa em profundidade contra essa
+    invariante (duas tabelas mantidas separadamente por design) deixar de
+    valer no futuro, não a correção de uma falha reproduzível hoje por
+    esses dois chamadores. `avaliar()` chamada diretamente com uma classe
+    de efeito fora do piso e um principal malformado — ex.: um terceiro
+    consumidor futuro de `avaliar()`, ou os próprios testes deste módulo —
+    continua reproduzindo o `AttributeError` original sem este guard, que
+    vive só nos dois pontos de entrada do piso.
+    """
+    return PolicyDecision(
+        decision=Decisao.DENY,
+        policy_id=_POLICY_ID_PADRAO,
+        policy_version=_POLICY_VERSION_PADRAO,
+        reason_code="erro_interno_avaliacao_politica",
+        constraints_checked=("floor_confirmacao_obrigatoria",),
+        operation_hash=_hash_operacao(request),
+        motivo_legivel=motivo_legivel,
+    )
+
+
 def decisao_piso(db, principal: Principal, nome: str, argumentos: dict) -> PolicyDecision | None:
     """Preflight de `avaliar()` para os tools do piso — orquestra
     `estado_autonomia_atual()` + `PolicyRequest` + `avaliar()` +
@@ -769,6 +829,18 @@ def decisao_piso(db, principal: Principal, nome: str, argumentos: dict) -> Polic
     são fail-safe internamente (a primeira cai em SOMENTE_PREPARACAO numa
     falha de LEITURA; a segunda só loga numa falha de ESCRITA) — nenhuma
     das duas deixa uma exceção escapar para quem chamou `decisao_piso`.
+
+    `avaliar(request)` agora também é chamada dentro de um try/except (P02
+    sub-entrega 12/N): um `principal` malformado (`None`, ou faltando
+    `.eh_dono()`/`.tipo`/`.origem_humana`) propagava `AttributeError` em vez
+    de cair fail-closed como o resto desta função — risco teórico desde a
+    sub-entrega 8/N (pendência registrada, não corrigida então porque
+    `decisao_piso()` não tinha consumidor real fora dos testes), agora
+    endereçado porque `mcp_jobs.py` (sub-entrega 9/N) e o clique de
+    "Confirmar" do Telegram (sub-entrega 10/N) constroem `Principal` fora
+    do controle deste módulo. Ver `decisao_erro_avaliacao()`, acima, para o
+    porquê de DENY (não SOMENTE_PREPARACAO/PREPARE_ONLY) ser a resposta a
+    um erro interno de avaliação.
     """
     classe_efeito = CLASSE_EFEITO_PISO.get(nome)
     if classe_efeito is None:
@@ -782,7 +854,17 @@ def decisao_piso(db, principal: Principal, nome: str, argumentos: dict) -> Polic
         argumentos_resolvidos=argumentos,
         estado_autonomia=estado,
     )
-    decisao = avaliar(request)
+    try:
+        decisao = avaliar(request)
+    except Exception as exc:  # noqa: BLE001 — principal malformado nunca deixa a tool do piso passar sem confirmação
+        print(f"[autonomy.policy] Falha ao avaliar política do piso para '{nome}': {exc}")
+        decisao = decisao_erro_avaliacao(
+            request,
+            motivo_legivel=(
+                f"Falha interna ao avaliar a política de autonomia para '{nome}'; "
+                "bloqueado por segurança."
+            ),
+        )
     registrar_decisao(db, request, decisao)
     return decisao
 

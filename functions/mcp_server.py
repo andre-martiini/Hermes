@@ -522,6 +522,18 @@ def _decisao_piso_mcp(ctx: ToolContext, nome: str, argumentos: dict) -> PolicyDe
     mudar dentro da janela de 10 minutos da confirmação) ainda não está
     implementado; registrado como limitação conhecida, não escondida, em
     docs/autonomia/execucao.md.
+
+    `autonomy_policy.avaliar(request)` é chamada dentro de um try/except
+    (P02 sub-entrega 12/N, mesmo fix aplicado em `autonomy.policy::
+    decisao_piso`, o outro consumidor real do motor) — defesa em
+    profundidade contra um `principal` malformado propagar `AttributeError`
+    em vez de bloquear fail-closed. `_principal_mcp(ctx)` em si nunca falha
+    assim hoje (só lê `ctx.user_uid`/`ctx.canal`, nunca `ctx.db`), e o ramo
+    do motor que este preflight sempre exercita (piso) nem chega a tocar
+    `principal` — ver `autonomy.policy.decisao_erro_avaliacao()` para o
+    detalhe honesto de por que o risco prático é baixo hoje mesmo assim, e
+    por que DENY (não SOMENTE_PREPARACAO/PREPARE_ONLY) é a resposta certa
+    quando o guard entra em ação.
     """
     classe_efeito = autonomy_policy.CLASSE_EFEITO_PISO.get(nome)
     if classe_efeito is None:
@@ -557,7 +569,17 @@ def _decisao_piso_mcp(ctx: ToolContext, nome: str, argumentos: dict) -> PolicyDe
         argumentos_resolvidos=argumentos,
         estado_autonomia=estado,
     )
-    decisao = autonomy_policy.avaliar(request)
+    try:
+        decisao = autonomy_policy.avaliar(request)
+    except Exception as exc:  # noqa: BLE001 — principal malformado nunca deixa a tool do piso passar sem confirmação
+        print(f"[mcp_server] Falha ao avaliar política do piso para '{nome}': {exc}")
+        decisao = autonomy_policy.decisao_erro_avaliacao(
+            request,
+            motivo_legivel=(
+                f"Falha interna ao avaliar a política de autonomia para '{nome}'; "
+                "bloqueado por segurança."
+            ),
+        )
     try:
         # Mesmo raciocínio do bloco acima: `registrar_decisao` já não deixa
         # uma falha de ESCRITA (dentro dela) derrubar a chamada, mas de novo
