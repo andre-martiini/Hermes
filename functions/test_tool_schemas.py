@@ -13,6 +13,7 @@ from unittest import mock
 from google.genai import types
 
 import hermes_core_logic as core
+import telegram_message_tools
 import telegram_utils
 
 
@@ -29,12 +30,13 @@ class _FakeClient:
 def _stub_das_ferramentas_do_telegram():
     """Recria as ferramentas do Telegram como funções de topo.
 
-    Elas são definidas dentro de `_process_telegram_message` (closures sobre `db`
-    e sobre a sessão), então o teste reconstrói stubs com a MESMA assinatura e o
-    MESMO docstring a partir da AST — que é exatamente o que o SDK lê para gerar
-    o schema.
+    Elas são definidas dentro de `telegram_message_tools.build_telegram_tool_closures`
+    (closures sobre `db` e sobre a sessão — extraídas de `_process_telegram_message`
+    no P02, modularização por área, 2026-09-08), então o teste reconstrói stubs com
+    a MESMA assinatura e o MESMO docstring a partir da AST — que é exatamente o que
+    o SDK lê para gerar o schema.
     """
-    fonte = inspect.getsource(core)
+    fonte = inspect.getsource(telegram_message_tools)
     arvore = ast.parse(fonte)
     nomes = _nomes_das_ferramentas(arvore)
     stubs = {}
@@ -64,14 +66,14 @@ def _stub_das_ferramentas_do_telegram():
 
 
 def _nomes_das_ferramentas(arvore):
-    """Lê a `tools_list` declarada em hermes_core_logic (fonte da verdade)."""
+    """Lê a `tools_list` declarada em telegram_message_tools (fonte da verdade)."""
     for no in ast.walk(arvore):
         if isinstance(no, ast.Assign) and any(
             isinstance(alvo, ast.Name) and alvo.id == "tools_list" for alvo in no.targets
         ):
             if isinstance(no.value, ast.List):
                 return [e.id for e in no.value.elts if isinstance(e, ast.Name)]
-    raise AssertionError("tools_list não encontrada em hermes_core_logic")
+    raise AssertionError("tools_list não encontrada em telegram_message_tools")
 
 
 def _percorre(schema, caminho="parameters"):
@@ -174,7 +176,7 @@ class TestSecretarioTelegramExecucao(unittest.TestCase):
         from test_secretario_whatsapp import _MockDb
 
         self.db = _MockDb()
-        arvore = ast.parse(inspect.getsource(core._process_telegram_message))
+        arvore = ast.parse(inspect.getsource(telegram_message_tools.build_telegram_tool_closures))
         nomes = {"ativar_modo_secretario", "desativar_modo_secretario", "consultar_status_modo_secretario"}
         nos = [n for n in arvore.body[0].body if isinstance(n, ast.FunctionDef) and n.name in nomes]
         self.assertEqual({n.name for n in nos}, nomes)
