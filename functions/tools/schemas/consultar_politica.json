@@ -1,0 +1,14 @@
+{
+  "name": "consultar_politica",
+  "description": "Consulta a política de autonomia vigente para um escopo: permissões, limites, versão e origem — leitura pura, sem gravar nada.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "escopo": {
+        "type": "string",
+        "description": "Escopo da política a consultar. 'mcp' devolve o piso de confirmação obrigatória do canal MCP (hoje o único escopo com dados reais); qualquer outro valor devolve a matriz de efeito padrão. Padrão: 'mcp'."
+      }
+    },
+    "required": []
+  }
+}

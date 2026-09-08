@@ -183,10 +183,13 @@ class Mandato:
     ainda não implementado nesta sub-entrega, já que mandatos persistidos
     ficam para a sub-entrega seguinte) precisa RESOLVER e preencher este
     campo antes de colocar o mandato em `PolicyRequest.mandatos_aplicaveis`.
-    `None` (o default) significa "contagem não verificada" — `mandato_cobre`
-    não aplica o limite quando não sabe a contagem, mas o campo existe desde
-    já para que o wrapper futuro tenha onde escrever, em vez de a checagem
-    ficar sem nenhum lugar para acontecer.
+    `None` (o default) significa "contagem não verificada" — terceira rodada
+    da revisão do Codex (PR #191): quando `limite_por_janela` está declarado
+    mas a contagem ainda é `None`, `mandato_cobre` trata o mandato como NÃO
+    coberto (falha fechada), em vez de pular o limite como se não existisse.
+    O campo existe desde já para que o wrapper futuro (ainda não
+    implementado nesta sub-entrega) tenha onde escrever a contagem
+    resolvida, em vez de a checagem ficar sem nenhum lugar para acontecer.
     """
 
     mandato_id: str
@@ -196,8 +199,34 @@ class Mandato:
     limite_por_janela: int | None = None
     janela_dias: int | None = None
     usos_na_janela_atual: int | None = None
-    horario_permitido_inicio: str | None = None   # "HH:MM", None = sem restrição
+    # Teto de orçamento aprovado para este mandato (seção 5.1: "Executar com
+    # mandato e orçamento válidos"; seção 5.3, exemplo: "consumir até o teto
+    # aprovado"). `None` (o default) significa "este mandato não declara teto
+    # de orçamento" — mandatos puramente não-financeiros (ex.: "cobrar
+    # confirmação de recebimento") não precisam de nenhum valor aqui e não
+    # são afetados por esta checagem.
+    #
+    # Quando declarado, `autonomy.policy.mandato_cobre()` exige que
+    # `PolicyRequest.orcamento_restante` tenha sido RESOLVIDO (mesmo padrão
+    # de `usos_na_janela_atual` acima: contagem/saldo desconhecido contra um
+    # teto declarado falha fechado, não é tratado como "sem restrição") e
+    # que ainda reste orçamento positivo. Quem resolve o saldo real
+    # (consumo até agora vs. este teto) é um wrapper com I/O ainda não
+    # implementado — mesma divisão de responsabilidade de
+    # `usos_na_janela_atual`: este tipo só declara o teto, não calcula nada.
+    orcamento_maximo: float | None = None
+    # "HH:MM". Os dois só significam "sem restrição de horário" quando AMBOS
+    # são None — quarta rodada da revisão do Codex (PR #191):
+    # `autonomy.policy.mandato_cobre()` falha fechado quando só um dos dois
+    # está preenchido (configuração parcial), em vez de tratar isso como
+    # "sem restrição". Preencha os dois ou nenhum.
+    horario_permitido_inicio: str | None = None
     horario_permitido_fim: str | None = None
+    # `None` (o default) significa "validade não resolvida" — quarta rodada
+    # da revisão do Codex (PR #191): `mandato_cobre()` passou a falhar
+    # fechado quando `valido_ate` é `None`, em vez de tratar ausência de
+    # validade como "cobre indefinidamente". Todo mandato real precisa desta
+    # data preenchida para cobrir algo.
     valido_ate: datetime | None = None
     origem_autorizacao: str = ""       # referência a como/quando o dono concedeu isto
     forma_revogacao: str = ""

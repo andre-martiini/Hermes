@@ -102,6 +102,7 @@ class TestDefaultsDeContrato(unittest.TestCase):
         self.assertIsNone(m.valido_ate)
         self.assertIsNone(m.limite_por_janela)
         self.assertIsNone(m.usos_na_janela_atual)
+        self.assertIsNone(m.orcamento_maximo)
 
 
 if __name__ == "__main__":

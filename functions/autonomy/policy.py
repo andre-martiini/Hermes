@@ -92,9 +92,14 @@ def avaliar(request: PolicyRequest, *, agora: datetime | None = None) -> PolicyD
     checagem posterior pode afrouxar uma decisão anterior mais restritiva):
 
     1. Piso de confirmação obrigatória (nunca contornável por política nem
-       por mandato — P02 passo 5). Decide e retorna imediatamente.
+       por mandato — P02 passo 5): fixa a decisão CANDIDATA em
+       require_approval e pula os passos 2-5 (nenhum mandato nem tipo de
+       principal muda isso). A candidata ainda passa pelo aperto de estado
+       do passo 6 — ver a nota nesse passo.
     2. Estado "pausado" (seção 5.4): bloqueia tudo que não seja leitura.
-       Decide e retorna imediatamente — nenhum mandato o contorna.
+       Decide e retorna imediatamente — nenhum mandato o contorna. (Só se
+       aplica quando o passo 1 não decidiu — ferramentas do piso são
+       apertadas pelo mesmo estado no passo 6, não aqui.)
     3. Tipo de principal vs. classe de efeito — um `runner_servico` nunca
        decide sozinho um efeito de "compromisso com terceiros" ou
        "financeiro/destrutivo/institucional" (aceite do P02: "o agente não
@@ -104,13 +109,18 @@ def avaliar(request: PolicyRequest, *, agora: datetime | None = None) -> PolicyD
     4/5. Mandato aplicável (rebaixa para allow, seção 5.3: "não exige um
        segundo botão") OU, na ausência de mandato, a matriz de efeito
        padrão (seção 5.1). As duas alimentam a MESMA decisão candidata.
-       Por fim, o estado "somente_preparação" (seção 5.4) aperta essa
-       decisão candidata por igual — inclusive uma vinda de mandato: um
-       mandato vigente nunca faz o sistema agir além do que
-       "somente_preparação" permite. Isto é deliberado: mandato responde
-       "o dono já autorizou isto uma vez", estado de autonomia responde "o
-       dono quer isto pausado/restrito AGORA" — a pergunta mais recente
-       (estado) vence sobre a mais antiga (mandato).
+    6. Por fim, o estado "somente_preparação"/"pausado" (seção 5.4) aperta
+       a decisão candidata por igual — venha ela do piso (passo 1), de
+       mandato ou da matriz padrão (passo 4/5). Um mandato vigente nunca
+       faz o sistema agir além do que "somente_preparação" permite, e uma
+       ferramenta do piso nunca fica "aguardando aprovação" enquanto a
+       autonomia está pausada (achado P1 da revisão do Codex, PR #191: a
+       versão original retornava o piso direto no passo 1, sem nunca
+       consultar o estado — um humano aprovando essa pendência ainda
+       executaria o efeito apesar da pausa). Isto é deliberado: mandato/
+       piso respondem "o dono já autorizou isto" (uma vez, ou como regra
+       permanente), estado de autonomia responde "o dono quer isto
+       pausado/restrito AGORA" — a pergunta mais recente (estado) vence.
 
     Não confia em `sensibilidade`/confiança autodeclarada do modelo para
     autorizar efeito (seção 5.2, última frase) — este parâmetro só entra no
@@ -120,106 +130,121 @@ def avaliar(request: PolicyRequest, *, agora: datetime | None = None) -> PolicyD
     checks: list[str] = []
     op_hash = _hash_operacao(request)
 
-    # 1. Piso de confirmação obrigatória — decide e para, sempre.
-    if request.ferramenta in FLOOR_CONFIRMACAO_OBRIGATORIA:
-        checks.append("floor_confirmacao_obrigatoria")
-        return PolicyDecision(
-            decision=Decisao.REQUIRE_APPROVAL,
-            policy_id="floor-confirmacao-obrigatoria",
-            policy_version=_POLICY_VERSION_PADRAO,
-            reason_code="floor_nao_contornavel",
-            constraints_checked=tuple(checks),
-            approval_required=True,
-            operation_hash=op_hash,
-            motivo_legivel=(
-                f"'{request.ferramenta}' está no piso de confirmação obrigatória "
-                "(decisão do dono, não amplia nem reduz por política ou mandato)."
-            ),
-        )
-
     checks.append("floor_confirmacao_obrigatoria")
+    veio_do_piso = request.ferramenta in FLOOR_CONFIRMACAO_OBRIGATORIA
 
-    # 2. Estado de autonomia — só pode apertar, nunca afrouxar (checado nos
-    #    dois extremos primeiro: pausado bloqueia tudo que não seja leitura).
-    if request.estado_autonomia == EstadoAutonomia.PAUSADO:
+    if veio_do_piso:
+        # 1. Piso — decisão candidata fixa, passos 2-5 não se aplicam. Ainda
+        #    passa pelo aperto de estado do passo 6, abaixo. `policy_id`
+        #    próprio (não o padrão da matriz) enquanto a decisão continuar
+        #    vindo do piso — o passo 6 troca para `_POLICY_ID_PADRAO` se e
+        #    quando o estado efetivamente apertar a decisão (achado da
+        #    revisão adversarial desta correção: a refatoração abaixo tinha
+        #    deixado o `return` final usar `_POLICY_ID_PADRAO`
+        #    incondicionalmente, fazendo uma decisão do piso se identificar
+        #    como se tivesse vindo da matriz de efeito da seção 5.1).
+        decisao_padrao, reason_code, aprovacao = Decisao.REQUIRE_APPROVAL, "floor_nao_contornavel", True
+        policy_id = "floor-confirmacao-obrigatoria"
+        # O passo 6 sempre consulta o estado para decidir se aperta o piso —
+        # registra isso na trilha de auditoria mesmo quando o estado é ATIVO
+        # e nada muda, espelhando o que o passo 2 já faz no ramo não-piso.
         checks.append("estado_autonomia")
-        if request.classe_efeito == ClasseEfeito.OBSERVACAO_AUTORIZADA:
-            pass  # leitura continua permitida mesmo pausado (seção 5.4)
+    else:
+        # 2. Estado de autonomia — só pode apertar, nunca afrouxar (checado
+        #    nos dois extremos primeiro: pausado bloqueia tudo que não seja
+        #    leitura).
+        if request.estado_autonomia == EstadoAutonomia.PAUSADO:
+            checks.append("estado_autonomia")
+            if request.classe_efeito == ClasseEfeito.OBSERVACAO_AUTORIZADA:
+                pass  # leitura continua permitida mesmo pausado (seção 5.4)
+            else:
+                return PolicyDecision(
+                    decision=Decisao.DENY,
+                    policy_id=_POLICY_ID_PADRAO,
+                    policy_version=_POLICY_VERSION_PADRAO,
+                    reason_code="autonomia_pausada",
+                    constraints_checked=tuple(checks),
+                    operation_hash=op_hash,
+                    motivo_legivel="Autonomia pausada: nenhum efeito além de leitura é permitido agora.",
+                )
         else:
+            checks.append("estado_autonomia")
+
+        # 3. Tipo de principal vs. classe de efeito — o agente não pode se
+        #    autoconceder um efeito de compromisso com terceiros ou
+        #    financeiro/destrutivo/institucional. Calcula a cobertura de
+        #    mandato UMA vez aqui e reusa no passo 4 (evita computar duas
+        #    vezes e, mais importante, garante que os dois passos vejam
+        #    exatamente a mesma resposta).
+        checks.append("tipo_principal_vs_classe_efeito")
+        cobre_por_mandato = _mandato_cobre_algum(request, agora)
+        classes_restritas_a_dono = (
+            ClasseEfeito.COMPROMISSO_TERCEIROS,
+            ClasseEfeito.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
+        )
+        if (
+            request.classe_efeito in classes_restritas_a_dono
+            and not request.principal.eh_dono()
+            and not cobre_por_mandato
+        ):
             return PolicyDecision(
                 decision=Decisao.DENY,
                 policy_id=_POLICY_ID_PADRAO,
                 policy_version=_POLICY_VERSION_PADRAO,
-                reason_code="autonomia_pausada",
+                reason_code="principal_nao_pode_autoconceder",
                 constraints_checked=tuple(checks),
                 operation_hash=op_hash,
-                motivo_legivel="Autonomia pausada: nenhum efeito além de leitura é permitido agora.",
+                motivo_legivel=(
+                    f"Principal do tipo '{request.principal.tipo.value}' não pode "
+                    f"decidir sozinho um efeito '{request.classe_efeito.value}' sem "
+                    "mandato explícito que cubra este pedido."
+                ),
             )
-    else:
-        checks.append("estado_autonomia")
 
-    # 3. Tipo de principal vs. classe de efeito — o agente não pode se
-    #    autoconceder um efeito de compromisso com terceiros ou financeiro/
-    #    destrutivo/institucional. Calcula a cobertura de mandato UMA vez
-    #    aqui e reusa no passo 4 (evita computar duas vezes e, mais
-    #    importante, garante que os dois passos vejam exatamente a mesma
-    #    resposta).
-    checks.append("tipo_principal_vs_classe_efeito")
-    cobre_por_mandato = _mandato_cobre_algum(request, agora)
-    classes_restritas_a_dono = (
-        ClasseEfeito.COMPROMISSO_TERCEIROS,
-        ClasseEfeito.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
-    )
-    if (
-        request.classe_efeito in classes_restritas_a_dono
-        and not request.principal.eh_dono()
-        and not cobre_por_mandato
-    ):
-        return PolicyDecision(
-            decision=Decisao.DENY,
-            policy_id=_POLICY_ID_PADRAO,
-            policy_version=_POLICY_VERSION_PADRAO,
-            reason_code="principal_nao_pode_autoconceder",
-            constraints_checked=tuple(checks),
-            operation_hash=op_hash,
-            motivo_legivel=(
-                f"Principal do tipo '{request.principal.tipo.value}' não pode "
-                f"decidir sozinho um efeito '{request.classe_efeito.value}' sem "
-                "mandato explícito que cubra este pedido."
-            ),
-        )
+        # 4/5. Mandato aplicável (rebaixa para allow) OU matriz de efeito
+        #    padrão (seção 5.1) para o que sobrar — as DUAS fontes
+        #    alimentam a MESMA variável de decisão, para que o passo 6
+        #    (estado) aperte de forma uniforme independentemente de onde a
+        #    decisão veio. Antes desta correção, uma decisão vinda de
+        #    mandato retornava direto e escapava do aperto de
+        #    "somente_preparação" — corrigido após revisão adversarial
+        #    (sub-entrega 1/N, ver docs/autonomia/execucao.md): um runner de
+        #    serviço com mandato vigente NÃO pode mais enviar um compromisso
+        #    a terceiros enquanto o dono colocou a autonomia em
+        #    "somente_preparação".
+        checks.append("mandato_aplicavel")
+        if cobre_por_mandato:
+            decisao_padrao, reason_code, aprovacao = Decisao.ALLOW, "dentro_de_mandato_vigente", False
+        else:
+            checks.append("matriz_efeito_padrao")
+            decisao_padrao, reason_code, aprovacao = _decisao_padrao_por_classe(
+                request.classe_efeito, request.principal
+            )
+        policy_id = _POLICY_ID_PADRAO
 
-    # 4/5. Mandato aplicável (rebaixa para allow) OU matriz de efeito padrão
-    #    (seção 5.1) para o que sobrar — as DUAS fontes alimentam a MESMA
-    #    variável de decisão, para que o passo seguinte (estado
-    #    "somente_preparação") aperte de forma uniforme independentemente de
-    #    onde a decisão veio. Antes desta correção, uma decisão vinda de
-    #    mandato retornava direto e escapava do aperto de
-    #    "somente_preparação" — corrigido após revisão adversarial
-    #    (sub-entrega 1/N, ver docs/autonomia/execucao.md): um runner de
-    #    serviço com mandato vigente NÃO pode mais enviar um compromisso a
-    #    terceiros enquanto o dono colocou a autonomia em "somente_preparação".
-    checks.append("mandato_aplicavel")
-    if cobre_por_mandato:
-        decisao_padrao, reason_code, aprovacao = Decisao.ALLOW, "dentro_de_mandato_vigente", False
-    else:
-        checks.append("matriz_efeito_padrao")
-        decisao_padrao, reason_code, aprovacao = _decisao_padrao_por_classe(
-            request.classe_efeito, request.principal
-        )
-
-    # Estado "somente_preparação" aperta qualquer coisa mais forte que
-    # preparação interna — inclusive uma decisão que veio de mandato.
-    if request.estado_autonomia == EstadoAutonomia.SOMENTE_PREPARACAO and decisao_padrao not in (
+    # 6. Estado "pausado"/"somente_preparação" aperta a decisão candidata —
+    #    inclusive uma vinda do piso (achado P1 da revisão do Codex, PR
+    #    #191, ver docstring acima). O ramo do piso nunca passa por aqui com
+    #    OBSERVACAO_AUTORIZADA (nenhuma ferramenta do piso é classificada
+    #    como leitura), então "pausado" sempre aperta para deny quando
+    #    veio_do_piso — sem precisar repetir a exceção de leitura do passo 2.
+    #    Quando o estado efetivamente aperta uma decisão do piso, o
+    #    `policy_id` muda para o padrão — a decisão final não é mais "o piso
+    #    decidiu", é "o estado de autonomia decidiu apertar o piso".
+    if veio_do_piso and request.estado_autonomia == EstadoAutonomia.PAUSADO:
+        decisao_padrao, reason_code, aprovacao = Decisao.DENY, "autonomia_pausada", False
+        policy_id = _POLICY_ID_PADRAO
+    elif request.estado_autonomia == EstadoAutonomia.SOMENTE_PREPARACAO and decisao_padrao not in (
         Decisao.DENY, Decisao.PREPARE_ONLY,
     ) and request.classe_efeito != ClasseEfeito.OBSERVACAO_AUTORIZADA:
         decisao_padrao = Decisao.PREPARE_ONLY
         reason_code = "autonomia_somente_preparacao"
         aprovacao = False
+        policy_id = _POLICY_ID_PADRAO
 
     return PolicyDecision(
         decision=decisao_padrao,
-        policy_id=_POLICY_ID_PADRAO,
+        policy_id=policy_id,
         policy_version=_POLICY_VERSION_PADRAO,
         reason_code=reason_code,
         constraints_checked=tuple(checks),
@@ -237,15 +262,59 @@ def _decisao_padrao_por_classe(
     if classe == ClasseEfeito.OBSERVACAO_AUTORIZADA:
         return Decisao.ALLOW, "observacao_autorizada", False
     if classe == ClasseEfeito.PREPARACAO_INTERNA:
-        # Correção pós-revisão do Codex (PR #191): este é o ramo da matriz
-        # PADRÃO — chamado só quando NÃO há mandato cobrindo (ver `avaliar()`,
-        # passo 4/5). O reason_code antigo ("...com_mandato_valido") mentia
-        # sobre a origem da decisão e corrompia a trilha de auditoria
-        # (`registrar_decisao` grava exatamente este texto).
-        return Decisao.ALLOW, "preparacao_interna_permitida_por_padrao", False
+        # Correção pós-revisão do Codex (PR #191, segunda rodada): este é o
+        # ramo da matriz PADRÃO — chamado só quando NÃO há mandato cobrindo
+        # (ver `avaliar()`, passo 4/5). O reason_code antigo
+        # ("...com_mandato_valido") mentia sobre a origem da decisão e
+        # corrompia a trilha de auditoria (`registrar_decisao` grava
+        # exatamente este texto).
+        #
+        # Gate por `origem_humana` (correção pós-revisão do Codex, terceira
+        # rodada): a matriz de efeito (seção 5.1 do plano) define, para
+        # "Preparação interna", a regra "Executar com mandato e orçamento
+        # válidos" — ou seja, SEM mandato vigente, o padrão não é ALLOW
+        # incondicional. A exceção que preserva a "pouca fricção" prometida
+        # na seção 5 é quando um humano está de fato presente/dirigindo o
+        # pedido agora (`origem_humana=True` — dono interativo ou cliente
+        # assistido em tempo real, que já é a própria confirmação); sem essa
+        # presença (rotina do Cowork ou runner de serviço agindo sozinho,
+        # sem mandato), preparar internamente ainda é seguro por ser
+        # reversível/observável, mas não deve fechar o ciclo sozinho —
+        # rebaixa para PREPARE_ONLY em vez de ALLOW.
+        #
+        # Exige também `eh_dono()` (achado do Codex sobre a PR #192): o
+        # comentário acima já dizia que a exceção é para "dono interativo ou
+        # cliente assistido", mas o código só checava a flag booleana
+        # `origem_humana` — nada no sistema de tipos impede um
+        # `ROTINA_COWORK`/`RUNNER_SERVICO`/`TERCEIRO_PORTAL` de ser
+        # construído com `origem_humana=True` (o próprio default do
+        # contrato). Sem essa checagem extra, um terceiro num portal
+        # público com "humano presente" (ele mesmo, não o dono) recebia o
+        # mesmo ALLOW que o dono interativo — a garantia de que é o DONO
+        # presente, não qualquer humano, é o que preserva a baixa fricção
+        # da seção 5 sem abrir mão da restrição de autoconcessão do passo 3
+        # de `avaliar()`.
+        if principal.origem_humana and principal.eh_dono():
+            return Decisao.ALLOW, "preparacao_interna_permitida_por_padrao", False
+        return (
+            Decisao.PREPARE_ONLY,
+            "preparacao_interna_requer_mandato_ou_humano_presente",
+            False,
+        )
     if classe == ClasseEfeito.ESCRITA_INTERNA_REVERSIVEL:
-        # Mesma correção — nenhum mandato foi consultado para chegar aqui.
-        return Decisao.ALLOW, "escrita_interna_reversivel_permitida_por_padrao", False
+        # Mesma correção — nenhum mandato foi consultado para chegar aqui. A
+        # seção 5.1 define, para "Escrita interna reversível", a regra
+        # "Executar dentro do mandato": sem mandato vigente, mesmo raciocínio
+        # de `origem_humana` acima — inclusive o `eh_dono()` adicional
+        # (achado do Codex sobre a PR #192, mesmo raciocínio do ramo
+        # PREPARACAO_INTERNA logo acima).
+        if principal.origem_humana and principal.eh_dono():
+            return Decisao.ALLOW, "escrita_interna_reversivel_permitida_por_padrao", False
+        return (
+            Decisao.PREPARE_ONLY,
+            "escrita_interna_reversivel_requer_mandato_ou_humano_presente",
+            False,
+        )
     if classe == ClasseEfeito.COORDENACAO_LIMITADA:
         # "Exigir política específica previamente aprovada" — sem mandato
         # explícito cobrindo (já checado antes de chegar aqui), decide-se
@@ -288,45 +357,117 @@ def _destino_coberto(destino_mandato: str, destinatario_pedido: str) -> bool:
 
 def mandato_cobre(mandato: Mandato, request: PolicyRequest, agora: datetime) -> bool:
     """Um mandato cobre um pedido se: não revogado, ainda válido, dentro do
-    limite de uso da janela (quando conhecido), a finalidade bate com a
-    missão do pedido (quando ambas informadas), o destino está entre os
-    cobertos, a classe de conteúdo está entre as permitidas, e o horário (se
-    restrito) bate.
+    limite de uso da janela (falha fechada quando a contagem é desconhecida
+    e há limite declarado), a finalidade bate exatamente com a missão do
+    pedido (falha fechada quando a missão não foi informada), o destino está
+    entre os cobertos, a classe de conteúdo está entre as permitidas, e o
+    horário (se restrito) bate.
+
+    Orçamento (fechado na sub-entrega 4/N do P02, docs/autonomia/execucao.md
+    — antes disso, `PolicyRequest.orcamento_restante` não era lido em nenhum
+    ponto desta função nem de `avaliar()`, apesar de a matriz de efeito
+    (seção 5.1 do plano) exigir "mandato e orçamento válidos" para
+    preparação interna): quando `Mandato.orcamento_maximo` está declarado, o
+    mandato só cobre se `orcamento_restante` tiver sido RESOLVIDO (mesmo
+    raciocínio fail-closed de `usos_na_janela_atual`, logo abaixo — saldo
+    desconhecido contra um teto declarado não passa) e ainda restar
+    orçamento positivo. Mandatos sem `orcamento_maximo` declarado (o
+    default, `None`) não são afetados — nem toda finalidade tem dimensão
+    financeira. Resolver o saldo real (consumo até agora vs. teto) continua
+    sendo responsabilidade de um wrapper com I/O ainda não implementado,
+    mesma divisão já descrita para `usos_na_janela_atual`. Gap ainda aberto,
+    categoria diferente: `classes_conteudo_permitidas` continua texto livre,
+    não enum fechado (ver comentário mais abaixo, na checagem de
+    `sensibilidade`).
 
     Limite por janela (correção pós-revisão do Codex, PR #191): esta função
     é pura e não tem acesso a histórico de uso — `mandato.usos_na_janela_atual`
     é o dado JÁ RESOLVIDO que o chamador (thin wrapper com I/O, análogo a
     `estado_autonomia_atual` no fim deste arquivo — ainda não implementado
     nesta sub-entrega) precisa preencher antes de incluir o mandato em
-    `mandatos_aplicaveis`. Quando `None` (nada resolveu a contagem ainda), o
-    limite simplesmente não é aplicado — mas o campo existe desde já, então
-    o limite deixa de ser "documentado mas sem lugar nenhum para ser
-    checado" (era assim que o Codex encontrou o gap: nada no repositório
-    populava ou lia essa contagem).
+    `mandatos_aplicaveis`. Terceira rodada da revisão do Codex: quando há
+    `limite_por_janela` declarado mas a contagem ainda é `None` (nada
+    resolveu ainda), o mandato NÃO cobre — contagem desconhecida contra um
+    limite declarado falha fechado, não é tratada como "sem limite". O campo
+    existe desde já para que o wrapper futuro tenha onde escrever, em vez de
+    o limite ficar "documentado mas sem lugar nenhum para ser checado" (era
+    assim que o Codex encontrou o gap original: nada no repositório populava
+    ou lia essa contagem).
     """
     if mandato.revogado:
         return False
-    if mandato.valido_ate is not None and agora > mandato.valido_ate:
+    # Validade (correção pós-revisão do Codex, PR #191, quarta rodada): a
+    # versão anterior só rejeitava quando `valido_ate` estava PREENCHIDO e no
+    # passado — um mandato sem `valido_ate` (o default do contrato) cobria
+    # indefinidamente, apesar de "validade" ser uma das condições mínimas do
+    # mandato (seção 5.3 do plano) e de cada outro campo opcional desta
+    # função já ter sido fechado no mesmo sentido (limite por janela,
+    # finalidade/missão, destinos, classes — todos falham fechado quando o
+    # dado não foi resolvido, em vez de tratar ausência como "sem
+    # restrição"). Agora: sem `valido_ate` resolvido, o mandato não cobre.
+    if mandato.valido_ate is None:
         return False
-    if (
-        mandato.limite_por_janela is not None
-        and mandato.usos_na_janela_atual is not None
-        and mandato.usos_na_janela_atual >= mandato.limite_por_janela
-    ):
+    if agora > mandato.valido_ate:
         return False
+    if mandato.limite_por_janela is not None:
+        # Correção pós-revisão do Codex (PR #191, terceira rodada): a versão
+        # anterior só rejeitava quando `usos_na_janela_atual` já estava
+        # PREENCHIDO e no limite — quando o chamador ainda não tinha
+        # resolvido a contagem (`None`, o padrão do contrato), o limite era
+        # simplesmente ignorado e o mandato cobria como se não houvesse
+        # limite nenhum. Um mandato com `limite_por_janela` declarado exige
+        # que a contagem tenha sido resolvida para contar como coberto —
+        # contagem desconhecida não passa por um limite declarado (falha
+        # fechada, mesmo raciocínio já aplicado a `sensibilidade=None`
+        # contra um mandato que declara `classes_conteudo_permitidas`).
+        if mandato.usos_na_janela_atual is None:
+            return False
+        if mandato.usos_na_janela_atual >= mandato.limite_por_janela:
+            return False
+
+    # Orçamento (P02 passo 8, sub-entrega 4/N — ver docstring desta função
+    # acima para o histórico do gap): mesmo raciocínio fail-closed do limite
+    # por janela, logo acima — um teto DECLARADO exige saldo RESOLVIDO.
+    if mandato.orcamento_maximo is not None:
+        if request.orcamento_restante is None:
+            return False
+        # `not (> 0)`, não `<= 0` (achado da revisão adversarial desta
+        # sub-entrega): `orcamento_restante = float('nan')` faz TODAS as
+        # comparações (`<=`, `<`, `>`, `>=`, `==`) retornarem `False` — um
+        # saldo NaN não é "None" nem "<= 0", então a checagem `<= 0` deixava
+        # passar como se fosse um saldo positivo válido, exatamente o
+        # oposto do fail-closed que esta checagem existe para garantir.
+        # `not (x > 0)` rejeita NaN corretamente (`nan > 0` já é `False`,
+        # então a negação vira `True` e a função retorna `False` abaixo).
+        if not (request.orcamento_restante > 0):
+            return False
 
     # Finalidade do mandato vs. missão do pedido (correção pós-revisão do
-    # Codex): só rejeita em caso de DIVERGÊNCIA EXPLÍCITA entre as duas —
-    # `missao`/`finalidade` são texto livre, então não há como inferir
-    # equivalência semântica aqui (uma correspondência mais forte que
-    # igualdade exata fica para quando mandatos ganharem uma categoria
-    # estruturada, não texto livre). Não bloqueia quando `missao` não foi
-    # informada pelo chamador — hoje nenhum chamador a preenche ainda.
-    if request.missao is not None and mandato.finalidade and request.missao != mandato.finalidade:
+    # Codex, terceira rodada): a versão anterior só comparava quando AMBOS
+    # `missao` e `finalidade` vinham preenchidos — como `Mandato.finalidade`
+    # é campo obrigatório (`str`, sem default — seção 5.3: "condições
+    # mínimas" inclui finalidade), todo mandato real já declara uma; a
+    # checagem antiga então nunca disparava quando o chamador simplesmente
+    # não preenchia `missao` (`None`, o default de `PolicyRequest`),
+    # deixando QUALQUER mandato cobrir pedidos sem missão declarada — o
+    # mesmo padrão de fail-open já fechado para `sensibilidade`/
+    # `destinatarios_recursos`/`classes_conteudo_permitidas`. Agora a
+    # comparação é incondicional: `missao` ausente nunca bate com a
+    # `finalidade` (sempre presente) do mandato.
+    if request.missao != mandato.finalidade:
         return False
 
     destinos = set(mandato.destinatarios_recursos)
-    if destinos and not (
+    if not destinos:
+        # Achado P1 da revisão do Codex (PR #191): `destinos and not (...)`
+        # pulava a checagem inteira quando `destinatarios_recursos` vinha
+        # vazio (`set()` é falso), tratando um mandato SEM escopo de destino
+        # como se cobrisse QUALQUER destinatário — o oposto do que o
+        # contrato pede ("destinatários/recursos" é uma das condições
+        # mínimas do mandato, não algo que possa ficar implícito como "*").
+        # Falha fechada: destino vazio nunca cobre nada.
+        return False
+    if not (
         "*" in destinos
         or any(
             _destino_coberto(d, request.argumentos_resolvidos.get("destinatario", ""))
@@ -337,19 +478,53 @@ def mandato_cobre(mandato: Mandato, request: PolicyRequest, agora: datetime) -> 
         return False
 
     classes = set(mandato.classes_conteudo_permitidas)
-    if classes and request.sensibilidade not in classes:
-        # Correção pós-revisão do Codex (PR #191): a versão original só
-        # rejeitava quando `sensibilidade` estava PREENCHIDA e fora da
-        # lista — como o contrato permite `sensibilidade=None` por padrão,
-        # um mandato restrito a ("geral",) cobria qualquer pedido cujo
-        # chamador simplesmente não preenchesse o campo, inclusive um
+    if not classes:
+        # Mesmo achado, mesmo raciocínio, para `classes_conteudo_permitidas`
+        # vazio: sem classe declarada, o mandato não cobre nada — não é
+        # "unrestricted" por omissão.
+        return False
+    if request.sensibilidade not in classes:
+        # Correção pós-revisão do Codex (PR #191, primeira rodada): a versão
+        # original só rejeitava quando `sensibilidade` estava PREENCHIDA e
+        # fora da lista — como o contrato permite `sensibilidade=None` por
+        # padrão, um mandato restrito a ("geral",) cobria qualquer pedido
+        # cujo chamador simplesmente não preenchesse o campo, inclusive um
         # efeito financeiro/destrutivo. Agora: ausência de classificação
         # NÃO passa por um mandato que declara classes — falha fechado, não
         # aberto (`None not in {"geral"}` é True, então isto também barra
         # o caso ausente, não só o caso "fora da lista").
+        #
+        # Limitação documentada (segunda rodada da revisão do Codex, PR
+        # #191): `classes_conteudo_permitidas` continua sendo texto livre
+        # (`tuple[str, ...]`), não um conjunto fechado/enum — nada aqui
+        # impede um mandato com um rótulo como "outro" de cobrir um pedido
+        # cujo `sensibilidade` resolvido seja também "outro". O plano
+        # (seção 5.3) exige que "tipos 'outro' e rótulos livres não podem
+        # habilitar envio autônomo", mas essa é uma responsabilidade de QUEM
+        # RESOLVE `sensibilidade` a partir de um vocabulário controlado
+        # (ainda não implementado — nenhum chamador popula este campo nesta
+        # sub-entrega) ou de uma sub-entrega futura que troque este campo
+        # por um enum fechado; esta função só compara os valores que recebe.
         return False
 
-    if mandato.horario_permitido_inicio and mandato.horario_permitido_fim:
+    # Janela de horário parcialmente configurada (correção pós-revisão do
+    # Codex, PR #191, quarta rodada): a versão anterior só aplicava a
+    # restrição quando os DOIS extremos vinham preenchidos (`and`) — um
+    # mandato com só `horario_permitido_inicio` OU só `horario_permitido_fim`
+    # (dado parcial/malformado; os dois campos são independentemente
+    # opcionais no contrato) pulava a checagem inteira, cobrindo qualquer
+    # horário como se não houvesse restrição nenhuma. Mesmo raciocínio já
+    # aplicado aos outros campos desta função: um dado parcialmente resolvido
+    # não é "sem restrição", é "não resolvido" — falha fechada.
+    # `is not None` na checagem externa, não truthiness (achado da revisão
+    # adversarial desta própria correção): `"" or ""` é falsy, então um
+    # mandato com os dois campos presentes mas vazios (`""`) escapava até
+    # da checagem de configuração parcial logo abaixo — o mesmo padrão de
+    # bug que esta rodada fechou em `estado_autonomia_atual`, reintroduzido
+    # aqui por usar `or`/`and` sobre o valor em vez de identidade com None.
+    if mandato.horario_permitido_inicio is not None or mandato.horario_permitido_fim is not None:
+        if not (mandato.horario_permitido_inicio and mandato.horario_permitido_fim):
+            return False
         inicio, fim = mandato.horario_permitido_inicio, mandato.horario_permitido_fim
         hora_atual = agora.strftime("%H:%M")
         if inicio <= fim:
@@ -492,6 +667,7 @@ def preparar_politica(politica_proposta: dict, *, base_version: int) -> dict:
 # ---------------------------------------------------------------------------
 
 _ESTADO_DOC = ("system", "autonomy_state")
+_AUSENTE = object()  # sentinela: distingue "chave ausente" de "valor presente e falsy"
 
 
 def estado_autonomia_atual(db, dominio: str = "global") -> EstadoAutonomia:
@@ -524,7 +700,25 @@ def estado_autonomia_atual(db, dominio: str = "global") -> EstadoAutonomia:
         return EstadoAutonomia.ATIVO
 
     dados = snap.to_dict() or {}
-    valor = dados.get(dominio) or dados.get("global") or EstadoAutonomia.ATIVO.value
+    # Correção pós-revisão do Codex (PR #191, quarta rodada): a versão
+    # anterior usava `dados.get(dominio) or dados.get("global") or ATIVO`,
+    # que trata um valor PRESENTE MAS FALSY (`""`, `None` gravado
+    # explicitamente — por exemplo um documento em escrita parcial) do
+    # mesmo jeito que uma chave AUSENTE, caindo direto em ATIVO sem nunca
+    # passar pelo `except ValueError` abaixo. O docstring desta função
+    # promete SOMENTE_PREPARACAO para "valor gravado que não é um dos três
+    # esperados" — um valor falsy presente é exatamente esse caso, não o
+    # de "nada configurado". Agora a chave é procurada por AUSÊNCIA
+    # (`dict.get(..., _AUSENTE)`), não por truthiness: só cai em ATIVO
+    # quando nem `dominio` nem "global" existem no documento; um valor
+    # presente e falsy segue para `EstadoAutonomia(valor)`, que lança
+    # `ValueError` e cai no fail-closed de baixo, como qualquer outro valor
+    # gravado inválido.
+    valor = dados.get(dominio, _AUSENTE)
+    if valor is _AUSENTE:
+        valor = dados.get("global", _AUSENTE)
+    if valor is _AUSENTE:
+        valor = EstadoAutonomia.ATIVO.value
     try:
         return EstadoAutonomia(valor)
     except ValueError:
@@ -532,6 +726,66 @@ def estado_autonomia_atual(db, dominio: str = "global") -> EstadoAutonomia:
         # — dado corrompido/versão futura desconhecida, mesmo raciocínio de
         # falha de leitura acima: não presume ATIVO nem PAUSADO.
         return EstadoAutonomia.SOMENTE_PREPARACAO
+
+
+def decisao_piso(db, principal: Principal, nome: str, argumentos: dict) -> PolicyDecision | None:
+    """Preflight de `avaliar()` para os tools do piso — orquestra
+    `estado_autonomia_atual()` + `PolicyRequest` + `avaliar()` +
+    `registrar_decisao()` num único ponto reutilizável por qualquer canal
+    (P02 sub-entrega 6/N). Extraída da lógica que `mcp_server.py::
+    _decisao_piso_mcp` já tinha desde a sub-entrega 2/N — essa função
+    continua com sua própria implementação por ora (ver pendência em
+    docs/autonomia/execucao.md sobre a duplicação; não refeita nesta
+    sub-entrega para não mexer num caminho de código sensível já testado).
+
+    O candidato natural para o segundo consumidor real, nesta mesma
+    sub-entrega, era o fechamento do agendamento de WhatsApp via Telegram
+    (hermes_core_logic.py::schedule_whatsapp_message, que tem sua própria
+    confirmação por botões mas não consulta autonomy.policy em nenhum
+    ponto) — chegou a ser implementado e testado, mas teve que ser
+    REVERTIDO: hermes_core_logic.py sozinho, sem NENHUMA mudança desta
+    sub-entrega, já tem 276257 caracteres — acima do limite de 200000 de
+    `mcp__Argos__argos_escrever_arquivo_repositorio.conteudo` (a API de
+    escrita do Argos exige o arquivo INTEIRO, não um diff/patch), então
+    esse arquivo é estruturalmente inalcançável por este mecanismo de
+    shipping, para QUALQUER mudança, não só a desta sub-entrega. Ver
+    docs/autonomia/execucao.md (P02 sub-entrega 6/N) para os detalhes e o
+    que isso bloqueia. Esta função em si (`decisao_piso`) não depende de
+    hermes_core_logic.py e continua sendo entregue nesta sub-entrega, pronta
+    para o dia em que esse arquivo puder ser alcançado (ex.: extraindo os
+    handlers de Telegram para um módulo menor, ou uma via de escrita que
+    aceite diffs).
+
+    Retorna `None` quando `nome` não está classificado em
+    `CLASSE_EFEITO_PISO` (mesmo contrato de `mcp_server.py::
+    _decisao_piso_mcp`: um tool exigindo confirmação só por config, sem
+    classe_efeito conhecida, não passa pelo motor).
+
+    `db` já deve estar RESOLVIDO (cliente Firestore de verdade), diferente
+    de `mcp_server.py::_decisao_piso_mcp`, que lida com `ctx.db` (property
+    lazy que pode falhar na PRÓPRIA inicialização, fora do try/except
+    interno de `estado_autonomia_atual`/`registrar_decisao` — por isso
+    aquela função ainda tem uma camada extra de try/except que esta não
+    precisa). Tanto `estado_autonomia_atual` quanto `registrar_decisao` já
+    são fail-safe internamente (a primeira cai em SOMENTE_PREPARACAO numa
+    falha de LEITURA; a segunda só loga numa falha de ESCRITA) — nenhuma
+    das duas deixa uma exceção escapar para quem chamou `decisao_piso`.
+    """
+    classe_efeito = CLASSE_EFEITO_PISO.get(nome)
+    if classe_efeito is None:
+        return None
+
+    estado = estado_autonomia_atual(db)
+    request = PolicyRequest(
+        principal=principal,
+        ferramenta=nome,
+        classe_efeito=classe_efeito,
+        argumentos_resolvidos=argumentos,
+        estado_autonomia=estado,
+    )
+    decisao = avaliar(request)
+    registrar_decisao(db, request, decisao)
+    return decisao
 
 
 def registrar_decisao(db, request: PolicyRequest, decision: PolicyDecision) -> None:

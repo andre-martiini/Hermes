@@ -1,5 +1,38 @@
-"""Testes de `mcp_server.py` — dispatch JSON-RPC do canal MCP do Hermes.
+"""Testes do preflight de `autonomy.policy` no servidor MCP (P02 sub-entrega
+2/N, docs/autonomia/execucao.md) e cobertura do contrato `resultType` do
+dispatch MCP (achado do Codex na PR #193, 07/09/2026).
 
+Este arquivo reúne duas frentes de teste para `mcp_server.py`, criadas
+independentemente em duas branches sem ancestral comum para este arquivo
+(main e `claude/p02-autonomy-policy-contracts`) e combinadas aqui ao
+resolver o conflito de merge (add/add) entre as duas ao integrar as PRs.
+Nenhuma classe, teste ou asserção de nenhuma das duas partes foi alterada
+nesta combinação — só a função auxiliar `_ctx` da Parte 2 foi renomeada
+para `_ctx_result_type`, para não colidir com a `_ctx` da Parte 1 (as duas
+tinham o mesmo nome mas construíam o `ToolContext` de forma ligeiramente
+diferente — ver cada uma abaixo).
+
+== Parte 1 — Preflight de `autonomy.policy` (classes logo abaixo) ==
+Escopo deliberadamente estreito: `mcp_server.py` não tem nenhum outro teste
+(898 linhas, sem `test_mcp_server.py` antes desta sub-entrega — só
+`test_mcp_oauth.py`, que cobre o módulo de OAuth, não este arquivo). Em vez
+de tentar cobrir o servidor MCP inteiro nesta sub-entrega, este arquivo cobre
+só o que ela ADICIONA: `_principal_mcp` (construção do `Principal` do
+canal), `_decisao_piso_mcp` (o preflight em si) e o mapeamento de
+`PolicyDecision` para a resposta JSON-RPC dentro de `_handle_tools_call`.
+
+Os testes evitam Firestore real de duas formas: (1) `_decisao_piso_mcp`
+chama `autonomy_policy.estado_autonomia_atual`/`autonomy_policy.
+registrar_decisao` pelo nome do módulo (`mcp_server.autonomy_policy.*`), e
+essas duas funções já são as únicas do motor que tocam `db` — testá-las de
+verdade é responsabilidade de `test_policy.py`; aqui elas são substituídas
+por dublês. (2) Quando um teste precisa de um `ToolContext` mas o caminho
+sob teste nunca acessa `ctx.db` de verdade (porque as funções de I/O foram
+substituídas), o `ToolContext` é construído com `_db` já preenchido por um
+sentinela, para que a property `db` não tente inicializar Firebase.
+
+== Parte 2 — Contrato `resultType` (classes no fim do arquivo, usam
+`_ctx_result_type`) ==
 Não existia arquivo de teste chamando estes handlers DIRETAMENTE antes desta
 correção (confirmado por busca no repositório: `_handle_tools_call`/
 `_handle_tools_list`/`_handle_server_discover` não eram importados por
@@ -11,7 +44,7 @@ exercitava boa parte deste dispatch de ponta a ponta, via `mcpServer()` real
 igualdade exata — e que esta correção QUEBROU de propósito (o contrato mudou
 para incluir `resultType`; os dois foram atualizados para refletir o
 contrato novo, não revertidos). Vale a pena ler aquela classe também para o
-quadro completo do que já era coberto. O escopo deste arquivo é
+quadro completo do que já era coberto. O escopo desta segunda parte é
 deliberadamente estreito: cobre o achado do Codex na PR #193
 (07/09/2026) — `_SUPPORTED_PROTOCOL_VERSIONS` passou a incluir "2026-07-28"
 (para o `server/discover` do ChatGPT), mas nenhuma resposta de `tools/call`
@@ -42,10 +75,397 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import mcp_server
+from autonomy.contracts import Decisao, EstadoAutonomia, PolicyDecision, TipoPrincipal
 from tools.tool_context import ToolContext
 
 
-def _ctx(uid: str = "dono-uid") -> ToolContext:
+def _ctx(uid="dono-uid"):
+    # `_db` já preenchido com um sentinela: nada neste arquivo deve acessar
+    # Firestore de verdade, então se algum código sob teste tentar (bug),
+    # o sentinela (não um cliente Firestore) estoura na hora, alto e claro,
+    # em vez de tentar abrir uma conexão real e travar/falhar de outro jeito.
+    return ToolContext(user_uid=uid, canal="mcp", _db=object())
+
+
+class TestPrincipalMcp(unittest.TestCase):
+    def test_cliente_assistido_com_origem_humana_true(self):
+        ctx = _ctx(uid="uid-123")
+        principal = mcp_server._principal_mcp(ctx)
+        self.assertEqual(principal.uid, "uid-123")
+        self.assertEqual(principal.tipo, TipoPrincipal.CLIENTE_ASSISTIDO)
+        self.assertEqual(principal.canal, "mcp")
+        self.assertIs(principal.origem_humana, True)
+        # CLIENTE_ASSISTIDO é um dos dois tipos "eh_dono()" — condição que o
+        # gate de eh_dono() (rodada 5 do Codex, PR #192) depende para conceder
+        # o ALLOW de baixa fricção da matriz padrão.
+        self.assertTrue(principal.eh_dono())
+
+
+class TestDecisaoPisoMcp(unittest.TestCase):
+    def test_retorna_none_para_tool_fora_da_classificacao_do_piso(self):
+        ctx = _ctx()
+        with patch.object(mcp_server.autonomy_policy, "estado_autonomia_atual") as mock_estado:
+            resultado = mcp_server._decisao_piso_mcp(ctx, "tool_admin_qualquer", {})
+        self.assertIsNone(resultado)
+        # Prova que o preflight nem tenta resolver estado/avaliar para um
+        # tool que não está em CLASSE_EFEITO_PISO — não é só "decide None
+        # por outro caminho", é "não entra no motor de política".
+        mock_estado.assert_not_called()
+
+    def test_ativo_produz_require_approval(self):
+        ctx = _ctx()
+        with patch.object(
+            mcp_server.autonomy_policy, "estado_autonomia_atual", return_value=EstadoAutonomia.ATIVO
+        ), patch.object(mcp_server.autonomy_policy, "registrar_decisao") as mock_registrar:
+            decisao = mcp_server._decisao_piso_mcp(ctx, "pausar_conversa", {"x": 1})
+        self.assertIsInstance(decisao, PolicyDecision)
+        self.assertEqual(decisao.decision, Decisao.REQUIRE_APPROVAL)
+        self.assertEqual(decisao.reason_code, "floor_nao_contornavel")
+        mock_registrar.assert_called_once()
+
+    def test_pausado_produz_deny(self):
+        ctx = _ctx()
+        with patch.object(
+            mcp_server.autonomy_policy, "estado_autonomia_atual", return_value=EstadoAutonomia.PAUSADO
+        ), patch.object(mcp_server.autonomy_policy, "registrar_decisao"):
+            decisao = mcp_server._decisao_piso_mcp(ctx, "schedule_whatsapp_message", {})
+        self.assertEqual(decisao.decision, Decisao.DENY)
+
+    def test_somente_preparacao_produz_prepare_only(self):
+        ctx = _ctx()
+        with patch.object(
+            mcp_server.autonomy_policy,
+            "estado_autonomia_atual",
+            return_value=EstadoAutonomia.SOMENTE_PREPARACAO,
+        ), patch.object(mcp_server.autonomy_policy, "registrar_decisao"):
+            decisao = mcp_server._decisao_piso_mcp(ctx, "criar_rascunho_email", {})
+        self.assertEqual(decisao.decision, Decisao.PREPARE_ONLY)
+
+    def test_usa_principal_cliente_assistido_no_request_avaliado(self):
+        # Verifica o Principal que de fato chega em avaliar() (via
+        # registrar_decisao, que recebe o mesmo PolicyRequest) — não só que
+        # `_principal_mcp` por si só está correto (já coberto acima), mas
+        # que `_decisao_piso_mcp` de fato usa ele para montar o pedido.
+        ctx = _ctx(uid="dono-uid-xyz")
+        with patch.object(
+            mcp_server.autonomy_policy, "estado_autonomia_atual", return_value=EstadoAutonomia.ATIVO
+        ), patch.object(mcp_server.autonomy_policy, "registrar_decisao") as mock_registrar:
+            mcp_server._decisao_piso_mcp(ctx, "registrar_aporte_investimento", {"valor": 10})
+        request_usado = mock_registrar.call_args.args[1]
+        self.assertEqual(request_usado.principal.uid, "dono-uid-xyz")
+        self.assertEqual(request_usado.principal.tipo, TipoPrincipal.CLIENTE_ASSISTIDO)
+        self.assertIs(request_usado.principal.origem_humana, True)
+        self.assertEqual(request_usado.ferramenta, "registrar_aporte_investimento")
+
+
+class TestHandleToolsCallPreflight(unittest.TestCase):
+    """Integração: `_handle_tools_call` mapeando `PolicyDecision` para a
+    resposta JSON-RPC, ANTES de qualquer prévia de confirmação ser criada."""
+
+    def _params(self, nome, argumentos=None):
+        return {"name": nome, "arguments": argumentos or {}}
+
+    def test_bloqueia_tool_do_piso_quando_autonomia_pausada_sem_chamar_preview(self):
+        ctx = _ctx()
+        with patch.object(
+            mcp_server.autonomy_policy, "estado_autonomia_atual", return_value=EstadoAutonomia.PAUSADO
+        ), patch.object(mcp_server.autonomy_policy, "registrar_decisao"), patch.object(
+            mcp_server.registry, "is_mcp_enabled", return_value=True
+        ), patch.object(mcp_server, "preview_tool") as mock_preview:
+            resultado = mcp_server._handle_tools_call(
+                self._params("pausar_conversa"), ctx=ctx
+            )
+        mock_preview.assert_not_called()
+        conteudo = resultado["content"][0]["text"]
+        self.assertTrue(resultado.get("isError"))
+        self.assertIn("denied", conteudo)
+
+    def test_prepare_only_quando_somente_preparacao_sem_chamar_preview(self):
+        ctx = _ctx()
+        with patch.object(
+            mcp_server.autonomy_policy,
+            "estado_autonomia_atual",
+            return_value=EstadoAutonomia.SOMENTE_PREPARACAO,
+        ), patch.object(mcp_server.autonomy_policy, "registrar_decisao"), patch.object(
+            mcp_server.registry, "is_mcp_enabled", return_value=True
+        ), patch.object(mcp_server, "preview_tool") as mock_preview:
+            resultado = mcp_server._handle_tools_call(
+                self._params("criar_rascunho_email"), ctx=ctx
+            )
+        mock_preview.assert_not_called()
+        self.assertFalse(resultado.get("isError", False))
+        conteudo = resultado["content"][0]["text"]
+        self.assertIn("prepare_only", conteudo)
+
+    def test_ativo_prossegue_para_fluxo_de_confirmacao_existente(self):
+        # Não recria toda a criação de confirmação (Firestore) — só prova
+        # que o controle chega até `preview_tool`, o primeiro passo do fluxo
+        # antigo, inalterado. Um `RuntimeError` sentinela de dentro do
+        # `preview_tool` mockado é capturado pelo `except Exception` que já
+        # existe nesse trecho e vira `{"erro": ...}` — evidência de que o
+        # fluxo antigo foi mesmo alcançado, sem precisar simular Firestore.
+        ctx = _ctx()
+        with patch.object(
+            mcp_server.autonomy_policy, "estado_autonomia_atual", return_value=EstadoAutonomia.ATIVO
+        ), patch.object(mcp_server.autonomy_policy, "registrar_decisao"), patch.object(
+            mcp_server.registry, "is_mcp_enabled", return_value=True
+        ), patch.object(
+            mcp_server, "preview_tool", side_effect=RuntimeError("sentinela-fluxo-antigo")
+        ) as mock_preview:
+            resultado = mcp_server._handle_tools_call(
+                self._params("pausar_conversa"), ctx=ctx
+            )
+        mock_preview.assert_called_once()
+        self.assertTrue(resultado.get("isError"))
+        self.assertIn("sentinela-fluxo-antigo", resultado["content"][0]["text"])
+
+    def test_tool_confirm_gated_so_por_config_nao_chama_motor_de_politica(self):
+        # Um tool que exige confirmação só via `system/mcp_access.confirm_tools`
+        # (não está no piso hardcoded) não tem `classe_efeito` conhecida —
+        # `_decisao_piso_mcp` retorna None e o fluxo antigo roda inalterado,
+        # sem nunca consultar `estado_autonomia_atual`.
+        ctx = _ctx()
+        with patch.object(
+            mcp_server, "_access_config", return_value={"confirm_tools": {"tool_admin_extra"}}
+        ), patch.object(mcp_server.autonomy_policy, "estado_autonomia_atual") as mock_estado, patch.object(
+            mcp_server.registry, "is_mcp_enabled", return_value=True
+        ), patch.object(
+            mcp_server, "preview_tool", side_effect=RuntimeError("sentinela-fluxo-antigo")
+        ) as mock_preview:
+            resultado = mcp_server._handle_tools_call(
+                self._params("tool_admin_extra"), ctx=ctx
+            )
+        mock_estado.assert_not_called()
+        mock_preview.assert_called_once()
+        self.assertIn("sentinela-fluxo-antigo", resultado["content"][0]["text"])
+
+
+class TestPisoSemHookNaoBurlaConfirmacaoComConfirmedTrue(unittest.TestCase):
+    """Achado da revisão adversarial desta sub-entrega (P02 sub-entrega 2/N):
+    `criar_rascunho_email`, `registrar_aporte_investimento` e
+    `registrar_execucao_investimento` não têm hook de prévia
+    (`tools/hermes_tools.py::preview()` devolve `None` para as três). Antes
+    da correção, uma ÚNICA chamada `tools/call` com `_confirmed=true` e SEM
+    `_confirmation_id` executava essas três tools direto — sem nunca criar
+    uma confirmação real, sem nunca passar por `_decisao_piso_mcp` (só
+    chamado no ramo de CRIAÇÃO de confirmação), e sem o "sim" explícito que
+    o piso promete ser inegociável. Provado ponta a ponta contra o dispatch
+    real (`execute_tool`), não só contra o texto do erro — a prova que
+    importa é que a tool NUNCA RODA, não só que a resposta parece um erro.
+    """
+
+    def _params(self, nome, confirmed=True, confirmation_id=None, argumentos=None):
+        args = dict(argumentos or {})
+        args["_confirmed"] = confirmed
+        if confirmation_id is not None:
+            args["_confirmation_id"] = confirmation_id
+        return {"name": nome, "arguments": args}
+
+    def test_registrar_aporte_investimento_bloqueado_sem_confirmation_id(self):
+        ctx = _ctx()
+        with patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), patch.object(
+            mcp_server, "execute_tool"
+        ) as mock_execute, patch.object(mcp_server, "preview_tool") as mock_preview:
+            resultado = mcp_server._handle_tools_call(
+                self._params("registrar_aporte_investimento", argumentos={"valor": 100}),
+                ctx=ctx,
+            )
+        mock_execute.assert_not_called()
+        self.assertTrue(resultado.get("isError"))
+        self.assertIn("confirmation_id", resultado["content"][0]["text"])
+        # Nem sequer chega a checar hook de prévia — bloqueado antes disso,
+        # só por estar no piso.
+        mock_preview.assert_not_called()
+
+    def test_registrar_execucao_investimento_bloqueado_sem_confirmation_id(self):
+        ctx = _ctx()
+        with patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), patch.object(
+            mcp_server, "execute_tool"
+        ) as mock_execute:
+            resultado = mcp_server._handle_tools_call(
+                self._params("registrar_execucao_investimento", argumentos={"ativo": "X"}),
+                ctx=ctx,
+            )
+        mock_execute.assert_not_called()
+        self.assertTrue(resultado.get("isError"))
+
+    def test_criar_rascunho_email_bloqueado_sem_confirmation_id(self):
+        ctx = _ctx()
+        with patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), patch.object(
+            mcp_server, "execute_tool"
+        ) as mock_execute:
+            resultado = mcp_server._handle_tools_call(
+                self._params("criar_rascunho_email"), ctx=ctx
+            )
+        mock_execute.assert_not_called()
+        self.assertTrue(resultado.get("isError"))
+
+    def test_confirmation_id_real_ainda_funciona_para_tool_do_piso_sem_hook(self):
+        # A correção não deve quebrar o caminho LEGÍTIMO: confirmation_id de
+        # uma confirmação real e persistida ainda executa normalmente — só o
+        # atalho sem confirmation_id é que fica fechado.
+        ctx = _ctx()
+        with patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), patch.object(
+            mcp_server, "_executar_confirmacao", return_value={"ok": True}
+        ) as mock_executar:
+            resultado = mcp_server._handle_tools_call(
+                self._params(
+                    "registrar_aporte_investimento",
+                    confirmation_id="confirmacao-real-123",
+                    argumentos={"valor": 100},
+                ),
+                ctx=ctx,
+            )
+        mock_executar.assert_called_once()
+        self.assertFalse(resultado.get("isError", False))
+
+    def test_pausar_conversa_com_hook_continua_pedindo_confirmation_id_como_antes(self):
+        # `pausar_conversa` TEM hook de prévia — já era bloqueada antes desta
+        # correção (preview_tool(...) is not None). Continua bloqueada, só
+        # que agora pela mesma razão nova (está no piso) chega primeiro —
+        # o comportamento observável para quem chama não muda.
+        ctx = _ctx()
+        with patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), patch.object(
+            mcp_server, "execute_tool"
+        ) as mock_execute, patch.object(
+            mcp_server, "preview_tool", return_value={"status": "aguardando_confirmacao"}
+        ) as mock_preview:
+            resultado = mcp_server._handle_tools_call(
+                self._params("pausar_conversa"), ctx=ctx
+            )
+        mock_execute.assert_not_called()
+        self.assertTrue(resultado.get("isError"))
+        # Bloqueado pelo novo gate do piso, ANTES de sequer consultar o hook
+        # de prévia (redundante para tools do piso, mas não regressivo).
+        mock_preview.assert_not_called()
+
+    def test_tool_confirm_gated_so_por_config_tambem_exige_confirmation_id(self):
+        # Fora do piso hardcoded (só por `system/mcp_access.confirm_tools`):
+        # ATUALIZADO na sub-entrega 7/N — a "compatibilidade legada"
+        # ("_confirmed=true bem sucedido quando a tool não tem hook") foi
+        # deliberadamente fechada aqui também, mesma lacuna de governança já
+        # fechada para o piso na sub-entrega 2/N (ver docstring da classe).
+        # A sub-entrega 2/N tinha restringido o fechamento só ao piso e
+        # registrado esta mesma lacuna como pendência explícita em
+        # docs/autonomia/execucao.md ("vale endereçar quando uma futura
+        # sub-entrega tratar de tools configuráveis via política") — este é
+        # aquele endereçamento. Não é ampliação por analogia do PISO (que
+        # continua sendo só os 5 nomes fixos); é o fechamento do MESMO atalho
+        # de bypass para qualquer tool que `_exige_confirmacao()` cubra.
+        ctx = _ctx()
+        with patch.object(
+            mcp_server, "_access_config", return_value={"confirm_tools": {"tool_admin_extra"}}
+        ), patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), patch.object(
+            mcp_server, "execute_tool", return_value={"ok": True}
+        ) as mock_execute, patch.object(mcp_server, "preview_tool", return_value=None):
+            resultado = mcp_server._handle_tools_call(
+                self._params("tool_admin_extra"), ctx=ctx
+            )
+        mock_execute.assert_not_called()
+        self.assertTrue(resultado.get("isError"))
+        self.assertIn("confirmation_id", resultado["content"][0]["text"])
+
+    def test_tool_confirm_gated_so_por_config_com_confirmation_id_real_ainda_funciona(self):
+        # O caminho legítimo (confirmation_id de uma confirmação real e
+        # persistida) continua funcionando normalmente para tools de
+        # confirmação só por config — só o atalho sem confirmation_id fica
+        # fechado, mesmo padrão já provado para o piso acima.
+        ctx = _ctx()
+        with patch.object(
+            mcp_server, "_access_config", return_value={"confirm_tools": {"tool_admin_extra"}}
+        ), patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), patch.object(
+            mcp_server, "_executar_confirmacao", return_value={"ok": True}
+        ) as mock_executar:
+            resultado = mcp_server._handle_tools_call(
+                self._params("tool_admin_extra", confirmation_id="confirmacao-real-456"),
+                ctx=ctx,
+            )
+        mock_executar.assert_called_once()
+        self.assertFalse(resultado.get("isError", False))
+
+    def test_tool_confirm_gated_so_por_config_com_hook_continua_bloqueada_como_antes(self):
+        # Tool de confirmação só por config QUE TEM hook de prévia: já era
+        # bloqueada antes desta sub-entrega (preview_tool(...) is not None);
+        # continua bloqueada agora, comportamento observável inalterado.
+        ctx = _ctx()
+        with patch.object(
+            mcp_server, "_access_config", return_value={"confirm_tools": {"tool_admin_extra"}}
+        ), patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), patch.object(
+            mcp_server, "execute_tool"
+        ) as mock_execute, patch.object(
+            mcp_server, "preview_tool", return_value={"status": "aguardando_confirmacao"}
+        ):
+            resultado = mcp_server._handle_tools_call(
+                self._params("tool_admin_extra"), ctx=ctx
+            )
+        mock_execute.assert_not_called()
+        self.assertTrue(resultado.get("isError"))
+
+
+class TestFerramentasDePoliticaViaMcp(unittest.TestCase):
+    """P02 sub-entrega 3/N: consultar_politica/simular_politica/preparar_politica
+    não estão em `CLASSE_EFEITO_PISO` nem em `confirm_tools` por padrão —
+    `_exige_confirmacao` é `False` para as três, então passam direto pelo
+    fluxo genérico de execução deste método (`execute_tool`), sem preflight
+    de política nem prévia de confirmação.
+
+    Achado da revisão adversarial desta sub-entrega: as duas respostas de
+    erro mais comuns dessas tools (lote de `simular_politica` com pedido
+    inválido; `preparar_politica` com `base_version` desatualizada — a
+    salvaguarda central da tool) eram serializadas como uma string JSON
+    plana, sem o prefixo `ERRO|` que `_looks_like_error` reconhece — o
+    protocolo MCP via `isError` reportava sucesso para uma chamada que, na
+    prática, não fez o que foi pedido. Os testes abaixo provam a correção
+    no ponto onde um cliente MCP real observaria a diferença: o `isError`
+    devolvido por `_handle_tools_call`, não só o texto interno da resposta.
+    """
+
+    def _params(self, nome, argumentos=None):
+        return {"name": nome, "arguments": argumentos or {}}
+
+    def test_simular_politica_lote_invalido_marca_iserror(self):
+        ctx = _ctx()
+        resultado = mcp_server._handle_tools_call(
+            self._params("simular_politica", {"pedidos": [
+                {"ferramenta": "tool_sem_classe_efeito_conhecida"},
+            ]}),
+            ctx=ctx,
+        )
+        self.assertTrue(resultado.get("isError"))
+        self.assertIn("pedidos_invalidos", resultado["content"][0]["text"])
+
+    def test_simular_politica_lote_valido_nao_marca_iserror(self):
+        ctx = _ctx()
+        resultado = mcp_server._handle_tools_call(
+            self._params("simular_politica", {"pedidos": [
+                {"ferramenta": "pausar_conversa"},
+            ]}),
+            ctx=ctx,
+        )
+        self.assertFalse(resultado.get("isError", False))
+
+    def test_preparar_politica_versao_base_errada_marca_iserror(self):
+        ctx = _ctx()
+        resultado = mcp_server._handle_tools_call(
+            self._params("preparar_politica", {"politica_proposta": {}, "base_version": 999}),
+            ctx=ctx,
+        )
+        self.assertTrue(resultado.get("isError"))
+        self.assertIn("não bate", resultado["content"][0]["text"])
+
+    def test_preparar_politica_valida_nao_marca_iserror(self):
+        ctx = _ctx()
+        resultado = mcp_server._handle_tools_call(
+            self._params("preparar_politica", {
+                "politica_proposta": {},
+                "base_version": mcp_server.autonomy_policy._POLICY_VERSION_PADRAO,
+            }),
+            ctx=ctx,
+        )
+        self.assertFalse(resultado.get("isError", False))
+
+
+def _ctx_result_type(uid: str = "dono-uid") -> ToolContext:
     return ToolContext(user_uid=uid, canal="mcp", _db=MagicMock())
 
 
@@ -97,7 +517,7 @@ class TestHandleToolsCallResultType(unittest.TestCase):
         with patch.object(mcp_server, "_exige_confirmacao", return_value=False), \
              patch.object(mcp_server, "execute_tool", return_value={"resultado": "ok"}), \
              patch.object(mcp_server, "_audit_log"):
-            r = mcp_server._handle_tools_call({"name": "obter_estado_atual", "arguments": {}}, ctx=_ctx())
+            r = mcp_server._handle_tools_call({"name": "obter_estado_atual", "arguments": {}}, ctx=_ctx_result_type())
         self.assertEqual(r["resultType"], "complete")
         self.assertFalse(r["isError"])
 
@@ -105,7 +525,7 @@ class TestHandleToolsCallResultType(unittest.TestCase):
         with patch.object(mcp_server, "_exige_confirmacao", return_value=False), \
              patch.object(mcp_server, "execute_tool", side_effect=RuntimeError("boom")), \
              patch.object(mcp_server, "_audit_log"):
-            r = mcp_server._handle_tools_call({"name": "consultar_dados_cadastrais", "arguments": {}}, ctx=_ctx())
+            r = mcp_server._handle_tools_call({"name": "consultar_dados_cadastrais", "arguments": {}}, ctx=_ctx_result_type())
         self.assertEqual(r["resultType"], "complete")
         self.assertTrue(r["isError"])
 
@@ -113,7 +533,7 @@ class TestHandleToolsCallResultType(unittest.TestCase):
         with patch.object(mcp_server, "_executar_confirmacao", return_value={"status": "ok"}), \
              patch.object(mcp_server, "_audit_log"):
             r = mcp_server._handle_tools_call(
-                {"name": "confirmar_acao", "arguments": {"confirmation_id": "c1"}}, ctx=_ctx()
+                {"name": "confirmar_acao", "arguments": {"confirmation_id": "c1"}}, ctx=_ctx_result_type()
             )
         self.assertEqual(r["resultType"], "complete")
 
@@ -122,7 +542,7 @@ class TestHandleToolsCallResultType(unittest.TestCase):
              patch.object(mcp_server, "preview_tool", return_value={"resumo": "prevista"}), \
              patch.object(mcp_server, "_criar_confirmacao", return_value="conf-1"), \
              patch.object(mcp_server, "_audit_log"):
-            r = mcp_server._handle_tools_call({"name": "algo_sensivel", "arguments": {}}, ctx=_ctx())
+            r = mcp_server._handle_tools_call({"name": "algo_sensivel", "arguments": {}}, ctx=_ctx_result_type())
         self.assertEqual(r["resultType"], "complete")
         self.assertFalse(r["isError"])
 
@@ -130,7 +550,7 @@ class TestHandleToolsCallResultType(unittest.TestCase):
         with patch.object(mcp_server, "_exige_confirmacao", return_value=True), \
              patch.object(mcp_server, "preview_tool", side_effect=ValueError("destino invalido")), \
              patch.object(mcp_server, "_audit_log"):
-            r = mcp_server._handle_tools_call({"name": "algo_sensivel", "arguments": {}}, ctx=_ctx())
+            r = mcp_server._handle_tools_call({"name": "algo_sensivel", "arguments": {}}, ctx=_ctx_result_type())
         self.assertEqual(r["resultType"], "complete")
         self.assertTrue(r["isError"])
 
@@ -139,7 +559,7 @@ class TestHandleToolsCallResultType(unittest.TestCase):
              patch.object(mcp_server, "_TOOLS_LONGAS", {"tool_demorada"}), \
              patch("mcp_jobs.criar_job", return_value="job-1"), \
              patch.object(mcp_server, "_audit_log"):
-            r = mcp_server._handle_tools_call({"name": "tool_demorada", "arguments": {}}, ctx=_ctx())
+            r = mcp_server._handle_tools_call({"name": "tool_demorada", "arguments": {}}, ctx=_ctx_result_type())
         self.assertEqual(r["resultType"], "complete")
         self.assertFalse(r["isError"])
         self.assertEqual(r["content"][0]["text"].count("job-1"), 1)

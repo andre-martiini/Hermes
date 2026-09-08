@@ -86,6 +86,11 @@ def ler_job(uid: str, job_id: str) -> dict:
         saida["resultado"] = dados.get("resultado")
     elif dados.get("status") == "error":
         saida["erro"] = dados.get("erro")
+        # Presente só quando o erro veio do preflight de política (P02
+        # sub-entrega 9/N), nunca de uma falha de execução — permite ao
+        # consumidor distinguir "bloqueado, não adianta repetir" de um bug.
+        if dados.get("bloqueio_politica") is not None:
+            saida["bloqueio_politica"] = dados.get("bloqueio_politica")
     else:
         saida["mensagem"] = (
             "Ainda processando. Consulte de novo em alguns segundos com o mesmo job_id."
@@ -112,8 +117,10 @@ def on_mcp_job_created(event: firestore_fn.Event[firestore_fn.DocumentSnapshot |
     tool = job.get("tool")
 
     try:
+        from autonomy.contracts import Decisao, TipoPrincipal
+        from autonomy.policy import decisao_piso
         from tools.hermes_tools import execute
-        from tools.tool_context import ToolContext
+        from tools.tool_context import ToolContext, principal_de
 
         ctx = ToolContext(
             user_uid=job.get("uid"),
@@ -121,7 +128,85 @@ def on_mcp_job_created(event: firestore_fn.Event[firestore_fn.DocumentSnapshot |
             task_id=job.get("task_id"),
             canal="mcp",
         )
-        resultado = execute(tool, job.get("arguments") or {}, ctx)
+        argumentos = job.get("arguments") or {}
+
+        # P02 sub-entrega 9/N (passo 1): este trigger retoma uma tool MCP
+        # assincronamente, ja fora do ciclo do request HTTP original — sem
+        # NENHUMA garantia de que o dono ainda esta acompanhando a sessao. E
+        # exatamente o caso que a docstring de
+        # `tools/tool_context.py::principal_de` (sub-entrega 5/N) cita como
+        # motivo para o tipo do principal ser sempre explicito, nunca
+        # inferido de `ctx.canal` (que aqui e "mcp", igual ao do cliente
+        # interativo em `mcp_server.py`). Decisao de Andre: sempre
+        # RUNNER_SERVICO, sempre `origem_humana=False` — nunca
+        # DONO_INTERATIVO/CLIENTE_ASSISTIDO so porque o uid bate com o dono.
+        principal = principal_de(ctx, TipoPrincipal.RUNNER_SERVICO, origem_humana=False)
+
+        # Preflight do motor de politica (mesmo padrao de
+        # `mcp_server.py::_decisao_piso_mcp`), passo 6 do P02: chamadas
+        # internas tambem passam pela politica antes do efeito.
+        # `decisao_piso` e fail-safe por dentro (nunca deixa excecao escapar)
+        # e devolve `None` quando `tool` nao esta classificado em
+        # `autonomy.policy.CLASSE_EFEITO_PISO` — hoje nenhuma das tres tools
+        # que passam por este trigger (gerar_relatorio,
+        # ler_documento_na_integra, buscar_e_analisar_email) esta
+        # classificada, entao este bloco sempre recebe `None` e NAO muda
+        # nenhum comportamento hoje; fica pronto para quando uma tool
+        # assincrona for classificada no piso.
+        #
+        # IMPORTANTE (achado da revisão adversarial desta sub-entrega):
+        # bloqueia em QUALQUER decisão diferente de ALLOW, não só
+        # DENY/PREPARE_ONLY. `mcp_server.py::_handle_tools_call` deixa
+        # REQUIRE_APPROVAL cair no fluxo abaixo porque esse fluxo cria uma
+        # confirmação real e espera o "sim" do dono antes de executar — mas
+        # este trigger não tem NENHUM mecanismo de confirmação: o fallthrough
+        # aqui é execução direta. Copiar o mesmo "só bloqueia DENY/PREPARE_
+        # ONLY" deste ponto executaria sem aprovação no dia em que uma tool
+        # assíncrona for classificada no piso e a autonomia estiver ATIVA
+        # (o caso mais comum, não o raro) — exatamente o cenário que este
+        # preflight existe para impedir.
+        decisao = decisao_piso(_db(), principal, tool, argumentos)
+        if decisao is not None and decisao.decision != Decisao.ALLOW:
+            mensagens = {
+                Decisao.DENY: "Ação bloqueada pela política de autonomia vigente.",
+                Decisao.PREPARE_ONLY: (
+                    "Autonomia está em modo somente-preparação: esta ação não "
+                    "pode ser executada automaticamente agora."
+                ),
+                Decisao.REQUIRE_APPROVAL: (
+                    "Esta ação exige aprovação explícita do dono antes de "
+                    "executar, mas este canal (job assíncrono de MCP) não tem "
+                    "mecanismo de confirmação — só o canal síncrono original "
+                    "(mcp_server.py) pode coletar essa aprovação."
+                ),
+                Decisao.DEFER: (
+                    "Autonomia adiou esta ação (defer) — não pode ser "
+                    "executada automaticamente agora."
+                ),
+            }
+            base = mensagens.get(decisao.decision, "Ação não permitida pela política de autonomia vigente.")
+            erro = (base + " " + (decisao.motivo_legivel or "")).strip()
+            ref.update({
+                "status": "error",
+                "erro": erro,
+                # Campo aditivo (não muda o contrato de `status`/`erro` que
+                # `ler_job` já lê): permite a um consumidor programático
+                # distinguir "bloqueado pela política, não adianta repetir"
+                # de um erro/bug genuíno, sem precisar casar texto livre.
+                "bloqueio_politica": {
+                    "decision": decisao.decision.value,
+                    "reason_code": decisao.reason_code,
+                },
+                "concluido_em": int(time.time()),
+                "expira_em": int(time.time()) + _TTL_SEC,
+            })
+            print(
+                f"[mcp_jobs] {tool} bloqueada pela politica "
+                f"(job={job.get('job_id')}, decision={decisao.decision.value}, reason={decisao.reason_code})"
+            )
+            return
+
+        resultado = execute(tool, argumentos, ctx)
         texto = resultado if isinstance(resultado, str) else json.dumps(
             resultado, ensure_ascii=False, default=str
         )
