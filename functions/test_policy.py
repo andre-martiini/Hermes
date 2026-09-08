@@ -988,6 +988,79 @@ class TestPrepararPolitica(unittest.TestCase):
         self.assertTrue(r["exige_justificativa_explicita"])
         self.assertIsNotNone(r["aviso"])
 
+    def test_string_em_vez_de_lista_retorna_erro_nao_diff_bogus(self):
+        # Regressão do bug de tipo achado pela revisão adversarial da
+        # sub-entrega 3/N: antes desta correção, `set("pausar_conversa")`
+        # iterava a string caractere por caractere e produzia um diff que
+        # parecia válido ("remover as 5 tools reais do piso, adicionar um
+        # bando de letras soltas"), sem sinalizar erro nenhum. Na época o
+        # bug foi contornado só na wrapper MCP (tools/hermes_tools.py); esta
+        # sub-entrega fecha o motor puro também.
+        r = policy.preparar_politica(
+            {"ferramentas_com_confirmacao_obrigatoria": "pausar_conversa"},
+            base_version=policy._POLICY_VERSION_PADRAO,
+        )
+        self.assertIsNone(r["diff"])
+        self.assertIn("erro", r)
+        self.assertNotIn("removidas", r)
+
+    def test_lista_com_item_nao_string_retorna_erro(self):
+        r = policy.preparar_politica(
+            {"ferramentas_com_confirmacao_obrigatoria": ["pausar_conversa", 42]},
+            base_version=policy._POLICY_VERSION_PADRAO,
+        )
+        self.assertIsNone(r["diff"])
+        self.assertIn("erro", r)
+
+    def test_tupla_de_strings_ainda_e_aceita(self):
+        # Não é só `list` que deve funcionar -- qualquer coleção de strings
+        # que não seja ela própria uma string é uma entrada legítima.
+        restante = tuple(sorted(policy.FLOOR_CONFIRMACAO_OBRIGATORIA))
+        r = policy.preparar_politica(
+            {"ferramentas_com_confirmacao_obrigatoria": restante},
+            base_version=policy._POLICY_VERSION_PADRAO,
+        )
+        self.assertIsNotNone(r["diff"])
+        self.assertNotIn("erro", r)
+
+    def test_campo_ausente_usa_piso_atual_sem_erro(self):
+        r = policy.preparar_politica({}, base_version=policy._POLICY_VERSION_PADRAO)
+        self.assertIsNotNone(r["diff"])
+        self.assertEqual(r["diff"]["adicionadas"], [])
+        self.assertEqual(r["diff"]["removidas"], [])
+
+    def test_campo_none_explicito_e_tratado_igual_a_ausente(self):
+        # Achado da revisão adversarial desta sub-entrega: chave PRESENTE com
+        # valor `None` (ex.: `{"ferramentas_com_confirmacao_obrigatoria":
+        # None}`) é um caso diferente de chave ausente para `dict.get(chave,
+        # default)` -- o default só vale quando a chave não existe. Antes
+        # desta correção, `set(None)` levantaria TypeError (mascarado pelo
+        # `except Exception` amplo da wrapper MCP). Agora os dois casos
+        # (ausente e None explícito) usam o piso atual, sem erro.
+        r = policy.preparar_politica(
+            {"ferramentas_com_confirmacao_obrigatoria": None},
+            base_version=policy._POLICY_VERSION_PADRAO,
+        )
+        self.assertIsNotNone(r["diff"])
+        self.assertEqual(r["diff"]["adicionadas"], [])
+        self.assertEqual(r["diff"]["removidas"], [])
+
+    def test_lista_vazia_propoe_remover_todo_o_piso(self):
+        # Lista vazia é uma proposta EXPLÍCITA de remover as 5 ferramentas do
+        # piso -- diferente de campo ausente/None (que preserva o piso
+        # atual). Comportamento pré-existente (não alterado por esta
+        # sub-entrega), agora coberto por teste: nunca aplicado sozinho,
+        # sempre exige justificativa explícita do dono.
+        r = policy.preparar_politica(
+            {"ferramentas_com_confirmacao_obrigatoria": []},
+            base_version=policy._POLICY_VERSION_PADRAO,
+        )
+        self.assertIsNotNone(r["diff"])
+        self.assertEqual(r["diff"]["adicionadas"], [])
+        self.assertEqual(set(r["diff"]["removidas"]), policy.FLOOR_CONFIRMACAO_OBRIGATORIA)
+        self.assertTrue(r["exige_justificativa_explicita"])
+        self.assertIsNotNone(r["aviso"])
+
 
 class TestEstadoAutonomiaAtual(unittest.TestCase):
     def test_documento_ausente_retorna_ativo(self):
