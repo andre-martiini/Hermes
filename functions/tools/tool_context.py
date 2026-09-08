@@ -15,6 +15,41 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from autonomy.contracts import Principal, TipoPrincipal
+
+
+def principal_de(ctx: "ToolContext", tipo: TipoPrincipal, *, origem_humana: bool | None = None) -> Principal:
+    """Constrói o `Principal` (autonomy/contracts.py) de uma chamada, a
+    partir de um `ToolContext` já resolvido pelo canal e do TIPO de
+    principal que o CHAMADOR (o adaptador do canal, não este módulo) já sabe
+    que esta chamada representa (P02 passo 1).
+
+    `tipo` é sempre explícito, nunca inferido de `ctx.canal` sozinho —
+    achado desta sub-entrega (5/N): `canal="mcp"` aparece tanto em
+    `mcp_server.py` (cliente MCP hospedado, dono acompanhando em tempo real
+    — `TipoPrincipal.CLIENTE_ASSISTIDO`) quanto em
+    `mcp_jobs.py::on_mcp_job_created` (job assíncrono de Firestore
+    continuando uma tool longa depois que o request HTTP original já
+    terminou — sem nenhuma garantia de que o dono ainda está olhando).
+    Resolver o tipo a partir do texto de `canal` teria classificado os dois
+    casos da mesma forma, escondendo exatamente a distinção que
+    `TipoPrincipal` existe para preservar. Cada canal que ainda não usa este
+    helper (Telegram, os disparos internos de `atencao.py`,
+    `outbox_aprovacao.py`, `revisao_semanal.py` e o próprio `mcp_jobs.py`)
+    continua sem religar — decidir o tipo correto de cada um fica para uma
+    sub-entrega futura (ver docs/autonomia/execucao.md).
+
+    `origem_humana` segue o mesmo default de `tools/hermes_tools.py::
+    _principal_simulado`: quando omitido (`None`), verdadeiro para
+    `DONO_INTERATIVO`/`CLIENTE_ASSISTIDO`, falso para os demais. Um chamador
+    que sabe que a regra padrão não se aplica (ex.: um runner de serviço
+    disparado manualmente com o dono observando o log) pode informar o
+    valor explicitamente.
+    """
+    if origem_humana is None:
+        origem_humana = tipo in (TipoPrincipal.DONO_INTERATIVO, TipoPrincipal.CLIENTE_ASSISTIDO)
+    return Principal(uid=ctx.user_uid, tipo=tipo, canal=ctx.canal, origem_humana=origem_humana)
+
 
 @dataclass
 class ToolContext:
