@@ -28,3 +28,19 @@ FIRESTORE_STREAM_RETRY = retries.Retry(
 def stream_collection_resilient(collection_ref, *, timeout: float = 60.0):
     """Abre um stream com retry explícito, sem depender do retry GAPIC quebrado."""
     return collection_ref.stream(retry=FIRESTORE_STREAM_RETRY, timeout=timeout)
+
+
+# --------------------------------------------------------------------------- #
+# Telemetria de custo do Firestore (DEV-2026-0003 / Issue #203)
+# --------------------------------------------------------------------------- #
+# Conta leituras/escritas por function (K_SERVICE) e por coleção raiz e grava
+# em system_usage/firestore/daily/{dia} — ver firestore_metrics.py. Este
+# módulo é importado por main.py no carregamento de todas as functions Python,
+# então o hook é instalado uma única vez por instância e vale para todas.
+# Desligar: HERMES_FIRESTORE_METRICS=0.
+try:
+    import firestore_metrics as _firestore_metrics
+
+    _firestore_metrics.install()
+except Exception as _exc:  # telemetria nunca impede o carregamento das functions
+    print(f"[FirestoreMetrics] hook não instalado: {_exc}")
