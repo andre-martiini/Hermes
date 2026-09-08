@@ -698,3 +698,203 @@ migracao:
   executada: false
 flags:
   antes: {}
+  depois: {}
+pendencias:
+  - "Nenhuma revisão adversarial independente rodou para esta sub-entrega (ver evidências) -- diferente das sub-entregas anteriores, que sempre tiveram uma. Deveria rodar antes de considerar P02 fechado."
+  - "O mesmo tipo de checagem que capturou este incidente (git ls-remote antes de ler a base) deveria virar hábito no início de qualquer sub-entrega futura desta sessão neste repositório, não só quando algo parece errado -- registrado aqui para não depender de lembrar sem reforço escrito."
+  - "Duplicação entre autonomy/policy.py::decisao_piso() e mcp_server.py::_decisao_piso_mcp permanece (pendência já registrada no bloco da sub-entrega 6/N)."
+  - "hermes_core_logic.py (276257 caracteres) permanece estruturalmente inalcançável por mcp__Argos__argos_escrever_arquivo_repositorio (pendência já registrada no bloco da sub-entrega 6/N) -- vale levar ao André."
+  - "Passo 1 do plano segue MATERIALMENTE em aberto: só o canal MCP constrói Principal e passa pelo preflight. Telegram, outbox_aprovacao.py, revisao_semanal.py e mcp_jobs.py continuam sem construir Principal nenhum."
+  - "Todas as pendências já registradas nos blocos das sub-entregas 1/N a 6/N que não foram tocadas nesta sub-entrega continuam abertas: validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP, Mandato.classes_conteudo_permitidas texto livre sem enum fechado, Mandato.usos_na_janela_atual e Mandato.orcamento_maximo sem wrapper de I/O real, o bug de tipo em autonomy/policy.py::preparar_politica (contornado na wrapper, não corrigido no motor), a pergunta de design sobre o default de origem_humana (levar ao André só ao fim do pacote inteiro)."
+proximo_pacote: "P02 (sub-entrega 8/N -- candidata a decidir: despachar a revisão adversarial pendente desta sub-entrega e da 6/N antes de seguir adiante, ou continuar o passo 1 decidindo o TipoPrincipal de um canal específico agora que decisao_piso() está pronto para reuso)"
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: b8ce2963df329db0a9792166c3b6cadf91a667cf
+pacote: "P02 (revisão adversarial retroativa das sub-entregas 6/N e 7/N -- sem mudança de código de produção)"
+# Esta entrada não implementa nada novo. Ela despacha a revisão adversarial
+# que os blocos das sub-entregas 6/N e 7/N já registravam como pendente --
+# "deveria rodar antes de considerar P02 fechado" -- e registra o resultado.
+# Escolhida como o próximo passo em vez de avançar o passo 1 do plano,
+# seguindo o próprio proximo_pacote do bloco anterior.
+estado: validado
+inicio: "2026-09-07T20:14:00Z"
+fim: "2026-09-07T20:31:42Z"
+arquivos_alterados:
+  - docs/autonomia/execucao.md
+decisoes:
+  - id: p02-sub8-revisao-6N-7N-sem-achado-bloqueante
+    motivo: "Sub-agente general-purpose independente, sem contexto prévio da implementação, revisou os diffs de autonomy/policy.py::decisao_piso()+test_policy.py (sub-entrega 6/N) e mcp_server.py+test_mcp_server.py (sub-entrega 7/N, incluindo a correção do incidente de reversão acidental de principal_de()). Rodou a suíte real (1304/1304, batendo com o alegado), traçou o histórico de commits (04ed060da -> c99739629 -> c69468d9a -> de5c34e40 -> b8ce2963d) e confirmou por diff direto que (a) _principal_mcp delega para principal_de() sem perda de comportamento, (b) nenhum outro resíduo do revert acidental restou em mcp_server.py, (c) o fechamento do atalho de bypass de confirmação cobre todos os caminhos de dispatch reais (sem via paralela, sem replay via _executar_confirmacao, que já valida confirmation_id contra Firestore/uid/expiração/claim atômico). Comparou decisao_piso() e _decisao_piso_mcp() linha a linha: equivalentes, divergência de tratamento de erro é intencional e documentada. Veredito explícito: \"Pronto. Não encontrei bugs de segurança ou de lógica bloqueantes em nenhum dos dois diffs.\""
+    autoridade: existente_ou_nova
+  - id: p02-sub8-achado-nao-bloqueante-avaliar-sem-protecao
+    motivo: "Único achado do revisor, não-bloqueante: decisao_piso() (e também _decisao_piso_mcp, já em produção desde a sub-entrega 2/N -- não é regressão desta sub-entrega) chama avaliar(request) sem try/except ao redor; um principal malformado (None, ou objeto sem .eh_dono()/.tipo) propagaria AttributeError em vez de cair em SOMENTE_PREPARACAO como o resto da função faz. Risco prático hoje é zero -- decisao_piso() não tem nenhum consumidor real fora dos próprios testes (confirmado por grep: só aparece em test_policy.py, autonomy/policy.py e execucao.md). Não corrigido agora, deliberadamente: registrado como pendência para quando um canal real passar a chamar decisao_piso() com um principal construído fora do controle do próprio módulo -- momento em que também caberia um teste de regressão dedicado."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py' (rodado pelo sub-agente revisor, ambiente venv já existente)"
+  resultados:
+    - "1304 passed / 0 failed / 0 erros / 0 skips -- confirma, por execução independente (não só leitura), a mesma contagem já alegada nos commits c69468d9a e de5c34e40."
+evidencias:
+  - "Relatório completo do sub-agente (general-purpose, dispatch via Agent tool, sem memória da implementação original) cobrindo os dois diffs -- ver decisões acima para o resumo; o relatório também confirmou ausência de ciclo/resíduo via checagem AST por definições de função duplicadas em mcp_server.py e via git diff 04ed060da..b8ce2963d --  functions/mcp_server.py isolando exatamente o fechamento do atalho de confirmação, nada mais."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: a pendência 'nenhuma revisão adversarial independente rodou' registrada nos blocos das sub-entregas 6/N e 7/N. Rodou, sem achado bloqueante (ver decisões acima)."
+  - "Novo, não-bloqueante: decisao_piso()/avaliar() não protegida contra principal malformado (ver decisão p02-sub8-achado-nao-bloqueante-avaliar-sem-protecao) -- endereçar quando um canal real além dos testes passar a chamar decisao_piso()."
+  - "Duplicação entre autonomy/policy.py::decisao_piso() e mcp_server.py::_decisao_piso_mcp permanece (pendência já registrada no bloco da sub-entrega 6/N) -- não tocada por esta revisão, que confirmou as duas equivalentes para os casos testados."
+  - "hermes_core_logic.py (276257 caracteres) permanece estruturalmente inalcançável por mcp__Argos__argos_escrever_arquivo_repositorio (pendência já registrada no bloco da sub-entrega 6/N) -- vale levar ao André."
+  - "Passo 1 do plano segue MATERIALMENTE em aberto: só o canal MCP constrói Principal e passa pelo preflight. Telegram, outbox_aprovacao.py, revisao_semanal.py e mcp_jobs.py continuam sem construir Principal nenhum."
+  - "Todas as pendências já registradas nos blocos das sub-entregas 1/N a 7/N que não foram tocadas por esta revisão continuam abertas: validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP, Mandato.classes_conteudo_permitidas texto livre sem enum fechado, Mandato.usos_na_janela_atual e Mandato.orcamento_maximo sem wrapper de I/O real, o bug de tipo em autonomy/policy.py::preparar_politica (contornado na wrapper, não corrigido no motor), a pergunta de design sobre o default de origem_humana (levar ao André só ao fim do pacote inteiro)."
+proximo_pacote: "P02 (sub-entrega 9/N -- revisão da 6/N e 7/N concluída sem achado bloqueante; decidir entre continuar o passo 1 do plano (decidir TipoPrincipal de um canal específico e religar esse canal a decisao_piso(), já pronta para reuso), ou levar ao André agora o achado operacional da sub-entrega 6/N sobre o teto de 200000 caracteres do Argos em hermes_core_logic.py, já que não depende de mais trabalho autônomo para ser decidido)"
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 7174571086bde0aabca63aa609dbc5269dae258e
+pacote: "P02 (sub-entrega 9/N -- split hermes_core_logic.py/telegram_utils.py + identidade em mcp_jobs.py::on_mcp_job_created, passos 1 e 6 do plano)"
+# Duas decisões de André, ambas relatadas e autorizadas fora deste registro,
+# endereçadas juntas nesta sub-entrega porque a segunda dependia da primeira:
+# (a) "Limite de 200.000 caracteres do Argos: Autorizo a extração para um
+# módulo menor." -- resolve a pendência operacional registrada nos blocos
+# das sub-entregas 6/N e 8/N (hermes_core_logic.py com 276257 caracteres,
+# estruturalmente inalcançável por argos_escrever_arquivo_repositorio).
+# (b) "Ambos sempre sem humano presente" -- decide que tanto
+# mcp_jobs.py::on_mcp_job_created quanto outbox_aprovacao.py/
+# revisao_semanal.py devem usar origem_humana=False quando/se vierem a
+# construir Principal. Só o primeiro foi efetivamente religado nesta
+# sub-entrega -- ver decisão p02-sub9-escopo-outbox-revisao-nao-religados
+# abaixo para o porquê.
+estado: pronto_para_revisao
+inicio: "2026-09-07T20:31:42Z"
+fim: "2026-09-07T22:19:00Z"
+arquivos_alterados:
+  - functions/telegram_utils.py (novo -- 105 funções + 39 constantes extraídas de hermes_core_logic.py, ordem relativa original preservada)
+  - functions/hermes_core_logic.py (reduzido a docstring do módulo, imports, init do Firebase Admin, bloco de reexport de telegram_utils.py e as 5 funções que ficaram: _process_telegram_message, _handle_telegram_callback, telegramWebhook, on_telegram_inbound, on_health_log_red_flag)
+  - functions/mcp_jobs.py (on_mcp_job_created agora constrói Principal e chama autonomy.policy.decisao_piso antes de executar a tool)
+  - functions/test_tool_schemas.py (patch de send_message_logged retargetado de hermes_core_logic para telegram_utils -- ver decisão p02-sub9-bare-name-resolution)
+  - functions/test_mcp_jobs.py (novo -- nenhuma cobertura existia para on_mcp_job_created antes desta sub-entrega)
+decisoes:
+  - id: p02-sub9-extracao-mecanica-hermes-core-logic
+    motivo: "Extração puramente mecânica (preserva comportamento): 105 funções e 39 constantes movidas para telegram_utils.py na ordem relativa original, hermes_core_logic.py passa a reexportar tudo de telegram_utils via `from telegram_utils import (...)` para preservar o atributo `hermes_core_logic.<nome>` onde algo externo dependa dele. Verificado por comparação AST antes/depois (nenhuma mudança de nó além da localização física) e pela suíte completa rodando duas vezes -- estado original vs. estado pós-split -- com contagem idêntica de linhas de erro de rede pré-existentes em ambos os logs, confirmando ausência de qualquer regressão além da já descrita abaixo."
+    autoridade: existente_ou_nova
+  - id: p02-sub9-bare-name-resolution
+    motivo: "Único efeito colateral real do split: `_run_gemini_turn` (agora em telegram_utils.py) chama `send_message_logged` como nome livre, que resolve pelo __globals__ de telegram_utils.py, não de hermes_core_logic.py -- quebrou test_tool_schemas.py, que fazia mock.patch.object(core, 'send_message_logged', ...). Corrigido retargetando o patch para telegram_utils. Generalizado: qualquer chamada interna a um nome reexportado (ex.: _send_telegram_message_with_keyboard, _send_telegram_message, generate_content_logged chamados de dentro de telegram_utils.py) tem o mesmo risco latente para futuros testes que tentem mockar via hermes_core_logic.<nome> -- documentado explicitamente no docstring de telegram_utils.py e num comentário de aviso acima do bloco de reexport em hermes_core_logic.py, já que hoje nenhum teste exercita essas chamadas nessa profundidade (nenhuma regressão atual, só lacuna de descoberta futura)."
+    autoridade: existente_ou_nova
+  - id: p02-sub9-mcp-jobs-runner-servico-origem-humana-false
+    motivo: "mcp_jobs.py::on_mcp_job_created retoma uma tool MCP assincronamente, já fora do ciclo do request HTTP original, sem nenhuma garantia de que o dono ainda está acompanhando a sessão -- exatamente o caso que a docstring de tool_context.py::principal_de (sub-entrega 5/N) cita como motivo para o tipo do principal ser sempre explícito, nunca inferido de ctx.canal (compartilhado com o cliente MCP interativo). Decisão de André aplicada: sempre TipoPrincipal.RUNNER_SERVICO, sempre origem_humana=False, nunca DONO_INTERATIVO/CLIENTE_ASSISTIDO só porque o uid bate com o dono. Preflight via autonomy.policy.decisao_piso adicionado antes de qualquer execução (passo 6 do plano)."
+    autoridade: existente_ou_nova
+  - id: p02-sub9-escopo-outbox-revisao-nao-religados
+    motivo: "outbox_aprovacao.py e revisao_semanal.py NÃO foram religados a principal_de()/decisao_piso() nesta sub-entrega, apesar da decisão de André cobrir os dois. Investigação concreta (leitura de outbox_aprovacao.py::aprovar_rascunho/liberar_rascunhos_promovidos, revisao_semanal.py::revisar_semana_propor_reagendamento, e do bloco em main.py que os chama a partir de um tick de scheduler) mostrou que os dois são varreduras em lote sem o formato de chamada nome+argumentos de uma tool única que decisao_piso() foi desenhada para avaliar -- diferente de mcp_jobs.py, que tem esse formato real (job.tool + job.arguments). Forçar uma wiring sintética nesses dois só para ter algo chamando decisao_piso() seria teatro de segurança, não segurança real: não há uma decisão de política natural do tipo 'permitir esta tool com estes argumentos' para um sweep batch. Escopo deliberadamente limitado a mcp_jobs.py, que tem o encaixe real. Confirmado são pela revisão adversarial independente desta sub-entrega (ver evidências)."
+    autoridade: existente_ou_nova
+  - id: p02-sub9-hash-whitespace-hermes-core-logic
+    motivo: "O commit ed76b25562dd7384faf4890ed1611097d56c641d de hermes_core_logic.py (shipado nesta sub-entrega) difere do conteúdo local verificado (hash 0118badb39dbd330d14d8d9f5d788e6a307a0811) em exatamente 12 linhas em branco que perderam espaços em branco à direita (trailing whitespace) durante a transcrição para o parâmetro `conteudo` da API de escrita do Argos -- nenhuma delas dentro de string/docstring, todas fora de qualquer literal, sem nenhum efeito de comportamento (confirmado por diff linha a linha antes do envio: as 12 linhas eram e continuam sendo linhas em branco, só a presença de espaços à direita muda). Hash de destino calculado e conferido ANTES do envio (via cópia local com as mesmas 12 linhas normalizadas, gerada por script, não por nova digitação manual) e o sha retornado pelo Argos bateu exatamente com o valor previsto -- a verificação de integridade cumpriu seu papel mesmo não sendo byte-idêntica ao arquivo de trabalho local. Não corrigido com um novo commit: reenviar o arquivo inteiro (única forma de 'patch' que a API de escrita permite) para consertar 12 bytes de espaço em branco invisível teria um risco de nova transcrição maior que o problema que resolveria."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "Antes da correção do achado HIGH da revisão: 1304/1304 (baseline pré-split preservado) após a extração + fix do bare-name-resolution."
+    - "Depois de test_mcp_jobs.py (novo, cobertura de on_mcp_job_created: ALLOW, DENY, PREPARE_ONLY, princípio RUNNER_SERVICO/origem_humana=False) e da correção do achado HIGH (REQUIRE_APPROVAL/DEFER também bloqueiam): 1313/1313 passando, 0 falhas, 0 erros."
+evidencias:
+  - "Revisão adversarial independente (subagente sem contexto da implementação) sobre o diff de mcp_jobs.py + test_mcp_jobs.py. Achado HIGH: a wiring inicial só bloqueava Decisao.DENY e Decisao.PREPARE_ONLY, deixando REQUIRE_APPROVAL e DEFER caírem no fluxo de execução direta -- copiava o padrão de mcp_server.py::_handle_tools_call sem perceber que a segurança desse padrão para REQUIRE_APPROVAL depende de um fluxo de confirmação real que mcp_server.py tem e mcp_jobs.py (trigger assíncrono fire-and-forget) não tem. Corrigido: bloqueia em qualquer decisão != ALLOW. Sem esta correção, no dia em que uma das três tools assíncronas fosse classificada em CLASSE_EFEITO_PISO com autonomia ATIVA (caso comum, não raro), o código executaria sem aprovação -- exatamente o cenário que este preflight existe para impedir."
+  - "Mesma revisão, dois achados MEDIUM (documentação do risco de bare-name-resolution para outras chamadas internas de telegram_utils.py -- ver decisão p02-sub9-bare-name-resolution; e ler_job() misturava bloqueio de política com erro de execução genérico no mesmo campo `erro` sem forma estruturada de distinguir os dois -- corrigido com campo aditivo `bloqueio_politica: {decision, reason_code}`, sem quebrar o contrato existente de `status`/`erro`) e um achado LOW (faltava um teste fixando que as três tools assíncronas de mcp_jobs.py não estão hoje classificadas em CLASSE_EFEITO_PISO, o que tornaria uma futura classificação silenciosa sem nenhum teste avisando -- corrigido com TestClasseEfeitoPisoNaoCobreTresToolsAssincronas)."
+  - "Mesma revisão confirmou como sã a decisão de não religar outbox_aprovacao.py/revisao_semanal.py nesta sub-entrega (ver decisão p02-sub9-escopo-outbox-revisao-nao-religados)."
+  - "Todos os 5 commits desta sub-entrega verificados individualmente por hash+parent antes de prosseguir para o próximo: mcp_jobs.py (commit 7dd012116553cb363308b044ebc742c553631670, sha c174012eb239fdf7778f1316fc23c648cdcbbe47), test_tool_schemas.py (commit 677c02b4aaea98f741bc460c543f18d2145a1de7, sha 402ad986a961a963b7c112692cce2c76caa48b90), test_mcp_jobs.py (commit 1eeefb6f058581d1e5d9e8aa9403ae2ed45ab18f, sha 166f321105b4a61f2f5057cb7a05c444eddb028a), telegram_utils.py (commit 7e1e28c52be33c1d0e956b47753707e36df71ba9, sha af8fd87405ac0736998f84c7f9c7b4508ce75af2, match exato no primeiro envio apesar de 125949 bytes), hermes_core_logic.py (commit 7174571086bde0aabca63aa609dbc5269dae258e, sha ed76b25562dd7384faf4890ed1611097d56c641d -- ver decisão p02-sub9-hash-whitespace-hermes-core-logic para a única divergência, cosmética, do arquivo de trabalho local)."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: o teto de 200000 caracteres do Argos em hermes_core_logic.py (pendência registrada nos blocos das sub-entregas 6/N e 8/N) -- extração autorizada por André, arquivo original agora com 3136 linhas / ~14KB de reexport contra os 154KB originais, telegram_utils.py concentra o restante em 125949 bytes, ambos dentro do limite."
+  - "Passo 1 do plano segue PARCIALMENTE aberto: mcp_jobs.py agora constrói Principal e passa pelo preflight; outbox_aprovacao.py e revisao_semanal.py continuam sem construir Principal nenhum, por decisão deliberada de escopo (ver p02-sub9-escopo-outbox-revisao-nao-religados), não por esquecimento. Telegram (hermes_core_logic.py/telegram_utils.py) também continua sem construir Principal."
+  - "Novo, não-bloqueante: risco latente de bare-name-resolution para _send_telegram_message_with_keyboard, _send_telegram_message e generate_content_logged (chamadas internas dentro de telegram_utils.py, hoje sem nenhum teste que as exercite nessa profundidade) documentado mas não coberto por teste -- endereçar se/quando um teste futuro tentar mockar um desses três via hermes_core_logic.<nome>."
+  - "Novo, não-bloqueante: o commit de hermes_core_logic.py tem 12 linhas em branco sem os espaços em branco à direita que o arquivo de trabalho local tem -- puramente cosmético, sem efeito de comportamento, caracterizado e verificado por hash previsto batendo exatamente (ver decisão p02-sub9-hash-whitespace-hermes-core-logic)."
+  - "Oportunidade não solicitada, só registrada: com o teto de 200000 caracteres resolvido, hermes_core_logic.py::schedule_whatsapp_message (a função original, não a closure de mesmo nome dentro de _process_telegram_message) volta a ser candidata a religar em decisao_piso() -- tentativa que a sub-entrega 6/N teve que reverter justamente por causa do teto agora resolvido. Não iniciado nesta sub-entrega; vale levar a André."
+  - "Todas as pendências já registradas nos blocos das sub-entregas 1/N a 8/N que não foram tocadas por esta sub-entrega continuam abertas: duplicação entre autonomy/policy.py::decisao_piso() e mcp_server.py::_decisao_piso_mcp, decisao_piso()/avaliar() não protegida contra principal malformado, validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP, Mandato.classes_conteudo_permitidas texto livre sem enum fechado, Mandato.usos_na_janela_atual e Mandato.orcamento_maximo sem wrapper de I/O real, o bug de tipo em autonomy/policy.py::preparar_politica, a pergunta de design sobre o default de origem_humana (levar ao André só ao fim do pacote inteiro)."
+proximo_pacote: "P02 (sub-entrega 10/N -- candidata a decidir: religar hermes_core_logic.py::schedule_whatsapp_message a decisao_piso() agora que o teto de 200000 caracteres está resolvido, ou continuar o passo 1 do plano nos canais ainda sem Principal (Telegram, outbox_aprovacao.py, revisao_semanal.py). Trabalho autônomo pausado ao final desta sub-entrega para atender a um pedido explícito de André: investigação da integração sistema-decisao-investimentos/Hermes (Bloco 1, Parte B) -- abrir PR retroativa para o branch codex/d5-registry-contact-number (já em produção sem PR) e verificar se existe MCP tool expondo POST /carteira/confirmar."
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 7782388d8958d017d4832031a9492359ebade9c8
+pacote: P01 (sub-entrega 3/N — agent_requests.py e core/idempotency.py)
+# Continuação da divisão do pacote "G" P01 (seção 8 do plano). Cobre o passo
+# 3 (agent_requests.py — achado A01: enfileirar_ou_atualizar/concluir liam e
+# escreviam fora de transação) e o passo 4 (core/idempotency.py — falha na
+# verificação de idempotência não pode virar "pode processar" silenciosamente).
+# Descobriu um bloqueio de infraestrutura genuinamente novo (ver
+# arquivos_bloqueados): main.py excede o limite de tamanho da escrita via
+# Argos, então a parte do passo 4 que amarra core/idempotency.py ao único
+# chamador de produção (githubWebhook) fica pendente de aplicação manual ou
+# de uma solução de infraestrutura — ver decisão p01-idempotency-main-py-bloqueado.
+# Sem espera de 90 minutos em relação à sub-entrega 2: mesmo pacote "G",
+# decisão já registrada nos blocos anteriores.
+estado: pronto_para_revisao
+# Estados: nao_iniciado, em_execucao, pronto_para_revisao,
+# validado, publicado, ativo, bloqueado, opt_in
+inicio: "2026-09-07T03:05:00Z"
+fim: "2026-09-07T03:15:00Z"
+arquivos_alterados:
+  - functions/agent_requests.py
+  - functions/test_agent_requests.py
+  - functions/core/idempotency.py
+  - functions/test_idempotency.py (novo)
+  - functions/test_atencao_whatsapp.py
+arquivos_bloqueados:
+  - path: functions/main.py
+    mudanca: "githubWebhook: capturar a exceção de core.idempotency.check_and_register e responder 503 (sem processar o evento) em vez de deixá-la propagar sem tratamento — texto exato já pronto localmente, só não publicado."
+    motivo: "functions/main.py tem 681.703 caracteres; a ferramenta de escrita do Argos (argos_escrever_arquivo_repositorio) limita o parâmetro conteudo a 200.000 caracteres e só aceita substituição integral do arquivo (não há modo patch/diff). Não há como publicar NENHUMA mudança em main.py por esse caminho, por menor que seja, enquanto o arquivo permanecer acima desse limite — não é específico desta mudança."
+decisoes:
+  - id: p01-a01-agent-requests-transacional
+    motivo: "A01: enfileirar_ou_atualizar() fazia get() seguido de set()/update() fora de transação; uma chamada concorrente a concluir() podia decidir o status do pedido entre a leitura e a escrita daqui (ex.: enfileirar_ou_atualizar lê 'pendente', concluir() termina o pedido nesse meio-tempo, e enfileirar_ou_atualizar ainda assim sobrescreve payload/timestamps de um pedido que virou terminal — ou o inverso). Mesmo achado, mesma direção do fix já aplicado a outbox_aprovacao.py e promocao_autonomia.py nas sub-entregas 1-2: leitura e escrita de cada função agora acontecem dentro de uma única transação atômica (@firestore.transactional); falha real da transação retorna {'erro': ...} em vez de cair para escrita fora de transação. Escopo deliberadamente restrito ao que o passo 3 do plano pede ('transformar enfileiramento/conclusão legados em transições condicionais') — o protocolo completo de lease/geração/heartbeat descrito na seção 4.5 do plano fica para P04, não é implementado aqui."
+    autoridade: existente_ou_nova
+  - id: p01-idempotency-check-and-register-propaga-excecao
+    motivo: "P01 passo 4: core/idempotency.py::check_and_register capturava qualquer exceção da verificação transacional e retornava True — ou seja, uma falha real (Firestore indisponível, contenção esgotando tentativas) virava silenciosamente 'trate como novo, pode processar', arriscando duplicar exatamente o efeito que a idempotência existe para evitar. Corrigido: a exceção agora propaga para o chamador. O único chamador de produção é functions/main.py::githubWebhook (confirmado por grep no repo inteiro); o texto que captura essa exceção e responde 503 sem processar o evento está pronto localmente mas não foi publicado nesta sub-entrega — ver arquivos_bloqueados. Mesmo sem essa amarração publicada, a correção já muda o comportamento em produção hoje: o call site atual (sem try/except) deixa a exceção subir sem tratamento pela função HTTP, e o runtime padrão do Cloud Functions (Python, 2ª geração) responde 5xx automaticamente a uma exceção não tratada — o achado central (nunca converter falha de idempotência em permissão de processar) já fica fechado; o que falta é só a resposta 503 explícita com log específico, mais limpa que o 500 genérico do runtime."
+    autoridade: existente_ou_nova
+  - id: p01-idempotency-main-py-bloqueado
+    motivo: "Descoberta operacional nesta sub-entrega, não um achado do plano: qualquer mudança em functions/main.py (16.184 linhas, 681.703 caracteres) é impossível de publicar via argos_escrever_arquivo_repositorio, cujo parâmetro conteudo tem limite de 200.000 caracteres e não aceita patch/diff — só substituição integral. Isso não é específico deste fix; bloqueia TODA futura mudança em main.py enquanto ele permanecer deste tamanho, o que é provável de recorrer em pacotes futuros do plano (main.py concentra a maior parte das Cloud Functions do Hermes). Três caminhos possíveis, nenhum decidido: (1) uma nova tool no Argos MCP que aceite diff/patch em vez de conteúdo integral; (2) aumentar o limite de conteúdo da tool atual, se não houver uma razão de fundo para o teto de 200.000; (3) dividir main.py em módulos menores — mudança estrutural maior, fora do escopo de uma sub-entrega, mas que resolveria o problema de raiz e ajudaria a legibilidade/revisão independente do limite da ferramenta. Registrado para André decidir; não bloqueia a continuidade do plano porque o achado de segurança em si (check_and_register) já está fechado (ver decisão anterior) — só a resposta HTTP explícita fica pendente."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+    - "cd functions && venv/bin/python -m unittest test_agent_requests -v"
+    - "cd functions && venv/bin/python -m unittest test_idempotency -v"
+    - "cd functions && venv/bin/python -m unittest test_atencao_whatsapp -v"
+  resultados:
+    - "Python (unittest, suíte completa): 1166/1166 passando (1155 anteriores + 7 de agent_requests.py + 4 de test_idempotency.py, novo; 0 regressões)"
+    - "test_agent_requests: 21/21 (7 novos: 3 de enfileirar_ou_atualizar — new/update com falha de transação, sem suporte a transação — e 2 de concluir, com os mesmos dois cenários, mais os 2 já existentes de cada função revalidados sob o novo caminho transacional)"
+    - "test_idempotency: 4/4, novo arquivo — chave nova, chave repetida, falha real de transação propaga exceção, ausência de suporte a transação propaga exceção"
+    - "test_atencao_whatsapp: 35/35 (0 novos; mocks atualizados para o protocolo de transação real, sem o que o teste de TestHookAgentRequests quebraria contra o novo enfileirar_ou_atualizar transacional)"
+    - "Não incluído nesta sub-entrega: um teste novo para o caminho 503 de githubWebhook (test_github_webhook.py) já foi escrito localmente, mas fica sem publicar até main.py poder ser atualizado — publicá-lo sozinho faria o teste falhar contra o main.py real, que ainda não tem a captura da exceção."
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio da implementação): confirmou, por leitura do código-fonte instalado de google.cloud.firestore_v1.transaction, que @firestore.transactional limpa e reinicia o estado da transação a cada tentativa (sem escrita parcial vazando entre retries), que só exceptions.Aborted é retentado automaticamente (qualquer outra propaga na hora, batendo com o except Exception externo), que o caminho 503 de githubWebhook (quando aplicado) retorna antes de qualquer escrita, e que core/idempotency.py não engole mais nenhuma exceção. Veredito: a correção transacional é correta e fecha a corrida pretendida."
+  - "Achado da própria revisão (corrigido nesta sub-entrega, não deixado pendente): faltava um teste provando que uma falha de transação ao ATUALIZAR um pedido pendente já existente (não só ao criar um novo) deixa o documento intocado em enfileirar_ou_atualizar — adicionado test_transacao_falha_ao_atualizar_pedido_existente_nao_corrompe."
+  - "Achado da própria revisão (aceito como conhecido, não corrigido): o except Exception ao redor de _exec(transaction) em enfileirar_ou_atualizar/concluir captura qualquer exceção, não só falhas de contenção/transação — um bug não relacionado a concorrência dentro de _exec seria reportado com a mesma mensagem de 'falha ao enfileirar/atualizar de forma atômica', o que pode confundir uma investigação futura. Comportamento ainda seguro (sempre falha fechado, sem corrupção), só a mensagem de log é potencialmente enganosa; mesmo padrão já usado em outbox_aprovacao.py e promocao_autonomia.py nas sub-entregas anteriores, então não é uma regressão introduzida aqui."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "BLOQUEADO (ver arquivos_bloqueados e decisão p01-idempotency-main-py-bloqueado): aplicar manualmente em functions/main.py, dentro de githubWebhook, a captura da exceção de core.idempotency.check_and_register com resposta 503 (texto pronto, não publicado); depois disso, publicar o teste correspondente já escrito em test_github_webhook.py (test_falha_idempotencia_retorna_503_sem_anotar)."
+  - "O mesmo bloqueio de tamanho de main.py deve recorrer em pacotes futuros do plano — vale decidir entre André e a próxima sessão qual dos três caminhos (nova tool de diff no Argos, aumento do limite atual, ou dividir main.py em módulos) seguir antes que isso vire um padrão de 'sempre aplicar manualmente' para um arquivo tão central."
+  - "P01 segue em aberto: mcp_jobs.py (passos 5-6), firestore.rules (achado A16, passos 7-8), deploy.yml (achado A17, passo 9, já bloqueado por permissão — ver P00), e o relatório de reconciliação do passo 10, ainda não iniciados."
+  - "achado do mesmo padrão de A04 em argos_autorizacao.py:242,348, aplicar_edicao_rascunho sem proteção transacional, e a notificação de falha por Telegram como mitigação não estrutural seguem como pendências já registradas nos blocos anteriores, ainda não fechadas."
+proximo_pacote: "P01 (sub-entrega 4/N)"
+```
+
+---
