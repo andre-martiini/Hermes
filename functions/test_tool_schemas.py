@@ -13,6 +13,7 @@ from unittest import mock
 from google.genai import types
 
 import hermes_core_logic as core
+import telegram_utils
 
 
 class _FakeApiClient:
@@ -222,7 +223,13 @@ class TestSecretarioTelegramExecucao(unittest.TestCase):
         ]))])
         final = types.GenerateContentResponse(candidates=[types.Candidate(content=types.Content(parts=[types.Part(text="Concluído")]))])
         with mock.patch("google.genai.Client", return_value=client), mock.patch.object(
-            core, "send_message_logged", side_effect=[chamadas, final]
+            # `_run_gemini_turn` foi extraída para telegram_utils.py (P02, sub-entrega
+            # 9/N — limite de 200.000 caracteres da API de escrita do Argos) e chama
+            # `send_message_logged` como nome livre, resolvido no namespace de
+            # telegram_utils. Por isso o patch precisa mirar telegram_utils, não
+            # hermes_core_logic (core): um patch em `core.send_message_logged` não
+            # intercepta essa chamada interna.
+            telegram_utils, "send_message_logged", side_effect=[chamadas, final]
         ) as send:
             resposta = core._run_gemini_turn(
                 db=self.db, gemini_key="fake", system_instruction="teste", history=[],
