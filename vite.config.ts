@@ -2,6 +2,7 @@ import path from "path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import { defaultExclude } from "vitest/config";
 
 export default defineConfig(() => {
   return {
@@ -111,6 +112,13 @@ export default defineConfig(() => {
       alias: {
         "@": path.resolve(__dirname, "."),
       },
+    },
+    test: {
+      // tests/rules/ precisa do Firestore Emulator rodando (ver
+      // tests/rules/README.md) — excluído do `npm test` padrão para não
+      // quebrar o gate normal quando o emulador não está de pé. Roda via
+      // `npm run test:rules`, que sobe o emulador antes.
+      exclude: [...defaultExclude, "tests/rules/**"],
     },
   };
 });
