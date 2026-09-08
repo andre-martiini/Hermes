@@ -397,3 +397,354 @@ proximo_pacote: "P02 (sub-entrega 4/N — candidata a decidir: passo 1, taxonomi
 ```
 
 ---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 5621eb5a6b1f7de36b4c331ffbca1fd148f61b33
+pacote: "P02 (sub-entrega 4/N — orçamento no mandato, passo 8 do plano, parcial)"
+# Antes de iniciar: a rodada de review do @codex sobre a sub-entrega 3/N
+# (comentário https://github.com/andre-martiini/Hermes/pull/192#issuecomment-5573743251,
+# postado ~17:09 UTC) foi tratada como exaurida sem resposta confirmável —
+# GitHub REST API continuou bloqueada ("GitHub access to this repository is
+# not enabled for this session"), e um WebFetch fresco em
+# https://github.com/andre-martiini/Hermes/pull/192 (17:14 UTC, mais de 5min
+# depois do comentário) ainda retornou conteúdo desatualizado (comentário de
+# 14:53:55 UTC, sem nada após 17:09 UTC) — mesma limitação de cache já
+# documentada nas sub-entregas anteriores. Seguiu-se para esta sub-entrega
+# sem esperar 5 horas (regra de espera é entre PACOTES, não entre
+# sub-entregas do mesmo pacote).
+#
+# Escopo: fecha o passo 8 do plano ("revalidar versão, revogação, escopo e
+# orçamento no despacho") NA DIMENSÃO ORÇAMENTO apenas — versão (base_version
+# em preparar_politica), revogação (Mandato.revogado) e escopo
+# (destinatarios_recursos/classes_conteudo_permitidas) já eram revalidados a
+# cada chamada de mandato_cobre()/avaliar() desde a sub-entrega 1/N (função
+# pura, sem cache — cada chamada resolve tudo de novo). O que faltava,
+# documentado explicitamente como pendência desde a sub-entrega 1/N (achado
+# da revisão adversarial da 4ª rodada do Codex, PR #191), era orçamento:
+# PolicyRequest.orcamento_restante existia no contrato mas não era lido em
+# lugar nenhum de autonomy/policy.py. Escopo deliberadamente pequeno: só o
+# motor puro (Mandato.orcamento_maximo + checagem em mandato_cobre()) —
+# mandatos persistidos continuam sem nenhuma fonte real (sub-entrega futura),
+# então este fix não é alcançável hoje por nenhum canal MCP, mesma situação
+# em que limite_por_janela esteve até ser fechado.
+estado: pronto_para_revisao
+# Estados: nao_iniciado, em_execucao, pronto_para_revisao,
+# validado, publicado, ativo, bloqueado, opt_in
+inicio: "2026-09-07T17:17:00Z"
+fim: "2026-09-07T17:35:00Z"
+arquivos_alterados:
+  - functions/autonomy/contracts.py
+  - functions/autonomy/policy.py
+  - functions/test_policy.py
+  - functions/test_contracts.py
+  - docs/autonomia/execucao.md
+decisoes:
+  - id: p02-sub4-orcamento-maximo-opt-in-por-mandato
+    motivo: "Mandato.orcamento_maximo é opcional (default None) e opt-in: um mandato só precisa declarar teto quando a finalidade tem dimensão financeira de verdade (ex.: 'consumir até o teto aprovado', seção 5.3 do plano) — mandatos puramente não-financeiros (ex.: 'cobrar confirmação de recebimento') não são afetados pela checagem nova. Mesma divisão de responsabilidade já usada para limite_por_janela/usos_na_janela_atual: o tipo só declara o teto, um wrapper com I/O ainda não implementado resolve o saldo real (consumo até agora vs. teto) e preenche PolicyRequest.orcamento_restante antes de incluir o mandato em mandatos_aplicaveis."
+    autoridade: existente_ou_nova
+  - id: p02-sub4-achado-adversarial-nan-bypassa-fail-closed
+    motivo: "Achado real da revisão adversarial, verificado por reprodução direta antes de aceitar: a primeira versão da checagem usava 'if request.orcamento_restante <= 0: return False'. float('nan') faz TODA comparação (<=, <, >, >=, ==) retornar False em Python — então nan <= 0 é False, e nan is None também é False, então um saldo NaN não caía em nenhum dos dois `return False` e passava como se fosse um saldo positivo válido, exatamente o oposto do fail-closed que a checagem existe para garantir. Corrigido para 'if not (request.orcamento_restante > 0): return False', que rejeita NaN corretamente (nan > 0 já é False, a negação vira True). O revisor confirmou o caminho de entrada real hoje: json.loads aceita o token NaN por padrão (json.loads('{\"x\": NaN}') funciona), e tools/hermes_tools.py:2202 (_principal_simulado) repassa pedido.get('orcamento_restante') para PolicyRequest sem validar tipo — então um pedido de simular_politica via MCP com \"orcamento_restante\": NaN chega em mandato_cobre() sem alteração. Blast radius hoje é limitado (simular_politica é só leitura/simulação, e nenhum canal real popula mandatos_aplicaveis ainda), mas seria um bypass real assim que um wrapper de resolução de orçamento for implementado."
+    autoridade: existente_ou_nova
+  - id: p02-sub4-achado-adversarial-doc-summary-incompleto
+    motivo: "Achado da revisão adversarial, nitpick: a frase-resumo no topo da docstring de mandato_cobre() ('Um mandato cobre um pedido se: não revogado, ainda válido, dentro do limite de uso da janela...') não mencionava orçamento entre as condições, embora a checagem detalhada estivesse descrita um parágrafo abaixo — corrigido, orçamento agora tem seu próprio parágrafo logo após a frase-resumo, referenciando onde o gap foi fechado."
+    autoridade: existente_ou_nova
+  - id: p02-sub4-achado-adversarial-teste-default-faltando
+    motivo: "Achado da revisão adversarial, nitpick: test_contracts.py::TestDefaultsDeContrato testava os defaults de Mandato (revogado, valido_ate, limite_por_janela, usos_na_janela_atual) mas não tinha sido estendido com orcamento_maximo — adicionado self.assertIsNone(m.orcamento_maximo), mesmo padrão dos irmãos."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+    - "cd functions && venv/bin/python -m unittest test_policy test_contracts -v"
+  resultados:
+    - "Python (unittest, suíte completa): 1286/1286 passando (1280 anteriores da sub-entrega 3/N + 6 testes novos em TestMandatoCobre — test_policy.py: saldo desconhecido, esgotado (0.0), negativo, NaN, positivo, sem teto declarado —, contagem conferida por AST, não de memória; 0 regressões). Suíte completa rodada antes E depois da correção do achado NaN, para confirmar que o fix não quebrou nada."
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio da implementação, instruído a ler o código real, rodar a suíte de verdade e reproduzir achados por execução, não só inspeção): encontrou os 4 achados listados acima (1 bug real, 1 gap de validação de tipo pré-existente registrado como pendência, 2 nitpicks de documentação/teste), todos verificados manualmente contra o código atual antes de aceitar (achado NaN reproduzido diretamente: nan <= 0 e nan is None ambos False)."
+  - "PR #192 (https://github.com/andre-martiini/Hermes/pull/192) — mesma PR aberta desde a sub-entrega 1/N (branch claude/p02-autonomy-policy-contracts); commits desta sub-entrega adicionados ao mesmo branch. Comentário https://github.com/andre-martiini/Hermes/pull/192#issuecomment-5574002387 documenta esta sub-entrega (achados, arquivos alterados, contagem de testes); @codex review pedido novamente ao final."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "Validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP (tools/hermes_tools.py:2202, _principal_simulado) não foi adicionada nesta sub-entrega — mesma folga que missao/sensibilidade já têm hoje (não é regressão desta sub-entrega, é um gap pré-existente que esta sub-entrega apenas tornou operacionalmente relevante pela primeira vez). Um valor não numérico levanta TypeError, capturado pelo except Exception amplo ao redor de simular_politica (degrada para mensagem de erro, não crash) — mas não impede um NaN especificamente (numérico, sem levantar exceção) de escapar até mandato_cobre(), onde a checagem desta sub-entrega agora trata corretamente. Corrigir a validação de tipo no wrapper fica para quando hermes_tools.py for revisitado por outro motivo, mesmo raciocínio de escopo já aplicado ao bug de tipo em preparar_politica na sub-entrega 3/N."
+  - "P02 segue MATERIALMENTE em aberto — dos passos 1-9 do plano (seção 'Unificar identidade e política de autonomia'), esta sub-entrega fecha a dimensão orçamento do passo 8. Ainda não endereçados: passo 1 (taxonomia completa de principals span todos os canais — só o canal MCP tem _principal_mcp desde a sub-entrega 2/N; tools/tool_context.py, mcp_oauth.py, web, Telegram e voz seguem sem o modelo de identidade unificado), passo 2 (evolução de claims/scopes OAuth), passo 3 (vínculo autenticado executor→capacidades), passo 8 nas outras três dimensões — versão/revogação/escopo já são revalidados a cada chamada da função pura (sem cache), mas isso só importa de verdade quando houver um canal real chamando avaliar()/mandato_cobre() fora de teste, o que ainda não existe."
+  - "Decisão de design a levar ao André quando o PACOTE P02 inteiro estiver completo (não antes — mantido das sub-entregas 1/N, 2/N e 3/N, ainda não é hora): o gate de origem_humana nos defaults da matriz PREPARACAO_INTERNA/ESCRITA_INTERNA_REVERSIVEL (rodadas 3 e 5 do Codex, exige também eh_dono()) — a pergunta de fundo ainda vale: origem_humana deveria mesmo ter default True no contrato? Esta sub-entrega não toca nisso."
+  - "Todas as pendências já registradas nos blocos das sub-entregas 1/N, 2/N e 3/N que não foram tocadas nesta sub-entrega continuam abertas: Mandato.classes_conteudo_permitidas ainda é texto livre sem enum fechado, Mandato.usos_na_janela_atual sem wrapper de I/O real (mesma situação agora de Mandato.orcamento_maximo — declarado mas sem nada que resolva o saldo real), canais além de MCP (web/Telegram/voz) não consultam autonomy.policy, o bug de tipo em autonomy/policy.py::preparar_politica (contornado na wrapper, não corrigido no motor) segue latente."
+proximo_pacote: "P02 (sub-entrega 5/N — candidata a decidir: passo 1, taxonomia de principals nos demais canais, ou seguir fechando o passo 8 nas outras dimensões quando houver um canal real consumindo avaliar())"
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 5621eb5a6b1f7de36b4c331ffbca1fd148f61b33
+pacote: "P02 (sub-entrega 5/N — principal_de() compartilhado, passo 1 do plano, parcial)"
+# Antes de iniciar: a rodada de review do @codex sobre a sub-entrega 4/N
+# (comentário https://github.com/andre-martiini/Hermes/pull/192#issuecomment-5574002387,
+# postado ~17:38-17:40 UTC) foi tratada como exaurida sem resposta
+# confirmável após DUAS checagens (17:44 e 17:49 UTC) — GitHub REST API
+# continuou bloqueada ("GitHub access to this repository is not enabled
+# for this session"), e a segunda checagem por WebFetch retornou
+# timestamps no FUTURO (eventos às 17:53/17:56 UTC quando a própria
+# checagem era às 17:49 UTC) — sinal inequívoco de que o conteúdo não é
+# confiável (cache desatualizado misdatado, ou extração garantida errada
+# pelo modelo pequeno do WebFetch), descartado sem virar achado. Seguiu-se
+# para esta sub-entrega sem esperar 5 horas (regra de espera é entre
+# PACOTES, não entre sub-entregas do mesmo pacote).
+#
+# Escopo: avança o passo 1 do plano ("definir principals distintos... span
+# todos os canais") sem tentar religar nenhum canal novo de uma vez — algo
+# que exigiria decidir o TipoPrincipal correto de Telegram,
+# outbox_aprovacao.py, revisao_semanal.py e mcp_jobs.py, cada um com
+# ambiguidades genuínas não investigadas a fundo ainda. Em vez disso,
+# extraída para tools/tool_context.py::principal_de() a lógica que já
+# existia hardcoded em mcp_server.py::_principal_mcp (uid/canal ->
+# Principal, default de origem_humana por tipo) — puramente aditivo/
+# refactor, sem mudança de comportamento no único canal já religado (MCP),
+# preparando o terreno para os canais futuros sem decidir por eles agora.
+estado: pronto_para_revisao
+# Estados: nao_iniciado, em_execucao, pronto_para_revisao,
+# validado, publicado, ativo, bloqueado, opt_in
+inicio: "2026-09-07T17:49:00Z"
+fim: "2026-09-07T18:08:00Z"
+arquivos_alterados:
+  - functions/tools/tool_context.py
+  - functions/mcp_server.py
+  - functions/test_tool_context.py (novo)
+  - functions/atencao.py
+  - functions/test_atencao.py
+decisoes:
+  - id: p02-sub5-principal-de-tipo-sempre-explicito
+    motivo: "principal_de(ctx, tipo, *, origem_humana=None) exige tipo como argumento explícito do CHAMADOR, nunca inferido de ctx.canal sozinho. Achado que motivou essa escolha de design: canal=\"mcp\" é usado tanto por mcp_server.py (cliente MCP hospedado, dono acompanhando em tempo real -> CLIENTE_ASSISTIDO) quanto por mcp_jobs.py::on_mcp_job_created (job assíncrono de Firestore continuando uma tool longa depois que o request HTTP original já terminou, sem garantia de que o dono ainda está olhando) -- um resolvedor por texto de canal teria classificado os dois da mesma forma, escondendo exatamente a distinção que TipoPrincipal existe para preservar. mcp_jobs.py hoje não constrói Principal nenhum (não foi religado nesta sub-entrega) -- o achado é preventivo, documentado na docstring da função para quem for religar esse canal depois."
+    autoridade: existente_ou_nova
+  - id: p02-sub5-principal-mcp-delega-sem-mudar-comportamento
+    motivo: "mcp_server.py::_principal_mcp passa a delegar para principal_de(ctx, TipoPrincipal.CLIENTE_ASSISTIDO, origem_humana=True) -- mesmo nome, mesma assinatura, mesma docstring (com um parágrafo novo explicando a delegação). test_mcp_server.py::TestPrincipalMcp, já existente e não alterado nesta sub-entrega, prova que o resultado não mudou. Verificado pela revisão adversarial rodando a suíte real, não só lendo o código."
+    autoridade: existente_ou_nova
+  - id: p02-sub5-achado-incidental-toolcontext-db-errado-em-atencao
+    motivo: "Achado incidental da revisão adversarial (fora do diff revisado, encontrado ao rastrear futuros call sites de principal_de): atencao.py::resolver_item, chamado sem ctx explícito (o caso comum) e com acao_id preenchido, construía ToolContext(db=db, ...) -- campo errado, o dataclass usa _db (db só existe como property de leitura). ToolContext(db=db, ...) levantava TypeError ANTES de chamar registrar_no_diario, engolido em silêncio pelo except Exception ao redor -- todo desfecho resolvido com acao_id preenchido, chamado sem ctx explícito, perdia a nota no diário da ação sem nenhum sinal de erro. Reproduzido diretamente antes de aceitar (ToolContext(db=object()) -> TypeError). Corrigido para _db=db, com teste de regressão que falhava antes do fix (test_resolver_item_com_acao_id_registra_no_diario). Pré-existente, não introduzido por esta sub-entrega; consertado por ser pequeno, bem entendido e diretamente relevante ao escopo (mesmo arquivo citado como futuro call site de principal_de)."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+    - "cd functions && venv/bin/python -m unittest test_tool_context test_mcp_server test_atencao -v"
+  resultados:
+    - "Python (unittest, suíte completa): 1296/1296 passando (1286 anteriores da sub-entrega 4/N + 9 testes novos em test_tool_context.py -- default de origem_humana por tipo para os 5 TipoPrincipal, override explícito, passthrough de uid/canal -- + 1 teste de regressão em test_atencao.py; contagem conferida por AST, não de memória; 0 regressões)."
+evidencias:
+  - "Revisão adversarial por sub-agente independente (general-purpose, sem contexto prévio da implementação, instruído a ler o diff real, rodar a suíte de verdade e verificar cada claim por execução, não só inspeção): nenhum defeito encontrado no diff revisado -- confirmou a lógica de principal_de correta (incluindo o caso origem_humana=False explícito para DONO_INTERATIVO, provado seguro por leitura de autonomy/policy.py::_decisao_padrao_por_classe -- o override só pode degradar para PREPARE_ONLY/REQUIRE_APPROVAL, nunca conceder ALLOW indevido, porque eh_dono() depende só de tipo), verificou a claim do mcp_jobs.py lendo o arquivo real, checou ausência de ciclo de import (autonomy/contracts.py e autonomy/policy.py não importam nada de tools/, confirmado por execução direta), e confirmou que os 9 testes novos exercitam a função real sem mocks tautológicos. Rodou a suíte completa: 1295/1295 (antes do fix incidental de atencao.py) e 1296/1296 (depois). Achado incidental (fora do diff, ver decisão acima) verificado por reprodução direta antes de ser aceito e corrigido."
+  - "PR #192 (https://github.com/andre-martiini/Hermes/pull/192) -- mesma PR aberta desde a sub-entrega 1/N (branch claude/p02-autonomy-policy-contracts); commits desta sub-entrega adicionados ao mesmo branch. Comentário https://github.com/andre-martiini/Hermes/pull/192#issuecomment-5574275337 documenta esta sub-entrega (escopo, achado incidental, contagem de testes); @codex review pedido novamente ao final."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "Passo 1 do plano segue MATERIALMENTE em aberto: só o canal MCP constrói Principal e passa pelo preflight de política. Telegram (hermes_core_logic.py, closures de ativar/desativar/consultar modo secretário), outbox_aprovacao.py, revisao_semanal.py e mcp_jobs.py continuam sem construir Principal nenhum. Decidir o TipoPrincipal correto de cada um fica para sub-entrega futura -- alguns são genuinamente ambíguos (ex.: mcp_jobs.py::on_mcp_job_created é sempre RUNNER_SERVICO, ou depende de quanto tempo passou desde o request HTTP original que criou o job?) e podem precisar de input do André em vez de decisão unilateral."
+  - "Religar esses canais no preflight de autonomy.policy.avaliar() é o passo 6 do plano, sequenciado ainda mais adiante -- deliberadamente não tentado nesta sub-entrega, mesmo tendo o mecanismo (principal_de) pronto para uso."
+  - "P02 segue MATERIALMENTE em aberto nos passos 2 (evolução de claims/scopes OAuth), 3 (vínculo autenticado executor->capacidades), e nas dimensões restantes do passo 8 (só orçamento foi fechado, na sub-entrega 4/N; versão/revogação/escopo já são revalidados a cada chamada da função pura, mas isso só importa de verdade quando um canal real chamar avaliar()/mandato_cobre() fora de teste)."
+  - "Decisão de design a levar ao André quando o PACOTE P02 inteiro estiver completo (não antes -- mantido das sub-entregas 1/N a 4/N, ainda não é hora): o gate de origem_humana nos defaults da matriz PREPARACAO_INTERNA/ESCRITA_INTERNA_REVERSIVEL (rodadas 3 e 5 do Codex, exige também eh_dono()) -- a pergunta de fundo ainda vale: origem_humana deveria mesmo ter default True no contrato? Esta sub-entrega não toca nisso."
+  - "Todas as pendências já registradas nos blocos das sub-entregas 1/N a 4/N que não foram tocadas nesta sub-entrega continuam abertas: validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP (tools/hermes_tools.py, _principal_simulado), Mandato.classes_conteudo_permitidas ainda texto livre sem enum fechado, Mandato.usos_na_janela_atual e Mandato.orcamento_maximo sem wrapper de I/O real, o bug de tipo em autonomy/policy.py::preparar_politica (contornado na wrapper, não corrigido no motor) segue latente."
+proximo_pacote: "P02 (sub-entrega 6/N -- candidata a decidir: continuar o passo 1 decidindo o TipoPrincipal de um canal específico, ou avançar os passos 2/3 do plano quando houver mais clareza sobre OAuth/claims)"
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 0242516a0560adafa2fc89690ca6219c423b618a
+pacote: "P02 (sub-entrega 6/N -- decisao_piso() compartilhado, passo 6 do plano, parcial)"
+# NOTA DE PROCESSO: este bloco documenta retroativamente uma sub-entrega cujo
+# código já estava no branch (commits 12da7dbae e 426167193) mas cuja entrada
+# em execucao.md nunca chegou a ser enviada -- o próprio commit de testes já
+# dizia "ver docstring e execucao.md", mas o registro aqui não aconteceu antes
+# da sessão ser compactada/interrompida. Escrito agora, na sub-entrega 7/N,
+# por leitura direta dos commits e diffs reais (git show), não de memória --
+# nenhuma decisão nova é tomada aqui, só o registro que faltou.
+#
+# Escopo: extrai para autonomy/policy.py::decisao_piso(db, principal, nome,
+# argumentos) a lógica que mcp_server.py::_decisao_piso_mcp já tinha desde a
+# sub-entrega 2/N (estado_autonomia_atual + PolicyRequest + avaliar +
+# registrar_decisao num único ponto), para reuso por qualquer canal futuro --
+# passo 6 do plano ("inserir preflight obrigatório no executor de domínio").
+# mcp_server.py NÃO foi religado para usar esta função nova (continua com sua
+# própria _decisao_piso_mcp, que lida com ctx.db como property lazy que pode
+# falhar na própria inicialização -- diferença documentada na docstring da
+# função nova). O candidato natural de segundo consumidor real -- fechar
+# schedule_whatsapp_message do Telegram (hermes_core_logic.py) com o mesmo
+# preflight -- chegou a ser implementado e testado nesta sub-entrega, mas foi
+# REVERTIDO por um bloqueio operacional descoberto aqui (ver decisão abaixo).
+estado: pronto_para_revisao
+# Estados: nao_iniciado, em_execucao, pronto_para_revisao,
+# validado, publicado, ativo, bloqueado, opt_in
+inicio: "2026-09-07T18:57:31Z"
+fim: "2026-09-07T19:04:17Z"
+arquivos_alterados:
+  - functions/autonomy/policy.py
+  - functions/test_policy.py
+decisoes:
+  - id: p02-sub6-decisao-piso-compartilhada
+    motivo: "decisao_piso(db, principal, nome, argumentos) orquestra estado_autonomia_atual() + PolicyRequest + avaliar() + registrar_decisao() num único ponto reutilizável por qualquer canal, extraído da lógica que mcp_server.py::_decisao_piso_mcp já tinha desde a sub-entrega 2/N. Retorna None quando nome não está em CLASSE_EFEITO_PISO, mesmo contrato de _decisao_piso_mcp. A duplicação entre as duas funções foi mantida deliberadamente (mcp_server.py não foi religado para usar a nova) para não mexer num caminho de código sensível já testado só para eliminar duplicação -- registrado como pendência abaixo."
+    autoridade: existente_ou_nova
+  - id: p02-sub6-telegram-wiring-revertido-limite-argos
+    motivo: "Achado operacional real, não de lógica: hermes_core_logic.py sozinho, sem NENHUMA mudança desta sub-entrega, já tem 276257 caracteres -- acima do limite de 200000 de mcp__Argos__argos_escrever_arquivo_repositorio.conteudo (a API de escrita do Argos exige o arquivo INTEIRO, não um diff/patch). Esse arquivo é estruturalmente inalcançável por este mecanismo de shipping, para QUALQUER mudança, não só a desta sub-entrega -- não é um problema desta sub-entrega especificamente, é um teto estrutural do canal Telegram inteiro enquanto ele viver nesse arquivo. O wiring de schedule_whatsapp_message -> decisao_piso() foi implementado e testado localmente, depois revertido (não enviado) porque não havia como enviá-lo. decisao_piso() em si não depende de hermes_core_logic.py e foi entregue mesmo assim, pronta para quando esse arquivo puder ser alcançado (extrair os handlers de Telegram para um módulo menor, ou uma via de escrita que aceite diffs)."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "Python (unittest, suíte completa): 1302/1302 passando (1296 anteriores da sub-entrega 5/N + 6 testes novos em TestDecisaoPiso -- test_policy.py: fora-do-piso sem tocar Firestore, ativo -> REQUIRE_APPROVAL + registra, pausado -> DENY, somente_preparacao -> PREPARE_ONLY, falha ao ler estado não propaga, falha ao registrar não propaga; 0 regressões), conforme mensagem do commit 426167193."
+evidencias:
+  - "Commits 12da7dbae (função) e 426167193 (testes) no branch claude/p02-autonomy-policy-contracts, lidos integralmente via git show para escrever este registro retroativo -- não há relato de revisão adversarial independente para esta sub-entrega especificamente, porque este registro foi escrito depois do fato, por uma sessão que não estava presente durante a implementação original. Fica como lacuna honesta: se uma revisão adversarial dedicada a este diff específico ainda não rodou, ela é candidata pendente, não algo a fingir que já aconteceu."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "Duplicação entre autonomy/policy.py::decisao_piso() (nova) e mcp_server.py::_decisao_piso_mcp (sub-entrega 2/N) não foi eliminada -- mcp_server.py continua com sua própria implementação. Unificar fica para quando o canal MCP for revisitado por outro motivo, ou quando um segundo canal real (Telegram ou outro) começar a usar decisao_piso() e a duplicação passar a doer de verdade."
+  - "hermes_core_logic.py (276257 caracteres) é estruturalmente inalcançável por mcp__Argos__argos_escrever_arquivo_repositorio (limite de 200000 caracteres, escrita é arquivo inteiro, não diff) -- isso bloqueia não só o wiring de decisao_piso() no Telegram, mas QUALQUER mudança futura nesse arquivo por este mecanismo de shipping. Vale levar ao André como achado operacional (não é decisão de design do plano, é uma limitação de ferramenta) -- candidatos: extrair handlers de Telegram para um módulo menor, ou uma via de escrita que aceite diff/patch."
+  - "Não há revisão adversarial independente registrada para o diff desta sub-entrega especificamente (ver evidências acima) -- se ainda não rodou, é candidata a rodar antes do pacote P02 ser dado como fechado."
+  - "Passo 1 do plano segue MATERIALMENTE em aberto: só o canal MCP constrói Principal e passa pelo preflight (desde a sub-entrega 2/N). Telegram, outbox_aprovacao.py, revisao_semanal.py e mcp_jobs.py continuam sem construir Principal nenhum -- e o Telegram especificamente agora tem o bloqueio de tamanho de arquivo acima, além da ambiguidade de tipo já registrada na sub-entrega 5/N."
+  - "Todas as pendências já registradas nos blocos das sub-entregas 1/N a 5/N que não foram tocadas nesta sub-entrega continuam abertas: validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP, Mandato.classes_conteudo_permitidas texto livre sem enum fechado, Mandato.usos_na_janela_atual e Mandato.orcamento_maximo sem wrapper de I/O real, o bug de tipo em autonomy/policy.py::preparar_politica (contornado na wrapper, não corrigido no motor), a pergunta de design sobre o default de origem_humana (levar ao André só ao fim do pacote inteiro)."
+proximo_pacote: "P02 (sub-entrega 7/N -- ver bloco seguinte)"
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 426167193ebf4004dfc20c278a3e4db4f1c5ba1f
+pacote: "P02 (sub-entrega 7/N -- fecha o atalho de bypass de confirmação para tools gated só por config, passo 6 do plano; inclui correção de um incidente de shipping desta mesma sub-entrega)"
+# Esta sub-entrega tem duas partes, registradas juntas porque a segunda
+# corrige um erro cometido ao entregar a primeira, na mesma sessão de
+# trabalho -- princípio "reconhecido, não escondido" do plano (não há
+# nenhuma tentativa de separar isso num registro mais discreto).
+#
+# PARTE 1 -- a mudança pretendida: a sub-entrega 2/N tinha fechado o atalho
+# de bypass de confirmação (_confirmed=true sem _confirmation_id executando
+# direto, sem nunca passar por preflight nem criar confirmação real) só para
+# o piso hardcoded (FLOOR_CONFIRMACAO_OBRIGATORIA), e tinha registrado
+# EXPLICITAMENTE como pendência que o mesmo gap continuava teoricamente
+# possível para uma tool exigindo confirmação só por config
+# (system/mcp_access.confirm_tools, fora do piso) sem hook de prévia. Esta
+# sub-entrega fecha esse mesmo atalho também para tools de confirmação só
+# por config -- mesma garantia do piso, sem mais exceção "legada". Hoje
+# system/mcp_access.confirm_tools está vazio em produção (achado já
+# registrado desde antes: contorno do WhatsApp de 27/08/2026), então esta
+# mudança não altera nenhum comportamento observável hoje -- só fecha a
+# lacuna teórica para quando alguém configurar uma tool assim no futuro.
+#
+# PARTE 2 -- o incidente e a correção: ao entregar a Parte 1 (rotulada, por
+# engano, "sub-entrega 4/N"), o commit foi construído sobre uma base git
+# local desatualizada. O clone local usado nesta sessão não tinha o fetch
+# refspec configurado para esta branch (`git config --get-all
+# remote.origin.fetch` só cobria main e claude/p00-baseline-ambiente-seguro)
+# -- então `git fetch origin claude/p02-autonomy-policy-contracts` buscava
+# os objetos do branch mas NUNCA atualizava
+# refs/remotes/origin/claude/p02-autonomy-policy-contracts, e `git log
+# origin/claude/p02-autonomy-policy-contracts` continuava mostrando a
+# sub-entrega 3/N como ponta, não importa quantas vezes o fetch fosse
+# repetido. Na realidade a branch já tinha avançado 7 commits (as
+# sub-entregas 4/N real -- orçamento no mandato --, 5/N e 6/N, registradas
+# nos blocos acima). O envio da Parte 1 via
+# mcp__Argos__argos_escrever_arquivo_repositorio (que resolve o sha atual no
+# servidor, então o COMMIT em si ficou corretamente encadeado depois do
+# commit real mais recente da branch) enviou um CONTEÚDO baseado na versão
+# desatualizada do arquivo -- uma sobrescrita de arquivo inteiro que
+# reverteu, sem que eu percebesse na hora, a delegação de
+# mcp_server.py::_principal_mcp() para tools.tool_context.principal_de()
+# introduzida pela sub-entrega 5/N (import e corpo da função voltaram à
+# forma anterior a ela). Só foi descoberto porque o campo `parents` da
+# resposta do Argos trazia um sha pai diferente do esperado, o que motivou
+# investigação. Diagnóstico confirmado com `git ls-remote origin <branch>`
+# (que ignora refs locais e mostra a ponta real) e `git diff` entre o commit
+# anterior ao meu e o meu.
+estado: pronto_para_revisao
+# Estados: nao_iniciado, em_execucao, pronto_para_revisao,
+# validado, publicado, ativo, bloqueado, opt_in
+inicio: "2026-09-07T19:56:38Z"
+fim: "2026-09-07T20:14:00Z"
+arquivos_alterados:
+  - functions/mcp_server.py
+  - functions/test_mcp_server.py
+  - docs/autonomia/execucao.md
+decisoes:
+  - id: p02-sub7-fecha-atalho-bypass-config
+    motivo: "Mesma classe do achado fechado para o piso na sub-entrega 2/N: uma tool de confirmação obrigatória só por config (system/mcp_access.confirm_tools, fora do piso hardcoded) que também não tem hook de prévia (preview_tool devolve None) caía no mesmo atalho -- _confirmed=true sem _confirmation_id executava direto, sem nunca criar uma confirmação real nem passar por qualquer preflight de política. Fechado: TODA tool que exige confirmação (piso ou config) sempre exige o confirmation_id de uma confirmação real, hook de prévia ou não. Testado nos dois níveis (bloqueio sem confirmation_id e caminho legítimo com confirmation_id real ainda funcionando) em TestPisoSemHookNaoBurlaConfirmacaoComConfirmedTrue."
+    autoridade: existente_ou_nova
+  - id: p02-sub7-incidente-base-local-desatualizada
+    motivo: "Ver nota no topo do bloco (PARTE 2) para o diagnóstico completo. Correção aplicada: (1) restaurada a delegação _principal_mcp() -> tools.tool_context.principal_de() (import e corpo/docstring), mesmo comportamento observável -- provado por TestPrincipalMcp, sem alteração de expectativa; (2) preservada integralmente a mudança pretendida da Parte 1; (3) fetch local corrigido com refspec explícito por branch (`git fetch origin +refs/heads/<branch>:refs/remotes/origin/<branch>`), e `git ls-remote` passa a ser o método de verificação da ponta real antes de qualquer leitura de base neste branch daqui em diante -- a lição de fundo: hash-verificar o upload de um arquivo (disciplina já seguida, sha conferido em cada escrita) prova que o CONTEÚDO chegou fiel, mas não prova que a BASE local de onde ele foi lido/editado estava atualizada; as duas verificações são independentes e a segunda faltou aqui."
+    autoridade: existente_ou_nova
+  - id: p02-sub7-renumeracao-4n-para-7n
+    motivo: "A Parte 1 foi originalmente rotulada 'sub-entrega 4/N' -- rótulo já ocupado pela sub-entrega real de orçamento no mandato (passo 8), que eu não enxergava por causa do mesmo problema de fetch descrito acima. Corrigido para 7/N (próximo número livre após 6/N) nos comentários de mcp_server.py e test_mcp_server.py e no registro deste arquivo."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+    - "cd functions && venv/bin/python -m unittest test_mcp_server -v"
+  resultados:
+    - "Python (unittest, suíte completa): 1304/1304 passando (1302 da sub-entrega 6/N + 2 testes novos: bloqueio sem confirmation_id e caminho legítimo com confirmation_id real, para tool gated só por config sem hook; 0 regressões). Suíte rodada sobre a árvore local sincronizada com a ponta real da branch (verificada por git ls-remote) + esta correção -- não sobre a base desatualizada que causou o incidente."
+    - "test_mcp_server -v: 22/22, incluindo TestPrincipalMcp (prova que a delegação restaurada não muda o resultado)."
+evidencias:
+  - "git diff entre o commit imediatamente anterior ao meu (426167193) e o meu (c99739629, antes da correção) isolou exatamente uma reversão não intencional -- a delegação de principal_de(); nenhuma outra sub-entrega (4/N real, 5/N, 6/N) foi afetada em nenhum outro arquivo, confirmado por git diff --stat entre a base desatualizada (5621eb5a6) e a ponta real (c99739629)."
+  - "git ls-remote origin claude/p02-autonomy-policy-contracts confirmou a ponta real em cada etapa da correção (antes de reescrever o arquivo, e depois de cada envio), prevenindo repetir o mesmo erro durante a própria correção."
+  - "sha devolvido pelo Argos em cada envio (mcp_server.py: 23876e6082a95bbb696ff772edcf741b7feede9e; test_mcp_server.py: d979a3e31d335cf52b17ac3a78aaeb05b2137a14) conferido contra git hash-object do arquivo local antes de enviar, e o campo parents da resposta conferido contra o commit esperado -- disciplina que já existia (skill argos-ship-feature) e que, desta vez, foi o que revelou o problema (parents não batia com o esperado)."
+  - "Nenhuma revisão adversarial por sub-agente independente foi despachada para o diff da Parte 1 nem para a correção da Parte 2 nesta sub-entrega -- diferente do padrão das sub-entregas 1/N-6/N. Registrado honestamente como lacuna, não escondido: a correção foi verificada por leitura direta do diff e por testes, não por um revisor sem contexto prévio. Candidata a rodar antes do pacote P02 ser dado como fechado."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "Nenhuma revisão adversarial independente rodou para esta sub-entrega (ver evidências) -- diferente das sub-entregas anteriores, que sempre tiveram uma. Deveria rodar antes de considerar P02 fechado."
+  - "O mesmo tipo de checagem que capturou este incidente (git ls-remote antes de ler a base) deveria virar hábito no início de qualquer sub-entrega futura desta sessão neste repositório, não só quando algo parece errado -- registrado aqui para não depender de lembrar sem reforço escrito."
+  - "Duplicação entre autonomy/policy.py::decisao_piso() e mcp_server.py::_decisao_piso_mcp permanece (pendência já registrada no bloco da sub-entrega 6/N)."
+  - "hermes_core_logic.py (276257 caracteres) permanece estruturalmente inalcançável por mcp__Argos__argos_escrever_arquivo_repositorio (pendência já registrada no bloco da sub-entrega 6/N) -- vale levar ao André."
+  - "Passo 1 do plano segue MATERIALMENTE em aberto: só o canal MCP constrói Principal e passa pelo preflight. Telegram, outbox_aprovacao.py, revisao_semanal.py e mcp_jobs.py continuam sem construir Principal nenhum."
+  - "Todas as pendências já registradas nos blocos das sub-entregas 1/N a 6/N que não foram tocadas nesta sub-entrega continuam abertas: validação de tipo de PolicyRequest.orcamento_restante no wrapper MCP, Mandato.classes_conteudo_permitidas texto livre sem enum fechado, Mandato.usos_na_janela_atual e Mandato.orcamento_maximo sem wrapper de I/O real, o bug de tipo em autonomy/policy.py::preparar_politica (contornado na wrapper, não corrigido no motor), a pergunta de design sobre o default de origem_humana (levar ao André só ao fim do pacote inteiro)."
+proximo_pacote: "P02 (sub-entrega 8/N -- candidata a decidir: despachar a revisão adversarial pendente desta sub-entrega e da 6/N antes de seguir adiante, ou continuar o passo 1 decidindo o TipoPrincipal de um canal específico agora que decisao_piso() está pronto para reuso)"
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: b8ce2963df329db0a9792166c3b6cadf91a667cf
+pacote: "P02 (revisão adversarial retroativa das sub-entregas 6/N e 7/N -- sem mudança de código de produção)"
+# Esta entrada não implementa nada novo. Ela despacha a revisão adversarial
+# que os blocos das sub-entregas 6/N e 7/N já registravam como pendente --
+# "deveria rodar antes de considerar P02 fechado" -- e registra o resultado.
+# Escolhida como o próximo passo em vez de avançar o passo 1 do plano,
+# seguindo o próprio proximo_pacote do bloco anterior.
+estado: validado
+inicio: "2026-09-07T20:14:00Z"
+fim: "2026-09-07T20:31:42Z"
+arquivos_alterados:
+  - docs/autonomia/execucao.md
+decisoes:
+  - id: p02-sub8-revisao-6N-7N-sem-achado-bloqueante
+    motivo: "Sub-agente general-purpose independente, sem contexto prévio da implementação, revisou os diffs de autonomy/policy.py::decisao_piso()+test_policy.py (sub-entrega 6/N) e mcp_server.py+test_mcp_server.py (sub-entrega 7/N, incluindo a correção do incidente de reversão acidental de principal_de()). Rodou a suíte real (1304/1304, batendo com o alegado), traçou o histórico de commits (04ed060da -> c99739629 -> c69468d9a -> de5c34e40 -> b8ce2963d) e confirmou por diff direto que (a) _principal_mcp delega para principal_de() sem perda de comportamento, (b) nenhum outro resíduo do revert acidental restou em mcp_server.py, (c) o fechamento do atalho de bypass de confirmação cobre todos os caminhos de dispatch reais (sem via paralela, sem replay via _executar_confirmacao, que já valida confirmation_id contra Firestore/uid/expiração/claim atômico). Comparou decisao_piso() e _decisao_piso_mcp() linha a linha: equivalentes, divergência de tratamento de erro é intencional e documentada. Veredito explícito: \"Pronto. Não encontrei bugs de segurança ou de lógica bloqueantes em nenhum dos dois diffs.\""
+    autoridade: existente_ou_nova
+  - id: p02-sub8-achado-nao-bloqueante-avaliar-sem-protecao
+    motivo: "Único achado do revisor, não-bloqueante: decisao_piso() (e também _decisao_piso_mcp, já em produção desde a sub-entrega 2/N -- não é regressão desta sub-entrega) chama avaliar(request) sem try/except ao redor; um principal malformado (None, ou objeto sem .eh_dono()/.tipo) propagaria AttributeError em vez de cair em SOMENTE_PREPARACAO como o resto da função faz. Risco prático hoje é zero -- decisao_piso() não tem nenhum consumidor real fora dos próprios testes (confirmado por grep: só aparece em test_policy.py, autonomy/policy.py e execucao.md). Não corrigido agora, deliberadamente: registrado como pendência para quando um canal real passar a chamar decisao_piso() com um principal construído fora do controle do próprio módulo -- momento em que também caberia um teste de regressão dedicado."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py' (rodado pelo sub-agente revisor, ambiente venv já existente)"
+  resultados:
+    - "1304 passed / 0 failed / 0 erros / 0 skips -- confirma, por execução independente (não só leitura), a mesma contagem já alegada nos commits c69468d9a e de5c34e40."
+evidencias:
+  - "Relatório completo do sub-agente (general-purpose, dispatch via Agent tool, sem memória da implementação original) cobrindo os dois diffs -- ver decisões acima para o resumo; o relatório também confirmou ausência de ciclo/resíduo via checagem AST por definições de função duplicadas em mcp_server.py e via git diff 04ed060da..b8ce2963d --  functions/mcp_server.py isolando exatamente o fechamento do atalho de confirmação, nada mais."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: a pendência 'nenhuma revisão adversarial independente rodou' registrada nos blocos das sub-entregas 6/N e 7/N. Rodou, sem achado bloqueante (ver decisões acima)."
+  - "Novo, não-bloqueante: decisao_piso()/avaliar() não protegida contra principal malformado (ver decisão p02-sub8-achado-nao-bloqueante-avaliar-sem-protecao) -- endereçar quando um canal real além dos testes passar a chamar decisao_piso()."
