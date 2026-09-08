@@ -16,8 +16,9 @@ motor `avaliar()` em si, sem I/O nem canal.
 """
 
 import unittest
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import mcp_server
 from autonomy import policy
@@ -74,6 +75,27 @@ class TestFloorIdenticoAoMcpServer(unittest.TestCase):
         # dono, 02/09/2026): uma mudança de tamanho sem tocar este teste
         # não deveria acontecer por acidente.
         self.assertEqual(len(policy.FLOOR_CONFIRMACAO_OBRIGATORIA), 5)
+
+    def test_classe_efeito_piso_cobre_exatamente_o_floor(self):
+        # Achado da sub-entrega 12/N: `avaliar()` só consulta
+        # `request.principal` no ramo NÃO-piso (`veio_do_piso=False`); o
+        # ramo do piso decide sem tocar principal (só o passo 6, estado,
+        # é consultado). `decisao_piso()`/`_decisao_piso_mcp` só chamam
+        # avaliar() com classe_efeito vindo de CLASSE_EFEITO_PISO — hoje,
+        # isso significa que SEMPRE caem no ramo do piso, então nunca
+        # dependem de `request.principal` estar bem formado por este
+        # caminho específico. Essa garantia depende inteiramente das duas
+        # tabelas (mantidas separadamente por design, ver docstring de
+        # CLASSE_EFEITO_PISO) terem exatamente as mesmas chaves — este
+        # teste trava essa invariante; se ela quebrar (uma ferramenta nova
+        # em CLASSE_EFEITO_PISO sem estar em FLOOR_CONFIRMACAO_OBRIGATORIA),
+        # o guard fail-closed de `decisao_erro_avaliacao()` (test_policy.py
+        # ::TestDecisaoPiso) passa a ser a única proteção real contra um
+        # principal malformado quebrar essas duas funções.
+        self.assertEqual(
+            set(policy.CLASSE_EFEITO_PISO.keys()),
+            set(policy.FLOOR_CONFIRMACAO_OBRIGATORIA),
+        )
 
 
 class TestAvaliarPiso(unittest.TestCase):
@@ -1133,6 +1155,77 @@ class TestDecisaoPiso(unittest.TestCase):
         except Exception as exc:  # pragma: no cover - falharia o teste se levantasse
             self.fail(f"decisao_piso não deveria propagar exceção, levantou: {exc}")
         self.assertEqual(resultado.decision, Decisao.REQUIRE_APPROVAL)
+
+    def test_falha_em_avaliar_nao_propaga_excecao_e_bloqueia_com_deny(self):
+        # P02 sub-entrega 12/N: `avaliar(request)` era chamada sem
+        # try/except ao redor — um `principal` malformado (None, ou um
+        # objeto sem `.eh_dono()`/`.tipo`) propagaria a exceção de dentro
+        # dela em vez de cair fail-closed, pendência registrada desde a
+        # sub-entrega 8/N, endereçada agora que decisao_piso() tem
+        # consumidores reais (mcp_jobs.py, confirm_whatsapp do Telegram).
+        #
+        # Usa mock.patch em vez de passar um principal malformado de
+        # verdade: para os 5 tools do piso (o único caso que decisao_piso()
+        # atende — classe_efeito vem de CLASSE_EFEITO_PISO, que hoje tem
+        # exatamente as mesmas chaves de FLOOR_CONFIRMACAO_OBRIGATORIA),
+        # avaliar() nunca toca request.principal — o ramo `if veio_do_piso`
+        # fixa a decisão sem consultar o tipo/eh_dono() do principal (só o
+        # passo 6, estado_autonomia, é consultado). Ou seja, um principal
+        # malformado não derruba avaliar() HOJE por este caminho específico
+        # — mas a proteção deve valer pela mesma razão que o resto desta
+        # função já é fail-safe: não depender de nenhuma invariante de outro
+        # módulo (ex.: CLASSE_EFEITO_PISO continuar sendo subconjunto exato
+        # de FLOOR_CONFIRMACAO_OBRIGATORIA) para não propagar uma exceção.
+        db = self._db_com_estado(existe=False)  # documento ausente -> ATIVO
+        with patch.object(
+            policy, "avaliar", side_effect=AttributeError("'NoneType' object has no attribute 'eh_dono'")
+        ):
+            try:
+                resultado = policy.decisao_piso(db, None, "schedule_whatsapp_message", {"x": "y"})
+            except Exception as exc:  # pragma: no cover - falharia o teste se levantasse
+                self.fail(f"decisao_piso não deveria propagar exceção, levantou: {exc}")
+        self.assertEqual(resultado.decision, Decisao.DENY)
+        self.assertEqual(resultado.reason_code, "erro_interno_avaliacao_politica")
+        # registrar_decisao ainda é tentado (mesmo com principal malformado,
+        # ela própria já é fail-safe — request.principal.uid dentro do seu
+        # próprio try/except, ver TestRegistrarDecisao).
+        self.assertIn(
+            "policy_decisions",
+            [c.args[0] for c in db.collection.call_args_list if c.args],
+        )
+
+    def test_falha_em_avaliar_preserva_operation_hash_da_operacao_real(self):
+        db = self._db_com_estado(existe=False)
+        argumentos = {"contact_number": "5511999999999", "message": "oi"}
+        with patch.object(policy, "avaliar", side_effect=RuntimeError("boom")):
+            resultado = policy.decisao_piso(db, None, "schedule_whatsapp_message", argumentos)
+        esperado = policy._hash_operacao(
+            PolicyRequest(
+                principal=None, ferramenta="schedule_whatsapp_message",
+                classe_efeito=ClasseEfeito.COMPROMISSO_TERCEIROS,
+                argumentos_resolvidos=argumentos,
+            )
+        )
+        self.assertEqual(resultado.operation_hash, esperado)
+
+class TestDecisaoErroAvaliacao(unittest.TestCase):
+    """`decisao_erro_avaliacao()` isolada — fallback fail-closed usado tanto
+    por `decisao_piso()` quanto por `mcp_server.py::_decisao_piso_mcp`
+    quando `avaliar()` não pôde ser executada (P02 sub-entrega 12/N)."""
+
+    def test_e_sempre_deny_nunca_prepare_only_ou_require_approval(self):
+        req = _req(ferramenta="registrar_aporte_investimento")
+        decisao = policy.decisao_erro_avaliacao(req, motivo_legivel="motivo de teste")
+        self.assertEqual(decisao.decision, Decisao.DENY)
+        self.assertEqual(decisao.motivo_legivel, "motivo de teste")
+
+    def test_nao_depende_de_principal_bem_formado(self):
+        req = _req(ferramenta="criar_rascunho_email")
+        req_malformado = replace(req, principal=None)
+        # Não deve levantar AttributeError mesmo com principal=None: só usa
+        # ferramenta/argumentos_resolvidos via _hash_operacao.
+        decisao = policy.decisao_erro_avaliacao(req_malformado, motivo_legivel="x")
+        self.assertEqual(decisao.operation_hash, policy._hash_operacao(req_malformado))
 
 
 if __name__ == "__main__":
