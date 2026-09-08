@@ -33,6 +33,14 @@ from datetime import datetime, timedelta, timezone
 
 from firebase_admin import firestore
 
+from autonomy import policy as autonomy_policy
+from autonomy.contracts import (
+    ClasseEfeito,
+    EstadoAutonomia,
+    Principal,
+    PolicyRequest,
+    TipoPrincipal,
+)
 from tools.tool_context import ToolContext
 
 
@@ -2102,6 +2110,177 @@ def _consultar_status_modo_secretario(ctx: ToolContext, args: dict):
 
 
 # ---------------------------------------------------------------------------
+# Motor de política de autonomia (P02 passo 7, autonomy/policy.py) — thin
+# wrappers em torno das funções PURAS já existentes e testadas em
+# autonomy/policy.py (test_policy.py). Nenhum dos três toca `ctx.db`: consultar
+# e simular são leitura pura; preparar só calcula um diff, nunca persiste
+# (ver docstring de `autonomy.policy.preparar_politica`). Erros de entrada
+# usam o prefixo `ERRO|` (convenção deste arquivo — mcp_server._looks_like_error
+# reconhece o prefixo e marca `isError=True`), em vez de deixar a exceção
+# propagar crua.
+# ---------------------------------------------------------------------------
+
+def _consultar_politica(ctx: ToolContext, args: dict):
+    escopo = str(args.get("escopo") or "mcp")
+    try:
+        return json.dumps(autonomy_policy.consultar_politica(escopo), ensure_ascii=False, default=str)
+    except Exception as e:  # noqa: BLE001 — nunca propagar cru para o cliente MCP
+        return f"ERRO|Falha ao consultar política: {e}"
+
+
+def _principal_simulado(pedido: dict) -> Principal:
+    """Constrói o `Principal` hipotético de um pedido de `simular_politica`.
+
+    Diferente de `mcp_server._principal_mcp` (que reflete o principal REAL do
+    canal MCP autenticado), este é inteiramente declarado pelo chamador — a
+    simulação existe justamente para explorar cenários de outros tipos de
+    principal (rotina_cowork, runner_servico, ...), não só o do canal atual.
+    """
+    tipo = TipoPrincipal(str(pedido.get("principal_tipo") or "cliente_assistido"))
+    origem_humana = pedido.get("origem_humana")
+    if origem_humana is None:
+        origem_humana = tipo in (TipoPrincipal.DONO_INTERATIVO, TipoPrincipal.CLIENTE_ASSISTIDO)
+    elif not isinstance(origem_humana, bool):
+        # Achado da revisão adversarial desta sub-entrega: `bool("false")` é
+        # `True` (truthiness de string não vazia, não parsing de JSON) — um
+        # `"origem_humana": "false"` (erro plausível de um cliente MCP
+        # montando o JSON à mão) inverteria silenciosamente o resultado da
+        # simulação, o oposto exato do que a ferramenta existe para evitar.
+        # Reproduzido: origem_humana="false" (string) => decision=allow;
+        # origem_humana=False (bool) => decision=prepare_only, para o mesmo
+        # pedido. Rejeitar tipo errado explicitamente em vez de coagir.
+        raise ValueError("'origem_humana' deve ser um booleano (true/false)")
+    return Principal(
+        uid=pedido.get("uid"),
+        tipo=tipo,
+        canal=str(pedido.get("canal") or "mcp"),
+        origem_humana=bool(origem_humana),
+    )
+
+
+def _policy_request_simulado(pedido: dict) -> PolicyRequest:
+    """Constrói o `PolicyRequest` hipotético de um pedido de `simular_politica`.
+
+    Levanta `ValueError` (nunca deixa passar silenciosamente) para qualquer
+    campo obrigatório ausente ou valor de enum desconhecido — quem chama
+    (`_simular_politica`) captura por pedido e reporta o índice, em vez de
+    interromper a simulação inteira num único erro sem contexto.
+    """
+    ferramenta = pedido.get("ferramenta")
+    if not isinstance(ferramenta, str) or not ferramenta.strip():
+        raise ValueError("'ferramenta' é obrigatória e deve ser uma string não vazia")
+
+    classe_str = pedido.get("classe_efeito")
+    if classe_str:
+        classe_efeito = ClasseEfeito(str(classe_str))
+    else:
+        classe_efeito = autonomy_policy.CLASSE_EFEITO_PISO.get(ferramenta)
+        if classe_efeito is None:
+            raise ValueError(
+                f"classe_efeito não informada e '{ferramenta}' não está classificada no piso "
+                "(CLASSE_EFEITO_PISO) — informe classe_efeito explicitamente"
+            )
+
+    argumentos_resolvidos = pedido.get("argumentos_resolvidos")
+    if argumentos_resolvidos is None:
+        argumentos_resolvidos = {}
+    elif not isinstance(argumentos_resolvidos, dict):
+        # Achado da revisão adversarial: `dict(pedido.get(...) or {})` sem
+        # checar o tipo antes levantava TypeError para um valor não-mapeável
+        # (ex.: um inteiro) — não capturado pelo `except (ValueError,
+        # KeyError)` do chamador, escapando cru até `hermes_tools.execute()`
+        # em vez de virar um erro por índice como os demais campos.
+        raise ValueError("'argumentos_resolvidos' deve ser um objeto")
+
+    return PolicyRequest(
+        principal=_principal_simulado(pedido),
+        ferramenta=ferramenta,
+        classe_efeito=classe_efeito,
+        argumentos_resolvidos=argumentos_resolvidos,
+        missao=pedido.get("missao"),
+        sensibilidade=pedido.get("sensibilidade"),
+        orcamento_restante=pedido.get("orcamento_restante"),
+        estado_autonomia=EstadoAutonomia(str(pedido.get("estado_autonomia") or "ativo")),
+    )
+
+
+def _simular_politica(ctx: ToolContext, args: dict):
+    pedidos_brutos = args.get("pedidos")
+    if not isinstance(pedidos_brutos, list) or not pedidos_brutos:
+        return "ERRO|'pedidos' é obrigatório e deve ser uma lista não vazia"
+
+    pedidos = []
+    erros = []
+    for i, pedido in enumerate(pedidos_brutos):
+        if not isinstance(pedido, dict):
+            erros.append({"indice": i, "erro": "cada pedido deve ser um objeto"})
+            continue
+        try:
+            pedidos.append(_policy_request_simulado(pedido))
+        except (ValueError, KeyError, TypeError) as e:
+            erros.append({"indice": i, "erro": str(e)})
+
+    if erros:
+        # Deliberado: nenhuma simulação roda se algum pedido for inválido — um
+        # resultado parcial (só os pedidos válidos) poderia ser lido como "os
+        # outros não apareceram porque foram bloqueados", em vez de "não foram
+        # nem avaliados". Ver schema (`simular_politica.json`).
+        #
+        # Achado da revisão adversarial: isto retornava um `json.dumps(...)`
+        # (string) contendo uma chave "erro" — mas `mcp_server._handle_tools_call`
+        # só deriva `isError=True` de um `dict` com `.get("erro")`; para um
+        # `str` ele cai em `_looks_like_error`, que só reconhece o prefixo
+        # `ERRO|`. O payload virava uma resposta "bem-sucedida" do ponto de
+        # vista do protocolo MCP. Prefixo adicionado para acionar o mesmo
+        # sinal que o resto deste arquivo já usa, sem perder o payload
+        # estruturado (`pedidos_invalidos`) que vem depois dele.
+        return "ERRO|" + json.dumps({
+            "erro": "Alguns pedidos são inválidos; nenhuma simulação foi executada. Corrija e tente de novo.",
+            "pedidos_invalidos": erros,
+        }, ensure_ascii=False)
+
+    try:
+        return json.dumps(autonomy_policy.simular_politica(pedidos), ensure_ascii=False, default=str)
+    except Exception as e:  # noqa: BLE001 — nunca propagar cru para o cliente MCP
+        return f"ERRO|Falha ao simular política: {e}"
+
+
+def _preparar_politica(ctx: ToolContext, args: dict):
+    politica_proposta = args.get("politica_proposta")
+    if not isinstance(politica_proposta, dict):
+        return "ERRO|'politica_proposta' é obrigatória e deve ser um objeto"
+    # Achado da revisão adversarial: `autonomy.policy.preparar_politica()` faz
+    # `set(politica_proposta.get("ferramentas_com_confirmacao_obrigatoria", ...))`
+    # sem checar o tipo — uma STRING passada em vez de uma lista (erro
+    # plausível: `"ferramentas_com_confirmacao_obrigatoria": "pausar_conversa"`
+    # em vez de `[...]`) é iterada caractere por caractere pelo `set()`, e o
+    # diff resultante ("remover as 5 tools reais do piso, adicionar um bando
+    # de letras soltas") sai como se fosse válido — exatamente no único tool
+    # cujo propósito é proteger o piso de confirmação obrigatória de uma
+    # mudança não revisada. Validado aqui, antes de entrar no motor puro
+    # (que não muda: fora do escopo desta sub-entrega mexer nele).
+    ferramentas = politica_proposta.get("ferramentas_com_confirmacao_obrigatoria")
+    if ferramentas is not None and (
+        not isinstance(ferramentas, list) or not all(isinstance(f, str) for f in ferramentas)
+    ):
+        return "ERRO|'ferramentas_com_confirmacao_obrigatoria' deve ser uma lista de strings"
+    base_version = args.get("base_version")
+    if not isinstance(base_version, int) or isinstance(base_version, bool):
+        return "ERRO|'base_version' é obrigatória e deve ser um inteiro"
+    try:
+        resultado = autonomy_policy.preparar_politica(politica_proposta, base_version=base_version)
+    except Exception as e:  # noqa: BLE001 — nunca propagar cru para o cliente MCP
+        return f"ERRO|Falha ao preparar política: {e}"
+    texto = json.dumps(resultado, ensure_ascii=False, default=str)
+    # Achado da revisão adversarial: o motor puro devolve {"diff": None,
+    # "erro": "..."} quando `base_version` não bate com a vigente — o caso
+    # de salvaguarda principal desta tool — mas isto também era serializado
+    # como string plana antes de retornar, perdendo o sinal de `isError` pelo
+    # mesmo motivo do achado em `_simular_politica` acima.
+    return f"ERRO|{texto}" if resultado.get("erro") else texto
+
+
+# ---------------------------------------------------------------------------
 # Registro
 # ---------------------------------------------------------------------------
 
@@ -2201,6 +2380,11 @@ _HANDLERS: dict = {
     "ativar_modo_secretario": _ativar_modo_secretario,
     "desativar_modo_secretario": _desativar_modo_secretario,
     "consultar_status_modo_secretario": _consultar_status_modo_secretario,
+
+    # Motor de política de autonomia (P02 passo 7)
+    "consultar_politica": _consultar_politica,
+    "simular_politica": _simular_politica,
+    "preparar_politica": _preparar_politica,
 }
 
 
