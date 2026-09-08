@@ -260,3 +260,37 @@ proximo_pacote: "P02 (sub-entrega 2/N — preflight em tool_context.py/mcp_serve
 ```
 
 ---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 8b845dd4bbd53e6495d7ab9ba1892056ce4a033f
+pacote: P02 (sub-entrega 2/N — preflight real em mcp_server.py)
+# Continuação de P02 (pacote "G", seção 8 do plano). Sub-entrega 1/N introduziu
+# functions/autonomy/{contracts,policy}.py como módulo puro, ainda não
+# consultado por nenhum canal. Esta sub-entrega religa o canal MCP
+# (functions/mcp_server.py) para consultar autonomy.policy.avaliar() como
+# preflight real antes de criar a prévia de confirmação dos 5 tools do piso —
+# cobre o passo 6 do plano ("inserir preflight obrigatório no executor de
+# domínio") só para o canal MCP, e só para o piso hardcoded, não para chamadas
+# internas de módulo nem para os demais canais (web/Telegram/voz). Note-se que
+# o plano nomeia functions/tools/tool_context.py entre os arquivos de P02;
+# nesta sub-entrega ele foi lido mas não precisou de alteração — o Principal do
+# canal MCP é montado inteiramente a partir de campos que ToolContext já tinha
+# (user_uid, canal), sem precisar de campo novo.
+estado: pronto_para_revisao
+# Estados: nao_iniciado, em_execucao, pronto_para_revisao,
+# validado, publicado, ativo, bloqueado, opt_in
+inicio: "2026-09-07T14:50:00Z"
+fim: "2026-09-07T16:07:00Z"
+arquivos_alterados:
+  - functions/mcp_server.py
+  - functions/test_mcp_server.py (novo)
+  - functions/test_hermes_tools.py
+  - functions/test_policy.py
+decisoes:
+  - id: p02-sub2-fonte-unica-floor
+    motivo: "_CONFIRMACAO_OBRIGATORIA em mcp_server.py deixa de ser um `set[str]` literal duplicado e vira um alias direto de autonomy_policy.FLOOR_CONFIRMACAO_OBRIGATORIA (frozenset). Antes, test_policy.py::test_floor_identico_ao_mcp_server existia só para travar as duas constantes na mesma coisa manualmente; agora esse teste é redundante com o próprio Python, mas foi mantido como trava de regressão (se alguém reintroduzir um set literal, o teste volta a pegar a divergência)."
+    autoridade: existente_ou_nova
+  - id: p02-sub2-principal-mcp-cliente-assistido
+    motivo: "_principal_mcp(ctx) constrói o Principal do canal MCP como TipoPrincipal.CLIENTE_ASSISTIDO (não DONO_INTERATIVO, que pressupõe clique de UI por chamada; não ROTINA_COWORK/RUNNER_SERVICO, que pressupõem ausência de sessão). O servidor MCP é de acesso único (_is_uid_allowed restringe a autenticação a um só uid dono — sem uid configurado, acesso negado por padrão), então toda chamada que chega ao preflight já veio de um cliente MCP hospedado com o dono acompanhando a sessão em tempo real. origem_humana=True é passado explicitamente (nunca herdado do default do dataclass) — documenta a decisão em vez de deixá-la implícita, seguindo a pendência já registrada no bloco da sub-entrega 1/N sobre cuidado ao religar Principal de verdade."
+    autoridade: existente_ou_nova
