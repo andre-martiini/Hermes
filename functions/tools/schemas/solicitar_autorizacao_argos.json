@@ -1,13 +1,13 @@
 {
   "name": "solicitar_autorizacao_argos",
-  "description": "Pede ao André, por um card com botões no Telegram, autorização para aprovar o plano de uma demanda ou enfileirar sua execução no Argos. Não afirme que foi autorizado ao receber a resposta desta tool — o card ainda está aguardando decisão. Consulte consultar_autorizacao_argos com o solicitacao_id devolvido até ver status 'aprovado', e só então chame consumir_autorizacao_argos imediatamente antes de agir no Argos.",
+  "description": "Pede ao André, por um card com botões no Telegram, autorização para aprovar o plano de uma demanda, enfileirar sua execução ou mesclar o PR de uma demanda no Argos. Não afirme que foi autorizado ao receber a resposta desta tool — o card ainda está aguardando decisão. Consulte consultar_autorizacao_argos com o solicitacao_id devolvido até ver status 'aprovado', e só então chame consumir_autorizacao_argos imediatamente antes de agir no Argos.",
   "parameters": {
     "type": "object",
     "properties": {
       "tipo": {
         "type": "string",
-        "enum": ["approve-plan", "enqueue-job"],
-        "description": "O que está sendo autorizado: 'approve-plan' para aprovar o plano de uma demanda, 'enqueue-job' para enfileirar sua execução."
+        "enum": ["approve-plan", "enqueue-job", "merge-pr"],
+        "description": "O que está sendo autorizado: 'approve-plan' para aprovar o plano de uma demanda, 'enqueue-job' para enfileirar sua execução, 'merge-pr' para mesclar o PR de uma demanda."
       },
       "sistema_id": {
         "type": "string",

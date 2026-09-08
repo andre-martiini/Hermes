@@ -1,15 +1,16 @@
-"""Autorização via Telegram para decisões do Argos (aprovar plano | enfileirar execução).
+"""Autorização via Telegram para decisões do Argos (aprovar plano | enfileirar execução | mesclar PR).
 
 Mesmo padrão de `outbox_aprovacao.py` (card com botões inline, decisão em um
 toque, transição atômica no Firestore), mas genérico para uma DECISÃO do
 Argos, não uma mensagem de WhatsApp. Não reaproveita `outbox_aprovacao.py`
 nem o substitui — modelam coisas diferentes.
 
-O conector Claude↔Argos (argos-gestor-sistemas-main) tem, de propósito, DUAS
-operações que não verifica sozinho: aprovar o plano de uma demanda e
-enfileirar sua execução. Este módulo é a peça que faz o André decidir isso
-pelo Telegram antes de qualquer uma das duas ser chamada — o portão humano
-continua existindo, só muda de canal (do navegador para o Telegram).
+O conector Claude↔Argos (argos-gestor-sistemas-main) tem, de propósito, TRÊS
+operações que não verifica sozinho: aprovar o plano de uma demanda, enfileirar
+sua execução e mesclar o PR de uma demanda. Este módulo é a peça que faz o
+André decidir isso pelo Telegram antes de qualquer uma delas ser chamada — o
+portão humano continua existindo, só muda de canal (do navegador para o
+Telegram).
 
 Este módulo NÃO chama o Argos. Ele só administra a decisão do André. Quem
 chama o Argos depois de ver 'aprovado' aqui é o agente (Claude, via a ponte
@@ -36,11 +37,12 @@ STATUS_RECUSADO = "recusado"
 STATUS_EXPIRADO = "expirado"
 STATUS_USADO = "usado"
 
-TIPOS_VALIDOS = {"approve-plan", "enqueue-job"}
+TIPOS_VALIDOS = {"approve-plan", "enqueue-job", "merge-pr"}
 
 _ROTULO_TIPO = {
     "approve-plan": "Aprovar plano",
     "enqueue-job": "Enfileirar execução",
+    "merge-pr": "Mesclar PR",
 }
 
 DEFAULT_MINUTOS_EXPIRACAO = 30
@@ -184,7 +186,7 @@ def solicitar_autorizacao(
             "Aguardando decisão do André no Telegram. Não afirme que foi autorizado; "
             "chame consultar_autorizacao_argos com este solicitacao_id até ver status "
             "'aprovado', e só então consumir_autorizacao_argos imediatamente antes de "
-            "chamar o endpoint do Argos (approve-plan ou jobs) com este mesmo "
+            "chamar o endpoint do Argos (approve-plan, jobs ou merge de PR) com este mesmo "
             f"solicitacao_id como autorizacaoId. Expira automaticamente após "
             f"{minutos_expiracao} min sem decisão."
         ),

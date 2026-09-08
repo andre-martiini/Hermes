@@ -135,6 +135,23 @@ class TestLogicaPura(unittest.TestCase):
         corpo, _ = aa.montar_card_telegram_autorizacao("enqueue-job", "s", "d", "<script>x</script>", "sol-2")
         self.assertNotIn("<script>", corpo)
 
+    def test_montar_card_telegram_autorizacao_merge_pr(self):
+        corpo, botoes = aa.montar_card_telegram_autorizacao(
+            tipo="merge-pr",
+            sistema_id="gestao-hermes",
+            demanda_id="DEV-2026-0099",
+            resumo="Mesclar PR #42 com o fix de autorizacao",
+            solicitacao_id="sol-3",
+        )
+        self.assertIn("Mesclar PR", corpo)
+        self.assertIn("gestao-hermes", corpo)
+        self.assertIn("DEV-2026-0099", corpo)
+
+        self.assertEqual(len(botoes), 1)
+        row = botoes[0]
+        self.assertEqual(row[0]["callback_data"], "argos_auth:sol-3:aprovar")
+        self.assertEqual(row[1]["callback_data"], "argos_auth:sol-3:recusar")
+
 
 # --------------------------------------------------------------------------
 # solicitar_autorizacao
@@ -168,6 +185,18 @@ class TestSolicitarAutorizacao(unittest.TestCase):
         self.assertEqual(res["status"], aa.STATUS_AGUARDANDO)
         self.assertFalse(res["telegram_notificado"])
         self.assertIn("solicitacao_id", res)
+
+    def test_aceita_tipo_merge_pr(self):
+        with mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=777) as mock_send, \
+             mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"), \
+             mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
+            res = aa.solicitar_autorizacao(self.db, "merge-pr", "gestao-hermes", "DEV-2026-0099", "Mesclar PR #42")
+        self.assertEqual(res["status"], aa.STATUS_AGUARDANDO)
+        self.assertTrue(res["telegram_notificado"])
+        mock_send.assert_called_once()
+        doc = self.db.collection(aa.COLLECTION)._docs[res["solicitacao_id"]]
+        self.assertEqual(doc["status"], aa.STATUS_AGUARDANDO)
+        self.assertEqual(doc["tipo"], "merge-pr")
 
 
 # --------------------------------------------------------------------------
@@ -220,6 +249,18 @@ class TestDecidirAutorizacao(unittest.TestCase):
         self.col._docs["sol-4"] = {"status": aa.STATUS_AGUARDANDO}
         res = aa.decidir_autorizacao(self.db, "sol-4", "talvez")
         self.assertEqual(res["status"], "erro")
+
+    def test_aprovar_merge_pr_edita_mensagem_com_rotulo_correto(self):
+        self.col._docs["sol-5"] = {
+            "tipo": "merge-pr", "sistema_id": "gestao-hermes", "demanda_id": "DEV-2026-0099",
+            "status": aa.STATUS_AGUARDANDO, "telegram_message_id": 888,
+        }
+        with mock.patch("core.telegram_api.edit_message", return_value=True) as mock_edit:
+            res = aa.decidir_autorizacao(self.db, "sol-5", "aprovar", telegram_token="tok", chat_id="123")
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(self.col._docs["sol-5"]["status"], aa.STATUS_APROVADO)
+        mock_edit.assert_called_once()
+        self.assertIn("Mesclar PR", mock_edit.call_args[0][3])
 
 
 # --------------------------------------------------------------------------
