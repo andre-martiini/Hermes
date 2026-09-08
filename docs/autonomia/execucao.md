@@ -183,3 +183,39 @@ proximo_pacote: "P01 (sub-entrega 3/N)"
 ```
 
 ---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: cf1b89814b3b64f06dca5b3712fac41a809f1b58
+pacote: P02 (sub-entrega 1/N — identidade e política unificadas)
+# P02 é pacote "G" (grande, seção 8 do plano); esta sub-entrega cobre só a
+# introdução do módulo puro functions/autonomy/ (contracts.py + policy.py):
+# os tipos do modelo unificado de identidade (Principal/TipoPrincipal),
+# o motor de decisão (avaliar/mandato_cobre/estado_autonomia_atual) e o
+# "piso" de confirmação obrigatória (FLOOR_CONFIRMACAO_OBRIGATORIA), ainda
+# não consultado por nenhum canal real. A sub-entrega 2/N religa
+# tool_context.py/mcp_server.py para consultar esse motor como preflight.
+estado: em_execucao
+# Estados: nao_iniciado, em_execucao, pronto_para_revisao,
+# validado, publicado, ativo, bloqueado, opt_in
+# em_execucao porque a PR que carrega o conteúdo completo desta sub-entrega
+# (rodadas 2-4 de correção) ainda não foi mesclada — ver seção "PR #191
+# mesclada cedo demais" abaixo.
+inicio: "2026-09-07T00:53:00Z"
+fim: null
+arquivos_alterados:
+  - functions/autonomy/__init__.py (novo)
+  - functions/autonomy/contracts.py (novo)
+  - functions/autonomy/policy.py (novo)
+  - functions/test_contracts.py (novo)
+  - functions/test_policy.py (novo)
+decisoes:
+  - id: p02-revisao-adversarial-interna-original
+    motivo: "Antes de qualquer rodada do Codex, a revisão adversarial interna (sub-agente sem contexto prévio) já pegou 4 achados na primeira versão de policy.py, todos corrigidos antes do primeiro envio: (1) um mandato vigente aprovava o efeito direto pulando o aperto de somente_preparação; (2) destinatario_recursos usava substring crua ('@empresa.com' cobria 'chefe@empresa.com.malicioso.net'); (3) janela de horário cruzando meia-noite (ex. 22:00-06:00) era insatisfazível; (4) falha de leitura de estado_autonomia_atual (Firestore indisponível) colapsava no mesmo default de 'documento ausente' (ATIVO) em vez de SOMENTE_PREPARACAO."
+    autoridade: existente_ou_nova
+  - id: p02-codex-rodada-1
+    motivo: "5 achados P1/P2 na primeira revisão do Codex sobre a PR #191: limite_por_janela sem contagem resolvida era ignorado; sensibilidade ausente escapava de mandato restrito por classe de conteúdo; missão vs. finalidade do mandato não era comparada; reason_code de decisões vindas da matriz padrão alegava mandato por engano; simular_politica() conflava PREPARE_ONLY/DEFER com requer_aprovacao na contagem. Todos corrigidos; commit 23d983698 é o estado do branch logo após esta rodada."
+    autoridade: existente_ou_nova
+  - id: p02-codex-rodada-2
+    motivo: "3 achados: piso de confirmação obrigatória não passava pelo aperto de pausado/somente_preparação; destinatarios_recursos/classes_conteudo_permitidas vazios (tupla vazia, falsy) eram tratados como 'sem restrição' em vez de 'não cobre nada'. A revisão adversarial da própria correção pegou um 3º achado nela mesma: policy_id/constraints_checked do retorno final ficavam incorretos quando a decisão vinha do piso."
+    autoridade: existente_ou_nova
