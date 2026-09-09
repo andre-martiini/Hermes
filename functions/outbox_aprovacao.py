@@ -692,7 +692,22 @@ def aplicar_edicao_rascunho(
     telegram_token: str | None = None,
     chat_id: str | int | None = None,
 ) -> dict:
-    """Aplica o texto editado pelo dono diretamente ao rascunho e reenvia o card."""
+    """Aplica o texto editado pelo dono diretamente ao rascunho e reenvia o card.
+
+    Transação atômica Firestore (achado A04 -- mesmo padrão de aprovar_rascunho/
+    descartar_rascunho, pendência registrada desde a sub-entrega 1/N de P01):
+    antes desta correção, esta função fazia um get()+update() incondicional, sem
+    reler nem revalidar o status dentro de uma transação. Dois problemas reais,
+    não só teóricos: (1) corrida com liberar_rascunhos_promovidos/
+    descartar_rascunho -- uma edição chegando no mesmo instante em que o
+    rascunho é liberado/descartado por outro caminho podia perder ou sobrescrever
+    a decisão concorrente; (2) mais grave, a ausência de QUALQUER checagem de
+    status fazia o update() reescrever `status` para aguardando_aprovacao
+    incondicionalmente -- uma edição tardia (sessão do Telegram/WhatsApp
+    obsoleta, retry, etc.) sobre um rascunho que já tinha sido enviado
+    (sent), aprovado (pending) ou descartado o ressuscitaria silenciosamente
+    de volta para aguardando_aprovacao, reabrindo uma decisão já tomada.
+    """
     outbox_id = str(outbox_id or "").strip()
     novo_texto = str(novo_texto or "").strip()
     if not outbox_id:
@@ -701,20 +716,63 @@ def aplicar_edicao_rascunho(
         return {"erro": "novo_texto é obrigatório."}
 
     doc_ref = db.collection(COLLECTION).document(outbox_id)
-    snap = doc_ref.get()
-    if not snap.exists:
-        return {"status": "not_found", "erro": f"Rascunho '{outbox_id}' não encontrado."}
-
-    data = snap.to_dict() or {}
     agora_utc = datetime.datetime.now(timezone.utc)
 
-    doc_ref.update({
-        "content": novo_texto,
-        "status": STATUS_AGUARDANDO,
-        "foi_editado": True,
-        "atualizado_em": firestore.SERVER_TIMESTAMP if hasattr(firestore, "SERVER_TIMESTAMP") else agora_utc,
-    })
+    # Sem suporte a transação real, não há como garantir exclusão mútua com
+    # liberar_rascunhos_promovidos/descartar_rascunho (achado A04) — recusa em
+    # vez de arriscar uma escrita não protegida.
+    if not hasattr(db, "transaction"):
+        return {
+            "status": "erro_configuracao",
+            "erro": "Backend Firestore sem suporte a transação; edição recusada para evitar condição de corrida.",
+        }
 
+    try:
+        transaction = db.transaction()
+
+        @firestore.transactional
+        def _exec_edit(tx):
+            snap = doc_ref.get(transaction=tx)
+            if not snap.exists:
+                return {"status": "not_found", "erro": f"Rascunho '{outbox_id}' não encontrado."}
+            data = snap.to_dict() or {}
+            # Mesmo domínio de validar_transicao_aprovacao/validar_transicao_
+            # descarte (idênticas entre si): só é possível editar um rascunho
+            # ainda não decidido (aguardando_aprovacao ou aguardando_janela) --
+            # reutilizada em vez de duplicada.
+            valido, motivo = validar_transicao_aprovacao(data.get("status"))
+            if not valido:
+                return {
+                    "status": "already_decided",
+                    "erro": f"Rascunho {motivo}",
+                    "dados": data,
+                }
+
+            tx.update(
+                doc_ref,
+                {
+                    "content": novo_texto,
+                    "status": STATUS_AGUARDANDO,
+                    "foi_editado": True,
+                    "atualizado_em": firestore.SERVER_TIMESTAMP if hasattr(firestore, "SERVER_TIMESTAMP") else agora_utc,
+                },
+            )
+            return {"status": "ok", "dados": data}
+
+        transaction_result = _exec_edit(transaction)
+    except Exception as tx_err:
+        # Falha real de transação. Sem fallback para escrita desprotegida —
+        # retorna erro explícito em vez de arriscar uma condição de corrida.
+        print(f"[OutboxAprovacao] Transação Firestore de edição falhou: {tx_err}")
+        return {
+            "status": "erro_transacao",
+            "erro": f"Não foi possível editar de forma atômica: {tx_err}",
+        }
+
+    if transaction_result.get("status") != "ok":
+        return transaction_result
+
+    data = transaction_result.get("dados") or {}
     destinatario_nome = data.get("destinatario_nome") or data.get("to_number") or "Destinatário"
     motivo = data.get("motivo") or "Rascunho editado"
 
