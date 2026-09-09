@@ -85,51 +85,85 @@ def enfileirar_ou_atualizar(
 
     Se o pedido já existir e estiver em_andamento, concluido ou erro, NÃO mexe
     para evitar concorrência com o executor.
+
+    Leitura (existe? qual status?) e escrita (criar, mesclar ou ignorar)
+    acontecem dentro de uma única transação Firestore (mesmo padrão A04 de
+    outbox_aprovacao.aprovar_rascunho/descartar_rascunho/aplicar_edicao_rascunho).
+    Sem essa proteção, um enfileiramento tardio (retry, mensagem fora de
+    ordem) que leu o documento como 'pendente' podia sobrescrever payload e
+    campos derivados depois que o executor já tivesse avançado o status para
+    em_andamento/concluido/erro entre a leitura e a escrita -- corrompendo
+    silenciosamente um pedido que já estava sendo processado com dado novo.
+    Sem suporte a transação real, recusa em vez de arriscar essa escrita
+    desprotegida.
     """
     doc_id = str(doc_id or "").strip()
     if not doc_id:
         return {"erro": "doc_id é obrigatório."}
 
     doc_ref = db.collection(COLLECTION).document(doc_id)
-    snap = doc_ref.get()
 
-    if not snap.exists:
-        data = {
-            "tipo": tipo,
-            "status": STATUS_PENDENTE,
-            "payload": payload,
-            "origem": origem,
-            "item_atencao_id": item_atencao_id,
-            "acao_id": acao_id,
-            "criado_em": firestore.SERVER_TIMESTAMP,
-            "atualizado_em": firestore.SERVER_TIMESTAMP,
-            "processado_em": None,
-            "resultado": None,
-            "erro": None,
+    if not hasattr(db, "transaction"):
+        return {
+            "status": "erro_configuracao",
+            "erro": "Backend Firestore sem suporte a transação; enfileiramento recusado para evitar condição de corrida.",
         }
-        doc_ref.set(data)
-        return {"status": "enfileirado", "doc_id": doc_id}
 
-    existente = snap.to_dict() or {}
-    status = existente.get("status")
+    try:
+        transaction = db.transaction()
 
-    if status == STATUS_PENDENTE:
-        update_data = {
-            "payload": payload,
-            "atualizado_em": firestore.SERVER_TIMESTAMP,
+        @firestore.transactional
+        def _exec_enfileirar(tx):
+            snap = doc_ref.get(transaction=tx)
+
+            if not snap.exists:
+                data = {
+                    "tipo": tipo,
+                    "status": STATUS_PENDENTE,
+                    "payload": payload,
+                    "origem": origem,
+                    "item_atencao_id": item_atencao_id,
+                    "acao_id": acao_id,
+                    "criado_em": firestore.SERVER_TIMESTAMP,
+                    "atualizado_em": firestore.SERVER_TIMESTAMP,
+                    "processado_em": None,
+                    "resultado": None,
+                    "erro": None,
+                }
+                tx.set(doc_ref, data)
+                return {"status": "enfileirado", "doc_id": doc_id}
+
+            existente = snap.to_dict() or {}
+            status = existente.get("status")
+
+            if status == STATUS_PENDENTE:
+                update_data = {
+                    "payload": payload,
+                    "atualizado_em": firestore.SERVER_TIMESTAMP,
+                }
+                if acao_id is not None:
+                    update_data["acao_id"] = acao_id
+                if item_atencao_id is not None:
+                    update_data["item_atencao_id"] = item_atencao_id
+                tx.update(doc_ref, update_data)
+                return {"status": "atualizado", "doc_id": doc_id}
+
+            return {
+                "status": "ignorado",
+                "motivo": f"status atual '{status}' nao permite atualizacao",
+                "doc_id": doc_id,
+            }
+
+        return _exec_enfileirar(transaction)
+    except Exception as tx_err:
+        # Falha real de transação (ex.: Aborted após esgotar tentativas). Não há
+        # fallback para escrita desprotegida -- retorna erro explícito em vez de
+        # arriscar sobrescrever um pedido que o executor já esteja processando.
+        print(f"[AgentRequests] Transação Firestore de enfileiramento falhou: {tx_err}")
+        return {
+            "status": "erro_transacao",
+            "erro": f"Não foi possível enfileirar de forma atômica: {tx_err}",
         }
-        if acao_id is not None:
-            update_data["acao_id"] = acao_id
-        if item_atencao_id is not None:
-            update_data["item_atencao_id"] = item_atencao_id
-        doc_ref.update(update_data)
-        return {"status": "atualizado", "doc_id": doc_id}
-
-    return {
-        "status": "ignorado",
-        "motivo": f"status atual '{status}' nao permite atualizacao",
-        "doc_id": doc_id,
-    }
 
 
 def listar_pendentes(db, tipo: str | None = None, limite: int = 20) -> dict:
@@ -188,6 +222,15 @@ def concluir(
     Exige exatamente um entre resultado e erro.
     É idempotente: se o pedido já estiver terminal, devolve status 'already_decided'
     sem sobrescrever o registro existente.
+
+    Transição protegida por transação Firestore (mesmo padrão A04 de
+    outbox_aprovacao.aprovar_rascunho/descartar_rascunho/aplicar_edicao_rascunho):
+    a tool MCP concluir_pedido_agente é acionável por mais de uma sessão, e um
+    get()+update() incondicional permite que duas conclusões concorrentes do
+    mesmo pedido colidam -- a segunda, lendo o mesmo snapshot pendente antes da
+    primeira escrever, sobrescreveria silenciosamente o resultado/erro já
+    gravado. Sem suporte a transação real, recusa em vez de arriscar essa
+    escrita desprotegida.
     """
     request_id = str(request_id or "").strip()
     if not request_id:
@@ -200,31 +243,62 @@ def concluir(
         return {"erro": "Informe exatamente um entre 'resultado' e 'erro'."}
 
     doc_ref = db.collection(COLLECTION).document(request_id)
-    snap = doc_ref.get()
-    if not snap.exists:
-        return {"status": "not_found", "erro": f"Pedido '{request_id}' não encontrado."}
 
-    data = snap.to_dict() or {}
-    status_atual = data.get("status")
-
-    valido, motivo = validar_transicao(status_atual)
-    if not valido:
+    if not hasattr(db, "transaction"):
         return {
-            "status": "already_decided",
-            "estado_atual": status_atual,
-            "erro": f"Pedido {motivo}",
-            "dados": data,
+            "status": "erro_configuracao",
+            "erro": "Backend Firestore sem suporte a transação; conclusão recusada para evitar condição de corrida.",
         }
 
     novo_status = STATUS_CONCLUIDO if tem_res else STATUS_ERRO
-    update_data = {
-        "status": novo_status,
-        "processado_em": firestore.SERVER_TIMESTAMP,
-        "atualizado_em": firestore.SERVER_TIMESTAMP,
-        "resultado": str(resultado).strip() if tem_res else None,
-        "erro": str(erro).strip() if tem_err else None,
-    }
-    doc_ref.update(update_data)
+
+    try:
+        transaction = db.transaction()
+
+        @firestore.transactional
+        def _exec_concluir(tx):
+            snap = doc_ref.get(transaction=tx)
+            if not snap.exists:
+                return {"status": "not_found", "erro": f"Pedido '{request_id}' não encontrado."}
+
+            data = snap.to_dict() or {}
+            status_atual = data.get("status")
+
+            valido, motivo = validar_transicao(status_atual)
+            if not valido:
+                return {
+                    "status": "already_decided",
+                    "estado_atual": status_atual,
+                    "erro": f"Pedido {motivo}",
+                    "dados": data,
+                }
+
+            tx.update(
+                doc_ref,
+                {
+                    "status": novo_status,
+                    "processado_em": firestore.SERVER_TIMESTAMP,
+                    "atualizado_em": firestore.SERVER_TIMESTAMP,
+                    "resultado": str(resultado).strip() if tem_res else None,
+                    "erro": str(erro).strip() if tem_err else None,
+                },
+            )
+            return {"status": "ok"}
+
+        transaction_result = _exec_concluir(transaction)
+    except Exception as tx_err:
+        # Falha real de transação (ex.: Aborted após esgotar tentativas). Não há
+        # fallback para escrita desprotegida -- retorna erro explícito em vez de
+        # arriscar uma condição de corrida entre conclusões concorrentes.
+        print(f"[AgentRequests] Transação Firestore de conclusão falhou: {tx_err}")
+        return {
+            "status": "erro_transacao",
+            "erro": f"Não foi possível concluir de forma atômica: {tx_err}",
+        }
+
+    if transaction_result.get("status") != "ok":
+        return transaction_result
+
     return {
         "status": "ok",
         "request_id": request_id,

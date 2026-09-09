@@ -521,7 +521,7 @@ def _processar_audio(db, mensagem: dict) -> None:
             acao_id=item.get("acao_id"),
             item_atencao_id=doc_id,
         )
-        agent_requests.enfileirar_ou_atualizar(
+        req_result = agent_requests.enfileirar_ou_atualizar(
             db,
             doc_id=f"consolidar_audio:{doc_id}",
             tipo=agent_requests.TIPO_CONSOLIDAR_AUDIO,
@@ -530,6 +530,18 @@ def _processar_audio(db, mensagem: dict) -> None:
             acao_id=item.get("acao_id"),
             item_atencao_id=doc_id,
         )
+        # Desde que enfileirar_ou_atualizar passou a ser transacional (achado
+        # A04/A01, P01 passo 3), uma falha protegida (erro_transacao/
+        # erro_configuracao) não levanta exceção -- vem como dict de erro.
+        # O item de atenção já foi gravado acima (linha 512), então o áudio
+        # continua visível ao dono; só a consolidação automática em segundo
+        # plano é que não vai ser enfileirada agora. Registrar para não ficar
+        # totalmente silencioso.
+        if req_result.get("status") in ("erro_transacao", "erro_configuracao"):
+            print(
+                f"[AtencaoWhatsApp] Falha protegida ao enfileirar consolidação de áudio "
+                f"para {doc_id} (status={req_result.get('status')}): {req_result.get('erro')}."
+            )
     except Exception as ar_exc:
         print(f"[AtencaoWhatsApp] Falha ao enfileirar agent_request para audio: {ar_exc}")
 

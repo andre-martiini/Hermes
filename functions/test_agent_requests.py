@@ -2,8 +2,10 @@
 
 Cobre:
 - Lógica pura: validação de transições e montagem de payload
-- Enfileiramento e atualização com proteção de concorrência (ignora se em_andamento/terminal)
-- Conclusão idempotente protegida contra toque duplo (resultado vs erro)
+- Enfileiramento e atualização com proteção de concorrência (ignora se em_andamento/terminal),
+  agora transacional (achado A01/P01 passo 3)
+- Conclusão idempotente protegida contra toque duplo (resultado vs erro), agora transacional
+- Ausência de fallback para escrita desprotegida quando a transação falha ou não existe (achado A04)
 - Listagem e contagem de pedidos pendentes
 """
 
@@ -28,7 +30,7 @@ class _MockDocRef:
         self.col = col
         self.id = doc_id
 
-    def get(self):
+    def get(self, transaction=None):
         data = self.col._docs.get(self.id)
         return _MockDocSnap(self.id, data)
 
@@ -80,6 +82,44 @@ class _MockCollection:
         return [_MockDocSnap(k, v) for k, v in self._docs.items()]
 
 
+class _MockTransaction:
+    """Double fiel do protocolo real (google.cloud.firestore_v1.transaction.
+    Transaction): implementa _begin/_clean_up/_commit/_rollback/_max_attempts/
+    _read_only para que o decorator @firestore.transactional real exercite o
+    mesmo caminho de código de produção, igual já feito em
+    test_outbox_aprovacao.py e test_promocao_autonomia.py."""
+
+    def __init__(self):
+        self._read_only = False
+        self._id = b"mock-tx-id"
+        self._max_attempts = 5
+
+    def get(self, doc_ref):
+        return doc_ref.get()
+
+    def update(self, doc_ref, data):
+        doc_ref.update(data)
+
+    def set(self, doc_ref, data, merge=False):
+        doc_ref.set(data, merge=merge)
+
+    def _rollback(self):
+        pass
+
+    def _commit(self):
+        pass
+
+    def _clean_up(self):
+        # Espelha Transaction._clean_up: o decorator @firestore.transactional
+        # chama isso antes de cada tentativa.
+        self._id = None
+
+    def _begin(self, retry_id=None):
+        # Espelha Transaction._begin: marca a transação como "em andamento"
+        # (in_progress checa self._id is not None) sem round-trip de rede.
+        self._id = retry_id or b"mock-tx-id"
+
+
 class _MockDB:
     def __init__(self):
         self._collections: dict[str, _MockCollection] = {}
@@ -88,6 +128,36 @@ class _MockDB:
         if name not in self._collections:
             self._collections[name] = _MockCollection(self, name)
         return self._collections[name]
+
+    def transaction(self):
+        return _MockTransaction()
+
+
+class _BrokenMockTransaction(_MockTransaction):
+    """Simula falha real de transação (ex.: Firestore indisponível ao iniciar
+    a transação). Falha em ``_begin`` -- antes de qualquer leitura/escrita --
+    para provar que, quando a transação nem chega a começar, nenhuma escrita
+    desprotegida acontece como fallback."""
+
+    def _begin(self, retry_id=None):
+        raise RuntimeError("Firestore indisponível (simulado)")
+
+
+class _MockDBTransacaoQuebrada(_MockDB):
+    def transaction(self):
+        return _BrokenMockTransaction()
+
+
+class _MockDBSemTransacao:
+    """Mock de DB que não implementa .transaction() -- simula um backend sem
+    suporte a transação real (achado A04: não deve haver fallback para
+    escrita desprotegida nesse caso)."""
+
+    def __init__(self, real_db: _MockDB):
+        self._real = real_db
+
+    def collection(self, name):
+        return self._real.collection(name)
 
 
 class TestLogicaPura(unittest.TestCase):
@@ -290,6 +360,82 @@ class TestConcluir(unittest.TestCase):
     def test_pedido_inexistente(self):
         res = ar.concluir(self.db, "req-inexistente", resultado="algo")
         self.assertEqual(res["status"], "not_found")
+
+
+class TestSemFallbackParaEscritaDesprotegida(unittest.TestCase):
+    """Achado A04 (P01 passo 3): quando a transação atômica falha (ou não
+    existe), enfileirar_ou_atualizar/concluir devem retornar erro explícito
+    -- nunca cair para uma escrita não protegida que arrisque condição de
+    corrida entre um enfileiramento tardio e o executor, ou entre duas
+    conclusões concorrentes do mesmo pedido."""
+
+    def setUp(self):
+        self.real_db = _MockDB()
+        self.col = self.real_db.collection(ar.COLLECTION)
+
+    def test_enfileirar_com_falha_de_transacao_retorna_erro_sem_escrever(self):
+        db_quebrado = _MockDBTransacaoQuebrada()
+        db_quebrado._collections[ar.COLLECTION] = self.col
+
+        res = ar.enfileirar_ou_atualizar(
+            db_quebrado,
+            doc_id="req-falha-tx",
+            tipo=ar.TIPO_CONSOLIDAR_AUDIO,
+            payload={"mensagem_ids": ["m1"]},
+            origem="teste",
+        )
+        self.assertEqual(res["status"], "erro_transacao")
+        self.assertIn("erro", res)
+        self.assertNotIn("req-falha-tx", self.col._docs)
+
+    def test_enfileirar_sem_suporte_a_transacao_retorna_erro_sem_escrever(self):
+        db_sem_tx = _MockDBSemTransacao(self.real_db)
+
+        res = ar.enfileirar_ou_atualizar(
+            db_sem_tx,
+            doc_id="req-sem-tx",
+            tipo=ar.TIPO_CONSOLIDAR_AUDIO,
+            payload={"mensagem_ids": ["m1"]},
+            origem="teste",
+        )
+        self.assertEqual(res["status"], "erro_configuracao")
+        self.assertNotIn("req-sem-tx", self.col._docs)
+
+    def test_enfileirar_existente_com_falha_de_transacao_nao_sobrescreve(self):
+        self.col._docs["req-existente"] = {
+            "status": ar.STATUS_PENDENTE,
+            "payload": {"mensagem_ids": ["m1"]},
+        }
+        db_quebrado = _MockDBTransacaoQuebrada()
+        db_quebrado._collections[ar.COLLECTION] = self.col
+
+        res = ar.enfileirar_ou_atualizar(
+            db_quebrado,
+            doc_id="req-existente",
+            tipo=ar.TIPO_CONSOLIDAR_AUDIO,
+            payload={"mensagem_ids": ["m1", "m2"]},
+            origem="teste",
+        )
+        self.assertEqual(res["status"], "erro_transacao")
+        self.assertEqual(self.col._docs["req-existente"]["payload"]["mensagem_ids"], ["m1"])
+
+    def test_concluir_com_falha_de_transacao_retorna_erro_sem_escrever(self):
+        self.col._docs["req-falha"] = {"status": ar.STATUS_PENDENTE}
+        db_quebrado = _MockDBTransacaoQuebrada()
+        db_quebrado._collections[ar.COLLECTION] = self.col
+
+        res = ar.concluir(db_quebrado, "req-falha", resultado="algo")
+        self.assertEqual(res["status"], "erro_transacao")
+        self.assertIn("erro", res)
+        self.assertEqual(self.col._docs["req-falha"]["status"], ar.STATUS_PENDENTE)
+
+    def test_concluir_sem_suporte_a_transacao_retorna_erro_sem_escrever(self):
+        self.col._docs["req-sem-tx"] = {"status": ar.STATUS_PENDENTE}
+        db_sem_tx = _MockDBSemTransacao(self.real_db)
+
+        res = ar.concluir(db_sem_tx, "req-sem-tx", resultado="algo")
+        self.assertEqual(res["status"], "erro_configuracao")
+        self.assertEqual(self.col._docs["req-sem-tx"]["status"], ar.STATUS_PENDENTE)
 
 
 class TestListarEContar(unittest.TestCase):
