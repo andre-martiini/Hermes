@@ -233,6 +233,57 @@ proximo_pacote: "P02 -- candidata natural: o wrapper de I/O que resolve um Manda
 
 ```yaml
 plano: plano-hermes-autonomo-2026-09-06
+base_commit: 7931ac2d9b067a75fd00b18ad0973f284bf045a7
+pacote: "P02 sub-entrega 16/N -- CLASSE_EFEITO_PISO/FLOOR_CONFIRMACAO_OBRIGATORIA: invariante estrutural, não só travada por teste"
+# Continuação autônoma autorizada por André ("pr mesclado. pode continuar"),
+# após a PR #205 (sub-entrega 15/N) ser mesclada em main -- confirmado por
+# leitura direta de functions/autonomy/contracts.py em main (sha
+# 3954ad0a7a9ec4a6afba802be61fdfb5d7b26bd9, batendo exatamente com o que a
+# sub-entrega 15/N enviou), não só pela palavra do André. Escolhida entre as
+# pendências acumuladas por ser a única puramente de engenharia sem decisão
+# de produto pendente -- a outra candidata natural (wrapper de I/O de
+# Mandato) foi deliberadamente deixada de fora desta sessão (ver
+# proximo_pacote, abaixo, e a recomendação já registrada no bloco anterior:
+# "recomendo trazer ao André antes de escopar" -- envolve decisões reais de
+# produto, que mandatos existem hoje na prática e quais categorias de
+# conteúdo, que não me cabe tomar sozinho). O outro item pendente puramente
+# técnico (risco de bare-name-resolution nos módulos de área) segue sem ação
+# concreta possível -- é um risco latente, "endereçar se/quando um teste
+# futuro tropeçar nisso", sem um passo de engenharia definido hoje.
+estado: pronto_para_revisao
+inicio: "2026-09-09T08:30:00Z"
+fim: "2026-09-09T08:49:00Z"
+arquivos_alterados:
+  - functions/autonomy/policy.py (nova função _validar_piso_consistente(), chamada no carregamento do módulo)
+  - functions/test_policy.py (5 testes novos em TestValidarPisoConsistente)
+decisoes:
+  - id: p02-sub16-piso-invariante-estrutural-nao-so-teste
+    motivo: "Pendência não-bloqueante registrada desde a sub-entrega 12/N: a garantia de que CLASSE_EFEITO_PISO e FLOOR_CONFIRMACAO_OBRIGATORIA têm exatamente as mesmas chaves -- da qual decisao_piso()/_decisao_piso_mcp dependem inteiramente para nunca chamar avaliar() com um principal malformado, ver decisao_erro_avaliacao() -- só era travada por test_policy.py::TestFloorIdenticoAoMcpServer.test_classe_efeito_piso_cobre_exatamente_o_floor. Um deploy que pulasse a suíte de testes podia deixar as duas tabelas divergirem em produção sem nenhum sinal. Decisão: extrair a checagem para uma função (_validar_piso_consistente, testável isoladamente com tabelas forjadas, sem precisar recarregar o módulo) e chamá-la uma vez no carregamento do módulo -- mesmo padrão fail-closed já usado no resto deste arquivo (decisao_erro_avaliacao()): se um dia divergirem, o import falha alto e cedo (AssertionError), em vez de deixar avaliar() correr com uma premissa quebrada. NÃO fundi as duas tabelas numa só (ex.: derivar FLOOR_CONFIRMACAO_OBRIGATORIA de CLASSE_EFEITO_PISO.keys()) -- o comentário já existente sobre FLOOR_CONFIRMACAO_OBRIGATORIA é explícito: 'ESTE CONJUNTO NÃO CRESCE POR HÁBITO (condição do dono, 02/09/2026) -- uma candidata nova exige decisão explícita, registrada aqui e em mcp_server.py'. Fundir as tabelas faria uma entrada nova em CLASSE_EFEITO_PISO (por qualquer outro motivo de documentação) crescer o piso por acidente -- exatamente o hábito que a condição do dono proíbe. Duas tabelas separadas, mantidas manualmente iguais, com a checagem agora estrutural em vez de só testada, preserva a fricção deliberada. Zero mudança de comportamento hoje -- as duas tabelas já batem; a checagem só passa a valer quando (se) um dia divergirem."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && venv/bin/python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "Antes desta sub-entrega (main pós-merge da PR #205, commit 7931ac2d9): 1415/1415."
+    - "Depois desta sub-entrega: 1420/1420, 0 falhas, 0 erros (5 testes novos: tabelas reais do módulo passam pela função isolada, tabelas idênticas forjadas não levantam, ferramenta extra em cada uma das duas direções levanta AssertionError citando o nome certo, tabelas vazias não levantam)."
+evidencias:
+  - "Revisão adversarial independente (Agent tool, general-purpose, sem contexto da implementação) sobre o diff dos 2 arquivos. Veredito: nenhum achado bloqueante. Verificou por importação direta do módulo que a checagem roda na ordem certa (sem NameError) e que as duas tabelas reais batem hoje (zero risco de crash em cold start introduzido por esta sub-entrega); confirmou por grep em todo functions/ que nenhum teste existente faz patch/reload das duas tabelas (nenhum risco de disparar a nova asserção por acidente); confirmou por leitura direta de decisao_piso() que a docstring da nova função não exagera a garantia real; rodou os 4 arquivos de teste relacionados (171 testes) para confirmar zero regressão; verificou que os testes novos são não-vácuos (uma implementação ingênua tipo 'só checa subconjunto' falharia em pelo menos um dos dois testes de assimetria). Dois nits cosméticos apontados (uma linha em branco a menos que o PEP8 recomenda antes do novo def; nenhum lint configurado no repo para isso) -- deliberadamente não corrigidos, sem efeito funcional."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: a dependência de CLASSE_EFEITO_PISO/FLOOR_CONFIRMACAO_OBRIGATORIA continuarem com as mesmas chaves, registrada desde a sub-entrega 12/N -- agora estrutural (falha no import), não só travada por teste."
+  - "Todas as pendências já registradas nos blocos anteriores que não foram tocadas por esta sub-entrega continuam abertas: risco de bare-name-resolution nos módulos de área (latente, sem passo de engenharia concreto definido), Mandato.usos_na_janela_atual/orcamento_maximo sem wrapper de I/O real, taxonomia real de Mandato.classes_conteudo_permitidas (decisão de produto), outbox_aprovacao.py::criar_rascunho.tipo desconectado de Mandato.classes_conteudo_permitidas."
+proximo_pacote: "P02 -- as pendências puramente de engenharia estão resgatadas por ora (nenhuma sobrou sem decisão de produto pendente). A única candidata natural que resta -- o wrapper de I/O que resolve um Mandato real a partir do Firestore -- envolve decisões reais de produto (que mandatos existem hoje na prática, quais categorias de conteúdo o Hermes pode usar autonomamente) que não me cabe escopar sozinho; será levada ao André como pergunta consolidada, não decidida por conta própria como as três da sub-entrega 15/N."
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
 base_commit: 54a873131cddf8ab6d5d6d700edff0c5680cbb61
 pacote: "P02 sub-entrega 17/N -- autonomy/mandatos_io.py (wrapper de I/O de Mandato) religando liberar_rascunhos_promovidos() ao motor de política real (avaliar()/mandato_cobre()), não mais só o interruptor global de EstadoAutonomia"
 # Esta sub-entrega é a continuação direta da pendência central deixada

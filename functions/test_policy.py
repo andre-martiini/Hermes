@@ -98,6 +98,48 @@ class TestFloorIdenticoAoMcpServer(unittest.TestCase):
         )
 
 
+class TestValidarPisoConsistente(unittest.TestCase):
+    """P02 sub-entrega 16/N: `_validar_piso_consistente` é a mesma checagem
+    de `test_classe_efeito_piso_cobre_exatamente_o_floor` acima, mas agora
+    também roda no carregamento do módulo (não só em teste) — estes testes
+    chamam a função isolada, com tabelas forjadas, sem precisar recarregar
+    `autonomy.policy` para simular uma divergência real."""
+
+    def test_tabelas_reais_do_modulo_passam(self):
+        # Já é coberto por test_classe_efeito_piso_cobre_exatamente_o_floor
+        # acima, mas confirma que a própria função de validação (não só a
+        # comparação de sets) concorda com as tabelas reais -- se este
+        # teste falhasse, o módulo nem teria terminado de importar.
+        policy._validar_piso_consistente(
+            policy.CLASSE_EFEITO_PISO, policy.FLOOR_CONFIRMACAO_OBRIGATORIA
+        )
+
+    def test_tabelas_identicas_nao_levanta(self):
+        classe_efeito = {"tool_a": ClasseEfeito.OBSERVACAO_AUTORIZADA}
+        floor = frozenset({"tool_a"})
+        policy._validar_piso_consistente(classe_efeito, floor)  # não levanta
+
+    def test_ferramenta_extra_em_classe_efeito_levanta(self):
+        classe_efeito = {
+            "tool_a": ClasseEfeito.OBSERVACAO_AUTORIZADA,
+            "tool_b": ClasseEfeito.COMPROMISSO_TERCEIROS,
+        }
+        floor = frozenset({"tool_a"})
+        with self.assertRaises(AssertionError) as ctx:
+            policy._validar_piso_consistente(classe_efeito, floor)
+        self.assertIn("tool_b", str(ctx.exception))
+
+    def test_ferramenta_extra_em_floor_levanta(self):
+        classe_efeito = {"tool_a": ClasseEfeito.OBSERVACAO_AUTORIZADA}
+        floor = frozenset({"tool_a", "tool_c"})
+        with self.assertRaises(AssertionError) as ctx:
+            policy._validar_piso_consistente(classe_efeito, floor)
+        self.assertIn("tool_c", str(ctx.exception))
+
+    def test_tabelas_vazias_nao_levanta(self):
+        policy._validar_piso_consistente({}, frozenset())  # não levanta
+
+
 class TestAvaliarPiso(unittest.TestCase):
     def test_ferramenta_do_piso_sempre_require_approval(self):
         # Mesmo com dono interativo e autonomia ativa, o piso decide e para.
