@@ -214,3 +214,50 @@ pendencias:
   - "Pendências de produto/infraestrutura já registradas em blocos anteriores e não resolvidas por P02 continuam abertas: card do Telegram de rascunho degradado não reeditado; observabilidade de claim pendente sem _audit_log; TTL do Firestore não configurado para mcp_jobs; limite de 200KB do Argos em main.py; risco de corrupção silenciosa em escritas grandes via Argos."
 proximo_pacote: "P03 -- consolidar contratos MCP e ferramentas. Investigação inicial (nesta mesma sessão): tools/registry.py hoje é só um catálogo plano nome->descrição (103 tools), sem outputSchema/structuredContent/annotations, sem expected_version/idempotency_key nas escritas, sem inventário tipado por ferramenta -- nenhum dos 10 passos do plano para P03 foi começado. Passo 1 do plano (inventário tipado: domínio, leitura/escrita, reversibilidade, rede, dados sensíveis, política, verificador, por ferramenta) é o ponto de partida natural, e o mais trabalhoso -- 103 ferramentas para classificar com precisão, não por amostragem. Vou começar por ele."
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: c26fb8890c118061458a8b1ab0a6b5085ee63b45
+pacote: "P03 sub-entrega 1/N -- inventario tipado das ferramentas MCP (passo 1 do plano: dominio, leitura/escrita, reversibilidade, necessidade de rede, dados sensiveis, politica e verificador, por ferramenta)"
+estado: validado
+inicio: "2026-09-09T20:20:00Z"
+fim: "2026-09-09T21:31:00Z"
+arquivos_alterados:
+  - functions/tools/inventory.py (novo -- ToolInventoryEntry tipado + dict _INVENTORY com as 105 tools de tools/registry.py::_CATALOG; classe_efeito reusa o enum ja existente autonomy.contracts.ClasseEfeito, sem taxonomia nova; nao e consultado por nenhum executor ainda, e so o inventario em si)
+  - functions/test_tool_inventory.py (novo -- paridade 1:1 com o catalogo real, nenhum campo obrigatorio vazio, leitura pura nunca reversivel/irreversivel, escrita pura nunca nao_aplica, leitura_e_escrita so fica nao_aplica quando a escrita e efeito colateral passivo documentado em nota)
+decisoes:
+  - id: p03-sub1-inventario-por-leitura-direta-nao-por-amostragem
+    motivo: "O plano pede inventario tipado das ferramentas, nao por amostragem. Classifiquei as 105 tools (o plano fala em 103 na secao de testes do P03; a contagem real do catalogo hoje e 105 -- divergencia da redacao do plano, nao erro deste inventario) por leitura direta de tools/hermes_tools.py e modulos delegados (promocao_autonomia.py, outbox_aprovacao.py, secretario_whatsapp.py, investimentos.py, atencao.py, autonomy/policy.py etc.), nunca pelo nome ou pela descricao do catalogo -- que divergem do codigo em varios casos documentados no proprio modulo (ex.: preparar_upload e preparar_contato_prioritario_secretario gravam direto apesar do nome 'preparar_'; gerar_rascunho_formulario nao persiste nada apesar da descricao dizer que salva). Investigacao feita em 3 lotes paralelos (~35 tools cada, via subagentes independentes citando arquivo:linha como evidencia); eu revisei e reconciliei o resultado antes de escrever o modulo final."
+    autoridade: existente_ou_nova
+  - id: p03-sub1-classe-efeito-reusa-clasEfeito-existente
+    motivo: "Em vez de inventar uma taxonomia de politica nova para o campo 'politica' pedido pelo passo 1, reusei o enum ja existente autonomy.contracts.ClasseEfeito (secao 5.1 do plano) -- mesma decisao de reaproveitar vocabulario ja tomada pela proposta de docs/autonomia/proposta-p02-mandato-io-wrapper.md. Cinco tools ja tinham classificacao canonica em autonomy/policy.py::CLASSE_EFEITO_PISO (schedule_whatsapp_message, pausar_conversa, criar_rascunho_email, registrar_aporte_investimento, registrar_execucao_investimento) -- usadas como ancora, nao reinferidas."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && ../venv/bin/python3 -m unittest discover -p 'test_*.py' -q"
+  resultados:
+    - "1534 testes, 8 falhas + 2 erros -- mesmo padrao pre-existente e documentado (ambiente sem ANTHROPIC_API_KEY/deps opcionais gmail/mp4; baseline era 1524/8/2 antes desta sub-entrega). Os 10 testes novos de test_tool_inventory.py passam integralmente (10/10); zero regressao."
+evidencias:
+  - "Revisao adversarial independente (Agent tool, general-purpose, sem contexto da implementacao): verificou ~30 tools de maior risco (dados_sensiveis=True, necessidade_de_rede=True, classe_efeito em COMPROMISSO_TERCEIROS/EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL, e as 7 leitura_e_escrita) contra o codigo-fonte real, e rodou a suite completa."
+  - "Achado BLOQUEANTE da revisao, corrigido antes do envio: bug real em test_leitura_e_escrita_nao_fica_nao_aplica -- o filtro comparava so contra o enum ESCRITA (`is`), nunca contra LEITURA_E_ESCRITA, ficando com zero cobertura da categoria mista. Corrigido: teste renomeado para test_escrita_pura_nao_fica_nao_aplica (mantem a checagem original) + novo teste test_leitura_e_escrita_com_reversibilidade_nao_aplica_exige_nota_explicando, que exige documentacao explicita em `nota` para as 3 tools que ficam nao_aplica nessa categoria mista."
+  - "Achado nao-bloqueante da revisao, corrigido: consultar_job estava dados_sensiveis=False contradizendo sua propria nota -- corrigido para True (e passthrough generico de qualquer job assincrono, incluindo os de dominio sensivel)."
+  - "Achados nao-bloqueantes da revisao, registrados como nota (nao reclassificados -- sao julgamento de produto, nao bug): ambiguidade genuina em gerar_relatorio (classificado PREPARACAO_INTERNA apesar de persistir documento final sem confirmacao) e em salvar_memoria_global (reversibilidade via resolver_conflito_memoria e condicional, nao um caminho direto de busca+correcao)."
+  - "Nenhuma classificacao de tool verificada pela revisao foi encontrada factualmente errada."
+  - "Todos os arquivos enviados via mcp__Argos__argos_escrever_arquivo_repositorio com verificacao de hash local (git hash-object) contra o sha retornado pelo Argos -- ambos batendo de primeira."
+  - "PR #223 mesclada por Andre (confirmado por git fetch + git log de origin/main: merge commit c26fb8890c118061458a8b1ab0a6b5085ee63b45)."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: passo 1 do P03 (inventario tipado por ferramenta)."
+  - "ABERTA: este inventario ainda nao e consultado por nenhum executor -- religar classe_efeito/dados_sensiveis/etc a decisao de politica real (autonomy/policy.py::avaliar()) e trabalho de sub-entrega futura, nao coberto aqui."
+  - "ABERTA: ambiguidades de classificacao registradas em nota (gerar_relatorio, salvar_memoria_global) ficam para revisitar quando classe_efeito for religado a decisao de politica de fato."
+  - "ACHADOS DE PROCESSO registrados no inventario para tratar em sub-entregas futuras do P03/P04: mutar_portal_compras_publico/mutar_lista_compras duplicam logica de escrita sobre a mesma colecao (candidato a consolidacao); excluir_objetivo_estrategico faz delete() definitivo sem estar no piso FLOOR_CONFIRMACAO_OBRIGATORIA do MCP; decidir_promocao_autonomia('aceitar') tem efeito de politica real maior que 'escrita interna' sugeriria."
+  - "Pendencias de produto/infraestrutura ja registradas em blocos anteriores e nao resolvidas por esta sub-entrega continuam abertas: card do Telegram de rascunho degradado nao reeditado; observabilidade de claim pendente sem _audit_log; TTL do Firestore nao configurado para mcp_jobs; limite de 200KB do Argos em main.py; risco de corrupcao silenciosa em escritas grandes via Argos; passo 2 do P02 (OAuth claims/scopes) como hardening futuro nao-bloqueante."
+proximo_pacote: "P03 -- com o inventario tipado no lugar, os proximos passos naturais sao o passo 2 (normalizador de resultados legados e validacao de argumentos) ou o passo 3 (outputSchema/structuredContent/annotations nos caminhos compativeis). Nenhum dos dois foi comecado ainda."
+```
