@@ -4,6 +4,7 @@ import json
 import unittest
 from unittest import mock
 
+import core.idempotency
 from main import (
     _obter_github_webhook_secret,
     anotar_evento_github_em_tarefas,
@@ -249,7 +250,7 @@ class TestGitHubWebhookHttpFlow(unittest.TestCase):
         self, mock_get_db, mock_secret, mock_idempotency
     ):
         mock_secret.return_value = self.secret
-        mock_idempotency.return_value = False  # Já registrado
+        mock_idempotency.return_value = core.idempotency.RESULTADO_DUPLICADO
         req = self._criar_req()
         resp = githubWebhook(req)
         self.assertEqual(resp.status_code, 200)
@@ -259,11 +260,57 @@ class TestGitHubWebhookHttpFlow(unittest.TestCase):
     @mock.patch("core.idempotency.check_and_register")
     @mock.patch("main._obter_github_webhook_secret")
     @mock.patch("main.get_db")
+    def test_idempotencia_erro_transacao_nao_processa_retorna_503(
+        self, mock_get_db, mock_secret, mock_idempotency, mock_anotar
+    ):
+        mock_secret.return_value = self.secret
+        mock_idempotency.return_value = core.idempotency.RESULTADO_ERRO_TRANSACAO
+
+        payload = {
+            "action": "closed",
+            "repository": {"full_name": "andre-martiini/Hermes", "default_branch": "main"},
+            "pull_request": {
+                "number": 161,
+                "title": "feat: nao deveria ser processado",
+                "merged": True,
+                "html_url": "https://github.com/andre-martiini/Hermes/pull/161",
+            },
+        }
+        req = self._criar_req(event="pull_request", payload=payload)
+        resp = githubWebhook(req)
+
+        self.assertEqual(resp.status_code, 503)
+        mock_anotar.assert_not_called()
+
+    @mock.patch("main.anotar_evento_github_em_tarefas")
+    @mock.patch("core.idempotency.check_and_register")
+    @mock.patch("main._obter_github_webhook_secret")
+    @mock.patch("main.get_db")
+    def test_idempotencia_erro_configuracao_nao_processa_retorna_503(
+        self, mock_get_db, mock_secret, mock_idempotency, mock_anotar
+    ):
+        mock_secret.return_value = self.secret
+        mock_idempotency.return_value = core.idempotency.RESULTADO_ERRO_CONFIGURACAO
+
+        req = self._criar_req(event="pull_request", payload={
+            "action": "closed",
+            "repository": {"full_name": "andre-martiini/Hermes", "default_branch": "main"},
+            "pull_request": {"number": 162, "title": "wip", "merged": True},
+        })
+        resp = githubWebhook(req)
+
+        self.assertEqual(resp.status_code, 503)
+        mock_anotar.assert_not_called()
+
+    @mock.patch("main.anotar_evento_github_em_tarefas")
+    @mock.patch("core.idempotency.check_and_register")
+    @mock.patch("main._obter_github_webhook_secret")
+    @mock.patch("main.get_db")
     def test_evento_valido_chama_anotar_e_retorna_200(
         self, mock_get_db, mock_secret, mock_idempotency, mock_anotar
     ):
         mock_secret.return_value = self.secret
-        mock_idempotency.return_value = True
+        mock_idempotency.return_value = core.idempotency.RESULTADO_NOVO
 
         payload = {
             "action": "closed",
@@ -292,7 +339,7 @@ class TestGitHubWebhookHttpFlow(unittest.TestCase):
         self, mock_get_db, mock_secret, mock_idempotency, mock_anotar
     ):
         mock_secret.return_value = self.secret
-        mock_idempotency.return_value = True
+        mock_idempotency.return_value = core.idempotency.RESULTADO_NOVO
 
         payload = {
             "action": "opened",

@@ -15451,8 +15451,21 @@ def githubWebhook(req: https_fn.Request) -> https_fn.Response:
     delivery_id = req.headers.get("X-GitHub-Delivery")
     if delivery_id:
         import core.idempotency
-        if not core.idempotency.check_and_register(db, delivery_id):
+        resultado_idem = core.idempotency.check_and_register(db, delivery_id)
+        if resultado_idem == core.idempotency.RESULTADO_DUPLICADO:
             return https_fn.Response("Already processed", status=200)
+        if resultado_idem in (
+            core.idempotency.RESULTADO_ERRO_CONFIGURACAO,
+            core.idempotency.RESULTADO_ERRO_TRANSACAO,
+        ):
+            # Não foi possível confirmar com segurança que este delivery_id
+            # é novo. Não processa agora (evitaria duplicar a anotação no
+            # diário se este for na verdade um retry) e sinaliza falha para
+            # que a entrega possa ser repetida depois (redelivery manual ou
+            # automática do GitHub) -- nunca responde 200 como se tivesse
+            # sido tratado.
+            print(f"[githubWebhook] Verificação de idempotência indisponível ({resultado_idem}) para delivery_id={delivery_id}; evento não processado.")
+            return https_fn.Response("Idempotency check unavailable, retry later", status=503)
 
     # 4. Normaliza o evento (funcao pura)
     try:
