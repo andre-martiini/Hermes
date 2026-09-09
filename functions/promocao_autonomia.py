@@ -340,6 +340,17 @@ def revogar_promocao_autonomia(db, tipo: str, motivo: str | None = None) -> dict
                 }
                 if motivo_limpo:
                     update_sug["motivo_revogacao"] = motivo_limpo
+                elif hasattr(firestore, "DELETE_FIELD"):
+                    # Achado P2 da revisão Codex na PR #219: o mesmo doc de
+                    # sugestão é reaproveitado por revogar -> repromover ->
+                    # revogar de novo. Sem isto, revogar sem motivo depois
+                    # de uma revogação anterior COM motivo deixava o
+                    # `motivo_revogacao` velho intacto ao lado do
+                    # `revogado_em` novo -- atribuindo por engano a razão da
+                    # revogação anterior à atual no histórico. DELETE_FIELD
+                    # remove o campo de fato (não grava `None`); é no-op
+                    # seguro quando o campo nunca existiu.
+                    update_sug["motivo_revogacao"] = firestore.DELETE_FIELD
                 transaction.update(sug_ref, update_sug)
 
             return {"ok": True, "tipo": tipo_limpo}
