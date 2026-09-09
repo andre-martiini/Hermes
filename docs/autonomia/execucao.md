@@ -134,3 +134,45 @@ pendencias:
   - "LACUNA DE PROCESSO já registrada na sub-entrega 18/N acima (mesclada sem entrada neste arquivo nem evidência localizável de revisão adversarial) -- não repetida aqui."
 proximo_pacote: "P02 -- com os dois itens da sub-entrega 17/N fechados (18/N e 19/N), os passos do plano ainda sem cobertura clara são o passo 2 (evoluir claims/scopes do OAuth existente sem expor refresh tokens do dono ao runner) e a parte de 'orçamento' e 'versão/escopo' do passo 8 (revalidar no despacho -- revogação já fica coberta de verdade pela sub-entrega 19/N; orçamento continua sem fonte de dado real, achado desde a sub-entrega 4/N). Investigação do estado real de mcp_oauth.py/tool_context.py necessária antes de propor qualquer um dos dois como próxima sub-entrega -- mesma disciplina de checar antes de afirmar."
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: dfa1cb0ab1a394321696b91c370d8401f59075ec
+pacote: "P02 -- decisão registrada (sem código): orcamento_maximo/limite_por_janela do Mandato ficam sem popular por ora; passo 8 do plano dado como fechado dentro do escopo atual"
+# Resposta do André (chat, não PR comment) à proposta em
+# docs/autonomia/proposta-p02-orcamento-limite-janela.md (PR #221, já
+# mesclada): aceitou a recomendação do documento -- "não popular agora
+# (deixar como está, sem limite), e revisitar só se um caso real pedir".
+# Confirmado explicitamente via pergunta direta (AskUserQuestion) depois do
+# merge da PR #221 sem comentário, para não presumir a resposta às três
+# perguntas em aberto do documento (quer teto? qual número/janela? por tipo
+# ou agregado?) -- disciplina padrão desta sessão de nunca inferir decisão
+# de produto do silêncio.
+estado: validado
+inicio: "2026-09-09T20:10:00Z"
+fim: "2026-09-09T20:14:00Z"
+arquivos_alterados:
+  - Nenhum arquivo de produto alterado -- decisão registrada aqui para constar. mandatos_io.mandato_tipo_promovido() continua deixando orcamento_maximo e limite_por_janela/usos_na_janela_atual como None, mesmo comportamento desde a sub-entrega 17/N.
+decisoes:
+  - id: p02-orcamento-limite-janela-sem-popular-por-decisao-do-andre
+    motivo: "André escolheu não implementar teto de orçamento nem de frequência por janela para tipos_promovidos neste momento -- aceitou a recomendação de docs/autonomia/proposta-p02-orcamento-limite-janela.md sem alteração. autonomy/policy.py::mandato_cobre() continua correto e fail-closed para os dois campos SE algum mandato algum dia os declarar; simplesmente nenhum declara hoje, por escolha, não por lacuna técnica. Revisitar exige um caso concreto (ex.: volume de envio automático que preocupe) ou a chegada de mandatos tipo 'missão' (P08/P09) para orcamento_maximo."
+    autoridade: existente_ou_nova
+testes:
+  comandos: []
+  resultados:
+    - "Não aplicável -- nenhuma mudança de código."
+evidencias:
+  - "Resposta direta do André via AskUserQuestion, opção 'Aceitar recomendação: sem limite por agora'."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada (decisão de produto, não código): orcamento_maximo/limite_por_janela do Mandato ficam sem popular; passo 8 do plano considerado fechado dentro do escopo atual (revogação real desde a sub-entrega 19/N; versão estruturalmente coberta -- avaliar() nunca reaplica decisão cacheada; orçamento/limite por decisão explícita nesta entrada; escopo/OAuth é o passo 2, não o 8, e segue como único item claramente aberto do pacote)."
+  - "Pendências já registradas em blocos anteriores continuam abertas: card do Telegram de rascunho degradado não reeditado; observabilidade de claim pendente sem _audit_log; TTL do Firestore não configurado para mcp_jobs; limite de 200KB do Argos em main.py; risco de corrupção silenciosa em escritas grandes via Argos."
+proximo_pacote: "P02 -- com este item fechado, o passo 2 (evoluir claims/scopes do OAuth existente) é o único item do pacote sem cobertura clara. André já tinha deliberadamente deixado esse passo de lado uma vez (priorizou orçamento/limite por janela primeiro); com esse item agora encerrado, vale perguntar diretamente se ele quer: (a) abrir o passo 2 agora, (b) considerar P02 suficientemente coberto pelo aceite do plano e avançar para P03 (consolidar contratos MCP e ferramentas), guardando o passo 2 como hardening a retomar quando fizer sentido, ou (c) outra prioridade."
+```
