@@ -102,8 +102,28 @@ class Principal:
     tipo: TipoPrincipal
     canal: str  # "web" | "telegram" | "mcp" | "voz" | "whatsapp" | ...
     client_id: str | None = None       # DCR client_id (OAuth), quando houver
-    origem_humana: bool = True         # False para rotina_cowork/runner_servico sem humano olhando agora
+    # None (o default) = "não informado pelo chamador" -- resolvido em
+    # __post_init__ por TIPO, não por um valor fixo (P02 sub-entrega 15/N,
+    # fecha a pendência registrada desde a sub-entrega 1/N/2/N: "origem_humana
+    # deveria mesmo ter default True no contrato?"). Todo canal religado até
+    # aqui (tools/tool_context.py::principal_de, hermes_tools.py::
+    # _principal_simulado, mcp_jobs.py, telegram_callbacks_confirmacoes.py)
+    # já tinha convergido independentemente para a mesma regra -- verdadeiro
+    # só para DONO_INTERATIVO/CLIENTE_ASSISTIDO, falso para os demais --,
+    # então esta sub-entrega só torna estrutural (garantida pelo tipo, não
+    # por disciplina do chamador) o que já era, na prática, o único
+    # comportamento em produção. Um chamador que sabe que a regra padrão não
+    # se aplica continua podendo passar True/False explicitamente.
+    origem_humana: bool | None = None
     autenticado_em: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if self.origem_humana is None:
+            object.__setattr__(
+                self,
+                "origem_humana",
+                self.tipo in (TipoPrincipal.DONO_INTERATIVO, TipoPrincipal.CLIENTE_ASSISTIDO),
+            )
 
     def eh_dono(self) -> bool:
         """Atalho para os dois tipos que representam o próprio dono agindo
@@ -231,3 +251,26 @@ class Mandato:
     origem_autorizacao: str = ""       # referência a como/quando o dono concedeu isto
     forma_revogacao: str = ""
     revogado: bool = False
+
+    def __post_init__(self) -> None:
+        # Estrutural, não só documentado: "outro" (em qualquer capitalização)
+        # e rótulo vazio/em branco nunca podem aparecer em
+        # classes_conteudo_permitidas -- seção 5.3 do plano, verbatim: "Tipos
+        # 'outro' e rótulos livres não podem habilitar envio autônomo" (P02
+        # sub-entrega 15/N). Isto NÃO define a taxonomia real de classes de
+        # conteúdo -- essa é uma decisão de produto (o que o Hermes pode
+        # dizer autonomamente a terceiros) deliberadamente deixada em aberto
+        # aqui; a validação só fecha a única regra que o plano já declara
+        # sem ambiguidade. Hoje nenhum código monta um Mandato de verdade
+        # (wrapper de I/O ainda não existe -- ver docstring da classe), então
+        # isto não muda nenhum comportamento em produção; fecha a porta para
+        # quando esse wrapper existir.
+        for classe in self.classes_conteudo_permitidas:
+            normalizada = str(classe or "").strip().lower()
+            if not normalizada or normalizada == "outro":
+                raise ValueError(
+                    "Mandato.classes_conteudo_permitidas não pode incluir "
+                    "rótulo vazio nem 'outro' -- seção 5.3 do plano: \"Tipos "
+                    "'outro' e rótulos livres não podem habilitar envio "
+                    f"autônomo.\" Recebido: {classe!r}."
+                )
