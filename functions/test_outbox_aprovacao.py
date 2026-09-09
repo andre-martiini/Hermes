@@ -125,6 +125,15 @@ class _MockTransaction:
     def update(self, ref, data):
         ref.update(data)
 
+    def set(self, ref, data, merge=False):
+        # Espelha o protocolo real (Transaction.set) -- necessário para
+        # exercitar promocao_autonomia.revogar_promocao_autonomia/
+        # decidir_promocao_autonomia de dentro dos testes deste arquivo
+        # (ex.: simular uma revogação concorrente real, não só mutar o doc
+        # à mão), mesmo padrão de _MockDocRef.set já usado fora de
+        # transação neste mock.
+        ref.set(data, merge=merge)
+
     def _rollback(self):
         pass
 
@@ -323,6 +332,56 @@ class TestAprovacaoTransicao(unittest.TestCase):
             mock_edit.assert_called_once()
             texto_editado = mock_edit.call_args[0][3]
             self.assertIn("(via Cowork)", texto_editado)
+
+    def test_janela_automatica_recheca_tipos_promovidos_e_recusa_se_revogado(self):
+        # Achado P1 da revisão Codex na PR #219: aprovar_rascunho, chamado
+        # com aprovado_via="janela_automatica" (o único caminho sem toque
+        # humano), agora rechecka system/mcp_access.tipos_promovidos DENTRO
+        # da própria transação -- não confia só na checagem externa feita
+        # por liberar_rascunhos_promovidos antes de chamar esta função.
+        # Aqui simula diretamente o caso em que o tipo já não está mais
+        # promovido no momento da transação (mcp_access ausente ou sem o
+        # tipo): a aprovação automática deve recusar, sem mudar o status.
+        self.outbox._docs["job-auto"] = {
+            "status": oa.STATUS_AGUARDANDO_JANELA,
+            "tipo": "confirmacao_reuniao",
+            "destinatario_nome": "Carla",
+        }
+        # system/mcp_access nem existe -- equivalente a "nunca promovido"
+        # ou "revogado e o documento nunca teve outro tipo".
+        res = oa.aprovar_rascunho(self.db, "job-auto", aprovado_via="janela_automatica")
+        self.assertEqual(res["status"], "mandato_revogado")
+        doc = self.outbox._docs["job-auto"]
+        self.assertEqual(doc["status"], oa.STATUS_AGUARDANDO_JANELA)
+        self.assertNotIn("aprovado_via", doc)
+
+    def test_janela_automatica_aprova_quando_tipo_ainda_promovido(self):
+        self.outbox._docs["job-auto-ok"] = {
+            "status": oa.STATUS_AGUARDANDO_JANELA,
+            "tipo": "confirmacao_reuniao",
+            "destinatario_nome": "Carla",
+        }
+        self.db.collection("system")._docs["mcp_access"] = {
+            "tipos_promovidos": ["confirmacao_reuniao"],
+        }
+        res = oa.aprovar_rascunho(self.db, "job-auto-ok", aprovado_via="janela_automatica")
+        self.assertEqual(res["status"], "ok")
+        doc = self.outbox._docs["job-auto-ok"]
+        self.assertEqual(doc["status"], oa.STATUS_PENDING)
+        self.assertEqual(doc["aprovado_via"], "janela_automatica")
+
+    def test_aprovacao_manual_nao_exige_tipos_promovidos(self):
+        # Diferente da liberação automática: um toque humano real
+        # (Telegram/WhatsApp/Cowork) É a decisão -- não deve depender de
+        # `tipos_promovidos` nem falhar quando o documento não existe.
+        self.outbox._docs["job-manual"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "tipo": "tipo_nunca_promovido",
+            "destinatario_nome": "Carla",
+        }
+        res = oa.aprovar_rascunho(self.db, "job-manual", aprovado_via="telegram")
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(self.outbox._docs["job-manual"]["status"], oa.STATUS_PENDING)
 
 
 class TestDescarte(unittest.TestCase):
@@ -1178,6 +1237,63 @@ class TestLiberarRascunhosPromovidosMandatoNaHora(unittest.TestCase):
         # O efeito observável do cache: só UMA resolução de mandato para os
         # dois rascunhos do mesmo tipo, não uma por rascunho.
         self.assertEqual(spy.call_count, 1)
+
+    def test_revogacao_concorrente_apos_cache_do_mandato_degrada_em_vez_de_enviar(self):
+        # Achado P1 da revisão Codex na PR #219: como mandato_tipo_promovido
+        # só roda UMA vez por tipo (cache acima), uma revogação que commite
+        # logo depois dessa única leitura -- mas antes de qualquer
+        # aprovar_rascunho do laço -- não seria vista por nenhum dos dois
+        # rascunhos deste tipo na versão anterior desta função, e ambos
+        # seriam enviados mesmo já revogados. Chama revogar_promocao_
+        # autonomia de verdade (não só mutando o doc à mão) no exato
+        # instante em que o laço cacheia o mandato, para exercitar o código
+        # de produção dos dois lados.
+        #
+        # Nota de honestidade (revisão adversarial desta correção): este
+        # mock de transação não implementa retry-on-conflict (_commit() é
+        # no-op, nunca levanta Aborted), então este teste só prova a
+        # ordenação "revogação commita e só DEPOIS aprovar_rascunho relê" --
+        # é a checagem transacional em si (aprovar_rascunho relendo
+        # tipos_promovidos DENTRO da própria transação) que fecha esse
+        # caso. O entrelaçamento mais difícil -- revogação commitando ENTRE
+        # a leitura e o commit da transação de aprovar_rascunho -- depende
+        # do controle de concorrência otimista real do Firestore (as duas
+        # transações leem/escrevem o mesmo documento system/mcp_access, e o
+        # SDK real aborta e repete a que perder a corrida); este mock não
+        # tem como simular isso, então esse caso fica garantido pela
+        # semântica do Firestore em produção, não coberto por teste aqui.
+        self._seed_promovido(doc_id="r-1", tipo="confirmacao_reuniao")
+        self._seed_promovido(doc_id="r-2", tipo="confirmacao_reuniao")
+        self._set_tipo_promovido()
+
+        import promocao_autonomia as pa
+        from autonomy import mandatos_io
+
+        real_mandato = mandatos_io.mandato_tipo_promovido
+
+        def _mandato_com_revogacao_concorrente(db, tipo, **kwargs):
+            resultado = real_mandato(db, tipo, **kwargs)
+            # "Vence a corrida" logo após esta única leitura cacheada --
+            # antes de qualquer aprovar_rascunho do laço ter rodado.
+            pa.revogar_promocao_autonomia(db, tipo=tipo)
+            return resultado
+
+        with mock.patch(
+            "autonomy.mandatos_io.mandato_tipo_promovido",
+            side_effect=_mandato_com_revogacao_concorrente,
+        ):
+            n = oa.liberar_rascunhos_promovidos(self.db, agora=self.agora)
+
+        self.assertEqual(n, 0)
+        for doc_id in ("r-1", "r-2"):
+            doc = self.outbox._docs[doc_id]
+            self.assertEqual(doc["status"], oa.STATUS_AGUARDANDO)
+            self.assertIsNone(doc["envio_liberado_em"])
+            self.assertEqual(doc["degradado_motivo"], "mandato_revogado_durante_aprovacao")
+        self.assertNotIn(
+            "confirmacao_reuniao",
+            self.db.collection("system")._docs["mcp_access"]["tipos_promovidos"],
+        )
 
     def test_tipo_outro_promovido_nao_derruba_o_lote_e_degrada_so_esse_rascunho(self):
         # Achado BLOQUEANTE da revisão adversarial (P02 sub-entrega 17/N):
