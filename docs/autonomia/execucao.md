@@ -14,128 +14,16 @@ arquivo de arquivo só (159725 bytes) falhou por limite de saída (64000
 tokens). O bloco P02 sub-entrega 17/N foi movido, também em 2026-09-09,
 para um TERCEIRO arquivo de arquivo,
 docs/autonomia/execucao-archive-p02-sub17.md — durante a sub-entrega P01
-6/N, preventivamente: o bloco novo somado ao arquivo ativo já passava do
-limiar de ~50KB que a própria sub-entrega P01 5/N registrou como
-arriscado. Ver o cabeçalho de cada arquivo de arquivo para o relato
-completo.** Nenhum conteúdo foi perdido; é uma relocação, não uma edição.
-Este arquivo continua sendo a fonte de verdade para tudo a partir daqui.
-
-```yaml
-plano: plano-hermes-autonomo-2026-09-06
-base_commit: d5538746b40e5129e606b1848cd8640a304c712a
-pacote: "P01 sub-entrega 3/N -- aplicar_edicao_rascunho ganha proteção transacional (mesmo padrão A04 de aprovar_rascunho/descartar_rascunho)"
-# André confirmou o merge da PR #210 (P02 sub-entrega 17/N) e pediu, antes
-# de prosseguir, um relato honesto e completo de quanto falta do plano
-# inteiro ("me fale o quanto falta para finalizar o plano por completo").
-# Entregue o relato (P00 essencialmente completo, P01 só 20% feito --
-# passos 1-2/10 --, P02 com religação real ao motor de política mas ainda
-# com lacunas conhecidas, P03-P18 não iniciados). André respondeu "Perfeito,
-# então vamos prosseguir" -- sem indicar qual pacote/passo especificamente.
-# Interpretado, por autoridade da própria seção 14.1 do plano ("Implemente
-# os pacotes na ordem das dependências... Continue o trabalho independente...
-# não transforme cada passo reversível em nova confirmação"), como
-# autorização para escolher o próximo passo de engenharia bem escopado e
-# reversível na ordem de dependências, sem nova pergunta de confirmação.
-# Escolhido: fechar P01 (o pacote menos completo, sem dependências
-# pendentes de P02+) pela lacuna já identificada e registrada desde a
-# sub-entrega 1/N -- aplicar_edicao_rascunho sem a mesma proteção
-# transacional que aprovar_rascunho/descartar_rascunho já tinham.
-estado: pronto_para_revisao
-inicio: "2026-09-09T10:15:00Z"
-fim: "2026-09-09T10:45:00Z"
-arquivos_alterados:
-  - functions/outbox_aprovacao.py (aplicar_edicao_rascunho reescrita para o padrão transacional A04 -- get()+update() incondicional vira transação Firestore que relê e revalida o status antes de escrever, reutilizando validar_transicao_aprovacao)
-  - functions/test_outbox_aprovacao.py (6 testes novos: 2 em TestSemFallbackParaEscritaDesprotegida -- falha de transação e ausência de suporte a transação, sem escrita desprotegida; 3 em TestEdicao -- aguardando_janela funciona e volta para aguardando_aprovacao, rascunho já decidido recusa e não ressuscita status/conteúdo em nenhum dos 4 status terminais via subTest, rascunho inexistente retorna not_found)
-decisoes:
-  - id: p01-sub3-aplicar-edicao-fecha-lacuna-a04-registrada-desde-sub1
-    motivo: "Pendência registrada desde a sub-entrega 1/N de P01 (achado A04, quando aprovar_rascunho e descartar_rascunho ganharam proteção transacional): aplicar_edicao_rascunho ficou de fora daquela correção porque não tinha, na época, nenhum risco de ressureição de status documentado -- só o risco genérico de condição de corrida com liberar_rascunhos_promovidos/descartar_rascunho. Ao reabrir o código nesta sub-entrega, achado mais grave que o originalmente registrado: a função fazia um update() incondicional que reescrevia status=aguardando_aprovacao SEMPRE, sem checar o status atual do documento -- uma edição tardia (sessão de Telegram/WhatsApp obsoleta, retry, clique duplo em fila) sobre um rascunho já enviado (sent), aprovado (pending) ou descartado o ressuscitava silenciosamente de volta para aguardando_aprovacao, reabrindo ao dono uma decisão que ele já tinha tomado. Corrigido com o mesmo padrão transacional já usado (e comprovado) em aprovar_rascunho/descartar_rascunho: get() dentro de uma @firestore.transactional, revalidação de status via validar_transicao_aprovacao (reutilizada, não duplicada -- é o mesmo domínio de aguardando_aprovacao/aguardando_janela que a aprovação usa), e nenhum fallback para escrita desprotegida quando a transação falha ou o backend não suporta transação (retorna erro_transacao/erro_configuracao explícito, mesmo contrato dos outros dois caminhos)."
-    autoridade: existente_ou_nova
-testes:
-  comandos:
-    - "cd functions && python -m unittest discover -s . -p 'test_*.py'"
-  resultados:
-    - "Antes desta sub-entrega (main pós-merge da PR #210, commit d5538746b): 1463/1463, 0 falhas, 0 erros -- baseline mais limpa que a documentada na sub-entrega 17/N (as 8 falhas + 2 erros pré-existentes de lá não aparecem mais; o merge da PR #210 aparentemente absorveu correções/arquivos concorrentes de outra PR, incluindo functions/llm_usage_hooks.py e functions/test_llm_usage_hooks.py, não tocados por esta sub-entrega)."
-    - "Depois desta sub-entrega: 1468/1468, 0 falhas, 0 erros -- exatamente os 5 testes novos, zero regressão."
-evidencias:
-  - "Revisão adversarial independente (Agent tool, general-purpose, sem contexto da implementação) sobre o diff dos 2 arquivos. Veredito: seguro para enviar. Verificou de forma empírica (via git stash do fix, rodando os testes novos contra o código ANTIGO) que test_editar_rascunho_ja_decidido_recusa_e_nao_ressuscita de fato falha sob o comportamento pré-correção -- confirma que o teste não é vácuo. Leu o código-fonte da biblioteca google-cloud-firestore instalada para confirmar que o protocolo do mock (_begin/_clean_up/_commit/_rollback/_max_attempts/_read_only) é fiel ao real, mesmo double já usado em aprovar_rascunho/descartar_rascunho. 4 achados não-bloqueantes, documentados aqui e deliberadamente não corrigidos nesta sub-entrega para manter o diff revisado idêntico ao enviado: (1) o card do Telegram de um rascunho editado-mas-depois-decidido-por-outro-caminho não é fechado/atualizado -- mesma limitação pré-existente já registrada como pendência na sub-entrega 17/N para o caso de degrade; (2) o telegram_message_id gravado após reenviar o card de edição é um doc_ref.update() solto, fora da transação -- inofensivo (é só o id da mensagem do card, não afeta status/conteúdo), mesmo padrão não-transacional já usado em criar_rascunho/aprovar_rascunho/descartar_rascunho para esse mesmo campo; (3) envio_liberado_em não é explicitamente nulado quando uma edição rebaixa aguardando_janela para aguardando_aprovacao -- nit de higiene de dado, sem efeito funcional (avaliar_liberacao_promovidos já filtra por status=aguardando_janela primeiro, então um envio_liberado_em obsoleto num doc aguardando_aprovacao nunca é lido); (4) sugestão de cobertura de teste adicional (não um bug) para o caminho de reenvio de card falhar silenciosamente durante uma edição bem-sucedida -- já coberto pelo padrão try/except existente, só faltava um teste dedicado."
-migracao:
-  dry_run: null
-  executada: false
-flags:
-  antes: {}
-  depois: {}
-pendencias:
-  - "RESOLVIDO por esta entrada: aplicar_edicao_rascunho sem proteção transacional, pendência registrada desde a sub-entrega 1/N de P01 (achado A04)."
-  - "Os 4 achados não-bloqueantes da revisão adversarial desta sub-entrega, listados em evidencias acima, deliberadamente não corrigidos: (1) card Telegram não fechado quando o rascunho é decidido por outro caminho após edição; (2) telegram_message_id gravado fora da transação (inofensivo, padrão pré-existente); (3) envio_liberado_em não nulado ao rebaixar de aguardando_janela via edição (nit de higiene, sem efeito funcional); (4) nice-to-have de cobertura de teste para falha silenciosa de reenvio de card."
-  - "P01 passos 3-10 do plano continuam abertos: agent_requests.py, core/idempotency.py, mcp_jobs.py, mcp_server.py, firestore.rules/deploy.yml (mesmo bloqueio de PAT sem escopo workflow já registrado para P00), e o relatório de reconciliação final do pacote."
-  - "Todas as pendências já registradas nos blocos anteriores que não foram tocadas por esta sub-entrega continuam abertas (ver blocos de P02 acima)."
-proximo_pacote: "P01 -- próximo passo natural na ordem do plano é o passo 3 (agent_requests.py), seguido de core/idempotency.py e mcp_jobs.py/mcp_server.py; firestore.rules/deploy.yml permanece bloqueado pelo mesmo PAT sem escopo workflow de P00. Como esta é a segunda sub-entrega consecutiva escolhida sem confirmação explícita do André sobre QUAL trabalho priorizar, meu relato a ele nomeará esse próximo passo como recomendação, não como decisão já tomada -- para não encadear escolhas unilaterais indefinidamente."
-```
-
----
-
-```yaml
-plano: plano-hermes-autonomo-2026-09-06
-base_commit: ab537c889a90c9be08b4ffb3f6b2bd0e5a6f6f0e
-pacote: "P01 sub-entrega 4/N -- agent_requests.py (passo 3 do plano): enfileiramento/conclusão legados viram transições condicionais"
-# Continuação autônoma autorizada por André: os 3 PRs em aberto (#206, #208,
-# #211) foram mesclados e ele disse "Pode seguir com o trabalho". Escolhido
-# exatamente o passo nomeado como recomendação no proximo_pacote da entrada
-# anterior (P01 passo 3, agent_requests.py) -- não uma escolha nova.
-#
-# Passo 3 do plano ("Transformar enfileiramento/conclusão legados em
-# transições condicionais. P04 acrescentará o protocolo completo.") aplicado
-# ao achado A01 (agent_requests.py: enfileirar_ou_atualizar, listar_pendentes
-# e concluir; transições por leitura seguida de escrita, sem lease). Escopo
-# desta sub-entrega: só a proteção transacional condicional (mesmo padrão
-# A04 já usado 3x em outbox_aprovacao.py) -- NÃO o protocolo completo de
-# lease/reserva/schema_version/dedupe_key da seção 4, que é explicitamente
-# P04. listar_pendentes é só leitura (query), não sofre a mesma condição de
-# corrida -- não tocada.
-#
-# concluir() é acionável em produção por mais de uma sessão via a tool MCP
-# concluir_pedido_agente (tools/hermes_tools.py:2016) -- a condição de corrida
-# de duas conclusões concorrentes do mesmo pedido não é hipotética.
-estado: pronto_para_revisao
-inicio: "2026-09-09T11:10:00Z"
-fim: "2026-09-09T11:55:00Z"
-arquivos_alterados:
-  - functions/agent_requests.py (enfileirar_ou_atualizar e concluir reescritas para o padrão transacional A04 -- leitura+escrita dentro de uma única @firestore.transactional; sem hasattr(db, "transaction") ou falha real de transação, retorna erro_configuracao/erro_transacao explícito, nunca cai para escrita desprotegida)
-  - functions/test_agent_requests.py (mock de Transaction promovido para o double fiel já usado em test_outbox_aprovacao.py/test_promocao_autonomia.py -- _begin/_clean_up/_commit/_rollback/_max_attempts/_read_only, com .set() -- e 5 testes novos em TestSemFallbackParaEscritaDesprotegida: falha de transação e ausência de suporte a transação para enfileirar_ou_atualizar (doc novo e doc existente) e para concluir)
-  - functions/test_atencao_whatsapp.py (mock de DB local (usado só pelo hook de áudio) ganhou o mesmo double fiel de Transaction -- estava desatualizado e quebrava test_hook_cria_e_mescla_agent_request assim que enfileirar_ou_atualizar passou a exigir transação; 1 teste novo, test_hook_sobrevive_a_falha_protegida_de_enfileiramento, cobrindo o achado should-fix abaixo)
-  - functions/atencao_whatsapp.py (hook audio_relevante: captura o retorno de enfileirar_ou_atualizar e loga quando vier erro_transacao/erro_configuracao -- achado should-fix da revisão adversarial, ver decisões)
-decisoes:
-  - id: p01-sub4-agent-requests-transacional-fecha-achado-a01-passo3
-    motivo: "Achado A01 (fila de pedidos com transição por leitura-seguida-de-escrita, sem lease) e passo 3 do plano P01 fechados juntos: enfileirar_ou_atualizar e concluir agora usam o mesmo padrão A04 já validado 3x em outbox_aprovacao.py (aprovar_rascunho/descartar_rascunho/aplicar_edicao_rascunho) -- @firestore.transactional relê o documento dentro da transação antes de decidir, e nenhum caminho (transação indisponível, transação que falha, ou qualquer dos 3 ramos de enfileirar_ou_atualizar: doc novo, doc pendente, doc já em andamento/terminal) cai para get()+set()/update() desprotegido. listar_pendentes/contar_pendentes permanecem só leitura, fora de escopo -- não têm transição a proteger. O protocolo completo de lease/reserva com schema_version/dedupe_key/assigned_executor (seção 4 do plano) fica para P04, como o próprio passo 3 já demarca -- esta sub-entrega não antecipa esse trabalho."
-    autoridade: existente_ou_nova
-  - id: p01-sub4-achado-should-fix-mock-db-desatualizado-quebrava-teste-existente
-    motivo: "Achado da revisão adversarial (Agent tool, general-purpose, sem contexto da implementação), categoria correção-antes-de-enviar (não um 'should-fix' documentado e adiado, mas um teste que a própria mudança quebrava): o _MockDB local de test_atencao_whatsapp.py (usado só por TestHookAgentRequests, que exercita atencao_whatsapp._processar_audio -> agent_requests.enfileirar_ou_atualizar) não implementava .transaction() nem aceitava o kwarg transaction= em DocRef.get(). Rodar a suíte completa antes de enviar pegou isso na hora: test_hook_cria_e_mescla_agent_request passou a falhar (0 docs em agent_requests em vez de 1) porque a nova exigência de transação real fazia o hook engolir um erro_configuracao em silêncio (try/except que só logava exceção levantada, e a nova implementação não levanta mais). Corrigido promovendo o mock local ao mesmo double fiel do protocolo real (_begin/_clean_up/_commit/_rollback/_max_attempts/_read_only, com .set()) já usado em test_outbox_aprovacao.py/test_promocao_autonomia.py/test_agent_requests.py."
-    autoridade: existente_ou_nova
-  - id: p01-sub4-achado-should-fix-hook-audio-logava-silenciosamente-falha-protegida
-    motivo: "Achado should-fix da revisão adversarial: o hook audio_relevante (atencao_whatsapp.py) descartava o retorno de enfileirar_ou_atualizar por completo -- antes desta sub-entrega isso era inofensivo (a única falha possível levantava exceção e caía no except que já loga); agora que erro_transacao/erro_configuracao voltam como dict sem exceção, o try/except externo não tinha mais nada a capturar, e a falha protegida ficava completamente muda. Não bloqueante -- o revisor notou que o item de atenção já foi gravado antes do hook (linha 512), então o áudio continua visível ao dono; só a consolidação automática em segundo plano é que deixaria de ser enfileirada, sem que ninguém soubesse. Corrigido com um log explícito quando o status vier erro_transacao/erro_configuracao (sem replicar o alerta via Telegram que outbox_aprovacao já tem em _alertar_se_falha_outbox para o mesmo achado -- esse mecanismo é para comando do dono via WhatsApp que seria perdido; aqui é só enfileiramento de trabalho em segundo plano, escopo menor, não pedido por este passo do plano). Testado com test_hook_sobrevive_a_falha_protegida_de_enfileiramento (backend sem suporte a transação: hook não quebra, item de atenção é criado, nada é enfileirado)."
-    autoridade: existente_ou_nova
-testes:
-  comandos:
-    - "cd functions && ../venv/bin/python3 -m unittest discover -p 'test_*.py' -q"
-  resultados:
-    - "Antes desta sub-entrega (main pós-merge dos PRs #206/#208/#211, commit ab537c889): 1467 testes, 8 falhas + 2 erros -- confirmados PRÉ-EXISTENTES (ambiente sem ANTHROPIC_API_KEY/deps opcionais para gmail/mp4; mesmos test_deteccao_subproduto.py::TestUltimaTentativaSempreRegistrada, test_gmail_bill_pdf, test_mp4_repair já documentados nas sub-entregas anteriores), não relacionados a esta sub-entrega. Confirmado via git stash antes de enviar."
-    - "Depois desta sub-entrega: 1473 testes (6 novos: 5 em test_agent_requests.py::TestSemFallbackParaEscritaDesprotegida, 1 em test_atencao_whatsapp.py::TestHookAgentRequests), mesmas 8 falhas + 2 erros pré-existentes, zero regressão nova."
-evidencias:
-  - "Revisão adversarial independente (Agent tool, general-purpose, sem contexto da implementação) sobre o diff completo (agent_requests.py, test_agent_requests.py, test_atencao_whatsapp.py). Verificou contra o código-fonte real da biblioteca google-cloud-firestore instalada que o uso de tx.set()/tx.update()/doc_ref.get(transaction=tx) é fiel à API real, e que todas as leituras acontecem antes de qualquer escrita dentro de cada função transacional (exigência real do protocolo, não só do mock). Escreveu um mock de transação alternativo que só aplica escritas em _commit() (diferindo dos mocks que aplicam na hora) para simular um ciclo real de Aborted-e-retry, e confirmou que o código de produção relê corretamente no retry sem corromper dado. Rodou a suíte completa (1472 testes no momento da revisão, antes do achado do hook de áudio ser corrigido) e confirmou que as 8 falhas + 2 erros são as mesmas pré-existentes, em arquivos não relacionados. Veredito explícito: 'safe to ship'. Dois achados should-fix (ambos endereçados, ver decisões acima); nenhum achado bloqueante; um nitpick sobre os mocks de transação aplicarem escrita na hora em vez de diferir para _commit() -- mesmo padrão já usado nos outros mocks de transação do repositório (test_outbox_aprovacao.py/test_promocao_autonomia.py), não é regressão desta sub-entrega, e o revisor confirmou por script standalone que isso não mascara nenhum bug de produção."
-  - "Suíte completa rodada antes (via git stash) e depois do diff completo (incluindo os 2 achados should-fix já corrigidos); ver testes.resultados acima."
-  - "Todos os arquivos desta sub-entrega (agent_requests.py, test_agent_requests.py, test_atencao_whatsapp.py, atencao_whatsapp.py, e este próprio bloco de execucao.md) enviados via mcp__Argos__argos_escrever_arquivo_repositorio com verificação de hash local (git hash-object) contra o sha retornado pelo Argos em cada arquivo, antes de abrir a PR."
-migracao:
-  dry_run: null
-  executada: false
-flags:
-  antes: {}
-  depois: {}
-pendencias:
-  - "RESOLVIDO por esta entrada: achado A01 (agent_requests.py sem proteção transacional) e passo 3 de P01, ambos fechados -- só o escopo de transição condicional; o protocolo completo de lease/reserva continua para P04, como o plano já previa."
-  - "P01 passos 4-10 do plano continuam abertos: idempotência com efeito (core/idempotency.py), mcp_jobs (reivindicação sobre leitura atual, estado de erro normalizado), firestore.rules/deploy.yml (mesmo bloqueio de PAT sem escopo workflow já registrado para P00), relatório de reconciliação final do pacote."
-  - "Todas as pendências já registradas nos blocos anteriores que não foram tocadas por esta sub-entrega continuam abertas (ver blocos de P01/P02 acima)."
-proximo_pacote: "P01 -- próximo passo natural na ordem do plano é o passo 4 (idempotência: mudar erro de idempotência em caminho com efeito para resultado recuperável sem efeito, em vez de 'permitir processamento' silenciosamente -- core/idempotency.py), seguido do passo 5 (mcp_jobs.py). Como já são várias sub-entregas seguidas escolhidas por mim seguindo a ordem do plano sem nova confirmação explícita a cada uma, vou nomear isso como recomendação no relato ao André, não como decisão já tomada."
-```
+6/N, preventivamente. Os blocos P01 sub-entrega 3/N e 4/N foram movidos,
+ainda em 2026-09-09, para um QUARTO arquivo de arquivo,
+docs/autonomia/execucao-archive-p01-sub3-a-sub4.md — durante a sub-entrega
+P01 7/N, também preventivamente: o bloco novo somado ao arquivo ativo já
+passava do limiar de ~50KB que a sub-entrega P01 5/N registrou como
+arriscado, e desta vez os dois blocos mais antigos foram movidos juntos
+para dar mais folga antes do próximo corte. Ver o cabeçalho de cada
+arquivo de arquivo para o relato completo.** Nenhum conteúdo foi perdido;
+é uma relocação, não uma edição. Este arquivo continua sendo a fonte de
+verdade para tudo a partir da sub-entrega P01 5/N em diante.
 
 ---
 
@@ -321,4 +209,73 @@ pendencias:
   - "P01 passos 6-10 do plano continuam abertos: claim de confirmação abandonado, regras Firestore/deploy.yml (mesmo bloqueio de PAT sem escopo workflow já registrado para P00), relatório de reconciliação final do pacote."
   - "Pendências já registradas em blocos anteriores e não tocadas por esta sub-entrega continuam abertas (limite de 200KB do Argos em main.py; risco de corrupção silenciosa em escritas grandes -- ver blocos de P01 sub-entrega 5/N acima)."
 proximo_pacote: "P01 -- próximo passo natural é o passo 6 (claim de confirmação abandonado). Antes de escolher sozinho, vale levar ao André o achado de produto desta sub-entrega (formato de erro de buscar_e_analisar_email não capturado pela heurística) e as duas pendências de infraestrutura/processo já registradas (limite de 200KB do Argos em main.py; risco de corrupção silenciosa em escritas grandes) -- nenhuma delas bloqueia prosseguir, mas são decisões que cabem ao André, não a mim sozinho."
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 9ccdd93b1f0940665b8068d787e4accfe6002288
+pacote: "P01 sub-entrega 7/N -- functions/mcp_server.py (passo 6 do plano): claim de confirmação abandonado deixa de ser lido como confirmação simplesmente expirada"
+# Continuação autônoma autorizada por André ("Mesclagem realizada, pode
+# prosseguir.") após confirmar a mesclagem da PR #214 -- verificado antes de
+# aceitar como fato (git fetch origin main + checagem de que o commit de
+# merge está em origin/main), disciplina padrão desta sessão de nunca
+# afirmar estado sem checar.
+#
+# Passo 6 do plano: "Tratar claim de confirmação abandonado: identificar
+# operação iniciada e resultado incerto, sem liberar retry que possa
+# duplicar efeito." Ligado em espírito ao achado A03 ("aprovação não encerra
+# compromisso") e ao próprio requisito de teste de aceite do passo
+# ("confirmação interrompida após claim").
+#
+# Bug encontrado em confirmar_acao/_executar_confirmacao: se um claim
+# (mcp_confirmations/{id}/claims/execute, mutex por create() atômico do
+# Firestore) é criado mas o processo cai antes de gravar executed_at/result
+# (timeout ou reinício de instância), uma nova tentativa com o mesmo
+# confirmation_id -- se ainda dentro de expires_at -- ficava presa para
+# sempre em "em_execucao" (seguro, mas rotulado errado); se já passado
+# expires_at, caía primeiro no teste de expiração (a checagem de claim vinha
+# DEPOIS na ordem do código) e devolvia "Confirmação expirada; peça uma nova
+# prévia" -- que na prática convida a abrir uma confirmação nova, reivindicar
+# de novo e rodar a tool de novo, sem saber se o efeito da primeira tentativa
+# (ex.: uma mensagem de WhatsApp) já ocorreu.
+estado: pronto_para_revisao
+inicio: "2026-09-09T14:50:00Z"
+fim: "2026-09-09T15:40:00Z"
+arquivos_alterados:
+  - functions/mcp_server.py (nova constante _CLAIM_ABANDONADA_APOS = timedelta(minutes=6), entre o timeout_sec=300 da função mcpServer e o _CONFIRMACAO_TTL de 10 min; nova função _status_claim_pendente(claim_data) que decide entre "em_execucao" e "resultado_incerto" a partir de claimed_at; _executar_confirmacao reordenada -- a checagem de claim existente passa a vir ANTES da checagem de expires_at, tanto no caminho normal quanto no ramo de corrida real do except em torno de claim.create())
+  - functions/test_hermes_tools.py (_ConfirmationClaim ganha .get() e passa a guardar claim_data, refletindo DocumentReference real; 5 testes novos em TestConfirmacaoPersistida: claim recente reporta em_execucao sem reexecutar, claim abandonado reporta resultado_incerto sem reexecutar, claim abandonado prevalece mesmo com confirmação já expirada, claim sem claimed_at válido não quebra e fica do lado seguro, corrida real no create() aplica a mesma regra de claim pendente)
+  - functions/test_mcp_server.py (1 teste novo: resultado_incerto marca isError:true no envelope MCP devolvido por confirmar_acao via _handle_tools_call)
+decisoes:
+  - id: p01-sub7-claim-abandonado-nao-e-mais-lido-como-expirada
+    motivo: "Passo 6 do plano fechado: a existência de um claim para o confirmation_id passa a ser verificada ANTES do teste de expires_at -- uma vez que um claim é encontrado, este confirmation_id nunca mais executa a tool, para sempre (só relata em_execucao ou resultado_incerto). _status_claim_pendente distingue os dois pelo tempo decorrido desde claimed_at contra a nova constante _CLAIM_ABANDONADA_APOS (6 min), deliberadamente entre os dois limites já existentes e documentados no próprio arquivo: acima do timeout_sec=300 (5 min) da função mcpServer -- para nunca rotular como abandonado um claim que ainda pode estar dentro do próprio limite de execução da função --, e abaixo do _CONFIRMACAO_TTL de 10 min -- para o estado ficar identificável como resultado_incerto antes que a confirmação em si pareça só expirada. Resolver de verdade (sweep de leases vencidos com resultado observado, heartbeat, geração) é o escopo maior do P04, citado explicitamente no plano; esta correção não antecipa esse framework -- só evita que o estado hoje incerto seja mal rotulado de um jeito que convide a duplicar o efeito. Uma corrida real entre a checagem de claim e o claim.create() (outra chamada toma o claim primeiro) aplica a mesma _status_claim_pendente, não um em_execucao hardcoded -- coberto por teste dedicado que simula a corrida de verdade via monkeypatch de create()."
+    autoridade: existente_ou_nova
+  - id: p01-sub7-achado-revisao-campo-erro-em-vez-de-message
+    motivo: "Achado should-fix da revisão adversarial: resultado_incerto originalmente usava uma chave \"message\" (sem \"erro\"), então o contrato genérico de _handle_tools_call (is_err = bool(result.get(\"erro\"))) calculava isError:false -- o mesmo sinal neutro do em_execucao meramente transitório, enfraquecendo na prática a garantia de não duplicar efeito: nada impedia estruturalmente um agente chamador menos cuidadoso de ler a mensagem como um \"aguarde\" e mesmo assim abrir uma confirmação nova para a mesma ação. Corrigido movendo o texto explicativo para a chave \"erro\" -- isError:true passa a sair automaticamente do contrato genérico já existente, sem caso especial em nenhum call site. Três testes existentes ganharam asserção assertTrue(result.get(\"erro\")) e um teste novo de envelope (test_confirmar_acao_com_resultado_incerto_marca_iserror, em test_mcp_server.py) prova que isError:True propaga de fato até a resposta MCP."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && source venv/bin/activate && python3 -m pytest test_hermes_tools.py test_mcp_server.py -q"
+    - "cd functions && source venv/bin/activate && python3 -m pytest -q"
+  resultados:
+    - "test_hermes_tools.py isolado: 95 testes, todos passando (5 novos de TestConfirmacaoPersistida entre eles)."
+    - "test_hermes_tools.py + test_mcp_server.py juntos: 151 testes + 3 subtests, todos passando."
+    - "Suíte completa: 1512 testes + 147 subtests passando, zero falha -- base pré-existente de 1506+147 subtests (fechada na sub-entrega anterior, P01 6/N) mais as 6 diferenças desta sub-entrega (5 em test_hermes_tools.py, 1 em test_mcp_server.py). Sem regressão em nenhum outro módulo."
+evidencias:
+  - "Revisão adversarial independente (Agent tool, general-purpose, sem contexto da implementação) sobre o diff completo (mcp_server.py, test_hermes_tools.py, test_mcp_server.py). Veredito explícito: seguro para enviar, com um achado should-fix (a chave \"erro\" vs \"message\", ver decisões -- endereçado antes do envio) e dois nitpicks não-bloqueantes, deliberadamente não corrigidos nesta sub-entrega: (1) um claim pendente encontrado por _executar_confirmacao não passa por _audit_log -- lacuna pré-existente, não introduzida por esta mudança, registrada abaixo como pendência de observabilidade; (2) a nova checagem de claim custa uma leitura extra do Firestore por chamada de confirmar_acao -- aceito como custo necessário para a correção, não uma regressão de desempenho relevante para o volume de chamadas deste fluxo."
+  - "Suíte completa rodada antes e depois do diff (incluindo o achado should-fix já corrigido); ver testes.resultados acima. Reexecução isolada de test_hermes_tools.py e test_mcp_server.py em cada rodada de edição, sem nenhuma falha a corrigir durante o desenvolvimento desta sub-entrega."
+  - "Todos os três arquivos (mcp_server.py, 68823 bytes; test_hermes_tools.py, 61781 bytes; test_mcp_server.py, 40811 bytes) enviados via mcp__Argos__argos_escrever_arquivo_repositorio com verificação de hash local (git hash-object) contra o sha retornado pelo Argos, batendo exatamente nos três -- e reconfirmado depois por git fetch da branch remota + git diff (zero diferença) e por git rev-parse dos blobs remotos contra os hashes locais, mesma disciplina de verificação por diff (não só sha) estabelecida como necessária desde a sub-entrega P01 5/N para escritas grandes."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: passo 6 de P01 (claim de confirmação abandonado deixa de ser lido como confirmação simplesmente expirada; resultado_incerto vem com isError:true)."
+  - "NOVA, de observabilidade (não-bloqueante, achado da revisão adversarial, pré-existente): um claim pendente encontrado por _executar_confirmacao (em_execucao ou resultado_incerto) não passa por _audit_log -- só a execução de fato (sucesso/erro da tool) é auditada hoje. Não corrigido nesta sub-entrega por não ser parte do escopo do passo 6; fica para o André avaliar se vale ampliar o log de auditoria para incluir tentativas de reexecução barradas por claim."
+  - "P01 passos 7-10 do plano continuam abertos: regras Firestore/deploy.yml (mesmo bloqueio de PAT sem escopo workflow já registrado para P00), relatório de reconciliação final do pacote."
+  - "Pendências já registradas em blocos anteriores e não tocadas por esta sub-entrega continuam abertas: formato de erro de tools/hermes_tools.py::_buscar_e_analisar_email não capturado pela heurística de mcp_jobs.py (achado de produto da sub-entrega 6/N); TTL do Firestore não configurado para a coleção mcp_jobs (infraestrutura); limite de 200KB do conector Argos em functions/main.py; risco de corrupção silenciosa em escritas via Argos acima de ~50KB (ver blocos de P01 sub-entrega 5/N e 6/N)."
+proximo_pacote: "P01 -- os dois itens que restam no pacote são regras Firestore/deploy.yml (bloqueado pelo mesmo PAT sem escopo workflow já registrado para P00) e o relatório de reconciliação final do pacote. Como o bloqueio de infraestrutura de regras/deploy já está registrado e não depende de mim, a recomendação natural é ir direto ao relatório de reconciliação final de P01 -- mas isso fica como recomendação a levar ao André, não decisão já tomada."
 ```
