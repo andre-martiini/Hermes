@@ -108,7 +108,7 @@ jobs:
           attempt=1
           max_attempts=5
           until firebase deploy \
-            --only hosting,functions,firestore:indexes,storage \
+            --only hosting,functions,firestore:rules,firestore:indexes,storage
             --project gestao-hermes \
             --non-interactive \
             --force
