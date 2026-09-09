@@ -142,6 +142,16 @@ def _decidir_promocao_autonomia(ctx: ToolContext, args: dict):
     )
 
 
+def _revogar_promocao_autonomia(ctx: ToolContext, args: dict):
+    import promocao_autonomia
+
+    return promocao_autonomia.revogar_promocao_autonomia(
+        ctx.db,
+        tipo=args.get("tipo"),
+        motivo=args.get("motivo"),
+    )
+
+
 def _agendar_lembrete_acao(ctx: ToolContext, args: dict):
     from tools.telegram_extended import execute as _execute
 
@@ -2311,6 +2321,7 @@ _HANDLERS: dict = {
     "decidir_elevacao": _decidir_elevacao,
     "consultar_promocoes_autonomia_sugeridas": _consultar_promocoes_autonomia_sugeridas,
     "decidir_promocao_autonomia": _decidir_promocao_autonomia,
+    "revogar_promocao_autonomia": _revogar_promocao_autonomia,
     "consultar_historico_acoes": _consultar_historico_acoes,
     "buscar_arquivos_acervo": _buscar_arquivos_acervo,
     "buscar_contato": _buscar_contato,

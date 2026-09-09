@@ -1,0 +1,18 @@
+{
+  "name": "revogar_promocao_autonomia",
+  "description": "Revoga a promoção de autonomia de um tipo de rascunho de WhatsApp já promovido, removendo-o de system/mcp_access.tipos_promovidos. Novos rascunhos desse tipo voltam a exigir aprovação prévia no Telegram. Não é permanente: o tipo pode ser sugerido de novo no futuro se as métricas voltarem a atender os critérios.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "tipo": {
+        "type": "string",
+        "description": "Identificador do tipo de rascunho atualmente promovido (ex.: 'confirmacao_reuniao', 'retorno_promessa')."
+      },
+      "motivo": {
+        "type": "string",
+        "description": "Motivo opcional da revogação, registrado para histórico (ex.: 'respostas saindo com erros recentes')."
+      }
+    },
+    "required": ["tipo"]
+  }
+}

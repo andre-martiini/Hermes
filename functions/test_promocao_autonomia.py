@@ -19,6 +19,8 @@ from datetime import timezone, timedelta
 import unittest
 from unittest import mock
 
+from firebase_admin import firestore
+
 import outbox_aprovacao as oa
 import promocao_autonomia as pa
 
@@ -58,7 +60,18 @@ class _MockDocRef:
     def update(self, data):
         if self.id not in self.col._docs:
             raise KeyError(f"Doc {self.id} does not exist")
-        self.col._docs[self.id].update(data)
+        doc = self.col._docs[self.id]
+        for key, value in data.items():
+            # Espelha o comportamento real do Firestore para o sentinel
+            # DELETE_FIELD (google.cloud.firestore_v1.transforms.Sentinel):
+            # remove a chave por completo em vez de gravar o objeto sentinel
+            # como valor. Necessário a partir de revogar_promocao_autonomia
+            # (achado P2 da revisão Codex na PR #219), que usa isto para
+            # limpar `motivo_revogacao` de uma revogação anterior.
+            if hasattr(firestore, "DELETE_FIELD") and value is firestore.DELETE_FIELD:
+                doc.pop(key, None)
+            else:
+                doc[key] = value
 
     def delete(self):
         self.col._docs.pop(self.id, None)
@@ -717,6 +730,193 @@ class TestDecidirPromocaoAutonomia(unittest.TestCase):
         self.assertFalse(res["ok"])
         self.assertIn("sem suporte a transação", res["erro"].lower())
         self.assertEqual(promocoes._docs["confirmacao_reuniao"]["status"], pa.STATUS_PENDENTE)
+
+
+class TestRevogarPromocaoAutonomia(unittest.TestCase):
+    """Testes de revogação de promoção de autonomia (oposto de 'aceitar')."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        # Sem patch de firestore.transactional -- mesmo motivo de
+        # TestDecidirPromocaoAutonomia: o _MockTransaction implementa o
+        # protocolo real (A04).
+        self.promocoes = self.db.collection(pa.COL_PROMOCOES)
+        self.mcp = self.db.collection("system")
+        self.promocoes._docs["confirmacao_reuniao"] = {
+            "tipo": "confirmacao_reuniao",
+            "status": pa.STATUS_ACEITA,
+            "amostra": 10,
+            "taxa_sem_edicao": 0.95,
+            "decisao": "aceitar",
+        }
+        self.mcp._docs["mcp_access"] = {
+            "tipos_promovidos": ["confirmacao_reuniao", "retorno_promessa"],
+        }
+
+    def test_tipo_obrigatorio_retorna_erro(self):
+        res = pa.revogar_promocao_autonomia(self.db, tipo="")
+        self.assertFalse(res["ok"])
+        self.assertIn("obrigatório", res["erro"])
+
+    def test_tipo_nao_promovido_retorna_erro(self):
+        res = pa.revogar_promocao_autonomia(self.db, tipo="tipo_nunca_promovido")
+        self.assertFalse(res["ok"])
+        self.assertIn("não está atualmente promovido", res["erro"])
+
+    def test_revoga_remove_de_tipos_promovidos_e_preserva_outros(self):
+        res = pa.revogar_promocao_autonomia(self.db, tipo="confirmacao_reuniao")
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["tipo"], "confirmacao_reuniao")
+
+        mcp = self.mcp._docs["mcp_access"]
+        self.assertNotIn("confirmacao_reuniao", mcp["tipos_promovidos"])
+        self.assertIn("retorno_promessa", mcp["tipos_promovidos"])
+
+    def test_revoga_atualiza_sugestao_com_status_e_motivo(self):
+        res = pa.revogar_promocao_autonomia(
+            self.db, tipo="confirmacao_reuniao", motivo="taxa de erro subiu"
+        )
+        self.assertTrue(res["ok"])
+
+        sug = self.promocoes._docs["confirmacao_reuniao"]
+        self.assertEqual(sug["status"], pa.STATUS_REVOGADA)
+        self.assertEqual(sug["motivo_revogacao"], "taxa de erro subiu")
+        self.assertIn("revogado_em", sug)
+
+    def test_revoga_sem_motivo_nao_grava_campo_motivo(self):
+        res = pa.revogar_promocao_autonomia(self.db, tipo="confirmacao_reuniao")
+        self.assertTrue(res["ok"])
+        sug = self.promocoes._docs["confirmacao_reuniao"]
+        self.assertNotIn("motivo_revogacao", sug)
+
+    def test_revoga_de_novo_sem_motivo_limpa_motivo_da_revogacao_anterior(self):
+        # Achado P2 da revisão Codex na PR #219: revoga com motivo, o tipo é
+        # promovido de novo (fora do escopo desta função -- aqui só semeia
+        # o efeito que decidir_promocao_autonomia(..., "aceitar") teria em
+        # tipos_promovidos) e é revogado outra vez, agora sem motivo. O
+        # motivo_revogacao da PRIMEIRA revogação não pode sobreviver e ser
+        # lido como se fosse da revogação atual.
+        primeiro = pa.revogar_promocao_autonomia(
+            self.db, tipo="confirmacao_reuniao", motivo="respostas saindo com erro"
+        )
+        self.assertTrue(primeiro["ok"])
+        self.assertEqual(
+            self.promocoes._docs["confirmacao_reuniao"]["motivo_revogacao"],
+            "respostas saindo com erro",
+        )
+
+        self.mcp._docs["mcp_access"]["tipos_promovidos"].append("confirmacao_reuniao")
+
+        segundo = pa.revogar_promocao_autonomia(self.db, tipo="confirmacao_reuniao")
+        self.assertTrue(segundo["ok"])
+        sug = self.promocoes._docs["confirmacao_reuniao"]
+        self.assertNotIn("motivo_revogacao", sug)
+        self.assertEqual(sug["status"], pa.STATUS_REVOGADA)
+
+    def test_revoga_tipo_promovido_sem_sugestao_correspondente_nao_falha(self):
+        # Tipo promovido "manualmente" (sem doc em promocoes_autonomia_sugeridas)
+        # -- a fonte de verdade é tipos_promovidos; revogar não deve exigir a
+        # existência da sugestão.
+        self.mcp._docs["mcp_access"]["tipos_promovidos"].append("promovido_manualmente")
+        res = pa.revogar_promocao_autonomia(self.db, tipo="promovido_manualmente")
+        self.assertTrue(res["ok"])
+        self.assertNotIn(
+            "promovido_manualmente", self.mcp._docs["mcp_access"]["tipos_promovidos"]
+        )
+        self.assertNotIn("promovido_manualmente", self.promocoes._docs)
+
+    def test_revoga_normaliza_maiusculas_e_espacos_no_tipo(self):
+        # tipos_promovidos guarda em minúsculo/strip (mesmo padrão de
+        # decidir_promocao_autonomia); a chamada de revogação deve casar
+        # mesmo vindo com variação de caixa/espaços do chamador.
+        res = pa.revogar_promocao_autonomia(self.db, tipo="  Confirmacao_Reuniao  ")
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["tipo"], "confirmacao_reuniao")
+        mcp = self.mcp._docs["mcp_access"]
+        self.assertNotIn("confirmacao_reuniao", mcp["tipos_promovidos"])
+        self.assertIn("retorno_promessa", mcp["tipos_promovidos"])
+
+    def test_revoga_remove_entrada_com_variacao_de_caixa_na_lista_persistida(self):
+        # tipos_promovidos pode conter uma entrada legada gravada com
+        # variação de caixa/espaço (ex.: por edição manual do documento);
+        # a remoção deve normalizar cada entrada da lista antes de comparar,
+        # não só o `tipo` recebido.
+        self.mcp._docs["mcp_access"]["tipos_promovidos"] = [" Confirmacao_Reuniao ", "retorno_promessa"]
+        res = pa.revogar_promocao_autonomia(self.db, tipo="confirmacao_reuniao")
+        self.assertTrue(res["ok"])
+        mcp = self.mcp._docs["mcp_access"]
+        self.assertNotIn(" Confirmacao_Reuniao ", mcp["tipos_promovidos"])
+        self.assertIn("retorno_promessa", mcp["tipos_promovidos"])
+
+    def test_revogar_duas_vezes_seguidas_falha_na_segunda(self):
+        primeiro = pa.revogar_promocao_autonomia(self.db, tipo="confirmacao_reuniao")
+        self.assertTrue(primeiro["ok"])
+        segundo = pa.revogar_promocao_autonomia(self.db, tipo="confirmacao_reuniao")
+        self.assertFalse(segundo["ok"])
+        self.assertIn("não está atualmente promovido", segundo["erro"])
+
+    def test_transacao_falha_retorna_erro_sem_escrever(self):
+        """Achado A04, mesmo padrão de TestDecidirPromocaoAutonomia: se a
+        transação falhar de verdade, a revogação é recusada em vez de cair
+        para uma escrita get+update não protegida."""
+
+        class _TransacaoQuebrada(_MockTransaction):
+            def _begin(self, retry_id=None):
+                raise RuntimeError("Firestore indisponível (simulado)")
+
+        class _DbTransacaoQuebrada(_MockDb):
+            def transaction(self):
+                return _TransacaoQuebrada()
+
+        db_quebrado = _DbTransacaoQuebrada()
+        promocoes = db_quebrado.collection(pa.COL_PROMOCOES)
+        promocoes._docs["confirmacao_reuniao"] = {
+            "tipo": "confirmacao_reuniao",
+            "status": pa.STATUS_ACEITA,
+        }
+        mcp = db_quebrado.collection("system")
+        mcp._docs["mcp_access"] = {"tipos_promovidos": ["confirmacao_reuniao"]}
+
+        res = pa.revogar_promocao_autonomia(db_quebrado, tipo="confirmacao_reuniao")
+        self.assertFalse(res["ok"])
+        self.assertIn("erro", res)
+        # Nada deve ter mudado.
+        self.assertIn("confirmacao_reuniao", mcp._docs["mcp_access"]["tipos_promovidos"])
+        self.assertEqual(promocoes._docs["confirmacao_reuniao"]["status"], pa.STATUS_ACEITA)
+
+    def test_sem_suporte_a_transacao_retorna_erro_sem_escrever(self):
+        class _DbSemTransacao:
+            """Sem método .transaction() -- simula um backend/mock incompatível."""
+
+            def __init__(self, real_db):
+                self._real = real_db
+
+            def collection(self, name):
+                return self._real.collection(name)
+
+        db_sem_tx = _DbSemTransacao(_MockDb())
+        promocoes = db_sem_tx.collection(pa.COL_PROMOCOES)
+        promocoes._docs["confirmacao_reuniao"] = {
+            "tipo": "confirmacao_reuniao",
+            "status": pa.STATUS_ACEITA,
+        }
+        mcp = db_sem_tx.collection("system")
+        mcp._docs["mcp_access"] = {"tipos_promovidos": ["confirmacao_reuniao"]}
+
+        res = pa.revogar_promocao_autonomia(db_sem_tx, tipo="confirmacao_reuniao")
+        self.assertFalse(res["ok"])
+        self.assertIn("sem suporte a transação", res["erro"].lower())
+        self.assertEqual(promocoes._docs["confirmacao_reuniao"]["status"], pa.STATUS_ACEITA)
+
+    def test_tool_mcp_revogar(self):
+        from tools.hermes_tools import ToolContext, _revogar_promocao_autonomia
+
+        ctx = ToolContext(_db=self.db)
+        res = _revogar_promocao_autonomia(ctx, {"tipo": "confirmacao_reuniao", "motivo": "teste"})
+        self.assertTrue(res["ok"])
+        self.assertNotIn(
+            "confirmacao_reuniao", self.mcp._docs["mcp_access"]["tipos_promovidos"]
+        )
 
 
 class TestListarPromocoesPendentesETools(unittest.TestCase):

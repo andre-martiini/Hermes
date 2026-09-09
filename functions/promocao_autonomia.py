@@ -18,6 +18,7 @@ STATUS_PENDENTE = "pendente"
 STATUS_ACEITA = "aceita"
 STATUS_ADIADA = "adiada"
 STATUS_NUNCA = "nunca"
+STATUS_REVOGADA = "revogada"
 
 
 def _to_iso(val) -> str | None:
@@ -251,6 +252,127 @@ def decidir_promocao_autonomia(db, tipo: str, decisao: str) -> dict:
         "decisao": decisao_limpa,
         "status": novo_status,
         "detalhe": detalhes.get(decisao_limpa, ""),
+    }
+
+
+def revogar_promocao_autonomia(db, tipo: str, motivo: str | None = None) -> dict:
+    """Revoga a promoção de autonomia de um tipo, removendo-o de
+    system/mcp_access.tipos_promovidos.
+
+    Volta a exigir aprovação prévia no Telegram para novos rascunhos desse
+    tipo (o oposto de `decidir_promocao_autonomia(..., decisao="aceitar")`).
+    Não é permanente como 'nunca': o tipo pode voltar a ser sugerido no
+    futuro se as métricas (`tipos_elegiveis_para_promocao`) melhorarem de
+    novo, já que a exclusão em `tipos_elegiveis_para_promocao` só olha para
+    status 'pendente'/'nunca' e para presença em `tipos_promovidos` — nenhum
+    dos dois fica true aqui.
+
+    Transacional: lê mcp_ref e (se existir) sug_ref ANTES de escrever em
+    qualquer um dos dois — mesma ordem leitura-antes-de-escrita que o SDK
+    real do Firestore exige dentro de uma transação (Achado A04, mesmo
+    padrão de `decidir_promocao_autonomia` acima). Se o tipo não estiver
+    atualmente em `tipos_promovidos`, recusa com erro claro em vez de
+    devolver um "sucesso" vazio. Se existir uma sugestão em
+    `promocoes_autonomia_sugeridas/{tipo}`, registra `revogado_em` (e
+    `motivo_revogacao`, se informado) nela para preservar o histórico; se
+    não existir (ex.: tipo promovido manualmente ou sugestão antiga já
+    purgada), segue sem erro — a fonte de verdade da promoção é sempre
+    `tipos_promovidos`, a sugestão é só um registro auxiliar.
+    """
+    tipo_limpo = str(tipo or "").strip().lower()
+    if not tipo_limpo:
+        return {"ok": False, "erro": "tipo é obrigatório."}
+
+    motivo_limpo = str(motivo).strip() if motivo else None
+    mcp_ref = db.collection("system").document("mcp_access")
+    sug_ref = db.collection(COL_PROMOCOES).document(tipo_limpo)
+    agora_utc = datetime.datetime.now(timezone.utc)
+    server_ts = firestore.SERVER_TIMESTAMP if hasattr(firestore, "SERVER_TIMESTAMP") else agora_utc
+
+    # Achado A04, mesma justificativa de decidir_promocao_autonomia: sem
+    # transação, ou se ela falhar por qualquer motivo real, a revogação é
+    # recusada em vez de cair para um get+update não protegido. Duas
+    # chamadas concorrentes (ex.: revogar duas vezes seguidas, ou revogar
+    # enquanto outra decisão sobre o mesmo tipo está em voo) não podem ambas
+    # ler a mesma lista de tipos_promovidos e ambas escrever versões
+    # divergentes dela.
+    if not hasattr(db, "transaction"):
+        return {
+            "ok": False,
+            "erro": "Backend Firestore sem suporte a transação; revogação recusada para evitar condição de corrida.",
+        }
+
+    try:
+        tx = db.transaction()
+
+        @firestore.transactional
+        def _exec_revogar(transaction):
+            # Todas as leituras primeiro, todas as escritas depois.
+            mcp_snap = mcp_ref.get(transaction=transaction)
+            sug_snap = sug_ref.get(transaction=transaction)
+
+            tipos_atuais = []
+            if mcp_snap.exists:
+                tipos_atuais = list((mcp_snap.to_dict() or {}).get("tipos_promovidos") or [])
+            tipos_set = {str(t).strip().lower() for t in tipos_atuais if str(t).strip()}
+
+            if tipo_limpo not in tipos_set:
+                return {
+                    "ok": False,
+                    "erro": f"Tipo '{tipo_limpo}' não está atualmente promovido para envio autônomo.",
+                }
+
+            tipos_restantes = [t for t in tipos_atuais if str(t).strip().lower() != tipo_limpo]
+
+            transaction.set(
+                mcp_ref,
+                {
+                    "tipos_promovidos": tipos_restantes,
+                    "atualizado_em": server_ts,
+                },
+                merge=True,
+            )
+
+            if sug_snap.exists:
+                update_sug = {
+                    "status": STATUS_REVOGADA,
+                    "revogado_em": server_ts,
+                }
+                if motivo_limpo:
+                    update_sug["motivo_revogacao"] = motivo_limpo
+                elif hasattr(firestore, "DELETE_FIELD"):
+                    # Achado P2 da revisão Codex na PR #219: o mesmo doc de
+                    # sugestão é reaproveitado por revogar -> repromover ->
+                    # revogar de novo. Sem isto, revogar sem motivo depois
+                    # de uma revogação anterior COM motivo deixava o
+                    # `motivo_revogacao` velho intacto ao lado do
+                    # `revogado_em` novo -- atribuindo por engano a razão da
+                    # revogação anterior à atual no histórico. DELETE_FIELD
+                    # remove o campo de fato (não grava `None`); é no-op
+                    # seguro quando o campo nunca existiu.
+                    update_sug["motivo_revogacao"] = firestore.DELETE_FIELD
+                transaction.update(sug_ref, update_sug)
+
+            return {"ok": True, "tipo": tipo_limpo}
+
+        transaction_result = _exec_revogar(tx)
+    except Exception as tx_err:
+        print(f"[PromocaoAutonomia] Transação Firestore de revogação falhou: {tx_err}")
+        return {
+            "ok": False,
+            "erro": f"Não foi possível revogar de forma atômica: {tx_err}",
+        }
+
+    if not transaction_result.get("ok"):
+        return transaction_result
+
+    return {
+        "ok": True,
+        "tipo": tipo_limpo,
+        "detalhe": (
+            f"Tipo '{tipo_limpo}' revogado. Novos rascunhos desse tipo voltarão a "
+            f"exigir aprovação prévia no Telegram."
+        ),
     }
 
 
