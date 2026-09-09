@@ -489,9 +489,7 @@ class TestEdicao(unittest.TestCase):
             "motivo": "Follow-up",
         }
 
-        with mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=777) as mock_send, \
-                mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"), \
-                mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
+        with mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=777) as mock_send,              mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"),              mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
             res = oa.aplicar_edicao_rascunho(self.db, "job-3", "Texto novo corrigido pelo dono")
             self.assertEqual(res["status"], "ok")
             doc = self.outbox._docs["job-3"]
@@ -561,10 +559,7 @@ class TestCriarEListarRascunho(unittest.TestCase):
     def test_criar_rascunho_sucesso_dispara_telegram(self):
         with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={
             "encontrado": True, "nome": "Mariana", "chat_id": "5527998887777@c.us"
-        }), \
-                mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=555) as mock_send, \
-                mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"), \
-                mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
+        }),         mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=555) as mock_send,         mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"),         mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
             res = oa.criar_rascunho(
                 self.db,
                 contact_number="+5527998887777",
