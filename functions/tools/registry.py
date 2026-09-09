@@ -280,6 +280,49 @@ def get_schema(tool_name: str) -> dict:
     return _schema_cache[tool_name]
 
 
+def campos_obrigatorios_ausentes(tool_name: str, arguments: dict) -> list[str]:
+    """Nomes dos campos que o schema publicado (`tools/list`) marca como
+    `required` e que nao vieram em `arguments` — ausentes da chave ou com
+    valor `None`. Lista vazia quer dizer "nada de errado aqui".
+
+    P03 passo 2 ("validacao de argumentos"), sub-entrega 2/N, primeira fatia: so a metade
+    "obrigatorio ausente", nao checagem de tipo. E a fatia mais segura de
+    introduzir sem risco de rejeitar uma chamada que hoje funciona — um
+    campo que o proprio schema ja declara `required` nunca foi, por
+    definicao, uma chamada suportada quando ausente; o dispatch de hoje so
+    nao tem NENHUM preflight que diga isso ao cliente antes de a tool
+    tentar rodar (o handler, se checar, devolve string livre tipo
+    "ERRO|..."; se nao checar, ou propaga uma excecao Python crua via
+    `except Exception` em `mcp_server.py` ou, pior, segue em frente com um
+    dado incompleto). Checagem de TIPO (schema `type`) fica para uma
+    sub-entrega separada, com sua propria bateria de testes — ali o risco
+    de falso positivo contra um cliente legado que hoje manda um valor
+    "meio certo" (ex.: numero como string) e mais real.
+
+    Falha aberta, nunca fechada: schema ausente, ilegivel ou com formato
+    inesperado (achado da revisao adversarial desta sub-entrega: um
+    `except` estreito demais aqui viraria "falha fechada" na pratica, via o
+    `except Exception` de nivel superior em `mcp_server.py` transformando
+    qualquer excecao nao prevista num erro generico para TODA chamada
+    daquela tool — o oposto exato desta garantia) nao bloqueia a chamada
+    (mesma filosofia de `_handle_tools_list` ao omitir uma tool com schema
+    quebrado em vez de derrubar o catalogo inteiro) — o objetivo e dar um
+    erro mais claro quando ha certeza do problema, nunca inventar um
+    bloqueio novo por causa de uma falha de infraestrutura de leitura de
+    schema.
+    """
+    try:
+        schema = get_schema(tool_name)
+        parametros = schema.get("parameters") or {}
+        required = parametros.get("required") or []
+        if not isinstance(required, list) or not isinstance(arguments, dict):
+            return []
+        return [campo for campo in required
+                if isinstance(campo, str) and (campo not in arguments or arguments.get(campo) is None)]
+    except (FileNotFoundError, OSError, json.JSONDecodeError, AttributeError, TypeError):
+        return []
+
+
 def needs_confirmation(tool_name: str) -> bool:
     return tool_name in _NEEDS_CONFIRMATION
 

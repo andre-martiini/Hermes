@@ -1054,6 +1054,9 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
                     + (decisao_piso.motivo_legivel or "")
                 ).strip(),
             }, is_error=False)
+        erro_argumentos = _erro_campos_obrigatorios(name, arguments)
+        if erro_argumentos is not None:
+            return erro_argumentos
         try:
             proposal = preview_tool(name, ctx, arguments)
         except Exception as exc:  # prévia inválida deve apontar o dado, sem mutar
@@ -1092,6 +1095,10 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
     # tools que aceitam a acao implicitamente.
     if arguments.get("task_id"):
         ctx.task_id = str(arguments["task_id"])
+
+    erro_argumentos = _erro_campos_obrigatorios(name, arguments)
+    if erro_argumentos is not None:
+        return erro_argumentos
 
     # O perfil do usuario era alimentado so por `askCopilotoHermes`. Com a
     # interacao migrando para clientes MCP, aquele caminho para de ser exercido e
@@ -1148,6 +1155,35 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
     # porque `text` aqui pode ja vir como string crua do executor, nao um
     # payload dict a serializar).
     return {"content": [{"type": "text", "text": text}], "isError": is_error, "resultType": "complete"}
+
+
+def _erro_campos_obrigatorios(name: str, arguments: dict) -> dict | None:
+    """Preflight de `_handle_tools_call` (P03 passo 2, sub-entrega 2/N):
+    `None` quando a chamada tem todos os campos que o proprio schema
+    publicado (`tools/list`) marca como `required`; senao, a resposta MCP
+    de erro pronta para devolver direto.
+
+    So checa presenca, nao tipo (ver docstring de
+    `registry.campos_obrigatorios_ausentes`). Chamado em dois pontos de
+    `_handle_tools_call`, os dois unicos onde `arguments` de fato representa
+    o payload de negocio completo da tool: antes de criar a previa de uma
+    tool que exige confirmacao, e antes de executar direto uma tool que
+    nao exige. Deliberadamente NAO chamado no reenvio `_confirmed=true`
+    (`arguments` ali e so o envelope `_confirmation_id`, o payload real ja
+    foi validado — ou nao — quando a previa foi criada) nem dentro de
+    `_executar_confirmacao` (roda sobre o argumento ja congelado no
+    Firestore na criacao da previa, nao sobre entrada nova do cliente).
+    """
+    ausentes = registry.campos_obrigatorios_ausentes(name, arguments)
+    if not ausentes:
+        return None
+    campos = ", ".join(f"'{c}'" for c in ausentes)
+    return _text_result({
+        "erro": (
+            f"Campo(s) obrigatório(s) ausente(s) para '{name}': {campos}. "
+            "Preencha e tente novamente."
+        ),
+    }, is_error=True)
 
 
 def _looks_like_error(result) -> bool:
