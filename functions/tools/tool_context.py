@@ -39,15 +39,16 @@ def principal_de(ctx: "ToolContext", tipo: TipoPrincipal, *, origem_humana: bool
     continua sem religar — decidir o tipo correto de cada um fica para uma
     sub-entrega futura (ver docs/autonomia/execucao.md).
 
-    `origem_humana` segue o mesmo default de `tools/hermes_tools.py::
-    _principal_simulado`: quando omitido (`None`), verdadeiro para
-    `DONO_INTERATIVO`/`CLIENTE_ASSISTIDO`, falso para os demais. Um chamador
-    que sabe que a regra padrão não se aplica (ex.: um runner de serviço
-    disparado manualmente com o dono observando o log) pode informar o
-    valor explicitamente.
+    `origem_humana`: quando omitido (`None`), o próprio `Principal.__post_init__`
+    (autonomy/contracts.py, P02 sub-entrega 15/N) deriva o default por TIPO --
+    verdadeiro para `DONO_INTERATIVO`/`CLIENTE_ASSISTIDO`, falso para os
+    demais -- então este helper só repassa o parâmetro, sem recalcular a
+    mesma regra (fonte única; antes desta sub-entrega a derivação estava
+    duplicada aqui e em `tools/hermes_tools.py::_principal_simulado`). Um
+    chamador que sabe que a regra padrão não se aplica (ex.: um runner de
+    serviço disparado manualmente com o dono observando o log) pode informar
+    o valor explicitamente.
     """
-    if origem_humana is None:
-        origem_humana = tipo in (TipoPrincipal.DONO_INTERATIVO, TipoPrincipal.CLIENTE_ASSISTIDO)
     return Principal(uid=ctx.user_uid, tipo=tipo, canal=ctx.canal, origem_humana=origem_humana)
 
 
