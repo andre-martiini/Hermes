@@ -10,9 +10,9 @@ Fecha dois furos do relatório de custos:
    ``generate_content_stream`` e ``embed_content`` e registra o uso via
    ``gemini_cost_controls.log_gemini_usage`` com ``feature="auto:<modulo>.<funcao>"``
    (o chamador é descoberto pela pilha). Chamadas que já passam por
-   ``generate_content_logged`` / ``send_message_logged`` são ignoradas aqui, para
-   não contar duas vezes. ``Chat.send_message`` usa ``Models.generate_content``
-   por baixo, então chats diretos também ficam cobertos.
+   ``generate_content_logged`` / ``send_message_logged`` / ``embed_content_logged``
+   são ignoradas aqui, para não contar duas vezes. ``Chat.send_message`` usa
+   ``Models.generate_content`` por baixo, então chats diretos também ficam cobertos.
 
 2. **Claude sem telemetria.** ``log_claude_usage`` grava em
    ``system_usage/claude/daily/{dia}`` no mesmo formato de ``system_usage/gemini``
@@ -50,7 +50,7 @@ _SKIP_MODULE_PREFIXES = (
     "importlib",
     "unittest",
 )
-_LOGGED_WRAPPERS = {"generate_content_logged", "send_message_logged"}
+_LOGGED_WRAPPERS = {"generate_content_logged", "send_message_logged", "embed_content_logged"}
 
 
 # --------------------------------------------------------------------------- #
