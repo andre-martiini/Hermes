@@ -69,4 +69,13 @@ def schedule_whatsapp_message(db, contact_number: str, message: str, scheduled_t
             "usuario que a mensagem foi enviada.".format(doc_ref.id)
         )
     except Exception as e:
-        return f"Erro ao agendar mensagem no WhatsApp: {e}"
+        # P03 passo 2 (normalizador de resultados legados): sem o prefixo
+        # `ERRO|`, `mcp_server._looks_like_error` nao reconhecia esta falha
+        # -- exatamente a classe de bug que a docstring deste modulo
+        # descreve (09/2026: "Nesse dia dois envios foram aceitos, falharam
+        # no worker e o agente afirmou ao dono que tinha mandado"), so que na
+        # camada de baixo: aqui a falha e no PROPRIO enfileiramento (numero
+        # vazio, data invalida), nao no worker depois. Ajustado junto com
+        # `tools/pausar_conversa.py::pausar` (unico chamador interno, que
+        # checava o prefixo antigo "Erro" sem o pipe -- ver comentario la).
+        return f"ERRO|Erro ao agendar mensagem no WhatsApp: {e}"
