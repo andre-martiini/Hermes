@@ -460,6 +460,29 @@ def aprovar_rascunho(
             "erro": "Backend Firestore sem suporte a transação; aprovação recusada para evitar condição de corrida.",
         }
 
+    # Achado P1 da revisão Codex na PR #219 (revogar_promocao_autonomia):
+    # `liberar_rascunhos_promovidos` checa o mandato via
+    # `mandatos_io.mandato_tipo_promovido` ANTES de chamar esta função --
+    # mas aquela leitura não é atômica com a aprovação em si, e o resultado
+    # fica em cache por `tipo` para o laço inteiro (vários rascunhos do
+    # mesmo tipo reaproveitam uma única leitura). Se `revogar_promocao_
+    # autonomia` commitar entre a checagem e esta transação (ou entre a
+    # aprovação de um rascunho e a do próximo, do mesmo tipo, no mesmo
+    # laço), o rascunho ainda seria enviado sozinho mesmo já revogado --
+    # exatamente o "sucesso" que o André veria ao revogar, seguido do envio
+    # de qualquer forma. Por isso a liberação automática (só ela; aprovação
+    # manual via Telegram/WhatsApp/Cowork é a própria decisão humana e não
+    # depende de `tipos_promovidos`) rechecka `system/mcp_access` DENTRO
+    # desta mesma transação que muda o status -- é isto que faz o Firestore
+    # aplicar controle de concorrência otimista de verdade entre as duas
+    # funções: como ambas leem/escrevem o mesmo documento
+    # (`system/mcp_access`) dentro de suas respectivas transações, uma das
+    # duas é forçada a abortar/repetir se rodarem de fato em paralelo --
+    # nunca as duas commitam com visões inconsistentes. A checagem de fora
+    # continua útil (evita o custo de abrir a transação para um rascunho já
+    # sabidamente sem mandato), mas só esta aqui é a garantia real.
+    mcp_ref = db.collection("system").document("mcp_access") if aprovado_via == "janela_automatica" else None
+
     try:
         transaction = db.transaction()
 
@@ -476,6 +499,20 @@ def aprovar_rascunho(
                     "erro": f"Rascunho {motivo}",
                     "dados": data,
                 }
+
+            if mcp_ref is not None:
+                tipo_rascunho = str(data.get("tipo") or "").strip().lower()
+                mcp_snap = mcp_ref.get(transaction=tx)
+                tipos_promovidos_agora = set()
+                if mcp_snap.exists:
+                    lista = (mcp_snap.to_dict() or {}).get("tipos_promovidos") or []
+                    tipos_promovidos_agora = {str(t).strip().lower() for t in lista if str(t).strip()}
+                if tipo_rascunho not in tipos_promovidos_agora:
+                    return {
+                        "status": "mandato_revogado",
+                        "erro": f"Tipo '{tipo_rascunho}' não está mais promovido; aprovação automática recusada.",
+                        "dados": data,
+                    }
 
             tx.update(
                 doc_ref,
@@ -1072,6 +1109,24 @@ def liberar_rascunhos_promovidos(
         )
         if res.get("status") == "ok":
             liberados_count += 1
+        elif res.get("status") == "mandato_revogado":
+            # Achado P1 da revisão Codex na PR #219: a checagem de mandato
+            # logo acima (`mandato_tipo_promovido`, com cache por tipo para
+            # o laço inteiro) já passou para este rascunho, mas
+            # `aprovar_rascunho` rechecou de novo DENTRO da própria
+            # transação e descobriu que o tipo foi revogado nesse meio-
+            # tempo (revogação concorrente, ou cache deste laço já
+            # desatualizado por um rascunho anterior do mesmo tipo). Mesmo
+            # tratamento de "mandato não cobre mais": degrada para
+            # aprovação manual em vez de deixar em aguardando_janela para
+            # sempre.
+            print(
+                f"[OutboxAprovacao] Tipo '{tipo}' revogado durante a própria aprovação de {doc_id} "
+                "(corrida com revogar_promocao_autonomia); degradando para aprovação manual."
+            )
+            _degradar_rascunho_promovido_sem_mandato(
+                db, doc_id, motivo_codigo="mandato_revogado_durante_aprovacao",
+            )
 
     return liberados_count
 
