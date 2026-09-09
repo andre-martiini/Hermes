@@ -222,6 +222,41 @@ class TestProporReagendamentoSemanal(unittest.TestCase):
         self.assertEqual(keyboard[0][1]["text"], "❌ Descartar")
         self.assertEqual(keyboard[0][1]["callback_data"], f"reagendamento_lote:{propostas[0].id}:descartar")
 
+    def test_autonomia_pausada_bloqueia_proposta(self):
+        """P02 sub-entrega 15/N: preflight novo de
+        `autonomy.policy.estado_autonomia_atual` — PAUSADO impede até a
+        PROPOSTA de ser criada, sem tocar em `tarefas` nem no Telegram."""
+        db = MockDb({
+            "system": {"autonomy_state": {"global": "pausado"}},
+            "tarefas": {
+                "t1": {"titulo": "Renovar alvará", "status": "em andamento", "data_limite": "2026-09-01"},
+            },
+            COLLECTION_PROPOSTAS: {},
+        })
+
+        res = propor_reagendamento_semanal(db, now=self.segunda)
+        self.assertEqual(res["status"], "pulado_autonomia_pausada")
+        self.assertEqual(res["estado_autonomia"], "pausado")
+        self.assertEqual(len(db.collection(COLLECTION_PROPOSTAS).stream()), 0)
+
+    @patch("main._resolve_default_telegram_chat_id", return_value="123456")
+    @patch("main._send_telegram_message_raw_with_keyboard", return_value=True)
+    def test_autonomia_somente_preparacao_nao_bloqueia_proposta(self, mock_send, mock_chat_id):
+        """Diferente de PAUSADO: propor uma proposta que aguarda aprovação
+        humana no Telegram é, pela própria definição da seção 5.4 do plano,
+        'preparação' — SOMENTE_PREPARACAO não deve suprimir isto."""
+        db = MockDb({
+            "system": {"autonomy_state": {"global": "somente_preparacao"}},
+            "tarefas": {
+                "t1": {"titulo": "Renovar alvará", "status": "em andamento", "data_limite": "2026-09-01"},
+            },
+            COLLECTION_PROPOSTAS: {},
+        })
+
+        res = propor_reagendamento_semanal(db, now=self.segunda)
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(len(db.collection(COLLECTION_PROPOSTAS).stream()), 1)
+
 
 class TestCallbackReagendamentoLote(unittest.TestCase):
     def setUp(self):
