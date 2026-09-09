@@ -822,6 +822,42 @@ def liberar_rascunhos_promovidos(
     chat_id: str | int | None = None,
 ) -> int:
     """Varre e libera rascunhos em aguardando_janela cujo envio_liberado_em <= agora."""
+    # Preflight de autonomia (P02 sub-entrega 15/N, passo 1 do plano —
+    # primeira religação real deste arquivo a autonomy/policy.py). Esta é a
+    # ÚNICA função de todo o outbox que envia SEM um toque humano por
+    # instância — rascunhos "promovidos" (ver `_tipos_promovidos`) só
+    # aguardam a janela de cancelamento passar, depois `aprovar_rascunho` é
+    # chamado sozinho, aqui embaixo, com `aprovado_via="janela_automatica"`.
+    # Por não haver decisão humana concreta neste caminho (diferente de um
+    # toque real no Telegram), tanto PAUSADO quanto SOMENTE_PREPARACAO
+    # bloqueiam — o nome "somente preparação" já diz que enviar de verdade a
+    # terceiros não é preparação. Fail-closed também na FALHA de leitura do
+    # estado (SOMENTE_PREPARACAO é o resultado de `estado_autonomia_atual`
+    # quando o Firestore não responde — ver docstring lá).
+    #
+    # Isto NÃO é ainda o `decisao_piso()` completo com `Mandato` real — o
+    # wrapper de I/O que resolveria um `Mandato` a partir do Firestore não
+    # existe nesta sub-entrega (ver docstring de `Mandato` em
+    # autonomy/contracts.py), e a classificação de conteúdo do rascunho
+    # (`tipo`, hoje texto livre com default "outro") ainda não se liga a
+    # `Mandato.classes_conteudo_permitidas` — cortar esse caminho por
+    # completo, ou trocar a checagem hoje existente (`_tipos_promovidos`)
+    # por um `Mandato` fabricado sem dado real por trás, mudaria o
+    # comportamento de um sistema em produção que manda WhatsApp de verdade
+    # sem revisão do André — deliberadamente deixado para uma sub-entrega
+    # dedicada. Ver docs/autonomia/execucao.md para o registro completo.
+    from autonomy import policy as autonomy_policy
+    from autonomy.contracts import EstadoAutonomia
+
+    estado = autonomy_policy.estado_autonomia_atual(db)
+    if estado in (EstadoAutonomia.PAUSADO, EstadoAutonomia.SOMENTE_PREPARACAO):
+        print(
+            f"[OutboxAprovacao] Autonomia {estado.value} "
+            "(system/autonomy_state.global); pulando liberação automática de "
+            "rascunhos promovidos."
+        )
+        return 0
+
     agora_utc = agora or datetime.datetime.now(timezone.utc)
     if agora_utc.tzinfo is None:
         agora_utc = agora_utc.replace(tzinfo=timezone.utc)

@@ -41,6 +41,8 @@ def propor_reagendamento_semanal(db, now: datetime | None = None) -> dict:
     """Varre tarefas atrasadas e gera proposta de reagendamento em lote para aprovação no Telegram."""
     from tools.hermes_tools import ToolContext, preparar_reagendamento_em_lote
     from main import _resolve_default_telegram_chat_id, _send_telegram_message_raw_with_keyboard
+    from autonomy import policy as autonomy_policy
+    from autonomy.contracts import EstadoAutonomia
 
     if now is None:
         now = datetime.now(timezone.utc)
@@ -49,6 +51,26 @@ def propor_reagendamento_semanal(db, now: datetime | None = None) -> dict:
 
     now_sp = now.astimezone(_TZ_SP)
     today_str = now_sp.strftime("%Y-%m-%d")
+
+    # 0. Preflight de autonomia (P02 sub-entrega 15/N, passo 1 do plano —
+    # primeira religação real deste arquivo a autonomy/policy.py). Esta
+    # função roda sem humano olhando (gatilho `scheduler_fn`, toda
+    # segunda-feira 5h15) e só PROPÕE — a aplicação real ainda exige um toque
+    # explícito no Telegram (ver `revisar_semana_propor_reagendamento`
+    # abaixo) — então PAUSADO bloqueia (nem propor), mas SOMENTE_PREPARACAO
+    # não (propor uma proposta que aguarda aprovação humana é, pela própria
+    # definição da seção 5.4, "preparação"). Não é ainda o `decisao_piso()`
+    # completo — isso exigiria um `Mandato` real cobrindo esta ação, e o
+    # wrapper de I/O que resolveria um `Mandato` a partir do Firestore não
+    # existe (ver docstring de `Mandato.usos_na_janela_atual` em
+    # autonomy/contracts.py); chamar `decisao_piso()` sem mandato algum
+    # aplicável cairia fail-closed e desligaria esta função por completo —
+    # uma mudança de comportamento real que não é desta sub-entrega decidir
+    # sozinha. Ver docs/autonomia/execucao.md para o registro completo.
+    estado = autonomy_policy.estado_autonomia_atual(db)
+    if estado == EstadoAutonomia.PAUSADO:
+        print(f"[RevisaoSemanal] Autonomia pausada (system/autonomy_state.global=pausado); pulando proposta.")
+        return {"status": "pulado_autonomia_pausada", "estado_autonomia": estado.value}
 
     # 1. Trava de proposta única em aberto
     pendentes_stream = (

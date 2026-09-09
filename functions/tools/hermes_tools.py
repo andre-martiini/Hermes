@@ -2138,9 +2138,7 @@ def _principal_simulado(pedido: dict) -> Principal:
     """
     tipo = TipoPrincipal(str(pedido.get("principal_tipo") or "cliente_assistido"))
     origem_humana = pedido.get("origem_humana")
-    if origem_humana is None:
-        origem_humana = tipo in (TipoPrincipal.DONO_INTERATIVO, TipoPrincipal.CLIENTE_ASSISTIDO)
-    elif not isinstance(origem_humana, bool):
+    if origem_humana is not None and not isinstance(origem_humana, bool):
         # Achado da revisão adversarial desta sub-entrega: `bool("false")` é
         # `True` (truthiness de string não vazia, não parsing de JSON) — um
         # `"origem_humana": "false"` (erro plausível de um cliente MCP
@@ -2150,11 +2148,14 @@ def _principal_simulado(pedido: dict) -> Principal:
         # origem_humana=False (bool) => decision=prepare_only, para o mesmo
         # pedido. Rejeitar tipo errado explicitamente em vez de coagir.
         raise ValueError("'origem_humana' deve ser um booleano (true/false)")
+    # `None` passa direto para `Principal.__post_init__` (autonomy/contracts.py,
+    # P02 sub-entrega 15/N), que deriva o default por tipo -- fonte única,
+    # não recalculado aqui.
     return Principal(
         uid=pedido.get("uid"),
         tipo=tipo,
         canal=str(pedido.get("canal") or "mcp"),
-        origem_humana=bool(origem_humana),
+        origem_humana=origem_humana,
     )
 
 

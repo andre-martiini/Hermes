@@ -285,15 +285,18 @@ def _decisao_padrao_por_classe(
         # Exige também `eh_dono()` (achado do Codex sobre a PR #192): o
         # comentário acima já dizia que a exceção é para "dono interativo ou
         # cliente assistido", mas o código só checava a flag booleana
-        # `origem_humana` — nada no sistema de tipos impede um
-        # `ROTINA_COWORK`/`RUNNER_SERVICO`/`TERCEIRO_PORTAL` de ser
-        # construído com `origem_humana=True` (o próprio default do
-        # contrato). Sem essa checagem extra, um terceiro num portal
-        # público com "humano presente" (ele mesmo, não o dono) recebia o
-        # mesmo ALLOW que o dono interativo — a garantia de que é o DONO
-        # presente, não qualquer humano, é o que preserva a baixa fricção
-        # da seção 5 sem abrir mão da restrição de autoconcessão do passo 3
-        # de `avaliar()`.
+        # `origem_humana` — e um chamador ainda PODE passar
+        # `origem_humana=True` explicitamente para um
+        # `ROTINA_COWORK`/`RUNNER_SERVICO`/`TERCEIRO_PORTAL` (P02 sub-entrega
+        # 15/N tornou o DEFAULT por omissão derivado do tipo, não mais um
+        # `True` incondicional — mas não impede, nem deveria, uma passagem
+        # explícita, que existe para o caso legítimo de um runner disparado
+        # manualmente com o dono observando o log). Sem esta checagem extra,
+        # um terceiro num portal público com "humano presente" (ele mesmo,
+        # não o dono) receberia o mesmo ALLOW que o dono interativo — a
+        # garantia de que é o DONO presente, não qualquer humano, é o que
+        # preserva a baixa fricção da seção 5 sem abrir mão da restrição de
+        # autoconcessão do passo 3 de `avaliar()`.
         if principal.origem_humana and principal.eh_dono():
             return Decisao.ALLOW, "preparacao_interna_permitida_por_padrao", False
         return (
