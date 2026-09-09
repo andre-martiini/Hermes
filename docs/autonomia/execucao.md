@@ -366,3 +366,57 @@ pendencias:
   - "Todas as pendências já registradas em blocos anteriores que não foram tocadas por esta sub-entrega continuam abertas: risco de bare-name-resolution nos módulos de área, dependência de CLASSE_EFEITO_PISO/FLOOR_CONFIRMACAO_OBRIGATORIA continuarem com as mesmas chaves (travado por teste, não garantia estrutural -- a PR #206, ainda aberta no momento desta sub-entrega, torna isso estrutural; ver docs/autonomia/execucao.md quando/se mergeada)."
 proximo_pacote: "P02 -- com o wrapper de Mandato e liberar_rascunhos_promovidos religados, a extensão natural é religar revisao_semanal.py::propor_reagendamento_semanal ao mesmo padrão (hoje só o interruptor global) e considerar se/quando criar a tool de revogação explícita de tipo promovido. Nenhuma das duas é urgente -- proponho aguardar sinal do André sobre o que priorizar a seguir, em vez de escolher sozinha mais uma vez em sequência."
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: d5538746b40e5129e606b1848cd8640a304c712a
+pacote: "P01 sub-entrega 3/N -- aplicar_edicao_rascunho ganha proteção transacional (mesmo padrão A04 de aprovar_rascunho/descartar_rascunho)"
+# André confirmou o merge da PR #210 (P02 sub-entrega 17/N) e pediu, antes
+# de prosseguir, um relato honesto e completo de quanto falta do plano
+# inteiro ("me fale o quanto falta para finalizar o plano por completo").
+# Entregue o relato (P00 essencialmente completo, P01 só 20% feito --
+# passos 1-2/10 --, P02 com religação real ao motor de política mas ainda
+# com lacunas conhecidas, P03-P18 não iniciados). André respondeu "Perfeito,
+# então vamos prosseguir" -- sem indicar qual pacote/passo especificamente.
+# Interpretado, por autoridade da própria seção 14.1 do plano ("Implemente
+# os pacotes na ordem das dependências... Continue o trabalho independente...
+# não transforme cada passo reversível em nova confirmação"), como
+# autorização para escolher o próximo passo de engenharia bem escopado e
+# reversível na ordem de dependências, sem nova pergunta de confirmação.
+# Escolhido: fechar P01 (o pacote menos completo, sem dependências
+# pendentes de P02+) pela lacuna já identificada e registrada desde a
+# sub-entrega 1/N -- aplicar_edicao_rascunho sem a mesma proteção
+# transacional que aprovar_rascunho/descartar_rascunho já tinham.
+estado: pronto_para_revisao
+inicio: "2026-09-09T10:15:00Z"
+fim: "2026-09-09T10:45:00Z"
+arquivos_alterados:
+  - functions/outbox_aprovacao.py (aplicar_edicao_rascunho reescrita para o padrão transacional A04 -- get()+update() incondicional vira transação Firestore que relê e revalida o status antes de escrever, reutilizando validar_transicao_aprovacao)
+  - functions/test_outbox_aprovacao.py (6 testes novos: 2 em TestSemFallbackParaEscritaDesprotegida -- falha de transação e ausência de suporte a transação, sem escrita desprotegida; 3 em TestEdicao -- aguardando_janela funciona e volta para aguardando_aprovacao, rascunho já decidido recusa e não ressuscita status/conteúdo em nenhum dos 4 status terminais via subTest, rascunho inexistente retorna not_found)
+decisoes:
+  - id: p01-sub3-aplicar-edicao-fecha-lacuna-a04-registrada-desde-sub1
+    motivo: "Pendência registrada desde a sub-entrega 1/N de P01 (achado A04, quando aprovar_rascunho e descartar_rascunho ganharam proteção transacional): aplicar_edicao_rascunho ficou de fora daquela correção porque não tinha, na época, nenhum risco de ressureição de status documentado -- só o risco genérico de condição de corrida com liberar_rascunhos_promovidos/descartar_rascunho. Ao reabrir o código nesta sub-entrega, achado mais grave que o originalmente registrado: a função fazia um update() incondicional que reescrevia status=aguardando_aprovacao SEMPRE, sem checar o status atual do documento -- uma edição tardia (sessão de Telegram/WhatsApp obsoleta, retry, clique duplo em fila) sobre um rascunho já enviado (sent), aprovado (pending) ou descartado o ressuscitava silenciosamente de volta para aguardando_aprovacao, reabrindo ao dono uma decisão que ele já tinha tomado. Corrigido com o mesmo padrão transacional já usado (e comprovado) em aprovar_rascunho/descartar_rascunho: get() dentro de uma @firestore.transactional, revalidação de status via validar_transicao_aprovacao (reutilizada, não duplicada -- é o mesmo domínio de aguardando_aprovacao/aguardando_janela que a aprovação usa), e nenhum fallback para escrita desprotegida quando a transação falha ou o backend não suporta transação (retorna erro_transacao/erro_configuracao explícito, mesmo contrato dos outros dois caminhos)."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && python -m unittest discover -s . -p 'test_*.py'"
+  resultados:
+    - "Antes desta sub-entrega (main pós-merge da PR #210, commit d5538746b): 1463/1463, 0 falhas, 0 erros -- baseline mais limpa que a documentada na sub-entrega 17/N (as 8 falhas + 2 erros pré-existentes de lá não aparecem mais; o merge da PR #210 aparentemente absorveu correções/arquivos concorrentes de outra PR, incluindo functions/llm_usage_hooks.py e functions/test_llm_usage_hooks.py, não tocados por esta sub-entrega)."
+    - "Depois desta sub-entrega: 1468/1468, 0 falhas, 0 erros -- exatamente os 5 testes novos, zero regressão."
+evidencias:
+  - "Revisão adversarial independente (Agent tool, general-purpose, sem contexto da implementação) sobre o diff dos 2 arquivos. Veredito: seguro para enviar. Verificou de forma empírica (via git stash do fix, rodando os testes novos contra o código ANTIGO) que test_editar_rascunho_ja_decidido_recusa_e_nao_ressuscita de fato falha sob o comportamento pré-correção -- confirma que o teste não é vácuo. Leu o código-fonte da biblioteca google-cloud-firestore instalada para confirmar que o protocolo do mock (_begin/_clean_up/_commit/_rollback/_max_attempts/_read_only) é fiel ao real, mesmo double já usado em aprovar_rascunho/descartar_rascunho. 4 achados não-bloqueantes, documentados aqui e deliberadamente não corrigidos nesta sub-entrega para manter o diff revisado idêntico ao enviado: (1) o card do Telegram de um rascunho editado-mas-depois-decidido-por-outro-caminho não é fechado/atualizado -- mesma limitação pré-existente já registrada como pendência na sub-entrega 17/N para o caso de degrade; (2) o telegram_message_id gravado após reenviar o card de edição é um doc_ref.update() solto, fora da transação -- inofensivo (é só o id da mensagem do card, não afeta status/conteúdo), mesmo padrão não-transacional já usado em criar_rascunho/aprovar_rascunho/descartar_rascunho para esse mesmo campo; (3) envio_liberado_em não é explicitamente nulado quando uma edição rebaixa aguardando_janela para aguardando_aprovacao -- nit de higiene de dado, sem efeito funcional (avaliar_liberacao_promovidos já filtra por status=aguardando_janela primeiro, então um envio_liberado_em obsoleto num doc aguardando_aprovacao nunca é lido); (4) sugestão de cobertura de teste adicional (não um bug) para o caminho de reenvio de card falhar silenciosamente durante uma edição bem-sucedida -- já coberto pelo padrão try/except existente, só faltava um teste dedicado."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: aplicar_edicao_rascunho sem proteção transacional, pendência registrada desde a sub-entrega 1/N de P01 (achado A04)."
+  - "Os 4 achados não-bloqueantes da revisão adversarial desta sub-entrega, listados em evidencias acima, deliberadamente não corrigidos: (1) card Telegram não fechado quando o rascunho é decidido por outro caminho após edição; (2) telegram_message_id gravado fora da transação (inofensivo, padrão pré-existente); (3) envio_liberado_em não nulado ao rebaixar de aguardando_janela via edição (nit de higiene, sem efeito funcional); (4) nice-to-have de cobertura de teste para falha silenciosa de reenvio de card."
+  - "P01 passos 3-10 do plano continuam abertos: agent_requests.py, core/idempotency.py, mcp_jobs.py, mcp_server.py, firestore.rules/deploy.yml (mesmo bloqueio de PAT sem escopo workflow já registrado para P00), e o relatório de reconciliação final do pacote."
+  - "Todas as pendências já registradas nos blocos anteriores que não foram tocadas por esta sub-entrega continuam abertas (ver blocos de P02 acima)."
+proximo_pacote: "P01 -- próximo passo natural na ordem do plano é o passo 3 (agent_requests.py), seguido de core/idempotency.py e mcp_jobs.py/mcp_server.py; firestore.rules/deploy.yml permanece bloqueado pelo mesmo PAT sem escopo workflow de P00. Como esta é a segunda sub-entrega consecutiva escolhida sem confirmação explícita do André sobre QUAL trabalho priorizar, meu relato a ele nomeará esse próximo passo como recomendação, não como decisão já tomada -- para não encadear escolhas unilaterais indefinidamente."
+```

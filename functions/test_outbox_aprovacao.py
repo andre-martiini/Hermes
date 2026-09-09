@@ -472,6 +472,36 @@ class TestSemFallbackParaEscritaDesprotegida(unittest.TestCase):
         self.assertEqual(res["status"], "erro_configuracao")
         self.assertEqual(self.outbox._docs["job-sem-tx-desc"]["status"], oa.STATUS_AGUARDANDO)
 
+    def test_editar_com_falha_de_transacao_retorna_erro_sem_escrever(self):
+        self.outbox._docs["job-falha-edicao"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "content": "Texto original",
+            "destinatario_nome": "Marcos",
+        }
+        db_quebrado = _MockDbTransacaoQuebrada()
+        db_quebrado._cols[oa.COLLECTION] = self.outbox
+
+        res = oa.aplicar_edicao_rascunho(db_quebrado, "job-falha-edicao", "Texto novo")
+        self.assertEqual(res["status"], "erro_transacao")
+        self.assertIn("erro", res)
+        doc = self.outbox._docs["job-falha-edicao"]
+        self.assertEqual(doc["status"], oa.STATUS_AGUARDANDO)
+        self.assertEqual(doc["content"], "Texto original")
+
+    def test_editar_sem_suporte_a_transacao_retorna_erro_sem_escrever(self):
+        self.outbox._docs["job-sem-tx-edicao"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "content": "Texto original",
+            "destinatario_nome": "Marcos",
+        }
+        db_sem_tx = _MockDbSemTransacao(self.real_db)
+
+        res = oa.aplicar_edicao_rascunho(db_sem_tx, "job-sem-tx-edicao", "Texto novo")
+        self.assertEqual(res["status"], "erro_configuracao")
+        doc = self.outbox._docs["job-sem-tx-edicao"]
+        self.assertEqual(doc["status"], oa.STATUS_AGUARDANDO)
+        self.assertEqual(doc["content"], "Texto original")
+
 
 class TestEdicao(unittest.TestCase):
     """Testes de substituição de conteúdo em rascunho."""
@@ -489,7 +519,9 @@ class TestEdicao(unittest.TestCase):
             "motivo": "Follow-up",
         }
 
-        with mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=777) as mock_send,              mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"),              mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
+        with mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=777) as mock_send, \
+                mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"), \
+                mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
             res = oa.aplicar_edicao_rascunho(self.db, "job-3", "Texto novo corrigido pelo dono")
             self.assertEqual(res["status"], "ok")
             doc = self.outbox._docs["job-3"]
@@ -500,6 +532,56 @@ class TestEdicao(unittest.TestCase):
             self.assertEqual(doc["telegram_message_id"], 777)
             mock_send.assert_called_once()
             self.assertIn("Texto novo corrigido", mock_send.call_args[0][2])
+
+    def test_editar_rascunho_em_aguardando_janela_funciona_e_volta_para_aguardando(self):
+        # Editar um rascunho promovido (aguardando_janela) é uma decisão
+        # manual do dono -- volta para aguardando_aprovacao normal, tira do
+        # trilho de liberação automática. Comportamento pré-existente,
+        # preservado pela correção transacional (validar_transicao_aprovacao
+        # aceita os dois status).
+        self.outbox._docs["job-janela"] = {
+            "status": oa.STATUS_AGUARDANDO_JANELA,
+            "to_number": "+5527999991111",
+            "destinatario_nome": "Carla",
+            "content": "Confirmando amanhã",
+            "motivo": "Confirmação",
+            "envio_liberado_em": datetime.datetime.now(timezone.utc) + timedelta(minutes=5),
+        }
+        with mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=888), \
+                mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"), \
+                mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
+            res = oa.aplicar_edicao_rascunho(self.db, "job-janela", "Confirmando às 15h")
+            self.assertEqual(res["status"], "ok")
+            doc = self.outbox._docs["job-janela"]
+            self.assertEqual(doc["status"], oa.STATUS_AGUARDANDO)
+            self.assertEqual(doc["content"], "Confirmando às 15h")
+
+    def test_editar_rascunho_ja_decidido_recusa_e_nao_ressuscita(self):
+        # Achado real desta correção (P01 sub-entrega 3/N): antes, a função
+        # não checava o status atual -- um update() incondicional reescrevia
+        # status=aguardando_aprovacao mesmo sobre um rascunho já enviado,
+        # ressuscitando silenciosamente uma decisão já tomada. Cobre os
+        # status terminais/decididos que validar_transicao_aprovacao recusa.
+        for status_decidido in (oa.STATUS_PENDING, oa.STATUS_SENT, oa.STATUS_DESCARTADO, oa.STATUS_EXPIRADO):
+            with self.subTest(status=status_decidido):
+                doc_id = f"job-decidido-{status_decidido}"
+                self.outbox._docs[doc_id] = {
+                    "status": status_decidido,
+                    "content": "Texto já decidido",
+                    "destinatario_nome": "Felipe",
+                }
+                res = oa.aplicar_edicao_rascunho(self.db, doc_id, "Tentativa de edição tardia")
+                self.assertEqual(res["status"], "already_decided")
+                doc = self.outbox._docs[doc_id]
+                # Nada mudou: nem o conteúdo, nem (mais importante) o status
+                # -- não voltou para aguardando_aprovacao.
+                self.assertEqual(doc["status"], status_decidido)
+                self.assertEqual(doc["content"], "Texto já decidido")
+                self.assertNotIn("foi_editado", doc)
+
+    def test_editar_rascunho_inexistente_retorna_not_found(self):
+        res = oa.aplicar_edicao_rascunho(self.db, "job-nao-existe", "Texto novo")
+        self.assertEqual(res["status"], "not_found")
 
 
 class TestExpiracao(unittest.TestCase):
