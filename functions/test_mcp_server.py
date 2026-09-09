@@ -630,6 +630,21 @@ class TestHandleToolsCallResultType(unittest.TestCase):
             )
         self.assertEqual(r["resultType"], "complete")
 
+    def test_confirmar_acao_com_resultado_incerto_marca_iserror(self):
+        # P01 passo 6: um claim abandonado nao pode ser lido pelo cliente MCP
+        # como um "aguarde" rotineiro (mesmo isError:false de em_execucao) --
+        # precisa vir com isError:true para desencorajar estruturalmente uma
+        # nova tentativa que poderia duplicar o efeito.
+        with patch.object(
+            mcp_server, "_executar_confirmacao",
+            return_value={"status": "resultado_incerto", "erro": "resultado desconhecido"},
+        ), patch.object(mcp_server, "_audit_log"):
+            r = mcp_server._handle_tools_call(
+                {"name": "confirmar_acao", "arguments": {"confirmation_id": "c1"}}, ctx=_ctx_result_type()
+            )
+        self.assertEqual(r["resultType"], "complete")
+        self.assertTrue(r["isError"])
+
     def test_tool_exigindo_confirmacao_primeira_chamada_inclui_resulttype(self):
         with patch.object(mcp_server, "_exige_confirmacao", return_value=True), \
              patch.object(mcp_server, "preview_tool", return_value={"resumo": "prevista"}), \
