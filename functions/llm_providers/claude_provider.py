@@ -6,6 +6,7 @@ de uma mesma rodada via ThreadPoolExecutor, resultado final em texto.
 """
 
 import json
+import sys
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 
 GODMODE_MAX_ROUNDS = 10
@@ -51,6 +52,7 @@ def run_tool_loop(
     max_tokens: int = 4096,
     max_rounds: int = GODMODE_MAX_ROUNDS,
     fallback_model: str | None = None,
+    feature: str | None = None,
 ) -> dict:
     """
     Executa um turno completo de conversa com tool-calling na Claude Messages API.
@@ -64,6 +66,8 @@ def run_tool_loop(
     fallback_model: se o `model` primário responder "não disponível" (404),
              a rodada é refeita automaticamente com este modelo, e todas as
              rodadas seguintes do mesmo turno passam a usá-lo.
+    feature: rótulo para a telemetria de custo (system_usage/claude). Se omitido,
+             usa o nome do módulo chamador (ex.: "godmode", "secretario_whatsapp").
 
     Retorna: {"text", "history", "tools_used", "usage", "model_used", "fallback_used"}
     """
@@ -71,7 +75,13 @@ def run_tool_loop(
     messages.append({"role": "user", "content": user_message})
 
     tools_used: list[str] = []
-    usage_totals = {"input_tokens": 0, "output_tokens": 0}
+    usage_totals = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "rounds": 0,
+    }
     final_text = ""
     hit_round_limit = True
     active_model = model
@@ -98,9 +108,12 @@ def run_tool_loop(
                 raise
 
         usage = getattr(response, "usage", None)
+        usage_totals["rounds"] += 1
         if usage is not None:
             usage_totals["input_tokens"] += getattr(usage, "input_tokens", 0) or 0
             usage_totals["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
+            usage_totals["cache_read_input_tokens"] += getattr(usage, "cache_read_input_tokens", 0) or 0
+            usage_totals["cache_creation_input_tokens"] += getattr(usage, "cache_creation_input_tokens", 0) or 0
 
         assistant_content = [_serialize_block_for_request(block) for block in response.content]
         messages.append({"role": "assistant", "content": assistant_content})
@@ -144,6 +157,8 @@ def run_tool_loop(
             "Tente reformular o pedido em um escopo menor."
         )
 
+    _log_usage(usage_totals, active_model, feature)
+
     return {
         "text": final_text,
         "history": messages,
@@ -152,3 +167,23 @@ def run_tool_loop(
         "model_used": active_model,
         "fallback_used": fallback_used,
     }
+
+
+def _caller_feature() -> str:
+    """Nome do módulo que chamou run_tool_loop (godmode, secretario_whatsapp, ...)."""
+    try:
+        frame = sys._getframe(3)  # _caller_feature <- _log_usage <- run_tool_loop <- chamador
+        name = str(frame.f_globals.get("__name__", "") or "")
+        return name.rsplit(".", 1)[-1] or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _log_usage(usage_totals: dict, model: str, feature: str | None) -> None:
+    """Telemetria de custo (DEV-2026-0003): nunca interfere no resultado do turno."""
+    try:
+        from llm_usage_hooks import log_claude_usage
+
+        log_claude_usage(usage_totals, model=model, feature=feature or _caller_feature())
+    except Exception as exc:
+        print(f"[ClaudeUsage] telemetria indisponível: {exc}")

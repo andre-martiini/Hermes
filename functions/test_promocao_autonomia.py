@@ -122,6 +122,15 @@ class _MockCollection:
             self._id_counter += 1
         return _MockDocRef(self, doc_id)
 
+    def add(self, data):
+        # Espelha Collection.add do Firestore real (usado por
+        # autonomy.policy.registrar_decisao, chamado agora por
+        # liberar_rascunhos_promovidos -- P02 sub-entrega 17/N).
+        doc_id = f"mock-doc-{self._id_counter}"
+        self._id_counter += 1
+        self._docs[doc_id] = dict(data)
+        return (None, _MockDocRef(self, doc_id))
+
     def where(self, field, op, val):
         if op == "==":
             filtered = [(k, v) for k, v in self._docs.items() if v.get(field) == val]
@@ -380,6 +389,14 @@ class TestLiberacaoECancelamento(unittest.TestCase):
 
     def test_liberar_rascunhos_promovidos_so_libera_vencidos(self):
         agora = datetime.datetime(2026, 9, 4, 15, 0, tzinfo=timezone.utc)
+        # P02 sub-entrega 17/N: liberar_rascunhos_promovidos agora reavalia o
+        # mandato NA HORA da liberação (autonomy.mandatos_io.mandato_tipo_
+        # promovido), não confia mais só no status aguardando_janela gravado
+        # na criação -- por isso o tipo precisa estar de fato promovido em
+        # system/mcp_access para este teste continuar liberando o vencido.
+        self.db.collection("system")._docs["mcp_access"] = {
+            "tipos_promovidos": ["confirmacao_reuniao"],
+        }
         self.outbox._docs["vencido"] = {
             "status": oa.STATUS_AGUARDANDO_JANELA,
             "destinatario_nome": "Lucas",

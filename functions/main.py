@@ -6762,80 +6762,6 @@ def _fetch_usd_brl_rate(db) -> float:
 
 
 @scheduler_fn.on_schedule(
-    schedule="30 20 * * *",
-    timezone="America/Sao_Paulo",
-    memory=options.MemoryOption.MB_512,
-    timeout_sec=60,
-)
-def relatorio_diario_custo_gemini(event: scheduler_fn.ScheduledEvent):
-    """Watchdog de custo: resume o uso diário de tokens Gemini (system_usage/gemini)
-    e envia no Telegram, com alerta se estourar o orçamento (system/cost_controls)."""
-    db = get_db()
-    try:
-        from datetime import datetime as _dt, timezone as _tz
-
-        day = _dt.now(_tz.utc).strftime("%Y-%m-%d")
-        usage_doc = (
-            db.collection("system_usage").document("gemini")
-            .collection("daily").document(day).get()
-        )
-        if not usage_doc.exists:
-            print(f"[CustoGemini] Sem uso registrado em {day}.")
-            return
-        data = usage_doc.to_dict() or {}
-
-        budget = 5.0
-        try:
-            cfg = _cached_doc_get(db, "system", "cost_controls")
-            if cfg.exists:
-                budget = float((cfg.to_dict() or {}).get("daily_budget_usd", budget))
-        except Exception:
-            pass
-
-        cost = float(data.get("estimated_usd") or 0.0)
-        calls = int(data.get("calls") or 0)
-        tokens = data.get("tokens") or {}
-        features = data.get("features") or {}
-        top_features = sorted(
-            features.items(),
-            key=lambda kv: int((kv[1] or {}).get("tokens_total") or 0),
-            reverse=True,
-        )[:3]
-
-        usd_brl_rate = _fetch_usd_brl_rate(db)
-        cost_brl = cost * usd_brl_rate
-        budget_brl = budget * usd_brl_rate
-
-        lines = [
-            f"💰 <b>Uso Gemini — {day}</b>",
-            f"Custo estimado: <b>${cost:.2f}</b> (~R$ {cost_brl:.2f}) | orçamento: ${budget:.2f} (~R$ {budget_brl:.2f})",
-            f"Chamadas: {calls} | Tokens: {int(tokens.get('total') or 0):,}".replace(",", "."),
-            f"Entrada: {int(tokens.get('input') or 0):,} | Saída: {int(tokens.get('output') or 0):,}".replace(",", "."),
-        ]
-        if top_features:
-            lines.append("Top consumidores:")
-            for name, fdata in top_features:
-                lines.append(f"  • {name}: {int((fdata or {}).get('tokens_total') or 0):,} tokens".replace(",", "."))
-        lines.append("Obs.: cobre só tokens de IA (Gemini) — não inclui Firestore, Cloud Run e outros custos de infraestrutura.")
-        if cost > budget:
-            lines.insert(0, "⚠️ <b>ORÇAMENTO DIÁRIO ESTOURADO</b>")
-
-        message = "\n".join(lines)
-        print(f"[CustoGemini] {message}")
-
-        chat_id = _get_allowed_chat_id()
-        if not chat_id:
-            keys = (_cached_doc_get(db, "system", "api_keys").to_dict() or {})
-            chat_id = keys.get("telegram_chat_id") or keys.get("allowed_telegram_chat_id")
-        if chat_id:
-            _send_telegram_message(_get_telegram_token(db), chat_id, message)
-        else:
-            print("[CustoGemini] Nenhum chat_id do Telegram configurado; resumo apenas nos logs.")
-    except Exception as exc:
-        print(f"[CustoGemini] Falha no relatório diário: {exc}")
-
-
-@scheduler_fn.on_schedule(
     schedule="0 4 * * *",
     timezone="America/Sao_Paulo",
     memory=options.MemoryOption.MB_512,
@@ -14081,6 +14007,9 @@ from personal_diary import gerar_diario_pessoal, consolidar_personalidade, ajust
 from health_weekly_summary import gerar_resumo_semanal_saude, verificar_reavaliacoes_saude
 from health_calendar_sync import sincronizar_eventos_saude_agenda
 from health_weekly_report import gerar_relatorio_semanal_saude
+
+# Import daily cost report job (DEV-2026-0003, PR 1) — substitui relatorio_diario_custo_gemini
+from cost_report import relatorio_diario_custos
 
 
 @https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=60)
