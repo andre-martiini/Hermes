@@ -246,7 +246,7 @@ pacote: "P02 sub-entrega 16/N -- CLASSE_EFEITO_PISO/FLOOR_CONFIRMACAO_OBRIGATORI
 # proximo_pacote, abaixo, e a recomendação já registrada no bloco anterior:
 # "recomendo trazer ao André antes de escopar" -- envolve decisões reais de
 # produto, que mandatos existem hoje na prática e quais categorias de
-# conteúdo, que não me cabe tomar sozinho). O outro item pendente puramente
+# conteúdo, que não me cabe tomar sozinha). O outro item pendente puramente
 # técnico (risco de bare-name-resolution nos módulos de área) segue sem ação
 # concreta possível -- é um risco latente, "endereçar se/quando um teste
 # futuro tropeçar nisso", sem um passo de engenharia definido hoje.
@@ -277,7 +277,7 @@ flags:
 pendencias:
   - "RESOLVIDO por esta entrada: a dependência de CLASSE_EFEITO_PISO/FLOOR_CONFIRMACAO_OBRIGATORIA continuarem com as mesmas chaves, registrada desde a sub-entrega 12/N -- agora estrutural (falha no import), não só travada por teste."
   - "Todas as pendências já registradas nos blocos anteriores que não foram tocadas por esta sub-entrega continuam abertas: risco de bare-name-resolution nos módulos de área (latente, sem passo de engenharia concreto definido), Mandato.usos_na_janela_atual/orcamento_maximo sem wrapper de I/O real, taxonomia real de Mandato.classes_conteudo_permitidas (decisão de produto), outbox_aprovacao.py::criar_rascunho.tipo desconectado de Mandato.classes_conteudo_permitidas."
-proximo_pacote: "P02 -- as pendências puramente de engenharia estão resgatadas por ora (nenhuma sobrou sem decisão de produto pendente). A única candidata natural que resta -- o wrapper de I/O que resolve um Mandato real a partir do Firestore -- envolve decisões reais de produto (que mandatos existem hoje na prática, quais categorias de conteúdo o Hermes pode usar autonomamente) que não me cabe escopar sozinho; será levada ao André como pergunta consolidada, não decidida por conta própria como as três da sub-entrega 15/N."
+proximo_pacote: "P02 -- as pendências puramente de engenharia estão resgatadas por ora (nenhuma sobrou sem decisão de produto pendente). A única candidata natural que resta -- o wrapper de I/O que resolve um Mandato real a partir do Firestore -- envolve decisões reais de produto (que mandatos existem hoje na prática, quais categorias de conteúdo o Hermes pode usar autonomamente) que não me cabe escopar sozinha; será levada ao André como pergunta consolidada, não decidida por conta própria como as três da sub-entrega 15/N."
 ```
 
 ---
@@ -484,4 +484,74 @@ pendencias:
   - "P01 passos 4-10 do plano continuam abertos: idempotência com efeito (core/idempotency.py), mcp_jobs (reivindicação sobre leitura atual, estado de erro normalizado), firestore.rules/deploy.yml (mesmo bloqueio de PAT sem escopo workflow já registrado para P00), relatório de reconciliação final do pacote."
   - "Todas as pendências já registradas nos blocos anteriores que não foram tocadas por esta sub-entrega continuam abertas (ver blocos de P01/P02 acima)."
 proximo_pacote: "P01 -- próximo passo natural na ordem do plano é o passo 4 (idempotência: mudar erro de idempotência em caminho com efeito para resultado recuperável sem efeito, em vez de 'permitir processamento' silenciosamente -- core/idempotency.py), seguido do passo 5 (mcp_jobs.py). Como já são várias sub-entregas seguidas escolhidas por mim seguindo a ordem do plano sem nova confirmação explícita a cada uma, vou nomear isso como recomendação no relato ao André, não como decisão já tomada."
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: f97978b90132ae9e6431000eff0a1c43bfeb691d
+pacote: "P01 sub-entrega 5/N -- core/idempotency.py (passo 4 do plano): erro de idempotência em caminho com efeito vira resultado recuperável sem efeito, não mais 'permite processamento' silenciosamente"
+# Continuação autônoma autorizada por André ("PR 212 mesclado. Pode
+# prosseguir."). Escolhido exatamente o passo nomeado como recomendação no
+# proximo_pacote da entrega anterior (P01 passo 4, core/idempotency.py).
+#
+# Achado técnico NOVO nesta sub-entrega, bloqueante para o caminho normal de
+# envio: o único callsite real de check_and_register (githubWebhook, em
+# functions/main.py) fica dentro de um arquivo de 683664 bytes -- acima do
+# limite de 200000 bytes que o conector Argos aplica tanto para leitura
+# (argos_ler_arquivo_repositorio) quanto para escrita
+# (argos_escrever_arquivo_repositorio, que só aceita substituição integral do
+# arquivo, nunca patch/diff). Confirmado ao vivo: a tentativa de leitura foi
+# recusada pelo próprio Argos com erro explícito (413, "excede o limite de
+# 200000 bytes"). Diferente do limite de saída de 64000 tokens que afetou
+# este próprio execucao.md na sub-entrega 15/N de P02 (resolvido arquivando
+# conteúdo antigo), este é um limite do CONECTOR Argos sobre UM arquivo de
+# produção grande demais -- não há como dividir main.py em pedaços menores
+# só para esta sub-entrega sem um refactor real, fora de escopo.
+#
+# Levado ao André via AskUserQuestion (4 opções: aplicar o diff manualmente,
+# dividir main.py em módulos menores, pausar a sub-entrega, ou habilitar
+# push local). Ele escolheu aplicar manualmente -- recebeu o diff exato (15
+# linhas) e commitou direto na branch remota (commit 6ec1137cf). Confirmado
+# por git fetch + diff que o commit dele bate byte a byte com o diff que eu
+# tinha gerado localmente (mesmo blob sha do main.py, c8a05f3f2...) antes de
+# eu prosseguir com os dois arquivos de teste restantes.
+estado: pronto_para_revisao
+inicio: "2026-09-09T11:58:00Z"
+fim: "2026-09-09T12:16:00Z"
+arquivos_alterados:
+  - functions/core/idempotency.py (check_and_register reescrita: retorna enum de string RESULTADO_NOVO/RESULTADO_DUPLICADO/RESULTADO_ERRO_CONFIGURACAO/RESULTADO_ERRO_TRANSACAO em vez de bool; falha de transação ou backend sem suporte a transação nunca mais retornam True/"permite processamento")
+  - functions/main.py (githubWebhook: trata os 2 resultados de erro com HTTP 503, sem processar o evento -- aplicado manualmente por André, commit 6ec1137cf, verificado byte a byte contra o diff gerado)
+  - functions/test_github_webhook.py (testes existentes atualizados para o novo contrato de enum; 2 testes novos cobrindo o caminho 503 para cada tipo de erro)
+  - functions/test_idempotency.py (novo -- não existia cobertura dedicada para core/idempotency.py antes desta sub-entrega; 8 testes: novo/duplicado/ausente/aceita-int, e 4 no não-fallback para processamento silencioso em erro)
+decisoes:
+  - id: p01-sub5-idempotency-erro-vira-resultado-recuperavel-sem-efeito
+    motivo: "Passo 4 do plano fechado: 'erro em caminho com efeito' (Firestore indisponível, ou backend de teste sem suporte a transação) deixa de retornar True (permitir processamento) e passa a retornar um dos dois resultados de erro explícitos -- RESULTADO_ERRO_CONFIGURACAO (sem hasattr(db, 'transaction')) e RESULTADO_ERRO_TRANSACAO (falha real da transação). Em nenhum dos dois casos o documento de idempotência é escrito. O único chamador real (githubWebhook) responde 503 nesses casos -- não processa o evento agora (evita duplicar a anotação no diário de tarefas vinculadas se a causa raiz for uma entrega repetida coincidindo com uma falha transitória do Firestore) e sinaliza falha explícita para a entrega poder ser repetida depois (redelivery manual ou automática do GitHub), em vez de responder 200 como se tivesse sido tratada."
+    autoridade: existente_ou_nova
+  - id: p01-sub5-limite-200kb-do-conector-argos-bloqueia-edicao-de-main-py
+    motivo: "Achado de infraestrutura, não de produto: functions/main.py (683664 bytes) está acima do limite de 200000 bytes que argos_ler_arquivo_repositorio e argos_escrever_arquivo_repositorio aplicam -- confirmado ao vivo pela recusa 413 do próprio Argos na tentativa de leitura. Isso bloqueia QUALQUER edição futura a main.py pelo caminho normal desta sessão (Argos MCP), não só esta. Não tentei contornar via push local (fora da diretriz padrão desta sessão, sem credencial configurada) nem tentei dividir main.py sozinha (refactor real, fora de escopo, decisão de arquitetura que não me cabe tomar sozinha). Levado ao André via pergunta direta com 4 opções; ele escolheu aplicar o diff manualmente desta vez. Fica como pendência de infraestrutura para o André decidir se/quando quiser resolver de raiz (dividir main.py em módulos menores, ou uma ferramenta Argos com suporte a patch/diff para arquivos grandes)."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && ../venv/bin/python3 -m unittest discover -p 'test_*.py' -q"
+  resultados:
+    - "Antes desta sub-entrega (main pós-merge da PR #212, commit f97978b90): 1473 testes, 8 falhas + 2 erros -- confirmados PRÉ-EXISTENTES (mesmos de sempre: test_deteccao_subproduto.py, test_gmail_bill_pdf, test_mp4_repair)."
+    - "Depois desta sub-entrega (com o main.py exatamente como o André commitou, verificado por git fetch): 1483 testes (10 novos: 8 em test_idempotency.py, 2 em test_github_webhook.py), mesmas 8 falhas + 2 erros pré-existentes, zero regressão nova."
+evidencias:
+  - "Revisão adversarial independente (Agent tool, general-purpose, sem contexto da implementação) sobre o diff completo (antes do André aplicar main.py manualmente -- revisou o diff de main.py como texto, não como arquivo lido via Argos). Veredito explícito: 'safe to ship'. Verificou contra o código-fonte real da biblioteca google-cloud-firestore instalada que o mock de Transaction em test_idempotency.py é fiel ao protocolo real. Confirmou empiricamente que os testes pegam a regressão de verdade: reintroduziu deliberadamente o bug antigo (retornar RESULTADO_NOVO em vez de erro) e viu exatamente os 3 testes esperados falharem, depois restaurou o fix. Dois achados não-bloqueantes, nenhum corrigido (ambos aceitos como característica inerente ao design, não regressão): (1) update_id int 0 (falsy) seria tratado como 'nada a deduplicar' -- inalcançável hoje (delivery_id do GitHub é sempre string não vazia), comportamento inalterado do código original; (2) por o registro de idempotência e o efeito (anotar no diário) serem dois passos não-transacionais separados, um resultado ambíguo de commit (escrita no Firestore bem-sucedida no servidor mas cliente vê timeout) pode em teoria descartar permanentemente um evento -- inerente à decisão do próprio passo 4 do plano (preferir descartar/exigir retry a duplicar silenciosamente), e webhooks de repositório do GitHub não são reentregues automaticamente por padrão (confirmado via docs.github.com/webhooks/using-webhooks/handling-failed-webhook-deliveries)."
+  - "Após o André aplicar main.py manualmente (commit 6ec1137cf): confirmado por git fetch + git diff que o conteúdo bate byte a byte com o diff que eu tinha preparado (mesmo blob sha c8a05f3f2... do main.py que eu já tinha verificado localmente antes do bloqueio do Argos). Suíte completa rodada de novo contra o main.py real dele (não uma simulação) antes de enviar os 2 arquivos de teste restantes -- ver testes.resultados acima."
+  - "Todos os arquivos possíveis de enviar via Argos (idempotency.py, test_github_webhook.py, test_idempotency.py) enviados via mcp__Argos__argos_escrever_arquivo_repositorio com verificação de hash local (git hash-object) contra o sha retornado, batendo exatamente. main.py foi commitado manualmente por André diretamente na branch remota, verificado por leitura via git fetch (não pelo Argos, que recusa o arquivo)."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: passo 4 de P01 (erro de idempotência em caminho com efeito vira resultado recuperável sem efeito)."
+  - "NOVA, de infraestrutura: functions/main.py (683664 bytes) excede o limite de 200000 bytes do conector Argos para leitura E escrita -- bloqueia qualquer edição futura a main.py pelo caminho normal (Argos MCP) desta sessão, não só a desta sub-entrega. Duas saídas possíveis, nenhuma decidida ainda: dividir main.py em módulos menores (refactor real), ou uma ferramenta Argos com suporte a leitura/escrita parcial (patch/diff) para arquivos grandes. Por ora, a saída usada foi o André aplicar o diff manualmente -- funciona, mas não escala para edições maiores em main.py."
+  - "P01 passos 5-10 do plano continuam abertos: mcp_jobs (reivindicação sobre leitura atual, estado de erro normalizado), claim de confirmação abandonado, regras Firestore/deploy.yml (mesmo bloqueio de PAT sem escopo workflow já registrado para P00), relatório de reconciliação final do pacote."
+  - "Todas as pendências já registradas nos blocos anteriores que não foram tocadas por esta sub-entrega continuam abertas (ver blocos de P01/P02 acima)."
+proximo_pacote: "P01 -- próximo passo natural na ordem do plano é o passo 5 (mcp_jobs.py: reivindicação sobre leitura atual, estado de erro normalizado, resultado estruturado e timestamp de expiração). Antes de escolher sozinha, porém, vale levar ao André a pendência nova de infraestrutura (limite de 200KB do Argos em main.py) como pergunta separada de arquitetura -- não é um passo de engenharia autocontido como os anteriores, é uma decisão sobre a própria ferramenta de trabalho."
 ```
