@@ -134,3 +134,83 @@ pendencias:
   - "LACUNA DE PROCESSO já registrada na sub-entrega 18/N acima (mesclada sem entrada neste arquivo nem evidência localizável de revisão adversarial) -- não repetida aqui."
 proximo_pacote: "P02 -- com os dois itens da sub-entrega 17/N fechados (18/N e 19/N), os passos do plano ainda sem cobertura clara são o passo 2 (evoluir claims/scopes do OAuth existente sem expor refresh tokens do dono ao runner) e a parte de 'orçamento' e 'versão/escopo' do passo 8 (revalidar no despacho -- revogação já fica coberta de verdade pela sub-entrega 19/N; orçamento continua sem fonte de dado real, achado desde a sub-entrega 4/N). Investigação do estado real de mcp_oauth.py/tool_context.py necessária antes de propor qualquer um dos dois como próxima sub-entrega -- mesma disciplina de checar antes de afirmar."
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: dfa1cb0ab1a394321696b91c370d8401f59075ec
+pacote: "P02 -- decisão registrada (sem código): orcamento_maximo/limite_por_janela do Mandato ficam sem popular por ora; passo 8 do plano dado como fechado dentro do escopo atual"
+# Resposta do André (chat, não PR comment) à proposta em
+# docs/autonomia/proposta-p02-orcamento-limite-janela.md (PR #221, já
+# mesclada): aceitou a recomendação do documento -- "não popular agora
+# (deixar como está, sem limite), e revisitar só se um caso real pedir".
+# Confirmado explicitamente via pergunta direta (AskUserQuestion) depois do
+# merge da PR #221 sem comentário, para não presumir a resposta às três
+# perguntas em aberto do documento (quer teto? qual número/janela? por tipo
+# ou agregado?) -- disciplina padrão desta sessão de nunca inferir decisão
+# de produto do silêncio.
+estado: validado
+inicio: "2026-09-09T20:10:00Z"
+fim: "2026-09-09T20:14:00Z"
+arquivos_alterados:
+  - Nenhum arquivo de produto alterado -- decisão registrada aqui para constar. mandatos_io.mandato_tipo_promovido() continua deixando orcamento_maximo e limite_por_janela/usos_na_janela_atual como None, mesmo comportamento desde a sub-entrega 17/N.
+decisoes:
+  - id: p02-orcamento-limite-janela-sem-popular-por-decisao-do-andre
+    motivo: "André escolheu não implementar teto de orçamento nem de frequência por janela para tipos_promovidos neste momento -- aceitou a recomendação de docs/autonomia/proposta-p02-orcamento-limite-janela.md sem alteração. autonomy/policy.py::mandato_cobre() continua correto e fail-closed para os dois campos SE algum mandato algum dia os declarar; simplesmente nenhum declara hoje, por escolha, não por lacuna técnica. Revisitar exige um caso concreto (ex.: volume de envio automático que preocupe) ou a chegada de mandatos tipo 'missão' (P08/P09) para orcamento_maximo."
+    autoridade: existente_ou_nova
+testes:
+  comandos: []
+  resultados:
+    - "Não aplicável -- nenhuma mudança de código."
+evidencias:
+  - "Resposta direta do André via AskUserQuestion, opção 'Aceitar recomendação: sem limite por agora'."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada (decisão de produto, não código): orcamento_maximo/limite_por_janela do Mandato ficam sem popular; passo 8 do plano considerado fechado dentro do escopo atual (revogação real desde a sub-entrega 19/N; versão estruturalmente coberta -- avaliar() nunca reaplica decisão cacheada; orçamento/limite por decisão explícita nesta entrada; escopo/OAuth é o passo 2, não o 8, e segue como único item claramente aberto do pacote)."
+  - "Pendências já registradas em blocos anteriores continuam abertas: card do Telegram de rascunho degradado não reeditado; observabilidade de claim pendente sem _audit_log; TTL do Firestore não configurado para mcp_jobs; limite de 200KB do Argos em main.py; risco de corrupção silenciosa em escritas grandes via Argos."
+proximo_pacote: "P02 -- com este item fechado, o passo 2 (evoluir claims/scopes do OAuth existente) é o único item do pacote sem cobertura clara. André já tinha deliberadamente deixado esse passo de lado uma vez (priorizou orçamento/limite por janela primeiro); com esse item agora encerrado, vale perguntar diretamente se ele quer: (a) abrir o passo 2 agora, (b) considerar P02 suficientemente coberto pelo aceite do plano e avançar para P03 (consolidar contratos MCP e ferramentas), guardando o passo 2 como hardening a retomar quando fizer sentido, ou (c) outra prioridade."
+```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: fd6760a869fbd903fb7bb067cd795c2a7fdcef47
+pacote: "P02 -- fechamento do pacote: André decidiu considerar P02 coberto pelo aceite do plano e avançar para P03, guardando o passo 2 (OAuth claims/scopes) como hardening futuro"
+# Resposta do André via AskUserQuestion, opção "Considerar P02 coberto,
+# avançar para P03 (Recomendado)" -- essa era a própria recomendação que eu
+# tinha oferecido, então não há decisão de produto nova a registrar além da
+# escolha em si.
+estado: validado
+inicio: "2026-09-09T20:16:00Z"
+fim: "2026-09-09T20:18:00Z"
+arquivos_alterados:
+  - Nenhum -- fechamento de pacote é decisão de escopo, não código.
+decisoes:
+  - id: p02-fechado-passo2-oauth-vira-hardening-futuro-nao-bloqueante
+    motivo: "P02 atinge o aceite do plano dentro do escopo que o André priorizou: o agente não consegue conceder a si mesmo permissão (mandatos_io.mandato_tipo_promovido resolve na hora, sem cache entre chamadas de revogação; aprovar_rascunho recheca tipos_promovidos dentro da própria transação desde a sub-entrega 19/N); execução dentro de mandato não pede aprovação redundante (liberar_rascunhos_promovidos/propor_reagendamento_semanal passam por avaliar() real desde as sub-entregas 17/N-18/N); política indisponível impede novos efeitos que dependam dela (decisao_erro_avaliacao fail-closed, sub-entrega 12/N e 18/N). O passo 2 (evoluir claims/scopes do OAuth, hoje um único escopo 'hermes:tools' para tudo) fica registrado como item aberto do pacote, não como bloqueio -- é hardening (nenhum caminho de produção hoje expõe refresh token do dono a um runner, investigado antes de propor a proposta da PR #221), não uma correção de bug pendente. Retomar quando um caso concreto pedir diferenciação de escopo entre clientes hospedados."
+    autoridade: existente_ou_nova
+testes:
+  comandos: []
+  resultados:
+    - "Não aplicável -- decisão de escopo, sem mudança de código."
+evidencias:
+  - "Resposta direta do André via AskUserQuestion."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: P02 fechado como pacote."
+  - "ABERTA, não-bloqueante: passo 2 do plano (OAuth claims/scopes) fica como hardening futuro, sem prazo. Retomar se um caso concreto pedir (ex.: diferenciar permissões entre Claude.ai/Cowork/Claude Code em vez de um escopo único para todos)."
+  - "Pendências de produto/infraestrutura já registradas em blocos anteriores e não resolvidas por P02 continuam abertas: card do Telegram de rascunho degradado não reeditado; observabilidade de claim pendente sem _audit_log; TTL do Firestore não configurado para mcp_jobs; limite de 200KB do Argos em main.py; risco de corrupção silenciosa em escritas grandes via Argos."
+proximo_pacote: "P03 -- consolidar contratos MCP e ferramentas. Investigação inicial (nesta mesma sessão): tools/registry.py hoje é só um catálogo plano nome->descrição (103 tools), sem outputSchema/structuredContent/annotations, sem expected_version/idempotency_key nas escritas, sem inventário tipado por ferramenta -- nenhum dos 10 passos do plano para P03 foi começado. Passo 1 do plano (inventário tipado: domínio, leitura/escrita, reversibilidade, rede, dados sensíveis, política, verificador, por ferramenta) é o ponto de partida natural, e o mais trabalhoso -- 103 ferramentas para classificar com precisão, não por amostragem. Vou começar por ele."
+```
