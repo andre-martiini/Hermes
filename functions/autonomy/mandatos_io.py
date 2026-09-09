@@ -23,9 +23,10 @@ de escopo que ficaram para o André — ambas respondidas por ele em
 - `valido_ate` — janela rolante automática (opção "a" da proposta):
   recalculada a cada chamada a partir de `agora`, nunca lida de um valor
   persistido. O mandato nunca expira de fato enquanto o `tipo` continuar em
-  `tipos_promovidos`; a única forma real de revogação é removê-lo de lá
-  (`forma_revogacao`, abaixo) — não muda a UX de `decidir_promocao_
-  autonomia`, que já funciona hoje sem perguntar prazo.
+  `tipos_promovidos`; a forma de revogação é removê-lo de lá
+  (`forma_revogacao`, abaixo) — hoje via a tool dedicada
+  `revogar_promocao_autonomia` (P02 sub-entrega 19/N) — não muda a UX de
+  `decidir_promocao_autonomia`, que já funciona hoje sem perguntar prazo.
 
 Deliberadamente FORA do escopo deste módulo (ver proposta, seção "O que NÃO
 está nesta proposta"): taxonomia nova de categorias de conteúdo (usa o
@@ -79,11 +80,11 @@ def mandato_tipo_promovido(
     rascunho foi criado. Esta releitura (em vez de confiar no status
     `aguardando_janela` do documento, decidido no passado) é o ponto central
     desta sub-entrega: fecha a janela em que um `tipo` promovido no
-    momento da criação do rascunho é revogado (`decidir_promocao_autonomia`
-    removendo-o da lista, hoje só por edição direta do documento — não há
-    tool dedicada) antes de a janela de cancelamento vencer, e o rascunho
-    ainda assim seria enviado sozinho por carregar um status decidido no
-    passado.
+    momento da criação do rascunho é revogado (hoje via a tool dedicada
+    `revogar_promocao_autonomia`, que remove `tipo` de
+    `system/mcp_access.tipos_promovidos`) antes de a janela de cancelamento
+    vencer, e o rascunho ainda assim seria enviado sozinho por carregar um
+    status decidido no passado.
 
     Retorna `None` quando `tipo` (normalizado: strip + lower, mesmo padrão
     de `outbox_aprovacao._tipos_promovidos`) não está promovido agora —
@@ -141,9 +142,8 @@ def mandato_tipo_promovido(
             valido_ate=agora + timedelta(days=janela_validade_dias),
             origem_autorizacao=origem_autorizacao,
             forma_revogacao=(
-                f"Remover '{tipo_limpo}' de system/mcp_access.tipos_promovidos "
-                "(hoje só por edição direta do documento; não há tool dedicada "
-                "para revogar um tipo já promovido)."
+                f"revogar_promocao_autonomia(tipo='{tipo_limpo}') — remove "
+                f"'{tipo_limpo}' de system/mcp_access.tipos_promovidos."
             ),
         )
     except ValueError as err:
