@@ -437,3 +437,18 @@ def decrement_limit(
         print(f"[GeminiUsage] Failed to decrement limit for {user_id}/{feature}: {e}")
 
 
+
+
+# --------------------------------------------------------------------------- #
+# Telemetria completa de IA (DEV-2026-0003 / Issue #203, PR 2)
+# --------------------------------------------------------------------------- #
+# Intercepta as chamadas Gemini feitas fora de generate_content_logged e a
+# telemetria do Claude — ver llm_usage_hooks.py. Este módulo é importado por
+# main.py em todas as functions, então o hook é instalado uma vez por instância.
+# Desligar: HERMES_LLM_USAGE_HOOKS=0.
+try:
+    import llm_usage_hooks as _llm_usage_hooks
+
+    _llm_usage_hooks.install()
+except Exception as _exc:  # telemetria nunca impede o carregamento do módulo
+    print(f"[LLMUsageHooks] hook não instalado: {_exc}")
