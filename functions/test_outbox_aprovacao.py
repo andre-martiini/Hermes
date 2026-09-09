@@ -910,5 +910,78 @@ class TestHermesToolsOutboxCowork(unittest.TestCase):
         self.assertEqual(self.outbox._docs["r-desc"]["descartado_motivo"], "Desnecessário")
 
 
+class TestLiberarRascunhosPromovidosPreflightAutonomia(unittest.TestCase):
+    """P02 sub-entrega 15/N: `liberar_rascunhos_promovidos` é o único caminho
+    do outbox que envia sem toque humano por instância — cobre o preflight
+    novo de `autonomy.policy.estado_autonomia_atual` (nenhum teste cobria
+    esta função antes desta sub-entrega, nem o caminho feliz)."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.outbox = self.db.collection(oa.COLLECTION)
+        self.agora = datetime.datetime(2026, 9, 9, 12, 0, tzinfo=timezone.utc)
+
+    def _seed_promovido(self, doc_id="r-prom"):
+        self.outbox._docs[doc_id] = {
+            "status": oa.STATUS_AGUARDANDO_JANELA,
+            "to_number": "5527999990000@c.us",
+            "content": "Confirmando a reunião de amanhã",
+            "destinatario_nome": "Carla",
+            "tipo": "confirmacao_reuniao",
+            "telegram_message_id": 4242,
+            "envio_liberado_em": self.agora - timedelta(minutes=1),
+        }
+
+    def _set_estado(self, valor: str):
+        self.db.collection("system")._docs["autonomy_state"] = {"global": valor}
+
+    def test_caminho_feliz_sem_estado_configurado_e_ativo_libera_normalmente(self):
+        # Sem system/autonomy_state (nada configurado ainda) -> ATIVO, mesmo
+        # comportamento de produção hoje, sem esta sub-entrega.
+        self._seed_promovido()
+        n = oa.liberar_rascunhos_promovidos(self.db, agora=self.agora)
+        self.assertEqual(n, 1)
+        self.assertEqual(self.outbox._docs["r-prom"]["status"], oa.STATUS_PENDING)
+        self.assertEqual(self.outbox._docs["r-prom"]["aprovado_via"], "janela_automatica")
+
+    def test_estado_ativo_explicito_libera_normalmente(self):
+        self._seed_promovido()
+        self._set_estado("ativo")
+        n = oa.liberar_rascunhos_promovidos(self.db, agora=self.agora)
+        self.assertEqual(n, 1)
+        self.assertEqual(self.outbox._docs["r-prom"]["status"], oa.STATUS_PENDING)
+
+    def test_pausado_bloqueia_e_nao_toca_no_rascunho(self):
+        self._seed_promovido()
+        self._set_estado("pausado")
+        n = oa.liberar_rascunhos_promovidos(self.db, agora=self.agora)
+        self.assertEqual(n, 0)
+        self.assertEqual(self.outbox._docs["r-prom"]["status"], oa.STATUS_AGUARDANDO_JANELA)
+        self.assertNotIn("aprovado_via", self.outbox._docs["r-prom"])
+
+    def test_somente_preparacao_tambem_bloqueia_envio_automatico(self):
+        # "Somente preparação" -> enviar de verdade a terceiros não é
+        # preparação; só um toque humano real (aprovar_rascunho via
+        # Telegram) continua liberado, não o caminho automático.
+        self._seed_promovido()
+        self._set_estado("somente_preparacao")
+        n = oa.liberar_rascunhos_promovidos(self.db, agora=self.agora)
+        self.assertEqual(n, 0)
+        self.assertEqual(self.outbox._docs["r-prom"]["status"], oa.STATUS_AGUARDANDO_JANELA)
+
+    def test_falha_ao_ler_estado_cai_fail_closed_e_bloqueia(self):
+        # estado_autonomia_atual() já trata falha de leitura como
+        # SOMENTE_PREPARACAO (fail-closed) — confirma que o preflight herda
+        # essa garantia em vez de assumir ATIVO na dúvida.
+        self._seed_promovido()
+
+        class _DbQuebrado:
+            def collection(self, name):
+                raise RuntimeError("Firestore indisponível (simulado)")
+
+        n = oa.liberar_rascunhos_promovidos(_DbQuebrado(), agora=self.agora)
+        self.assertEqual(n, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
