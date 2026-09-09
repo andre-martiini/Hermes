@@ -19,6 +19,8 @@ from datetime import timezone, timedelta
 import unittest
 from unittest import mock
 
+from firebase_admin import firestore
+
 import outbox_aprovacao as oa
 import promocao_autonomia as pa
 
@@ -58,7 +60,18 @@ class _MockDocRef:
     def update(self, data):
         if self.id not in self.col._docs:
             raise KeyError(f"Doc {self.id} does not exist")
-        self.col._docs[self.id].update(data)
+        doc = self.col._docs[self.id]
+        for key, value in data.items():
+            # Espelha o comportamento real do Firestore para o sentinel
+            # DELETE_FIELD (google.cloud.firestore_v1.transforms.Sentinel):
+            # remove a chave por completo em vez de gravar o objeto sentinel
+            # como valor. Necessário a partir de revogar_promocao_autonomia
+            # (achado P2 da revisão Codex na PR #219), que usa isto para
+            # limpar `motivo_revogacao` de uma revogação anterior.
+            if hasattr(firestore, "DELETE_FIELD") and value is firestore.DELETE_FIELD:
+                doc.pop(key, None)
+            else:
+                doc[key] = value
 
     def delete(self):
         self.col._docs.pop(self.id, None)
@@ -775,6 +788,30 @@ class TestRevogarPromocaoAutonomia(unittest.TestCase):
         self.assertTrue(res["ok"])
         sug = self.promocoes._docs["confirmacao_reuniao"]
         self.assertNotIn("motivo_revogacao", sug)
+
+    def test_revoga_de_novo_sem_motivo_limpa_motivo_da_revogacao_anterior(self):
+        # Achado P2 da revisão Codex na PR #219: revoga com motivo, o tipo é
+        # promovido de novo (fora do escopo desta função -- aqui só semeia
+        # o efeito que decidir_promocao_autonomia(..., "aceitar") teria em
+        # tipos_promovidos) e é revogado outra vez, agora sem motivo. O
+        # motivo_revogacao da PRIMEIRA revogação não pode sobreviver e ser
+        # lido como se fosse da revogação atual.
+        primeiro = pa.revogar_promocao_autonomia(
+            self.db, tipo="confirmacao_reuniao", motivo="respostas saindo com erro"
+        )
+        self.assertTrue(primeiro["ok"])
+        self.assertEqual(
+            self.promocoes._docs["confirmacao_reuniao"]["motivo_revogacao"],
+            "respostas saindo com erro",
+        )
+
+        self.mcp._docs["mcp_access"]["tipos_promovidos"].append("confirmacao_reuniao")
+
+        segundo = pa.revogar_promocao_autonomia(self.db, tipo="confirmacao_reuniao")
+        self.assertTrue(segundo["ok"])
+        sug = self.promocoes._docs["confirmacao_reuniao"]
+        self.assertNotIn("motivo_revogacao", sug)
+        self.assertEqual(sug["status"], pa.STATUS_REVOGADA)
 
     def test_revoga_tipo_promovido_sem_sugestao_correspondente_nao_falha(self):
         # Tipo promovido "manualmente" (sem doc em promocoes_autonomia_sugeridas)
