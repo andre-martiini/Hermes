@@ -138,6 +138,12 @@ _access_cache: dict[str, object] | None = None
 _CONFIRMACAO_OBRIGATORIA: frozenset[str] = autonomy_policy.FLOOR_CONFIRMACAO_OBRIGATORIA
 _CONFIRMACAO_PADRAO: set[str] = set(_CONFIRMACAO_OBRIGATORIA)
 _CONFIRMACAO_TTL = timedelta(minutes=10)
+# Ver `_status_claim_pendente`: folga acima do timeout_sec=300 da função
+# `mcpServer` (comentário de `_TOOLS_LONGAS` abaixo) para nunca rotular como
+# abandonado um claim que ainda pode estar dentro do próprio limite da
+# função; folga abaixo de `_CONFIRMACAO_TTL` para o caso ficar identificável
+# como "resultado incerto" antes que a confirmação em si pareça só expirada.
+_CLAIM_ABANDONADA_APOS = timedelta(minutes=6)
 _WHATSAPP_JOB_ID_RE = re.compile(r"\bjob_id=([A-Za-z0-9_-]+)")
 
 # Tools que passam de um minuto e por isso nao podem rodar dentro do request.
@@ -674,6 +680,46 @@ def _resultado_confirmacao_whatsapp(ctx: ToolContext, argumentos: dict, result, 
         return resposta
 
 
+def _status_claim_pendente(claim_data: dict) -> dict:
+    """Decide o texto para um claim que já existe e ainda não tem resultado.
+
+    Duas leituras possíveis do mesmo fato ("claimed_at" presente, sem
+    executed_at): a tentativa anterior pode estar genuinamente em andamento
+    (comum: latência da tool), ou pode ter sido abandonada por uma
+    interrupção do servidor (timeout da função, reinício de instância) --
+    nesse segundo caso a tool pode já ter rodado e produzido efeito, mas
+    ninguém chegou a gravar o resultado. Não dá para diferenciar os dois
+    casos com certeza, então o corte usa `_CLAIM_ABANDONADA_APOS`: folga
+    generosa acima do timeout_sec=300 da própria função `mcpServer` (ver
+    comentário de `_TOOLS_LONGAS` acima), para nunca rotular como abandonado
+    um claim que ainda pode legitimamente estar rodando dentro do próprio
+    limite da função. Em NENHUM dos dois casos a tool é reexecutada aqui --
+    a diferença é a mensagem devolvida ao chamador e, para o caso abandonado,
+    o campo `erro`: achado da revisão adversarial (ver execucao.md) -- sem
+    ele, `_handle_tools_call` computa `isError: false` (mesma convenção
+    neutra de `em_execucao`, via `bool(result.get("erro"))`), e nada no
+    envelope MCP distingue estruturalmente "aguarde, está rodando" de
+    "resultado desconhecido, não repita sem checar". Um agente menos
+    cauteloso podia ler a mensagem e mesmo assim abrir uma confirmação nova
+    para a mesma ação. `erro` truthy aqui faz o cliente MCP receber
+    `isError: true`, sinal mais difícil de ignorar do que só o texto.
+    """
+    claimed_at = claim_data.get("claimed_at")
+    if isinstance(claimed_at, datetime) and datetime.now(timezone.utc) - claimed_at >= _CLAIM_ABANDONADA_APOS:
+        return {
+            "status": "resultado_incerto",
+            "erro": (
+                "Uma tentativa anterior desta confirmação foi reivindicada e não "
+                "terminou de forma registrada -- provável interrupção do servidor "
+                "(timeout ou reinício de instância). O efeito pode já ter "
+                "ocorrido. Não repita esta ação automaticamente (nem abrindo uma "
+                "confirmação nova para a mesma ação): verifique o histórico antes "
+                "de decidir se uma nova ação é necessária."
+            ),
+        }
+    return {"status": "em_execucao", "message": "Confirmação já está sendo executada."}
+
+
 def _executar_confirmacao(ctx: ToolContext, confirmation_id: object, *, tool_esperada: str | None = None) -> dict:
     """Executa uma única vez a proposta congelada, sem confiar no cliente."""
     if not isinstance(confirmation_id, str) or not confirmation_id.strip():
@@ -687,6 +733,23 @@ def _executar_confirmacao(ctx: ToolContext, confirmation_id: object, *, tool_esp
         return {"erro": "Confirmação não pertence a este usuário."}
     if data.get("executed_at") or data.get("executada_em"):
         return {"status": "ja_executada", "resultado_anterior": data.get("result", data.get("resultado"))}
+
+    # Reivindicação abandonada (P01 passo 6, achado A03 em espírito: "aprovação
+    # não encerra compromisso"). Verificamos se um claim já existe ANTES do
+    # teste de expiração de propósito: um claim tomado e nunca resolvido não
+    # pode virar "expirada, peça uma nova prévia" -- isso na prática liberaria
+    # uma segunda tentativa (nova confirmação, nova reivindicação, tool
+    # rodando de novo) sem saber se a primeira já produziu o efeito. Uma vez
+    # que um claim é encontrado, este confirmation_id nunca mais executa a
+    # tool -- só relata `em_execucao` ou `resultado_incerto` via
+    # `_status_claim_pendente`, para sempre. Resolver de verdade (sweep de
+    # leases vencidos com resultado observado) é o escopo maior do P04; aqui
+    # o objetivo é não mentir sobre o estado e não duplicar efeito.
+    claim = ref.collection("claims").document("execute")
+    claim_snap = claim.get()
+    if claim_snap.exists:
+        return _status_claim_pendente(claim_snap.to_dict() or {})
+
     expires_at = data.get("expires_at")
     if not isinstance(expires_at, datetime) or expires_at <= datetime.now(timezone.utc):
         return {"erro": "Confirmação expirada; peça uma nova prévia."}
@@ -698,14 +761,15 @@ def _executar_confirmacao(ctx: ToolContext, confirmation_id: object, *, tool_esp
     # `create` é atômico no Firestore: duas confirmações concorrentes não podem
     # obter a mesma reivindicação. O outbox usa o mesmo id como segunda barreira
     # para WhatsApp.
-    claim = ref.collection("claims").document("execute")
     try:
         claim.create({"claimed_at": datetime.now(timezone.utc)})
     except Exception:
+        # Concorrência real entre a checagem acima e este ponto: outra chamada
+        # tomou o claim primeiro. Mesma regra de `_status_claim_pendente`.
         latest = ref.get().to_dict() or {}
         if latest.get("executed_at") or latest.get("executada_em"):
             return {"status": "ja_executada", "resultado_anterior": latest.get("result", latest.get("resultado"))}
-        return {"status": "em_execucao", "message": "Confirmação já está sendo executada."}
+        return _status_claim_pendente(claim.get().to_dict() or {})
     ctx.mcp_confirmation_id = confirmation_id
     ctx.mcp_confirmation_created_at = data.get("created_at")
     ctx.mcp_confirmation_preview = data.get("preview")

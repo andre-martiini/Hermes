@@ -492,12 +492,17 @@ class _ConfirmationClaim:
         if self._parent.claimed:
             raise RuntimeError("already exists")
         self._parent.claimed = True
+        self._parent.claim_data = dict(data)
+
+    def get(self):
+        return _ConfirmationSnap(dict(self._parent.claim_data) if self._parent.claimed else None)
 
 
 class _ConfirmationRef:
     def __init__(self, data):
         self.data = data
         self.claimed = False
+        self.claim_data = None
 
     def get(self):
         return _ConfirmationSnap(self.data)
@@ -891,6 +896,100 @@ class TestConfirmacaoPersistida(unittest.TestCase):
         with mock.patch.object(mcp_server, "execute_tool") as execute:
             result = mcp_server._executar_confirmacao(ctx, "id-expirado")
         self.assertIn("expirada", result["erro"])
+        execute.assert_not_called()
+
+    # -- P01 passo 6 (achado A03 em espírito): claim de confirmação abandonado --
+    # reivindicação tomada, processo interrompido antes de gravar
+    # executed_at/result. Nenhum destes casos pode reexecutar a tool.
+
+    def test_claim_recente_reporta_em_execucao_sem_reexecutar(self):
+        from datetime import datetime, timedelta, timezone
+        from unittest import mock
+
+        ctx = self._ctx(self._confirmation())
+        ctx._db.ref.claimed = True
+        ctx._db.ref.claim_data = {"claimed_at": datetime.now(timezone.utc) - timedelta(seconds=5)}
+        with mock.patch.object(mcp_server, "execute_tool") as execute:
+            result = mcp_server._executar_confirmacao(ctx, "id-em-andamento")
+        self.assertEqual(result["status"], "em_execucao")
+        execute.assert_not_called()
+
+    def test_claim_abandonado_reporta_resultado_incerto_sem_reexecutar(self):
+        from datetime import datetime, timedelta, timezone
+        from unittest import mock
+
+        ctx = self._ctx(self._confirmation())
+        ctx._db.ref.claimed = True
+        ctx._db.ref.claim_data = {
+            "claimed_at": datetime.now(timezone.utc) - mcp_server._CLAIM_ABANDONADA_APOS - timedelta(seconds=1)
+        }
+        with mock.patch.object(mcp_server, "execute_tool") as execute:
+            result = mcp_server._executar_confirmacao(ctx, "id-abandonado")
+        self.assertEqual(result["status"], "resultado_incerto")
+        # Achado da revisão adversarial: sem um "erro" truthy aqui,
+        # `_handle_tools_call` computaria isError:false (mesma convenção
+        # neutra de em_execucao) e nada distinguiria estruturalmente
+        # "aguarde" de "resultado desconhecido, não repita".
+        self.assertTrue(result.get("erro"))
+        execute.assert_not_called()
+
+    def test_claim_abandonado_prevalece_mesmo_com_confirmacao_expirada(self):
+        """Regressão do bug que motivou o passo 6: antes desta correção, uma
+        confirmação com claim abandonado e `expires_at` no passado caía direto
+        no ramo "erro: expirada; peça uma nova prévia" -- convite, na prática,
+        a repetir a ação via uma confirmação nova sem saber se a primeira já
+        rodou e produziu efeito."""
+        from datetime import datetime, timedelta, timezone
+        from unittest import mock
+
+        ctx = self._ctx(self._confirmation(expires_at=datetime.now(timezone.utc) - timedelta(minutes=1)))
+        ctx._db.ref.claimed = True
+        ctx._db.ref.claim_data = {
+            "claimed_at": datetime.now(timezone.utc) - mcp_server._CLAIM_ABANDONADA_APOS - timedelta(seconds=1)
+        }
+        with mock.patch.object(mcp_server, "execute_tool") as execute:
+            result = mcp_server._executar_confirmacao(ctx, "id-abandonado-e-expirado")
+        self.assertEqual(result["status"], "resultado_incerto")
+        self.assertTrue(result.get("erro"))
+        execute.assert_not_called()
+
+    def test_claim_sem_claimed_at_valido_nao_quebra_e_fica_do_lado_seguro(self):
+        # Defesa: um documento de claim sem `claimed_at` utilizável (corrompido,
+        # ou escrito por uma versão futura do código) nunca vira reexecução --
+        # na dúvida sobre a idade do claim, "em_execucao" é o lado seguro.
+        from unittest import mock
+
+        ctx = self._ctx(self._confirmation())
+        ctx._db.ref.claimed = True
+        ctx._db.ref.claim_data = {}
+        with mock.patch.object(mcp_server, "execute_tool") as execute:
+            result = mcp_server._executar_confirmacao(ctx, "id-claim-corrompido")
+        self.assertEqual(result["status"], "em_execucao")
+        execute.assert_not_called()
+
+    def test_race_no_create_aplica_mesma_regra_do_claim_pendente(self):
+        """Duas chamadas quase simultâneas: a pré-checagem desta chamada não viu
+        claim (nenhum existia ainda), mas outra chamada reivindicou entre essa
+        leitura e o `create()` atômico -- o `except` deve aplicar a MESMA regra
+        de `_status_claim_pendente`, não sempre 'em_execucao' incondicional."""
+        from datetime import datetime, timedelta, timezone
+        from unittest import mock
+
+        ctx = self._ctx(self._confirmation())
+        ref = ctx._db.ref
+        claimed_at_abandonado = datetime.now(timezone.utc) - mcp_server._CLAIM_ABANDONADA_APOS - timedelta(seconds=1)
+
+        def _create_simulando_corrida(self, data):
+            ref.claimed = True
+            ref.claim_data = {"claimed_at": claimed_at_abandonado}
+            raise RuntimeError("already exists")
+
+        with mock.patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), \
+             mock.patch.object(mcp_server, "execute_tool") as execute, \
+             mock.patch.object(_ConfirmationClaim, "create", _create_simulando_corrida):
+            result = mcp_server._executar_confirmacao(ctx, "id-corrida")
+        self.assertEqual(result["status"], "resultado_incerto")
+        self.assertTrue(result.get("erro"))
         execute.assert_not_called()
 
     def test_confirmacao_de_envio_imediato_devolve_job_e_estado_do_outbox(self):
