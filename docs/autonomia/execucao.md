@@ -277,3 +277,47 @@ pendencias:
   - "Pendências já registradas em blocos anteriores e não tocadas por esta sub-entrega continuam abertas: observabilidade de claim pendente sem _audit_log; formato de erro de _buscar_e_analisar_email; TTL do Firestore não configurado para mcp_jobs; limite de 200KB do Argos em main.py; risco de corrupção silenciosa em escritas grandes (ver blocos de P01 sub-entrega 5/N, 6/N e 7/N)."
 proximo_pacote: "P01 fica com um único item aberto: passo 9 (deploy.yml), que depende só do André aplicar o diff de 2 linhas manualmente -- assim que ele confirmar a aplicação, o pacote inteiro pode ser dado como concluído (aceite do plano: nenhuma falha de transação produz escrita alternativa; aprovação não encerra compromisso; regras protegem controles sem impedir fluxos legítimos; não há falso done quando handler relata erro -- todos verificados nas sub-entregas 1/N a 8/N). Depois disso, o próximo pacote na ordem de dependências do plano é P02 (unificar identidade e política de autonomia), que já tem trabalho anterior parcial registrado nos blocos arquivados (execucao-archive-p00-a-p02sub11.md e seguintes) -- vale um levantamento do que já está feito ali antes de continuar, mesma disciplina aplicada aqui para P01."
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 68b30b9ba52b5a7b39500181ea4dff4785efd833
+pacote: "P01 sub-entrega 9/N -- fechamento do pacote: passo 9 (achado A17) aplicado manualmente pelo André, verificado; P01 completo"
+# Continuação autônoma autorizada por André ("código corrigido e pull
+# request mesclado. vamos prosseguir"), depois de eu ter apontado (fora
+# deste arquivo, em mensagem direta) que o commit dele em deploy.yml
+# (081b7fd7b) tinha derrubado a barra de continuação `\` no final da linha
+# do --only, quebrando o comando em dois na leitura do bash -- a segunda
+# "linha" (--project gestao-hermes --non-interactive --force) viraria um
+# comando inexistente, e o deploy real rodaria sem --project/--non-
+# interactive/--force. André corrigiu com o commit 6e600fde1 ("Fix
+# formatting in deploy.yml for firebase deploy command"), devolvendo a
+# barra. Verificado por leitura direta do arquivo em main -- disciplina
+# padrão desta sessão de nunca aceitar "corrigido" sem checar.
+estado: validado
+inicio: "2026-09-09T16:10:00Z"
+fim: "2026-09-09T16:15:00Z"
+arquivos_alterados:
+  - .github/workflows/deploy.yml (aplicado manualmente pelo André, fora do Argos -- bloqueado por falta de escopo workflow no PAT, mesmo achado já registrado para P00 e para este passo na sub-entrega 8/N. Commits 081b7fd7b + 6e600fde1: acrescenta firestore:rules ao --only do passo de deploy, mantendo hosting,functions,firestore:indexes,storage.)
+decisoes:
+  - id: p01-sub9-passo9-fechado-com-fix-de-sintaxe-verificado
+    motivo: "Achado A17 fechado: deploy.yml agora inclui firestore:rules no --only do passo de deploy, com a sintaxe do bloco `run:` (continuação de linha via `\\`) íntegra -- confirmado por leitura do arquivo em main após os dois commits do André, não só pela afirmação dele de que estava corrigido. Com isso, os quatro passos que restavam registrados como pendência (7, 8, 9, 10) estão todos fechados -- 7, 8 e 10 já estavam prontos e mesclados desde 2026-09-08 (reconciliados na sub-entrega 8/N), e 9 fecha agora. P01 como pacote atinge o aceite do plano: nenhuma falha de transação produz escrita alternativa (outbox_aprovacao.py, promocao_autonomia.py, agent_requests.py, core/idempotency.py, mcp_jobs.py); aprovação não encerra compromisso (A03); regras protegem controles sem impedir fluxos legítimos (A16, testado em tests/rules/); não há falso done quando handler relata erro (mcp_jobs.py, mcp_server.py); claim de confirmação abandonado não libera retry duplicador (P01 sub-entrega 7/N)."
+    autoridade: existente_ou_nova
+testes:
+  comandos: []
+  resultados:
+    - "Não aplicável -- mudança de configuração de CI, sem cobertura de teste automatizado possível neste sandbox (emulador/deploy real não executáveis aqui, ver sub-entrega 8/N). Verificação foi por leitura direta do arquivo, não por execução."
+evidencias:
+  - "git fetch + leitura de .github/workflows/deploy.yml em origin/main após o relato do André: confirma que a linha --only termina em ` \\` novamente, restaurando a continuação de comando de 5 linhas (firebase deploy --only ... --project ... --non-interactive --force) como um único comando, não dois."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: passo 9 de P01 (achado A17), último item aberto do pacote. P01 dado como CONCLUÍDO."
+  - "Pendências de produto/infraestrutura/processo já registradas em blocos anteriores e não resolvidas por P01 continuam abertas para quando forem relevantes: formato de erro de _buscar_e_analisar_email (mcp_jobs.py); TTL do Firestore não configurado para mcp_jobs; observabilidade de claim pendente sem _audit_log; limite de 200KB do Argos em main.py; risco de corrupção silenciosa em escritas grandes via Argos; achado de processo sobre os dois commits de 2026-09-08 sem PR (ver sub-entrega 8/N) -- nenhuma delas é escopo de outro pacote específico do plano, ficam como lembretes operacionais."
+proximo_pacote: "P02 -- unificar identidade e política de autonomia. Antes de propor trabalho novo, vale repetir aqui a mesma disciplina que revelou o estado real de P01 nesta sub-entrega e na 8/N: os blocos arquivados (execucao-archive-p00-a-p02sub11.md e os arquivos seguintes) já registram sub-entregas de P02 (pelo menos 1/N, identidade/política, e reaparecem menções a P02 sub-entregas até 17/N nos cabeçalhos de arquivo) -- preciso investigar o que já está implementado e mesclado antes de escolher o próximo passo de P02, em vez de presumir que o pacote começa do zero."
+```
