@@ -176,3 +176,41 @@ pendencias:
   - "Pendências já registradas em blocos anteriores continuam abertas: card do Telegram de rascunho degradado não reeditado; observabilidade de claim pendente sem _audit_log; TTL do Firestore não configurado para mcp_jobs; limite de 200KB do Argos em main.py; risco de corrupção silenciosa em escritas grandes via Argos."
 proximo_pacote: "P02 -- com este item fechado, o passo 2 (evoluir claims/scopes do OAuth existente) é o único item do pacote sem cobertura clara. André já tinha deliberadamente deixado esse passo de lado uma vez (priorizou orçamento/limite por janela primeiro); com esse item agora encerrado, vale perguntar diretamente se ele quer: (a) abrir o passo 2 agora, (b) considerar P02 suficientemente coberto pelo aceite do plano e avançar para P03 (consolidar contratos MCP e ferramentas), guardando o passo 2 como hardening a retomar quando fizer sentido, ou (c) outra prioridade."
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: fd6760a869fbd903fb7bb067cd795c2a7fdcef47
+pacote: "P02 -- fechamento do pacote: André decidiu considerar P02 coberto pelo aceite do plano e avançar para P03, guardando o passo 2 (OAuth claims/scopes) como hardening futuro"
+# Resposta do André via AskUserQuestion, opção "Considerar P02 coberto,
+# avançar para P03 (Recomendado)" -- essa era a própria recomendação que eu
+# tinha oferecido, então não há decisão de produto nova a registrar além da
+# escolha em si.
+estado: validado
+inicio: "2026-09-09T20:16:00Z"
+fim: "2026-09-09T20:18:00Z"
+arquivos_alterados:
+  - Nenhum -- fechamento de pacote é decisão de escopo, não código.
+decisoes:
+  - id: p02-fechado-passo2-oauth-vira-hardening-futuro-nao-bloqueante
+    motivo: "P02 atinge o aceite do plano dentro do escopo que o André priorizou: o agente não consegue conceder a si mesmo permissão (mandatos_io.mandato_tipo_promovido resolve na hora, sem cache entre chamadas de revogação; aprovar_rascunho recheca tipos_promovidos dentro da própria transação desde a sub-entrega 19/N); execução dentro de mandato não pede aprovação redundante (liberar_rascunhos_promovidos/propor_reagendamento_semanal passam por avaliar() real desde as sub-entregas 17/N-18/N); política indisponível impede novos efeitos que dependam dela (decisao_erro_avaliacao fail-closed, sub-entrega 12/N e 18/N). O passo 2 (evoluir claims/scopes do OAuth, hoje um único escopo 'hermes:tools' para tudo) fica registrado como item aberto do pacote, não como bloqueio -- é hardening (nenhum caminho de produção hoje expõe refresh token do dono a um runner, investigado antes de propor a proposta da PR #221), não uma correção de bug pendente. Retomar quando um caso concreto pedir diferenciação de escopo entre clientes hospedados."
+    autoridade: existente_ou_nova
+testes:
+  comandos: []
+  resultados:
+    - "Não aplicável -- decisão de escopo, sem mudança de código."
+evidencias:
+  - "Resposta direta do André via AskUserQuestion."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: P02 fechado como pacote."
+  - "ABERTA, não-bloqueante: passo 2 do plano (OAuth claims/scopes) fica como hardening futuro, sem prazo. Retomar se um caso concreto pedir (ex.: diferenciar permissões entre Claude.ai/Cowork/Claude Code em vez de um escopo único para todos)."
+  - "Pendências de produto/infraestrutura já registradas em blocos anteriores e não resolvidas por P02 continuam abertas: card do Telegram de rascunho degradado não reeditado; observabilidade de claim pendente sem _audit_log; TTL do Firestore não configurado para mcp_jobs; limite de 200KB do Argos em main.py; risco de corrupção silenciosa em escritas grandes via Argos."
+proximo_pacote: "P03 -- consolidar contratos MCP e ferramentas. Investigação inicial (nesta mesma sessão): tools/registry.py hoje é só um catálogo plano nome->descrição (103 tools), sem outputSchema/structuredContent/annotations, sem expected_version/idempotency_key nas escritas, sem inventário tipado por ferramenta -- nenhum dos 10 passos do plano para P03 foi começado. Passo 1 do plano (inventário tipado: domínio, leitura/escrita, reversibilidade, rede, dados sensíveis, política, verificador, por ferramenta) é o ponto de partida natural, e o mais trabalhoso -- 103 ferramentas para classificar com precisão, não por amostragem. Vou começar por ele."
+```
