@@ -815,6 +815,70 @@ def expirar_rascunhos_pendentes(
     return expirados_count
 
 
+def _degradar_rascunho_promovido_sem_mandato(db, outbox_id: str, motivo_codigo: str) -> bool:
+    """Rebaixa um rascunho de `aguardando_janela` para `aguardando_aprovacao`
+    (aprovação manual) quando `liberar_rascunhos_promovidos` descobre, na
+    hora da liberação, que nenhum mandato cobre mais o `tipo` do rascunho.
+
+    TRANSACIONAL e revalida o status atual antes de escrever -- mesmo padrão
+    de `aprovar_rascunho`/`descartar_rascunho` (achado A04, documentado
+    acima). Achado BLOQUEANTE da revisão adversarial desta sub-entrega
+    (P02 17/N): a primeira versão fazia um `.update()` cru, sem revalidar
+    status nem transação. Entre a consulta em `query.stream()`, no topo de
+    `liberar_rascunhos_promovidos`, e esta função alcançar o documento (um
+    intervalo alargado por esta própria sub-entrega, que agora faz 1-2
+    leituras extras + uma escrita em `policy_decisions` por rascunho antes
+    de chegar aqui), um humano pode ter tocado "Cancelar" no card do
+    Telegram, e `descartar_rascunho` já ter transacionado o documento para
+    `STATUS_DESCARTADO`. Um `.update()` cru sobrescreveria isso de volta
+    para `aguardando_aprovacao` -- ressuscitando silenciosamente um
+    rascunho que o dono já tinha descartado, o oposto exato do "veto humano
+    inegociável" que `avaliar_liberacao_promovidos` documenta.
+
+    Retorna `True` só quando de fato degradou (o status ainda era
+    `aguardando_janela` dentro da transação); `False` quando o documento já
+    tinha mudado de status por um caminho concorrente (nesse caso este
+    caminho não faz nada -- o outro já decidiu) ou quando a escrita não pôde
+    ser feita com segurança (sem suporte a transação, ou falha real de
+    transação) -- mesmo raciocínio de "recusar em vez de arriscar escrita
+    desprotegida" já aplicado a `aprovar_rascunho`/`descartar_rascunho`.
+    """
+    doc_ref = db.collection(COLLECTION).document(outbox_id)
+
+    if not hasattr(db, "transaction"):
+        print(
+            f"[OutboxAprovacao] Backend sem suporte a transação; não é seguro "
+            f"degradar {outbox_id} sem revalidar status -- deixado como está."
+        )
+        return False
+
+    try:
+        transaction = db.transaction()
+
+        @firestore.transactional
+        def _exec_degradar(tx):
+            snap = doc_ref.get(transaction=tx)
+            if not snap.exists:
+                return False
+            data = snap.to_dict() or {}
+            if data.get("status") != STATUS_AGUARDANDO_JANELA:
+                # Já decidido por outro caminho concorrente (aprovado,
+                # descartado, ou até degradado por outra chamada) -- não
+                # sobrescreve uma decisão que já aconteceu.
+                return False
+            tx.update(doc_ref, {
+                "status": STATUS_AGUARDANDO,
+                "envio_liberado_em": None,
+                "degradado_motivo": motivo_codigo,
+            })
+            return True
+
+        return bool(_exec_degradar(transaction))
+    except Exception as exc:
+        print(f"[OutboxAprovacao] Falha ao degradar {outbox_id} para aprovação manual: {exc}")
+        return False
+
+
 def liberar_rascunhos_promovidos(
     db,
     agora: datetime.datetime | None = None,
@@ -835,19 +899,30 @@ def liberar_rascunhos_promovidos(
     # estado (SOMENTE_PREPARACAO é o resultado de `estado_autonomia_atual`
     # quando o Firestore não responde — ver docstring lá).
     #
-    # Isto NÃO é ainda o `decisao_piso()` completo com `Mandato` real — o
-    # wrapper de I/O que resolveria um `Mandato` a partir do Firestore não
-    # existe nesta sub-entrega (ver docstring de `Mandato` em
-    # autonomy/contracts.py), e a classificação de conteúdo do rascunho
-    # (`tipo`, hoje texto livre com default "outro") ainda não se liga a
-    # `Mandato.classes_conteudo_permitidas` — cortar esse caminho por
-    # completo, ou trocar a checagem hoje existente (`_tipos_promovidos`)
-    # por um `Mandato` fabricado sem dado real por trás, mudaria o
-    # comportamento de um sistema em produção que manda WhatsApp de verdade
-    # sem revisão do André — deliberadamente deixado para uma sub-entrega
-    # dedicada. Ver docs/autonomia/execucao.md para o registro completo.
+    # P02 sub-entrega 17/N: além deste preflight global, cada rascunho agora
+    # passa por `avaliar()` de verdade com um `Mandato` resolvido na hora
+    # (`autonomy.mandatos_io.mandato_tipo_promovido`, ver
+    # docs/autonomia/proposta-p02-mandato-io-wrapper.md) — não mais só o
+    # status `aguardando_janela` decidido no PASSADO (na criação do
+    # rascunho). Fecha a janela em que `tipo` é revogado de
+    # `tipos_promovidos` DEPOIS de o rascunho ter sido criado como promovido
+    # mas ANTES de a janela de cancelamento vencer: sem esta checagem, o
+    # rascunho seria enviado sozinho mesmo já não estando mais coberto por
+    # nenhum mandato. Quando o mandato não cobre (revogado nesse intervalo,
+    # ou qualquer outra razão que `avaliar()` decida diferente de ALLOW), o
+    # rascunho é degradado para aprovação manual (`STATUS_AGUARDANDO`) em vez
+    # de enviado ou descartado silenciosamente — mesmo padrão já usado em
+    # `criar_rascunho` para "falha_entrega_card_telegram", logo acima.
+    from autonomy import mandatos_io
     from autonomy import policy as autonomy_policy
-    from autonomy.contracts import EstadoAutonomia
+    from autonomy.contracts import (
+        ClasseEfeito,
+        Decisao,
+        EstadoAutonomia,
+        Principal,
+        PolicyRequest,
+        TipoPrincipal,
+    )
 
     estado = autonomy_policy.estado_autonomia_atual(db)
     if estado in (EstadoAutonomia.PAUSADO, EstadoAutonomia.SOMENTE_PREPARACAO):
@@ -872,9 +947,64 @@ def liberar_rascunhos_promovidos(
         rascunhos_dados.append(d)
 
     ids_liberar = avaliar_liberacao_promovidos(rascunhos_dados, agora_utc)
+    rascunhos_por_id = {r["id"]: r for r in rascunhos_dados}
+
+    # Principal do worker que libera sozinho: RUNNER_SERVICO ("processo de
+    # longa duração agindo em nome do dono sem sessão interativa... o tipo
+    # mais restrito: nunca deve conseguir conceder a si mesmo uma
+    # permissão" — autonomy/contracts.py) é exatamente este caso, não
+    # ROTINA_COWORK (que pressupõe uma rotina agendada do Cowork, um canal
+    # diferente). `eh_dono()` é False para os dois, então a distinção não
+    # muda a decisão de `avaliar()` aqui, mas identifica corretamente a
+    # origem na trilha de auditoria (`registrar_decisao`).
+    principal_worker = Principal(uid=None, tipo=TipoPrincipal.RUNNER_SERVICO, canal="outbox_worker")
+
+    # Cache por `tipo` dentro desta chamada — evita reler
+    # `system/mcp_access`/`promocoes_autonomia_sugeridas` uma vez por
+    # rascunho quando vários rascunhos prontos compartilham o mesmo tipo.
+    mandatos_cache: dict[str, object] = {}
     liberados_count = 0
 
     for doc_id in ids_liberar:
+        rascunho = rascunhos_por_id.get(doc_id) or {}
+        tipo = str(rascunho.get("tipo") or "").strip().lower()
+
+        if tipo not in mandatos_cache:
+            mandatos_cache[tipo] = mandatos_io.mandato_tipo_promovido(db, tipo, agora=agora_utc)
+        mandato = mandatos_cache[tipo]
+
+        request = PolicyRequest(
+            principal=principal_worker,
+            ferramenta="liberar_rascunhos_promovidos",
+            classe_efeito=ClasseEfeito.COMPROMISSO_TERCEIROS,
+            argumentos_resolvidos={"outbox_id": doc_id, "tipo": tipo},
+            missao=f"envio_promovido:{tipo}",
+            sensibilidade=tipo,
+            estado_autonomia=estado,
+            mandatos_aplicaveis=(mandato,) if mandato else (),
+        )
+        try:
+            decisao = autonomy_policy.avaliar(request, agora=agora_utc)
+        except Exception as exc:  # noqa: BLE001 — nunca deixa um erro de avaliação liberar por engano
+            decisao = autonomy_policy.decisao_erro_avaliacao(
+                request,
+                motivo_legivel=(
+                    f"Falha interna ao avaliar mandato do tipo '{tipo}' para {doc_id}; "
+                    "bloqueado por segurança."
+                ),
+            )
+        autonomy_policy.registrar_decisao(db, request, decisao)
+
+        if decisao.decision != Decisao.ALLOW:
+            print(
+                f"[OutboxAprovacao] Mandato não cobre mais o tipo '{tipo}' para {doc_id} "
+                f"({decisao.reason_code}); degradando para aprovação manual em vez de liberar."
+            )
+            _degradar_rascunho_promovido_sem_mandato(
+                db, doc_id, motivo_codigo=f"mandato_nao_cobre:{decisao.reason_code}",
+            )
+            continue
+
         res = aprovar_rascunho(
             db,
             outbox_id=doc_id,
