@@ -261,3 +261,57 @@ pendencias:
   - "Pendencias de produto/infraestrutura ja registradas em blocos anteriores e nao resolvidas por esta sub-entrega continuam abertas: card do Telegram de rascunho degradado nao reeditado; observabilidade de claim pendente sem _audit_log; TTL do Firestore nao configurado para mcp_jobs; limite de 200KB do Argos em main.py; risco de corrupcao silenciosa em escritas grandes via Argos; passo 2 do P02 (OAuth claims/scopes) como hardening futuro nao-bloqueante."
 proximo_pacote: "P03 -- com o inventario tipado no lugar, os proximos passos naturais sao o passo 2 (normalizador de resultados legados e validacao de argumentos) ou o passo 3 (outputSchema/structuredContent/annotations nos caminhos compativeis). Nenhum dos dois foi comecado ainda."
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 2046755d0d0e4eb6dee7da5f60c173a4bd844ee9
+pacote: "P03 sub-entrega 2/N -- validacao de argumentos obrigatorios no dispatch MCP (metade 'presenca de campo' do passo 2 do plano; checagem de tipo do schema fica para sub-entrega futura)"
+estado: validado
+inicio: "2026-09-09T22:08:34Z"
+fim: "2026-09-09T22:22:08Z"
+arquivos_alterados:
+  - functions/mcp_server.py (nova _erro_campos_obrigatorios(name, arguments), chamada em dois pontos de _handle_tools_call: no ramo de criacao de confirmacao, apos o gate de politica DENY/PREPARE_ONLY e antes de preview_tool; e no ramo de execucao direta nao-gated, apos a resolucao de task_id e antes de execute_tool/fila assincrona. Deliberadamente NAO aplicado ao reenvio _confirmed=true -- ali arguments e so o envelope da confirmacao, o payload real ja foi congelado no Firestore na criacao da previa -- nem a _executar_confirmacao/confirmar_acao)
+  - functions/tools/registry.py (nova campos_obrigatorios_ausentes(tool_name, arguments), fail-open por design: FileNotFoundError/OSError/json.JSONDecodeError/AttributeError/TypeError mais guardas isinstance nunca bloqueiam uma chamada por falha de leitura/formato do schema, so por ausencia real de campo)
+  - functions/tools/schemas/criar_rascunho_email.json (assunto removido de required -- achado da revisao adversarial, ver decisoes)
+  - functions/tools/schemas/salvar_pop_global.json (instrucao_sistema removido de required -- achado da revisao adversarial, ver decisoes)
+  - functions/test_validacao_argumentos.py (novo -- testes de campos_obrigatorios_ausentes, incluindo paridade contra os 105 schemas reais do catalogo por inteiro, nao amostra; testes de _erro_campos_obrigatorios; integracao ponta a ponta via _handle_tools_call nos dois pontos de insercao e no reenvio _confirmed=true que deve ficar fora do alcance)
+  - functions/test_mcp_server.py (test_ativo_prossegue_para_fluxo_de_confirmacao_existente ajustado: pausar_conversa passa a receber contato_ou_grupo/retomar_em validos, ja que o novo preflight intercepta antes de preview_tool quando ausentes -- o teste prova alcancabilidade do fluxo antigo, nao completude de argumentos, nenhuma asercao mudou)
+  - functions/test_hermes_tools.py (test_devolve_job_id_em_vez_de_executar ajustado: gerar_relatorio passa a receber contexto, campo ja required no schema mas nunca antes enforced -- decisao deliberada de tratar o schema publicado como autoritativo para este campo especifico, sem escape de heranca/alias documentado ao contrario dos dois casos corrigidos abaixo)
+decisoes:
+  - id: p03-sub2-preflight-so-presenca-nao-tipo-ainda
+    motivo: "Escopo deliberadamente estreito dentro do passo 2 do plano ('normalizador de resultados legados e validacao de argumentos'): so presenca de campo required (chave ausente ou None) e enforced agora. Checagem de TIPO (schema `type`) e o normalizador de resultados legados ficam para sub-entregas futuras -- misturar as duas coisas nesta sub-entrega ampliaria a superficie de regressao sem necessidade, e o achado da revisao adversarial (ver abaixo) ja mostrou que ate a fatia 'so presenca', supostamente a mais segura, escondia dois casos reais de inconsistencia schema-vs-handler."
+    autoridade: existente_ou_nova
+  - id: p03-sub2-dois-pontos-de-insercao-preservando-reenvio-confirmado
+    motivo: "O preflight so entra nos DOIS pontos onde arguments representa de fato o payload de negocio completo: antes de preview_tool (criacao de confirmacao) e antes de execute_tool (execucao direta nao-gated). Deliberadamente fora do alcance: o reenvio _confirmed=true+_confirmation_id (arguments ali e so o envelope da confirmacao -- os campos reais ja foram congelados no Firestore na criacao da previa; validar de novo aqui quebraria TODO reenvio de qualquer tool com campo obrigatorio), _executar_confirmacao (executa o payload congelado, nao input fresco do cliente) e confirmar_acao (ramo totalmente separado, anterior aos dois pontos de insercao)."
+    autoridade: existente_ou_nova
+  - id: p03-sub2-revisao-corrigiu-dois-schemas-inconsistentes-com-o-proprio-handler
+    motivo: "Achado real da revisao adversarial (Agent tool, general-purpose, sem contexto da implementacao), nao autodetectado: dois schemas marcavam um campo como required mesmo o handler tendo fallback legitimo e ja documentado no proprio schema. (1) criar_rascunho_email: assunto era required, mas o schema ja documentava 'pode ficar vazio ao responder uma thread', e o handler (tools/criar_rascunho_email.py:77-79) de fato herda o assunto da thread, so rejeitando se mesmo assim ficar vazio -- corrigido removendo assunto de required. (2) salvar_pop_global: instrucao_sistema era required, mas o schema documenta instrucao/conteudo como apelidos, e o handler (tools/telegram_extended.py:195-209) resolve os tres por or com erro estruturado proprio quando todos ficam ausentes -- corrigido removendo instrucao_sistema de required. Os dois achados foram verificados de forma independente lendo o codigo real dos handlers (nao so o relato da revisao) antes de aplicar a correcao -- cada handler ja tinha tratamento gracioso pre-existente para o caso 'realmente ausente', entao a correcao do schema restaura o comportamento legitimo sem perda de seguranca. Varredura propria adicional por outros padroes de alias/heranca no catalogo (agendar_lembrete_acao hora/horario; obter_projeto_bolsas_publico/registrar_inscricao_bolsa_publica projectId/form_data) confirmou os dois casos seguros, sem necessidade de ajuste."
+    autoridade: existente_ou_nova
+  - id: p03-sub2-fail-open-ampliado-apos-achado-nao-bloqueante-da-revisao
+    motivo: "Achado nao-bloqueante da revisao adversarial: a excecao original de campos_obrigatorios_ausentes era estreita demais -- um schema malformado (parameters: null, required nao-lista) escaparia por AttributeError/TypeError nao capturado, caindo no except Exception de nivel superior de mcp_server.py e virando bloqueio generico para toda chamada daquela tool, contradizendo a propria promessa 'fail-open' da funcao. Corrigido ampliando a excecao (FileNotFoundError, OSError, json.JSONDecodeError, AttributeError, TypeError) e adicionando guardas isinstance explicitas antes de iterar."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "cd functions && ../venv/bin/python3 -m unittest discover -p 'test_*.py' -q"
+  resultados:
+    - "1560 testes + 539 subtests passando, 0 falhas novas, 0 regressao -- confirmado antes do envio a PR #225."
+evidencias:
+  - "Revisao adversarial independente (Agent tool, general-purpose, sem contexto da implementacao): rodou a suite completa, leu o diff e o codigo dos handlers envolvidos diretamente, e encontrou as duas regressoes bloqueantes e o achado nao-bloqueante de fail-open listados em decisoes acima."
+  - "Todos os 7 arquivos enviados via mcp__Argos__argos_escrever_arquivo_repositorio com verificacao de hash local (git hash-object) contra o sha retornado pelo Argos -- todos batendo de primeira, sem drift de whitespace nem corrupcao."
+  - "PR #225 mesclada por Andre (confirmado por git fetch + git log de origin/main: merge commit bc262a2e14b9a1f3b9915a154e26e5f881c19899)."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: metade 'presenca de campo obrigatorio' do passo 2 do plano."
+  - "ABERTA: checagem de TIPO (schema `type`) da mesma validacao de argumentos -- deliberadamente deixada fora desta sub-entrega, ver decisoes."
+  - "ABERTA: normalizador de resultados legados, a outra metade do passo 2 do plano -- ainda nao comecado. Hoje so existe o heuristico fragil de prefixo de string (_looks_like_error reconhecendo 'ERRO|') como forma de normalizacao."
+  - "ABERTA: passo 3 do plano (outputSchema/structuredContent/annotations nos caminhos compativeis) continua sem cobertura."
+  - "Pendencias ja registradas em blocos anteriores e nao tocadas por esta sub-entrega continuam abertas: religar inventario tipado (classe_efeito/dados_sensiveis/etc, P03 sub-entrega 1/N) a decisao de politica real; ambiguidades de classificacao (gerar_relatorio, salvar_memoria_global); card do Telegram de rascunho degradado nao reeditado; observabilidade de claim pendente sem _audit_log; TTL do Firestore nao configurado para mcp_jobs; limite de 200KB do Argos em main.py; risco de corrupcao silenciosa em escritas grandes via Argos; passo 2 do P02 (OAuth claims/scopes) como hardening futuro nao-bloqueante."
+proximo_pacote: "P03 -- restam do passo 2 do plano: checagem de tipo (schema `type`) da validacao de argumentos, e o normalizador de resultados legados propriamente dito. O passo 3 (outputSchema/structuredContent/annotations) continua tambem em aberto. Vale perguntar ao Andre qual priorizar a seguir antes de comecar a proxima sub-entrega."
+```
