@@ -17,7 +17,7 @@
       },
       "instrucao_sistema": {
         "type": "string",
-        "description": "Instrução operacional completa do POP"
+        "description": "Instrução operacional completa do POP. Aceita também `instrucao` ou `conteudo` — pelo menos um dos três é obrigatório."
       },
       "sempre_ativo": {
         "type": "boolean",
@@ -34,8 +34,7 @@
     },
     "required": [
       "titulo",
-      "gatilhos",
-      "instrucao_sistema"
+      "gatilhos"
     ]
   }
 }
