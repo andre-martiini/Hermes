@@ -44,6 +44,85 @@ class TestPrincipalEhDono(unittest.TestCase):
         self.assertFalse(p.eh_dono())
 
 
+class TestPrincipalOrigemHumanaDefaultPorTipo(unittest.TestCase):
+    """P02 sub-entrega 15/N: `origem_humana` omitido não é mais `True`
+    incondicional -- `Principal.__post_init__` deriva por `tipo`. Mesma
+    regra que `tools/tool_context.py::principal_de` e
+    `hermes_tools.py::_principal_simulado` já aplicavam por fora; agora é
+    garantida pelo próprio tipo. Ver também test_tool_context.py, que cobre
+    o helper por cima desta base."""
+
+    def test_dono_interativo_omitido_e_true(self):
+        p = Principal(uid="u1", tipo=TipoPrincipal.DONO_INTERATIVO, canal="web")
+        self.assertIs(p.origem_humana, True)
+
+    def test_cliente_assistido_omitido_e_true(self):
+        p = Principal(uid="u1", tipo=TipoPrincipal.CLIENTE_ASSISTIDO, canal="mcp")
+        self.assertIs(p.origem_humana, True)
+
+    def test_rotina_cowork_omitido_e_false(self):
+        p = Principal(uid=None, tipo=TipoPrincipal.ROTINA_COWORK, canal="cowork")
+        self.assertIs(p.origem_humana, False)
+
+    def test_runner_servico_omitido_e_false(self):
+        p = Principal(uid=None, tipo=TipoPrincipal.RUNNER_SERVICO, canal="scheduler")
+        self.assertIs(p.origem_humana, False)
+
+    def test_terceiro_portal_omitido_e_false(self):
+        p = Principal(uid=None, tipo=TipoPrincipal.TERCEIRO_PORTAL, canal="web")
+        self.assertIs(p.origem_humana, False)
+
+    def test_override_explicito_true_sobrepoe_tipo_nao_dono(self):
+        # Caso legítimo já documentado: runner disparado manualmente com o
+        # dono observando o log.
+        p = Principal(uid="u1", tipo=TipoPrincipal.RUNNER_SERVICO, canal="mcp", origem_humana=True)
+        self.assertIs(p.origem_humana, True)
+
+    def test_override_explicito_false_sobrepoe_tipo_dono(self):
+        p = Principal(uid="u1", tipo=TipoPrincipal.DONO_INTERATIVO, canal="web", origem_humana=False)
+        self.assertIs(p.origem_humana, False)
+
+
+class TestMandatoClassesConteudoPermitidasValidacao(unittest.TestCase):
+    """P02 sub-entrega 15/N: seção 5.3 do plano, verbatim -- "Tipos 'outro' e
+    rótulos livres não podem habilitar envio autônomo". Estrutural agora,
+    não só documentado: `Mandato.__post_init__` recusa a construção."""
+
+    def _mandato(self, classes):
+        return Mandato(
+            mandato_id="m1",
+            finalidade="teste",
+            destinatarios_recursos=("*",),
+            classes_conteudo_permitidas=classes,
+        )
+
+    def test_classe_outro_e_rejeitada(self):
+        with self.assertRaises(ValueError):
+            self._mandato(("confirmacao_reuniao", "outro"))
+
+    def test_classe_outro_maiuscula_tambem_e_rejeitada(self):
+        with self.assertRaises(ValueError):
+            self._mandato(("Outro",))
+
+    def test_classe_em_branco_e_rejeitada(self):
+        with self.assertRaises(ValueError):
+            self._mandato(("confirmacao_reuniao", "   "))
+
+    def test_classe_vazia_e_rejeitada(self):
+        with self.assertRaises(ValueError):
+            self._mandato(("",))
+
+    def test_classes_reais_sao_aceitas(self):
+        m = self._mandato(("confirmacao_reuniao", "cobranca_documento"))
+        self.assertEqual(m.classes_conteudo_permitidas, ("confirmacao_reuniao", "cobranca_documento"))
+
+    def test_tupla_vazia_e_aceita(self):
+        # Mandato que não permite nenhuma classe -- degenerado, mas não é o
+        # caso que a seção 5.3 proíbe (não há "outro" nem rótulo ali).
+        m = self._mandato(())
+        self.assertEqual(m.classes_conteudo_permitidas, ())
+
+
 class TestPolicyDecisionToDict(unittest.TestCase):
     def test_serializa_enum_como_valor(self):
         d = PolicyDecision(
