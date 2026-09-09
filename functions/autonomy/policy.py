@@ -77,6 +77,51 @@ CLASSE_EFEITO_PISO: dict[str, ClasseEfeito] = {
     "registrar_execucao_investimento": ClasseEfeito.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
 }
 
+def _validar_piso_consistente(
+    classe_efeito_piso: dict[str, ClasseEfeito], floor: frozenset[str]
+) -> None:
+    """Levanta `AssertionError` se as duas tabelas do piso não tiverem
+    exatamente as mesmas chaves.
+
+    Invariante estrutural, não só travada por teste (P02 sub-entrega 16/N,
+    fecha a pendência não-bloqueante registrada desde a sub-entrega 12/N):
+    `decisao_piso()`/`_decisao_piso_mcp` só chamam `avaliar()` com
+    `classe_efeito` vindo de `CLASSE_EFEITO_PISO`; a garantia de que esse
+    caminho NUNCA toca `request.principal` malformado (ver docstring de
+    `decisao_piso()`, abaixo) depende inteiramente de `CLASSE_EFEITO_PISO`
+    e `FLOOR_CONFIRMACAO_OBRIGATORIA` terem exatamente as mesmas chaves.
+    Até esta sub-entrega isso só era travado por `test_policy.py::
+    TestFloorIdenticoAoMcpServer.
+    test_classe_efeito_piso_cobre_exatamente_o_floor` — ou seja, um deploy
+    que pulasse a suíte de testes podia deixar as duas tabelas divergirem
+    em produção sem nenhum sinal. Chamada no próprio carregamento do
+    módulo (abaixo), torna a invariante real em produção, não só em
+    teste — mesmo padrão fail-closed já usado no resto deste módulo (ver
+    `decisao_erro_avaliacao()`, abaixo): se um dia divergirem, o import
+    falha alto e cedo, em vez de deixar `avaliar()` correr com uma
+    premissa quebrada. Extraída como função (em vez de um `if` solto no
+    escopo do módulo) só para ficar testável diretamente com tabelas
+    forjadas, sem precisar recarregar o módulo inteiro para simular uma
+    divergência. O teste original continua existindo — documenta o
+    raciocínio e falha de forma mais legível durante desenvolvimento;
+    esta checagem é a rede de segurança que vale mesmo sem a suíte rodar.
+    """
+    chaves_classe_efeito = set(classe_efeito_piso)
+    if chaves_classe_efeito == floor:
+        return
+    apenas_classe_efeito = chaves_classe_efeito - floor
+    apenas_floor = floor - chaves_classe_efeito
+    raise AssertionError(
+        "CLASSE_EFEITO_PISO e FLOOR_CONFIRMACAO_OBRIGATORIA divergiram -- "
+        "as duas precisam ter exatamente as mesmas chaves (ver comentário "
+        "de FLOOR_CONFIRMACAO_OBRIGATORIA, acima). "
+        f"Só em CLASSE_EFEITO_PISO: {sorted(apenas_classe_efeito)!r}. "
+        f"Só em FLOOR_CONFIRMACAO_OBRIGATORIA: {sorted(apenas_floor)!r}."
+    )
+
+
+_validar_piso_consistente(CLASSE_EFEITO_PISO, FLOOR_CONFIRMACAO_OBRIGATORIA)
+
 _POLICY_ID_PADRAO = "matriz-efeito-secao-5.1"
 _POLICY_VERSION_PADRAO = 1
 
