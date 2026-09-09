@@ -89,6 +89,17 @@ class MockQuery:
             return new_doc
         return next((d for d in self.docs if d.id == wanted), MockDoc(wanted, None))
 
+    def add(self, data):
+        # Espelha Collection.add do Firestore real -- usado por
+        # autonomy.policy.registrar_decisao para gravar em
+        # "policy_decisions" (P02 sub-entrega 18/N: propor_reagendamento_semanal
+        # religado a avaliar()). Formato de retorno (update_time, doc_ref)
+        # como o real, mas nenhum chamador aqui lê o valor.
+        auto_id = f"auto-{uuid.uuid4().hex[:8]}"
+        new_doc = MockDoc(auto_id, dict(data))
+        self.docs.append(new_doc)
+        return (None, new_doc)
+
 
 class MockDb:
     def __init__(self, data=None):
@@ -256,6 +267,87 @@ class TestProporReagendamentoSemanal(unittest.TestCase):
         res = propor_reagendamento_semanal(db, now=self.segunda)
         self.assertEqual(res["status"], "ok")
         self.assertEqual(len(db.collection(COLLECTION_PROPOSTAS).stream()), 1)
+
+    @patch("main._resolve_default_telegram_chat_id", return_value="123456")
+    @patch("main._send_telegram_message_raw_with_keyboard", return_value=True)
+    def test_religacao_a_avaliar_registra_decisao_em_policy_decisions(self, mock_send, mock_chat_id):
+        """P02 sub-entrega 18/N: `propor_reagendamento_semanal` passa a
+        chamar `autonomy.policy.avaliar()` de verdade (não mais só a
+        comparação ad hoc de `estado_autonomia_atual`) e `registrar_decisao`
+        grava o motivo em `policy_decisions` -- mesmo padrão de
+        `outbox_aprovacao.py::liberar_rascunhos_promovidos` desde a
+        sub-entrega 17/N. Estado ATIVO (padrão, sem doc `system/
+        autonomy_state`): sem mandato e sem humano presente
+        (`RUNNER_SERVICO`), a matriz de efeito resolve `PREPARE_ONLY` para
+        `PREPARACAO_INTERNA` -- não bloqueia a proposta (mesmo
+        comportamento observável de antes), mas agora fica registrado."""
+        db = MockDb({
+            "tarefas": {
+                "t1": {"titulo": "Renovar alvará", "status": "em andamento", "data_limite": "2026-09-01"},
+            },
+            COLLECTION_PROPOSTAS: {},
+        })
+
+        res = propor_reagendamento_semanal(db, now=self.segunda)
+        self.assertEqual(res["status"], "ok")
+
+        decisoes = list(db.collection("policy_decisions").stream())
+        self.assertEqual(len(decisoes), 1)
+        registro = decisoes[0].to_dict()
+        self.assertEqual(registro["ferramenta"], "propor_reagendamento_semanal")
+        self.assertEqual(registro["principal_tipo"], "runner_servico")
+        self.assertEqual(registro["canal"], "revisao_semanal")
+        self.assertEqual(registro["decision"], "prepare_only")
+        self.assertEqual(
+            registro["reason_code"], "preparacao_interna_requer_mandato_ou_humano_presente",
+        )
+
+    def test_pausado_registra_decision_deny_com_motivo_autonomia_pausada(self):
+        """Complementa test_autonomia_pausada_bloqueia_proposta: além de
+        pular a proposta, a decisão DENY (`autonomia_pausada`) fica
+        registrada em `policy_decisions`, não só logada."""
+        db = MockDb({
+            "system": {"autonomy_state": {"global": "pausado"}},
+            "tarefas": {
+                "t1": {"titulo": "Renovar alvará", "status": "em andamento", "data_limite": "2026-09-01"},
+            },
+            COLLECTION_PROPOSTAS: {},
+        })
+
+        res = propor_reagendamento_semanal(db, now=self.segunda)
+        self.assertEqual(res["status"], "pulado_autonomia_pausada")
+        self.assertEqual(res["policy_reason_code"], "autonomia_pausada")
+
+        decisoes = list(db.collection("policy_decisions").stream())
+        self.assertEqual(len(decisoes), 1)
+        registro = decisoes[0].to_dict()
+        self.assertEqual(registro["decision"], "deny")
+        self.assertEqual(registro["reason_code"], "autonomia_pausada")
+
+    @patch("autonomy.policy.avaliar", side_effect=RuntimeError("firestore indisponivel"))
+    def test_erro_ao_avaliar_politica_bloqueia_fail_closed(self, mock_avaliar):
+        """Erro interno ao avaliar a política (ex.: Firestore fora do ar no
+        meio da leitura de um mandato futuro) nunca deve deixar a proposta
+        passar por omissão -- mesmo padrão de
+        `outbox_aprovacao.py::liberar_rascunhos_promovidos` (sub-entrega
+        17/N) e de `decisao_erro_avaliacao`: DENY, não
+        SOMENTE_PREPARACAO/PREPARE_ONLY. Nem `tarefas` chega a ser
+        consultada nem o Telegram é acionado."""
+        db = MockDb({
+            "tarefas": {
+                "t1": {"titulo": "Renovar alvará", "status": "em andamento", "data_limite": "2026-09-01"},
+            },
+            COLLECTION_PROPOSTAS: {},
+        })
+
+        res = propor_reagendamento_semanal(db, now=self.segunda)
+        self.assertEqual(res["status"], "pulado_erro_avaliacao_politica")
+        self.assertEqual(res["policy_reason_code"], "erro_interno_avaliacao_politica")
+        self.assertEqual(len(db.collection(COLLECTION_PROPOSTAS).stream()), 0)
+
+        decisoes = list(db.collection("policy_decisions").stream())
+        self.assertEqual(len(decisoes), 1)
+        self.assertEqual(decisoes[0].to_dict()["decision"], "deny")
 
 
 class TestCallbackReagendamentoLote(unittest.TestCase):

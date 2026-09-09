@@ -42,7 +42,13 @@ def propor_reagendamento_semanal(db, now: datetime | None = None) -> dict:
     from tools.hermes_tools import ToolContext, preparar_reagendamento_em_lote
     from main import _resolve_default_telegram_chat_id, _send_telegram_message_raw_with_keyboard
     from autonomy import policy as autonomy_policy
-    from autonomy.contracts import EstadoAutonomia
+    from autonomy.contracts import (
+        ClasseEfeito,
+        Decisao,
+        Principal,
+        PolicyRequest,
+        TipoPrincipal,
+    )
 
     if now is None:
         now = datetime.now(timezone.utc)
@@ -52,25 +58,76 @@ def propor_reagendamento_semanal(db, now: datetime | None = None) -> dict:
     now_sp = now.astimezone(_TZ_SP)
     today_str = now_sp.strftime("%Y-%m-%d")
 
-    # 0. Preflight de autonomia (P02 sub-entrega 15/N, passo 1 do plano —
-    # primeira religação real deste arquivo a autonomy/policy.py). Esta
-    # função roda sem humano olhando (gatilho `scheduler_fn`, toda
-    # segunda-feira 5h15) e só PROPÕE — a aplicação real ainda exige um toque
-    # explícito no Telegram (ver `revisar_semana_propor_reagendamento`
-    # abaixo) — então PAUSADO bloqueia (nem propor), mas SOMENTE_PREPARACAO
-    # não (propor uma proposta que aguarda aprovação humana é, pela própria
-    # definição da seção 5.4, "preparação"). Não é ainda o `decisao_piso()`
-    # completo — isso exigiria um `Mandato` real cobrindo esta ação, e o
-    # wrapper de I/O que resolveria um `Mandato` a partir do Firestore não
-    # existe (ver docstring de `Mandato.usos_na_janela_atual` em
-    # autonomy/contracts.py); chamar `decisao_piso()` sem mandato algum
-    # aplicável cairia fail-closed e desligaria esta função por completo —
-    # uma mudança de comportamento real que não é desta sub-entrega decidir
-    # sozinha. Ver docs/autonomia/execucao.md para o registro completo.
+    # 0. Preflight de autonomia (P02 sub-entrega 15/N introduziu a checagem
+    # ad hoc de `estado_autonomia_atual`; esta sub-entrega religa de verdade
+    # a `autonomy.policy.avaliar()`, mesmo padrão já usado em
+    # `outbox_aprovacao.py::liberar_rascunhos_promovidos` desde a
+    # sub-entrega 17/N). NÃO é `decisao_piso()` — essa função só decide para
+    # os 5 tools do piso (`FLOOR_CONFIRMACAO_OBRIGATORIA`,
+    # `schedule_whatsapp_message` e companhia); `propor_reagendamento_semanal`
+    # não é um deles, então `decisao_piso()` devolveria `None` aqui (ver seu
+    # próprio docstring: "retorna None quando nome não está classificado em
+    # CLASSE_EFEITO_PISO") — chamar `avaliar()` diretamente, com
+    # `classe_efeito` explícito, é o caminho certo.
+    #
+    # `classe_efeito=PREPARACAO_INTERNA`: esta função só PROPÕE — a aplicação
+    # real ainda exige um toque explícito no Telegram (ver
+    # `revisar_semana_propor_reagendamento` abaixo) — que é exatamente a
+    # definição de "preparação" da seção 5.4/5.1 do plano. Principal é
+    # `RUNNER_SERVICO` (roda por `scheduler_fn`, sem humano olhando em tempo
+    # real, `origem_humana=False` por padrão do tipo — contracts.py) e não
+    # há `Mandato` algum cobrindo esta ação (nenhum wrapper de I/O resolve um
+    # mandato de "reagendamento" hoje — diferente de `tipos_promovidos`,
+    # ligado só a envio de WhatsApp). Pela matriz de efeito
+    # (`_decisao_padrao_por_classe`, policy.py): sem mandato e sem
+    # `origem_humana and eh_dono()`, `PREPARACAO_INTERNA` sempre resolve
+    # `PREPARE_ONLY`, nunca `DENY` — a ÚNICA forma de `DENY` chegar aqui é o
+    # passo 2 de `avaliar()` (estado `PAUSADO`, que bloqueia tudo que não for
+    # leitura, antes mesmo de olhar a classe de efeito). Ou seja: comparado à
+    # checagem manual anterior, o comportamento observável não muda uma
+    # vírgula (PAUSADO continua bloqueando antes de tocar em `tarefas`;
+    # SOMENTE_PREPARACAO e ATIVO continuam deixando propor) — o que muda é
+    # que a decisão passa pelo motor real, com `registrar_decisao()`
+    # gravando o motivo em `policy_decisions` (P02 passo 9), em vez de uma
+    # comparação ad hoc que só o estado ATIVO/PAUSADO/SOMENTE_PREPARACAO
+    # conhecia. Ver docs/autonomia/execucao.md para o registro completo.
     estado = autonomy_policy.estado_autonomia_atual(db)
-    if estado == EstadoAutonomia.PAUSADO:
-        print(f"[RevisaoSemanal] Autonomia pausada (system/autonomy_state.global=pausado); pulando proposta.")
-        return {"status": "pulado_autonomia_pausada", "estado_autonomia": estado.value}
+    principal_worker = Principal(uid=None, tipo=TipoPrincipal.RUNNER_SERVICO, canal="revisao_semanal")
+    policy_request = PolicyRequest(
+        principal=principal_worker,
+        ferramenta="propor_reagendamento_semanal",
+        classe_efeito=ClasseEfeito.PREPARACAO_INTERNA,
+        missao="revisao_semanal:propor_reagendamento",
+        estado_autonomia=estado,
+    )
+    try:
+        decisao = autonomy_policy.avaliar(policy_request, agora=now_sp)
+    except Exception as exc:  # noqa: BLE001 — nunca deixa um erro de avaliação propor por engano
+        print(f"[RevisaoSemanal] Falha ao avaliar política de autonomia: {exc}")
+        decisao = autonomy_policy.decisao_erro_avaliacao(
+            policy_request,
+            motivo_legivel=(
+                "Falha interna ao avaliar a política de autonomia para "
+                "propor_reagendamento_semanal; bloqueado por segurança."
+            ),
+        )
+    autonomy_policy.registrar_decisao(db, policy_request, decisao)
+
+    if decisao.decision == Decisao.DENY:
+        status = (
+            "pulado_autonomia_pausada"
+            if decisao.reason_code == "autonomia_pausada"
+            else "pulado_erro_avaliacao_politica"
+        )
+        print(
+            f"[RevisaoSemanal] Preflight de política bloqueou a proposta "
+            f"({decisao.reason_code}); pulando."
+        )
+        return {
+            "status": status,
+            "estado_autonomia": estado.value,
+            "policy_reason_code": decisao.reason_code,
+        }
 
     # 1. Trava de proposta única em aberto
     pendentes_stream = (
