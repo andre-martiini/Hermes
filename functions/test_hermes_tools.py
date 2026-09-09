@@ -1111,8 +1111,14 @@ class TestToolsLongas(unittest.TestCase):
         with mock.patch("mcp_jobs.criar_job", return_value="mcpjob-teste") as criar:
             resp = self.handler(_FakeRequest({
                 "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                # `contexto` é obrigatório no schema de `gerar_relatorio` (P03
+                # sub-entrega de validação de argumentos): desde essa
+                # sub-entrega, uma chamada sem ele é rejeitada antes de sequer
+                # chegar a enfileirar o job — incluído aqui porque este teste
+                # prova o enfileiramento em si, não os argumentos.
                 "params": {"name": "gerar_relatorio",
-                           "arguments": {"titulo": "Relatorio X", "tipo": "executivo"}},
+                           "arguments": {"titulo": "Relatorio X", "tipo": "executivo",
+                                         "contexto": "Contexto de teste"}},
             }))
         payload = json.loads(resp.get_data(as_text=True))
         conteudo = json.loads(payload["result"]["content"][0]["text"])
