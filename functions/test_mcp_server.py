@@ -306,7 +306,15 @@ class TestHandleToolsCallPreflight(unittest.TestCase):
             mcp_server, "preview_tool", side_effect=RuntimeError("sentinela-fluxo-antigo")
         ) as mock_preview:
             resultado = mcp_server._handle_tools_call(
-                self._params("pausar_conversa"), ctx=ctx
+                # `contato_ou_grupo`/`retomar_em` são obrigatórios no schema de
+                # `pausar_conversa` — desde a sub-entrega de validação de
+                # argumentos (P03 passo 2), uma chamada sem eles nem chega a
+                # `preview_tool`. Preenchidos aqui porque este teste prova outra
+                # coisa (que o fluxo antigo é alcançado), não a validação em si.
+                self._params("pausar_conversa", {
+                    "contato_ou_grupo": "5511999999999",
+                    "retomar_em": "amanha_manha",
+                }), ctx=ctx
             )
         mock_preview.assert_called_once()
         self.assertTrue(resultado.get("isError"))
