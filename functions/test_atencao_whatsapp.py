@@ -225,7 +225,7 @@ class _MockDocRef:
         self.col = col
         self.id = doc_id
 
-    def get(self):
+    def get(self, transaction=None):
         data = self.col._docs.get(self.id)
         return _MockDocSnap(self.id, data)
 
@@ -286,6 +286,39 @@ class _MockCollection:
         return [_MockDocSnap(k, v) for k, v in self._docs.items()]
 
 
+class _MockTransaction:
+    """Double fiel do protocolo real de Transaction (mesmo padrão já usado em
+    test_outbox_aprovacao.py/test_promocao_autonomia.py/test_agent_requests.py)
+    -- necessário desde que agent_requests.enfileirar_ou_atualizar passou a
+    exigir transação real (P01 passo 3 / achado A01/A04)."""
+
+    def __init__(self):
+        self._read_only = False
+        self._id = b"mock-tx-id"
+        self._max_attempts = 5
+
+    def get(self, doc_ref):
+        return doc_ref.get()
+
+    def update(self, doc_ref, data):
+        doc_ref.update(data)
+
+    def set(self, doc_ref, data, merge=False):
+        doc_ref.set(data, merge=merge)
+
+    def _rollback(self):
+        pass
+
+    def _commit(self):
+        pass
+
+    def _clean_up(self):
+        self._id = None
+
+    def _begin(self, retry_id=None):
+        self._id = retry_id or b"mock-tx-id"
+
+
 class _MockDB:
     def __init__(self):
         self._collections: dict[str, _MockCollection] = {}
@@ -294,6 +327,21 @@ class _MockDB:
         if name not in self._collections:
             self._collections[name] = _MockCollection(self, name)
         return self._collections[name]
+
+    def transaction(self):
+        return _MockTransaction()
+
+
+class _MockDBSemTransacao:
+    """Mock de DB que não implementa .transaction() -- simula um backend sem
+    suporte a transação real, para exercitar o caminho erro_configuracao de
+    agent_requests.enfileirar_ou_atualizar a partir do hook."""
+
+    def __init__(self, real_db: _MockDB):
+        self._real = real_db
+
+    def collection(self, name):
+        return self._real.collection(name)
 
 
 class TestHookAgentRequests(unittest.TestCase):
@@ -353,6 +401,40 @@ class TestHookAgentRequests(unittest.TestCase):
         req_doc2 = req_col._docs[expected_req_id]
         self.assertEqual(req_doc2["status"], "pendente")
         self.assertEqual(req_doc2["payload"]["mensagem_ids"], ["aud1", "aud2"])
+
+    @mock.patch("atencao_whatsapp._flag_audio", return_value=(True, 20))
+    @mock.patch("atencao_whatsapp._acoes_ativas_por_chat_cached")
+    def test_hook_sobrevive_a_falha_protegida_de_enfileiramento(self, mock_acoes, mock_flag):
+        """Achado should-fix da revisão adversarial de P01 sub-entrega 4/N:
+        agent_requests.enfileirar_ou_atualizar passou a ser transacional
+        (achado A04/A01) e não levanta mais exceção em erro_configuracao --
+        devolve um dict de erro. O hook precisa sobreviver a isso sem quebrar
+        _processar_audio, e o item de atenção (já gravado antes do hook)
+        continua existindo mesmo que a consolidação automática não seja
+        enfileirada."""
+        mock_acoes.return_value = {"chat-test": {"id": "acao-xyz", "titulo": "Ação Teste"}}
+        db = _MockDBSemTransacao(_MockDB())
+
+        m1 = {
+            "from_me": False,
+            "message_type": "ptt",
+            "chat_id": "chat-test",
+            "chat_name": "Guilherme",
+            "wa_message_id": "aud1",
+            "author_name": "Guilherme",
+            "media": {},
+            "timestamp": datetime(2026, 9, 3, 10, 0, tzinfo=timezone.utc),
+        }
+        # Não deve levantar exceção.
+        _processar_audio(db, m1)
+
+        atencao_col = db.collection("atencao")
+        req_col = db.collection("agent_requests")
+
+        # Item de atenção foi criado normalmente (grava antes do hook).
+        self.assertEqual(len(atencao_col._docs), 1)
+        # Nada foi enfileirado -- backend sem suporte a transação recusou.
+        self.assertEqual(len(req_col._docs), 0)
 
 
 class TestAprovacaoOutboxWhatsApp(unittest.TestCase):
