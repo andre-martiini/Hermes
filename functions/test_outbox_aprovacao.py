@@ -72,6 +72,16 @@ class _MockCollection:
             self._id_counter += 1
         return _MockDocRef(self, doc_id)
 
+    def add(self, data):
+        # Espelha Collection.add do Firestore real (usado por
+        # autonomy.policy.registrar_decisao para gravar em
+        # "policy_decisions") -- gera um id novo e devolve (update_time,
+        # doc_ref), mesmo formato da API real; nada aqui lê o update_time.
+        doc_id = f"mock-doc-{self._id_counter}"
+        self._id_counter += 1
+        self._docs[doc_id] = dict(data)
+        return (None, _MockDocRef(self, doc_id))
+
     def where(self, field, op, val):
         if op == "==":
             return _MockQuery(self, [(k, v) for k, v in self._docs.items() if v.get(field) == val])
@@ -479,7 +489,9 @@ class TestEdicao(unittest.TestCase):
             "motivo": "Follow-up",
         }
 
-        with mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=777) as mock_send,              mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"),              mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
+        with mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=777) as mock_send, \
+                mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"), \
+                mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
             res = oa.aplicar_edicao_rascunho(self.db, "job-3", "Texto novo corrigido pelo dono")
             self.assertEqual(res["status"], "ok")
             doc = self.outbox._docs["job-3"]
@@ -549,7 +561,10 @@ class TestCriarEListarRascunho(unittest.TestCase):
     def test_criar_rascunho_sucesso_dispara_telegram(self):
         with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={
             "encontrado": True, "nome": "Mariana", "chat_id": "5527998887777@c.us"
-        }),         mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=555) as mock_send,         mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"),         mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
+        }), \
+                mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=555) as mock_send, \
+                mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"), \
+                mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
             res = oa.criar_rascunho(
                 self.db,
                 contact_number="+5527998887777",
@@ -914,20 +929,31 @@ class TestLiberarRascunhosPromovidosPreflightAutonomia(unittest.TestCase):
     """P02 sub-entrega 15/N: `liberar_rascunhos_promovidos` é o único caminho
     do outbox que envia sem toque humano por instância — cobre o preflight
     novo de `autonomy.policy.estado_autonomia_atual` (nenhum teste cobria
-    esta função antes desta sub-entrega, nem o caminho feliz)."""
+    esta função antes desta sub-entrega, nem o caminho feliz).
+
+    P02 sub-entrega 17/N: os testes de caminho feliz abaixo agora também
+    semeiam `system/mcp_access.tipos_promovidos` (`_set_tipo_promovido`) —
+    antes desta sub-entrega, `liberar_rascunhos_promovidos` só confiava no
+    status `aguardando_janela` do próprio documento (decidido no passado,
+    na criação do rascunho); agora cada liberação reavalia o mandato NA
+    HORA (`autonomy.mandatos_io.mandato_tipo_promovido`), então um rascunho
+    cujo `tipo` nunca esteve (ou não está mais) em `tipos_promovidos` não é
+    mais liberado só por já estar com esse status — ver
+    `TestLiberarRascunhosPromovidosMandatoNaHora`, abaixo, para o
+    comportamento de degradação quando o mandato não cobre."""
 
     def setUp(self):
         self.db = _MockDb()
         self.outbox = self.db.collection(oa.COLLECTION)
         self.agora = datetime.datetime(2026, 9, 9, 12, 0, tzinfo=timezone.utc)
 
-    def _seed_promovido(self, doc_id="r-prom"):
+    def _seed_promovido(self, doc_id="r-prom", tipo="confirmacao_reuniao"):
         self.outbox._docs[doc_id] = {
             "status": oa.STATUS_AGUARDANDO_JANELA,
             "to_number": "5527999990000@c.us",
             "content": "Confirmando a reunião de amanhã",
             "destinatario_nome": "Carla",
-            "tipo": "confirmacao_reuniao",
+            "tipo": tipo,
             "telegram_message_id": 4242,
             "envio_liberado_em": self.agora - timedelta(minutes=1),
         }
@@ -935,10 +961,16 @@ class TestLiberarRascunhosPromovidosPreflightAutonomia(unittest.TestCase):
     def _set_estado(self, valor: str):
         self.db.collection("system")._docs["autonomy_state"] = {"global": valor}
 
+    def _set_tipo_promovido(self, tipo="confirmacao_reuniao"):
+        # Fonte real que `mandato_tipo_promovido` lê -- mesmo documento que
+        # `decidir_promocao_autonomia` grava em produção.
+        self.db.collection("system")._docs["mcp_access"] = {"tipos_promovidos": [tipo]}
+
     def test_caminho_feliz_sem_estado_configurado_e_ativo_libera_normalmente(self):
         # Sem system/autonomy_state (nada configurado ainda) -> ATIVO, mesmo
         # comportamento de produção hoje, sem esta sub-entrega.
         self._seed_promovido()
+        self._set_tipo_promovido()
         n = oa.liberar_rascunhos_promovidos(self.db, agora=self.agora)
         self.assertEqual(n, 1)
         self.assertEqual(self.outbox._docs["r-prom"]["status"], oa.STATUS_PENDING)
@@ -946,6 +978,7 @@ class TestLiberarRascunhosPromovidosPreflightAutonomia(unittest.TestCase):
 
     def test_estado_ativo_explicito_libera_normalmente(self):
         self._seed_promovido()
+        self._set_tipo_promovido()
         self._set_estado("ativo")
         n = oa.liberar_rascunhos_promovidos(self.db, agora=self.agora)
         self.assertEqual(n, 1)
@@ -953,6 +986,7 @@ class TestLiberarRascunhosPromovidosPreflightAutonomia(unittest.TestCase):
 
     def test_pausado_bloqueia_e_nao_toca_no_rascunho(self):
         self._seed_promovido()
+        self._set_tipo_promovido()
         self._set_estado("pausado")
         n = oa.liberar_rascunhos_promovidos(self.db, agora=self.agora)
         self.assertEqual(n, 0)
@@ -964,6 +998,7 @@ class TestLiberarRascunhosPromovidosPreflightAutonomia(unittest.TestCase):
         # preparação; só um toque humano real (aprovar_rascunho via
         # Telegram) continua liberado, não o caminho automático.
         self._seed_promovido()
+        self._set_tipo_promovido()
         self._set_estado("somente_preparacao")
         n = oa.liberar_rascunhos_promovidos(self.db, agora=self.agora)
         self.assertEqual(n, 0)
@@ -981,6 +1016,167 @@ class TestLiberarRascunhosPromovidosPreflightAutonomia(unittest.TestCase):
 
         n = oa.liberar_rascunhos_promovidos(_DbQuebrado(), agora=self.agora)
         self.assertEqual(n, 0)
+
+
+class TestLiberarRascunhosPromovidosMandatoNaHora(unittest.TestCase):
+    """P02 sub-entrega 17/N: `liberar_rascunhos_promovidos` religado a um
+    `Mandato` real (`autonomy.mandatos_io.mandato_tipo_promovido`), resolvido
+    NA HORA da liberação -- não mais só o status `aguardando_janela` gravado
+    na criação do rascunho. Ver docs/autonomia/proposta-p02-mandato-io-
+    wrapper.md e docs/autonomia/execucao.md (P02 sub-entrega 17/N)."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.outbox = self.db.collection(oa.COLLECTION)
+        self.agora = datetime.datetime(2026, 9, 9, 12, 0, tzinfo=timezone.utc)
+
+    def _seed_promovido(self, doc_id="r-prom", tipo="confirmacao_reuniao"):
+        self.outbox._docs[doc_id] = {
+            "status": oa.STATUS_AGUARDANDO_JANELA,
+            "to_number": "5527999990000@c.us",
+            "content": "Confirmando a reunião de amanhã",
+            "destinatario_nome": "Carla",
+            "tipo": tipo,
+            "telegram_message_id": 4242,
+            "envio_liberado_em": self.agora - timedelta(minutes=1),
+        }
+
+    def _set_tipo_promovido(self, tipo="confirmacao_reuniao"):
+        self.db.collection("system")._docs["mcp_access"] = {"tipos_promovidos": [tipo]}
+
+    def test_tipo_ainda_promovido_libera_e_registra_decisao_allow(self):
+        self._seed_promovido()
+        self._set_tipo_promovido()
+        n = oa.liberar_rascunhos_promovidos(self.db, agora=self.agora)
+        self.assertEqual(n, 1)
+        self.assertEqual(self.outbox._docs["r-prom"]["status"], oa.STATUS_PENDING)
+
+        decisoes = list(self.db.collection("policy_decisions")._docs.values())
+        self.assertEqual(len(decisoes), 1)
+        self.assertEqual(decisoes[0]["decision"], "allow")
+        self.assertEqual(decisoes[0]["reason_code"], "dentro_de_mandato_vigente")
+
+    def test_tipo_nunca_promovido_degrada_para_aprovacao_manual(self):
+        # `aguardando_janela` sem NUNCA ter passado por tipos_promovidos --
+        # não deveria acontecer via criar_rascunho() real, mas a checagem
+        # nova não confia cegamente no status para decidir enviar sozinho.
+        self._seed_promovido()
+        n = oa.liberar_rascunhos_promovidos(self.db, agora=self.agora)
+        self.assertEqual(n, 0)
+        doc = self.outbox._docs["r-prom"]
+        self.assertEqual(doc["status"], oa.STATUS_AGUARDANDO)
+        self.assertIsNone(doc["envio_liberado_em"])
+        self.assertEqual(doc["degradado_motivo"], "mandato_nao_cobre:principal_nao_pode_autoconceder")
+
+    def test_tipo_revogado_entre_criacao_e_liberacao_degrada_para_manual(self):
+        # O cenário central desta sub-entrega: o rascunho foi criado quando
+        # o tipo estava promovido (por isso está em aguardando_janela), mas
+        # o André revogou o tipo (removeu de tipos_promovidos) antes de a
+        # janela de cancelamento vencer. Antes desta sub-entrega, isto seria
+        # enviado mesmo assim -- agora degrada para aprovação manual.
+        self._seed_promovido(tipo="cobranca_terceiro")
+        self._set_tipo_promovido(tipo="outro_tipo_ainda_promovido")  # não inclui "cobranca_terceiro"
+        n = oa.liberar_rascunhos_promovidos(self.db, agora=self.agora)
+        self.assertEqual(n, 0)
+        doc = self.outbox._docs["r-prom"]
+        self.assertEqual(doc["status"], oa.STATUS_AGUARDANDO)
+        self.assertIsNone(doc["envio_liberado_em"])
+        self.assertIn("mandato_nao_cobre", doc["degradado_motivo"])
+
+    def test_dois_rascunhos_mesmo_tipo_reusa_mandato_cacheado(self):
+        self._seed_promovido(doc_id="r-1", tipo="confirmacao_reuniao")
+        self._seed_promovido(doc_id="r-2", tipo="confirmacao_reuniao")
+        self._set_tipo_promovido()
+
+        from autonomy import mandatos_io
+        with mock.patch(
+            "autonomy.mandatos_io.mandato_tipo_promovido",
+            wraps=mandatos_io.mandato_tipo_promovido,
+        ) as spy:
+            n = oa.liberar_rascunhos_promovidos(self.db, agora=self.agora)
+
+        self.assertEqual(n, 2)
+        self.assertEqual(self.outbox._docs["r-1"]["status"], oa.STATUS_PENDING)
+        self.assertEqual(self.outbox._docs["r-2"]["status"], oa.STATUS_PENDING)
+        # O efeito observável do cache: só UMA resolução de mandato para os
+        # dois rascunhos do mesmo tipo, não uma por rascunho.
+        self.assertEqual(spy.call_count, 1)
+
+    def test_tipo_outro_promovido_nao_derruba_o_lote_e_degrada_so_esse_rascunho(self):
+        # Achado BLOQUEANTE da revisão adversarial (P02 sub-entrega 17/N):
+        # antes da correção, "outro" em tipos_promovidos (alcançável via
+        # decidir_promocao_autonomia -- promocao_autonomia não o exclui da
+        # varredura) fazia Mandato.__post_init__ levantar ValueError sem
+        # ninguém capturar, derrubando o LOTE inteiro -- inclusive
+        # rascunhos de outros tipos, válidos, no mesmo lote. Confirma que
+        # isso não acontece mais: o rascunho "outro" degrada para manual,
+        # e o rascunho de tipo válido no MESMO lote continua liberado
+        # normalmente.
+        self._seed_promovido(doc_id="r-outro", tipo="outro")
+        self._seed_promovido(doc_id="r-valido", tipo="confirmacao_reuniao")
+        self.db.collection("system")._docs["mcp_access"] = {
+            "tipos_promovidos": ["outro", "confirmacao_reuniao"],
+        }
+
+        n = oa.liberar_rascunhos_promovidos(self.db, agora=self.agora)
+
+        self.assertEqual(n, 1)
+        doc_outro = self.outbox._docs["r-outro"]
+        self.assertEqual(doc_outro["status"], oa.STATUS_AGUARDANDO)
+        self.assertIsNone(doc_outro["envio_liberado_em"])
+        self.assertIn("mandato_nao_cobre", doc_outro["degradado_motivo"])
+        self.assertEqual(self.outbox._docs["r-valido"]["status"], oa.STATUS_PENDING)
+
+    def test_degradar_e_transacional_nao_sobrescreve_descarte_concorrente(self):
+        # Achado BLOQUEANTE da revisão adversarial: a versão original do
+        # degrade fazia um .update() cru, sem revalidar status nem
+        # transação -- se um humano tivesse cancelado via Telegram (
+        # descartar_rascunho, que transaciona para STATUS_DESCARTADO) entre
+        # a consulta e esta função alcançar o documento, o .update() cru
+        # ressuscitaria silenciosamente o rascunho descartado de volta para
+        # aguardando_aprovacao. Testa o helper isoladamente: um documento
+        # que JÁ NÃO está mais em aguardando_janela (simulando essa corrida)
+        # não deve ser tocado.
+        self.outbox._docs["r-descartado"] = {
+            "status": oa.STATUS_DESCARTADO,
+            "descartado_em": "2026-09-09T11:59:00+00:00",
+            "descartado_motivo": "cancelado pelo dono via Telegram",
+        }
+        degradou = oa._degradar_rascunho_promovido_sem_mandato(
+            self.db, "r-descartado", motivo_codigo="mandato_nao_cobre:teste",
+        )
+        self.assertFalse(degradou)
+        doc = self.outbox._docs["r-descartado"]
+        self.assertEqual(doc["status"], oa.STATUS_DESCARTADO)
+        self.assertEqual(doc["descartado_motivo"], "cancelado pelo dono via Telegram")
+        self.assertNotIn("degradado_motivo", doc)
+
+    def test_degradar_funciona_quando_status_ainda_e_aguardando_janela(self):
+        self._seed_promovido(doc_id="r-prom")
+        degradou = oa._degradar_rascunho_promovido_sem_mandato(
+            self.db, "r-prom", motivo_codigo="mandato_nao_cobre:teste",
+        )
+        self.assertTrue(degradou)
+        doc = self.outbox._docs["r-prom"]
+        self.assertEqual(doc["status"], oa.STATUS_AGUARDANDO)
+        self.assertIsNone(doc["envio_liberado_em"])
+        self.assertEqual(doc["degradado_motivo"], "mandato_nao_cobre:teste")
+
+    def test_degradar_sem_suporte_a_transacao_nao_escreve(self):
+        self._seed_promovido(doc_id="r-prom")
+
+        class _DbSemTransacao:
+            def __init__(self, outer):
+                self._outer = outer
+
+            def collection(self, name):
+                return self._outer.db.collection(name)
+
+        degradou = oa._degradar_rascunho_promovido_sem_mandato(
+            _DbSemTransacao(self), "r-prom", motivo_codigo="mandato_nao_cobre:teste",
+        )
+        self.assertFalse(degradou)
+        self.assertEqual(self.outbox._docs["r-prom"]["status"], oa.STATUS_AGUARDANDO_JANELA)
 
 
 if __name__ == "__main__":
