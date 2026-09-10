@@ -290,14 +290,34 @@ def _active_tasks(db) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict]
     return by_chat, by_email, by_id
 
 
-def _contacts(db) -> dict[str, str]:
-    result = {}
+def _contacts(db) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    """Nomes de contato por chat_id e, DEV-2026-0004 sub-entrega 5/9 proposta
+    (c)(ii), o vínculo de identidade do MESMO contato entre WhatsApp e
+    e-mail -- só quando o MESMO doc de `perfil_pessoas` tem `whatsapp_chat_id`
+    E `email` preenchidos ao mesmo tempo (os dois syncs independentes --
+    Google Contacts para `email`, `linkWhatsappContacts` por últimos 8
+    dígitos do telefone para `whatsapp_chat_id` -- já vincularam essa pessoa
+    nos dois canais). Sem essa dupla confirmação não dá para saber com
+    segurança que é o mesmo contato; os dois dicionários de e-mail ficam
+    vazios de propósito nesse caso, nunca um palpite por nome/telefone.
+
+    Devolve (nome_por_chat, email_por_chat, chat_por_email) -- o terceiro é
+    o inverso do segundo, para ir de um remetente de e-mail até o chat de
+    WhatsApp correspondente. Os dois novos são usados só para checar, do
+    OUTRO canal, se André já respondeu depois da mensagem pendente -- ver
+    `coletar()`."""
+    nome_por_chat, email_por_chat, chat_por_email = {}, {}, {}
     for doc in db.collection("perfil_pessoas").stream():
         data = doc.to_dict() or {}
         chat_id = str(data.get("whatsapp_chat_id") or "").strip()
-        if chat_id and str(data.get("nome") or "").strip():
-            result[chat_id] = str(data["nome"]).strip()
-    return result
+        nome = str(data.get("nome") or "").strip()
+        email = str(data.get("email") or "").strip().lower()
+        if chat_id and nome:
+            nome_por_chat[chat_id] = nome
+        if chat_id and email:
+            email_por_chat[chat_id] = email
+            chat_por_email[email] = chat_id
+    return nome_por_chat, email_por_chat, chat_por_email
 
 
 def _noise_config(db) -> tuple[set[str], set[str]]:
@@ -405,6 +425,76 @@ def _resolved_by_diario(task: dict | None, message_when: datetime | None) -> boo
     return bool(latest and latest > message_when)
 
 
+def _outgoing_email_by_contact(db, by_email: dict, by_id: dict) -> dict[str, datetime]:
+    """DEV-2026-0004 sub-entrega 5/9, proposta (c)(ii): data do e-mail mais
+    recente que o PRÓPRIO André mandou a cada contato, entre os vínculos
+    aplicados (mesma fonte de `_applied_email_suggestions`).
+
+    A SEGUNDA rodada de revisão adversarial encontrou que a primeira versão
+    não exigia ação ATIVA vinculada, ao contrário de `emails_by_thread` em
+    `coletar()` e do próprio `_resolved_by_diario` -- um e-mail respondido
+    por André numa ação já CONCLUÍDA (ou sem ação nenhuma) contava como
+    evidência de tratamento para uma pendência de WhatsApp completamente
+    diferente do mesmo contato, sem relação com trabalho em andamento
+    nenhum. Risco maior que o do vínculo por diário (que já exige ação
+    ativa): aqui são dois canais e possivelmente dois assuntos diferentes,
+    então a barra de evidência não podia ficar mais frouxa. Corrigido
+    exigindo `task` resolvido (mesmo padrão de `by_email`/`by_id` de
+    `_active_tasks`) antes de contar a data -- `by_email`/`by_id` recebidos
+    do chamador, já calculados uma vez por `coletar()`.
+
+    `origem_sinal` guarda o remetente ORIGINAL da thread (quem a
+    disparou) -- nunca reescrito por `atualizar_direcao_emails_aplicados`,
+    por isso continua identificando o contato mesmo depois que a direção da
+    thread virou "última de André" (`sender`, esse sim, passa a apontar
+    para o próprio André nesse caso -- ver docstring de
+    `atualizar_direcao_emails_aplicados`). Quando o mesmo contato aparece em
+    mais de uma thread (com ação ativa), fica a data mais recente."""
+    latest: dict[str, datetime] = {}
+    for doc in _applied_email_suggestions(db):
+        data = doc.to_dict() or {}
+        if str(data.get("canal") or "") != "email" or not data.get("ultima_mensagem_de_andre"):
+            continue
+        if not str(data.get("status") or "").startswith("applied"):
+            continue
+        task = by_email.get(doc.id) or by_id.get(str(data.get("task_id") or ""))
+        if not task:
+            continue
+        address = (parseaddr(str(data.get("origem_sinal") or ""))[1] or "").strip().lower()
+        if not address:
+            continue
+        when = _as_datetime(data.get("internal_date"))
+        if when and (address not in latest or when > latest[address]):
+            latest[address] = when
+    return latest
+
+
+def _resolved_cross_channel(*, contact_key: str | None, message_when: datetime | None,
+                            outgoing_by_contact: dict) -> bool:
+    """DEV-2026-0004 sub-entrega 5/9, proposta (c)(ii): André já respondeu
+    ao MESMO contato pelo OUTRO canal depois da mensagem pendente (achado B
+    implícito -- Wagner/Vetor, "André afirma que já tratou": quando o
+    tratamento aconteceu por e-mail para uma pendência de WhatsApp, ou
+    vice-versa, não precisa de resposta duplicada no canal original).
+
+    `contact_key` é o identificador do contato NO OUTRO canal -- endereço
+    de e-mail normalizado para resolver um item de WhatsApp, chat_id para
+    resolver um item de e-mail -- já resolvido pelo chamador via
+    `_contacts()`; None quando `perfil_pessoas` não liga os dois canais
+    para essa pessoa (nunca um palpite). `outgoing_by_contact` é o mapa
+    contato->data mais recente no OUTRO canal (`_outgoing_email_by_contact`
+    para o lado e-mail; o equivalente para WhatsApp é construído em
+    `coletar()` a partir do próprio índice já lido, sem nova consulta).
+
+    Comparação estrita (`>`, nunca `>=`), mesmo motivo de
+    `_resolved_by_diario`: uma resposta no mesmo instante da mensagem não
+    conta como posterior a ela."""
+    if not contact_key or not message_when:
+        return False
+    when = outgoing_by_contact.get(contact_key)
+    return bool(when and when > message_when)
+
+
 def _applied_email_suggestions(db):
     """Lê somente os vínculos aplicados, nunca a coleção histórica inteira."""
     collection = db.collection("email_action_suggestions")
@@ -452,17 +542,30 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
     allowed = _allowlist(db)
     andre_ids = _andre_ids(db)
     by_chat, by_email, by_id = _active_tasks(db)
-    contacts = _contacts(db)
+    contacts, email_por_chat, chat_por_email = _contacts(db)
+    outgoing_email = _outgoing_email_by_contact(db, by_email, by_id)
+    # DEV-2026-0004 sub-entrega 5/9: última mensagem de André por chat, só
+    # para os chats cuja mensagem mais recente É dela -- preenchido abaixo,
+    # dentro do próprio laço de WhatsApp (nenhuma consulta nova), e usado
+    # depois no laço de e-mail para resolver pendências de e-mail cujo
+    # contato já foi respondido por WhatsApp. Ver `_resolved_cross_channel`.
+    whatsapp_last_outgoing: dict[str, datetime] = {}
     items = []
-    filtered = {"automaticos": 0, "encerramentos": 0, "sem_texto": 0, "informativo": 0, "tratado_na_acao": 0}
+    filtered = {"automaticos": 0, "encerramentos": 0, "sem_texto": 0, "informativo": 0,
+                "tratado_na_acao": 0, "tratado_em_outro_canal": 0}
     domains, endings = _noise_config(db)
 
     for doc in db.collection(COLLECTION).stream():
         data = doc.to_dict() or {}
-        if data.get("tipo") != "whatsapp" or data.get("ultima_de_andre"):
+        if data.get("tipo") != "whatsapp":
             continue
         chat_id = str(data.get("chat_id") or "")
         if "*" not in allowed and chat_id not in allowed:
+            continue
+        if data.get("ultima_de_andre"):
+            when = _as_datetime(data.get("desde"))
+            if chat_id and when:
+                whatsapp_last_outgoing[chat_id] = when
             continue
         task = by_chat.get(chat_id)
         inclusion_reason = "conversa_direta"
@@ -485,8 +588,13 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
         if reason and not incluir_filtrados:
             filtered[reason] += 1
             continue
-        if _resolved_by_diario(task, _as_datetime(data.get("desde"))) and not incluir_filtrados:
+        wa_when = _as_datetime(data.get("desde"))
+        if _resolved_by_diario(task, wa_when) and not incluir_filtrados:
             filtered["tratado_na_acao"] += 1
+            continue
+        if _resolved_cross_channel(contact_key=email_por_chat.get(chat_id), message_when=wa_when,
+                                   outgoing_by_contact=outgoing_email) and not incluir_filtrados:
+            filtered["tratado_em_outro_canal"] += 1
             continue
         item = _item(
             contato=contacts.get(chat_id) or str(data.get("chat_name") or chat_id),
@@ -524,8 +632,14 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
         if reason and not incluir_filtrados:
             filtered[reason] += 1
             continue
-        if _resolved_by_diario(task, _as_datetime(data.get("internal_date") or data.get("analyzed_at"))) and not incluir_filtrados:
+        email_when = _as_datetime(data.get("internal_date") or data.get("analyzed_at"))
+        if _resolved_by_diario(task, email_when) and not incluir_filtrados:
             filtered["tratado_na_acao"] += 1
+            continue
+        sender_address = (parseaddr(str(data.get("sender") or ""))[1] or "").strip().lower()
+        if _resolved_cross_channel(contact_key=chat_por_email.get(sender_address), message_when=email_when,
+                                   outgoing_by_contact=whatsapp_last_outgoing) and not incluir_filtrados:
+            filtered["tratado_em_outro_canal"] += 1
             continue
         item = _item(
             contato=str(data.get("sender") or data.get("origem_sinal") or "E-mail"),
