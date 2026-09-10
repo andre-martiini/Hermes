@@ -105,13 +105,18 @@ class TestHermesToolsStringsDeErro(unittest.TestCase):
         self.assertFalse(_erro_reconhecido(r))
 
     def test_buscar_e_analisar_email_excecao(self):
-        # `tools.buscar_e_analisar_email` depende de `html2text`, ausente
-        # neste sandbox -- o próprio `ModuleNotFoundError` do import (dentro
-        # do try/except da função) já exercita o ramo de exceção real, sem
-        # precisar simular outra falha.
-        r = hermes_tools._buscar_e_analisar_email(_ctx(), {"query": "fatura"})
+        # `html2text` é dependência real do projeto (requirements.txt) -- num
+        # ambiente corretamente provisionado (CI) ela está presente, e sem
+        # credenciais do Gmail a própria `buscar_e_analisar_email` já devolve
+        # erro pelo prefixo `⚠️` antes de levantar. Para exercitar o ramo de
+        # exceção desta função (linha 404 de hermes_tools.py) de forma
+        # determinística -- sem depender do que o sandbox tem ou não
+        # instalado/configurado -- mocka-se a função importada para levantar
+        # diretamente, no mesmo padrão dos demais testes desta classe.
+        with patch("tools.buscar_e_analisar_email.buscar_e_analisar_email", side_effect=RuntimeError("boom")):
+            r = hermes_tools._buscar_e_analisar_email(_ctx(), {"query": "fatura"})
         self.assertTrue(_erro_reconhecido(r))
-        self.assertTrue(r.startswith("ERRO|Erro: "))
+        self.assertEqual(r, "ERRO|Erro: boom")
 
     def test_salvar_memoria_global_excecao(self):
         with patch("main._classify_memory_candidate", side_effect=RuntimeError("gemini fora do ar")):
