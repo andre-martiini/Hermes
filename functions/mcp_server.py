@@ -904,13 +904,14 @@ def _handle_tools_list() -> dict:
                 "voiceEnabled": registry.is_voice_enabled(name),
             },
         }
-        # P03 passo 3, sub-entrega 6/N: `annotations` do protocolo MCP
-        # (readOnlyHint/destructiveHint por enquanto — ver docstring de
-        # `registry.mcp_annotations` para o porque de idempotentHint/
-        # openWorldHint ficarem fora desta sub-entrega). Campo OPCIONAL no
-        # objeto Tool — omitido (nao um dict vazio) quando a tool nao tem
-        # entrada no inventario, para nao publicar metadado vazio sem
-        # sentido.
+        # P03 passo 3: `annotations` do protocolo MCP — readOnlyHint/
+        # destructiveHint (sub-entrega 6/N) e openWorldHint (sub-entrega
+        # 7/N) — ver docstring de `registry.mcp_annotations` para o porque
+        # de idempotentHint continuar fora, e de openWorldHint ficar OMITIDO
+        # (nao False/True) para as tools cujo dominio de rede nao foi
+        # classificado com confianca. Campo OPCIONAL no objeto Tool —
+        # omitido (nao um dict vazio) quando a tool nao tem entrada no
+        # inventario, para nao publicar metadado vazio sem sentido.
         annotations = registry.mcp_annotations(name)
         if annotations:
             tool_entry["annotations"] = annotations

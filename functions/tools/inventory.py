@@ -84,11 +84,25 @@ class Reversibilidade(str, Enum):
     NAO_APLICA = "nao_aplica"
 
 
+class DominioRede(str, Enum):
+    """Classificação complementar a `necessidade_de_rede`, só para as tools
+    com `necessidade_de_rede=True` -- P03 sub-entrega 7/N, para sustentar
+    `openWorldHint` do protocolo MCP (ver `tools/registry.py::mcp_annotations`).
+    `necessidade_de_rede` sozinho NÃO diferencia "fala com um sistema externo
+    fechado e conhecido" (a agenda do próprio dono) de "fala com um sistema
+    externo imprevisível" (a web aberta) -- por isso um campo novo, não uma
+    derivação automática do texto livre de `rede_servico`."""
+
+    FECHADO = "fechado"  # domínio conhecido e limitado -- conta/serviço do próprio dono, ou chamada de IA interna
+    ABERTO = "aberto"  # conteúdo externo arbitrário/imprevisível -- busca na web, URL arbitrária
+
+
 @dataclass(frozen=True)
 class ToolInventoryEntry:
     """Uma linha do inventário — ver docstring do módulo para os 7 campos
     pedidos pelo passo 1 do P03. `rede_servico`/`dados_sensiveis_categoria`
-    são o "qual" complementar dos dois campos booleanos."""
+    são o "qual" complementar dos dois campos booleanos. `dominio_rede` é o
+    "qual" complementar de `necessidade_de_rede`, ver `DominioRede`."""
 
     dominio: str
     leitura_escrita: LeituraEscrita
@@ -100,6 +114,7 @@ class ToolInventoryEntry:
     rede_servico: str | None = None
     dados_sensiveis_categoria: str | None = None
     nota: str | None = None
+    dominio_rede: DominioRede | None = None
 
 
 _L = LeituraEscrita
@@ -115,34 +130,41 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "acervo_documentos", _L.LEITURA, _R.NAO_APLICA, True, True, _C.OBSERVACAO_AUTORIZADA,
         "nenhum — score de similaridade não é conferido contra relevância real",
         rede_servico="Gemini (embedding da query)",
+        dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="documentos do Acervo Global, potencialmente pessoais/institucionais",
     ),
     "buscar_conversas_whatsapp": ToolInventoryEntry(
         "whatsapp", _L.LEITURA, _R.NAO_APLICA, True, True, _C.OBSERVACAO_AUTORIZADA,
         "nenhum",
         rede_servico="Gemini (embedding) + busca vetorial Firestore",
+        dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="conteúdo de conversas privadas de terceiros",
     ),
     "pesquisar_internet": ToolInventoryEntry(
         "utilitario", _L.LEITURA, _R.NAO_APLICA, True, False, _C.OBSERVACAO_AUTORIZADA,
         "nenhum — resposta da API de busca não é checada", rede_servico="API Tavily",
+        dominio_rede=DominioRede.ABERTO,
     ),
     "ler_pagina_web": ToolInventoryEntry(
         "utilitario", _L.LEITURA, _R.NAO_APLICA, True, False, _C.OBSERVACAO_AUTORIZADA,
         "nenhum", rede_servico="proxy r.jina.ai",
+        dominio_rede=DominioRede.ABERTO,
     ),
     "consultar_agenda": ToolInventoryEntry(
         "agenda", _L.LEITURA, _R.NAO_APLICA, True, False, _C.OBSERVACAO_AUTORIZADA,
         "nenhum", rede_servico="Google Calendar",
+        dominio_rede=DominioRede.FECHADO,
     ),
     "encontrar_slot_livre": ToolInventoryEntry(
         "agenda", _L.LEITURA, _R.NAO_APLICA, True, False, _C.OBSERVACAO_AUTORIZADA,
         "nenhum", rede_servico="Google Calendar",
+        dominio_rede=DominioRede.FECHADO,
     ),
     "criar_acao_no_sistema": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, True, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum dedicado — dedup evita duplicata; reconsulta via obter_acao",
         rede_servico="Google Calendar (checagem de conflito) + Gemini condicional (embedding se houver texto-fonte)",
+        dominio_rede=DominioRede.FECHADO,
     ),
     "agendar_lembrete_acao": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
@@ -152,6 +174,7 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "memoria_e_procedimentos", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum determinístico — o próprio filtro de retenção é um LLM",
         rede_servico="Gemini (classificador de retenção + embedding)",
+        dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="fato pessoal do usuário ou de terceiro, sem filtro de categoria",
         nota="reversível via resolver_conflito_memoria — mas só na prática quando uma gravação futura for "
         "detectada como similar o bastante para abrir um conflito; não há tool neste catálogo para buscar "
@@ -164,6 +187,7 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "buscar_e_analisar_email": ToolInventoryEntry(
         "email", _L.LEITURA, _R.NAO_APLICA, True, True, _C.OBSERVACAO_AUTORIZADA,
         "nenhum", rede_servico="Gmail API",
+        dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="conteúdo de e-mails e anexos",
     ),
     "obter_contexto_tela": ToolInventoryEntry(
@@ -173,6 +197,7 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "acervo_documentos", _L.LEITURA, _R.NAO_APLICA, True, True, _C.OBSERVACAO_AUTORIZADA,
         "nenhum — resposta do Gemini não é conferida contra o documento original",
         rede_servico="Google Drive (download) + Gemini",
+        dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="documento arbitrário do Drive do usuário",
     ),
     "salvar_pop_global": ToolInventoryEntry(
@@ -182,6 +207,7 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "resolver_conflito_memoria": ToolInventoryEntry(
         "memoria_e_procedimentos", _L.ESCRITA, _R.REVERSIVEL, True, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum", rede_servico="Gemini (embedding), só quando decisão=substituir_pelo_novo",
+        dominio_rede=DominioRede.FECHADO,
     ),
     "atualizar_personalidade": ToolInventoryEntry(
         "memoria_e_procedimentos", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
@@ -208,6 +234,7 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "utilitario", _L.ESCRITA, _R.REVERSIVEL, True, False, _C.PREPARACAO_INTERNA,
         "nenhum — texto do LLM é gravado sem conferência de qualidade",
         rede_servico="Gemini (múltiplas chamadas: esqueleto + cada seção)",
+        dominio_rede=DominioRede.FECHADO,
         nota="classificação PREPARACAO_INTERNA discutível: ao contrário de preparar_edicao_acao (que é "
         "LEITURA/NAO_APLICA, sem persistir nada até confirmar_edicao_acao), esta tool já persiste um "
         "documento final em relatorios/{id} sem passo de confirmação — mais perto de ESCRITA_INTERNA_"
@@ -299,6 +326,7 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, True, True, _C.COMPROMISSO_TERCEIROS,
         "o card do Telegram é o verificador humano; para tipos promovidos, só a janela de cancelamento",
         rede_servico="Telegram Bot API (notifica o dono)",
+        dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="destinatário e conteúdo de terceiro",
         nota="irreversível só para tipos promovidos (liberam sozinhos ao fim da janela de cancelamento, sem "
         "nova confirmação); outros tipos são revisáveis via descartar_rascunho_whatsapp. Classificado "
@@ -316,18 +344,21 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, True, True, _C.COMPROMISSO_TERCEIROS,
         "transação Firestore garante exclusão mútua com liberação automática; não verifica entrega",
         rede_servico="Telegram (edit_message do card)",
+        dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="destinatário e conteúdo de terceiro",
     ),
     "descartar_rascunho_whatsapp": ToolInventoryEntry(
         "whatsapp", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "transação Firestore revalida status antes de escrever",
         rede_servico="Telegram (edit_message condicional)",
+        dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="destinatário e conteúdo de terceiro",
     ),
     "solicitar_autorizacao_argos": ToolInventoryEntry(
         "argos_autorizacao", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.COORDENACAO_LIMITADA,
         "nenhum — consultar_autorizacao_argos é chamado depois, manualmente",
         rede_servico="Telegram Bot API", nota="sem tool de cancelamento; só expira sozinha por tempo",
+        dominio_rede=DominioRede.FECHADO,
     ),
     "consultar_autorizacao_argos": ToolInventoryEntry(
         "argos_autorizacao", _L.LEITURA_E_ESCRITA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,
@@ -362,6 +393,7 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "email", _L.LEITURA_E_ESCRITA, _R.IRREVERSIVEL, True, True, _C.COMPROMISSO_TERCEIROS,
         "devolve draft_id + link — verificador mínimo existe, raro no inventário",
         rede_servico="Gmail API (drafts.create, threads.get, getProfile)",
+        dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="destinatário e conteúdo de terceiro",
         nota="classificação COMPROMISSO_TERCEIROS já existe em autonomy/policy.py::CLASSE_EFEITO_PISO, apesar "
         "da descrição do catálogo dizer 'nunca envia'; nenhuma tool exclui um rascunho Gmail já criado",
@@ -409,6 +441,7 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "utilitario", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.PREPARACAO_INTERNA,
         "nenhum — não confere se a imagem corresponde ao prompt nem se a URL segue acessível",
         rede_servico="Gemini (geração) + Google Cloud Storage (upload)",
+        dominio_rede=DominioRede.FECHADO,
         nota="upload permanente no bucket público; sem tool de exclusão",
     ),
     "preparar_reagendamento_em_lote": ToolInventoryEntry(
@@ -508,6 +541,7 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, True, False, _C.PREPARACAO_INTERNA,
         "conferência real (tamanho/sha256) acontece na chamada seguinte, dentro de anexar_arquivo",
         rede_servico="Google Cloud IAM signBlob (URL assinada)",
+        dominio_rede=DominioRede.FECHADO,
         nota="grava doc em uploads_pendentes apesar do nome sugerir só preparo em memória; token de uso "
         "único, expira em 15 min, nada é aplicado a nenhuma tarefa por esta chamada",
     ),
@@ -515,6 +549,7 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "acoes_tarefas", _L.ESCRITA, _R.IRREVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum — devolve só um booleano de lixeira, sem confirmar que era o anexo certo",
         rede_servico="Google Drive (mover para lixeira)",
+        dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="documento anexado",
         nota="sem tool para restaurar o vínculo exato; arquivo vai para a lixeira do Drive (recuperável por "
         "30 dias fora do Hermes)",
@@ -540,6 +575,7 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, True, True, _C.PREPARACAO_INTERNA,
         "nenhum automático da qualidade da síntese; implícito: releitura do transcript literal",
         rede_servico="Groq/Whisper (áudio) e Gemini (vídeo + síntese), via trigger assíncrono disparado pelo handler",
+        dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="conteúdo de conversas de terceiros",
         nota="handler síncrono só grava doc 'queued'; sem tool para desfazer uma consolidação",
     ),

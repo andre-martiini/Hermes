@@ -96,6 +96,26 @@ class TestConsistenciaDosCampos(unittest.TestCase):
                         f"{nome}: tool de escrita com reversibilidade nao_aplica",
                     )
 
+    def test_dominio_rede_e_enum_valido_ou_ausente(self) -> None:
+        for nome, entrada in inventory._INVENTORY.items():
+            with self.subTest(tool=nome):
+                self.assertTrue(
+                    entrada.dominio_rede is None or isinstance(entrada.dominio_rede, inventory.DominioRede),
+                    f"{nome}: dominio_rede não é None nem DominioRede válido",
+                )
+
+    def test_dominio_rede_so_e_classificado_quando_ha_necessidade_de_rede(self) -> None:
+        """`dominio_rede` (P03 sub-entrega 7/N) é o "qual" de `necessidade_de_rede`
+        -- não faz sentido classificar o domínio de uma tool que não usa rede
+        nenhuma."""
+        for nome, entrada in inventory._INVENTORY.items():
+            if entrada.dominio_rede is not None:
+                with self.subTest(tool=nome):
+                    self.assertTrue(
+                        entrada.necessidade_de_rede,
+                        f"{nome}: dominio_rede classificado sem necessidade_de_rede=True",
+                    )
+
     def test_leitura_e_escrita_com_reversibilidade_nao_aplica_exige_nota_explicando(self) -> None:
         """Achado da revisão adversarial (sub-entrega P03 1/N): o filtro original só
         comparava contra ESCRITA (`is`), nunca contra LEITURA_E_ESCRITA -- ficava sem

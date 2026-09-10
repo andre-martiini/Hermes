@@ -1,7 +1,12 @@
 import json
 import os
 
-from tools.inventory import LeituraEscrita, Reversibilidade, get_inventory_entry
+from tools.inventory import (
+    DominioRede,
+    LeituraEscrita,
+    Reversibilidade,
+    get_inventory_entry,
+)
 
 _SCHEMA_DIR = os.path.join(os.path.dirname(__file__), "schemas")
 
@@ -610,48 +615,59 @@ def get_required_params(tool_name: str) -> list[str]:
 
 
 def mcp_annotations(tool_name: str) -> dict:
-    """`ToolAnnotations` do MCP (`readOnlyHint`/`destructiveHint`) para o
-    catalogo publicado em `tools/list` -- P03 passo 3 do plano de autonomia
-    ("Adicionar outputSchema, structuredContent, annotations e envelope aos
-    caminhos compativeis"), sub-entrega 6/N. So a fatia `annotations`; as
-    outras tres (outputSchema, structuredContent, envelope) exigem definir
-    um contrato de dados por tool -- fora do escopo desta sub-entrega, ver
+    """`ToolAnnotations` do MCP (`readOnlyHint`/`destructiveHint`/
+    `openWorldHint`) para o catalogo publicado em `tools/list` -- P03 passo 3
+    do plano de autonomia ("Adicionar outputSchema, structuredContent,
+    annotations e envelope aos caminhos compativeis"). `readOnlyHint`/
+    `destructiveHint` vieram da sub-entrega 6/N; `openWorldHint`, desta
+    sub-entrega 7/N. `outputSchema`/`structuredContent`/envelope seguem fora
+    de escopo -- exigem definir um contrato de dados por tool, ver
     docs/autonomia/execucao.md.
 
-    Escopo DELIBERADAMENTE parcial dentro da propria fatia `annotations`: so
-    os dois hints derivaveis de forma mecanica e confiavel do inventario ja
-    investigado e revisado em P03 sub-entrega 1/N (`tools/inventory.py`) --
-    `readOnlyHint` de `leitura_escrita` e `destructiveHint` de
-    `reversibilidade`. Os outros dois hints do protocolo MCP
-    (`idempotentHint`, `openWorldHint`) exigiriam investigacao propria, tool
-    por tool, que o inventario atual nao cobre:
-    - `idempotentHint` pede saber, por handler, se chamar de novo com os
-      MESMOS argumentos tem efeito adicional (ex.: `criar_acao_no_sistema`
-      dedupla por titulo/data; `agendar_lembrete_acao` nao dedupla nada) --
-      nenhum campo do inventario registra isso hoje, so `verificador`, que e
-      sobre CONFERIR o efeito, nao sobre repeti-lo sem custo.
-    - `openWorldHint` NAO e o mesmo que `necessidade_de_rede`: uma tool que
-      fala com o Google Calendar do dono (`rede_servico="Google Calendar"`)
-      opera num dominio fechado e conhecido (a agenda do proprio dono), nao
-      um "mundo aberto" de entidades arbitrarias -- so tools como
-      `pesquisar_internet`/`ler_pagina_web` (e possivelmente outras, nao
-      levantadas com esse criterio especifico ainda) se qualificariam de
-      verdade. Mapear `necessidade_de_rede` direto para `openWorldHint`
-      produziria metadado ERRADO para a maioria das tools com rede
-      (Calendar, Gmail, SIPAC, Firestore, Gemini) -- pior que nao declarar
-      nada: sao metadados, nao controles de autorizacao (secao 6.1 do
-      plano), mas um cliente MCP pode usa-los para decidir se pede
-      confirmacao extra, e um "mundo aberto" declarado por engano faz o
-      cliente subestimar o quao previsivel a tool de verdade e.
+    `readOnlyHint` vem de `leitura_escrita` e `destructiveHint` de
+    `reversibilidade` -- ambos do inventario investigado em P03 sub-entrega
+    1/N (`tools/inventory.py`).
 
-    Omitir os dois nao e regressao: a especificacao MCP ja define default
-    conservador para quem nao declara `ToolAnnotations`
-    (`destructiveHint`/`openWorldHint` default `true`, o lado mais cauteloso
-    em ambos os casos) -- omitir um hint que ainda nao foi investigado com
-    confianca e estritamente mais seguro que declarar um valor errado.
-    Candidato explicito a sub-entrega futura, com investigacao dedicada de
-    idempotencia (por handler) e do que de fato conta como "mundo aberto"
-    (por `rede_servico`), nao por amostragem.
+    `openWorldHint` vem do campo `dominio_rede` (P03 sub-entrega 7/N,
+    `DominioRede`), NAO de `necessidade_de_rede` direto: uma tool que fala
+    com o Google Calendar do dono opera num dominio fechado e conhecido (a
+    agenda do proprio dono), nao um "mundo aberto" de entidades arbitrarias
+    -- so tools como `pesquisar_internet`/`ler_pagina_web` se qualificam de
+    verdade. Mapear `necessidade_de_rede` direto para `openWorldHint`
+    produziria metadado ERRADO para a maioria das tools com rede (Calendar,
+    Gmail, Drive, Telegram, Gemini) -- pior que nao declarar nada: sao
+    metadados, nao controles de autorizacao (secao 6.1 do plano), mas um
+    cliente MCP pode usa-los para decidir se pede confirmacao extra, e
+    metadado errado (em qualquer direcao) e pior que omissao.
+
+    Das 28 tools com `necessidade_de_rede=True`, 21 tem `dominio_rede`
+    classificado (19 `FECHADO`, 2 `ABERTO`, ver `tools/inventory.py`); 7
+    ficam deliberadamente SEM classificacao (`dominio_rede=None`, hint
+    omitido, cai no default cauteloso da especificacao) por serem
+    genuinamente ambiguas mesmo apos leitura direta do codigo:
+    `confirmar_acao` (delega para uma de varias tools, alvo variavel, ver
+    `nota` no inventario), `consultar_processo_sipac`/
+    `acompanhar_processo_sipac` (scraper de portal institucional externo,
+    fora do controle do Hermes, sujeito a mudanca de estrutura sem aviso),
+    `anexar_arquivo` (pode envolver "URL arbitraria conforme a origem",
+    textualmente o caso `ABERTO`, mas nem sempre), e as tres tools de
+    `investimentos` (servico externo que por sua vez busca dados de
+    mercado via yfinance/SGS-Bacen -- fora do controle direto do Hermes e
+    do proprio servico).
+
+    `idempotentHint` continua inteiramente fora de escopo: pede saber, por
+    HANDLER, se chamar de novo com os MESMOS argumentos tem efeito
+    adicional (ex.: `criar_acao_no_sistema` dedupla por titulo/data;
+    `agendar_lembrete_acao` nao dedupla nada) -- nenhum campo do inventario
+    atual registra isso (nem `dominio_rede`, que e sobre O QUE a tool
+    alcança pela rede, nao sobre REPETIR a chamada sem custo); precisaria de
+    investigacao dedicada por handler, do mesmo porte da sub-entrega 1/N,
+    candidata a uma sub-entrega futura propria.
+
+    Omitir hints nao investigados com confianca nao e regressao: a
+    especificacao MCP ja define default conservador para quem nao declara
+    `ToolAnnotations` (`destructiveHint`/`openWorldHint` default `true`, o
+    lado mais cauteloso em ambos os casos).
 
     Falha aberta, mesma filosofia das outras funcoes deste modulo: tool sem
     entrada no inventario (nao deveria acontecer --
@@ -677,4 +693,8 @@ def mcp_annotations(tool_name: str) -> dict:
         # pretende comunicar; tratada como False, mesmo grupo de
         # `reversivel`.
         annotations["destructiveHint"] = entry.reversibilidade == Reversibilidade.IRREVERSIVEL
+    if entry.dominio_rede == DominioRede.FECHADO:
+        annotations["openWorldHint"] = False
+    elif entry.dominio_rede == DominioRede.ABERTO:
+        annotations["openWorldHint"] = True
     return annotations

@@ -3,16 +3,18 @@
 
 P03 passo 3 do plano de autonomia (docs/plano-hermes-autonomo-2026-09-06.md):
 "Adicionar outputSchema, structuredContent, annotations e envelope aos
-caminhos compatíveis; manter content legado". Esta sub-entrega (6/N) cobre
-só a fatia `annotations`, e dela só os dois hints derivados com confiança
-do inventário tipado da sub-entrega 1/N (`tools/inventory.py`):
-`readOnlyHint` (de `leitura_escrita`) e `destructiveHint` (de
-`reversibilidade`). `idempotentHint` e `openWorldHint` ficam deliberadamente
-fora -- ver a docstring de `registry.mcp_annotations` para o porquê (nenhum
-campo do inventário atual sustenta os dois com confiança, e um hint errado
-é pior que a omissão, já que a própria especificação MCP já assume o lado
-mais cauteloso -- `destructiveHint`/`openWorldHint` default `true` -- para
-quem não declara `ToolAnnotations`).
+caminhos compatíveis; manter content legado". `readOnlyHint`/
+`destructiveHint` vieram da sub-entrega 6/N, derivados com confiança do
+inventário tipado da sub-entrega 1/N (`tools/inventory.py`):
+`readOnlyHint` de `leitura_escrita`, `destructiveHint` de
+`reversibilidade`. `openWorldHint` vem desta sub-entrega (7/N), do campo
+`dominio_rede` (`tools/inventory.py::DominioRede`) -- não de
+`necessidade_de_rede` direto, ver a docstring de `registry.mcp_annotations`
+para o porquê. `idempotentHint` continua deliberadamente fora -- nenhum
+campo do inventário atual sustenta esse hint com confiança, e um hint
+errado é pior que a omissão, já que a própria especificação MCP já assume o
+lado mais cauteloso -- `destructiveHint`/`openWorldHint` default `true` --
+para quem não declara `ToolAnnotations`.
 
 Duas frentes:
 1. `TestMcpAnnotations` -- a função pura em `tools/registry.py`, incluindo
@@ -21,7 +23,8 @@ Duas frentes:
    `destructiveHint`; toda tool de escrita (pura ou mista) tem
    `readOnlyHint=False` e `destructiveHint` correspondendo exatamente à
    `reversibilidade` (`irreversivel`->`True`, `reversivel`/`nao_aplica`->
-   `False`).
+   `False`); `openWorldHint` correspondendo exatamente a `dominio_rede`
+   (`FECHADO`->`False`, `ABERTO`->`True`, `None`->omitido).
 2. `TestHandleToolsListAnnotations` -- ponta a ponta via
    `mcp_server._handle_tools_list()`: o campo `annotations` chega no
    catálogo publicado, com os valores corretos para tools reais de cada
@@ -35,7 +38,7 @@ import unittest
 
 import mcp_server
 from tools import inventory, registry
-from tools.inventory import LeituraEscrita, Reversibilidade
+from tools.inventory import DominioRede, LeituraEscrita, Reversibilidade
 
 
 class TestMcpAnnotations(unittest.TestCase):
@@ -50,21 +53,24 @@ class TestMcpAnnotations(unittest.TestCase):
 
     def test_escrita_irreversivel_e_destructive_hint_true(self):
         # `criar_rascunho_email`: leitura_e_escrita, irreversivel (COMPROMISSO_
-        # TERCEIROS -- ver nota em tools/inventory.py).
+        # TERCEIROS -- ver nota em tools/inventory.py). rede_servico="Gmail
+        # API" -- dominio_rede=FECHADO (conta do proprio dono).
         self.assertEqual(
             registry.mcp_annotations("criar_rascunho_email"),
-            {"readOnlyHint": False, "destructiveHint": True},
+            {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
         )
 
     def test_escrita_reversivel_e_destructive_hint_false(self):
-        # `criar_acao_no_sistema`: escrita, reversivel.
+        # `criar_acao_no_sistema`: escrita, reversivel. rede_servico=
+        # "Google Calendar (...) + Gemini condicional" -- dominio_rede=
+        # FECHADO (agenda do proprio dono + chamada de IA interna).
         self.assertEqual(
             registry.mcp_annotations("criar_acao_no_sistema"),
-            {"readOnlyHint": False, "destructiveHint": False},
+            {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
         )
 
     def test_criar_rascunho_whatsapp_e_destructive_hint_true(self):
-        # Achado real da revisão adversarial desta sub-entrega: a
+        # Achado real da revisão adversarial da sub-entrega 6/N: a
         # classificação original de `criar_rascunho_whatsapp` em
         # tools/inventory.py era REVERSIVEL, apesar da própria nota dizer
         # "reversível ... exceto tipos promovidos (liberam sozinhos após a
@@ -77,9 +83,11 @@ class TestMcpAnnotations(unittest.TestCase):
         # Corrigido em tools/inventory.py para IRREVERSIVEL, mesma convenção
         # das outras duas tools. Este teste prova o valor correto chegando
         # em mcp_annotations, não só a classificação bruta do inventário.
+        # rede_servico="Telegram Bot API (notifica o dono)" -- dominio_rede=
+        # FECHADO (canal fixo e conhecido, não conteúdo externo arbitrário).
         self.assertEqual(
             registry.mcp_annotations("criar_rascunho_whatsapp"),
-            {"readOnlyHint": False, "destructiveHint": True},
+            {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
         )
 
     def test_leitura_e_escrita_com_efeito_colateral_passivo_e_destructive_hint_false(self):
@@ -98,21 +106,50 @@ class TestMcpAnnotations(unittest.TestCase):
                     {"readOnlyHint": False, "destructiveHint": False},
                 )
 
-    def test_annotations_nunca_leva_idempotent_hint_ou_open_world_hint(self):
-        # Escopo deliberadamente parcial desta sub-entrega -- ver docstring
-        # de registry.mcp_annotations. Testa uma tool de cada categoria para
-        # não depender de amostra única.
+    def test_annotations_nunca_leva_idempotent_hint(self):
+        # idempotentHint continua inteiramente fora de escopo (ver docstring
+        # de registry.mcp_annotations) -- em toda tool, com ou sem rede, com
+        # ou sem openWorldHint.
         for nome in ("consultar_historico_acoes", "criar_acao_no_sistema", "pesquisar_internet"):
             with self.subTest(tool=nome):
-                anotacoes = registry.mcp_annotations(nome)
-                self.assertNotIn("idempotentHint", anotacoes)
-                self.assertNotIn("openWorldHint", anotacoes)
+                self.assertNotIn("idempotentHint", registry.mcp_annotations(nome))
+
+    def test_dominio_rede_fechado_e_open_world_hint_false(self):
+        # `criar_acao_no_sistema`: rede_servico envolve Google Calendar (do
+        # próprio dono) -- dominio_rede=FECHADO.
+        self.assertEqual(registry.mcp_annotations("criar_acao_no_sistema").get("openWorldHint"), False)
+
+    def test_dominio_rede_aberto_e_open_world_hint_true(self):
+        # `pesquisar_internet`/`ler_pagina_web`: conteúdo web arbitrário --
+        # dominio_rede=ABERTO, os únicos dois hoje.
+        for nome in ("pesquisar_internet", "ler_pagina_web"):
+            with self.subTest(tool=nome):
+                self.assertEqual(registry.mcp_annotations(nome).get("openWorldHint"), True)
+
+    def test_dominio_rede_nao_classificado_omite_open_world_hint(self):
+        # Tool sem necessidade de rede (dominio_rede=None por definição --
+        # nunca foi candidata) e tools com rede mas deliberadamente não
+        # classificadas por ambiguidade genuína (ver docstring de
+        # registry.mcp_annotations): nenhuma leva openWorldHint, nem True
+        # nem False -- omissão, não um terceiro valor.
+        for nome in (
+            "consultar_historico_acoes",  # sem rede
+            "confirmar_acao",  # alvo variável, delega para outra tool
+            "consultar_processo_sipac",  # scraper de portal externo
+            "acompanhar_processo_sipac",  # idem
+            "anexar_arquivo",  # pode envolver URL arbitrária conforme a origem
+            "consultar_investimentos",  # serviço externo de dados de mercado
+            "registrar_aporte_investimento",  # idem
+            "registrar_execucao_investimento",  # idem
+        ):
+            with self.subTest(tool=nome):
+                self.assertNotIn("openWorldHint", registry.mcp_annotations(nome))
 
     def test_paridade_com_todas_as_entradas_reais_do_inventario(self):
-        # Não por amostragem: para TODA tool do catálogo (105 hoje), o par
-        # (readOnlyHint, destructiveHint) tem que corresponder exatamente à
-        # classificação real do inventário -- nunca um valor inventado nem
-        # uma tool esquecida.
+        # Não por amostragem: para TODA tool do catálogo (105 hoje), o trio
+        # (readOnlyHint, destructiveHint, openWorldHint) tem que corresponder
+        # exatamente à classificação real do inventário -- nunca um valor
+        # inventado nem uma tool esquecida.
         for nome, entry in sorted(inventory.list_inventory().items()):
             with self.subTest(tool=nome):
                 anotacoes = registry.mcp_annotations(nome)
@@ -123,6 +160,12 @@ class TestMcpAnnotations(unittest.TestCase):
                 else:
                     esperado_destructive = entry.reversibilidade == Reversibilidade.IRREVERSIVEL
                     self.assertEqual(anotacoes.get("destructiveHint"), esperado_destructive)
+                if entry.dominio_rede == DominioRede.FECHADO:
+                    self.assertEqual(anotacoes.get("openWorldHint"), False)
+                elif entry.dominio_rede == DominioRede.ABERTO:
+                    self.assertEqual(anotacoes.get("openWorldHint"), True)
+                else:
+                    self.assertNotIn("openWorldHint", anotacoes)
 
 
 class TestHandleToolsListAnnotations(unittest.TestCase):
@@ -145,14 +188,25 @@ class TestHandleToolsListAnnotations(unittest.TestCase):
     def test_escrita_irreversivel_chega_com_destructive_hint_true(self):
         self.assertEqual(
             self.catalogo["criar_rascunho_email"]["annotations"],
-            {"readOnlyHint": False, "destructiveHint": True},
+            {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
         )
 
     def test_escrita_reversivel_chega_com_destructive_hint_false(self):
         self.assertEqual(
             self.catalogo["criar_acao_no_sistema"]["annotations"],
-            {"readOnlyHint": False, "destructiveHint": False},
+            {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
         )
+
+    def test_dominio_aberto_chega_com_open_world_hint_true(self):
+        self.assertEqual(
+            self.catalogo["pesquisar_internet"]["annotations"],
+            {"readOnlyHint": True, "openWorldHint": True},
+        )
+
+    def test_dominio_ambiguo_chega_sem_open_world_hint(self):
+        # `consultar_processo_sipac`: rede via scraper de portal externo,
+        # deliberadamente não classificado (ver registry.mcp_annotations).
+        self.assertNotIn("openWorldHint", self.catalogo["consultar_processo_sipac"]["annotations"])
 
     def test_annotations_nao_interfere_no_resto_do_meta(self):
         # `_meta` (needsConfirmation/mutates/voiceEnabled, sub-entregas
