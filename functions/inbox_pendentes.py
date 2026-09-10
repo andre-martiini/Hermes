@@ -874,16 +874,27 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
         # do laço de WhatsApp acima -- `doc.id` em `email_action_suggestions`
         # é o `google_message_id` original (gravado assim em
         # `email_action_linker.py`, `suggestions_col.document(msg_id).set(...)`),
-        # usado aqui só como METADE da chave de cache: `snippet`/`sender`
-        # deste MESMO doc são reescritos a cada refresh de
+        # congelado para sempre -- `snippet`/`sender`/`internal_date` deste
+        # MESMO doc são reescritos a cada refresh de
         # `atualizar_direcao_emails_aplicados` para refletir a mensagem mais
-        # recente da thread, então o fingerprint do texto (dentro de
-        # `_chave_cache_classificacao`) é o que garante que uma resposta nova
-        # na mesma thread não herda a classificação de uma mensagem antiga e
-        # diferente que por acaso caiu no mesmo `doc.id`.
+        # recente da thread, mas o id da mensagem NOVA em si nunca é gravado
+        # em lugar nenhum. Achado da revisão adversarial: o fingerprint do
+        # SNIPPET sozinho não bastava -- dois e-mails DIFERENTES na mesma
+        # thread cujo snippet do Gmail coincida (plausível para avisos
+        # automáticos/institucionais formulaicos) colidiriam no mesmo
+        # `doc.id`, e a classificação da mensagem ANTIGA (ex.: "informativo",
+        # cacheada) seria silenciosamente reaplicada à mensagem NOVA sem
+        # nunca chamar o LLM de novo -- o "achado A" desta demanda de novo
+        # (exclusão indevida por dado obsoleto), sem exigir nenhuma ação do
+        # André. `internal_date` É atualizado a cada refresh (mesmo campo do
+        # qual `_resolved_by_diario`/`_resolved_cross_channel` já dependem
+        # estar fresco) e dois e-mails distintos nunca compartilham o mesmo
+        # timestamp -- por isso entra como parte do `message_id` passado
+        # abaixo (não do `texto`, que seria enviado ao LLM sem alteração;
+        # `message_id` só alimenta a chave de cache, nunca o prompt).
         if not incluir_filtrados:
             rotulo = _classificar_necessidade_resposta(
-                db, _get_llm_client_memo, message_id=doc.id,
+                db, _get_llm_client_memo, message_id=f"{doc.id}|{data.get('internal_date')}",
                 texto=str(data.get("snippet") or data.get("resumo") or ""), is_email=True,
                 pode_classificar=_pode_classificar,
             )
