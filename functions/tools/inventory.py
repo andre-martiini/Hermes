@@ -296,11 +296,17 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "só enfileira em whatsapp_outbox — quem entrega é um worker separado, não esta chamada",
     ),
     "criar_rascunho_whatsapp": ToolInventoryEntry(
-        "whatsapp", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.COMPROMISSO_TERCEIROS,
+        "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, True, True, _C.COMPROMISSO_TERCEIROS,
         "o card do Telegram é o verificador humano; para tipos promovidos, só a janela de cancelamento",
         rede_servico="Telegram Bot API (notifica o dono)",
         dados_sensiveis_categoria="destinatário e conteúdo de terceiro",
-        nota="reversível via descartar_rascunho_whatsapp, exceto tipos promovidos (liberam sozinhos após a janela)",
+        nota="irreversível só para tipos promovidos (liberam sozinhos ao fim da janela de cancelamento, sem "
+        "nova confirmação); outros tipos são revisáveis via descartar_rascunho_whatsapp. Classificado "
+        "IRREVERSIVEL ao nível da tool (mesma convenção de decidir_elevacao/decidir_promocao_autonomia para "
+        "a mesma forma de nuance -- 'irreversível só para um subconjunto') -- achado da revisão adversarial "
+        "de P03 sub-entrega 6/N: a classificação original (REVERSIVEL) divergia dessa convenção e produzia "
+        "destructiveHint=False enganoso em tools/registry.py::mcp_annotations para o caso de risco real "
+        "(tipo promovido).",
     ),
     "listar_rascunhos_pendentes": ToolInventoryEntry(
         "whatsapp", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",
