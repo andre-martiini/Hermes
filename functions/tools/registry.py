@@ -1,6 +1,8 @@
 import json
 import os
 
+from tools.inventory import LeituraEscrita, Reversibilidade, get_inventory_entry
+
 _SCHEMA_DIR = os.path.join(os.path.dirname(__file__), "schemas")
 
 _CATALOG: dict[str, str] = {
@@ -605,3 +607,74 @@ def has_schema(tool_name: str) -> bool:
 def get_required_params(tool_name: str) -> list[str]:
     schema = get_schema(tool_name)
     return schema.get("parameters", {}).get("required", [])
+
+
+def mcp_annotations(tool_name: str) -> dict:
+    """`ToolAnnotations` do MCP (`readOnlyHint`/`destructiveHint`) para o
+    catalogo publicado em `tools/list` -- P03 passo 3 do plano de autonomia
+    ("Adicionar outputSchema, structuredContent, annotations e envelope aos
+    caminhos compativeis"), sub-entrega 6/N. So a fatia `annotations`; as
+    outras tres (outputSchema, structuredContent, envelope) exigem definir
+    um contrato de dados por tool -- fora do escopo desta sub-entrega, ver
+    docs/autonomia/execucao.md.
+
+    Escopo DELIBERADAMENTE parcial dentro da propria fatia `annotations`: so
+    os dois hints derivaveis de forma mecanica e confiavel do inventario ja
+    investigado e revisado em P03 sub-entrega 1/N (`tools/inventory.py`) --
+    `readOnlyHint` de `leitura_escrita` e `destructiveHint` de
+    `reversibilidade`. Os outros dois hints do protocolo MCP
+    (`idempotentHint`, `openWorldHint`) exigiriam investigacao propria, tool
+    por tool, que o inventario atual nao cobre:
+    - `idempotentHint` pede saber, por handler, se chamar de novo com os
+      MESMOS argumentos tem efeito adicional (ex.: `criar_acao_no_sistema`
+      dedupla por titulo/data; `agendar_lembrete_acao` nao dedupla nada) --
+      nenhum campo do inventario registra isso hoje, so `verificador`, que e
+      sobre CONFERIR o efeito, nao sobre repeti-lo sem custo.
+    - `openWorldHint` NAO e o mesmo que `necessidade_de_rede`: uma tool que
+      fala com o Google Calendar do dono (`rede_servico="Google Calendar"`)
+      opera num dominio fechado e conhecido (a agenda do proprio dono), nao
+      um "mundo aberto" de entidades arbitrarias -- so tools como
+      `pesquisar_internet`/`ler_pagina_web` (e possivelmente outras, nao
+      levantadas com esse criterio especifico ainda) se qualificariam de
+      verdade. Mapear `necessidade_de_rede` direto para `openWorldHint`
+      produziria metadado ERRADO para a maioria das tools com rede
+      (Calendar, Gmail, SIPAC, Firestore, Gemini) -- pior que nao declarar
+      nada: sao metadados, nao controles de autorizacao (secao 6.1 do
+      plano), mas um cliente MCP pode usa-los para decidir se pede
+      confirmacao extra, e um "mundo aberto" declarado por engano faz o
+      cliente subestimar o quao previsivel a tool de verdade e.
+
+    Omitir os dois nao e regressao: a especificacao MCP ja define default
+    conservador para quem nao declara `ToolAnnotations`
+    (`destructiveHint`/`openWorldHint` default `true`, o lado mais cauteloso
+    em ambos os casos) -- omitir um hint que ainda nao foi investigado com
+    confianca e estritamente mais seguro que declarar um valor errado.
+    Candidato explicito a sub-entrega futura, com investigacao dedicada de
+    idempotencia (por handler) e do que de fato conta como "mundo aberto"
+    (por `rede_servico`), nao por amostragem.
+
+    Falha aberta, mesma filosofia das outras funcoes deste modulo: tool sem
+    entrada no inventario (nao deveria acontecer --
+    `test_tool_inventory.py::TestParidadeComCatalogo` garante paridade 1:1
+    com o catalogo -- mas nao e este modulo que deve quebrar `tools/list` se
+    isso um dia divergir) devolve dict vazio; o cliente MCP cai nos defaults
+    da propria especificacao.
+    """
+    try:
+        entry = get_inventory_entry(tool_name)
+    except (AttributeError, TypeError):
+        return {}
+    if entry is None:
+        return {}
+    read_only = entry.leitura_escrita == LeituraEscrita.LEITURA
+    annotations: dict = {"readOnlyHint": read_only}
+    if not read_only:
+        # So faz sentido quando readOnlyHint e False (secao 6.1 do plano e a
+        # propria especificacao MCP). `NAO_APLICA` (as 3 tools
+        # leitura_e_escrita com escrita de efeito colateral passivo ou
+        # idempotente, documentada em nota -- nunca o proposito da tool, ver
+        # tools/inventory.py) nao e destrutiva no sentido que o hint
+        # pretende comunicar; tratada como False, mesmo grupo de
+        # `reversivel`.
+        annotations["destructiveHint"] = entry.reversibilidade == Reversibilidade.IRREVERSIVEL
+    return annotations
