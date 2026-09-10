@@ -74,6 +74,9 @@ class MockQuery:
         new_filters.append((field, op, val))
         return MockQuery(self.docs, new_filters)
 
+    def limit(self, _n):
+        return self
+
     def stream(self):
         filtered = []
         for d in self.docs:

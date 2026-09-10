@@ -174,5 +174,50 @@ class EmailDirectionSenderRefreshTest(unittest.TestCase):
         )
 
 
+class EmailDirectionAndreEmToRefreshTest(unittest.TestCase):
+    """DEV-2026-0004 sub-entrega 3/9: `andre_em_to` (André está no To da
+    última mensagem da thread, não só em Cc) é recalculado a cada refresh --
+    mesma disciplina de sender/snippet na sub-entrega 1/9, para não deixar o
+    sinal congelado na mensagem que criou a sugestão."""
+
+    def test_ultima_mensagem_so_com_andre_em_cc_corrige_para_false(self):
+        doc = _Doc('suggestion-cc', {
+            'google_message_id': 'message-1',
+            'sender': 'Diretoria de Ensino <dae.rei@ifes.edu.br>',
+            'andre_em_to': True,  # valor antigo, tem que ser corrigido no refresh
+        })
+        gmail = _Gmail(thread_messages=[
+            {'internalDate': '1', 'payload': {'headers': [
+                {'name': 'From', 'value': 'Diretoria de Ensino <dae.rei@ifes.edu.br>'},
+                {'name': 'To', 'value': 'dae.rei@ifes.edu.br'},
+                {'name': 'Cc', 'value': 'André <andre@ufjf.br>'},
+            ]}},
+        ])
+        atualizar_direcao_emails_aplicados(_Db([doc]), gmail)
+        self.assertFalse(doc.reference.data['andre_em_to'])
+
+    def test_ultima_mensagem_com_andre_no_to_marca_true(self):
+        doc = _Doc('suggestion-to', {'google_message_id': 'message-1', 'sender': 'Gabriela <gabriela@ifes.edu.br>'})
+        gmail = _Gmail(thread_messages=[
+            {'internalDate': '1', 'payload': {'headers': [
+                {'name': 'From', 'value': 'Gabriela <gabriela@ifes.edu.br>'},
+                {'name': 'To', 'value': 'andre@ufjf.br'},
+            ]}},
+        ])
+        atualizar_direcao_emails_aplicados(_Db([doc]), gmail)
+        self.assertTrue(doc.reference.data['andre_em_to'])
+
+    def test_header_to_ausente_marca_none_nao_false(self):
+        """Um Bcc puro (sem header To nenhum) não é o mesmo sinal que 'André
+        só em Cc' -- fica None (não filtra) em vez de False (filtraria como
+        informativo e esconderia um e-mail que pode ter ido só para ele)."""
+        doc = _Doc('suggestion-sem-to', {'google_message_id': 'message-1', 'sender': 'Gabriela <gabriela@ifes.edu.br>'})
+        gmail = _Gmail(thread_messages=[
+            {'internalDate': '1', 'payload': {'headers': [{'name': 'From', 'value': 'Gabriela <gabriela@ifes.edu.br>'}]}},
+        ])
+        atualizar_direcao_emails_aplicados(_Db([doc]), gmail)
+        self.assertIsNone(doc.reference.data['andre_em_to'])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -24,9 +24,10 @@ Mapa de onde cada produtor é chamado: docs/okf/arquitetura/cloud-functions.md
 
 import base64
 import json
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from email.utils import parseaddr
+from email.utils import getaddresses, parseaddr
 from zoneinfo import ZoneInfo
 
 from firebase_admin import firestore
@@ -42,6 +43,99 @@ EXPIRE_AFTER_DAYS = 7
 GMAIL_QUERY_MAX_RESULTS = 20
 GMAIL_MAX_PAGES_PER_PASS = 5
 DEFAULT_IGNORED_SENDERS = ["notifications@github.com", "@github.com"]
+
+# DEV-2026-0004 sub-entrega 2/9: remetente típico de devolução (bounce) --
+# mesma ideia de `inbox_pendentes._AUTO_SENDER`, mas restrito aos remetentes
+# que especificamente sinalizam não-entrega (não todo remetente automático).
+_BOUNCE_SENDER_RE = re.compile(
+    r"(mailer-daemon|postmaster|mail delivery subsystem|delivery status notification)", re.I
+)
+# Código SMTP estendido (RFC 3463), ex. "550 5.1.1 ..." ou "550-5.7.1 ...".
+# Exige o código de resposta básico de 3 dígitos (2xx/4xx/5xx) logo antes,
+# separado por espaço ou hífen (formato multilinha "550-5.7.1" / "550 5.7.1")
+# -- achado da revisão adversarial desta sub-entrega: sem essa âncora, o
+# padrão solto `[245]\.\d{1,3}\.\d{1,3}` casa falsamente com trechos comuns
+# em corpos de devolução reais que não são o código (octetos de IP como
+# "10.2.30.41", ou um cabeçalho citado como "X-Mailer: 5.2.1"). Uma segunda
+# forma cobre o campo "Status:" de um DSN (RFC 3464) ecoado no texto legível
+# -- não tem o código básico de 3 dígitos na frente, mas o rótulo "Status:"
+# é inequívoco o bastante para não precisar dessa âncora (achado da segunda
+# revisão adversarial: a forma única, mais estrita, deixava de casar esse
+# formato, que é comum o bastante para não ficar de fora).
+_SMTP_EXTENDED_CODE_PATTERNS = (
+    re.compile(r"\b\d{3}[- ]([245]\.\d{1,3}\.\d{1,3})\b"),
+    re.compile(r"^status:\s*([245]\.\d{1,3}\.\d{1,3})", re.I),
+)
+
+# DEV-2026-0004 sub-entrega 2/9 (achado da revisão adversarial): o cabeçalho
+# `To` da mensagem que disparou a devolução só identifica o destinatário que
+# falhou quando havia um único destinatário -- com vários (cc de grupo,
+# e-mail institucional), não dá para saber qual deles rejeitou sem olhar o
+# próprio corpo da devolução, que normalmente nomeia o endereço explicitamente.
+# Dois formatos cobertos, do mais para o menos específico: o endereço entre
+# "<>" logo após o código SMTP (Postfix/Exim/Sendmail e a maioria dos NDRs
+# genéricos), e as frases fixas do Gmail quando o primeiro não aparece. O
+# primeiro exige que só espaço/tab/dois-pontos/hífen separe o código do "<"
+# -- achado da segunda revisão adversarial: uma folga larga (a versão
+# original aceitava até 20 caracteres quaisquer no meio) deixava o padrão
+# pegar um endereço de contato/abuse mencionado por perto mas sem relação
+# (ex. "erro 5.7.1, fale com <abuse@...>"), em vez do destinatário real;
+# exigir adjacência também reduz o risco de casar um octeto de IP em vez do
+# código. Pontuação (":"/"-") continua permitida além de espaço/tab -- achado
+# da terceira revisão: formatos reais variam ("550 5.1.1: <addr>",
+# "5.1.1 - <addr>"), e nenhum deles introduz o risco de prosa que motivou a
+# restrição original (letras continuam de fora da classe de caracteres).
+_BOUNCE_RECIPIENT_PATTERNS = (
+    re.compile(
+        r"[245]\.\d{1,3}\.\d{1,3}[ \t:-]{0,4}<([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})>",
+        re.I,
+    ),
+    re.compile(
+        r"(?:delivery to the following recipient failed|"
+        r"wasn.t delivered to|couldn.t be delivered to)"
+        r"[\s\S]{0,80}?([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})",
+        re.I,
+    ),
+)
+
+# DEV-2026-0004 sub-entrega 2/9 (achado da segunda revisão adversarial): o
+# detector de remetente (`_BOUNCE_SENDER_RE`) não distingue um aviso de
+# ATRASO (a entrega ainda pode dar certo numa próxima tentativa) de uma
+# falha PERMANENTE -- os dois vêm do mesmo tipo de remetente automático.
+# Tratar um atraso como "não entregue" geraria um item de prioridade alta
+# falso-positivo toda vez que o servidor de destino só estivesse lento ou
+# temporariamente fora (extremamente comum e geralmente se resolve sozinho).
+# O sinal mais confiável é a classe do código SMTP estendido (RFC 3463):
+# 4.x.x é falha transitória ("Persistent Transient Failure"), só 5.x.x é
+# permanente. Sem código reconhecido, cai para palavras-chave do corpo.
+# Simplificação aceita (achado da terceira revisão adversarial): 4.2.2
+# (caixa cheia) tecnicamente é "transitório" pela RFC, mas na prática às
+# vezes nunca se resolve sozinho (o dono da caixa não libera espaço) -- tratá-lo
+# como atraso pode deixar uma devolução efetivamente permanente de fora da
+# fila por mais tempo que o ideal. Não há como diferenciar isso de um atraso
+# real sem acompanhar tentativas repetidas ao longo do tempo, o que está fora
+# do escopo desta sub-entrega; fica como limitação conhecida.
+#
+# Só os primeiros N linhas do corpo são varridas (aqui e em
+# `_extract_bounce_reason`) -- achado da terceira revisão: um DSN real quase
+# sempre repete o texto da mensagem original mais abaixo no corpo (citação),
+# que pode conter incidentalmente uma dessas palavras-chave (ou um código
+# SMTP não relacionado) sem ter nada a ver com o motivo real da devolução;
+# limitar a janela ao início, onde o servidor sempre coloca sua própria
+# explicação, reduz esse risco sem precisar separar as partes MIME da
+# devolução (`message/delivery-status` vs. `text/rfc822-headers`), que
+# `_extract_email_body` não distingue hoje.
+_BOUNCE_DIAGNOSTIC_WINDOW_LINES = 20
+
+_DELAY_KEYWORDS = (
+    "will keep trying", "we'll keep trying", "has been delayed",
+    "message is delayed", "delivery is delayed", "delayed mail",
+    "temporarily deferred", "try again later", "delivery incomplete",
+    # equivalentes em português -- a conta é de um usuário brasileiro e o
+    # Gmail localiza essas notificações pelo idioma da conta.
+    "vamos continuar tentando", "tentaremos novamente", "entrega atrasada",
+    "mensagem está atrasada", "atraso na entrega",
+)
 
 
 def is_sender_ignored(sender_raw: str | None, ignored_patterns: list[str]) -> bool:
@@ -304,6 +398,95 @@ def _extract_email_body(payload: dict) -> str:
 
     body = "\n".join(line for line in body.split("\n") if line.strip())
     return body[:4000]
+
+
+def _extract_bounce_reason(body: str) -> tuple[str | None, str]:
+    """Extrai o código SMTP estendido (ex. "5.1.1") e uma linha de motivo do
+    corpo de uma devolução (RFC 3464). Best-effort e deliberadamente simples:
+    o formato varia bastante entre servidores de origem, então quando não
+    acha um código, cai para as primeiras linhas do corpo como motivo --
+    melhor que nada, mas sem código para orientar a sugestão de "Enviar
+    e-mail como" (essa fica restrita ao caso em que o código 5.7.x foi
+    identificado com confiança). Só examina as primeiras
+    `_BOUNCE_DIAGNOSTIC_WINDOW_LINES` linhas (ver comentário na constante) --
+    evita pegar um código não relacionado de dentro da mensagem original
+    citada mais abaixo no corpo.
+    """
+    if not body:
+        return None, ""
+    linhas = [l.strip() for l in body.split("\n") if l.strip()][:_BOUNCE_DIAGNOSTIC_WINDOW_LINES]
+    codigo = None
+    motivo = ""
+    for i, linha in enumerate(linhas):
+        for padrao in _SMTP_EXTENDED_CODE_PATTERNS:
+            m = padrao.search(linha)
+            if m:
+                codigo = m.group(1)
+                motivo = linha
+                if len(motivo) < 20 and i + 1 < len(linhas):
+                    motivo = f"{motivo} {linhas[i + 1]}"
+                break
+        if codigo:
+            break
+    if not motivo:
+        motivo = " ".join(linhas[:3])
+    motivo = motivo.strip()
+    if len(motivo) > 300:
+        motivo = motivo[:297] + "..."
+    return codigo, motivo
+
+
+def _extract_bounce_recipient(body: str) -> str | None:
+    """Tenta achar, no próprio corpo da devolução, o endereço que de fato
+    falhou -- mais confiável que o cabeçalho `To` da mensagem anterior na
+    thread quando esse `To` tinha mais de um destinatário (ver
+    `_BOUNCE_RECIPIENT_PATTERNS`). `None` quando nenhum dos formatos
+    reconhecidos aparece; o chamador cai para o cabeçalho `To` nesse caso."""
+    if not body:
+        return None
+    for pattern in _BOUNCE_RECIPIENT_PATTERNS:
+        m = pattern.search(body)
+        if m:
+            return m.group(1).strip().lower().rstrip(".,;:>)")
+    return None
+
+
+def _is_delayed_not_failed(body: str, codigo: str | None) -> bool:
+    """True quando a mensagem é um aviso de ATRASO (a entrega ainda pode dar
+    certo numa próxima tentativa), não uma falha definitiva -- não deve virar
+    item na fila de atenção (ver `_DELAY_KEYWORDS`). Prioriza a classe do
+    código SMTP estendido quando disponível (4.x.x = transitório, só 5.x.x é
+    permanente); sem código reconhecido, cai para palavras-chave nas
+    primeiras `_BOUNCE_DIAGNOSTIC_WINDOW_LINES` linhas do corpo -- não no
+    corpo inteiro, para não pegar uma palavra-chave incidental dentro da
+    mensagem original citada mais abaixo (achado da terceira revisão
+    adversarial)."""
+    if codigo:
+        return codigo.startswith("4")
+    linhas = [l for l in (body or "").split("\n") if l.strip()][:_BOUNCE_DIAGNOSTIC_WINDOW_LINES]
+    janela_lower = "\n".join(linhas).lower()
+    return any(kw in janela_lower for kw in _DELAY_KEYWORDS)
+
+
+def _internal_date_to_sp_iso(internal_date) -> str:
+    """Converte o `internalDate` do Gmail (epoch ms, string) para um timestamp
+    ordenável (YYYY-MM-DDTHH:MM:SS) em America/Sao_Paulo -- granularidade de
+    segundo, não só de dia. Isso importa para `avaliar_emails_nao_entregues`:
+    a reabertura idempotente de um item fechado em `_persistir_itens_atencao`
+    decide comparando esse valor (`prazo_origem`) com o gravado antes: duas
+    devoluções DIFERENTES para o mesmo destinatário no mesmo dia (achado da
+    revisão adversarial desta sub-entrega) precisam contar como ocorrências
+    distintas -- com granularidade só de dia, se André resolvesse o item pela
+    manhã e uma nova devolução (não relacionada) chegasse à tarde do mesmo
+    dia, o item ficaria incorretamente fechado. Valor ausente/inválido cai
+    para o instante atual (mesmo fuso) em vez de propagar exceção -- o
+    chamador não deve travar por causa de um campo auxiliar de data."""
+    sp_tz = ZoneInfo("America/Sao_Paulo")
+    try:
+        millis = int(internal_date)
+        return datetime.fromtimestamp(millis / 1000, tz=timezone.utc).astimezone(sp_tz).strftime("%Y-%m-%dT%H:%M:%S")
+    except (TypeError, ValueError):
+        return datetime.now(sp_tz).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def _build_prompt(sender: str, subject: str, body: str, snippet: str, candidates_text: str) -> str:
@@ -762,6 +945,45 @@ def _collect_fresh_message_ids(service, query: str, needed: int, suggestions_col
     return fresh_ids
 
 
+def _header_value(message: dict, name: str) -> str:
+    """Lê um header específico (case-insensitive) do payload do Gmail."""
+    headers = ((message.get("payload") or {}).get("headers") or [])
+    name_l = name.lower()
+    return next((str(h.get("value") or "") for h in headers if str(h.get("name") or "").lower() == name_l), "")
+
+
+def _andre_em_to(message: dict, own_email: str) -> bool | None:
+    """DEV-2026-0004 sub-entrega 3/9: sinal para o filtro heurístico de
+    `inbox_pendentes` distinguir e-mail endereçado ao André (`To`) de e-mail
+    onde ele só está em cópia (`Cc`) ou em nenhum dos dois -- caso 2 do
+    achado B da demanda (informativo, André em Cc, não pede resposta).
+
+    Devolve None (sinal "não sei", nunca filtra) em dois casos, ambos
+    conservadores de propósito -- o chamador (`_noise_reason`) só trata como
+    "informativo" um False explícito: (1) sem `own_email`, mesma postura de
+    `detectar_emails_nao_entregues` -- sem o endereço da conta não dá para
+    diferenciar com confiança; (2) header `To` ausente/vazio -- um Bcc puro
+    (sem nenhum `To`) não é o mesmo sinal que "André está em Cc, não em To",
+    e tratar os dois como equivalentes esconderia um e-mail que pode muito
+    bem ter sido endereçado só a ele via Bcc.
+
+    Limitação aceita (mesma de `_mensagem_disparadora` em
+    `detectar_emails_nao_entregues`): `own_email` é só o endereço primário da
+    conta (`getProfile`). Um alias de "Enviar e-mail como" que receba e-mail
+    diretamente no To não bate contra `own_email` e o item fica marcado
+    (incorretamente) como só-Cc.
+    """
+    if not own_email:
+        return None
+    to_header = _header_value(message, "To")
+    if not to_header.strip():
+        return None
+    to_addrs = {addr.strip().lower() for _, addr in getaddresses([to_header]) if addr}
+    if not to_addrs:
+        return None
+    return own_email in to_addrs
+
+
 def atualizar_direcao_emails_aplicados(db, service, limit: int = 60) -> None:
     """Materializa a direção atual das threads ligadas a ações.
 
@@ -818,7 +1040,7 @@ def atualizar_direcao_emails_aplicados(db, service, limit: int = 60) -> None:
                 thread_id = str(source.get("threadId") or "").strip()
             if not thread_id:
                 continue
-            thread = service.users().threads().get(userId="me", id=thread_id, format="metadata", metadataHeaders=["From"]).execute()
+            thread = service.users().threads().get(userId="me", id=thread_id, format="metadata", metadataHeaders=["From", "To"]).execute()
             messages = thread.get("messages") or []
             if not messages:
                 continue
@@ -828,6 +1050,11 @@ def atualizar_direcao_emails_aplicados(db, service, limit: int = 60) -> None:
                 "ultima_mensagem_de_andre": _from(latest) == own_email,
                 "internal_date": latest.get("internalDate") or data.get("internal_date"),
                 "email_last_checked_at": checked_at,
+                # DEV-2026-0004 sub-entrega 3/9: reescrito a cada refresh, igual
+                # sender/snippet acima (sub-entrega 1/9) -- senão o sinal
+                # ficaria congelado na mensagem que criou a sugestão em vez de
+                # acompanhar a mais recente da thread.
+                "andre_em_to": _andre_em_to(latest, own_email),
             }
             latest_sender = _from_header(latest)
             if latest_sender:
@@ -838,6 +1065,223 @@ def atualizar_direcao_emails_aplicados(db, service, limit: int = 60) -> None:
             doc.reference.set(update, merge=True)
         except Exception as exc:
             print(f"[EMAIL-LINK] Falha ao atualizar thread {thread_id or message_id}: {exc}")
+
+
+def detectar_emails_nao_entregues(db, service, settings: dict | None = None, limit: int = 60) -> list[dict]:
+    """DEV-2026-0004 sub-entrega 2/9: identifica devoluções (bounces) nas
+    mesmas threads vinculadas a ações que `atualizar_direcao_emails_aplicados`
+    já percorre, e grava um item `email_nao_entregue` na fila de atenção
+    (`atencao.avaliar_emails_nao_entregues`) para cada destinatário com falha
+    -- agrupando devoluções repetidas do mesmo destinatário em um único item.
+
+    Respeita a flag system/settings.atencao.email_nao_entregue.enabled
+    (padrão False, desligado), no mesmo padrão dos demais detectores de
+    `atencao.py`.
+
+    Roda como um segundo passe independente sobre as mesmas sugestões
+    aplicadas/reativadas -- deliberadamente não reaproveita o laço de
+    `atualizar_direcao_emails_aplicados` para não alterar aquela função já
+    testada e em produção (sub-entrega 1/9). O custo extra só existe quando a
+    flag está ligada, e o corpo da mensagem de devolução em si (a chamada
+    `messages().get(format="full")`, mais cara) só é buscado quando um
+    remetente de devolução é de fato encontrado -- não em toda thread.
+
+    Atribuição de destinatário/alias (revisada duas vezes por revisões
+    adversariais desta sub-entrega): a mensagem que gerou a devolução é a
+    mais recente na thread, ANTES da devolução, que seja do próprio André
+    (comparado ao e-mail da conta via `getProfile`) -- `_mensagem_disparadora`
+    anda para trás procurando isso, em vez de assumir cegamente
+    `messages[idx-1]` (que atribuía a devolução a si mesma quando o servidor
+    manda mais de uma notificação para o mesmo envio -- aviso de atraso
+    primeiro, falha definitiva depois -- e, mesmo só pulando notificações
+    automáticas, ainda podia pegar a resposta de um terceiro que por acaso
+    ficasse entre o envio original e uma devolução atrasada). Quando nenhuma
+    mensagem anterior bate com o e-mail da conta (ex.: André mandou por um
+    alias diferente do "Enviar e-mail como" -- limitação já aceita também em
+    `atualizar_direcao_emails_aplicados`), cai para a mensagem não-automática
+    mais recente antes da devolução, que ainda é melhor que nada.
+
+    O destinatário que falhou vem, em ordem de confiança: (1) o endereço que
+    o próprio corpo da devolução nomeia (`_extract_bounce_recipient`) -- é a
+    fonte mais confiável e a única que funciona quando o `To` da mensagem
+    disparadora tinha mais de um destinatário, caso em que `email.utils.parseaddr`
+    (pensado para um único endereço) devolveria um valor vazio e a devolução
+    seria descartada em silêncio; (2) se o corpo não nomear ninguém, o `To`
+    da mensagem disparadora, mas só quando ele tem exatamente um endereço --
+    com mais de um e nada no corpo, não dá para saber qual falhou, e a
+    devolução é pulada em vez de arriscar atribuir à pessoa errada. O alias
+    de envio (para a sugestão de revisar "Enviar e-mail como" quando o código
+    é 5.7.x) vem do `From` da mensagem disparadora. Uma devolução sem nenhuma
+    mensagem disparadora antes dela na thread é pulada -- não dá para
+    atribuir destinatário com confiança nesse caso.
+
+    Devoluções que são só um aviso de ATRASO (não uma falha definitiva) são
+    descartadas por `_is_delayed_not_failed` -- ver essa função para o porquê.
+    """
+    if settings is None:
+        try:
+            settings_doc = db.collection("system").document("settings").get()
+            settings = settings_doc.to_dict() if settings_doc.exists else {}
+        except Exception as set_err:
+            print(f"[EmailNaoEntregue] Falha ao consultar settings: {set_err}")
+            settings = {}
+
+    enabled = (
+        (settings or {}).get("atencao", {}).get("email_nao_entregue", {}).get("enabled", False)
+    )
+    if not enabled:
+        print("[EmailNaoEntregue] Detector email_nao_entregue desligado em system/settings; abortando.")
+        return []
+
+    suggestions = db.collection("email_action_suggestions")
+    try:
+        docs = list(suggestions.where("status", "in", ["applied", "applied_reactivated"]).limit(limit).stream())
+    except Exception as exc:
+        print(f"[EmailNaoEntregue] Falha ao consultar sugestões: {exc}")
+        return []
+
+    try:
+        own_email = str(service.users().getProfile(userId="me").execute().get("emailAddress") or "").strip().lower()
+    except Exception as profile_err:
+        print(f"[EmailNaoEntregue] Falha ao obter e-mail da conta (seguindo sem ele): {profile_err}")
+        own_email = ""
+
+    def _header(message: dict, name: str) -> str:
+        headers = ((message.get("payload") or {}).get("headers") or [])
+        name_l = name.lower()
+        return next((str(h.get("value") or "") for h in headers if str(h.get("name") or "").lower() == name_l), "")
+
+    def _from_addr(message: dict) -> str:
+        return parseaddr(_header(message, "From"))[1].strip().lower()
+
+    def _mensagem_disparadora(messages: list[dict], bounce_idx: int) -> dict | None:
+        """Anda para trás a partir do índice da devolução procurando a
+        mensagem que a disparou. Prioriza a mais recente que seja do próprio
+        André (bate com `own_email`) -- evita pegar a resposta de um
+        terceiro que por acaso ficou entre o envio original e a devolução.
+        Quando nada bate com `own_email` (ex.: alias de envio diferente),
+        cai para a mensagem não-automática mais recente antes da devolução
+        (ver docstring acima).
+
+        Sem `own_email` (falha ao consultar a conta -- ver acima), não dá
+        para diferenciar uma mensagem do André de uma resposta de terceiro
+        com confiança nenhuma: devolve None para TODA devolução nesse passe
+        em vez de arriscar a mesma atribuição errada que esta função existe
+        para evitar (achado da terceira revisão adversarial -- sem essa
+        guarda, a falha ao obter `own_email` fazia a função silenciosamente
+        regredir para "mensagem não-automática mais próxima", reintroduzindo
+        o problema)."""
+        if not own_email:
+            return None
+        melhor_nao_automatica = None
+        for j in range(bounce_idx - 1, -1, -1):
+            candidata = messages[j]
+            remetente_candidata = _header(candidata, "From")
+            if remetente_candidata and _BOUNCE_SENDER_RE.search(remetente_candidata):
+                continue
+            if melhor_nao_automatica is None:
+                melhor_nao_automatica = candidata
+            if _from_addr(candidata) == own_email:
+                return candidata
+        return melhor_nao_automatica
+
+    bounces: list[dict] = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        message_id = str(data.get("google_message_id") or doc.id).strip()
+        thread_id = str(data.get("gmail_thread_id") or "").strip()
+        try:
+            if not thread_id:
+                source = service.users().messages().get(
+                    userId="me", id=message_id, format="metadata", metadataHeaders=["From"]
+                ).execute()
+                thread_id = str(source.get("threadId") or "").strip()
+            if not thread_id:
+                continue
+            thread = service.users().threads().get(
+                userId="me", id=thread_id, format="metadata", metadataHeaders=["From", "To"]
+            ).execute()
+            messages = thread.get("messages") or []
+            for idx, msg in enumerate(messages):
+                sender = _header(msg, "From")
+                if not sender or not _BOUNCE_SENDER_RE.search(sender):
+                    continue
+
+                disparadora = _mensagem_disparadora(messages, idx)
+                if disparadora is None:
+                    print(f"[EmailNaoEntregue] Sem mensagem disparadora confiável para a devolução "
+                          f"{msg.get('id')} na thread {thread_id}; pulando.")
+                    continue
+                destinatario_raw = _header(disparadora, "To")
+                alias_remetente = _header(disparadora, "From")
+
+                bounce_msg_id = str(msg.get("id") or "").strip()
+                motivo, codigo, corpo = "", None, ""
+                if bounce_msg_id:
+                    try:
+                        full = service.users().messages().get(
+                            userId="me", id=bounce_msg_id, format="full"
+                        ).execute()
+                        corpo = _extract_email_body(full.get("payload") or {})
+                        codigo, motivo = _extract_bounce_reason(corpo)
+                    except Exception as body_err:
+                        print(f"[EmailNaoEntregue] Falha ao ler corpo da devolução {bounce_msg_id}: {body_err}")
+
+                if _is_delayed_not_failed(corpo, codigo):
+                    # Aviso de atraso, não falha definitiva -- a entrega
+                    # ainda pode dar certo numa próxima tentativa do
+                    # servidor; não vira item na fila de atenção.
+                    print(f"[EmailNaoEntregue] Devolução {bounce_msg_id} parece atraso, não falha "
+                          f"definitiva (codigo={codigo}); pulando.")
+                    continue
+
+                nome_dest = ""
+                addr_dest = _extract_bounce_recipient(corpo)
+                if not addr_dest:
+                    # Corpo não nomeou o destinatário -- só confia no `To` da
+                    # mensagem disparadora quando ele tem exatamente um
+                    # endereço (getaddresses trata corretamente um `To` com
+                    # vários destinatários separados por vírgula, ao
+                    # contrário de parseaddr).
+                    enderecos = getaddresses([destinatario_raw]) if destinatario_raw else []
+                    if len(enderecos) == 1:
+                        nome_dest, addr_dest = enderecos[0]
+                        addr_dest = addr_dest.strip().lower()
+                if not addr_dest:
+                    continue
+                if not nome_dest and destinatario_raw:
+                    for nome_cand, addr_cand in getaddresses([destinatario_raw]):
+                        if addr_cand.strip().lower() == addr_dest:
+                            nome_dest = nome_cand
+                            break
+
+                internal_date = msg.get("internalDate") or data.get("internal_date")
+                data_str = _internal_date_to_sp_iso(internal_date)
+
+                bounces.append({
+                    "destinatario": addr_dest,
+                    "destinatario_nome": nome_dest or addr_dest,
+                    "alias_remetente": alias_remetente,
+                    "motivo": motivo,
+                    "codigo_smtp": codigo,
+                    "thread_id": thread_id,
+                    "mensagem_id": bounce_msg_id or message_id,
+                    "data": data_str,
+                })
+        except Exception as exc:
+            print(f"[EmailNaoEntregue] Falha ao varrer thread {thread_id or message_id}: {exc}")
+
+    if not bounces:
+        return []
+
+    import atencao as _atencao
+
+    sp_tz = ZoneInfo("America/Sao_Paulo")
+    hoje = datetime.now(sp_tz).date()
+    itens = _atencao.avaliar_emails_nao_entregues(bounces, hoje)
+    if itens:
+        _atencao._persistir_itens_atencao(db, itens)
+    return itens
 
 
 def link_emails_to_actions(db, service, sync_ref, logs):
@@ -863,6 +1307,13 @@ def link_emails_to_actions(db, service, sync_ref, logs):
 
     suggestions_col = db.collection("email_action_suggestions")
     atualizar_direcao_emails_aplicados(db, service)
+    try:
+        detectar_emails_nao_entregues(db, service)
+    except Exception as bounce_err:
+        # DEV-2026-0004 sub-entrega 2/9: nunca deixa a fila de atenção
+        # atrapalhar o restante do sync de e-mails (mesma postura defensiva
+        # do resto desta função).
+        print(f"[EMAIL-LINK] Falha ao detectar e-mails não entregues: {bounce_err}")
     chat_id = _resolve_default_telegram_chat_id(db)
     now = datetime.now(timezone.utc)
     sent_this_pass = 0
@@ -928,6 +1379,17 @@ def link_emails_to_actions(db, service, sync_ref, logs):
     genai = get_genai_module()
     client = genai.Client(api_key=api_key)
 
+    # DEV-2026-0004 sub-entrega 3/9: buscado uma vez por passada (mesmo padrão
+    # de `detectar_emails_nao_entregues`/`atualizar_direcao_emails_aplicados`)
+    # para marcar cada sugestão com `andre_em_to` já na criação -- não fica
+    # esperando o próximo refresh de `atualizar_direcao_emails_aplicados` para
+    # o primeiro passe já classificar corretamente e-mails só-Cc.
+    try:
+        own_email = str(service.users().getProfile(userId="me").execute().get("emailAddress") or "").strip().lower()
+    except Exception as profile_err:
+        log_to_firestore(sync_ref, logs, f"[EMAIL-LINK][!] Falha ao obter e-mail da conta (andre_em_to ficará indefinido): {profile_err}", True)
+        own_email = ""
+
     analyzed = 0
 
     for msg_id in fresh_message_ids:
@@ -938,6 +1400,7 @@ def link_emails_to_actions(db, service, sync_ref, logs):
             continue
 
         sender, subject = _gmail_message_headers(msg)
+        andre_em_to = _andre_em_to(msg, own_email)
         if is_sender_ignored(sender, settings.get("ignored_senders", [])):
             base_doc = {
                 "canal": "email",
@@ -953,6 +1416,7 @@ def link_emails_to_actions(db, service, sync_ref, logs):
                 "status": "ignored",
                 "ignored_reason": "ignored_sender",
                 "related": False,
+                "andre_em_to": andre_em_to,
             }
             suggestions_col.document(msg_id).set(base_doc)
             continue
@@ -988,6 +1452,7 @@ def link_emails_to_actions(db, service, sync_ref, logs):
             "model": GEMINI_LIGHT_MODEL,
             "related": related,
             "confidence": confidence,
+            "andre_em_to": andre_em_to,
         }
 
         if not related or not task_id or task_id not in candidates_by_id or confidence < settings["min_confidence"]:
