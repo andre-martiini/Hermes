@@ -36,6 +36,12 @@ class _Db:
 
 
 class _Gmail:
+    def __init__(self, thread_messages=None):
+        self.thread_messages = thread_messages or [
+            {'internalDate': '1', 'payload': {'headers': [{'name': 'From', 'value': 'proad@ufjf.br'}]}},
+            {'internalDate': '2', 'payload': {'headers': [{'name': 'From', 'value': 'André <andre@ufjf.br>'}]}},
+        ]
+
     def users(self): return self
     def getProfile(self, **kwargs): return _Req({'emailAddress': 'andre@ufjf.br'})
     def messages(self): return self
@@ -43,10 +49,7 @@ class _Gmail:
     def get(self, **kwargs):
         if kwargs['id'] == 'message-1':
             return _Req({'threadId': 'thread-1'})
-        return _Req({'messages': [
-            {'internalDate': '1', 'payload': {'headers': [{'name': 'From', 'value': 'proad@ufjf.br'}]}},
-            {'internalDate': '2', 'payload': {'headers': [{'name': 'From', 'value': 'André <andre@ufjf.br>'}]}},
-        ]})
+        return _Req({'messages': self.thread_messages})
 
 
 class EmailDirectionTest(unittest.TestCase):
@@ -56,6 +59,119 @@ class EmailDirectionTest(unittest.TestCase):
         self.assertTrue(doc.reference.data['ultima_mensagem_de_andre'])
         self.assertEqual(doc.reference.data['gmail_thread_id'], 'thread-1')
         self.assertEqual(doc.reference.data['internal_date'], '2')
+
+
+class EmailDirectionSenderRefreshTest(unittest.TestCase):
+    """DEV-2026-0004 sub-entrega 1/9 (causa-raiz do achado B1): `sender` deixa
+    de ficar congelado no remetente original -- passa a refletir quem mandou a
+    última mensagem da thread a cada refresh. Reproduz o caso relatado
+    (Sabrina Panceri / Mayana-IFTO / FAPES): uma devolução (mailer-daemon)
+    chegando como resposta à mensagem do André."""
+
+    def test_devolucao_mailer_daemon_atualiza_sender_para_o_remetente_real(self):
+        doc = _Doc('suggestion-sabrina', {
+            'google_message_id': 'message-1',
+            'sender': 'Sabrina Panceri <sabrina.panceri@example.com>',
+            'origem_sinal': 'Sabrina Panceri <sabrina.panceri@example.com>',
+        })
+        gmail = _Gmail(thread_messages=[
+            {'internalDate': '1', 'payload': {'headers': [
+                {'name': 'From', 'value': 'Sabrina Panceri <sabrina.panceri@example.com>'}]}},
+            {'internalDate': '2', 'payload': {'headers': [
+                {'name': 'From', 'value': 'André <andre@ufjf.br>'}]}},
+            {'internalDate': '3', 'payload': {'headers': [
+                {'name': 'From', 'value': 'Mail Delivery Subsystem <mailer-daemon@googlemail.com>'}]}},
+        ])
+        atualizar_direcao_emails_aplicados(_Db([doc]), gmail)
+        # a thread não fecha sozinha (mailer-daemon != andre@ufjf.br) -- isso é
+        # tratado pelas sub-entregas seguintes (exclusão/realocação do item) --
+        # mas o remetente gravado agora é o real, não mais o congelado.
+        self.assertFalse(doc.reference.data['ultima_mensagem_de_andre'])
+        self.assertEqual(
+            doc.reference.data['sender'],
+            'Mail Delivery Subsystem <mailer-daemon@googlemail.com>',
+        )
+        # origem_sinal (registro histórico de quem abriu o vínculo) não é tocado.
+        self.assertEqual(
+            doc.reference.data['origem_sinal'],
+            'Sabrina Panceri <sabrina.panceri@example.com>',
+        )
+
+    def test_sender_atualizado_e_reconhecido_como_ruido_automatico(self):
+        """Ponta a ponta com inbox_pendentes._noise_reason, usando o `sender` E
+        o `snippet` como o refresh de verdade os deixa (não texto digitado à
+        mão no teste): uma vez que `sender` reflete o remetente real da
+        devolução, o filtro de ruído -- que já reconhecia `mailer-daemon` --
+        passa a excluir o item corretamente (antes desta correção, `sender`
+        continuaria "Mayana <mayana@ifto.edu.br>" e este reason daria None, ou
+        seja, falsa "resposta pendente")."""
+        from inbox_pendentes import _DEFAULT_DOMAINS, _DEFAULT_ENDINGS, _noise_reason
+
+        doc = _Doc('suggestion-mayana', {
+            'google_message_id': 'message-1',
+            'sender': 'Mayana <mayana@ifto.edu.br>',
+            'snippet': 'Mayana: segue o cronograma da visita técnica.',
+        })
+        gmail = _Gmail(thread_messages=[
+            {'internalDate': '1', 'payload': {'headers': [{'name': 'From', 'value': 'Mayana <mayana@ifto.edu.br>'}]}},
+            {'internalDate': '2', 'payload': {'headers': [{'name': 'From', 'value': 'André <andre@ufjf.br>'}]}},
+            {'internalDate': '3', 'snippet': 'Delivery Status Notification (Failure)', 'payload': {'headers': [
+                {'name': 'From', 'value': 'mailer-daemon@googlemail.com'}]}},
+        ])
+        atualizar_direcao_emails_aplicados(_Db([doc]), gmail)
+        updated = doc.reference.data
+
+        reason = _noise_reason(
+            trecho=updated['snippet'],
+            sender=updated['sender'],
+            is_email=True,
+            has_contact=False,
+            has_task=True,
+            domains=_DEFAULT_DOMAINS,
+            endings=_DEFAULT_ENDINGS,
+        )
+        self.assertEqual(reason, 'automaticos')
+
+    def test_troca_de_remetente_na_thread_atualiza_snippet_junto_com_sender(self):
+        """Achado da revisão adversarial desta sub-entrega: atualizar `sender`
+        sem atualizar `snippet` deixaria o contato certo ao lado de um trecho
+        de uma mensagem antiga e diferente, sempre que outra pessoa (não uma
+        devolução) assume a thread -- ex.: um assistente responde no lugar do
+        contato original. Prova que os dois campos avançam juntos."""
+        doc = _Doc('suggestion-troca', {
+            'google_message_id': 'message-1',
+            'sender': 'Gabriela <gabriela@ifes.edu.br>',
+            'snippet': 'Gabriela: poderia revisar o anexo até sexta?',
+        })
+        gmail = _Gmail(thread_messages=[
+            {'internalDate': '1', 'payload': {'headers': [{'name': 'From', 'value': 'Gabriela <gabriela@ifes.edu.br>'}]}},
+            {'internalDate': '2', 'payload': {'headers': [{'name': 'From', 'value': 'André <andre@ufjf.br>'}]}},
+            {'internalDate': '3', 'snippet': 'Marcos: assumindo esse assunto no lugar da Gabriela, segue o despacho.',
+             'payload': {'headers': [{'name': 'From', 'value': 'Marcos Marinho <marcos@tjes.jus.br>'}]}},
+        ])
+        atualizar_direcao_emails_aplicados(_Db([doc]), gmail)
+        updated = doc.reference.data
+        self.assertEqual(updated['sender'], 'Marcos Marinho <marcos@tjes.jus.br>')
+        self.assertEqual(updated['snippet'], 'Marcos: assumindo esse assunto no lugar da Gabriela, segue o despacho.')
+
+    def test_ausencia_de_snippet_na_resposta_da_api_preserva_o_valor_anterior(self):
+        """Mesma postura defensiva já usada para `sender`: se a resposta da API
+        não trouxer `snippet` para a mensagem mais recente, o valor antigo
+        sobrevive em vez de ser apagado."""
+        doc = _Doc('suggestion-sem-snippet', {
+            'google_message_id': 'message-1',
+            'sender': 'Gabriela <gabriela@ifes.edu.br>',
+            'snippet': 'Gabriela: poderia revisar o anexo até sexta?',
+        })
+        gmail = _Gmail(thread_messages=[
+            {'internalDate': '1', 'payload': {'headers': [{'name': 'From', 'value': 'Gabriela <gabriela@ifes.edu.br>'}]}},
+            {'internalDate': '2', 'payload': {'headers': [{'name': 'From', 'value': 'Gabriela <gabriela@ifes.edu.br>'}]}},
+        ])
+        atualizar_direcao_emails_aplicados(_Db([doc]), gmail)
+        self.assertEqual(
+            doc.reference.data['snippet'],
+            'Gabriela: poderia revisar o anexo até sexta?',
+        )
 
 
 if __name__ == '__main__':

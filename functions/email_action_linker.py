@@ -26,6 +26,7 @@ import base64
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
+from email.utils import parseaddr
 from zoneinfo import ZoneInfo
 
 from firebase_admin import firestore
@@ -769,6 +770,25 @@ def atualizar_direcao_emails_aplicados(db, service, limit: int = 60) -> None:
     se a última mensagem de uma thread for do André, ela deixa de aparecer como
     resposta pendente; se for recebida, seu timestamp avança para a mensagem
     mais recente da thread.
+
+    DEV-2026-0004 sub-entrega 1/9 (causa-raiz do achado B1): os campos `sender`
+    e `snippet` também são reescritos a cada refresh, a partir da mensagem mais
+    recente da thread -- antes só eram gravados uma vez, na criação da sugestão
+    (`link_emails_to_actions`), e nunca mais tocados aqui. Sem isso, quando uma
+    devolução (mailer-daemon) chega como resposta à mensagem do André, o campo
+    `sender` continuava apontando para o remetente humano original: o filtro de
+    ruído em `inbox_pendentes._noise_reason` já sabe reconhecer `mailer-daemon`
+    via `_AUTO_SENDER`, mas comparava sempre contra esse remetente congelado,
+    nunca contra quem de fato mandou a última mensagem da thread -- por isso a
+    devolução aparecia como "resposta pendente" do contato original em vez de
+    ser excluída (ou, a partir da sub-entrega 2/9, virar um item dedicado
+    `email_nao_entregue` na fila de atenção). `snippet` entra pelo mesmo motivo,
+    achado pela revisão adversarial desta sub-entrega: sem atualizá-lo junto,
+    `sender` ficaria correto mas `inbox_pendentes._item` mostraria esse contato
+    ao lado de um trecho (`trecho`) de uma mensagem antiga e diferente -- não
+    afeta o caso mailer-daemon em si (o filtro de ruído decide pelo remetente,
+    antes de olhar o trecho), mas afetaria qualquer outra troca de remetente na
+    mesma thread.
     """
     suggestions = db.collection("email_action_suggestions")
     try:
@@ -780,11 +800,12 @@ def atualizar_direcao_emails_aplicados(db, service, limit: int = 60) -> None:
     if not own_email:
         return
 
-    def _from(message: dict) -> str:
+    def _from_header(message: dict) -> str:
         headers = ((message.get("payload") or {}).get("headers") or [])
-        raw = next((str(h.get("value") or "") for h in headers if str(h.get("name") or "").lower() == "from"), "")
-        from email.utils import parseaddr
-        return parseaddr(raw)[1].strip().lower()
+        return next((str(h.get("value") or "") for h in headers if str(h.get("name") or "").lower() == "from"), "")
+
+    def _from(message: dict) -> str:
+        return parseaddr(_from_header(message))[1].strip().lower()
 
     checked_at = datetime.now(timezone.utc).isoformat()
     for doc in docs:
@@ -802,12 +823,19 @@ def atualizar_direcao_emails_aplicados(db, service, limit: int = 60) -> None:
             if not messages:
                 continue
             latest = messages[-1]
-            doc.reference.set({
+            update = {
                 "gmail_thread_id": thread_id,
                 "ultima_mensagem_de_andre": _from(latest) == own_email,
                 "internal_date": latest.get("internalDate") or data.get("internal_date"),
                 "email_last_checked_at": checked_at,
-            }, merge=True)
+            }
+            latest_sender = _from_header(latest)
+            if latest_sender:
+                update["sender"] = latest_sender
+            latest_snippet = latest.get("snippet")
+            if latest_snippet:
+                update["snippet"] = latest_snippet
+            doc.reference.set(update, merge=True)
         except Exception as exc:
             print(f"[EMAIL-LINK] Falha ao atualizar thread {thread_id or message_id}: {exc}")
 
