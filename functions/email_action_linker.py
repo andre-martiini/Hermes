@@ -945,6 +945,45 @@ def _collect_fresh_message_ids(service, query: str, needed: int, suggestions_col
     return fresh_ids
 
 
+def _header_value(message: dict, name: str) -> str:
+    """Lê um header específico (case-insensitive) do payload do Gmail."""
+    headers = ((message.get("payload") or {}).get("headers") or [])
+    name_l = name.lower()
+    return next((str(h.get("value") or "") for h in headers if str(h.get("name") or "").lower() == name_l), "")
+
+
+def _andre_em_to(message: dict, own_email: str) -> bool | None:
+    """DEV-2026-0004 sub-entrega 3/9: sinal para o filtro heurístico de
+    `inbox_pendentes` distinguir e-mail endereçado ao André (`To`) de e-mail
+    onde ele só está em cópia (`Cc`) ou em nenhum dos dois -- caso 2 do
+    achado B da demanda (informativo, André em Cc, não pede resposta).
+
+    Devolve None (sinal "não sei", nunca filtra) em dois casos, ambos
+    conservadores de propósito -- o chamador (`_noise_reason`) só trata como
+    "informativo" um False explícito: (1) sem `own_email`, mesma postura de
+    `detectar_emails_nao_entregues` -- sem o endereço da conta não dá para
+    diferenciar com confiança; (2) header `To` ausente/vazio -- um Bcc puro
+    (sem nenhum `To`) não é o mesmo sinal que "André está em Cc, não em To",
+    e tratar os dois como equivalentes esconderia um e-mail que pode muito
+    bem ter sido endereçado só a ele via Bcc.
+
+    Limitação aceita (mesma de `_mensagem_disparadora` em
+    `detectar_emails_nao_entregues`): `own_email` é só o endereço primário da
+    conta (`getProfile`). Um alias de "Enviar e-mail como" que receba e-mail
+    diretamente no To não bate contra `own_email` e o item fica marcado
+    (incorretamente) como só-Cc.
+    """
+    if not own_email:
+        return None
+    to_header = _header_value(message, "To")
+    if not to_header.strip():
+        return None
+    to_addrs = {addr.strip().lower() for _, addr in getaddresses([to_header]) if addr}
+    if not to_addrs:
+        return None
+    return own_email in to_addrs
+
+
 def atualizar_direcao_emails_aplicados(db, service, limit: int = 60) -> None:
     """Materializa a direção atual das threads ligadas a ações.
 
@@ -1001,7 +1040,7 @@ def atualizar_direcao_emails_aplicados(db, service, limit: int = 60) -> None:
                 thread_id = str(source.get("threadId") or "").strip()
             if not thread_id:
                 continue
-            thread = service.users().threads().get(userId="me", id=thread_id, format="metadata", metadataHeaders=["From"]).execute()
+            thread = service.users().threads().get(userId="me", id=thread_id, format="metadata", metadataHeaders=["From", "To"]).execute()
             messages = thread.get("messages") or []
             if not messages:
                 continue
@@ -1011,6 +1050,11 @@ def atualizar_direcao_emails_aplicados(db, service, limit: int = 60) -> None:
                 "ultima_mensagem_de_andre": _from(latest) == own_email,
                 "internal_date": latest.get("internalDate") or data.get("internal_date"),
                 "email_last_checked_at": checked_at,
+                # DEV-2026-0004 sub-entrega 3/9: reescrito a cada refresh, igual
+                # sender/snippet acima (sub-entrega 1/9) -- senão o sinal
+                # ficaria congelado na mensagem que criou a sugestão em vez de
+                # acompanhar a mais recente da thread.
+                "andre_em_to": _andre_em_to(latest, own_email),
             }
             latest_sender = _from_header(latest)
             if latest_sender:
@@ -1335,6 +1379,17 @@ def link_emails_to_actions(db, service, sync_ref, logs):
     genai = get_genai_module()
     client = genai.Client(api_key=api_key)
 
+    # DEV-2026-0004 sub-entrega 3/9: buscado uma vez por passada (mesmo padrão
+    # de `detectar_emails_nao_entregues`/`atualizar_direcao_emails_aplicados`)
+    # para marcar cada sugestão com `andre_em_to` já na criação -- não fica
+    # esperando o próximo refresh de `atualizar_direcao_emails_aplicados` para
+    # o primeiro passe já classificar corretamente e-mails só-Cc.
+    try:
+        own_email = str(service.users().getProfile(userId="me").execute().get("emailAddress") or "").strip().lower()
+    except Exception as profile_err:
+        log_to_firestore(sync_ref, logs, f"[EMAIL-LINK][!] Falha ao obter e-mail da conta (andre_em_to ficará indefinido): {profile_err}", True)
+        own_email = ""
+
     analyzed = 0
 
     for msg_id in fresh_message_ids:
@@ -1345,6 +1400,7 @@ def link_emails_to_actions(db, service, sync_ref, logs):
             continue
 
         sender, subject = _gmail_message_headers(msg)
+        andre_em_to = _andre_em_to(msg, own_email)
         if is_sender_ignored(sender, settings.get("ignored_senders", [])):
             base_doc = {
                 "canal": "email",
@@ -1360,6 +1416,7 @@ def link_emails_to_actions(db, service, sync_ref, logs):
                 "status": "ignored",
                 "ignored_reason": "ignored_sender",
                 "related": False,
+                "andre_em_to": andre_em_to,
             }
             suggestions_col.document(msg_id).set(base_doc)
             continue
@@ -1395,6 +1452,7 @@ def link_emails_to_actions(db, service, sync_ref, logs):
             "model": GEMINI_LIGHT_MODEL,
             "related": related,
             "confidence": confidence,
+            "andre_em_to": andre_em_to,
         }
 
         if not related or not task_id or task_id not in candidates_by_id or confidence < settings["min_confidence"]:
