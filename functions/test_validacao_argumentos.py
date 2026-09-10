@@ -49,8 +49,52 @@ comprovada (`registry._CAMPOS_COM_TOLERANCIA_A_STRING_JSON`), não uma
 regra geral -- `editar_acao.tags`, por exemplo, continua sem essa
 tolerância e continua sendo rejeitado.
 
-Este arquivo tem seis frentes (três da sub-entrega 2/N, três da 4/N,
-mesmo padrão cada):
+P03 sub-entrega 5/N (adicionado depois, mesmo arquivo): terceira fatia da
+validação de argumentos -- checa se o valor de um campo presente está
+entre os permitidos pela lista `enum` que o schema declara para ele
+(quando declara). Levantamento nos 105 schemas (10/09/2026) encontrou 8
+propriedades de nível superior, em 8 tools, com `enum` -- todas `string`,
+sem sobreposição com a checagem de tipo estrutural (que só cobre
+`array`/`object`). Mesmo escopo deliberado de `tipos_invalidos`: só
+propriedades de NÍVEL SUPERIOR -- o `enum` aninhado do campo `estado` de
+cada etapa dentro de `plano_acao`/`etapas` fica de fora, pela mesma razão
+estrutural (o campo que contém essa lista pode chegar como string JSON
+bruta; validar o conteúdo aninhado viraria parser de plano, não checagem
+de preflight). Ver a docstring de `registry.valores_invalidos` para o
+catálogo completo.
+
+Achados da 1ª rodada de revisão adversarial da 5/N (dois, ambos corrigidos
+antes de mesclar): (1) o schema de `obter_fila_atencao.origem` estava
+desatualizado -- faltava `secretario_whatsapp`, um valor real que
+`atencao.ORIGENS` já lista e que `secretario_whatsapp.py` já grava em
+produção, sem validação alguma no handler (`atencao.coletar_fila_atencao`
+faz um filtro cru do Firestore); corrigido acrescentando o valor ao
+schema. (2) 4 dos 8 handlers dos campos com `enum`
+(`decidir_promocao_autonomia.decisao`, `registrar_execucao_investimento.
+ativo`, `registrar_execucao_agente.status`, `solicitar_autorizacao_argos.
+tipo`) já normalizam o valor recebido (`.strip().lower()`/`.upper()`/
+`.strip()`) antes de comparar -- uma comparação exata aqui teria bloqueado
+uma chamada com case ou espaço diferente que esses handlers aceitam hoje,
+a mesma classe de regressão já encontrada na 4/N.
+
+A correção inicial do achado (2) tornou `valores_invalidos` tolerante a
+case/espaço para QUALQUER campo com `enum` -- e a 2ª rodada de revisão
+adversarial (feita sobre a correção, não sobre o diff original, mesmo
+padrão de duas rodadas estabelecido na 4/N) achou que essa tolerância
+geral era, ela mesma, uma regressão nova e pior: `obter_fila_atencao`
+(`estado`/`origem`) não tem handler tolerante -- `coletar_fila_atencao`
+usa o valor cru num filtro `==` do Firestore. Com tolerância geral,
+`estado="ABERTO"` passaria pelo preflight e devolveria SILENCIOSAMENTE
+zero itens (o filtro não bate com o valor armazenado, sempre minúsculo),
+sem erro nenhum -- pior que o excesso de rigor original, porque troca um
+erro claro por um resultado vazio indistinguível de "nada pendente".
+Corrigido tornando a tolerância uma lista FECHADA de pares (tool, campo)
+com tolerância comprovada no próprio handler (ver
+`registry._CAMPOS_COM_ENUM_TOLERANTE_A_CASE`), mesmo padrão de
+`_CAMPOS_COM_TOLERANCIA_A_STRING_JSON` -- nunca uma tolerância geral.
+
+Este arquivo tem nove frentes (três da sub-entrega 2/N, três da 4/N, três
+da 5/N, mesmo padrão cada):
 1. `TestCamposObrigatoriosAusentes` — a função pura em `tools/registry.py`,
    incluindo uma verificação de paridade contra TODOS os schemas reais do
    catálogo (não só alguns exemplos escolhidos a dedo).
@@ -73,6 +117,14 @@ mesmo padrão cada):
    mesmos dois pontos de inserção da checagem de presença, mesma exclusão
    do reenvio `_confirmed=true`, e a regressão da exceção
    (`plano_acao` como string JSON chegando a `preview_tool`).
+7. `TestValoresInvalidos` — a função pura `registry.valores_invalidos`,
+   incluindo paridade (para TODO schema real que declara `enum` numa
+   propriedade de nível superior) e um teste provando que o `enum`
+   aninhado de `plano_acao`/`etapas` fica fora do escopo.
+8. `TestErroValoresInvalidos` — o wrapper `mcp_server._erro_valores_invalidos`.
+9. `TestIntegracaoValoresInvalidos` — ponta a ponta via `_handle_tools_call`,
+   mesmos dois pontos de inserção, incluindo a prova de que campo ausente e
+   tipo inválido têm prioridade sobre valor inválido no mesmo payload.
 """
 
 from __future__ import annotations
@@ -607,6 +659,399 @@ class TestIntegracaoTiposInvalidos(unittest.TestCase):
             resultado = mcp_server._handle_tools_call(
                 {
                     "name": "criar_rascunho_email",
+                    "arguments": {"_confirmed": True, "_confirmation_id": "conf-1"},
+                },
+                ctx=_ctx(),
+            )
+        mock_executar.assert_called_once()
+        self.assertFalse(resultado.get("isError", False))
+
+
+class TestValoresInvalidos(unittest.TestCase):
+    """`registry.valores_invalidos` isolada, sem tocar o dispatch. Cobre só
+    `enum` de propriedades de nível superior -- ver docstring da função
+    para o porquê de `enum` aninhado (ex.: `estado` de cada etapa dentro de
+    `plano_acao`/`etapas`) ficar fora."""
+
+    def test_valor_permitido_devolve_lista_vazia(self):
+        self.assertEqual(
+            registry.valores_invalidos(
+                "decidir_promocao_autonomia", {"tipo": "x", "decisao": "aceitar"}
+            ),
+            [],
+        )
+
+    def test_valor_fora_do_enum_e_detectado(self):
+        self.assertEqual(
+            registry.valores_invalidos(
+                "decidir_promocao_autonomia", {"tipo": "x", "decisao": "talvez"}
+            ),
+            [{
+                "campo": "decisao",
+                "esperado": ["aceitar", "adiar", "nunca"],
+                "recebido": "talvez",
+            }],
+        )
+
+    def test_campo_ausente_nao_e_acusado_aqui(self):
+        # Ausência é responsabilidade de `campos_obrigatorios_ausentes`, não
+        # desta função.
+        self.assertEqual(
+            registry.valores_invalidos("decidir_promocao_autonomia", {"tipo": "x"}), []
+        )
+
+    def test_campo_none_nao_e_acusado_aqui(self):
+        self.assertEqual(
+            registry.valores_invalidos(
+                "decidir_promocao_autonomia", {"tipo": "x", "decisao": None}
+            ),
+            [],
+        )
+
+    def test_campo_sem_enum_declarado_nunca_e_acusado(self):
+        # `tipo` (nesta tool) não declara `enum` -- qualquer string vale
+        # para esta função (pode ser inválido por outro motivo, mas isso
+        # não é responsabilidade desta checagem).
+        self.assertEqual(
+            registry.valores_invalidos(
+                "decidir_promocao_autonomia",
+                {"tipo": "qualquer coisa mesmo", "decisao": "aceitar"},
+            ),
+            [],
+        )
+
+    def test_multiplos_campos_com_enum_invalido_sao_todos_listados(self):
+        problemas = registry.valores_invalidos(
+            "obter_fila_atencao", {"estado": "estado_doido", "origem": "origem_doida"}
+        )
+        self.assertEqual({p["campo"] for p in problemas}, {"estado", "origem"})
+
+    def test_tool_inexistente_falha_aberta(self):
+        self.assertEqual(
+            registry.valores_invalidos("tool_que_nao_existe_de_verdade", {"x": "y"}), []
+        )
+
+    def test_tool_sem_properties_no_schema_nunca_acusa_nada(self):
+        self.assertEqual(registry.valores_invalidos("obter_estado_atual", {"x": "y"}), [])
+
+    def test_origem_secretario_whatsapp_e_aceita(self):
+        # Achado da revisão adversarial: o schema de `origem` estava
+        # desatualizado -- `secretario_whatsapp` é um valor real, gravado
+        # em produção por `secretario_whatsapp.py`
+        # (`ORIGEM_SECRETARIO = "secretario_whatsapp"`), sem validação
+        # alguma no handler (`atencao.coletar_fila_atencao` é um filtro cru
+        # do Firestore). Corrigido acrescentando o valor ao schema.
+        self.assertEqual(
+            registry.valores_invalidos("obter_fila_atencao", {"origem": "secretario_whatsapp"}),
+            [],
+        )
+
+    def test_valor_com_case_ou_espaco_diferente_e_tolerado_quando_handler_normaliza(self):
+        # Achado da revisão adversarial: 4 dos 8 handlers já normalizam
+        # (`.strip().lower()`/`.upper()`/`.strip()`) antes de comparar --
+        # uma checagem exata aqui bloquearia uma chamada que o handler
+        # aceita hoje.
+        self.assertEqual(
+            registry.valores_invalidos(
+                "decidir_promocao_autonomia", {"tipo": "x", "decisao": "Aceitar"}
+            ),
+            [],
+        )
+        self.assertEqual(
+            registry.valores_invalidos(
+                "registrar_execucao_investimento", {"ativo": "bova11"}
+            ),
+            [],
+        )
+        self.assertEqual(
+            registry.valores_invalidos(
+                "registrar_execucao_agente",
+                {"rotina": "x", "resumo": "y", "status": "SUCESSO"},
+            ),
+            [],
+        )
+        self.assertEqual(
+            registry.valores_invalidos(
+                "solicitar_autorizacao_argos",
+                {
+                    "tipo": " approve-plan ",
+                    "sistema_id": "s",
+                    "demanda_id": "d",
+                    "resumo": "r",
+                },
+            ),
+            [],
+        )
+
+    def test_tolerancia_a_case_nao_aceita_valor_genuinamente_invalido(self):
+        # A tolerância é só de forma (case/espaço), não abre a lista --
+        # um valor que não corresponde a NENHUM permitido, nem depois de
+        # normalizado, continua acusado.
+        self.assertEqual(
+            registry.valores_invalidos(
+                "decidir_promocao_autonomia", {"tipo": "x", "decisao": "  Talvez  "}
+            ),
+            [{
+                "campo": "decisao",
+                "esperado": ["aceitar", "adiar", "nunca"],
+                "recebido": "  Talvez  ",
+            }],
+        )
+
+    def test_tolerancia_a_case_nao_se_espalha_para_campos_sem_handler_tolerante(self):
+        # Achado da 2ª rodada de revisão adversarial (sobre a correção do
+        # achado anterior, não sobre o diff original): uma tolerância GERAL
+        # a case/espaço seria pior que o problema que corrigia --
+        # `obter_fila_atencao` não normaliza nada (`coletar_fila_atencao`
+        # usa o valor cru num filtro `==` do Firestore); um valor mal
+        # formatado passaria pelo preflight e devolveria silenciosamente
+        # zero itens, sem erro algum. A tolerância é uma lista FECHADA
+        # (`registry._CAMPOS_COM_ENUM_TOLERANTE_A_CASE`) -- não se espalha
+        # para campos fora dela, mesmo que também tenham `enum`.
+        self.assertEqual(
+            registry.valores_invalidos("obter_fila_atencao", {"estado": "ABERTO"}),
+            [{
+                "campo": "estado",
+                "esperado": [
+                    "aberto", "delegado_ao_agente", "aguardando_andre",
+                    "resolvido", "descartado",
+                ],
+                "recebido": "ABERTO",
+            }],
+        )
+        self.assertEqual(
+            registry.valores_invalidos("obter_fila_atencao", {"origem": "WhatsApp"}),
+            [{
+                "campo": "origem",
+                "esperado": [
+                    "acao", "whatsapp", "email", "agenda", "repo",
+                    "financeiro", "saude", "secretario_whatsapp",
+                ],
+                "recebido": "WhatsApp",
+            }],
+        )
+        self.assertEqual(
+            registry.valores_invalidos(
+                "resolver_item_atencao", {"item_id": "i1", "estado": "Resolvido"}
+            ),
+            [{
+                "campo": "estado",
+                "esperado": [
+                    "delegado_ao_agente", "aguardando_andre", "resolvido", "descartado",
+                ],
+                "recebido": "Resolvido",
+            }],
+        )
+
+    def test_tolerancia_a_case_nao_vaza_por_nome_de_campo_igual_em_outra_tool(self):
+        # Achado da 3ª rodada de revisão (sobre a correção da 2ª): a exceção
+        # é chave (tool, campo), não só campo. `registrar_item_financeiro_v2`
+        # tem um campo `tipo` com `enum` -- mesmo nome do campo tolerante de
+        # `solicitar_autorizacao_argos.tipo` -- e precisa continuar em modo
+        # exato, sem "vazar" a tolerância por coincidência de nome.
+        self.assertEqual(
+            registry.valores_invalidos(
+                "registrar_item_financeiro_v2",
+                {"tipo": "RENDA", "descricao": "x", "valor": 1},
+            ),
+            [{
+                "campo": "tipo",
+                "esperado": ["renda", "obrigacao_fixa", "transacao_avulsa"],
+                "recebido": "RENDA",
+            }],
+        )
+
+    def test_tolerancia_a_case_nao_afeta_valor_nao_string(self):
+        # Só compara de forma tolerante quando o valor recebido é `str` --
+        # um `int`/`bool` é comparado só pela forma exata, sem o viés de
+        # `True == 1`/`False == 0` do Python afetar enum não-string.
+        self.assertEqual(
+            registry.valores_invalidos("decidir_promocao_autonomia", {"tipo": "x", "decisao": True}),
+            [{
+                "campo": "decisao",
+                "esperado": ["aceitar", "adiar", "nunca"],
+                "recebido": True,
+            }],
+        )
+
+    def test_enum_aninhado_em_plano_acao_fica_fora_do_escopo(self):
+        # O `enum` do campo `estado` de cada etapa dentro de `plano_acao`
+        # está aninhado no schema de item do array, não é uma propriedade
+        # de nível superior -- fora do escopo desta função (ver docstring
+        # de `registry.valores_invalidos`).
+        self.assertEqual(
+            registry.valores_invalidos(
+                "criar_acao_no_sistema",
+                {"plano_acao": [{"texto": "x", "estado": "valor_doido_que_nao_existe"}]},
+            ),
+            [],
+        )
+
+    def test_paridade_com_todos_os_schemas_reais_do_catalogo(self):
+        # Para todo schema real que declara `enum` numa propriedade de
+        # nível superior: um valor do próprio enum nunca é falso positivo,
+        # e um valor fora dele é sempre detectado -- não só nos exemplos
+        # escolhidos a dedo acima.
+        sentinela = "valor-fora-do-enum-que-nao-existe-nunca"
+        for nome in sorted(registry.list_tool_names()):
+            schema = registry.get_schema(nome)
+            propriedades = (schema.get("parameters") or {}).get("properties") or {}
+            for campo, prop_schema in propriedades.items():
+                if not isinstance(prop_schema, dict):
+                    continue
+                valores_permitidos = prop_schema.get("enum")
+                if not isinstance(valores_permitidos, list) or not valores_permitidos:
+                    continue
+                with self.subTest(tool=nome, campo=campo, caso="valor_certo"):
+                    self.assertEqual(
+                        registry.valores_invalidos(nome, {campo: valores_permitidos[0]}), []
+                    )
+                with self.subTest(tool=nome, campo=campo, caso="valor_errado"):
+                    problemas = registry.valores_invalidos(nome, {campo: sentinela})
+                    self.assertEqual(
+                        [p for p in problemas if p["campo"] == campo],
+                        [{
+                            "campo": campo,
+                            "esperado": valores_permitidos,
+                            "recebido": sentinela,
+                        }],
+                    )
+
+
+class TestErroValoresInvalidos(unittest.TestCase):
+    """`mcp_server._erro_valores_invalidos`: tradução para a resposta MCP."""
+
+    def test_none_quando_valores_corretos(self):
+        self.assertIsNone(
+            mcp_server._erro_valores_invalidos(
+                "decidir_promocao_autonomia", {"tipo": "x", "decisao": "aceitar"}
+            )
+        )
+
+    def test_none_quando_nenhum_campo_com_enum_presente(self):
+        self.assertIsNone(
+            mcp_server._erro_valores_invalidos("decidir_promocao_autonomia", {"tipo": "x"})
+        )
+
+    def test_resposta_de_erro_quando_valor_invalido(self):
+        resultado = mcp_server._erro_valores_invalidos(
+            "decidir_promocao_autonomia", {"tipo": "x", "decisao": "talvez"}
+        )
+        self.assertIsNotNone(resultado)
+        self.assertTrue(resultado["isError"])
+        self.assertEqual(resultado["resultType"], "complete")
+        texto = resultado["content"][0]["text"]
+        self.assertIn("decisao", texto)
+        self.assertIn("talvez", texto)
+        self.assertIn("aceitar", texto)
+
+    def test_tool_sem_properties_nunca_gera_erro(self):
+        self.assertIsNone(mcp_server._erro_valores_invalidos("obter_estado_atual", {"x": "y"}))
+
+
+class TestIntegracaoValoresInvalidos(unittest.TestCase):
+    """Ponta a ponta via `_handle_tools_call`, mesmos dois pontos de
+    inserção das checagens de presença e tipo -- a checagem de valor roda
+    por último, então um campo com valor fora do enum também nunca chega a
+    `preview_tool`/`execute_tool`."""
+
+    def setUp(self):
+        patcher = patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True)
+        self.addCleanup(patcher.stop)
+        patcher.start()
+
+    def test_tool_nao_gated_com_valor_invalido_nunca_chega_a_execute_tool(self):
+        with patch.object(mcp_server, "_exige_confirmacao", return_value=False), \
+             patch.object(mcp_server, "execute_tool") as mock_execute:
+            resultado = mcp_server._handle_tools_call(
+                {
+                    "name": "decidir_promocao_autonomia",
+                    "arguments": {"tipo": "x", "decisao": "talvez"},
+                },
+                ctx=_ctx(),
+            )
+        mock_execute.assert_not_called()
+        self.assertTrue(resultado["isError"])
+        self.assertIn("decisao", resultado["content"][0]["text"])
+
+    def test_tool_nao_gated_com_valor_correto_chega_a_execute_tool(self):
+        with patch.object(mcp_server, "_exige_confirmacao", return_value=False), \
+             patch.object(mcp_server, "execute_tool", return_value={"ok": True}) as mock_execute:
+            resultado = mcp_server._handle_tools_call(
+                {
+                    "name": "decidir_promocao_autonomia",
+                    "arguments": {"tipo": "x", "decisao": "aceitar"},
+                },
+                ctx=_ctx(),
+            )
+        mock_execute.assert_called_once()
+        self.assertFalse(resultado.get("isError", False))
+
+    def test_tool_gated_primeira_chamada_com_valor_invalido_nunca_chega_a_preview(self):
+        with patch.object(mcp_server, "_exige_confirmacao", return_value=True), \
+             patch.object(mcp_server, "_decisao_piso_mcp", return_value=None), \
+             patch.object(mcp_server, "preview_tool") as mock_preview:
+            resultado = mcp_server._handle_tools_call(
+                {
+                    "name": "resolver_item_atencao",
+                    "arguments": {"item_id": "item-1", "estado": "estado_doido"},
+                },
+                ctx=_ctx(),
+            )
+        mock_preview.assert_not_called()
+        self.assertTrue(resultado["isError"])
+        self.assertIn("estado", resultado["content"][0]["text"])
+
+    def test_campo_ausente_tem_prioridade_sobre_valor_invalido_no_mesmo_payload(self):
+        with patch.object(mcp_server, "_exige_confirmacao", return_value=False), \
+             patch.object(mcp_server, "execute_tool") as mock_execute:
+            resultado = mcp_server._handle_tools_call(
+                {
+                    "name": "decidir_promocao_autonomia",
+                    "arguments": {"decisao": "talvez"},
+                },
+                ctx=_ctx(),
+            )
+        mock_execute.assert_not_called()
+        self.assertTrue(resultado["isError"])
+        texto = resultado["content"][0]["text"]
+        self.assertIn("tipo", texto)
+        self.assertIn("obrigatório", texto)
+
+    def test_tipo_invalido_tem_prioridade_sobre_valor_invalido_no_mesmo_payload(self):
+        # `registrar_execucao_agente` tem `contadores` (object) e `status`
+        # (enum) -- os dois errados no mesmo payload; `_erro_tipos_invalidos`
+        # roda antes de `_erro_valores_invalidos`, então a mensagem devolvida
+        # é a de tipo, não a de valor.
+        with patch.object(mcp_server, "_exige_confirmacao", return_value=False), \
+             patch.object(mcp_server, "execute_tool") as mock_execute:
+            resultado = mcp_server._handle_tools_call(
+                {
+                    "name": "registrar_execucao_agente",
+                    "arguments": {
+                        "rotina": "cron-x",
+                        "resumo": "ok",
+                        "contadores": "não é um dict",
+                        "status": "estado_doido",
+                    },
+                },
+                ctx=_ctx(),
+            )
+        mock_execute.assert_not_called()
+        self.assertTrue(resultado["isError"])
+        self.assertIn("contadores", resultado["content"][0]["text"])
+
+    def test_reenvio_confirmed_true_continua_fora_do_alcance_desta_checagem(self):
+        # Mesma exclusão deliberada das duas checagens anteriores: no
+        # reenvio `_confirmed=true`, `arguments` é só o envelope da
+        # confirmação, não o payload de negócio.
+        with patch.object(mcp_server, "_exige_confirmacao", return_value=True), \
+             patch.object(
+                 mcp_server, "_executar_confirmacao", return_value={"ok": True}
+             ) as mock_executar:
+            resultado = mcp_server._handle_tools_call(
+                {
+                    "name": "resolver_item_atencao",
                     "arguments": {"_confirmed": True, "_confirmation_id": "conf-1"},
                 },
                 ctx=_ctx(),
