@@ -497,3 +497,54 @@ pendencias:
   - "Pendencias ja registradas em blocos anteriores e nao tocadas por esta sub-entrega continuam abertas: religar inventario tipado (P03 sub-entrega 1/N) a decisao de politica real; ambiguidades de classificacao (gerar_relatorio, salvar_memoria_global); card do Telegram de rascunho degradado nao reeditado; observabilidade de claim pendente sem _audit_log; TTL do Firestore nao configurado para mcp_jobs; limite de 200KB do Argos em main.py; risco de corrupcao silenciosa em escritas grandes via Argos; passo 2 do P02 (OAuth claims/scopes) como hardening futuro nao-bloqueante."
 proximo_pacote: "P03 -- com presenca, tipo estrutural e valor (enum) cobertos, resta so o passo 3 do plano (outputSchema/structuredContent/annotations nos caminhos compativeis) para o passo 2 do P03 ser considerado totalmente fechado em relacao ao levantamento original. Proxima sub-entrega natural, salvo nova prioridade do Andre."
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 78d111e6b905d515a327a68542830887ca701845
+pacote: "P03 sub-entrega 6/N -- passo 3 do plano (outputSchema/structuredContent/annotations/envelope), fatia inicial: campo `annotations` do protocolo MCP (`readOnlyHint`/`destructiveHint`) publicado em `tools/list`, derivado do inventario tipado da sub-entrega 1/N. Escolhida por recomendacao propria apos o Andre delegar a decisao de prioridade de novo ('esta mesclado pode prosseguir')."
+estado: validado
+inicio: "2026-09-10T11:45:00Z"
+fim: "2026-09-10T12:20:00Z"
+arquivos_alterados:
+  - functions/tools/registry.py (nova `mcp_annotations(tool_name) -> dict` -- `readOnlyHint` de `leitura_escrita == LEITURA`; quando nao read-only, `destructiveHint` de `reversibilidade == IRREVERSIVEL` -- tratando `NAO_APLICA` como `REVERSIVEL` (False), ja que as 3 entradas `NAO_APLICA` em `LEITURA_E_ESCRITA` tem escrita passiva/idempotente, nunca o proposito da tool. Fail-open -- `{}` em `(AttributeError, TypeError)` ou tool sem entrada no inventario. `destructiveHint` OMITIDO, nao `False`, quando `readOnlyHint=true` -- so e significativo quando falso, por especificacao.)
+  - functions/mcp_server.py (`_handle_tools_list` acrescenta `annotations` a cada tool publicada, so quando o dict nao e vazio -- aditivo, `_meta` needsConfirmation/mutates/voiceEnabled inalterado)
+  - functions/tools/inventory.py (correcao de classificacao de `criar_rascunho_whatsapp`, REVERSIVEL -> IRREVERSIVEL -- achado da revisao adversarial, ver decisoes)
+  - functions/test_mcp_annotations.py (novo -- 13 testes / 111+ subtestes -- `TestMcpAnnotations` cobre paridade completa, nao amostrada, contra as 105 entradas reais do inventario; `TestHandleToolsListAnnotations` cobre a ligacao ponta a ponta via `_handle_tools_list`)
+decisoes:
+  - id: p03-sub6-escopo-so-readonly-e-destructive-hint
+    motivo: "P03 passo 3 pede outputSchema/structuredContent/annotations/envelope -- quatro pecas. Esta sub-entrega cobre so `annotations`, e dela so `readOnlyHint`/`destructiveHint`: sao os dois unicos hints que o inventario tipado da sub-entrega 1/N sustenta com confianca (leitura_escrita e reversibilidade, campos ja classificados por leitura direta da implementacao). `idempotentHint`/`openWorldHint` ficam de fora deliberadamente -- nenhum campo do inventario atual sustenta os dois, e um hint errado e pior que a omissao (a propria especificacao MCP ja assume o lado cauteloso -- destructiveHint/openWorldHint default true -- para quem nao declara ToolAnnotations). outputSchema/structuredContent/envelope seguem inteiramente fora: cada um exige um contrato de dados por tool, escopo maior e futuro."
+    autoridade: existente_ou_nova
+  - id: p03-sub6-primeira-rodada-achou-classificacao-inconsistente-em-criar_rascunho_whatsapp
+    motivo: "PRIMEIRA rodada de revisao adversarial (Agent tool, general-purpose, sem contexto da implementacao), um achado real antes de qualquer coisa ir pro Argos: `criar_rascunho_whatsapp` em tools/inventory.py estava classificada REVERSIVEL, apesar da propria nota ja dizer 'reversivel ... exceto tipos promovidos (liberam sozinhos apos a janela)' -- confirmado rastreando outbox_aprovacao.py: para tipos promovidos, o rascunho se entrega sozinho a um terceiro, irreversivelmente, sem nova confirmacao. Duas tools no mesmo arquivo com a MESMA forma de nuance (decidir_elevacao, decidir_promocao_autonomia) ja tratavam isso classificando a tool inteira como IRREVERSIVEL -- o lado conservador; a classificacao antiga de criar_rascunho_whatsapp divergia dessa convencao propria do arquivo e produzia destructiveHint=False enganoso via mcp_annotations, justamente no caso de risco real."
+    autoridade: existente_ou_nova
+  - id: p03-sub6-segunda-rodada-sobre-o-fix-nao-achou-bug-confirmou-sem-irmaos
+    motivo: "SEGUNDA rodada de revisao adversarial, dispatchada sobre a correcao em si (nao o diff original, mesmo padrao das sub-entregas 2/N, 4/N, 5/N e da PR #219/#10 do Argos): confirmou consistencia interna do ajuste e, via varredura COMPLETA das 105 entradas do inventario (nao amostragem), confirmou que nenhuma outra entrada tem a mesma inconsistencia latente -- so 3 entradas tem a nuance 'irreversivel so para um subconjunto', e as tres ja ficam consistentemente IRREVERSIVEL apos esta correcao. Sinalizou salvar_memoria_global como um formato diferente, pre-existente e ja autodocumentado (nao acionavel, fora de escopo). Nenhum bug adicional -- sem necessidade de terceira rodada (criterio de parada ja estabelecido: so escalar enquanto uma rodada acha algo real)."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "../venv/bin/python3 -m unittest test_mcp_annotations test_tool_inventory -v (venv persistente do clone)"
+    - "../venv/bin/python3 -m unittest discover -s . -p 'test_*.py' -q (suite completa)"
+  resultados:
+    - "test_mcp_annotations.py + test_tool_inventory.py isolados: 23 testes, OK."
+    - "Suite completa: 1664/1664, 0 falhas, 0 erros, sem regressao (1651 baseline confirmado pela sub-entrega 5/N + 13 novos aqui)."
+evidencias:
+  - "Duas rodadas de revisao adversarial independente (Agent tool, general-purpose, cada uma sem contexto da implementacao ou da rodada anterior): a primeira achou a classificacao inconsistente de criar_rascunho_whatsapp antes de qualquer coisa ser enviada; a segunda, sobre a correcao, nao achou bug -- so confirmou, por varredura completa e nao amostragem, que nenhuma outra entrada do inventario tem a mesma inconsistencia."
+  - "Teste de paridade (TestMcpAnnotations::test_paridade_com_todas_as_entradas_reais_do_inventario) cobre TODAS as 105 entradas reais do catalogo, nao so exemplos escolhidos a dedo."
+  - "Todos os 4 arquivos enviados via mcp__Argos__argos_escrever_arquivo_repositorio com verificacao de hash local (git hash-object) contra o sha retornado pelo Argos -- os 4 batendo de primeira, sem drift de whitespace nem corrupcao. mcp_server.py (1513 linhas / 74744 bytes) lido em duas chamadas Read nao sobrepostas, borda a borda, antes do envio."
+  - "PR #233 aberta, com o relato completo das duas rodadas no corpo, e mesclada por Andre ('Mesclado com sucesso, pode prosseguir para as proximas rodadas'), confirmado por git fetch + git log de origin/main: merge commit a24d7743694fefee5aaab8b3db311df5c102aceb."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: fatia `annotations` (readOnlyHint/destructiveHint) do passo 3 do P03."
+  - "ABERTA, deliberadamente: `idempotentHint`/`openWorldHint` ficam fora -- precisam de investigacao dedicada por tool antes de qualquer classificacao, sem fonte de dados confiavel no inventario atual."
+  - "ABERTA: `outputSchema`/`structuredContent`/envelope (as outras tres partes do passo 3 do plano) nao iniciadas -- cada uma exige definir um contrato de dados por tool, escopo bem maior."
+  - "ABERTA, deliberadamente (herdada da sub-entrega 5/N): checagem de tipo ESCALAR continua fora de escopo."
+  - "Pendencias ja registradas em blocos anteriores e nao tocadas por esta sub-entrega continuam abertas: religar inventario tipado (P03 sub-entrega 1/N) a decisao de politica real; ambiguidade de classificacao de gerar_relatorio; card do Telegram de rascunho degradado nao reeditado; observabilidade de claim pendente sem _audit_log; TTL do Firestore nao configurado para mcp_jobs; limite de 200KB do Argos em main.py; risco de corrupcao silenciosa em escritas grandes via Argos; passo 2 do P02 (OAuth claims/scopes) como hardening futuro nao-bloqueante."
+proximo_pacote: "P03 passo 3 -- restam outputSchema/structuredContent/envelope, e os hints idempotentHint/openWorldHint (bloqueados por falta de fonte de dados confiavel). Proxima sub-entrega natural e provavelmente investigar idempotentHint/openWorldHint por tool, ou iniciar o contrato outputSchema para um subconjunto pequeno de tools, salvo nova prioridade do Andre."
+```
