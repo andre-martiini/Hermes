@@ -40,7 +40,7 @@ class InboxPendentesTest(unittest.TestCase):
             },
         })
         result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
-        self.assertEqual(result['filtrados'], {'automaticos': 0, 'encerramentos': 1, 'sem_texto': 1, 'informativo': 0})
+        self.assertEqual(result['filtrados'], {'automaticos': 0, 'encerramentos': 1, 'sem_texto': 1, 'informativo': 0, 'tratado_na_acao': 0})
         self.assertEqual({x['trecho'] for x in result['itens']}, {'Você pode confirmar? Obrigada', 'segue a planilha'})
 
     def test_auditoria_inclui_itens_filtrados(self):
@@ -255,6 +255,243 @@ class InboxPendentesTest(unittest.TestCase):
         })
         result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
         self.assertEqual(len(result['itens']), 1)
+
+    def test_email_tratado_na_acao_apos_a_mensagem_e_resolvido(self):
+        """DEV-2026-0004 sub-entrega 4/9, achado B caso 3: DAE/Proen -- e-mail
+        informativo com anexo ('segue a planilha') já tratado na ação
+        vinculada, com entrada de diário GENUÍNA posterior à mensagem."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': []}}},
+            'perfil_pessoas': {},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento',
+                               'acompanhamento': [{'data': '2026-09-01T11:00:00+00:00', 'nota': 'Planilha conferida e arquivada.'}]}},
+            'inbox_pendentes': {},
+            'email_action_suggestions': {
+                'e': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                      'sender': 'DAE/Proen <dae@ifes.edu.br>',
+                      'snippet': 'Segue a planilha em anexo.',
+                      'internal_date': '2026-09-01T08:00:00+00:00'},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(result['itens'], [])
+        self.assertEqual(result['filtrados']['tratado_na_acao'], 1)
+
+    def test_diario_anterior_a_mensagem_nao_resolve(self):
+        """Uma nota de diário ANTERIOR à mensagem não é tratamento dela --
+        pode ser um follow-up novo que chegou depois e ainda precisa de
+        resposta. Só entrada POSTERIOR conta (`>` estrito)."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': []}}},
+            'perfil_pessoas': {},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento',
+                               'acompanhamento': [{'data': '2026-09-01T07:00:00+00:00', 'nota': 'Primeira tratativa.'}]}},
+            'inbox_pendentes': {},
+            'email_action_suggestions': {
+                'e': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                      'sender': 'Gabriela <gabriela@ifes.edu.br>',
+                      'snippet': 'Novidade: precisa de retorno.',
+                      'internal_date': '2026-09-01T08:00:00+00:00'},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(len(result['itens']), 1)
+        self.assertEqual(result['filtrados']['tratado_na_acao'], 0)
+
+    def test_diario_no_mesmo_instante_da_mensagem_nao_resolve(self):
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': []}}},
+            'perfil_pessoas': {},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento',
+                               'acompanhamento': [{'data': '2026-09-01T08:00:00+00:00', 'nota': 'Nota simultânea.'}]}},
+            'inbox_pendentes': {},
+            'email_action_suggestions': {
+                'e': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                      'sender': 'Gabriela <gabriela@ifes.edu.br>',
+                      'snippet': 'Mensagem.',
+                      'internal_date': '2026-09-01T08:00:00+00:00'},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(len(result['itens']), 1)
+
+    def test_entrada_email_json_de_vinculo_nao_conta_como_tratamento(self):
+        """A entrada `EMAIL::JSON::` só registra o INSTANTE em que o e-mail
+        foi vinculado à ação -- não é evidência de que André tratou o
+        assunto. Sem essa exclusão, todo e-mail vinculado seria
+        imediatamente 'tratado', já que o próprio vínculo sempre acontece
+        depois da mensagem que o originou."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': []}}},
+            'perfil_pessoas': {},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento',
+                               'acompanhamento': [{'data': '2026-09-01T09:00:00+00:00',
+                                                    'nota': 'EMAIL::JSON::{"v": "msgid1"}'}]}},
+            'inbox_pendentes': {},
+            'email_action_suggestions': {
+                'msgid1': {'canal': 'email', 'status': 'applied',
+                           'sender': 'Gabriela <gabriela@ifes.edu.br>',
+                           'snippet': 'Poderia revisar o anexo até sexta?',
+                           'internal_date': '2026-09-01T08:00:00+00:00'},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(len(result['itens']), 1)
+        self.assertEqual(result['filtrados']['tratado_na_acao'], 0)
+
+    def test_email_json_mais_nota_genuina_posterior_e_resolvido(self):
+        """Mesmo vínculo do teste anterior, mas com uma segunda entrada,
+        genuína, registrada DEPOIS -- essa sim conta."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': []}}},
+            'perfil_pessoas': {},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento',
+                               'acompanhamento': [
+                                   {'data': '2026-09-01T09:00:00+00:00', 'nota': 'EMAIL::JSON::{"v": "msgid1"}'},
+                                   {'data': '2026-09-01T11:00:00+00:00', 'nota': 'Despacho enviado ao setor.'},
+                               ]}},
+            'inbox_pendentes': {},
+            'email_action_suggestions': {
+                'msgid1': {'canal': 'email', 'status': 'applied',
+                           'sender': 'Marcos Marinho <marcos@tjes.jus.br>',
+                           'snippet': 'Segue o despacho em anexo.',
+                           'internal_date': '2026-09-01T08:00:00+00:00'},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(result['itens'], [])
+        self.assertEqual(result['filtrados']['tratado_na_acao'], 1)
+
+    def test_whatsapp_tratado_na_acao_apos_mensagem_e_resolvido(self):
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento',
+                               'whatsapp_vinculos': [{'chat_id': 'w'}],
+                               'acompanhamento': [{'data': '2026-09-01T11:00:00+00:00', 'nota': 'Já resolvi por telefone.'}]}},
+            'email_action_suggestions': {},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w', 'trecho': 'segue a planilha',
+                                       'desde': '2026-09-01T08:00:00+00:00'}},
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(result['itens'], [])
+        self.assertEqual(result['filtrados']['tratado_na_acao'], 1)
+
+    def test_vinculo_de_outra_conversa_whatsapp_na_mesma_acao_nao_esconde_pendencia_real(self):
+        """Cenário concreto do achado da revisão adversarial: a ação `t` tem
+        DUAS conversas vinculadas -- `chat_a` (Gabriela, pergunta real às
+        08h ainda sem resposta) e `chat_b` (grupo de status). Às 11h André
+        aprova, com um clique só, o vínculo de uma mensagem de `chat_b` à
+        mesma ação -- isso grava só o marcador `WHATSAPP::JSON::` (sem
+        evidenciar tratamento nenhum da pergunta da Gabriela). A pergunta
+        dela tem que continuar pendente."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['chat_a', 'chat_b']}}},
+            'perfil_pessoas': {'chat_a': {'nome': 'Gabriela', 'whatsapp_chat_id': 'chat_a'}},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento',
+                               'whatsapp_vinculos': [{'chat_id': 'chat_a'}, {'chat_id': 'chat_b'}],
+                               'acompanhamento': [{'data': '2026-09-01T11:00:00+00:00',
+                                                    'nota': 'WHATSAPP::JSON::{"n": "grupo de status"}'}]}},
+            'email_action_suggestions': {},
+            'inbox_pendentes': {
+                'chat_a': {'tipo': 'whatsapp', 'chat_id': 'chat_a', 'trecho': 'Pode revisar isso até amanhã?',
+                           'desde': '2026-09-01T08:00:00+00:00'},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual([x['contato'] for x in result['itens']], ['Gabriela'])
+        self.assertEqual(result['filtrados']['tratado_na_acao'], 0)
+
+    def test_auditoria_inclui_item_tratado_na_acao(self):
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento',
+                               'whatsapp_vinculos': [{'chat_id': 'w'}],
+                               'acompanhamento': [{'data': '2026-09-01T11:00:00+00:00', 'nota': 'Já resolvi por telefone.'}]}},
+            'email_action_suggestions': {},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w', 'trecho': 'segue a planilha',
+                                       'desde': '2026-09-01T08:00:00+00:00'}},
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc), incluir_filtrados=True)
+        self.assertEqual(len(result['itens']), 1)
+
+    def test_diario_mais_recente_ignora_marcador_de_vinculo_email_json(self):
+        from inbox_pendentes import _diario_mais_recente
+        acompanhamento = [
+            {'data': '2026-09-01T09:00:00+00:00', 'nota': 'EMAIL::JSON::{"v": "x"}'},
+            {'data': '2026-09-01T07:00:00+00:00', 'nota': 'Nota genuína mais antiga.'},
+        ]
+        self.assertEqual(_diario_mais_recente(acompanhamento).isoformat(), '2026-09-01T07:00:00+00:00')
+
+    def test_diario_mais_recente_sem_entradas_genuinas_devolve_none(self):
+        from inbox_pendentes import _diario_mais_recente
+        acompanhamento = [{'data': '2026-09-01T09:00:00+00:00', 'nota': 'EMAIL::JSON::{"v": "x"}'}]
+        self.assertIsNone(_diario_mais_recente(acompanhamento))
+
+    def test_diario_mais_recente_ignora_marcador_whatsapp_json(self):
+        """Achado da revisão adversarial desta sub-entrega: a primeira versão
+        só excluía `EMAIL::JSON::`, mas `_build_diary_note` grava o mesmo
+        tipo de marcador automático (sem evidenciar tratamento nenhum) ao
+        vincular uma conversa de WhatsApp a uma ação -- mesmo fluxo de um
+        clique só, mesmo problema."""
+        from inbox_pendentes import _diario_mais_recente
+        acompanhamento = [{'data': '2026-09-01T09:00:00+00:00', 'nota': 'WHATSAPP::JSON::{"n": "conversa"}'}]
+        self.assertIsNone(_diario_mais_recente(acompanhamento))
+
+    def test_diario_mais_recente_ignora_marcador_generico_de_outros_canais(self):
+        """Mesmo achado, para o terceiro formato de `_build_diary_note`
+        (sipac/calendar/pagina/demais canais): `"[{icone} Hermes] {rótulo}:
+        ..."` -- também automático, também sem evidência de tratamento."""
+        from inbox_pendentes import _diario_mais_recente
+        acompanhamento = [{'data': '2026-09-01T09:00:00+00:00', 'nota': '[📋 Hermes] Processo SIPAC: Requerimento 123'}]
+        self.assertIsNone(_diario_mais_recente(acompanhamento))
+
+    def test_diario_mais_recente_escolhe_a_mais_recente_entre_varias_genuinas(self):
+        from inbox_pendentes import _diario_mais_recente
+        acompanhamento = [
+            {'data': '2026-09-01T07:00:00+00:00', 'nota': 'Primeira nota genuína.'},
+            {'data': '2026-09-01T09:00:00+00:00', 'nota': 'WHATSAPP::JSON::{"n": "conversa"}'},
+            {'data': '2026-09-01T11:00:00+00:00', 'nota': 'Segunda nota genuína, mais recente.'},
+            {'data': '2026-09-01T08:00:00+00:00', 'nota': 'Terceira nota genuína, no meio.'},
+        ]
+        self.assertEqual(_diario_mais_recente(acompanhamento).isoformat(), '2026-09-01T11:00:00+00:00')
+
+    def test_diario_mais_recente_nao_ignora_notas_genuinas_de_copiloto_ou_telegram(self):
+        """Achado da SEGUNDA rodada de revisão adversarial: um coringa
+        genérico (`\\[\\S+ Hermes\\]`) na primeira correção também casava
+        com prefixos de notas GENUÍNAS e confirmadas -- "[Copiloto Hermes]"
+        (main.py/editar_plano_acao, editar_acao) e "[Telegram Hermes]"
+        (tools/telegram_extended.py) -- excluindo tratamento de verdade da
+        comparação (falha no sentido oposto ao achado da primeira rodada:
+        em vez de esconder uma pendência real, o auto-resolve deixaria de
+        disparar quando deveria). A classe de caracteres restrita aos
+        ícones reais de `_CANAL_ICONS` (+ fallback "🔔") corrige isso -- "C"
+        de "Copiloto" e "T" de "Telegram" não estão nela."""
+        from inbox_pendentes import _diario_mais_recente
+        for nota in [
+            "[Copiloto Hermes] Plano de ação atualizado: revisão concluída.",
+            "[Copiloto Hermes] Ação editada via card de confirmação. Campos alterados: status.",
+            "[Telegram Hermes] Plano de ação atualizado: etapa marcada como feita.",
+            "[Telegram Hermes] Lembrete agendado para amanhã.",
+        ]:
+            with self.subTest(nota=nota):
+                acompanhamento = [{'data': '2026-09-01T09:00:00+00:00', 'nota': nota}]
+                self.assertEqual(
+                    _diario_mais_recente(acompanhamento).isoformat(), '2026-09-01T09:00:00+00:00',
+                    f"{nota!r} é uma nota genuína, não devia ser tratada como marcador automático",
+                )
+
+    def test_resolved_by_diario_compara_a_data_ja_calculada_da_task(self):
+        from inbox_pendentes import _resolved_by_diario
+        task = {'diario_mais_recente': datetime(2026, 9, 1, 11, tzinfo=timezone.utc)}
+        self.assertTrue(_resolved_by_diario(task, datetime(2026, 9, 1, 8, tzinfo=timezone.utc)))
+        self.assertFalse(_resolved_by_diario(task, datetime(2026, 9, 1, 12, tzinfo=timezone.utc)))
+
+    def test_resolved_by_diario_sem_task_ou_sem_data_da_mensagem_devolve_false(self):
+        from inbox_pendentes import _resolved_by_diario
+        self.assertFalse(_resolved_by_diario(None, datetime(2026, 9, 1, 8, tzinfo=timezone.utc)))
+        self.assertFalse(_resolved_by_diario({'diario_mais_recente': datetime(2026, 9, 1, 11, tzinfo=timezone.utc)}, None))
 
 
 class _MemorySnap:
