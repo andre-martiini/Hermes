@@ -24,7 +24,8 @@
           "agenda",
           "repo",
           "financeiro",
-          "saude"
+          "saude",
+          "secretario_whatsapp"
         ],
         "description": "Opcional. Filtra por canal de origem do item."
       },
