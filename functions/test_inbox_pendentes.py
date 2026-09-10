@@ -40,7 +40,7 @@ class InboxPendentesTest(unittest.TestCase):
             },
         })
         result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
-        self.assertEqual(result['filtrados'], {'automaticos': 0, 'encerramentos': 1, 'sem_texto': 1, 'informativo': 0, 'tratado_na_acao': 0})
+        self.assertEqual(result['filtrados'], {'automaticos': 0, 'encerramentos': 1, 'sem_texto': 1, 'informativo': 0, 'tratado_na_acao': 0, 'tratado_em_outro_canal': 0})
         self.assertEqual({x['trecho'] for x in result['itens']}, {'Você pode confirmar? Obrigada', 'segue a planilha'})
 
     def test_auditoria_inclui_itens_filtrados(self):
@@ -492,6 +492,231 @@ class InboxPendentesTest(unittest.TestCase):
         from inbox_pendentes import _resolved_by_diario
         self.assertFalse(_resolved_by_diario(None, datetime(2026, 9, 1, 8, tzinfo=timezone.utc)))
         self.assertFalse(_resolved_by_diario({'diario_mais_recente': datetime(2026, 9, 1, 11, tzinfo=timezone.utc)}, None))
+
+    # -- DEV-2026-0004 sub-entrega 5/9, proposta (c)(ii): auto-resolução por
+    # canal cruzado (André já respondeu ao MESMO contato pelo OUTRO canal). --
+
+    def test_whatsapp_respondido_por_email_apos_mensagem_e_resolvido(self):
+        """Cenário Wagner/Vetor do achado B6: pendência de WhatsApp, mas
+        André já tratou por e-mail com o mesmo contato depois da mensagem."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {'p': {'nome': 'Wagner', 'whatsapp_chat_id': 'w', 'email': 'wagner@vetor.com.br'}},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento'}},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w', 'trecho': 'Já tratamos isso?',
+                                       'desde': '2026-09-01T08:00:00+00:00'}},
+            'email_action_suggestions': {
+                'e': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                      'origem_sinal': 'Wagner <wagner@vetor.com.br>',
+                      'ultima_mensagem_de_andre': True,
+                      'internal_date': '2026-09-01T10:00:00+00:00'},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(result['itens'], [])
+        self.assertEqual(result['filtrados']['tratado_em_outro_canal'], 1)
+
+    def test_outgoing_email_por_contato_exige_acao_ativa(self):
+        """DEV-2026-0004 sub-entrega 5/9: achado da SEGUNDA rodada de revisão
+        adversarial -- a primeira versão de `_outgoing_email_by_contact` não
+        exigia ação ATIVA vinculada, ao contrário de `_resolved_by_diario` e
+        de `emails_by_thread`. Sem essa exigência, um e-mail respondido numa
+        ação já CONCLUÍDA (ou sem ação nenhuma) contava como tratamento para
+        uma pendência de WhatsApp completamente diferente do mesmo contato.
+        Aqui a ação 't' está CONCLUÍDA -- a pendência de WhatsApp tem que
+        continuar de pé."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {'p': {'nome': 'Wagner', 'whatsapp_chat_id': 'w', 'email': 'wagner@vetor.com.br'}},
+            'tarefas': {'t': {'titulo': 'Ação antiga', 'status': 'concluída'}},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w', 'trecho': 'Já tratamos isso?',
+                                       'desde': '2026-09-01T08:00:00+00:00'}},
+            'email_action_suggestions': {
+                'e': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                      'origem_sinal': 'Wagner <wagner@vetor.com.br>',
+                      'ultima_mensagem_de_andre': True,
+                      'internal_date': '2026-09-01T10:00:00+00:00'},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(len(result['itens']), 1)
+        self.assertEqual(result['filtrados']['tratado_em_outro_canal'], 0)
+
+    def test_email_respondido_por_whatsapp_apos_mensagem_e_resolvido(self):
+        """Mesmo cenário, invertido: pendência de e-mail já tratada por
+        WhatsApp com o mesmo contato depois da mensagem."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {'p': {'nome': 'Wagner', 'whatsapp_chat_id': 'w', 'email': 'wagner@vetor.com.br'}},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento'}},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w', 'ultima_de_andre': True,
+                                       'desde': '2026-09-01T10:00:00+00:00'}},
+            'email_action_suggestions': {
+                'e': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                      'sender': 'Wagner <wagner@vetor.com.br>',
+                      'snippet': 'Confirma pra mim?',
+                      'internal_date': '2026-09-01T08:00:00+00:00'},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(result['itens'], [])
+        self.assertEqual(result['filtrados']['tratado_em_outro_canal'], 1)
+
+    def test_cross_channel_resposta_anterior_a_mensagem_nao_resolve(self):
+        """Uma resposta no OUTRO canal ANTES da mensagem pendente não conta
+        -- só uma resposta posterior é evidência de tratamento."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {'p': {'nome': 'Wagner', 'whatsapp_chat_id': 'w', 'email': 'wagner@vetor.com.br'}},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento'}},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w', 'trecho': 'Novidade, precisa de retorno',
+                                       'desde': '2026-09-01T10:00:00+00:00'}},
+            'email_action_suggestions': {
+                'e': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                      'origem_sinal': 'Wagner <wagner@vetor.com.br>',
+                      'ultima_mensagem_de_andre': True,
+                      'internal_date': '2026-09-01T08:00:00+00:00'},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(len(result['itens']), 1)
+        self.assertEqual(result['filtrados']['tratado_em_outro_canal'], 0)
+
+    def test_cross_channel_no_mesmo_instante_nao_resolve(self):
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {'p': {'nome': 'Wagner', 'whatsapp_chat_id': 'w', 'email': 'wagner@vetor.com.br'}},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento'}},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w', 'trecho': 'Mensagem',
+                                       'desde': '2026-09-01T08:00:00+00:00'}},
+            'email_action_suggestions': {
+                'e': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                      'origem_sinal': 'Wagner <wagner@vetor.com.br>',
+                      'ultima_mensagem_de_andre': True,
+                      'internal_date': '2026-09-01T08:00:00+00:00'},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(len(result['itens']), 1)
+
+    def test_cross_channel_sem_vinculo_de_perfil_nao_resolve(self):
+        """`perfil_pessoas` só tem `whatsapp_chat_id`, sem `email` -- sem a
+        dupla confirmação, não há como ligar o e-mail que respondeu a esse
+        chat; a pendência de WhatsApp continua de pé mesmo que exista um
+        e-mail 'respondido' coincidentemente com o mesmo nome."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {'p': {'nome': 'Wagner', 'whatsapp_chat_id': 'w'}},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento'}},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w', 'trecho': 'Já tratamos isso?',
+                                       'desde': '2026-09-01T08:00:00+00:00'}},
+            'email_action_suggestions': {
+                'e': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                      'origem_sinal': 'Wagner <wagner@vetor.com.br>',
+                      'ultima_mensagem_de_andre': True,
+                      'internal_date': '2026-09-01T10:00:00+00:00'},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(len(result['itens']), 1)
+        self.assertEqual(result['filtrados']['tratado_em_outro_canal'], 0)
+
+    def test_auditoria_inclui_item_tratado_em_outro_canal(self):
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {'p': {'nome': 'Wagner', 'whatsapp_chat_id': 'w', 'email': 'wagner@vetor.com.br'}},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento'}},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w', 'trecho': 'Já tratamos isso?',
+                                       'desde': '2026-09-01T08:00:00+00:00'}},
+            'email_action_suggestions': {
+                'e': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                      'origem_sinal': 'Wagner <wagner@vetor.com.br>',
+                      'ultima_mensagem_de_andre': True,
+                      'internal_date': '2026-09-01T10:00:00+00:00'},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc), incluir_filtrados=True)
+        self.assertEqual(len(result['itens']), 1)
+
+    def test_contacts_liga_email_e_chat_id_so_quando_ambos_presentes(self):
+        from inbox_pendentes import _contacts
+        db = Db({'perfil_pessoas': {
+            'p1': {'nome': 'Wagner', 'whatsapp_chat_id': 'w1', 'email': 'Wagner@Vetor.com.br'},
+            'p2': {'nome': 'SóChat', 'whatsapp_chat_id': 'w2'},
+            'p3': {'nome': 'SóEmail', 'email': 'so-email@example.com'},
+        }})
+        nomes, email_por_chat, chat_por_email = _contacts(db)
+        self.assertEqual(nomes, {'w1': 'Wagner', 'w2': 'SóChat'})
+        self.assertEqual(email_por_chat, {'w1': 'wagner@vetor.com.br'})
+        self.assertEqual(chat_por_email, {'wagner@vetor.com.br': 'w1'})
+
+    def test_outgoing_email_by_contact_ignora_thread_sem_ultima_de_andre(self):
+        from inbox_pendentes import _outgoing_email_by_contact
+        db = Db({'email_action_suggestions': {
+            'a': {'canal': 'email', 'status': 'applied', 'task_id': 't', 'origem_sinal': 'x <x@ex.com>',
+                  'internal_date': '2026-09-01T08:00:00+00:00'},
+            'b': {'canal': 'email', 'status': 'applied', 'task_id': 't', 'origem_sinal': 'y <y@ex.com>',
+                  'ultima_mensagem_de_andre': True, 'internal_date': '2026-09-01T09:00:00+00:00'},
+        }})
+        by_id = {'t': {'id': 't', 'titulo': 'Ação'}}
+        self.assertEqual(_outgoing_email_by_contact(db, {}, by_id), {'y@ex.com': datetime(2026, 9, 1, 9, tzinfo=timezone.utc)})
+
+    def test_outgoing_email_by_contact_escolhe_a_mais_recente_entre_varias_threads(self):
+        from inbox_pendentes import _outgoing_email_by_contact
+        db = Db({'email_action_suggestions': {
+            'a': {'canal': 'email', 'status': 'applied', 'task_id': 't', 'origem_sinal': 'x <x@ex.com>',
+                  'ultima_mensagem_de_andre': True, 'internal_date': '2026-09-01T08:00:00+00:00'},
+            'b': {'canal': 'email', 'status': 'applied_reactivated', 'task_id': 't', 'origem_sinal': 'X <x@ex.com>',
+                  'ultima_mensagem_de_andre': True, 'internal_date': '2026-09-01T11:00:00+00:00'},
+        }})
+        by_id = {'t': {'id': 't', 'titulo': 'Ação'}}
+        self.assertEqual(_outgoing_email_by_contact(db, {}, by_id), {'x@ex.com': datetime(2026, 9, 1, 11, tzinfo=timezone.utc)})
+
+    def test_outgoing_email_by_contact_sem_acao_resolvida_e_ignorado(self):
+        """DEV-2026-0004 sub-entrega 5/9: achado da segunda rodada de revisão
+        adversarial -- sem `task_id` resolvido em `by_email`/`by_id` (ação
+        inexistente, concluída, ou vínculo nunca aplicado a uma ação ativa),
+        a thread não conta como evidência de tratamento."""
+        from inbox_pendentes import _outgoing_email_by_contact
+        db = Db({'email_action_suggestions': {
+            'a': {'canal': 'email', 'status': 'applied', 'task_id': 'inexistente', 'origem_sinal': 'x <x@ex.com>',
+                  'ultima_mensagem_de_andre': True, 'internal_date': '2026-09-01T09:00:00+00:00'},
+        }})
+        self.assertEqual(_outgoing_email_by_contact(db, {}, {}), {})
+
+    def test_resolved_cross_channel_compara_estrito_e_ignora_sem_vinculo(self):
+        from inbox_pendentes import _resolved_cross_channel
+        outgoing = {'x@ex.com': datetime(2026, 9, 1, 10, tzinfo=timezone.utc)}
+        self.assertTrue(_resolved_cross_channel(
+            contact_key='x@ex.com', message_when=datetime(2026, 9, 1, 8, tzinfo=timezone.utc), outgoing_by_contact=outgoing))
+        self.assertFalse(_resolved_cross_channel(
+            contact_key='x@ex.com', message_when=datetime(2026, 9, 1, 10, tzinfo=timezone.utc), outgoing_by_contact=outgoing))
+        self.assertFalse(_resolved_cross_channel(contact_key=None, message_when=datetime(2026, 9, 1, 8, tzinfo=timezone.utc), outgoing_by_contact=outgoing))
+        self.assertFalse(_resolved_cross_channel(contact_key='x@ex.com', message_when=None, outgoing_by_contact=outgoing))
+        self.assertFalse(_resolved_cross_channel(contact_key='ausente@ex.com', message_when=datetime(2026, 9, 1, 8, tzinfo=timezone.utc), outgoing_by_contact=outgoing))
+
+    def test_cross_channel_e_diario_sao_independentes_qualquer_um_resolve(self):
+        """Regressão de composição: o item pode ser resolvido por diário OU
+        por canal cruzado -- os dois caminhos não se atrapalham, e o
+        primeiro que casar já é suficiente (aqui, só o canal cruzado se
+        aplica; a ação nem tem diário genuíno)."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {'p': {'nome': 'Wagner', 'whatsapp_chat_id': 'w', 'email': 'wagner@vetor.com.br'}},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento', 'whatsapp_vinculos': [{'chat_id': 'w'}]}},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w', 'trecho': 'Já tratamos isso?',
+                                       'desde': '2026-09-01T08:00:00+00:00'}},
+            'email_action_suggestions': {
+                'e': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                      'origem_sinal': 'Wagner <wagner@vetor.com.br>',
+                      'ultima_mensagem_de_andre': True,
+                      'internal_date': '2026-09-01T10:00:00+00:00'},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(result['itens'], [])
+        self.assertEqual(result['filtrados']['tratado_na_acao'], 0)
+        self.assertEqual(result['filtrados']['tratado_em_outro_canal'], 1)
 
 
 class _MemorySnap:
