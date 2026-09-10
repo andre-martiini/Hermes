@@ -9,6 +9,7 @@ de mensagens cresce.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 from email.utils import parseaddr
@@ -16,8 +17,57 @@ from datetime import datetime, timezone
 
 from firebase_admin import firestore
 
+from gemini_cost_controls import GEMINI_LIGHT_MODEL, generate_content_logged
+
 
 COLLECTION = "inbox_pendentes"
+# DEV-2026-0004 sub-entrega 7/9, proposta (b)(ii): cache de classificações do
+# LLM -- ver `_classificar_necessidade_resposta` para a chave exata.
+LLM_CLASSIFICACAO_COLLECTION = "inbox_pendentes_classificacao_llm"
+_FEATURE_CLASSIFICADOR_LLM = "inbox_pendentes_classificador"
+_LLM_ROTULOS_VALIDOS = {"pergunta", "pedido", "informativo", "encerramento"}
+# Mapeia o rótulo do classificador para a chave de `filtered` correspondente.
+# DELIBERADAMENTE contadores PRÓPRIOS (não os mesmos que a heurística usa
+# para o equivalente, "informativo"/"encerramentos") -- achado da revisão
+# adversarial: a heurística é regex/léxico estático e bem testado, mas a
+# taxa de filtragem do LLM pode variar com mudanças de modelo/prompt sem que
+# ninguém perceba se ficasse escondida dentro do mesmo contador. Contadores
+# separados permitem monitorar "o classificador começou a filtrar demais"
+# sem precisar de detalhe por item.
+_LLM_ROTULO_PARA_FILTRO = {"informativo": "informativo_llm", "encerramento": "encerramentos_llm"}
+# Achado CRÍTICO da revisão adversarial: `email_action_suggestions` tem seu
+# `snippet`/`sender`/`internal_date` REESCRITOS a cada refresh de
+# `email_action_linker.atualizar_direcao_emails_aplicados`, a partir da
+# mensagem mais RECENTE da thread -- mas o id do documento (`doc.id`,
+# usado como `message_id` no laço de e-mail de `coletar()`) nunca muda.
+# Cachear só por `message_id` faria uma classificação de uma mensagem ANTIGA
+# (ex.: "informativo") ser silenciosamente reaplicada a uma mensagem NOVA e
+# diferente que chegou depois na mesma thread -- o "achado A" desta demanda
+# de novo (exclusão indevida por dado congelado), só que impossível de
+# perceber porque nada muda de nome. Por isso a chave de cache inclui um
+# fingerprint do TEXTO classificado: qualquer mudança de conteúdo já invalida
+# o cache sozinha, sem precisar que `email_action_linker.py` grave nenhum
+# campo novo. Prefixo de canal (`wa`/`email`) é defesa extra, barata, contra
+# uma colisão entre um id de mensagem do WhatsApp e um do Gmail.
+def _chave_cache_classificacao(message_id: str, texto: str, is_email: bool) -> str:
+    canal = "email" if is_email else "wa"
+    fingerprint = hashlib.sha256(texto.encode("utf-8")).hexdigest()[:16]
+    return f"{canal}:{message_id}:{fingerprint}"
+
+
+# Idem, achado HIGH da revisão adversarial: `coletar()` é chamado de forma
+# SÍNCRONA na abertura de toda sessão MCP (`morning_summary.gerar()`, que
+# documenta explicitamente "não faz RPC ao WhatsApp/Gmail durante a abertura
+# de uma sessão MCP" -- ver o comentário lá) e também da tool
+# `listar_respostas_pendentes`. Sem limite, um cache frio (logo após esta
+# sub-entrega entrar em produção, ou um backlog grande) dispararia uma
+# chamada Gemini SEQUENCIAL para cada mensagem sobrevivente aos filtros
+# gratuitos, quebrando essa garantia de latência. Um orçamento baixo e fixo
+# por passada mantém o pior caso pequeno; itens além do orçamento passam sem
+# classificar (mesmo comportamento de "sem client disponível" -- nunca
+# escondidos por falta de orçamento) e são reconsiderados na próxima
+# passada, então o cache esquenta gradualmente sem nunca bloquear nada.
+_LLM_MAX_CLASSIFICACOES_POR_PASSADA = 5
 _STANDBY_STATUS_ALIASES = {"stand-by", "standby", "stand by", "cgby"}
 _ACTIVE_STATUS_ALIASES = {"em andamento", "andamento", "nao iniciado", "não iniciado", "pendente"}
 MAX_ITEMS = 15
@@ -90,6 +140,11 @@ def _whatsapp_payload(message: dict, when: datetime) -> dict:
         "ultima_de_andre": bool(message.get("from_me")),
         "desde": when,
         "trecho": str(message.get("content") or "")[:120],
+        # DEV-2026-0004 sub-entrega 7/9: chave de cache do classificador LLM
+        # (`_classificar_necessidade_resposta`) -- o id da mensagem em si, não
+        # do chat, para que a classificação não fique presa a uma mensagem
+        # antiga quando uma nova chega no mesmo chat.
+        "message_id": str(message.get("id") or "").strip() or None,
         "mentioned_ids": [str(x) for x in (message.get("mentioned_ids") or []) if str(x)],
         "mentions_andre": bool(message.get("mentions_andre")),
         "quoted_msg_id": message.get("quoted_msg_id") or None,
@@ -510,6 +565,141 @@ def _applied_email_suggestions(db):
         return collection.where("status", "in", ["applied", "applied_reactivated"]).limit(EMAIL_SUGGESTIONS_LIMIT).stream()
 
 
+def _get_llm_client(db):
+    """DEV-2026-0004 sub-entrega 7/9: constrói o client Gemini só quando
+    algum item de fato sobreviveu aos filtros gratuitos (heurística,
+    diário, canal cruzado) e precisa da classificação paga -- mesmo padrão
+    de inicialização preguiçosa do resto do módulo (nunca ler
+    `system/api_keys` ou montar o client à toa). Falha (chave ausente,
+    import quebrado, etc.) devolve None em vez de propagar exceção: quem
+    chama trata None exatamente como "sem classificador disponível agora" e
+    NÃO filtra a mensagem -- ver `_classificar_necessidade_resposta`."""
+    try:
+        from main import get_genai_module, get_gemini_api_key
+        api_key = get_gemini_api_key()
+        if not api_key:
+            return None
+        genai = get_genai_module()
+        return genai.Client(api_key=api_key)
+    except Exception as exc:
+        print(f"[INBOX-PENDENTES] Falha ao inicializar cliente Gemini para o classificador: {exc}")
+        return None
+
+
+def _build_prompt_classificador(texto: str, is_email: bool) -> str:
+    fonte = "e-mail" if is_email else "mensagem de WhatsApp"
+    return f"""Você é o Hermes, assistente pessoal do André. Classifique se a mensagem
+abaixo de fato PEDE uma resposta ou ação dele, ou se pode ficar sem resposta.
+
+MENSAGEM ({fonte}):
+{texto}
+
+Responda APENAS com um JSON no formato exato:
+{{
+  "rotulo": "pergunta" | "pedido" | "informativo" | "encerramento",
+  "justificativa": "1 frase curta (português) explicando a escolha"
+}}
+
+Definições:
+- "pergunta": faz uma pergunta direta que espera resposta do André.
+- "pedido": pede uma ação, decisão ou providência do André (mesmo sem "?").
+- "informativo": avisa ou informa algo, sem esperar resposta (ex.: "segue o
+  anexo", cópia de e-mail em que André não é o destinatário principal,
+  atualização de status já concluída).
+- "encerramento": fecha a conversa (agradecimento, confirmação final,
+  despedida) e não abre nada novo.
+
+Na dúvida entre "pedido"/"pergunta" e "informativo"/"encerramento", prefira
+"pedido" ou "pergunta" -- é bem menos custoso o André ver uma mensagem à toa
+do que perder uma que de fato precisava de resposta."""
+
+
+def _classificar_necessidade_resposta(db, get_client, *, message_id: str | None, texto: str,
+                                      is_email: bool, pode_classificar=lambda: True) -> str | None:
+    """DEV-2026-0004 sub-entrega 7/9, proposta (b)(ii): classifica com Gemini
+    Flash Lite (`GEMINI_LIGHT_MODEL`, já usado em `email_action_linker.py`)
+    se a mensagem pede resposta, com cache em `LLM_CLASSIFICACAO_COLLECTION`
+    -- ver `_chave_cache_classificacao` para por que a chave inclui um
+    fingerprint do texto, não só o `message_id`.
+
+    `get_client` é uma função sem argumentos (não o client já pronto): só é
+    chamada depois de confirmado que NÃO há cache para esta mensagem -- ou
+    seja, o client (e a leitura de `system/api_keys` que ele exige) só é
+    montado quando algo de fato vai ser classificado. `coletar()` passa uma
+    versão memoizada (mesmo client reaproveitado entre mensagens da mesma
+    passada, nunca reconstruído à toa a cada cache-hit) -- ver seu uso ali.
+
+    `pode_classificar` é outra função sem argumentos, chamada no mesmo ponto
+    (depois do cache-miss, antes de `get_client()`): devolve False quando o
+    orçamento de chamadas novas desta passada (`_LLM_MAX_CLASSIFICACOES_POR_PASSADA`)
+    já acabou -- controla o CUSTO da chamada em si (ao contrário de
+    `get_client`, que controla se ela é sequer possível). Um cache-hit nunca
+    consulta `pode_classificar` nem consome orçamento -- só uma classificação
+    nova conta.
+
+    Devolve um dos rótulos de `_LLM_ROTULOS_VALIDOS`, ou None quando a
+    classificação não pôde ser obtida (sem `message_id`/texto para cachear,
+    orçamento da passada esgotado, sem client/chave configurada, resposta
+    malformada, erro de rede). None SEMPRE significa "não filtrar, deixa
+    passar" -- nunca "filtrar". Uma falha de classificação escondendo a
+    mensagem inteira seria o "achado A" desta demanda de novo (fechamento
+    indevido por falha silenciosa), só que na direção pior: lá o item ficava
+    preso aberto por engano; aqui a mensagem sumiria da fila sem André nunca
+    vê-la. O chamador só filtra quando o rótulo devolvido está em
+    `_LLM_ROTULO_PARA_FILTRO`."""
+    message_id = str(message_id or "").strip()
+    texto = str(texto or "").strip()
+    if not message_id or not texto:
+        return None
+    cache_ref = db.collection(LLM_CLASSIFICACAO_COLLECTION).document(
+        _chave_cache_classificacao(message_id, texto, is_email))
+    try:
+        cached = cache_ref.get()
+        if cached.exists:
+            rotulo = (cached.to_dict() or {}).get("rotulo")
+            if rotulo in _LLM_ROTULOS_VALIDOS:
+                return rotulo
+    except Exception as exc:
+        print(f"[INBOX-PENDENTES] Falha ao ler cache do classificador ({message_id}): {exc}")
+    if not pode_classificar():
+        return None
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        from google.genai import types
+        response = generate_content_logged(
+            client,
+            model=GEMINI_LIGHT_MODEL,
+            contents=_build_prompt_classificador(texto, is_email),
+            feature=_FEATURE_CLASSIFICADOR_LLM,
+            db=db,
+            config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.1),
+        )
+        raw = (response.text or "").strip()
+        if "```json" in raw:
+            raw = raw.split("```json")[-1].split("```")[0].strip()
+        elif "```" in raw:
+            raw = raw.split("```")[-1].split("```")[0].strip()
+        parsed = json.loads(raw)
+        rotulo = str(parsed.get("rotulo") or "").strip().lower()
+        justificativa = str(parsed.get("justificativa") or "").strip()[:300]
+    except Exception as exc:
+        print(f"[INBOX-PENDENTES] Falha ao classificar via LLM ({message_id}): {exc}")
+        return None
+    if rotulo not in _LLM_ROTULOS_VALIDOS:
+        return None
+    try:
+        cache_ref.set({
+            "rotulo": rotulo,
+            "justificativa": justificativa,
+            "classificado_em": datetime.now(timezone.utc),
+        })
+    except Exception as exc:
+        print(f"[INBOX-PENDENTES] Falha ao cachear classificação LLM ({message_id}): {exc}")
+    return rotulo
+
+
 def _item(*, contato: str, canal: str, desde, trecho: str, task: dict | None,
           paused_until, now: datetime) -> dict | None:
     received = _as_datetime(desde)
@@ -552,8 +742,31 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
     whatsapp_last_outgoing: dict[str, datetime] = {}
     items = []
     filtered = {"automaticos": 0, "encerramentos": 0, "sem_texto": 0, "informativo": 0,
+                "informativo_llm": 0, "encerramentos_llm": 0,
                 "tratado_na_acao": 0, "tratado_em_outro_canal": 0}
     domains, endings = _noise_config(db)
+    # DEV-2026-0004 sub-entrega 7/9: montado (e memoizado) só na primeira
+    # mensagem desta passada que sobra sem cache -- a maioria das passadas de
+    # `coletar()` nunca chega a precisar disso, e quando precisa, o mesmo
+    # client é reaproveitado para as demais mensagens da passada em vez de
+    # reconstruído a cada uma. Ver `_get_llm_client`/`_classificar_necessidade_resposta`.
+    _llm_client_box: list = []
+
+    def _get_llm_client_memo():
+        if not _llm_client_box:
+            _llm_client_box.append(_get_llm_client(db))
+        return _llm_client_box[0]
+
+    # Orçamento de classificações NOVAS (cache-miss) por passada -- ver
+    # `_LLM_MAX_CLASSIFICACOES_POR_PASSADA`. Compartilhado entre os dois
+    # laços (WhatsApp e e-mail) desta mesma chamada de `coletar()`.
+    _llm_orcamento_restante = [_LLM_MAX_CLASSIFICACOES_POR_PASSADA]
+
+    def _pode_classificar():
+        if _llm_orcamento_restante[0] <= 0:
+            return False
+        _llm_orcamento_restante[0] -= 1
+        return True
 
     for doc in db.collection(COLLECTION).stream():
         data = doc.to_dict() or {}
@@ -596,6 +809,22 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
                                    outgoing_by_contact=outgoing_email) and not incluir_filtrados:
             filtered["tratado_em_outro_canal"] += 1
             continue
+        # DEV-2026-0004 sub-entrega 7/9, proposta (b)(ii): último estágio,
+        # depois de todo filtro gratuito -- só chama o LLM (pago, ainda que
+        # cacheado por message_id) para quem sobrou. Pulado inteiramente em
+        # modo auditoria (`incluir_filtrados=True`): esse modo existe para
+        # inspecionar o que os filtros ESTÃO fazendo, não para gastar
+        # chamadas de LLM extras sem afetar o resultado.
+        if not incluir_filtrados:
+            rotulo = _classificar_necessidade_resposta(
+                db, _get_llm_client_memo, message_id=data.get("message_id"),
+                texto=data.get("trecho") or "", is_email=False,
+                pode_classificar=_pode_classificar,
+            )
+            filtro = _LLM_ROTULO_PARA_FILTRO.get(rotulo)
+            if filtro:
+                filtered[filtro] += 1
+                continue
         item = _item(
             contato=contacts.get(chat_id) or str(data.get("chat_name") or chat_id),
             canal="whatsapp_grupo" if data.get("is_group") else "whatsapp",
@@ -641,6 +870,38 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
                                    outgoing_by_contact=whatsapp_last_outgoing) and not incluir_filtrados:
             filtered["tratado_em_outro_canal"] += 1
             continue
+        # DEV-2026-0004 sub-entrega 7/9, proposta (b)(ii): mesmo estágio final
+        # do laço de WhatsApp acima -- `doc.id` em `email_action_suggestions`
+        # é o `google_message_id` original (gravado assim em
+        # `email_action_linker.py`, `suggestions_col.document(msg_id).set(...)`),
+        # congelado para sempre -- `snippet`/`sender`/`internal_date` deste
+        # MESMO doc são reescritos a cada refresh de
+        # `atualizar_direcao_emails_aplicados` para refletir a mensagem mais
+        # recente da thread, mas o id da mensagem NOVA em si nunca é gravado
+        # em lugar nenhum. Achado da revisão adversarial: o fingerprint do
+        # SNIPPET sozinho não bastava -- dois e-mails DIFERENTES na mesma
+        # thread cujo snippet do Gmail coincida (plausível para avisos
+        # automáticos/institucionais formulaicos) colidiriam no mesmo
+        # `doc.id`, e a classificação da mensagem ANTIGA (ex.: "informativo",
+        # cacheada) seria silenciosamente reaplicada à mensagem NOVA sem
+        # nunca chamar o LLM de novo -- o "achado A" desta demanda de novo
+        # (exclusão indevida por dado obsoleto), sem exigir nenhuma ação do
+        # André. `internal_date` É atualizado a cada refresh (mesmo campo do
+        # qual `_resolved_by_diario`/`_resolved_cross_channel` já dependem
+        # estar fresco) e dois e-mails distintos nunca compartilham o mesmo
+        # timestamp -- por isso entra como parte do `message_id` passado
+        # abaixo (não do `texto`, que seria enviado ao LLM sem alteração;
+        # `message_id` só alimenta a chave de cache, nunca o prompt).
+        if not incluir_filtrados:
+            rotulo = _classificar_necessidade_resposta(
+                db, _get_llm_client_memo, message_id=f"{doc.id}|{data.get('internal_date')}",
+                texto=str(data.get("snippet") or data.get("resumo") or ""), is_email=True,
+                pode_classificar=_pode_classificar,
+            )
+            filtro = _LLM_ROTULO_PARA_FILTRO.get(rotulo)
+            if filtro:
+                filtered[filtro] += 1
+                continue
         item = _item(
             contato=str(data.get("sender") or data.get("origem_sinal") or "E-mail"),
             canal="gmail", desde=data.get("internal_date") or data.get("analyzed_at"),
