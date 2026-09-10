@@ -294,10 +294,14 @@ def campos_obrigatorios_ausentes(tool_name: str, arguments: dict) -> list[str]:
     tentar rodar (o handler, se checar, devolve string livre tipo
     "ERRO|..."; se nao checar, ou propaga uma excecao Python crua via
     `except Exception` em `mcp_server.py` ou, pior, segue em frente com um
-    dado incompleto). Checagem de TIPO (schema `type`) fica para uma
-    sub-entrega separada, com sua propria bateria de testes — ali o risco
-    de falso positivo contra um cliente legado que hoje manda um valor
-    "meio certo" (ex.: numero como string) e mais real.
+    dado incompleto). Checagem de TIPO (schema `type`) ficou para uma
+    sub-entrega separada (P03 sub-entrega 4/N, ver `tipos_invalidos`
+    abaixo) -- e mesmo ali so a metade estrutural (`array`/`object`); os
+    quatro tipos escalares continuam de fora, porque a investigacao feita
+    naquela sub-entrega confirmou o risco suspeitado aqui: handlers reais
+    ja toleram deliberadamente um numero como string (ex.: `int(args.get(
+    "limite") or 20)`), e uma checagem escalar estrita rejeitaria chamadas
+    que hoje funcionam.
 
     Falha aberta, nunca fechada: schema ausente, ilegivel ou com formato
     inesperado (achado da revisao adversarial desta sub-entrega: um
@@ -319,6 +323,116 @@ def campos_obrigatorios_ausentes(tool_name: str, arguments: dict) -> list[str]:
             return []
         return [campo for campo in required
                 if isinstance(campo, str) and (campo not in arguments or arguments.get(campo) is None)]
+    except (FileNotFoundError, OSError, json.JSONDecodeError, AttributeError, TypeError):
+        return []
+
+
+_TIPOS_JSON_PARA_PYTHON = {
+    "array": list,
+    "object": dict,
+}
+
+
+# Achado da revisao adversarial desta sub-entrega: `subtarefas.py::
+# normalizar_entrada_plano` (gatilho: incidente real de 28/08/2026, ver a
+# docstring dela) ja aceita deliberadamente uma STRING com o JSON de uma
+# lista de etapas e a decodifica antes de usar -- string que nao e JSON
+# valido de lista ainda e recusada, so que pelo proprio handler (mensagem
+# especifica de `PlanoInvalido`), nao por aqui. Sem esta excecao, o
+# preflight bloquearia uma chamada que o handler ja trata com seguranca,
+# repetindo com um campo "quase certo" o mesmo risco que a sub-entrega 2/N
+# identificou para os tipos escalares (ver docstring de
+# `campos_obrigatorios_ausentes`). Achado via `tools/hermes_tools.py:1050`
+# (`criar_acao_no_sistema`, chama `subtarefas.converter_plano` que chama
+# `normalizar_entrada_plano`) e `tools/telegram_extended.py:361-378`
+# (`editar_plano_acao`, resolve os apelidos `novo_plano`/`plano_acao`/
+# `etapas` e chama `subtarefas.mesclar_plano`, que tambem chama
+# `normalizar_entrada_plano`). Isto NAO generaliza para outros campos
+# array/object (ex.: `tags`/`alteracoes` de `editar_acao`, que nao tem essa
+# normalizacao e onde uma string preenchida seria silenciosamente tratada
+# como se fosse a lista/dict) -- por isso a excecao e uma lista fechada de
+# pares (tool, campo) com tolerancia comprovada, nao uma regra geral tipo
+# "aceitar string se for JSON valido do tipo certo".
+_CAMPOS_COM_TOLERANCIA_A_STRING_JSON = {
+    ("criar_acao_no_sistema", "plano_acao"),
+    ("editar_plano_acao", "novo_plano"),
+    ("editar_plano_acao", "plano_acao"),
+    ("editar_plano_acao", "etapas"),
+}
+
+
+def tipos_invalidos(tool_name: str, arguments: dict) -> list[dict]:
+    """Campos presentes em `arguments` cujo valor não bate com o tipo
+    ESTRUTURAL (`array`/`object`) que o schema publicado (`tools/list`)
+    declara para eles. Lista vazia quer dizer "nada de errado aqui"; cada
+    item devolvido é `{"campo": ..., "esperado": ..., "recebido": ...}`.
+
+    P03 passo 2, sub-entrega 4/N: a fatia de "checagem de tipo" que a
+    sub-entrega 2/N (ver `campos_obrigatorios_ausentes` acima) deixou de
+    fora deliberadamente -- mas só metade dela. Cobre unicamente os dois
+    tipos ESTRUTURAIS do JSON Schema (`array` deve ser lista, `object` deve
+    ser dict) e DELIBERADAMENTE NÃO cobre os quatro tipos escalares
+    (`string`/`integer`/`number`/`boolean`).
+
+    Essa fronteira não é arbitrária -- é o resultado de investigar os 105
+    schemas e os handlers reais que os consomem (`tools/hermes_tools.py`)
+    antes de implementar, não uma suposição. Os campos escalares numéricos/
+    booleanos já são tratados com tolerância DELIBERADA pelo próprio
+    handler hoje: `int(args.get("limite") or 20)` aceita de bom grado tanto
+    `20` quanto `"20"`; `bool(args.get("apenas_ativos"))` aceita qualquer
+    valor truthy. Uma checagem estrita aqui rejeitaria uma chamada "meio
+    certa" que HOJE FUNCIONA -- exatamente o risco que a sub-entrega 2/N
+    identificou e adiou (ver docstring de `campos_obrigatorios_ausentes`).
+    Os campos estruturais não têm essa mesma tolerância pré-existente:
+    `alteracoes = dict(args.get("alteracoes") or {})` (`hermes_tools.py`,
+    `editar_acao`) levanta um `ValueError` opaco se vier uma string no
+    lugar de objeto; `tags = args.get("tags") or []` (`hermes_tools.py:
+    1052`) é pior -- se vier uma string NÃO-vazia, `"abc" or []` resolve
+    para `"abc"`, e o código segue tratando uma STRING como se fosse a
+    lista, sem erro nenhum ali, até explodir (ou, pior, iterar caractere
+    por caractere silenciosamente) num ponto mais fundo e mais difícil de
+    depurar. Para os dois tipos estruturais não há tolerância a preservar,
+    e o risco inclui corrupção silenciosa de dado, não só exceção crua.
+
+    Só verifica campos PRESENTES (ausência/`None` é responsabilidade de
+    `campos_obrigatorios_ausentes`, não desta função) -- aplica a campos
+    obrigatórios e opcionais igualmente, porque o risco (crash ou
+    corrupção silenciosa) independe de o campo ser obrigatório.
+
+    Exceção fechada e documentada (ver `_CAMPOS_COM_TOLERANCIA_A_STRING_JSON`
+    acima) para os poucos pares (tool, campo) onde o próprio handler já
+    normaliza uma string JSON com segurança -- sem ela este preflight
+    bloquearia uma chamada válida hoje.
+
+    Falha aberta, mesma filosofia de `campos_obrigatorios_ausentes`: schema
+    ausente, ilegível ou malformado nunca bloqueia a chamada por conta
+    própria.
+    """
+    try:
+        schema = get_schema(tool_name)
+        propriedades = (schema.get("parameters") or {}).get("properties") or {}
+        if not isinstance(propriedades, dict) or not isinstance(arguments, dict):
+            return []
+        problemas = []
+        for campo, prop_schema in propriedades.items():
+            if not isinstance(prop_schema, dict):
+                continue
+            tipo_esperado = prop_schema.get("type")
+            tipo_python = _TIPOS_JSON_PARA_PYTHON.get(tipo_esperado)
+            if tipo_python is None:
+                continue  # so array/object nesta fatia -- ver docstring acima
+            if campo not in arguments or arguments.get(campo) is None:
+                continue  # ausencia e responsabilidade de campos_obrigatorios_ausentes
+            if (tool_name, campo) in _CAMPOS_COM_TOLERANCIA_A_STRING_JSON:
+                continue  # handler ja normaliza string JSON com seguranca
+            valor = arguments[campo]
+            if not isinstance(valor, tipo_python):
+                problemas.append({
+                    "campo": campo,
+                    "esperado": tipo_esperado,
+                    "recebido": type(valor).__name__,
+                })
+        return problemas
     except (FileNotFoundError, OSError, json.JSONDecodeError, AttributeError, TypeError):
         return []
 
