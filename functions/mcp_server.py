@@ -890,7 +890,7 @@ def _handle_tools_list() -> dict:
             props.setdefault("_confirmed", {"type": "boolean", "description": "Confirma a prévia persistida."})
             props.setdefault("_confirmation_id", {"type": "string", "description": "ID devolvido pela prévia."})
             input_schema["properties"] = props
-        tools.append({
+        tool_entry = {
             "name": name,
             "description": schema.get("description", ""),
             "inputSchema": input_schema,
@@ -903,7 +903,18 @@ def _handle_tools_list() -> dict:
                 "mutates": registry.needs_confirmation(name),
                 "voiceEnabled": registry.is_voice_enabled(name),
             },
-        })
+        }
+        # P03 passo 3, sub-entrega 6/N: `annotations` do protocolo MCP
+        # (readOnlyHint/destructiveHint por enquanto — ver docstring de
+        # `registry.mcp_annotations` para o porque de idempotentHint/
+        # openWorldHint ficarem fora desta sub-entrega). Campo OPCIONAL no
+        # objeto Tool — omitido (nao um dict vazio) quando a tool nao tem
+        # entrada no inventario, para nao publicar metadado vazio sem
+        # sentido.
+        annotations = registry.mcp_annotations(name)
+        if annotations:
+            tool_entry["annotations"] = annotations
+        tools.append(tool_entry)
     return {
         "tools": tools,
         "resultType": "complete",
