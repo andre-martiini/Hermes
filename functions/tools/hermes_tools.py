@@ -1861,6 +1861,15 @@ def listar_respostas_pendentes(ctx: ToolContext, args: dict):
                    limite=int(args.get("limite") or 50))
 
 
+def dispensar_resposta_pendente(ctx: ToolContext, args: dict):
+    """DEV-2026-0004 sub-entrega 8/9, proposta (d): marca um item de
+    `listar_respostas_pendentes` como tratado, para não reaparecer na fila
+    enquanto o trecho/snippet que o originou não mudar. `item_id` é o campo
+    `id` devolvido para o item (nunca deve ser montado à mão)."""
+    from inbox_pendentes import dispensar
+    return dispensar(ctx.db, item_id=args.get("item_id"), motivo=args.get("motivo"))
+
+
 def obter_acao(ctx: ToolContext, args: dict):
     """Uma acao inteira, sem corte. O oposto de `consultar_historico_acoes`.
 
@@ -2445,6 +2454,7 @@ _HANDLERS: dict = {
     "reagendar_acoes_em_lote": reagendar_acoes_em_lote,
     "obter_estado_atual": obter_estado_atual,
     "listar_respostas_pendentes": listar_respostas_pendentes,
+    "dispensar_resposta_pendente": dispensar_resposta_pendente,
     "obter_acao": obter_acao,
     "listar_conversas_whatsapp": _whatsapp("listar_conversas"),
     "ler_mensagens_whatsapp": _whatsapp("ler_mensagens"),

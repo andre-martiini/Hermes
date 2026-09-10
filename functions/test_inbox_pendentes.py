@@ -5,13 +5,16 @@ from datetime import datetime, timezone
 sys.path.insert(0, '.')
 
 from inbox_pendentes import (
+    DISPENSA_COLLECTION,
     LLM_CLASSIFICACAO_COLLECTION,
     _LLM_MAX_CLASSIFICACOES_POR_PASSADA,
     _chave_cache_classificacao,
+    _chave_item_dispensavel,
     _classificar_necessidade_resposta,
     atualizar_whatsapp_em_lote,
     backfill_whatsapp_inicial,
     coletar,
+    dispensar,
 )
 
 
@@ -69,7 +72,7 @@ class InboxPendentesTest(unittest.TestCase):
         result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
         self.assertEqual(result['filtrados'], {'automaticos': 0, 'encerramentos': 1, 'sem_texto': 1, 'informativo': 0,
                                                 'informativo_llm': 0, 'encerramentos_llm': 0,
-                                                'tratado_na_acao': 0, 'tratado_em_outro_canal': 0})
+                                                'tratado_na_acao': 0, 'tratado_em_outro_canal': 0, 'dispensados': 0})
         self.assertEqual({x['trecho'] for x in result['itens']}, {'Você pode confirmar? Obrigada', 'segue a planilha'})
 
     def test_auditoria_inclui_itens_filtrados(self):
@@ -1303,6 +1306,325 @@ class ColetarClassificadorLLMTest(unittest.TestCase):
         with mock.patch('inbox_pendentes._get_llm_client', return_value=None):
             result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
         self.assertEqual(len(result['itens']), 1)
+
+
+class DispensarTest(unittest.TestCase):
+    """DEV-2026-0004 sub-entrega 8/9, proposta (d): testes diretos de
+    `dispensar()` -- validação de entrada e a gravação em si. A integração
+    com `coletar()` (o item de fato sumir da fila, e SÓ até o conteúdo
+    mudar) está em `ColetarDispensaTest` abaixo."""
+
+    def test_dispensa_grava_e_devolve_ok(self):
+        db = Db({})
+        item_id = _chave_item_dispensavel('w', 'Já tratamos isso?', False)
+        resultado = dispensar(db, item_id=item_id, motivo='Já resolvi por telefone')
+        self.assertEqual(resultado, {'status': 'ok', 'id': item_id, 'motivo': 'Já resolvi por telefone'})
+        doc = db.collection(DISPENSA_COLLECTION).document(item_id)
+        self.assertTrue(doc.exists)
+        self.assertEqual(doc.data['motivo'], 'Já resolvi por telefone')
+        self.assertEqual(doc.data['item_id'], item_id)
+
+    def test_dispensa_sem_item_id_devolve_erro_e_nao_grava(self):
+        db = Db({})
+        resultado = dispensar(db, item_id='', motivo='Motivo qualquer')
+        self.assertIn('erro', resultado)
+        self.assertEqual(len(db.collection(DISPENSA_COLLECTION).docs_by_id), 0)
+
+    def test_dispensa_com_item_id_mal_formado_devolve_erro(self):
+        """`item_id` tem que vir de `coletar()` (formato
+        `{canal}:{identificador}:{fingerprint}`, 2 dois-pontos) -- nunca
+        montado à mão pelo chamador. Um valor sem essa forma (aqui, um nome
+        de contato solto) é rejeitado em vez de aceito e gravado do jeito
+        errado."""
+        db = Db({})
+        resultado = dispensar(db, item_id='Wagner', motivo='Já tratei')
+        self.assertIn('erro', resultado)
+
+    def test_dispensa_sem_motivo_devolve_erro_e_nao_grava(self):
+        db = Db({})
+        item_id = _chave_item_dispensavel('w', 'Já tratamos isso?', False)
+        resultado = dispensar(db, item_id=item_id, motivo='   ')
+        self.assertIn('erro', resultado)
+        self.assertEqual(len(db.collection(DISPENSA_COLLECTION).docs_by_id), 0)
+
+
+class ColetarDispensaTest(unittest.TestCase):
+    """DEV-2026-0004 sub-entrega 8/9: integração da dispensa dentro de
+    `coletar()` -- o item some da fila depois de dispensado, tanto para
+    WhatsApp quanto para e-mail, mas SÓ enquanto o trecho/snippet que o
+    originou não mudar (ver `_chave_item_dispensavel`: a dispensa é presa ao
+    CONTEÚDO, não à conversa/thread inteira -- uma mensagem nova no mesmo
+    chat/thread tem um `id` diferente e continua aparecendo normalmente)."""
+
+    def test_coletar_expoe_id_previsivel_no_item_whatsapp(self):
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {}, 'email_action_suggestions': {}, 'tarefas': {},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w',
+                'trecho': 'Pode revisar isso hoje?', 'desde': '2026-09-01T08:00:00+00:00'}},
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        esperado = _chave_item_dispensavel('w', 'Pode revisar isso hoje?', False)
+        self.assertEqual(result['itens'][0]['id'], esperado)
+
+    def test_coletar_expoe_id_previsivel_no_item_email(self):
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': []}}},
+            'perfil_pessoas': {},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento'}},
+            'inbox_pendentes': {},
+            'email_action_suggestions': {
+                'msg-1': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                          'gmail_thread_id': 'thread-xyz',
+                          'sender': 'Gabriela <gabriela@ifes.edu.br>',
+                          'snippet': 'Poderia revisar o anexo até sexta?',
+                          'internal_date': '2026-09-01T08:00:00+00:00', 'andre_em_to': True},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        # DEV-2026-0004 sub-entrega 8/9, achado HIGH da segunda rodada de
+        # revisão adversarial: o texto fingerprintado do lado e-mail inclui
+        # `internal_date` além do snippet -- ver o comentário no call site em
+        # `coletar()` (`item_id_email`) para o motivo (sem isso, dois
+        # e-mails DIFERENTES na mesma thread com snippet coincidente
+        # colidiriam, já que `email_action_suggestions` não guarda nenhum id
+        # de mensagem que mude a cada refresh como o `message_id` do
+        # WhatsApp).
+        esperado = _chave_item_dispensavel(
+            'thread-xyz', '2026-09-01T08:00:00+00:00|Poderia revisar o anexo até sexta?', True)
+        self.assertEqual(result['itens'][0]['id'], esperado)
+
+    def test_coletar_email_motivo_inclusao_e_vinculado_a_acao(self):
+        """Achado da própria demanda (proposta d): `motivo_inclusao` de todo
+        item de e-mail era fixo em 'conversa_direta', sem relação com a razão
+        real. Todo item deste laço exige uma ação ATIVA vinculada -- ver
+        `emails_by_thread` em `coletar()` -- 'vinculado_a_acao' descreve isso
+        de fato."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': []}}},
+            'perfil_pessoas': {},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento'}},
+            'inbox_pendentes': {},
+            'email_action_suggestions': {
+                'msg-1': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                          'sender': 'Gabriela <gabriela@ifes.edu.br>',
+                          'snippet': 'Poderia revisar o anexo até sexta?',
+                          'internal_date': '2026-09-01T08:00:00+00:00', 'andre_em_to': True},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(result['itens'][0]['motivo_inclusao'], 'vinculado_a_acao')
+
+    def test_coletar_omite_item_whatsapp_dispensado_e_conta_no_filtrados(self):
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {}, 'email_action_suggestions': {}, 'tarefas': {},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w',
+                'trecho': 'Já tratamos isso?', 'desde': '2026-09-01T08:00:00+00:00'}},
+        })
+        item_id = _chave_item_dispensavel('w', 'Já tratamos isso?', False)
+        dispensar(db, item_id=item_id, motivo='Já resolvi por telefone')
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(result['itens'], [])
+        self.assertEqual(result['filtrados']['dispensados'], 1)
+
+    def test_coletar_omite_item_email_dispensado_e_conta_no_filtrados(self):
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': []}}},
+            'perfil_pessoas': {},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento'}},
+            'inbox_pendentes': {},
+            'email_action_suggestions': {
+                'msg-1': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                          'gmail_thread_id': 'thread-xyz',
+                          'sender': 'Wagner <wagner@vetor.com.br>',
+                          'snippet': 'Já tratamos isso, Wagner?',
+                          'internal_date': '2026-09-01T08:00:00+00:00', 'andre_em_to': True},
+            },
+        })
+        # `item_id` lido do próprio `coletar()` (não montado à mão) -- mais
+        # robusto a qualquer mudança futura na fórmula exata (ver achado HIGH
+        # documentado em `test_coletar_expoe_id_previsivel_no_item_email`).
+        item_id = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))['itens'][0]['id']
+        dispensar(db, item_id=item_id, motivo='André confirmou que já tratou por telefone')
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(result['itens'], [])
+        self.assertEqual(result['filtrados']['dispensados'], 1)
+
+    def test_coletar_emails_diferentes_com_snippet_coincidente_na_mesma_thread_nao_colidem(self):
+        """Achado HIGH da SEGUNDA rodada de revisão adversarial: sem
+        `internal_date` no texto fingerprintado, dois e-mails DIFERENTES na
+        MESMA thread cujo snippet do Gmail coincidisse (plausível para
+        avisos automáticos/institucionais formulaicos -- mesma classe de
+        risco do achado CRÍTICO do lado WhatsApp) teriam o MESMO `id`, já
+        que `email_action_suggestions` não guarda nenhum id de mensagem que
+        mude a cada refresh (ao contrário do `message_id` do WhatsApp). Este
+        teste simula exatamente como `email_action_linker.
+        atualizar_direcao_emails_aplicados` reescreve o MESMO doc a cada
+        refresh -- mesmo `doc.id`/`gmail_thread_id`, `internal_date` novo --
+        com um snippet que POR COINCIDÊNCIA é idêntico ao anterior, e prova
+        que a dispensa do primeiro e-mail não esconde o segundo."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': []}}},
+            'perfil_pessoas': {},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento'}},
+            'inbox_pendentes': {},
+            'email_action_suggestions': {
+                'msg-1': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                          'gmail_thread_id': 'thread-coincidencia',
+                          'sender': 'SIG/Ifes <sig@ifes.edu.br>',
+                          'snippet': 'Prezado, segue notificação do processo em andamento.',
+                          'internal_date': '2026-09-01T08:00:00+00:00', 'andre_em_to': True},
+            },
+        })
+        result1 = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        item_id_1 = result1['itens'][0]['id']
+        dispensar(db, item_id=item_id_1, motivo='Já resolvi, e-mail informativo de rotina')
+        self.assertEqual(coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))['itens'], [])
+
+        # Refresh de `atualizar_direcao_emails_aplicados`: MESMO doc.id,
+        # MESMA thread, snippet igual POR COINCIDÊNCIA (mensagem realmente
+        # diferente, mas o snippet do Gmail bate) -- só `internal_date` muda,
+        # exatamente como aconteceria de verdade.
+        db.collection('email_action_suggestions').document('msg-1').set(
+            {'internal_date': '2026-09-03T08:00:00+00:00'}, merge=True)
+
+        result2 = coletar(db, datetime(2026, 9, 3, 12, tzinfo=timezone.utc))
+        self.assertEqual(len(result2['itens']), 1)
+        self.assertNotEqual(result2['itens'][0]['id'], item_id_1)
+        self.assertEqual(result2['filtrados']['dispensados'], 0)
+
+    def test_coletar_mensagem_nova_no_mesmo_chat_apos_dispensa_nao_fica_escondida(self):
+        """Regressão CRÍTICA (mesma classe do achado que motivou o fingerprint
+        de texto na sub-entrega 7/9, agora do lado da dispensa): dispensar a
+        mensagem de HOJE do Wagner não pode silenciar uma mensagem NOVA e
+        diferente que chegue depois no MESMO chat -- isso seria o "achado A"
+        desta demanda de novo (exclusão indevida por dado obsoleto), só que
+        criado pelo próprio André sem querer."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {}, 'email_action_suggestions': {}, 'tarefas': {},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w',
+                'trecho': 'Já tratamos isso?', 'desde': '2026-09-01T08:00:00+00:00'}},
+        })
+        item_id_antigo = _chave_item_dispensavel('w', 'Já tratamos isso?', False)
+        dispensar(db, item_id=item_id_antigo, motivo='Já resolvi por telefone')
+        self.assertEqual(coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))['itens'], [])
+
+        # Mensagem NOVA e diferente chega no MESMO chat (mesmo doc, chat_id
+        # 'w'), simulando o índice sendo atualizado por `atualizar_whatsapp`.
+        db.collection('inbox_pendentes').document('w').set({
+            'tipo': 'whatsapp', 'chat_id': 'w',
+            'trecho': 'Na verdade, preciso que você decida isso hoje',
+            'desde': '2026-09-02T08:00:00+00:00',
+        }, merge=True)
+
+        result = coletar(db, datetime(2026, 9, 2, 12, tzinfo=timezone.utc))
+        self.assertEqual(len(result['itens']), 1)
+        self.assertEqual(result['itens'][0]['trecho'], 'Na verdade, preciso que você decida isso hoje')
+        self.assertEqual(result['filtrados']['dispensados'], 0)
+
+    def test_coletar_mensagens_diferentes_com_mesmo_prefixo_truncado_nao_colidem(self):
+        """Achado CRÍTICO da revisão adversarial: `trecho` já chega em
+        `coletar()` truncado a 120 caracteres (por `_whatsapp_payload`, fora
+        deste módulo) -- duas mensagens DIFERENTES que só compartilham o
+        mesmo prefixo de 120 caracteres (comum em pedidos institucionais
+        formulaicos) tinham o MESMO fingerprint de texto e, combinado com
+        `chat_id` sozinho como identificador, o MESMO `id` -- dispensar uma
+        escondia a outra para sempre (o "achado A" desta demanda de novo).
+        Corrigido usando `message_id` (por mensagem) como identificador
+        preferencial em `coletar()` -- mesmo campo que o classificador LLM já
+        usa (sub-entrega 7/9). Este teste prova que duas mensagens com o
+        MESMO trecho truncado, mas `message_id` diferente, recebem `id`s
+        diferentes e que dispensar a primeira NÃO esconde a segunda."""
+        prefixo_120 = ("Bom dia Andre, peco encaminhamento do processo referente ao requerimento "
+                       "protocolado na secretaria. " * 2)[:120]
+        self.assertEqual(len(prefixo_120), 120)  # sanity: exatamente o limite de truncamento
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {}, 'email_action_suggestions': {}, 'tarefas': {},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w', 'message_id': 'wa-msg-1',
+                'trecho': prefixo_120, 'desde': '2026-09-01T08:00:00+00:00'}},
+        })
+        result1 = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        item_id_1 = result1['itens'][0]['id']
+        dispensar(db, item_id=item_id_1, motivo='Já resolvi essa primeira')
+        self.assertEqual(coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))['itens'], [])
+
+        # Mensagem NOVA e DIFERENTE chega no MESMO chat, com o MESMO trecho
+        # truncado a 120 chars (o texto completo era diferente, mas ambos
+        # truncam igual) -- só o `message_id` muda, como aconteceria de
+        # verdade (cada mensagem do WhatsApp tem o seu).
+        db.collection('inbox_pendentes').document('w').set({
+            'tipo': 'whatsapp', 'chat_id': 'w', 'message_id': 'wa-msg-2',
+            'trecho': prefixo_120, 'desde': '2026-09-02T08:00:00+00:00',
+        }, merge=True)
+        result2 = coletar(db, datetime(2026, 9, 2, 12, tzinfo=timezone.utc))
+        self.assertEqual(len(result2['itens']), 1)
+        self.assertNotEqual(result2['itens'][0]['id'], item_id_1)
+        self.assertEqual(result2['filtrados']['dispensados'], 0)
+
+    def test_coletar_dispensa_por_chat_id_ainda_funciona_para_dado_legado_sem_message_id(self):
+        """Mensagens antigas, gravadas antes de `message_id` existir no
+        payload (`_whatsapp_payload`, campo adicionado na sub-entrega 7/9),
+        continuam suportando dispensa -- só com o fallback por `chat_id`
+        (mesmo risco de colisão por truncamento aceito como resíduo de dado
+        legado, ver docstring de `_chave_item_dispensavel`)."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {}, 'email_action_suggestions': {}, 'tarefas': {},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w',
+                'trecho': 'Já tratamos isso?', 'desde': '2026-09-01T08:00:00+00:00'}},
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        item_id = result['itens'][0]['id']
+        self.assertEqual(item_id, _chave_item_dispensavel('w', 'Já tratamos isso?', False))
+        dispensar(db, item_id=item_id, motivo='Já resolvi por telefone')
+        self.assertEqual(coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))['itens'], [])
+
+    def test_coletar_modo_auditoria_inclui_item_dispensado_sem_contar(self):
+        """Mesmo padrão dos outros filtros deste módulo: `incluir_filtrados=True`
+        existe para inspecionar o que ESTÁ sendo filtrado -- o item dispensado
+        continua no resultado, mas o contador não sobe (só sobe quando o item
+        de fato é omitido)."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {}, 'email_action_suggestions': {}, 'tarefas': {},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w',
+                'trecho': 'Já tratamos isso?', 'desde': '2026-09-01T08:00:00+00:00'}},
+        })
+        item_id = _chave_item_dispensavel('w', 'Já tratamos isso?', False)
+        dispensar(db, item_id=item_id, motivo='Já resolvi por telefone')
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc), incluir_filtrados=True)
+        self.assertEqual(len(result['itens']), 1)
+        self.assertEqual(result['filtrados']['dispensados'], 0)
+
+    def test_coletar_rotulo_classificador_none_quando_nao_classificado(self):
+        """Sem client de LLM disponível (chave ausente no ambiente de teste),
+        `rotulo_classificador` tem que vir None -- nunca inventar um rótulo
+        para um item que não foi de fato classificado."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {}, 'email_action_suggestions': {}, 'tarefas': {},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w',
+                'trecho': 'Você pode confirmar o horário?', 'desde': '2026-09-01T08:00:00+00:00'}},
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(len(result['itens']), 1)
+        self.assertIsNone(result['itens'][0]['rotulo_classificador'])
+
+    def test_coletar_rotulo_classificador_reflete_rotulo_do_llm(self):
+        from unittest import mock
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': ['w']}}},
+            'perfil_pessoas': {}, 'email_action_suggestions': {}, 'tarefas': {},
+            'inbox_pendentes': {'w': {'tipo': 'whatsapp', 'chat_id': 'w', 'message_id': 'wa-9',
+                'trecho': 'Preciso que você decida isso ainda hoje', 'desde': '2026-09-01T08:00:00+00:00'}},
+        })
+        client = _FakeGeminiClient(response_text='{"rotulo": "pedido", "justificativa": "pede decisao"}')
+        with mock.patch('inbox_pendentes._get_llm_client', return_value=client):
+            result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(result['itens'][0]['rotulo_classificador'], 'pedido')
 
 
 if __name__ == '__main__':
