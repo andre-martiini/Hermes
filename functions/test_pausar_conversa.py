@@ -139,6 +139,54 @@ class ScheduleWhatsappMessageTest(unittest.TestCase):
         self.assertIn('job_id=confirmacao-1', segundo)
         self.assertEqual(len(db.outbox.refs['confirmacao-1'].set_calls), 1)
 
+    def test_falha_ao_enfileirar_devolve_prefixo_erro(self):
+        """P03 passo 2: sem o prefixo `ERRO|`, `mcp_server._looks_like_error`
+        nao reconhecia esta falha -- exatamente o defeito que a docstring do
+        modulo documenta (09/2026: dois envios aceitos que falharam sem o
+        agente saber)."""
+        db = _OutboxDb()
+        resultado = schedule_whatsapp_message(db, '', 'oi', '2026-09-02T08:00:00+00:00')
+        self.assertTrue(resultado.startswith('ERRO|'))
+        self.assertIn('contact_number vazio', resultado)
+
+
+class PausarConversaAcopladaAoEnfileiramentoTest(unittest.TestCase):
+    """`pausar()` so grava a pausa e atualiza a acao se `schedule_whatsapp_
+    message` realmente enfileirou -- a checagem em `pausar_conversa.py:151`
+    e a unica consumidora interna do prefixo que `schedule_whatsapp_message`
+    devolve. Sem os dois fixos juntos (mesmo commit), a checagem antiga
+    (`startswith("Erro")`, sem o pipe) parava de bater silenciosamente e uma
+    falha real de enfileiramento virava `status: "enfileirada"`."""
+
+    def test_falha_no_enfileiramento_nao_marca_como_enfileirada(self):
+        ctx = _Ctx()
+        with mock.patch(
+            'tools.schedule_whatsapp_message.schedule_whatsapp_message',
+            return_value='ERRO|Erro ao agendar mensagem no WhatsApp: contact_number vazio',
+        ) as enqueue:
+            result = pausar(ctx, {'contato_ou_grupo': 'Gabriela', 'retomar_em': '2026-09-02T08:00:00-03:00'})
+        enqueue.assert_called_once()
+        self.assertIn('erro', result)
+        self.assertNotEqual(result.get('status'), 'enfileirada')
+        # Nem o indice de pausa nem a acao podem ser tocados quando o envio falhou.
+        self.assertEqual(ctx.db.inbox_ref.set_calls, [])
+        self.assertEqual(ctx.db.task_ref.update_calls, [])
+
+    def test_enfileiramento_real_com_erro_de_verdade_e_bloqueado(self):
+        """Ponta a ponta: sem nenhum mock do enfileirador, uma chamada real
+        que falha (contato sem digito algum, contrato de `schedule_whatsapp_
+        message`) tem de ser bloqueada por `pausar()`, nao silenciosamente
+        aceita."""
+        ctx = _Ctx()
+        # Corrompe o numero resolvido para nao ter nenhum digito, forcando
+        # `schedule_whatsapp_message` a recusar de verdade.
+        ctx.db.cols['perfil_pessoas'].docs[0]._data['telefone'] = ''
+        ctx.db.cols['perfil_pessoas'].docs[0]._data['whatsapp_chat_id'] = 'abc-sem-digito'
+        with mock.patch('tools.pausar_conversa.firestore.ArrayUnion', side_effect=lambda values: values):
+            result = pausar(ctx, {'contato_ou_grupo': 'Gabriela', 'retomar_em': '2026-09-02T08:00:00-03:00'})
+        self.assertIn('erro', result)
+        self.assertNotEqual(result.get('status'), 'enfileirada')
+
 
 if __name__ == '__main__':
     unittest.main()

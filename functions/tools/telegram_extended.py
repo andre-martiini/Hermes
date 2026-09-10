@@ -35,7 +35,11 @@ def execute(tool_name: str, slots: dict, db) -> str:
             return "Nenhuma tarefa em foco no momento."
         doc_snap = db.collection("tarefas").document(str(task_id)).get()
         if not doc_snap.exists:
-            return "Tarefa não identificada no banco de dados."
+            # P03 passo 2: task_id informado mas nao encontrado e erro de
+            # verdade (diferente do caso acima, sem task_id, que e so "sem
+            # contexto") -- faltava o prefixo `ERRO|` que o dispatch MCP
+            # reconhece.
+            return "ERRO|Tarefa não identificada no banco de dados."
         task_data = doc_snap.to_dict() or {}
         diario_full = []
         def _obter_data_ordenacao(entry):
@@ -195,11 +199,18 @@ def execute(tool_name: str, slots: dict, db) -> str:
         instrucao = str(slots.get("instrucao_sistema") or slots.get("instrucao")
                         or slots.get("conteudo") or "").strip()
         gatilhos = slots.get("gatilhos") or []
+        # P03 passo 2 (normalizador de resultados legados): os 3 retornos de
+        # erro abaixo (titulo/instrucao/gatilhos ausentes) sao strings JSON
+        # sem o prefixo `ERRO|` -- sem ele, `mcp_server._looks_like_error`
+        # nao reconhece a falha e o dispatch MCP via isError=False para uma
+        # gravacao que nao aconteceu. Esta funcao e independente da
+        # `salvar_pop_global` embutida em main.py (closure do copiloto web,
+        # com sua propria logica) -- a mudanca aqui nao a afeta.
         if not titulo:
-            return json.dumps({"status": "error", "reason": "titulo_obrigatorio",
+            return "ERRO|" + json.dumps({"status": "error", "reason": "titulo_obrigatorio",
                                "campo_esperado": "titulo"}, ensure_ascii=False)
         if not instrucao:
-            return json.dumps({
+            return "ERRO|" + json.dumps({
                 "status": "error",
                 "reason": "instrucao_obrigatoria",
                 "campo_esperado": "instrucao_sistema",
@@ -217,7 +228,7 @@ def execute(tool_name: str, slots: dict, db) -> str:
             seen.add(norm)
             gatilhos_clean.append(raw)
         if not gatilhos_clean:
-            return json.dumps({"status": "error", "reason": "gatilhos_obrigatorios"}, ensure_ascii=False)
+            return "ERRO|" + json.dumps({"status": "error", "reason": "gatilhos_obrigatorios"}, ensure_ascii=False)
         titulo_norm = _normalize_pop_text(titulo)
         existing_ref = None
         existing_data = None
@@ -264,7 +275,12 @@ def execute(tool_name: str, slots: dict, db) -> str:
             }, merge=True)
             return json.dumps({"status": "resolved", "decision": "kept_existing", "memory_id": memoria_id}, ensure_ascii=False)
         if decisao != "substituir_pelo_novo":
-            return json.dumps({"status": "error", "reason": "decisao_invalida"}, ensure_ascii=False)
+            # P03 passo 2: string JSON sem prefixo `ERRO|` -- o checkpoint de
+            # UI em main.py (`result.startswith('{')`) so age quando
+            # `status` e "resolved"/"updated", entao nunca tratava este caso
+            # de qualquer forma; adicionar o prefixo aqui so fecha a lacuna
+            # com o dispatch MCP, sem tirar comportamento da UI web.
+            return "ERRO|" + json.dumps({"status": "error", "reason": "decisao_invalida"}, ensure_ascii=False)
         gemini_key = _get_api_keys(db).get("gemini_api_key")
         result = main_mod._save_memory_node(
             db=db,
@@ -600,7 +616,7 @@ def execute(tool_name: str, slots: dict, db) -> str:
         description = str(slots.get("description") or "").strip()
         amount = slots.get("amount")
         if not description:
-            return "Descricao obrigatoria."
+            return "ERRO|Descricao obrigatoria."
         numeric_amount = float(amount)
         now = datetime.now()
         day = now.day
@@ -631,20 +647,22 @@ def execute(tool_name: str, slots: dict, db) -> str:
         action = str(slots.get("action") or "").strip()
         item_id = slots.get("item_id") or slots.get("itemId")
         value = slots.get("value")
+        # P03 passo 2: os 4 retornos de erro abaixo eram strings sem prefixo
+        # `ERRO|`.
         if action in {"toggle_planned", "toggle_purchased", "update_quantity"} and not item_id:
-            return "item_id obrigatorio."
+            return "ERRO|item_id obrigatorio."
         if action == "toggle_planned":
             ref = db.collection("shopping_items").document(str(item_id))
             snap = ref.get()
             if not snap.exists:
-                return "Item nao encontrado."
+                return "ERRO|Item nao encontrado."
             item = snap.to_dict() or {}
             ref.update({"isPlanned": not bool(item.get("isPlanned")), "isPurchased": False})
         elif action == "toggle_purchased":
             ref = db.collection("shopping_items").document(str(item_id))
             snap = ref.get()
             if not snap.exists:
-                return "Item nao encontrado."
+                return "ERRO|Item nao encontrado."
             item = snap.to_dict() or {}
             ref.update({"isPurchased": not bool(item.get("isPurchased"))})
         elif action == "update_quantity":
@@ -657,7 +675,7 @@ def execute(tool_name: str, slots: dict, db) -> str:
                     batch.update(snap.reference, {"isPlanned": False, "isPurchased": False})
             batch.commit()
         else:
-            return "Acao invalida."
+            return "ERRO|Acao invalida."
         return json.dumps({"success": True}, ensure_ascii=False)
 
     if tool_name == "mutar_lista_compras":
@@ -670,31 +688,34 @@ def execute(tool_name: str, slots: dict, db) -> str:
         try:
             resultado = lista_compras.mutar(db, slots.get("action"), slots)
         except lista_compras.ListaComprasError as erro:
-            return erro.message
+            # P03 passo 2: mesmo achado de `consultar_lista_compras`.
+            return f"ERRO|{erro.message}"
         return json.dumps(resultado, ensure_ascii=False)
 
     if tool_name == "obter_projeto_bolsas_publico":
         project_id = str(slots.get("project_id") or slots.get("projectId") or "").strip()
         if not project_id:
-            return "Projeto obrigatorio."
+            return "ERRO|Projeto obrigatorio."
         snap = db.collection("projetos").document(project_id).get()
         if not snap.exists:
-            return "Projeto nao encontrado."
+            return "ERRO|Projeto nao encontrado."
         project = snap.to_dict() or {}
         return json.dumps({"valid": True, "project": {"id": snap.id, "nome": project.get("nome")}}, ensure_ascii=False)
 
     if tool_name == "registrar_inscricao_bolsa_publica":
         project_id = str(slots.get("project_id") or slots.get("projectId") or "").strip()
         form = slots.get("formData") or slots.get("form_data") or {}
+        # P03 passo 2: os 3 retornos de erro abaixo (dados invalidos, campos
+        # ausentes, projeto nao encontrado) eram strings sem prefixo `ERRO|`.
         if not project_id or not isinstance(form, dict):
-            return "Dados do cadastro invalidos."
+            return "ERRO|Dados do cadastro invalidos."
         required_fields = ["nome", "cpf", "rg", "email", "telefone"]
         missing = [field for field in required_fields if not str(form.get(field) or "").strip()]
         if missing:
-            return f"Campos obrigatorios ausentes: {', '.join(missing)}"
+            return f"ERRO|Campos obrigatorios ausentes: {', '.join(missing)}"
         project_snap = db.collection("projetos").document(project_id).get()
         if not project_snap.exists:
-            return "Projeto nao encontrado."
+            return "ERRO|Projeto nao encontrado."
         cpf = str(form.get("cpf") or "").strip()
         perfil_data = {
             "nome": str(form.get("nome") or "").strip(),
@@ -902,6 +923,7 @@ def execute(tool_name: str, slots: dict, db) -> str:
             })
             return json.dumps({"success": True, "tipo": "transacao_avulsa", "id": ref.id})
 
-        return json.dumps({"success": False, "reason": "tipo_invalido"})
+        # P03 passo 2: string JSON com "success": false, sem prefixo `ERRO|`.
+        return "ERRO|" + json.dumps({"success": False, "reason": "tipo_invalido"})
 
     raise KeyError(tool_name)

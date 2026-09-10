@@ -109,7 +109,11 @@ def _consultar_lista_compras(ctx: ToolContext, args: dict):
             limite=args.get("limite"),
         )
     except lista_compras.ListaComprasError as erro:
-        return erro.message
+        # P03 passo 2 (normalizador de resultados legados): sem o prefixo
+        # `ERRO|`, `mcp_server._looks_like_error` nao reconhecia esta string
+        # como erro -- o cliente MCP via `isError=False` para um filtro
+        # invalido.
+        return f"ERRO|{erro.message}"
 
 
 def _consultar_elevacoes_sugeridas(ctx: ToolContext, args: dict):
@@ -307,15 +311,18 @@ def _consultar_agenda(ctx: ToolContext, args: dict):
         c_service = get_calendar_service()
         ids = get_sync_calendar_ids(ctx.db)
         if not c_service or not ids:
-            return "Google Calendar nao configurado."
+            return "ERRO|Google Calendar nao configurado."
         inicio, fim = args.get("data_inicio"), args.get("data_fim")
         events, falhas = hc_tools.consultar_eventos_multi(c_service, ids, inicio, fim)
         return hc_tools.formatar_eventos_para_llm(
             events, periodo=(inicio, fim), agendas=ids, falhas=falhas)
     except Exception as e:
         # A falha precisa ser inconfundivel: um erro lido como "agenda vazia"
-        # faz propor trabalho por cima de compromisso real.
-        return (f"ERRO ao consultar agenda: {e}. NAO trate isto como agenda vazia — "
+        # faz propor trabalho por cima de compromisso real. P03 passo 2: o
+        # prefixo faltava o `|` -- "ERRO " sozinho nao bate com o que
+        # `_looks_like_error` reconhece, entao esta falha virava "sucesso"
+        # no protocolo MCP.
+        return (f"ERRO|Erro ao consultar agenda: {e}. NAO trate isto como agenda vazia — "
                 "a consulta falhou e os compromissos do periodo sao desconhecidos.")
 
 
@@ -333,7 +340,7 @@ def _encontrar_slot_livre(ctx: ToolContext, args: dict):
         c_service = get_calendar_service()
         ids = get_sync_calendar_ids(ctx.db)
         if not c_service or not ids:
-            return "Erro: Google Calendar nao configurado."
+            return "ERRO|Google Calendar nao configurado."
         slot = hc_tools.encontrar_proximo_slot(
             c_service, ids, args.get("a_partir_de"), int(args.get("duracao_min") or 30)
         )
@@ -342,7 +349,8 @@ def _encontrar_slot_livre(ctx: ToolContext, args: dict):
         slot["agendas_consultadas"] = len(ids)
         return json.dumps(slot, ensure_ascii=False)
     except Exception as e:
-        return (f"ERRO ao buscar slot livre: {e}. NAO trate isto como "
+        # P03 passo 2: mesmo achado de `_consultar_agenda` -- faltava o `|`.
+        return (f"ERRO|Erro ao buscar slot livre: {e}. NAO trate isto como "
                 "disponibilidade — a agenda nao pode ser lida.")
 
 
@@ -360,18 +368,27 @@ def _consultar_saude(ctx: ToolContext, args: dict):
             default=str,
         )
     except Exception as e:
-        return f"Erro ao consultar dados de saude: {e}"
+        return f"ERRO|Erro ao consultar dados de saude: {e}"
 
 
 def _consultar_dados_cadastrais(ctx: ToolContext, args: dict):
     try:
         from dados_cadastrais import get_dados_cadastrais
 
-        return json.dumps(
-            get_dados_cadastrais(ctx.db, ctx.user_uid, args.get("secao") or ""),
-            ensure_ascii=False,
-            default=str,
-        )
+        resultado = get_dados_cadastrais(ctx.db, ctx.user_uid, args.get("secao") or "")
+        texto = json.dumps(resultado, ensure_ascii=False, default=str)
+        # P03 passo 2 (normalizador de resultados legados): `get_dados_
+        # cadastrais` sinaliza falha com a chave "error" (ingles, nao
+        # "erro") dentro do dict -- e esta funcao sempre serializa o dict
+        # inteiro para string antes de devolver, entao a chave nunca chegava
+        # a ser vista por `mcp_server._handle_tools_call` (que so olha
+        # `.get("erro")` em dict, ou o prefixo `ERRO|`/`⚠️` em string). Nao
+        # renomeio a chave em `dados_cadastrais.py` porque `godmode.py`
+        # consome o dict cru dessa mesma funcao (outro loop de tool-calling,
+        # sem este contrato) -- o ajuste fica isolado aqui, no wrapper MCP.
+        if isinstance(resultado, dict) and resultado.get("error"):
+            return f"ERRO|{texto}"
+        return texto
     except Exception as e:
         return f"ERRO|{e}"
 
@@ -385,7 +402,13 @@ def _buscar_e_analisar_email(ctx: ToolContext, args: dict):
             max_results=min(int(args.get("max_results") or 5), 5),
         )
     except Exception as e:
-        return f"Erro: {e}"
+        # P03 passo 2: cobre tambem o parsing de `max_results` acima, que
+        # pode levantar antes de `_fn` ser chamada -- sem o prefixo, tanto o
+        # despacho sincrono (`mcp_server._looks_like_error`) quanto o
+        # assincrono (`mcp_jobs._parece_mensagem_de_erro`, mesmo contrato,
+        # ja que esta tool esta em `_TOOLS_LONGAS`) tratavam isto como
+        # resultado valido.
+        return f"ERRO|Erro: {e}"
 
 
 def _schedule_whatsapp_message(ctx: ToolContext, args: dict):
@@ -642,7 +665,14 @@ def _salvar_memoria_global(ctx: ToolContext, args: dict):
         result["retention_confidence"] = retention.get("confidence")
         return json.dumps(result, ensure_ascii=False)
     except Exception as mem_err:
-        return json.dumps({"status": "error", "reason": str(mem_err)}, ensure_ascii=False)
+        # P03 passo 2: sem o prefixo, uma falha ao classificar/gravar a
+        # memoria (Gemini indisponivel, escrita no Firestore) virava
+        # "sucesso" no protocolo MCP mesmo com a memoria nao salva. O
+        # caminho de UI do copiloto web (main.py, checagem de
+        # `status == 'conflict'`) so olha a string quando ela comeca com
+        # `{` -- esse caminho nunca tratava `status == 'error'` mesmo antes
+        # desta mudanca, entao o prefixo nao tira nenhum comportamento dali.
+        return "ERRO|" + json.dumps({"status": "error", "reason": str(mem_err)}, ensure_ascii=False)
 
 
 def _strategy(nome: str):
@@ -650,7 +680,22 @@ def _strategy(nome: str):
         import strategy_tools
 
         fn = getattr(strategy_tools, nome)
-        return fn(ctx.db, ctx.user_uid, **args)
+        resultado = fn(ctx.db, ctx.user_uid, **args)
+        # P03 passo 2 (normalizador de resultados legados): as 4 funcoes de
+        # `strategy_tools.py` sinalizam falha com `{"status": "error",
+        # "reason": ...}`, sem a chave "erro" que `mcp_server._handle_tools_
+        # call` procura em resultado dict. Corrigido aqui, no unico ponto de
+        # despacho para as 4 (nao em `strategy_tools.py`, que outros
+        # chamadores podem consumir pelo shape original) -- so ADICIONA a
+        # chave "erro", nunca remove "status"/"reason". `or` (nao `.get(...,
+        # default)`) porque a revisao adversarial apontou que um "reason"
+        # presente mas vazio/None faria `.get` devolver esse valor falso, e
+        # `bool(resultado.get("erro"))` em mcp_server voltaria a ler a falha
+        # como sucesso -- o mesmo defeito que esta correcao existe pra fechar.
+        if (isinstance(resultado, dict) and resultado.get("status") == "error"
+                and "erro" not in resultado):
+            resultado = {**resultado, "erro": resultado.get("reason") or "Falha na operacao."}
+        return resultado
 
     return handler
 
@@ -689,7 +734,12 @@ def pesquisar_internet(ctx: ToolContext, args: dict, *, prompt_gate: str | None 
         keys_doc_web = _cached_doc_get(ctx.db, "system", "api_keys")
         tavily_key = keys_doc_web.to_dict().get("tavily_api_key") if keys_doc_web.exists else None
         if not tavily_key:
-            return ('{"error": "Tavily API key nao configurada. Informe ao usuario que a busca '
+            # P03 passo 2: os tres retornos de erro desta funcao eram strings
+            # com forma de JSON (chave "error", em ingles) mas sem o prefixo
+            # `ERRO|` -- `mcp_server._looks_like_error` so reconhece o
+            # prefixo, entao um cliente MCP via `isError=False` para uma
+            # busca que nao rodou.
+            return ('ERRO|{"error": "Tavily API key nao configurada. Informe ao usuario que a busca '
                     'na internet esta indisponivel no momento."}')
 
         resp = _req.post(
@@ -716,10 +766,10 @@ def pesquisar_internet(ctx: ToolContext, args: dict, *, prompt_gate: str | None 
             )
         return "\n\n".join(parts) if parts else "Nenhum resultado encontrado para esta busca."
     except _req.exceptions.Timeout:
-        return ('{"error": "Timeout ao acessar a Tavily API. Informe ao usuario que a busca '
+        return ('ERRO|{"error": "Timeout ao acessar a Tavily API. Informe ao usuario que a busca '
                 'demorou demais e tente novamente."}')
     except Exception as web_err:
-        return (f'{{"error": "Falha na busca: {web_err}. Informe ao usuario que nao foi '
+        return (f'ERRO|{{"error": "Falha na busca: {web_err}. Informe ao usuario que nao foi '
                 f'possivel realizar a pesquisa."}}')
 
 
@@ -734,7 +784,10 @@ def ler_pagina_web(ctx: ToolContext, args: dict):
             timeout=25,
         )
         if resp.status_code in (403, 401, 429):
-            return ('{"error": "Falha de acesso: O servidor alvo bloqueou a leitura por questoes '
+            # P03 passo 2: mesmo achado de `pesquisar_internet` -- os tres
+            # retornos de erro desta funcao tambem sao strings com forma de
+            # JSON sem o prefixo `ERRO|`.
+            return ('ERRO|{"error": "Falha de acesso: O servidor alvo bloqueou a leitura por questoes '
                     'de seguranca (Cloudflare/Paywall/Rate-limit). Informe ao usuario de forma '
                     'clara que nao foi possivel ler este conteudo especifico."}')
         resp.raise_for_status()
@@ -744,10 +797,10 @@ def ler_pagina_web(ctx: ToolContext, args: dict):
             content = content[:12000] + "\n\n[...conteudo truncado para caber no contexto...]"
         return content if content else "A pagina foi carregada mas nao contem conteudo legivel."
     except _req.exceptions.Timeout:
-        return ('{"error": "Timeout ao tentar ler a pagina. O servidor demorou demais para '
+        return ('ERRO|{"error": "Timeout ao tentar ler a pagina. O servidor demorou demais para '
                 'responder. Informe ao usuario."}')
     except Exception as scrape_err:
-        return (f'{{"error": "Falha ao ler a pagina: {scrape_err}. Informe ao usuario que nao '
+        return (f'ERRO|{{"error": "Falha ao ler a pagina: {scrape_err}. Informe ao usuario que nao '
                 f'foi possivel acessar o conteudo."}}')
 
 
@@ -1508,9 +1561,25 @@ def _via_callable(nome_callable: str, mapear=None):
 
         data = mapear(ctx, args) if mapear else dict(args)
         try:
-            return invoke_callable(
+            resultado = invoke_callable(
                 getattr(main, nome_callable), data, uid=ctx.user_uid, token={"uid": ctx.user_uid}
             )
+            # P03 passo 2 (normalizador de resultados legados): `confirmarEdicaoAcao`
+            # (main.py) recusa 3 cenarios reais -- acao inexistente, ja
+            # concluida, ou modificada desde o snapshot do card -- devolvendo
+            # `{"status": "invalidated", "message": ...}` sem levantar
+            # `HttpsError` e sem a chave "erro" que este dispatch MCP procura.
+            # A edicao nao foi aplicada mas `mcp_server._handle_tools_call`
+            # via isError=False. So ADICIONA "erro" (nunca remove "status"/
+            # "message" -- o card da UI web, que chama `confirmarEdicaoAcao`
+            # direto via Firebase callable sem passar por este wrapper, nao e
+            # afetado). `or` (nao `.get(..., default)`) pelo mesmo motivo do
+            # `_strategy` acima: "message" presente mas vazio/None nao pode
+            # produzir um "erro" igualmente vazio.
+            if (isinstance(resultado, dict) and resultado.get("status") == "invalidated"
+                    and "erro" not in resultado):
+                resultado = {**resultado, "erro": resultado.get("message") or "Edição bloqueada."}
+            return resultado
         except Exception as exc:
             # `str(exc)` era vazio para `HttpsError`, que guarda o texto em
             # `.message` — a tool respondia {"erro": ""} e quem lia entendia que

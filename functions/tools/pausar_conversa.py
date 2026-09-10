@@ -148,7 +148,12 @@ def pausar(ctx, args: dict) -> dict:
         proposal["mensagem"], datetime.now(timezone.utc).isoformat(),
         idempotency_key=getattr(ctx, "mcp_confirmation_id", None),
     )
-    if queued.startswith("Erro"):
+    # P03 passo 2: `schedule_whatsapp_message` passou a devolver o prefixo
+    # canonico `ERRO|` (era "Erro " sem pipe, que so por coincidencia batia
+    # com este `startswith`) -- atualizado junto, senao esta checagem
+    # silenciosamente parava de disparar e uma pausa seguia como se a
+    # mensagem tivesse sido enfileirada com sucesso.
+    if queued.startswith("ERRO|"):
         return {"erro": queued}
 
     pause_until = proposal["retomar_em"]
