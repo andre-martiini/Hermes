@@ -13,6 +13,7 @@ except ImportError:
 from atencao import (
     COLLECTION,
     ESTADO_ABERTO,
+    ESTADO_AGUARDANDO_ANDRE,
     ESTADO_DELEGADO,
     ESTADO_DESCARTADO,
     ESTADO_RESOLVIDO,
@@ -22,6 +23,7 @@ from atencao import (
     TIPO_AGUARDANDO_TERCEIRO_VENCIDO,
     TIPO_CONTA_VENCENDO,
     TIPO_ROTINA_SAUDE_AUSENTE,
+    _fechar_itens_obsoletos,
     avaliar_etapas,
     avaliar_contas_vencendo,
     detectar_atencao_financeiro,
@@ -917,6 +919,130 @@ class TestAtencaoFinanceiro(unittest.TestCase):
         self.assertEqual(doc.to_dict()["tipo"], TIPO_CONTA_VENCENDO)
 
 
+class TestFecharItensObsoletos(unittest.TestCase):
+    """DEV-2026-0004 sub-entrega 6/9, proposta (c)(iii): testes unitários do
+    helper genérico `_fechar_itens_obsoletos`, isolados de qualquer detector
+    específico."""
+
+    SAUDE_DESFECHO = "Pesagem registrada -- condição não é mais válida (fechado automaticamente)."
+    TERCEIRO_DESFECHO = (
+        "Condição não é mais válida: terceiro respondeu, etapa concluída ou "
+        "ação encerrada (fechado automaticamente)."
+    )
+
+    def _item_saude(self, chave="saude_pesagem_ausente:2026-09-01", estado=ESTADO_ABERTO, desfecho=None):
+        return {
+            "origem": "saude",
+            "tipo": TIPO_ROTINA_SAUDE_AUSENTE,
+            "prioridade": PRIORIDADE_MEDIA,
+            "titulo": "Pesagem não registrada há 4 dias",
+            "resumo": "",
+            "chave_dedupe": chave,
+            "estado": estado,
+            "desfecho": desfecho,
+        }
+
+    def test_fecha_doc_aberto_fora_do_lote_atual(self):
+        db = MockDb({COLLECTION: {"saude_pesagem_ausente:2026-09-01": self._item_saude()}})
+
+        fechados = _fechar_itens_obsoletos(
+            db, TIPO_ROTINA_SAUDE_AUSENTE, set(), desfecho=self.SAUDE_DESFECHO
+        )
+
+        self.assertEqual(fechados, 1)
+        doc = db.collection(COLLECTION).document("saude_pesagem_ausente:2026-09-01")
+        data = doc.to_dict()
+        self.assertEqual(data["estado"], ESTADO_RESOLVIDO)
+        self.assertEqual(data["desfecho"], self.SAUDE_DESFECHO)
+
+    def test_preserva_doc_cuja_chave_ainda_esta_no_lote_atual(self):
+        db = MockDb({
+            COLLECTION: {
+                "saude_pesagem_ausente:2026-09-05": self._item_saude(chave="saude_pesagem_ausente:2026-09-05"),
+            }
+        })
+
+        fechados = _fechar_itens_obsoletos(
+            db, TIPO_ROTINA_SAUDE_AUSENTE, {"saude_pesagem_ausente:2026-09-05"},
+            desfecho=self.SAUDE_DESFECHO,
+        )
+
+        self.assertEqual(fechados, 0)
+        doc = db.collection(COLLECTION).document("saude_pesagem_ausente:2026-09-05")
+        self.assertEqual(doc.to_dict()["estado"], ESTADO_ABERTO)
+
+    def test_ignora_docs_ja_fechados(self):
+        item = self._item_saude(estado=ESTADO_DESCARTADO, desfecho="Descartado manualmente por André.")
+        db = MockDb({COLLECTION: {"saude_pesagem_ausente:2026-08-01": item}})
+
+        fechados = _fechar_itens_obsoletos(
+            db, TIPO_ROTINA_SAUDE_AUSENTE, set(), desfecho=self.SAUDE_DESFECHO
+        )
+
+        self.assertEqual(fechados, 0)
+        doc = db.collection(COLLECTION).document("saude_pesagem_ausente:2026-08-01")
+        self.assertEqual(doc.to_dict()["estado"], ESTADO_DESCARTADO)
+        self.assertEqual(doc.to_dict()["desfecho"], "Descartado manualmente por André.")
+
+    def test_fecha_delegado_e_aguardando_andre_tambem(self):
+        item_delegado = {
+            "tipo": TIPO_AGUARDANDO_TERCEIRO_VENCIDO,
+            "estado": ESTADO_DELEGADO,
+            "chave_dedupe": "aguardando_terceiro_vencido:task-1:step-1",
+        }
+        item_aguardando = {
+            "tipo": TIPO_AGUARDANDO_TERCEIRO_VENCIDO,
+            "estado": ESTADO_AGUARDANDO_ANDRE,
+            "chave_dedupe": "aguardando_terceiro_vencido:task-2:step-1",
+        }
+        db = MockDb({
+            COLLECTION: {
+                "aguardando_terceiro_vencido:task-1:step-1": item_delegado,
+                "aguardando_terceiro_vencido:task-2:step-1": item_aguardando,
+            }
+        })
+
+        fechados = _fechar_itens_obsoletos(
+            db, TIPO_AGUARDANDO_TERCEIRO_VENCIDO, set(), desfecho=self.TERCEIRO_DESFECHO
+        )
+
+        self.assertEqual(fechados, 2)
+        col = db.collection(COLLECTION)
+        self.assertEqual(
+            col.document("aguardando_terceiro_vencido:task-1:step-1").to_dict()["estado"],
+            ESTADO_RESOLVIDO,
+        )
+        self.assertEqual(
+            col.document("aguardando_terceiro_vencido:task-2:step-1").to_dict()["estado"],
+            ESTADO_RESOLVIDO,
+        )
+
+    def test_ignora_docs_de_outro_tipo(self):
+        db = MockDb({
+            COLLECTION: {
+                "saude_pesagem_ausente:2026-09-01": self._item_saude(),
+                "conta_vencendo:fatura-2026-09": {
+                    "tipo": TIPO_CONTA_VENCENDO,
+                    "estado": ESTADO_ABERTO,
+                    "chave_dedupe": "conta_vencendo:fatura-2026-09",
+                },
+            }
+        })
+
+        fechados = _fechar_itens_obsoletos(
+            db, TIPO_ROTINA_SAUDE_AUSENTE, set(), desfecho=self.SAUDE_DESFECHO
+        )
+
+        self.assertEqual(fechados, 1)
+        col = db.collection(COLLECTION)
+        self.assertEqual(
+            col.document("saude_pesagem_ausente:2026-09-01").to_dict()["estado"], ESTADO_RESOLVIDO
+        )
+        self.assertEqual(
+            col.document("conta_vencendo:fatura-2026-09").to_dict()["estado"], ESTADO_ABERTO
+        )
+
+
 class TestAtencaoSaude(unittest.TestCase):
     def setUp(self):
         self.hoje = date(2026, 9, 5)
@@ -999,6 +1125,100 @@ class TestAtencaoSaude(unittest.TestCase):
         self.assertEqual(doc.to_dict()["tipo"], TIPO_ROTINA_SAUDE_AUSENTE)
         self.assertEqual(doc.to_dict()["evidencia"]["dias_sem_pesagem"], 4)
 
+    def test_detectar_atencao_saude_fecha_item_orfao_quando_pesagem_volta_em_dia(self):
+        """Achado A da demanda: um item `saude_pesagem_ausente:...` gerado num
+        run anterior (quando a última pesagem conhecida era 2026-09-01) deve
+        fechar sozinho quando uma pesagem nova (2026-09-04) chega e a lacuna
+        volta a ficar abaixo do limiar -- mesmo que o lote atual não gere
+        NENHUM item novo (`itens == []`)."""
+        db = MockDb({
+            "system": {
+                "settings": {"atencao": {"saude": {"enabled": True}}}
+            },
+            "health_weights": {
+                "w-1": {"date": "2026-09-04", "weight": 78.0},
+            },
+            COLLECTION: {
+                "saude_pesagem_ausente:2026-09-01": {
+                    "origem": "saude",
+                    "tipo": TIPO_ROTINA_SAUDE_AUSENTE,
+                    "estado": ESTADO_ABERTO,
+                    "titulo": "Pesagem não registrada há 4 dias",
+                    "chave_dedupe": "saude_pesagem_ausente:2026-09-01",
+                }
+            },
+        })
+
+        itens = detectar_atencao_saude(db, hoje=self.hoje)
+
+        self.assertEqual(itens, [])
+        doc = db.collection(COLLECTION).document("saude_pesagem_ausente:2026-09-01")
+        data = doc.to_dict()
+        self.assertEqual(data["estado"], ESTADO_RESOLVIDO)
+        self.assertIn("Pesagem registrada", data["desfecho"])
+
+    def test_detectar_atencao_saude_fecha_item_orfao_quando_chave_muda_mas_condicao_persiste(self):
+        """Achado A, variante: a condição continua valendo (ainda sem pesagem
+        recente o bastante), mas a chave de dedupe muda porque a data da
+        última pesagem conhecida avançou (de 2026-08-26 para 2026-08-30) --
+        o doc antigo precisa fechar e o novo precisa abrir, no mesmo run."""
+        db = MockDb({
+            "system": {
+                "settings": {"atencao": {"saude": {"enabled": True}}}
+            },
+            "health_weights": {
+                "w-1": {"date": "2026-08-30", "weight": 80.0},
+            },
+            COLLECTION: {
+                "saude_pesagem_ausente:2026-08-26": {
+                    "origem": "saude",
+                    "tipo": TIPO_ROTINA_SAUDE_AUSENTE,
+                    "estado": ESTADO_ABERTO,
+                    "titulo": "Pesagem não registrada há 10 dias",
+                    "chave_dedupe": "saude_pesagem_ausente:2026-08-26",
+                }
+            },
+        })
+
+        itens = detectar_atencao_saude(db, hoje=self.hoje)
+
+        self.assertEqual(len(itens), 1)
+        self.assertEqual(itens[0]["chave_dedupe"], "saude_pesagem_ausente:2026-08-30")
+
+        doc_antigo = db.collection(COLLECTION).document("saude_pesagem_ausente:2026-08-26")
+        self.assertEqual(doc_antigo.to_dict()["estado"], ESTADO_RESOLVIDO)
+
+        doc_novo = db.collection(COLLECTION).document("saude_pesagem_ausente:2026-08-30")
+        self.assertEqual(doc_novo.to_dict()["estado"], ESTADO_ABERTO)
+
+    def test_detectar_atencao_saude_nao_fecha_quando_lote_de_pesagens_vem_vazio(self):
+        """Regressão da revisão adversarial (round 1): se a consulta a
+        `health_weights` não trouxer NENHUM registro no período (seja porque
+        genuinamente não há pesagem, seja por uma falha silenciosa na
+        consulta), o item antigo NÃO pode ser fechado -- fechar exige que
+        `medidas` tenha vindo com pelo menos um registro real."""
+        db = MockDb({
+            "system": {
+                "settings": {"atencao": {"saude": {"enabled": True}}}
+            },
+            "health_weights": {},
+            COLLECTION: {
+                "saude_pesagem_ausente:2026-09-01": {
+                    "origem": "saude",
+                    "tipo": TIPO_ROTINA_SAUDE_AUSENTE,
+                    "estado": ESTADO_ABERTO,
+                    "titulo": "Pesagem não registrada há 4 dias",
+                    "chave_dedupe": "saude_pesagem_ausente:2026-09-01",
+                }
+            },
+        })
+
+        itens = detectar_atencao_saude(db, hoje=self.hoje)
+
+        self.assertEqual(itens, [])
+        doc = db.collection(COLLECTION).document("saude_pesagem_ausente:2026-09-01")
+        self.assertEqual(doc.to_dict()["estado"], ESTADO_ABERTO)
+
 
 class TestDetectarAtencaoAcoesIntegracao(unittest.TestCase):
     @patch("atencao.detectar_atencao_financeiro")
@@ -1012,6 +1232,118 @@ class TestDetectarAtencaoAcoesIntegracao(unittest.TestCase):
         fn()
         mock_fin.assert_called_once()
         mock_sau.assert_called_once()
+
+
+class TestDetectarAtencaoAcoesAutoFechamento(unittest.TestCase):
+    """DEV-2026-0004 sub-entrega 6/9, proposta (c)(iii): fechamento automático
+    de `aguardando_terceiro_vencido` dentro do fluxo real de
+    `detectar_atencao_acoes` (não apenas o helper isolado)."""
+
+    def _settings(self):
+        return {"atencao": {"aguardando_terceiro": {"enabled": True}}}
+
+    @patch("main.get_db")
+    def test_fecha_item_aguardando_terceiro_orfao_quando_terceiro_respondeu(self, mock_get_db):
+        db = MockDb({
+            "system": {"settings": self._settings()},
+            "tarefas": {
+                "task-1": {
+                    "titulo": "Renovar Alvará",
+                    "status": "em andamento",
+                    # plano_acao vazio: a etapa que gerou o item não existe
+                    # mais (terceiro respondeu, etapa marcada feito ou
+                    # removida) -- o próximo lote não reproduz mais esta chave.
+                    "plano_acao": [],
+                }
+            },
+            COLLECTION: {
+                "aguardando_terceiro_vencido:task-1:step-1": {
+                    "origem": "acao",
+                    "tipo": TIPO_AGUARDANDO_TERCEIRO_VENCIDO,
+                    "estado": ESTADO_ABERTO,
+                    "titulo": "Financeiro deveria ter respondido sobre: Aguardar retorno",
+                    "chave_dedupe": "aguardando_terceiro_vencido:task-1:step-1",
+                }
+            },
+        })
+        mock_get_db.return_value = db
+
+        fn = getattr(detectar_atencao_acoes, "__wrapped__", detectar_atencao_acoes)
+        fn()
+
+        doc = db.collection(COLLECTION).document("aguardando_terceiro_vencido:task-1:step-1")
+        data = doc.to_dict()
+        self.assertEqual(data["estado"], ESTADO_RESOLVIDO)
+        self.assertIn("terceiro respondeu", data["desfecho"])
+
+    @patch("main.get_db")
+    def test_nao_fecha_item_aguardando_terceiro_ainda_valido(self, mock_get_db):
+        """Guarda de regressão sobre a própria fiação: uma etapa ainda
+        legitimamente vencida (reproduzida no lote atual) NÃO pode ser
+        fechada automaticamente."""
+        db = MockDb({
+            "system": {"settings": self._settings()},
+            "tarefas": {
+                "task-1": {
+                    "titulo": "Renovar Alvará",
+                    "status": "em andamento",
+                    "plano_acao": [
+                        {
+                            "id": "step-1",
+                            "texto": "Aguardar retorno do setor financeiro",
+                            "estado": "aguardando_terceiro",
+                            "aguardando_de": "Financeiro",
+                            "data_prevista": "2020-01-01",
+                        }
+                    ],
+                }
+            },
+            COLLECTION: {
+                "aguardando_terceiro_vencido:task-1:step-1": {
+                    "origem": "acao",
+                    "tipo": TIPO_AGUARDANDO_TERCEIRO_VENCIDO,
+                    "estado": ESTADO_ABERTO,
+                    "titulo": "Financeiro deveria ter respondido sobre: Aguardar retorno do setor financeiro",
+                    "chave_dedupe": "aguardando_terceiro_vencido:task-1:step-1",
+                }
+            },
+        })
+        mock_get_db.return_value = db
+
+        fn = getattr(detectar_atencao_acoes, "__wrapped__", detectar_atencao_acoes)
+        fn()
+
+        doc = db.collection(COLLECTION).document("aguardando_terceiro_vencido:task-1:step-1")
+        self.assertEqual(doc.to_dict()["estado"], ESTADO_ABERTO)
+
+    @patch("main.get_db")
+    def test_nao_fecha_quando_lote_de_tarefas_vem_vazio(self, mock_get_db):
+        """Regressão da revisão adversarial (round 1): se `db.collection("tarefas")`
+        vier vazia -- genuinamente sem tarefas ou por falha/erro de config na
+        consulta -- fechar em massa TODO item `aguardando_terceiro_vencido`
+        aberto seria um falso-negativo perigoso (cada um pode estar
+        esperando por um terceiro diferente). O item deve permanecer aberto
+        até um run com um lote de tarefas confiável."""
+        db = MockDb({
+            "system": {"settings": self._settings()},
+            "tarefas": {},
+            COLLECTION: {
+                "aguardando_terceiro_vencido:task-1:step-1": {
+                    "origem": "acao",
+                    "tipo": TIPO_AGUARDANDO_TERCEIRO_VENCIDO,
+                    "estado": ESTADO_ABERTO,
+                    "titulo": "Financeiro deveria ter respondido sobre: Aguardar retorno",
+                    "chave_dedupe": "aguardando_terceiro_vencido:task-1:step-1",
+                }
+            },
+        })
+        mock_get_db.return_value = db
+
+        fn = getattr(detectar_atencao_acoes, "__wrapped__", detectar_atencao_acoes)
+        fn()
+
+        doc = db.collection(COLLECTION).document("aguardando_terceiro_vencido:task-1:step-1")
+        self.assertEqual(doc.to_dict()["estado"], ESTADO_ABERTO)
 
 
 if __name__ == "__main__":
