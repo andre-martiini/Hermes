@@ -398,6 +398,7 @@ def avaliar_contas_vencendo(
                 conta_mes = hoje_mes
         else:
             conta_mes = hoje_mes
+
         try:
             vencimento = date(int(conta_ano), int(conta_mes), due_day)
         except ValueError:
