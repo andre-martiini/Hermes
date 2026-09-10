@@ -548,6 +548,11 @@ def _analyze_email(client, db, sender: str, subject: str, body: str, snippet: st
     return json.loads(raw)
 
 
+# DEV-2026-0004 sub-entrega 4/9: `inbox_pendentes._AUTO_LINK_ICONS` mantém uma
+# cópia literal destes ícones (mais o fallback "🔔" usado abaixo) para
+# reconhecer notas de diário automáticas geradas por `_build_diary_note` e
+# excluí-las do cálculo de "última entrada genuína". Um ícone novo aqui
+# precisa ser espelhado lá também.
 _CANAL_ICONS = {"email": "📧", "whatsapp": "📱", "sipac": "📋", "calendar": "📅", "pagina": "🌐"}
 _CANAL_LABELS = {
     "email": "E-mail",
