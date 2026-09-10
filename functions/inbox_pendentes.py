@@ -27,7 +27,24 @@ _AUTO_SENDER = re.compile(r"^(noreply|no-reply|naoresponda|nao-responda|notifica
 _MEDIA_PREFIX = ("/9j/", "ivbor")
 _DATA_URI = re.compile(r"^data:[^;,\s]+(?:;[^,\s]+)*;base64,", re.I)
 _DEFAULT_DOMAINS = {"eventos.ifnmg.edu.br", "picpay.com", "picpay.com.br"}
-_DEFAULT_ENDINGS = {"ok", "okay", "blz", "beleza", "obrigado", "obrigada", "mto obrigado", "mto obrigada", "muito obrigado", "muito obrigada", "valeu", "ja foi", "entendi", "ah sim entendi", "combinado", "perfeito", "show", "top", "joia", "ate amanha", "ate logo", "bom dia", "boa tarde", "boa noite", "abraco", "abs"}
+# DEV-2026-0004 sub-entrega 3/9: usado tanto como léxico de palavras isoladas
+# quanto como frases -- ver `_is_closing_message`, que exige a mensagem
+# INTEIRA (todas as palavras) seja coberta por itens deste set, nunca só uma
+# palavra solta em meio a outras (a primeira versão desta sub-entrega fazia
+# isso e a revisão adversarial mostrou que "Ok, pode me ligar agora" ou "Bom
+# dia, poderia confirmar isso" -- pedidos de verdade -- também casavam e
+# ficavam escondidos do André; ver `_is_closing_message` para o algoritmo de
+# cobertura). As frases de 3+ palavras abaixo são literais, tiradas dos 9
+# encerramentos do achado B4 da demanda ("Obrigada pelo retorno", "Ok,
+# obrigada por avisar", "De nada, André!", "Boa noite e fique com Deus") --
+# deliberadamente não decompostas em palavras soltas ("retorno", "avisar",
+# "andre" isolados não entram no léxico) para não reabrir a mesma brecha.
+_DEFAULT_ENDINGS = {"ok", "okay", "blz", "beleza", "obrigado", "obrigada", "obrigadao", "obrigadinho", "mto obrigado", "mto obrigada", "muito obrigado", "muito obrigada", "vlw", "flw", "valeu", "ja foi", "entendi", "entendido", "ah sim entendi", "combinado", "perfeito", "show", "top", "joia", "ate amanha", "ate logo", "ate mais", "bom dia", "boa tarde", "boa noite", "abraco", "abracos", "abs", "de nada", "de nada andre", "obrigada pelo retorno", "obrigado pelo retorno", "obrigada por avisar", "obrigado por avisar", "boa noite e fique com deus"}
+# Interjeições de uma palavra só (risada, alívio) sem conteúdo informativo --
+# ex.: "Ufaaaaa" (achado B4). Repetição de letra no fim é normal em WhatsApp;
+# `(?:ha|he){2,}` cobre variações de risada como "hahaha"/"hehehe" (a versão
+# original só absorvia repetição de "a" ou "e" ao final, perdendo "hehehe").
+_INTERJECTION_RE = re.compile(r"^(ufa+|kk+|rs+|(?:ha|he){2,}h?a?|uhu+|eba+)$")
 
 
 def _as_datetime(value) -> datetime | None:
@@ -241,19 +258,67 @@ def _normalize_text(value) -> str:
     return " ".join("".join(c for c in unicodedata.normalize("NFD", str(value or "").lower()) if unicodedata.category(c) != "Mn").split())
 
 
-def _noise_reason(*, trecho: str, sender: str, is_email: bool, has_contact: bool, has_task: bool, domains: set[str], endings: set[str]) -> str | None:
+def _is_closing_message(words: list[str], endings: set[str]) -> bool:
+    """DEV-2026-0004 sub-entrega 3/9: substitui a checagem antiga (o texto
+    inteiro, já sem pontuação/maiúsculas, precisava ser IGUAL a um item do
+    set) por uma cobertura mais tolerante a variações de pontuação/quebra de
+    linha, mas que continua exigindo a mensagem INTEIRA -- todas as palavras,
+    não só uma -- seja reconhecida como encerramento.
+
+    Tenta casar, em sequência, as frases de `endings` com 2+ palavras contra
+    trechos contíguos de `words` (a mais longa primeiro, para "boa noite e
+    fique com deus" não deixar sobras que uma frase mais curta cobriria
+    melhor); marca essas posições como cobertas. Qualquer palavra que sobra
+    também precisa estar em `endings` como item de uma palavra só. Só quando
+    TODAS as palavras da mensagem terminam cobertas -- por frase ou por
+    palavra solta -- é que ela conta como encerramento.
+
+    A primeira versão desta função bastava UMA palavra qualquer da mensagem
+    bater no léxico (ou uma frase aparecer como substring solta) -- a revisão
+    adversarial mostrou que isso escondia pedidos de verdade ("Ok, pode me
+    ligar agora", "Bom dia, poderia confirmar isso"): a exigência de
+    cobertura total fecha essa brecha sem perder os 9 exemplos reais do
+    achado B4 (que viraram frases literais em `_DEFAULT_ENDINGS` em vez de
+    palavras soltas decompostas -- ver o comentário ali)."""
+    if not words:
+        return False
+    if len(words) == 1 and _INTERJECTION_RE.match(words[0]):
+        return True
+    phrases = sorted((e for e in endings if len(e.split()) > 1), key=lambda p: -len(p.split()))
+    single_words = {e for e in endings if len(e.split()) == 1}
+    covered = [False] * len(words)
+    for phrase in phrases:
+        p_tokens = phrase.split()
+        n = len(p_tokens)
+        if n > len(words):
+            continue
+        for start in range(0, len(words) - n + 1):
+            if not any(covered[start:start + n]) and words[start:start + n] == p_tokens:
+                for i in range(start, start + n):
+                    covered[i] = True
+    return all(covered[i] or words[i] in single_words for i in range(len(words)))
+
+
+def _noise_reason(*, trecho: str, sender: str, is_email: bool, has_contact: bool, has_task: bool,
+                  domains: set[str], endings: set[str], andre_em_to: bool | None = None) -> str | None:
     raw = str(trecho or "").strip()
     norm = _normalize_text(raw)
     if is_email:
         address = (parseaddr(str(sender or ""))[1] or str(sender or "")).lower().strip()
         if _AUTO_SENDER.match(address) or any(address.endswith("@" + d) for d in domains):
             return "automaticos"
+        # DEV-2026-0004 sub-entrega 3/9: André só em Cc (nunca em To) é o
+        # caso 2 do achado B -- e-mail informativo, não dirigido a ele, não
+        # pede resposta. `andre_em_to is False` (nunca None) para não filtrar
+        # quando o sinal não pôde ser calculado (ver `_andre_em_to`).
+        if andre_em_to is False:
+            return "informativo"
     if not raw or raw.lower().startswith(_MEDIA_PREFIX) or _DATA_URI.match(raw) or not re.sub(r"[^\w]", "", norm):
         return "sem_texto"
     if not is_email and not has_contact and not has_task and re.search(r"oferta|cart[aã]o|desconto|promo[cç][aã]o|fatura|clique|aproveite", norm):
         return "automaticos"
     words = re.findall(r"\w+", norm)
-    if "?" not in raw and len(words) <= 6 and norm.rstrip(".") in endings:
+    if "?" not in raw and len(words) <= 6 and _is_closing_message(words, endings):
         return "encerramentos"
     return None
 
@@ -307,7 +372,7 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
     by_chat, by_email, by_id = _active_tasks(db)
     contacts = _contacts(db)
     items = []
-    filtered = {"automaticos": 0, "encerramentos": 0, "sem_texto": 0}
+    filtered = {"automaticos": 0, "encerramentos": 0, "sem_texto": 0, "informativo": 0}
     domains, endings = _noise_config(db)
 
     for doc in db.collection(COLLECTION).stream():
@@ -369,7 +434,8 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
         if data.get("ultima_mensagem_de_andre"):
             continue
         reason = _noise_reason(trecho=data.get("snippet") or data.get("resumo") or "", sender=data.get("sender") or "",
-                               is_email=True, has_contact=False, has_task=bool(task), domains=domains, endings=endings)
+                               is_email=True, has_contact=False, has_task=bool(task), domains=domains, endings=endings,
+                               andre_em_to=data.get("andre_em_to"))
         if reason and not incluir_filtrados:
             filtered[reason] += 1
             continue
