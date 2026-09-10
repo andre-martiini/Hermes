@@ -437,6 +437,141 @@ def tipos_invalidos(tool_name: str, arguments: dict) -> list[dict]:
         return []
 
 
+def valores_invalidos(tool_name: str, arguments: dict) -> list[dict]:
+    """Campos presentes em `arguments` cujo valor não está entre os
+    permitidos pela lista `enum` que o schema publicado (`tools/list`)
+    declara para eles. Lista vazia quer dizer "nada de errado aqui"; cada
+    item devolvido é `{"campo": ..., "esperado": ..., "recebido": ...}`,
+    onde `esperado` é a própria lista `enum` e `recebido` é o valor
+    recebido (não o tipo dele — aqui o que importa é pertencimento, não
+    tipo).
+
+    P03 passo 2, sub-entrega 5/N: terceira fatia da validação de
+    argumentos, depois de presença (sub-entrega 2/N) e tipo estrutural
+    array/object (sub-entrega 4/N). Levantamento nos 105 schemas (10/09/2026)
+    encontrou 8 propriedades de nível superior, em 7 tools, que declaram
+    `enum` — todas do tipo `string` (`decidir_promocao_autonomia.decisao`,
+    `obter_fila_atencao.estado`/`origem`, `registrar_execucao_agente.status`,
+    `registrar_execucao_investimento.ativo`,
+    `registrar_item_financeiro_v2.tipo`, `resolver_item_atencao.estado`,
+    `solicitar_autorizacao_argos.tipo`). Nenhuma se sobrepõe a
+    `tipos_invalidos`: como esta função só cobre `array`/`object`, um campo
+    `string` com `enum` passa direto por ela e só é avaliado aqui — não há
+    conflito de prioridade a resolver entre as duas.
+
+    Escopo deliberadamente igual ao de `tipos_invalidos`: só propriedades de
+    NÍVEL SUPERIOR (as chaves diretas de `parameters.properties`). Dois
+    schemas (`criar_acao_no_sistema.json`, `editar_plano_acao.json`)
+    declaram `enum` só ANINHADO, no schema de cada item do array
+    `plano_acao`/`etapas` (o campo `estado` de cada etapa) — isso fica fora
+    do escopo pela mesma razão estrutural que já vale para
+    `tipos_invalidos`: o campo de nível superior que contém esse array pode
+    chegar como string JSON bruta (ver
+    `_CAMPOS_COM_TOLERANCIA_A_STRING_JSON`), e validar o conteúdo aninhado
+    exigiria decodificar essa string aqui — vira parser de plano, não
+    checagem estrutural de preflight. Como a iteração é só sobre
+    `parameters.properties` de nível superior, esse `enum` aninhado nunca
+    aparece nela; não precisou de uma exceção explícita como a dos campos
+    tolerantes a string JSON.
+
+    Só verifica campos PRESENTES (ausência/`None` é responsabilidade de
+    `campos_obrigatorios_ausentes`) e só quando o schema de fato declara uma
+    lista `enum` não vazia — a maioria dos campos não declara, e para esses
+    a função não tem nada a dizer.
+
+    Exceção fechada e documentada (ver `_CAMPOS_COM_ENUM_TOLERANTE_A_CASE`
+    abaixo) para os poucos pares (tool, campo) onde o próprio handler já
+    normaliza maiúscula/minúscula e espaço nas pontas antes de comparar --
+    sem ela este preflight, em comparação exata, bloquearia uma chamada que
+    esses handlers aceitam hoje (achado da 1ª rodada de revisão adversarial
+    desta sub-entrega, mesma classe de regressão que motivou
+    `_CAMPOS_COM_TOLERANCIA_A_STRING_JSON` em `tipos_invalidos`). A exceção
+    é DELIBERADAMENTE FECHADA, não uma tolerância geral -- a 2ª rodada de
+    revisão (feita sobre esta correção, não sobre o diff original) achou
+    que uma tolerância geral teria sido pior que o problema original:
+    `obter_fila_atencao` (`estado`/`origem`) não tem handler tolerante --
+    `atencao.coletar_fila_atencao` usa o valor cru num filtro `==` do
+    Firestore, sem normalizar nada. Com tolerância geral, `estado="ABERTO"`
+    passaria pelo preflight, chegaria ao filtro do Firestore, não bateria
+    com o valor armazenado (sempre minúsculo) e devolveria SILENCIOSAMENTE
+    zero itens, sem erro nenhum -- indistinguível de "nada pendente", pior
+    que o excesso de rigor que esta sub-entrega tentava evitar. Por isso a
+    tolerância vale só para os pares com tolerância comprovada no próprio
+    handler (ver a lista abaixo), nunca por padrão.
+
+    Falha aberta, mesma filosofia de `campos_obrigatorios_ausentes` e
+    `tipos_invalidos`: schema ausente, ilegível ou malformado nunca bloqueia
+    a chamada por conta própria.
+    """
+    try:
+        schema = get_schema(tool_name)
+        propriedades = (schema.get("parameters") or {}).get("properties") or {}
+        if not isinstance(propriedades, dict) or not isinstance(arguments, dict):
+            return []
+        problemas = []
+        for campo, prop_schema in propriedades.items():
+            if not isinstance(prop_schema, dict):
+                continue
+            valores_permitidos = prop_schema.get("enum")
+            if not isinstance(valores_permitidos, list) or not valores_permitidos:
+                continue  # so campos que de fato declaram enum nao vazio
+            if campo not in arguments or arguments.get(campo) is None:
+                continue  # ausencia e responsabilidade de campos_obrigatorios_ausentes
+            valor = arguments[campo]
+            tolerante = (tool_name, campo) in _CAMPOS_COM_ENUM_TOLERANTE_A_CASE
+            if not _bate_algum_valor_permitido(valor, valores_permitidos, tolerante):
+                problemas.append({
+                    "campo": campo,
+                    "esperado": valores_permitidos,
+                    "recebido": valor,
+                })
+        return problemas
+    except (FileNotFoundError, OSError, json.JSONDecodeError, AttributeError, TypeError):
+        return []
+
+
+# Achado da 1ª rodada de revisao adversarial da sub-entrega 5/N: estes 4
+# handlers ja normalizam o valor recebido antes de comparar contra o mesmo
+# conjunto que o schema declara em `enum` -- `promocao_autonomia.py:158`
+# (`decisao_limpa = str(decisao or "").strip().lower()`),
+# `investimentos.py:191` (`ativo = str(ativo or "").strip().upper()`),
+# `agent_runs.py:48` (`status_limpo = str(status or STATUS_SUCESSO)
+# .strip().lower()`), `argos_autorizacao.py:133` (`tipo = str(tipo or "")
+# .strip()`; so espaco, sem case). Lista FECHADA de pares (tool, campo) com
+# tolerancia comprovada -- NAO generaliza para os outros 4 campos com enum
+# (`obter_fila_atencao.estado`/`origem`, `resolver_item_atencao.estado`,
+# `registrar_item_financeiro_v2.tipo`), que comparam em modo exato nos
+# handlers e, no caso de `obter_fila_atencao`, nem validam -- usam o valor
+# cru num filtro `==` do Firestore (ver docstring de `valores_invalidos`
+# para o porque uma tolerancia geral teria sido uma regressao nova, achada
+# na 2a rodada de revisao adversarial sobre esta mesma correcao).
+_CAMPOS_COM_ENUM_TOLERANTE_A_CASE = {
+    ("decidir_promocao_autonomia", "decisao"),
+    ("registrar_execucao_investimento", "ativo"),
+    ("registrar_execucao_agente", "status"),
+    ("solicitar_autorizacao_argos", "tipo"),
+}
+
+
+def _bate_algum_valor_permitido(valor, valores_permitidos: list, tolerante_a_case: bool) -> bool:
+    """`True` se `valor` está em `valores_permitidos` — por igualdade exata
+    sempre, e, só quando `tolerante_a_case` é `True` (par (tool, campo) na
+    lista fechada `_CAMPOS_COM_ENUM_TOLERANTE_A_CASE`) e `valor` é `str`,
+    também por igualdade tolerante a maiúscula/minúscula e espaço nas
+    pontas contra qualquer permitido que também seja `str` (ver docstring
+    de `valores_invalidos` para o porquê da lista ser fechada).
+    """
+    if valor in valores_permitidos:
+        return True
+    if not tolerante_a_case or not isinstance(valor, str):
+        return False
+    normalizado = valor.strip().casefold()
+    return any(
+        isinstance(permitido, str) and permitido.strip().casefold() == normalizado
+        for permitido in valores_permitidos
+    )
+
+
 def needs_confirmation(tool_name: str) -> bool:
     return tool_name in _NEEDS_CONFIRMATION
 
