@@ -1045,12 +1045,15 @@ class ColetarClassificadorLLMTest(unittest.TestCase):
         self.assertEqual(result['filtrados']['encerramentos_llm'], 1)
         self.assertEqual(result['filtrados']['encerramentos'], 0)
         # Cache gravado com uma chave derivada do `doc.id` de
-        # `email_action_suggestions` (o próprio google_message_id) MAIS um
-        # fingerprint do texto -- não o `doc.id` puro. Ver
-        # `_chave_cache_classificacao` e o teste de regressão logo abaixo,
-        # que prova por que isso importa.
+        # `email_action_suggestions` (o próprio google_message_id) MAIS
+        # `internal_date` MAIS um fingerprint do texto -- não o `doc.id`
+        # puro, nem `doc.id`+snippet sozinhos (achado da revisão adversarial:
+        # dois e-mails diferentes na mesma thread podem ter snippet
+        # coincidente -- ver o teste
+        # `test_coletar_resposta_nova_com_snippet_coincidente_na_mesma_thread_e_reclassificada`
+        # logo abaixo, que prova por que `internal_date` também entra).
         snippet = 'Ficamos combinados então, agradeço a atenção de sempre'
-        chave = _chave_cache_classificacao('msg-em-1', snippet, True)
+        chave = _chave_cache_classificacao('msg-em-1|2026-09-01T08:00:00+00:00', snippet, True)
         cached = db.collection(LLM_CLASSIFICACAO_COLLECTION).document(chave)
         self.assertTrue(cached.exists)
 
@@ -1108,6 +1111,52 @@ class ColetarClassificadorLLMTest(unittest.TestCase):
              'internal_date': '2026-09-03T08:00:00+00:00'}, merge=True)
 
         client2 = _FakeGeminiClient(response_text='{"rotulo": "pergunta", "justificativa": "pergunta direta"}')
+        with mock.patch('inbox_pendentes._get_llm_client', return_value=client2):
+            result2 = coletar(db, datetime(2026, 9, 3, 12, tzinfo=timezone.utc))
+        self.assertEqual(len(result2['itens']), 1)
+        self.assertEqual(len(client2.models.calls), 1)
+
+    def test_coletar_resposta_nova_com_snippet_coincidente_na_mesma_thread_e_reclassificada(self):
+        """Achado da revisão adversarial (variante mais sutil do teste
+        anterior): a chave de cache usava só `doc.id` + fingerprint do
+        SNIPPET -- se o snippet da mensagem NOVA coincidisse, por acaso, com
+        o da mensagem ANTIGA (plausível para avisos automáticos/
+        institucionais formulaicos, onde o texto variável fica fora da
+        janela do snippet do Gmail), a classificação antiga era reaplicada
+        SEM NUNCA chamar o LLM de novo -- o teste anterior não cobria esse
+        caso porque usa um snippet novo e diferente. Aqui o snippet é
+        DELIBERADAMENTE igual entre as duas passadas; só `internal_date`
+        muda (o único campo que `atualizar_direcao_emails_aplicados` sempre
+        atualiza a cada refresh de verdade). A segunda passada tem que
+        classificar de novo (chamar o LLM), não reaproveitar o cache da
+        primeira."""
+        from unittest import mock
+        snippet = 'Prezado, segue notificação do processo em andamento.'
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': []}}},
+            'perfil_pessoas': {},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento'}},
+            'inbox_pendentes': {},
+            'email_action_suggestions': {
+                'msg-coincidencia': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                      'sender': 'SIG/Ifes <sig@ifes.edu.br>',
+                      'snippet': snippet,
+                      'internal_date': '2026-09-01T08:00:00+00:00', 'andre_em_to': True},
+            },
+        })
+        client1 = _FakeGeminiClient(response_text='{"rotulo": "informativo", "justificativa": "so avisa"}')
+        with mock.patch('inbox_pendentes._get_llm_client', return_value=client1):
+            result1 = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(result1['itens'], [])
+        self.assertEqual(len(client1.models.calls), 1)
+
+        # Refresh de `atualizar_direcao_emails_aplicados`: MESMO doc.id,
+        # snippet igual POR COINCIDÊNCIA (mensagem realmente diferente, mas o
+        # snippet do Gmail bate) -- só `internal_date` muda.
+        db.collection('email_action_suggestions').document('msg-coincidencia').set(
+            {'internal_date': '2026-09-03T08:00:00+00:00'}, merge=True)
+
+        client2 = _FakeGeminiClient(response_text='{"rotulo": "pedido", "justificativa": "pede providencia"}')
         with mock.patch('inbox_pendentes._get_llm_client', return_value=client2):
             result2 = coletar(db, datetime(2026, 9, 3, 12, tzinfo=timezone.utc))
         self.assertEqual(len(result2['itens']), 1)
