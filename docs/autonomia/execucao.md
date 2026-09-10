@@ -315,3 +315,68 @@ pendencias:
   - "Pendencias ja registradas em blocos anteriores e nao tocadas por esta sub-entrega continuam abertas: religar inventario tipado (classe_efeito/dados_sensiveis/etc, P03 sub-entrega 1/N) a decisao de politica real; ambiguidades de classificacao (gerar_relatorio, salvar_memoria_global); card do Telegram de rascunho degradado nao reeditado; observabilidade de claim pendente sem _audit_log; TTL do Firestore nao configurado para mcp_jobs; limite de 200KB do Argos em main.py; risco de corrupcao silenciosa em escritas grandes via Argos; passo 2 do P02 (OAuth claims/scopes) como hardening futuro nao-bloqueante."
 proximo_pacote: "P03 -- restam do passo 2 do plano: checagem de tipo (schema `type`) da validacao de argumentos, e o normalizador de resultados legados propriamente dito. O passo 3 (outputSchema/structuredContent/annotations) continua tambem em aberto. Vale perguntar ao Andre qual priorizar a seguir antes de comecar a proxima sub-entrega."
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: beb2d76a1243cad268437c3ca83b4242ab214ba2
+pacote: "P03 sub-entrega 3/N -- normalizador de resultados legados (a outra metade do passo 2 do plano, fechando-o junto com a validacao de argumentos da sub-entrega 2/N); mais a correcao de um teste que quebrou o CI da propria PR, achada e resolvida depois do merge"
+# inicio abaixo aproximado pelo timestamp do base_commit (merge da PR #226,
+# diario da sub-entrega 2/N) -- a auditoria das 105 tools e a implementacao
+# local desta sub-entrega comecaram num trecho de sessao anterior a este,
+# sem timestamp proprio observavel por mim com precisao; nao invento um.
+estado: validado
+inicio: "2026-09-09T22:28:27Z"
+fim: "2026-09-10T00:27:24Z"
+arquivos_alterados:
+  - functions/tools/schedule_whatsapp_message.py (o `except` da falha de enfileiramento passa a devolver `f"ERRO|Erro ao agendar mensagem no WhatsApp: {e}"` -- antes, sem o prefixo, `mcp_server._looks_like_error` nao reconhecia a falha; a propria docstring do modulo documenta o incidente de 28/08/2026 que motivou a funcao a existir)
+  - functions/tools/pausar_conversa.py (a checagem acoplada em `pausar()` -- `if queued.startswith(...)` -- atualizada de `"Erro"` sem pipe (batia por coincidencia com o texto antigo) para `"ERRO|"`, o prefixo novo de `schedule_whatsapp_message`; sem os dois fixos no mesmo commit, uma falha real de enfileiramento voltaria a passar como `status: "enfileirada"`)
+  - functions/tools/telegram_extended.py (9 pontos de retorno de erro em `execute()`, todos strings sem o prefixo `ERRO|`, corrigidos)
+  - functions/tools/hermes_tools.py (handlers de string solta -- sem dict, sem prefixo -- em `_consultar_lista_compras`, `_consultar_agenda` x2, `_encontrar_slot_livre` x2, `_consultar_saude`, `_consultar_dados_cadastrais` x3, `_buscar_e_analisar_email`, `_salvar_memoria_global`, `pesquisar_internet` x3 e `ler_pagina_web` x3, todos ajustados para `ERRO|`; mais os dois fixos preventivos da revisao adversarial em `_strategy`/`_via_callable`, ver decisoes)
+  - functions/test_normalizador_resultados_legados.py (novo -- 40 testes cobrindo os 21 gaps e os 2 fixos da revisao adversarial; 1 teste corrigido apos quebrar o CI, ver decisoes)
+  - functions/test_pausar_conversa.py (3 testes novos: novo prefixo de `schedule_whatsapp_message`; acoplamento real com `pausar_conversa`, incluindo um teste ponta a ponta sem nenhum mock do enfileirador)
+decisoes:
+  - id: p03-sub3-21-gaps-erro-pipe-e-convencao-existente-nao-nova
+    motivo: "`mcp_server._handle_tools_call` so reconhece falha por duas formas: dict com `.get('erro')` truthy, ou string comecando com `ERRO|` (fallback `warning-sign`). Auditoria sistematica das 105 tools MCP (3 agentes independentes, em paralelo, cobertura completa -- nao amostragem) achou 21 pontos reais onde uma falha nao batia em nenhuma das duas formas: a tool falhava e `is_error` saia False. Os fixos alinham ao prefixo `ERRO|`, que ja e a convencao dominante e pre-existente no resto do codigo -- nao e convencao nova introduzida por esta sub-entrega."
+    autoridade: existente_ou_nova
+  - id: p03-sub3-acoplamento-schedule-whatsapp-pausar-conversa-e-o-fixo-de-maior-risco
+    motivo: "Fixo isolado de maior risco desta sub-entrega: o `except` de `schedule_whatsapp_message` nao prefixava seu erro, e `pausar_conversa.py` checava esse retorno com `startswith('Erro')` sem pipe -- batia por coincidencia com o texto antigo. Corrigidos juntos, no mesmo commit, porque sao acoplados: sem o par, uma falha real de enfileiramento voltaria a passar como enfileirada com sucesso. Este modulo ja documenta na propria docstring o incidente de 28/08/2026 (dois envios aceitos que falharam no worker e o agente afirmou ao dono que tinha mandado) -- a checagem agora e defesa direta contra a recorrencia dessa classe de erro, uma camada abaixo (falha no proprio enfileiramento, nao no worker)."
+    autoridade: existente_ou_nova
+  - id: p03-sub3-revisao-achou-get-default-nao-cobre-chave-presente-e-vazia
+    motivo: "Achado real da revisao adversarial (Agent tool, general-purpose, sem contexto da implementacao): `_strategy` e `_via_callable` (hermes_tools.py) usavam `resultado.get('reason', default)` / `.get('message', default)` -- `dict.get(chave, default)` so cai no default quando a chave esta AUSENTE, nao quando presente e vazia/None. Uma funcao futura que devolvesse `{'status': 'error', 'reason': None}` produziria `'erro': None`, e `bool(None)` e False -- reintroduzindo a mesma classe de bug que esta correcao existe para fechar. Nao exploravel hoje (nenhum chamador atual devolve reason/message vazio), corrigido preventivamente para `.get(chave) or default`, com 2 testes novos provando o comportamento com `reason: None` / `message: ''`."
+    autoridade: existente_ou_nova
+  - id: p03-sub3-ci-quebrou-por-teste-dependente-de-ambiente-nao-por-producao
+    motivo: "CI da PR #227 (job 'Testes das Functions Python', run 34416261791) falhou apos o envio inicial. Reproduzido localmente numa venv limpa instalada so a partir de functions/requirements.txt (mesmos passos do pr.yml: sem ANTHROPIC_API_KEY): `test_buscar_e_analisar_email_excecao` assumia que `html2text` estaria ausente do sandbox para forcar o ramo de excecao de `_buscar_e_analisar_email` via ImportError natural -- mas `html2text` e dependencia real do projeto (requirements.txt) e esta presente num ambiente corretamente provisionado; sem credenciais do Gmail, a propria `buscar_e_analisar_email` ja devolve erro pelo prefixo de aviso antes de levantar, entao a asercao sobre o texto do ramo `except` nunca era exercitada. Nenhum codigo de producao estava errado. Corrigido mockando `tools.buscar_e_analisar_email.buscar_e_analisar_email` diretamente (mesmo padrao dos demais testes da classe), exercitando o ramo de forma deterministica. Corrigido e comentado na propria PR (issuecomment-5610539211) antes do merge; CI voltou a verde nos 3 checks do commit seguinte (confirmado via api.github.com/.../check-runs)."
+    autoridade: existente_ou_nova
+  - id: p03-sub3-achado-de-processo-venv-local-persistente-desatualizada
+    motivo: "Investigando a causa da falha de CI acima, descobri que a venv local persistente deste clone (`functions/../venv`, referenciada como `../venv/bin/python3` nos comandos de teste de P02 sub-entrega 18/N, 19/N, P03 sub-entrega 1/N e 2/N, todas acima) estava faltando dependencias REAIS do projeto (pypdf, imageio-ffmpeg, html2text -- todas em requirements.txt). Numa venv fiel a requirements.txt (sem ANTHROPIC_API_KEY, replicando o CI), a suite inteira passa 1601/1601, 0 falhas, 0 erros -- nenhum dos '8 falhas + 2 erros -- mesmo padrao pre-existente de ambiente' relatados nas quatro entradas anteriores acontece. Atualizei a venv persistente (`pip install -r requirements.txt`) e confirmei o mesmo resultado (1601/1601) nela tambem. Nao reescrevo os blocos anteriores (regra deste arquivo: nenhum bloco `validado` e reescrito), mas registro aqui como achado de processo: a alegacao de 'baseline pre-existente' nessas quatro entradas provavelmente refletia essa venv desatualizada, nao o ambiente real do CI, e deve ser tratada com ceticismo ate reverificacao."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "CI reproduzido localmente: venv limpa (python3 -m venv), `pip install -r functions/requirements.txt`, `cd functions && python -m unittest discover -s . -p 'test_*.py'` -- mesmos passos do job 'Testes das Functions Python' de .github/workflows/pr.yml, sem ANTHROPIC_API_KEY."
+    - "Apos o achado de processo: `../venv/bin/pip install -r requirements.txt` na venv persistente do clone, seguido do mesmo `unittest discover`."
+  resultados:
+    - "Venv limpa (fiel ao CI): 1601 testes, 0 falhas, 0 erros -- inclui os 40 testes novos de test_normalizador_resultados_legados.py e os 3 de test_pausar_conversa.py."
+    - "Venv persistente atualizada: mesmo resultado, 1601/1601, 0 falhas, 0 erros -- confirma que a discrepancia com as quatro entradas anteriores era a venv, nao um comportamento de ambiente genuino."
+    - "Confirmado tambem pelos check-runs reais do GitHub no commit final (55d14d99f): 'Testes das Functions Python', 'Testes e build' e 'GitGuardian Security Checks' -- os 3 com conclusion=success."
+evidencias:
+  - "Auditoria das 105 tools MCP por 3 agentes independentes em paralelo (cobertura completa, nao amostragem), cada um citando arquivo:linha como evidencia dos 21 gaps."
+  - "Revisao adversarial independente (Agent tool, general-purpose, sem contexto da implementacao) sobre o diff original -- achou o unico ponto registrado em decisoes (.get(chave, default)); confirmou sem mais achados: sem falso positivo, sem branch de erro esquecido nos 4 arquivos alterados, sem consumidor quebrado (checou mcp_jobs.py::_parece_mensagem_de_erro, godmode.py, e o copiloto web em main.py que chama confirmarEdicaoAcao direto via Firebase callable, fora do wrapper MCP), sem regressao nos testes."
+  - "Todos os 7 arquivos enviados via mcp__Argos__argos_escrever_arquivo_repositorio com verificacao de hash local (git hash-object) contra o sha retornado pelo Argos -- todos batendo de primeira, sem drift de whitespace nem corrupcao (6 do envio inicial + 1 da correcao pos-CI)."
+  - "PR #227 aberta; CI vermelho no primeiro commit (run 34416261791); causa raiz investigada reproduzindo o CI localmente; corrigido; comentario de correcao e retratacao do relato de baseline postado na propria PR (issuecomment-5610539211) antes do merge."
+  - "PR #227 mesclada por Andre ('mesclado, pode prosseguir'), confirmado por git fetch + git log de origin/main: merge commit 108247a94."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: a outra metade do passo 2 do plano (normalizador de resultados legados) -- passo 2 agora completo, junto com a validacao de argumentos da sub-entrega 2/N."
+  - "ACHADO DE PROCESSO, nao-bloqueante mas relevante: a alegacao de '8 falhas + 2 erros -- mesmo padrao pre-existente de ambiente' registrada em P02 sub-entrega 18/N, 19/N, P03 sub-entrega 1/N e 2/N provavelmente refletia uma venv local desatualizada (faltavam pypdf/imageio-ffmpeg/html2text, todas dependencias reais), nao o ambiente real do CI -- uma venv fiel a requirements.txt passa 1601/1601 sem nenhuma dessas falhas. Nao reescrevo os blocos anteriores (regra deste arquivo), mas registro para tratar aquelas contagens com ceticismo. Daqui em diante, verificar suite contra uma venv fiel a requirements.txt (ou contra os check-runs reais do CI) antes de relatar qualquer falha como 'baseline pre-existente'."
+  - "ABERTA: checagem de TIPO (schema `type`) da validacao de argumentos -- deixada de fora deliberadamente pela sub-entrega 2/N."
+  - "ABERTA: passo 3 do plano (outputSchema/structuredContent/annotations nos caminhos compativeis) continua sem cobertura."
+  - "Pendencias ja registradas em blocos anteriores e nao tocadas por esta sub-entrega continuam abertas: religar inventario tipado (P03 sub-entrega 1/N) a decisao de politica real; ambiguidades de classificacao (gerar_relatorio, salvar_memoria_global); card do Telegram de rascunho degradado nao reeditado; observabilidade de claim pendente sem _audit_log; TTL do Firestore nao configurado para mcp_jobs; limite de 200KB do Argos em main.py; risco de corrupcao silenciosa em escritas grandes via Argos; passo 2 do P02 (OAuth claims/scopes) como hardening futuro nao-bloqueante."
+proximo_pacote: "P03 -- com o passo 2 completo (validacao de argumentos + normalizador de resultados legados), restam o passo 3 (outputSchema/structuredContent/annotations) e a checagem de tipo deixada em aberto pela sub-entrega 2/N. Vale perguntar ao Andre qual priorizar a seguir -- ou tratar primeiro o achado de processo desta entrada (fidelidade da venv de teste) antes de prosseguir."
+```
