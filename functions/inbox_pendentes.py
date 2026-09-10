@@ -55,6 +55,86 @@ def _chave_cache_classificacao(message_id: str, texto: str, is_email: bool) -> s
     return f"{canal}:{message_id}:{fingerprint}"
 
 
+# DEV-2026-0004 sub-entrega 8/9, proposta (d): coleção onde `dispensar()`
+# grava um item marcado como tratado/dispensado pelo André, para não
+# reaparecer em `coletar()` -- ver `_chave_item_dispensavel` e `dispensar`.
+DISPENSA_COLLECTION = "inbox_pendentes_dispensados"
+
+
+def _chave_item_dispensavel(identificador: str, texto: str, is_email: bool) -> str:
+    """Mesma fórmula de `_chave_cache_classificacao` (canal:identificador:
+    fingerprint do texto) -- reaproveitada de propósito tanto para o campo
+    `id` de cada item devolvido por `coletar()` quanto para a chave gravada
+    por `dispensar()`/consultada por `_esta_dispensado()`. Mantida como
+    função própria (em vez de só chamar `_chave_cache_classificacao` direto
+    nos dois lugares) porque as duas coleções servem propósitos
+    conceitualmente diferentes -- cache efêmero e reclassificável do
+    classificador vs. dispensa permanente e intencional do usuário -- mesmo
+    com a matemática idêntica.
+
+    IMPORTANTE sobre `identificador` (achado CRÍTICO da revisão adversarial
+    desta sub-entrega): para e-mail, `gmail_thread_id`/`doc.id` já é o
+    identificador certo -- ver o call site em `coletar()`. Para WhatsApp,
+    porém, NÃO passe `chat_id` sozinho: `trecho` já chega aqui TRUNCADO a 120
+    caracteres por `_whatsapp_payload` (a mensagem original, mais longa,
+    nunca existe neste módulo) -- duas mensagens DIFERENTES que só
+    compartilham os mesmos 120 primeiros caracteres (comum em pedidos
+    institucionais formulaicos ou mensagens encaminhadas/citadas) produzem o
+    MESMO fingerprint de texto. Combinado com `chat_id` (estável por
+    conversa, não por mensagem), isso faz `id` colidir entre as duas
+    mensagens -- dispensar a primeira esconderia para sempre a segunda, o
+    "achado A" desta demanda de novo. O chamador em `coletar()` por isso usa
+    `data.get("message_id") or chat_id` como `identificador` para WhatsApp --
+    o mesmo `message_id` por-mensagem que `_classificar_necessidade_resposta`
+    já usa (sub-entrega 7/9) -- e só cai para `chat_id` puro (com o mesmo
+    risco de colisão de truncamento, aceito como resíduo de dado legado) para
+    mensagens antigas gravadas antes de `message_id` existir no payload."""
+    return _chave_cache_classificacao(identificador, texto, is_email)
+
+
+def _esta_dispensado(db, item_id: str) -> bool:
+    """Consulta best-effort: qualquer falha devolve False (nunca dispensado)
+    -- a mesma direção seguem todos os outros filtros deste módulo (nunca
+    esconder uma mensagem por causa de uma falha de leitura)."""
+    if not item_id:
+        return False
+    try:
+        return db.collection(DISPENSA_COLLECTION).document(item_id).get().exists
+    except Exception as exc:
+        print(f"[INBOX-PENDENTES] Falha ao consultar dispensa ({item_id}): {exc}")
+        return False
+
+
+def dispensar(db, *, item_id: str, motivo: str) -> dict:
+    """DEV-2026-0004 sub-entrega 8/9, proposta (d): marca um item específico
+    devolvido por `coletar()`/`listar_respostas_pendentes` como tratado ou
+    dispensado, gravando o motivo -- para que ele NÃO reapareça na fila
+    enquanto o trecho/snippet que o originou não mudar (ver
+    `_chave_item_dispensavel` para por que a dispensa é presa ao CONTEÚDO
+    atual, não à conversa/thread inteira).
+
+    `item_id` tem que ser o campo `id` devolvido por `coletar()` para o item
+    -- nunca deve ser montado à mão pelo chamador (é opaco de propósito:
+    `{canal}:{identificador}:{fingerprint}`). Devolve `{"erro": ...}` se
+    `item_id`/`motivo` estiverem vazios ou o formato for inválido, ou
+    `{"status": "ok", "id", "motivo"}` quando a gravação funciona."""
+    item_id = str(item_id or "").strip()
+    motivo = str(motivo or "").strip()
+    if not item_id or item_id.count(":") < 2:
+        return {"erro": "item_id inválido -- use o campo 'id' devolvido por listar_respostas_pendentes"}
+    if not motivo:
+        return {"erro": "motivo é obrigatório"}
+    try:
+        db.collection(DISPENSA_COLLECTION).document(item_id).set({
+            "item_id": item_id,
+            "motivo": motivo,
+            "dispensado_em": datetime.now(timezone.utc),
+        })
+    except Exception as exc:
+        return {"erro": f"falha ao gravar dispensa: {exc}"}
+    return {"status": "ok", "id": item_id, "motivo": motivo}
+
+
 # Idem, achado HIGH da revisão adversarial: `coletar()` é chamado de forma
 # SÍNCRONA na abertura de toda sessão MCP (`morning_summary.gerar()`, que
 # documenta explicitamente "não faz RPC ao WhatsApp/Gmail durante a abertura
@@ -701,7 +781,8 @@ def _classificar_necessidade_resposta(db, get_client, *, message_id: str | None,
 
 
 def _item(*, contato: str, canal: str, desde, trecho: str, task: dict | None,
-          paused_until, now: datetime) -> dict | None:
+          paused_until, now: datetime, item_id: str | None = None,
+          rotulo_classificador: str | None = None) -> dict | None:
     received = _as_datetime(desde)
     if not received:
         return None
@@ -709,6 +790,7 @@ def _item(*, contato: str, canal: str, desde, trecho: str, task: dict | None,
     if pause and pause > now:
         return None
     out = {
+        "id": item_id,
         "contato": contato,
         "canal": canal,
         "desde": _iso(received),
@@ -716,6 +798,14 @@ def _item(*, contato: str, canal: str, desde, trecho: str, task: dict | None,
         "acao_vinculada": ({"id": task["id"], "titulo": task["titulo"]} if task else None),
         "trecho": str(trecho or "")[:120],
         "pausada_ate": _iso(pause),
+        # DEV-2026-0004 sub-entrega 8/9, proposta (d): rótulo devolvido pelo
+        # classificador LLM (sub-entrega 7/9) para este item, quando ele foi
+        # de fato consultado nesta passada -- None quando não classificado
+        # (modo auditoria, orçamento esgotado, sem client disponível, ou
+        # cache-miss anterior à sub-entrega 7/9). Só "pergunta"/"pedido"
+        # sobrevivem até aqui (os outros dois rótulos já filtram o item
+        # antes de chegar em `_item()` -- ver `_LLM_ROTULO_PARA_FILTRO`).
+        "rotulo_classificador": rotulo_classificador,
     }
     if pause and pause <= now:
         out["retomada_devida"] = True
@@ -743,7 +833,7 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
     items = []
     filtered = {"automaticos": 0, "encerramentos": 0, "sem_texto": 0, "informativo": 0,
                 "informativo_llm": 0, "encerramentos_llm": 0,
-                "tratado_na_acao": 0, "tratado_em_outro_canal": 0}
+                "tratado_na_acao": 0, "tratado_em_outro_canal": 0, "dispensados": 0}
     domains, endings = _noise_config(db)
     # DEV-2026-0004 sub-entrega 7/9: montado (e memoizado) só na primeira
     # mensagem desta passada que sobra sem cache -- a maioria das passadas de
@@ -796,6 +886,26 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
             if not relevant and (not task or metadata_present):
                 continue
             inclusion_reason = "mencao" if (data.get("mentions_andre") or (mentions & andre_ids)) else ("resposta_a_mim" if resposta_a_mim else "grupo_vinculado")
+        # DEV-2026-0004 sub-entrega 8/9, proposta (d): checagem mais barata
+        # primeiro (uma leitura Firestore, sem heurística nem LLM) -- um item
+        # dispensado nem precisa gastar orçamento do classificador (ver
+        # `_pode_classificar`). `item_id_wa` é reaproveitado abaixo tanto no
+        # campo público `id` do item quanto, se sobreviver, em nenhum outro
+        # lugar (só é recomputado por `dispensar()` quando o André de fato
+        # pedir para dispensar).
+        # Achado CRÍTICO da revisão adversarial: NUNCA `chat_id` sozinho aqui
+        # -- ver o parágrafo "IMPORTANTE" na docstring de
+        # `_chave_item_dispensavel` para por que isso colidiria entre
+        # mensagens diferentes com o mesmo prefixo truncado a 120 chars.
+        # `message_id` (mesmo campo usado pelo classificador LLM da
+        # sub-entrega 7/9) resolve isso para todo dado gravado a partir
+        # daquela sub-entrega; só dado legado sem `message_id` cai no
+        # fallback por `chat_id`.
+        identificador_wa = str(data.get("message_id") or "").strip() or chat_id
+        item_id_wa = _chave_item_dispensavel(identificador_wa, data.get("trecho") or "", False)
+        if _esta_dispensado(db, item_id_wa) and not incluir_filtrados:
+            filtered["dispensados"] += 1
+            continue
         reason = _noise_reason(trecho=data.get("trecho") or "", sender="", is_email=False,
                                has_contact=chat_id in contacts, has_task=bool(task), domains=domains, endings=endings)
         if reason and not incluir_filtrados:
@@ -815,6 +925,7 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
         # modo auditoria (`incluir_filtrados=True`): esse modo existe para
         # inspecionar o que os filtros ESTÃO fazendo, não para gastar
         # chamadas de LLM extras sem afetar o resultado.
+        rotulo = None
         if not incluir_filtrados:
             rotulo = _classificar_necessidade_resposta(
                 db, _get_llm_client_memo, message_id=data.get("message_id"),
@@ -830,6 +941,7 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
             canal="whatsapp_grupo" if data.get("is_group") else "whatsapp",
             desde=data.get("desde"), trecho=data.get("trecho") or "", task=task,
             paused_until=data.get("pausada_ate"), now=now,
+            item_id=item_id_wa, rotulo_classificador=rotulo,
         )
         if item:
             item["motivo_inclusao"] = inclusion_reason
@@ -855,7 +967,40 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
     for _, doc, data, task in emails_by_thread.values():
         if data.get("ultima_mensagem_de_andre"):
             continue
-        reason = _noise_reason(trecho=data.get("snippet") or data.get("resumo") or "", sender=data.get("sender") or "",
+        email_trecho = str(data.get("snippet") or data.get("resumo") or "")
+        # DEV-2026-0004 sub-entrega 8/9, proposta (d): mesmo `identificador`
+        # usado para agrupar em `emails_by_thread` (thread do Gmail quando
+        # existe, senão o próprio `doc.id`) -- ver docstring de
+        # `_chave_item_dispensavel` para por que o fingerprint do TEXTO ainda
+        # é indispensável mesmo aqui: `doc.id`/`gmail_thread_id` não mudam
+        # entre refreshes de `atualizar_direcao_emails_aplicados`, só o
+        # `snippet` muda.
+        thread_key = str(data.get("gmail_thread_id") or doc.id)
+        # Achado HIGH da SEGUNDA rodada de revisão adversarial: ao contrário
+        # do WhatsApp (que tem `message_id` por mensagem, ver
+        # `identificador_wa` acima), `email_action_suggestions` NÃO guarda
+        # nenhum id da mensagem Gmail ATUAL -- `doc.id` é o
+        # `google_message_id` da mensagem que criou a sugestão, congelado
+        # para sempre (`email_action_linker.atualizar_direcao_emails_aplicados`
+        # reescreve `snippet`/`sender`/`internal_date` no mesmo doc a cada
+        # refresh, mas nunca grava o id da mensagem nova). Sem isso, a
+        # segurança da dispensa ficaria só no fingerprint do `snippet` --
+        # dois e-mails DIFERENTES na mesma thread cujo snippet do Gmail
+        # coincida (plausível para avisos automáticos/institucionais
+        # formulaicos, mesmo padrão de risco do achado CRÍTICO do lado
+        # WhatsApp) colidiriam e uma dispensa de hoje esconderia para sempre
+        # um e-mail diferente de amanhã. `internal_date` É atualizado a cada
+        # refresh (é o que `_resolved_by_diario`/`_resolved_cross_channel` já
+        # dependem estar fresco) e dois e-mails distintos nunca compartilham
+        # o mesmo timestamp -- somado ao snippet no texto fingerprintado,
+        # fecha essa brecha sem precisar mexer em `email_action_linker.py`
+        # (fora do escopo desta sub-entrega; usado por outros fluxos).
+        item_id_email = _chave_item_dispensavel(
+            thread_key, f"{data.get('internal_date')}|{email_trecho}", True)
+        if _esta_dispensado(db, item_id_email) and not incluir_filtrados:
+            filtered["dispensados"] += 1
+            continue
+        reason = _noise_reason(trecho=email_trecho, sender=data.get("sender") or "",
                                is_email=True, has_contact=False, has_task=bool(task), domains=domains, endings=endings,
                                andre_em_to=data.get("andre_em_to"))
         if reason and not incluir_filtrados:
@@ -878,24 +1023,25 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
         # MESMO doc são reescritos a cada refresh de
         # `atualizar_direcao_emails_aplicados` para refletir a mensagem mais
         # recente da thread, mas o id da mensagem NOVA em si nunca é gravado
-        # em lugar nenhum. Achado da revisão adversarial: o fingerprint do
-        # SNIPPET sozinho não bastava -- dois e-mails DIFERENTES na mesma
-        # thread cujo snippet do Gmail coincida (plausível para avisos
-        # automáticos/institucionais formulaicos) colidiriam no mesmo
-        # `doc.id`, e a classificação da mensagem ANTIGA (ex.: "informativo",
-        # cacheada) seria silenciosamente reaplicada à mensagem NOVA sem
-        # nunca chamar o LLM de novo -- o "achado A" desta demanda de novo
-        # (exclusão indevida por dado obsoleto), sem exigir nenhuma ação do
-        # André. `internal_date` É atualizado a cada refresh (mesmo campo do
-        # qual `_resolved_by_diario`/`_resolved_cross_channel` já dependem
-        # estar fresco) e dois e-mails distintos nunca compartilham o mesmo
+        # em lugar nenhum. Achado da revisão adversarial (rodada 3, PR #244):
+        # o fingerprint do SNIPPET sozinho não bastava -- dois e-mails
+        # DIFERENTES na mesma thread cujo snippet do Gmail coincida (plausível
+        # para avisos automáticos/institucionais formulaicos) colidiriam no
+        # mesmo `doc.id`, e a classificação da mensagem ANTIGA (cacheada)
+        # seria silenciosamente reaplicada à mensagem NOVA sem nunca chamar o
+        # LLM de novo -- o "achado A" desta demanda de novo (exclusão indevida
+        # por dado obsoleto), sem exigir nenhuma ação do André. `internal_date`
+        # É atualizado a cada refresh (mesmo campo do qual
+        # `_resolved_by_diario`/`_resolved_cross_channel` já dependem estar
+        # fresco) e dois e-mails distintos nunca compartilham o mesmo
         # timestamp -- por isso entra como parte do `message_id` passado
         # abaixo (não do `texto`, que seria enviado ao LLM sem alteração;
         # `message_id` só alimenta a chave de cache, nunca o prompt).
+        rotulo = None
         if not incluir_filtrados:
             rotulo = _classificar_necessidade_resposta(
                 db, _get_llm_client_memo, message_id=f"{doc.id}|{data.get('internal_date')}",
-                texto=str(data.get("snippet") or data.get("resumo") or ""), is_email=True,
+                texto=email_trecho, is_email=True,
                 pode_classificar=_pode_classificar,
             )
             filtro = _LLM_ROTULO_PARA_FILTRO.get(rotulo)
@@ -905,11 +1051,23 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
         item = _item(
             contato=str(data.get("sender") or data.get("origem_sinal") or "E-mail"),
             canal="gmail", desde=data.get("internal_date") or data.get("analyzed_at"),
-            trecho=str(data.get("snippet") or data.get("resumo") or ""), task=task,
+            trecho=email_trecho, task=task,
             paused_until=None, now=now,
+            item_id=item_id_email, rotulo_classificador=rotulo,
         )
         if item:
-            item["motivo_inclusao"] = "conversa_direta"
+            # DEV-2026-0004 sub-entrega 8/9, proposta (d): antes desta
+            # sub-entrega, todo item de e-mail recebia o mesmo
+            # `motivo_inclusao` fixo ("conversa_direta") herdado do valor
+            # padrão do laço de WhatsApp -- sem qualquer relação com a razão
+            # REAL de inclusão. Todo item deste laço só chega aqui porque
+            # está vinculado a uma ação ATIVA (`task` resolvido via
+            # `by_email`/`by_id` logo no início da montagem de
+            # `emails_by_thread`, acima) -- "vinculado_a_acao" descreve isso
+            # de verdade, ao contrário do rótulo antigo (que sugeria,
+            # incorretamente, o mesmo motivo usado para conversas diretas de
+            # WhatsApp 1:1).
+            item["motivo_inclusao"] = "vinculado_a_acao"
             items.append(item)
 
     items.sort(key=lambda item: (not item.pop("_critica"), -item["horas_aguardando"], item["desde"]))
