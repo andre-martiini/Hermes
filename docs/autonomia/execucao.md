@@ -380,3 +380,58 @@ pendencias:
   - "Pendencias ja registradas em blocos anteriores e nao tocadas por esta sub-entrega continuam abertas: religar inventario tipado (P03 sub-entrega 1/N) a decisao de politica real; ambiguidades de classificacao (gerar_relatorio, salvar_memoria_global); card do Telegram de rascunho degradado nao reeditado; observabilidade de claim pendente sem _audit_log; TTL do Firestore nao configurado para mcp_jobs; limite de 200KB do Argos em main.py; risco de corrupcao silenciosa em escritas grandes via Argos; passo 2 do P02 (OAuth claims/scopes) como hardening futuro nao-bloqueante."
 proximo_pacote: "P03 -- com o passo 2 completo (validacao de argumentos + normalizador de resultados legados), restam o passo 3 (outputSchema/structuredContent/annotations) e a checagem de tipo deixada em aberto pela sub-entrega 2/N. Vale perguntar ao Andre qual priorizar a seguir -- ou tratar primeiro o achado de processo desta entrada (fidelidade da venv de teste) antes de prosseguir."
 ```
+
+---
+
+```yaml
+plano: plano-hermes-autonomo-2026-09-06
+base_commit: 9215a3acfdf5b94fb9b3d9b4a11d099587ae5247
+pacote: "P03 sub-entrega 4/N -- checagem de TIPO do schema no preflight de tools/call, so a fatia estrutural (array/object), deixada em aberto pela sub-entrega 2/N; escopo escalar (string/integer/number/boolean) permanece deliberadamente fora"
+# inicio abaixo aproximado pelo timestamp do base_commit (merge da PR #228,
+# diario da sub-entrega 3/N) -- a investigacao dos handlers/schemas e a
+# implementacao local comecaram num trecho de sessao anterior a este sem
+# timestamp proprio observavel por mim com precisao; nao invento um.
+estado: validado
+inicio: "2026-09-10T01:11:26Z"
+fim: "2026-09-10T02:11:16Z"
+arquivos_alterados:
+  - functions/tools/registry.py (nova `tipos_invalidos(tool_name, arguments) -> list[dict]`: le o schema publicado real, so os dois tipos JSON Schema ESTRUTURAIS -- `array`->`list`, `object`->`dict` -- via `_TIPOS_JSON_PARA_PYTHON`; falha aberta na mesma filosofia de `campos_obrigatorios_ausentes`; docstring desta ultima atualizada para apontar a nova funcao em vez de so prometer "fica para sub-entrega futura". Tambem `_CAMPOS_COM_TOLERANCIA_A_STRING_JSON`, o conjunto fechado de 4 pares (tool, campo) que a checagem pula -- ver decisoes.)
+  - functions/mcp_server.py (novo `_erro_tipos_invalidos`, wrapper que traduz `tipos_invalidos` para o envelope MCP; ligado em `_handle_tools_call` nos mesmos dois pontos de insercao de `_erro_campos_obrigatorios`, logo depois dela -- presenca tem prioridade quando os dois se aplicam ao mesmo payload)
+  - functions/test_validacao_argumentos.py (tres classes novas -- `TestTiposInvalidos`, `TestErroTiposInvalidos`, `TestIntegracaoTiposInvalidos` -- 39 -> 42 testes no arquivo; inclui paridade contra os 105 schemas reais do catalogo e os testes da excecao de tolerancia a string JSON)
+decisoes:
+  - id: p03-sub4-fronteira-estrutural-array-object-nao-escalar
+    motivo: "Investigacao real dos 105 schemas (`tools/schemas/*.json`: 341 propriedades, distribuicao `string:234, integer:37, array:28, number:18, boolean:17, object:7`, zero uniao de tipos em uso) e dos handlers que os consomem (`tools/hermes_tools.py`) antes de implementar, nao suposicao. Campos escalares numericos/booleanos ja sao tratados com tolerancia DELIBERADA pelo proprio handler hoje -- padrao `int(args.get('limite') or 20)` aceita `'20'` de bom grado, ~17 ocorrencias; uma checagem escalar estrita rejeitaria chamada 'meio certa' que hoje funciona, exatamente o risco que a sub-entrega 2/N identificou e adiou. Os dois tipos estruturais nao tem essa tolerancia pre-existente: `alteracoes = dict(args.get('alteracoes') or {})` (`editar_acao`) levanta `ValueError` opaco com uma string; `tags = args.get('tags') or []` (`hermes_tools.py:1052`) e pior -- string nao-vazia vira a propria `tags`, tratada como lista sem erro nenhum ali, ate corromper dado silenciosamente ou explodir mais adiante. Enum (8 propriedades) fica fora de proposito, candidato a sub-entrega futura."
+    autoridade: existente_ou_nova
+  - id: p03-sub4-revisao-achou-regressao-plano-como-string-json
+    motivo: "Achado real da PRIMEIRA rodada de revisao adversarial (Agent tool, general-purpose, sem contexto da implementacao): `criar_acao_no_sistema` (`plano_acao`) e `editar_plano_acao` (`novo_plano`/`plano_acao`/`etapas`) ja aceitavam, antes desta sub-entrega, uma STRING com o JSON de uma lista de etapas -- `subtarefas.normalizar_entrada_plano` (gatilho: incidente real de producao em 28/08/2026, com teste de regressao dedicado em `test_subtarefas.py::TestPlanoQueChegaComoString`) decodifica isso com seguranca antes de usar, recusando com erro claro (`PlanoInvalido`) so quando a string nao e JSON valido de lista. Sem excecao, o preflight desta sub-entrega bloquearia uma chamada valida hoje -- a mesma classe de regressao que a sub-entrega 2/N evitou para os escalares, so que encontrada tarde demais para evitar por investigacao previa sozinha. Corrigido com `_CAMPOS_COM_TOLERANCIA_A_STRING_JSON`, lista FECHADA de 4 pares (tool, campo) com tolerancia comprovada -- nao uma regra geral 'aceitar string se for JSON valido do tipo certo', que reabriria o buraco original para campos sem essa normalizacao: `editar_acao.tags`, por exemplo, continua sem tolerancia e continua sendo rejeitado (teste dedicado prova que a excecao nao se espalha)."
+    autoridade: existente_ou_nova
+  - id: p03-sub4-segunda-rodada-adversarial-sobre-o-fix-nao-achou-problema
+    motivo: "SEGUNDA rodada de revisao adversarial, desta vez sobre o proprio fix da regressao acima (mesmo padrao usado na PR #10 do Argos, citado na skill argos-ship-feature: revisar tambem a correcao, nao so o diff original). Verificou de forma independente: `normalizar_entrada_plano` e funcao TOTAL (rejeita com erro claro qualquer valor que nao seja lista/dict/str/None, nunca crasha, mesmo passando int/bool/float diretamente -- a excecao pula a checagem de tipo para esses 4 campos independente do tipo recebido, nao so string, e isso e seguro porque o handler trata tudo); grep completo por padroes `isinstance(..., str)` + `json.loads` sobre argumento MCP em `hermes_tools.py`/`telegram_extended.py` nao achou nenhum par (tool, campo) irmao faltando na excecao; os 4 nomes de campo na excecao batem exatamente com as propriedades reais dos schemas (case-sensitive, sem typo). Nao achou nada a corrigir."
+    autoridade: existente_ou_nova
+testes:
+  comandos:
+    - "../venv/bin/python3 -m unittest test_validacao_argumentos -v (venv persistente do clone, ja atualizada fiel a requirements.txt desde a sub-entrega 3/N)"
+    - "../venv/bin/python3 -m unittest discover -s . -p 'test_*.py' (suite completa)"
+  resultados:
+    - "Arquivo isolado: 42/42, 0 falhas, 0 erros (39 pre-existentes da sub-entrega 2/N + 3 classes novas desta sub-entrega)."
+    - "Suite completa: 1625/1625, 0 falhas, 0 erros (1601 baseline confirmado pela sub-entrega 3/N + 21 da propria 2/N/3/N + 3 novos aqui -- numero ja reflete a fidelidade de venv corrigida pela sub-entrega anterior, sem a incerteza das quatro entradas mais antigas)."
+evidencias:
+  - "Analise programatica completa dos 105 schemas em tools/schemas/*.json (contagem exata de propriedades por tipo, confirmacao de zero uniao de tipos em uso) antes de decidir o escopo, nao amostragem."
+  - "Duas rodadas de revisao adversarial independente (Agent tool, general-purpose, cada uma sem contexto da implementacao): a primeira achou a regressao do plano-como-string-json (ver decisoes); a segunda, sobre o fix em si, nao achou problema -- confirmou a funcao total de `normalizar_entrada_plano`, a ausencia de caso irmao faltando via grep completo, e a exatidao dos nomes de campo contra os schemas reais."
+  - "Teste de paridade (`TestTiposInvalidos::test_paridade_com_todos_os_schemas_reais_do_catalogo`) cobre TODOS os 105 schemas reais, nao so os exemplos escolhidos a dedo -- para todo campo array/object declarado, valor certo nunca e falso positivo e valor errado (exceto os 4 pares da excecao) e sempre detectado."
+  - "Todos os 3 arquivos enviados via mcp__Argos__argos_escrever_arquivo_repositorio com verificacao de hash local (git hash-object) contra o sha retornado pelo Argos -- os 3 batendo de primeira, sem drift de whitespace nem corrupcao."
+  - "PR #229 aberta, revisada (as duas rodadas acima) e mesclada por Andre ('mesclado, pode prosseguir'), confirmado por git fetch + git log de origin/main: merge commit 79e19afb2."
+migracao:
+  dry_run: null
+  executada: false
+flags:
+  antes: {}
+  depois: {}
+pendencias:
+  - "RESOLVIDO por esta entrada: checagem de tipo do schema, fatia estrutural (array/object) -- a pendencia aberta explicitamente pela sub-entrega 2/N."
+  - "ABERTA, deliberadamente: checagem de tipo ESCALAR (string/integer/number/boolean) permanece fora de escopo -- handlers reais toleram coercao (`int('20')`) de proposito; so revisitar se um caso concreto mostrar que essa tolerancia virou problema real, nao por simetria com a fatia estrutural."
+  - "ABERTA, nova candidata: validacao de `enum` (8 propriedades no catalogo declaram enum hoje) nao e coberta por nenhuma das duas checagens -- candidata a sub-entrega futura, nao investigada a fundo ainda."
+  - "ABERTA: passo 3 do plano (outputSchema/structuredContent/annotations nos caminhos compativeis) continua sem cobertura."
+  - "Pendencias ja registradas em blocos anteriores e nao tocadas por esta sub-entrega continuam abertas: religar inventario tipado (P03 sub-entrega 1/N) a decisao de politica real; ambiguidades de classificacao (gerar_relatorio, salvar_memoria_global); card do Telegram de rascunho degradado nao reeditado; observabilidade de claim pendente sem _audit_log; TTL do Firestore nao configurado para mcp_jobs; limite de 200KB do Argos em main.py; risco de corrupcao silenciosa em escritas grandes via Argos; passo 2 do P02 (OAuth claims/scopes) como hardening futuro nao-bloqueante."
+proximo_pacote: "P03 -- passo 2 do plano agora completo em toda a extensao que foi decidida cobrir (presenca + tipo estrutural); resta o passo 3 (outputSchema/structuredContent/annotations), mais as duas pendencias novas nao-bloqueantes desta entrada (enum, tipo escalar sob demanda). Vale perguntar ao Andre qual priorizar a seguir."
+```
