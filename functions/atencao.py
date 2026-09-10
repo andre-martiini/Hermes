@@ -41,6 +41,7 @@ TIPO_SECRETARIO_DECISAO_FORCADA = "secretario_decisao_forcada"
 TIPO_SECRETARIO_INSISTENCIA = "secretario_insistencia"
 TIPO_SECRETARIO_ASSUNTO_SENSIVEL = "secretario_assunto_sensivel"
 TIPO_SECRETARIO_INVESTIGACAO_CONCLUIDA = "secretario_investigacao_concluida"
+TIPO_EMAIL_NAO_ENTREGUE = "email_nao_entregue"
 
 # Prioridades
 PRIORIDADE_ALTA = "alta"
@@ -557,6 +558,89 @@ def detectar_atencao_saude(
     itens = avaliar_rotinas_saude(registros_saude, hoje_dt)
     if itens:
         _persistir_itens_atencao(db, itens)
+    return itens
+
+
+def avaliar_emails_nao_entregues(bounces: list[dict], hoje: date) -> list[dict]:
+    """Avaliação pura e determinística de e-mails não entregues (origem 'email').
+
+    `bounces` é uma lista de dicts já extraídos (um por mensagem de devolução
+    encontrada; ver `email_action_linker.detectar_emails_nao_entregues`), cada
+    um com: destinatario (e-mail em minúsculas), destinatario_nome,
+    alias_remetente (From bruto da mensagem que gerou a devolução), motivo,
+    codigo_smtp, thread_id, mensagem_id, data (timestamp ordenável
+    YYYY-MM-DDTHH:MM:SS, granularidade de segundo -- não só de dia; ver
+    `email_action_linker._internal_date_to_sp_iso`).
+
+    Agrupa múltiplas devoluções para o mesmo destinatário em um único item --
+    critério de aceite da demanda (DEV-2026-0004): duas devoluções da Mayana
+    viram 1 item, não 2. Dentro de um mesmo lote, fica com a ocorrência mais
+    recente (maior `data`) como representante do grupo; entre lotes, quem
+    resolve isso é a idempotência por `chave_dedupe` em `_persistir_itens_atencao`
+    -- a chave usa só o destinatario, então uma nova devolução da mesma pessoa
+    atualiza o mesmo item em vez de duplicar. A granularidade de segundo em
+    `data` (em vez de só a data) importa especificamente para a reabertura de
+    um item já fechado (resolvido/descartado): `_persistir_itens_atencao` só
+    reabre quando `prazo_origem` muda de valor -- com granularidade de dia,
+    uma devolução nova e não relacionada para a mesma pessoa no mesmo dia em
+    que André resolveu o item anterior ficaria incorretamente represada como
+    fechada; com o timestamp completo, ela conta como uma ocorrência distinta
+    e reabre o item corretamente (achado da revisão adversarial desta
+    sub-entrega).
+    """
+    por_destinatario: dict[str, dict] = {}
+    for b in bounces:
+        destinatario = str(b.get("destinatario") or "").strip().lower()
+        if not destinatario:
+            continue
+        atual = por_destinatario.get(destinatario)
+        if atual is None or str(b.get("data") or "") >= str(atual.get("data") or ""):
+            por_destinatario[destinatario] = b
+
+    itens: list[dict] = []
+    for destinatario, b in sorted(por_destinatario.items()):
+        codigo = str(b.get("codigo_smtp") or "").strip()
+        motivo = str(b.get("motivo") or "").strip() or "Motivo não identificado na devolução."
+        alias = str(b.get("alias_remetente") or "").strip()
+        nome = str(b.get("destinatario_nome") or "").strip() or destinatario
+        data_str = str(b.get("data") or hoje.strftime("%Y-%m-%d"))
+
+        titulo = f"E-mail não entregue a {nome}"
+        resumo = f"Devolução ao enviar para {destinatario}"
+        if codigo:
+            resumo += f" (SMTP {codigo})"
+        resumo += f": {motivo}"
+        if len(resumo) > 400:
+            resumo = resumo[:397] + "..."
+
+        sugestao = "Verificar o endereço e reenviar."
+        if codigo.startswith("5.7"):
+            sugestao = (
+                'Provável bloqueio de política/remetente -- revisar a configuração '
+                '"Enviar e-mail como" (alias usado: ' + (alias or "não identificado") + ").")
+
+        itens.append({
+            "origem": "email",
+            "tipo": TIPO_EMAIL_NAO_ENTREGUE,
+            "prioridade": PRIORIDADE_ALTA,
+            "titulo": titulo,
+            "resumo": resumo,
+            "acao_id": None,
+            "etapa_id": None,
+            "pessoa": nome,
+            "prazo": data_str,
+            "evidencia": {
+                "destinatario": destinatario,
+                "alias_remetente": alias or None,
+                "codigo_smtp": codigo or None,
+                "motivo": motivo,
+                "thread_id": b.get("thread_id"),
+                "mensagem_id": b.get("mensagem_id"),
+            },
+            "sugestao": sugestao,
+            "estado": ESTADO_ABERTO,
+            "chave_dedupe": f"email_nao_entregue:{destinatario}",
+        })
     return itens
 
 
