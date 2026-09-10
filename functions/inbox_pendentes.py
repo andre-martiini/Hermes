@@ -198,6 +198,62 @@ def _andre_ids(db) -> set[str]:
     return {str(x).strip() for x in (ingest.get("andre_chat_ids") or []) if str(x).strip()}
 
 
+# DEV-2026-0004 sub-entrega 4/9: prefixos/formato das notas de diário
+# AUTOMÁTICAS geradas por `email_action_linker._build_diary_note` ao
+# vincular um sinal a uma ação -- ver docstring de `_diario_mais_recente`.
+# A SEGUNDA rodada de revisão adversarial encontrou que um coringa genérico
+# (`\[\S+ Hermes\]`) também casava com prefixos GENUÍNOS usados por outras
+# rotinas do sistema para notas reais e confirmadas -- "[Copiloto Hermes]"
+# (main.py, tools/hermes_tools.py, telegram_message_tools.py) e "[Telegram
+# Hermes]" (tools/telegram_extended.py) -- excluindo tratamento de verdade
+# da comparação (o oposto do achado da primeira rodada: em vez de esconder
+# uma pendência real, isso faz o auto-resolve nunca disparar quando a nota
+# mais recente é uma dessas). Corrigido restringindo a classe de caracteres
+# aos ícones REAIS de `email_action_linker._CANAL_ICONS` (mais o fallback
+# "🔔" de `.get(canal, "🔔")`) -- mantidos aqui como literal, não
+# importados, para não criar uma dependência de módulo nova só por isso
+# (este arquivo é o índice leve e determinístico descrito no docstring do
+# módulo). Se `_CANAL_ICONS` ganhar um ícone novo, esta lista precisa
+# acompanhar -- comentário espelhado ao lado de `_CANAL_ICONS` para isso
+# não passar despercebido.
+_AUTO_LINK_ICONS = "📧📱📋📅🌐🔔"
+_AUTO_LINK_NOTE_RE = re.compile(r"^(?:EMAIL|WHATSAPP)::JSON::|^\[[" + _AUTO_LINK_ICONS + r"] Hermes\]\s")
+
+
+def _diario_mais_recente(acompanhamento) -> datetime | None:
+    """DEV-2026-0004 sub-entrega 4/9: data da entrada de diário mais recente
+    e GENUÍNA (nota real -- não um marcador AUTOMÁTICO de vínculo, que só
+    registra o instante em que um sinal foi ligado à ação, nunca evidência
+    de que André tratou algo; esse vínculo em si é só a razão da mensagem
+    aparecer aqui). `email_action_linker._build_diary_note` produz três
+    formatos para esse marcador, um por grupo de canal -- todos excluídos
+    por `_AUTO_LINK_NOTE_RE`:
+      - ``EMAIL::JSON::{...}`` (canal e-mail);
+      - ``WHATSAPP::JSON::{...}`` (canal whatsapp);
+      - ``[{icone} Hermes] {rótulo}: ...`` (demais canais -- sipac,
+        calendar, pagina -- sempre começa com um ícone entre colchetes
+        seguido de " Hermes]").
+    A primeira versão desta função só excluía o primeiro formato -- a
+    revisão adversarial mostrou que os outros dois têm o mesmo problema:
+    vincular uma conversa de WhatsApp (ou um processo SIPAC, reunião etc.)
+    a uma ação grava uma nota tão automática quanto a de e-mail, no mesmo
+    fluxo de um clique (`apply_suggestion`) -- sem essa exclusão, vincular
+    QUALQUER sinal a uma ação com outra pendência ainda em aberto esconderia
+    essa pendência na hora, mesmo sem André ter feito nada a respeito dela.
+    Ver `_resolved_by_diario`."""
+    latest = None
+    for entry in acompanhamento or []:
+        if not isinstance(entry, dict):
+            continue
+        nota = str(entry.get("nota") or "")
+        if _AUTO_LINK_NOTE_RE.match(nota):
+            continue
+        when = _as_datetime(entry.get("data"))
+        if when and (latest is None or when > latest):
+            latest = when
+    return latest
+
+
 def _active_tasks(db) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict]]:
     """Retorna ações ativas por chat, por e-mail e por id.
 
@@ -214,6 +270,7 @@ def _active_tasks(db) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict]
             "titulo": str(task.get("titulo") or "(sem título)"),
             "execution_lane": str(task.get("execution_lane") or ""),
             "degradation_count": int(task.get("degradation_count") or 0),
+            "diario_mais_recente": _diario_mais_recente(task.get("acompanhamento")),
         }
         by_id[doc.id] = item
         for link in task.get("whatsapp_vinculos") or []:
@@ -323,6 +380,31 @@ def _noise_reason(*, trecho: str, sender: str, is_email: bool, has_contact: bool
     return None
 
 
+def _resolved_by_diario(task: dict | None, message_when: datetime | None) -> bool:
+    """DEV-2026-0004 sub-entrega 4/9, proposta (c)(i): a ação vinculada já
+    tem uma entrada de diário genuína registrada DEPOIS da própria
+    mensagem -- André já tratou o assunto através da ação, a mensagem não
+    precisa de resposta direta (achado B, caso 3: Gabriela, DAE/Proen,
+    Marcos Marinho -- e-mails com anexo já tratados na ação, diário
+    posterior à mensagem).
+
+    Comparação estrita (`>`, nunca `>=`): uma entrada no MESMO instante da
+    mensagem (ou antes dela) não conta -- pode ter sido o que criou o
+    vínculo, não um tratamento posterior de verdade.
+
+    Limitação conhecida e deliberada: a comparação é por AÇÃO, não por
+    thread/mensagem específica -- qualquer entrada de diário genuína mais
+    recente que a mensagem conta, mesmo que a ação tenha mais de uma
+    mensagem vinculada e a entrada trate de outra. Correlacionar o
+    CONTEÚDO da entrada com o remetente/assunto de cada mensagem exigiria
+    um mecanismo bem maior (e mais frágil); o vínculo mensagem->ação já
+    existente é o que hoje estabelece essa relação."""
+    if not task or not message_when:
+        return False
+    latest = task.get("diario_mais_recente")
+    return bool(latest and latest > message_when)
+
+
 def _applied_email_suggestions(db):
     """Lê somente os vínculos aplicados, nunca a coleção histórica inteira."""
     collection = db.collection("email_action_suggestions")
@@ -372,7 +454,7 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
     by_chat, by_email, by_id = _active_tasks(db)
     contacts = _contacts(db)
     items = []
-    filtered = {"automaticos": 0, "encerramentos": 0, "sem_texto": 0, "informativo": 0}
+    filtered = {"automaticos": 0, "encerramentos": 0, "sem_texto": 0, "informativo": 0, "tratado_na_acao": 0}
     domains, endings = _noise_config(db)
 
     for doc in db.collection(COLLECTION).stream():
@@ -402,6 +484,9 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
                                has_contact=chat_id in contacts, has_task=bool(task), domains=domains, endings=endings)
         if reason and not incluir_filtrados:
             filtered[reason] += 1
+            continue
+        if _resolved_by_diario(task, _as_datetime(data.get("desde"))) and not incluir_filtrados:
+            filtered["tratado_na_acao"] += 1
             continue
         item = _item(
             contato=contacts.get(chat_id) or str(data.get("chat_name") or chat_id),
@@ -438,6 +523,9 @@ def coletar(db, now: datetime | None = None, incluir_filtrados: bool = False, li
                                andre_em_to=data.get("andre_em_to"))
         if reason and not incluir_filtrados:
             filtered[reason] += 1
+            continue
+        if _resolved_by_diario(task, _as_datetime(data.get("internal_date") or data.get("analyzed_at"))) and not incluir_filtrados:
+            filtered["tratado_na_acao"] += 1
             continue
         item = _item(
             contato=str(data.get("sender") or data.get("origem_sinal") or "E-mail"),
