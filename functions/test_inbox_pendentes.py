@@ -40,7 +40,7 @@ class InboxPendentesTest(unittest.TestCase):
             },
         })
         result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
-        self.assertEqual(result['filtrados'], {'automaticos': 0, 'encerramentos': 1, 'sem_texto': 1})
+        self.assertEqual(result['filtrados'], {'automaticos': 0, 'encerramentos': 1, 'sem_texto': 1, 'informativo': 0})
         self.assertEqual({x['trecho'] for x in result['itens']}, {'Você pode confirmar? Obrigada', 'segue a planilha'})
 
     def test_auditoria_inclui_itens_filtrados(self):
@@ -132,6 +132,129 @@ class InboxPendentesTest(unittest.TestCase):
                  }})
         result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))['itens']
         self.assertEqual({x['contato']: x['motivo_inclusao'] for x in result}, {'a': 'mencao', 'c': 'grupo_vinculado', 'd': 'resposta_a_mim', 'e': 'resposta_a_mim'})
+
+    def test_encerramentos_pegam_todos_os_exemplos_do_achado_b4(self):
+        """DEV-2026-0004 sub-entrega 3/9 -- os 9 exemplos reais do achado B4 da
+        demanda (Fabíola, Silvia, Dério, Mariane, Marcos Marinho, Flávia,
+        SollyvanRM, Patrícia Vizinha, +55 61 3424-7018) que o filtro anterior
+        (frase inteira precisava ser, ao pé da letra, um item do set) deixava
+        passar como falsa resposta pendente."""
+        from inbox_pendentes import _DEFAULT_ENDINGS, _noise_reason
+
+        exemplos = [
+            "Obrigada pelo retorno",
+            "Mto obrigada",
+            "Muito obrigado",
+            "Blz",
+            "Bom dia.\nOk",
+            "Ufaaaaa",
+            "Boa noite e fique com Deus",
+            "Ok, obrigada por avisar",
+            "De nada, André!",
+        ]
+        for trecho in exemplos:
+            with self.subTest(trecho=trecho):
+                reason = _noise_reason(
+                    trecho=trecho, sender="", is_email=False,
+                    has_contact=True, has_task=False,
+                    domains=set(), endings=_DEFAULT_ENDINGS,
+                )
+                self.assertEqual(reason, "encerramentos", f"esperava encerramentos para {trecho!r}, veio {reason!r}")
+
+    def test_pergunta_com_palavra_de_encerramento_nao_e_filtrada(self):
+        """Regressão: '?' sempre bloqueia a classificação como encerramento,
+        mesmo com palavras do léxico presentes no texto."""
+        from inbox_pendentes import _DEFAULT_ENDINGS, _noise_reason
+
+        reason = _noise_reason(
+            trecho="Perfeito, você pode confirmar o horário?", sender="",
+            is_email=False, has_contact=True, has_task=False,
+            domains=set(), endings=_DEFAULT_ENDINGS,
+        )
+        self.assertIsNone(reason)
+
+    def test_pedido_de_verdade_com_palavra_de_encerramento_nao_e_filtrado(self):
+        """Achado da (primeira) revisão adversarial desta sub-entrega: a
+        versão inicial bastava UMA palavra da mensagem bater no léxico (ou
+        uma frase aparecer como substring solta) para classificar como
+        encerramento -- isso escondia pedidos de verdade sem '?' que só
+        continham uma palavra do léxico em meio a outras. `_is_closing_message`
+        agora exige a mensagem INTEIRA seja coberta por itens do léxico."""
+        from inbox_pendentes import _DEFAULT_ENDINGS, _noise_reason
+
+        pedidos_reais = [
+            "Ok, pode me ligar agora",
+            "Entendi, me manda de novo",
+            "Combinado, me manda o PIX depois",
+            "Entendido, favor enviar o boleto",
+            "Bom dia, poderia me confirmar isso",
+            "Boa noite, manda o relatorio",
+        ]
+        for trecho in pedidos_reais:
+            with self.subTest(trecho=trecho):
+                reason = _noise_reason(
+                    trecho=trecho, sender="", is_email=False,
+                    has_contact=True, has_task=False,
+                    domains=set(), endings=_DEFAULT_ENDINGS,
+                )
+                self.assertIsNone(reason, f"{trecho!r} é um pedido de verdade, não devia ser filtrado (veio {reason!r})")
+
+    def test_email_so_em_cc_e_classificado_como_informativo(self):
+        """Achado B, caso 2 da demanda: Diretoria de Ensino BSF -- e-mail
+        endereçado a dae.rei@ifes.edu.br com André só em cópia."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': []}}},
+            'perfil_pessoas': {},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento'}},
+            'inbox_pendentes': {},
+            'email_action_suggestions': {
+                'e': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                      'sender': 'Diretoria de Ensino <dae.rei@ifes.edu.br>',
+                      'snippet': 'Segue o comunicado para conhecimento.',
+                      'internal_date': '2026-09-01T08:00:00+00:00',
+                      'andre_em_to': False},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(result['itens'], [])
+        self.assertEqual(result['filtrados']['informativo'], 1)
+
+    def test_email_com_andre_em_to_nao_e_filtrado_como_informativo(self):
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': []}}},
+            'perfil_pessoas': {},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento'}},
+            'inbox_pendentes': {},
+            'email_action_suggestions': {
+                'e': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                      'sender': 'Gabriela <gabriela@ifes.edu.br>',
+                      'snippet': 'Poderia revisar o anexo até sexta?',
+                      'internal_date': '2026-09-01T08:00:00+00:00',
+                      'andre_em_to': True},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(len(result['itens']), 1)
+        self.assertEqual(result['filtrados']['informativo'], 0)
+
+    def test_email_sem_andre_em_to_gravado_nao_e_filtrado_por_seguranca(self):
+        """Sugestão antiga (gravada antes desta sub-entrega) não tem o campo
+        `andre_em_to` -- o padrão (None) nunca filtra, para não gerar falsos
+        positivos em dados existentes até o próximo refresh preenchê-lo."""
+        db = Db({
+            'system': {'settings': {'whatsapp_ingest': {'chats_allowlist': []}}},
+            'perfil_pessoas': {},
+            'tarefas': {'t': {'titulo': 'Ação', 'status': 'em andamento'}},
+            'inbox_pendentes': {},
+            'email_action_suggestions': {
+                'e': {'canal': 'email', 'status': 'applied', 'task_id': 't',
+                      'sender': 'Gabriela <gabriela@ifes.edu.br>',
+                      'snippet': 'Poderia revisar o anexo até sexta?',
+                      'internal_date': '2026-09-01T08:00:00+00:00'},
+            },
+        })
+        result = coletar(db, datetime(2026, 9, 1, 12, tzinfo=timezone.utc))
+        self.assertEqual(len(result['itens']), 1)
 
 
 class _MemorySnap:
