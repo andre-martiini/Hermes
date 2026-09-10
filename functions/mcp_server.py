@@ -1057,6 +1057,9 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
         erro_argumentos = _erro_campos_obrigatorios(name, arguments)
         if erro_argumentos is not None:
             return erro_argumentos
+        erro_tipos = _erro_tipos_invalidos(name, arguments)
+        if erro_tipos is not None:
+            return erro_tipos
         try:
             proposal = preview_tool(name, ctx, arguments)
         except Exception as exc:  # prévia inválida deve apontar o dado, sem mutar
@@ -1099,6 +1102,10 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
     erro_argumentos = _erro_campos_obrigatorios(name, arguments)
     if erro_argumentos is not None:
         return erro_argumentos
+
+    erro_tipos = _erro_tipos_invalidos(name, arguments)
+    if erro_tipos is not None:
+        return erro_tipos
 
     # O perfil do usuario era alimentado so por `askCopilotoHermes`. Com a
     # interacao migrando para clientes MCP, aquele caminho para de ser exercido e
@@ -1182,6 +1189,40 @@ def _erro_campos_obrigatorios(name: str, arguments: dict) -> dict | None:
         "erro": (
             f"Campo(s) obrigatório(s) ausente(s) para '{name}': {campos}. "
             "Preencha e tente novamente."
+        ),
+    }, is_error=True)
+
+
+def _erro_tipos_invalidos(name: str, arguments: dict) -> dict | None:
+    """Preflight de `_handle_tools_call` (P03 passo 2, sub-entrega 4/N):
+    `None` quando nenhum campo presente tem tipo ESTRUTURAL (`array`/
+    `object`) incompatível com o schema publicado; senão, a resposta MCP de
+    erro pronta para devolver.
+
+    Só cobre `array`/`object` -- os quatro tipos escalares
+    (`string`/`integer`/`number`/`boolean`) ficam de fora desta sub-entrega
+    de propósito (ver docstring de `registry.tipos_invalidos` para o
+    porquê: handlers já toleram deliberadamente `"20"` onde esperam `20`,
+    e uma checagem escalar estrita rejeitaria chamadas que hoje funcionam).
+    Mesmo dentro de `array`/`object`, uma lista fechada de campos com
+    tolerância comprovada a string JSON (achado da revisão adversarial,
+    ver `registry._CAMPOS_COM_TOLERANCIA_A_STRING_JSON`) fica de fora.
+
+    Chamado logo depois de `_erro_campos_obrigatorios`, nos mesmos dois
+    pontos de `_handle_tools_call` onde `arguments` representa o payload de
+    negócio completo -- mesmo raciocínio de escopo, não repetido aqui.
+    """
+    problemas = registry.tipos_invalidos(name, arguments)
+    if not problemas:
+        return None
+    detalhes = "; ".join(
+        f"'{p['campo']}' (esperado {p['esperado']}, recebido {p['recebido']})"
+        for p in problemas
+    )
+    return _text_result({
+        "erro": (
+            f"Campo(s) com tipo inválido para '{name}': {detalhes}. "
+            "Corrija o formato e tente novamente."
         ),
     }, is_error=True)
 
