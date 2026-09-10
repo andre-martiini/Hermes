@@ -1060,6 +1060,9 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
         erro_tipos = _erro_tipos_invalidos(name, arguments)
         if erro_tipos is not None:
             return erro_tipos
+        erro_valores = _erro_valores_invalidos(name, arguments)
+        if erro_valores is not None:
+            return erro_valores
         try:
             proposal = preview_tool(name, ctx, arguments)
         except Exception as exc:  # prévia inválida deve apontar o dado, sem mutar
@@ -1106,6 +1109,10 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
     erro_tipos = _erro_tipos_invalidos(name, arguments)
     if erro_tipos is not None:
         return erro_tipos
+
+    erro_valores = _erro_valores_invalidos(name, arguments)
+    if erro_valores is not None:
+        return erro_valores
 
     # O perfil do usuario era alimentado so por `askCopilotoHermes`. Com a
     # interacao migrando para clientes MCP, aquele caminho para de ser exercido e
@@ -1223,6 +1230,40 @@ def _erro_tipos_invalidos(name: str, arguments: dict) -> dict | None:
         "erro": (
             f"Campo(s) com tipo inválido para '{name}': {detalhes}. "
             "Corrija o formato e tente novamente."
+        ),
+    }, is_error=True)
+
+
+def _erro_valores_invalidos(name: str, arguments: dict) -> dict | None:
+    """Preflight de `_handle_tools_call` (P03 passo 2, sub-entrega 5/N):
+    `None` quando nenhum campo presente tem valor fora da lista `enum` que o
+    schema publicado (`tools/list`) declara para ele; senão, a resposta MCP
+    de erro pronta para devolver.
+
+    Só cobre propriedades de nível superior que de fato declaram `enum` (ver
+    docstring de `registry.valores_invalidos` para o catálogo atual e para o
+    porquê de `enum` aninhado, como o de cada etapa de `plano_acao`/
+    `etapas`, ficar fora desta sub-entrega).
+
+    Chamado logo depois de `_erro_tipos_invalidos`, nos mesmos dois pontos
+    de `_handle_tools_call` onde `arguments` representa o payload de
+    negócio completo -- mesmo raciocínio de escopo, não repetido aqui. Como
+    nenhum campo com `enum` no catálogo atual é `array`/`object`, não há
+    conflito de prioridade real com `_erro_tipos_invalidos` hoje; a ordem
+    (tipo antes de valor) é só para manter o mesmo padrão de "checagem mais
+    estrutural primeiro" das duas sub-entregas anteriores.
+    """
+    problemas = registry.valores_invalidos(name, arguments)
+    if not problemas:
+        return None
+    detalhes = "; ".join(
+        f"'{p['campo']}' (recebido {p['recebido']!r}, esperado um de {p['esperado']})"
+        for p in problemas
+    )
+    return _text_result({
+        "erro": (
+            f"Valor inválido para '{name}': {detalhes}. "
+            "Corrija o valor e tente novamente."
         ),
     }, is_error=True)
 
