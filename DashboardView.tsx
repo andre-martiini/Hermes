@@ -924,7 +924,10 @@ const EmailLinkSuggestionsPanel: React.FC<{
 // vira "em espera" automaticamente -- não conta na barra, porque hoje não depende
 // de André. Lê resumo_matinal/{data} ao vivo, mesmo padrão de listener que o
 // EmailLinkSuggestionsPanel já usa acima.
-const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
+// Exportado -- também usado fora do Dashboard desktop, na visão mobile
+// (index.tsx renderiza este card acima da MobileShortcutsView), já que
+// abaixo do breakpoint `sm` o DashboardView inteiro não é montado.
+export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
     const [resumo, setResumo] = useState<ResumoMatinal | null>(null);
     const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
