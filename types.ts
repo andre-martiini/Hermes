@@ -1261,6 +1261,31 @@ export interface ResumoAcao {
     etapas_feitas: number;
     etapas_totais: number;
     estrategia_objetivo_id: string | null;
+    /**
+     * A subtarefa escolhida para hoje (menor data prevista) — já calculada em
+     * functions/morning_summary.py, só não estava tipada aqui ainda. É o sinal
+     * granular de "o passo de hoje está esperando terceiro", diferente de
+     * `execution_lane` (que classifica a ação inteira e pode não refletir isso).
+     */
+    subtarefa_do_dia: {
+        id: string | null;
+        texto: string | null;
+        estado: SubtarefaEstado | null;
+        data_prevista: string | null;
+        aguardando_de: string | null;
+        degradation_count: number;
+    } | null;
+    /**
+     * Toda subtarefa da ação (não só a de hoje) que está aguardando terceiro —
+     * "a espera some hoje" quando a ação aparece em `avanco` por causa de outra
+     * etapa; esta lista existe pra ela não ficar invisível.
+     */
+    aguardando_terceiro: Array<{
+        id: string | null;
+        texto: string | null;
+        aguardando_de: string | null;
+        data_prevista: string | null;
+    }>;
 }
 
 export interface ResumoEvento {
