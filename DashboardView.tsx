@@ -9,7 +9,7 @@ import {
 } from './types';
 import { buildDiaryEmailNote, buildDiaryGenericNote, buildDiaryWhatsappNote, DiaryWhatsappActionItem } from './src/utils/diaryEntries';
 import { computeWeightHeadline, addDays } from './src/utils/healthAnalytics';
-import { estaFeita, estadoDaSubtarefa, ROTULO_ESTADO, textoDaSubtarefa } from './src/utils/subtarefas';
+import { contarSubtarefas, estaFeita, estadoDaSubtarefa, ROTULO_ESTADO, textoDaSubtarefa } from './src/utils/subtarefas';
 
 interface DashboardViewProps {
     tarefas: Tarefa[];
@@ -934,6 +934,7 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
     const [planos, setPlanos] = useState<Record<string, ActionPlanItem[]>>({});
     const [carregandoPlanos, setCarregandoPlanos] = useState<Record<string, boolean>>({});
     const [errosPlanos, setErrosPlanos] = useState<Record<string, boolean>>({});
+    const [acoesAoVivo, setAcoesAoVivo] = useState<Record<string, Tarefa>>({});
 
     useEffect(() => {
         const hojeId = formatDateLocalISO(new Date());
@@ -943,6 +944,30 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
         });
         return () => unsub();
     }, []);
+
+    useEffect(() => {
+        if (!resumo) return;
+
+        // O resumo define quais ações pertencem ao dia. Para elas, a própria
+        // tarefa é a fonte viva: qualquer escrita externa atualiza o card sem
+        // depender de recarregar a página.
+        const ids = [...new Set([
+            ...(resumo.hoje?.avanco ?? []),
+            ...(resumo.hoje?.continuo ?? []),
+            ...(resumo.hoje?.atrasadas ?? []),
+            ...(resumo.hoje?.aguardando_terceiro ?? []),
+        ].map(acao => acao.id))];
+        const unsubs = ids.map(id => onSnapshot(doc(db, 'tarefas', id), snap => {
+            setAcoesAoVivo(prev => {
+                if (!snap.exists()) {
+                    const { [id]: _, ...resto } = prev;
+                    return resto;
+                }
+                return { ...prev, [id]: { id: snap.id, ...(snap.data() as Omit<Tarefa, 'id'>) } };
+            });
+        }));
+        return () => unsubs.forEach(unsub => unsub());
+    }, [resumo]);
 
     if (!resumo) return null;
 
@@ -958,7 +983,44 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
     ]) {
         candidatasPorId.set(a.id, a);
     }
-    const candidatas: ResumoAcao[] = Array.from(candidatasPorId.values());
+    const hojeId = formatDateLocalISO(new Date());
+    const candidatas: ResumoAcao[] = Array.from(candidatasPorId.values())
+        .map(acao => {
+            const tarefa = acoesAoVivo[acao.id];
+            if (!tarefa) return acao;
+
+            const status = String(tarefa.status || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+            const dataLimite = String(tarefa.data_limite || acao.data_limite || '').slice(0, 10);
+            // Remove já na tela uma ação concluída, excluída ou reagendada para
+            // frente. O gatilho do backend persiste o mesmo resultado no resumo.
+            if (status === 'concluido' || status === 'excluido' || (dataLimite && dataLimite > hojeId)) return null;
+
+            const plano = Array.isArray(tarefa.plano_acao) ? tarefa.plano_acao : [];
+            const [etapasFeitas, etapasTotais] = contarSubtarefas(plano);
+            const corrente = plano.find(etapa => textoDaSubtarefa(etapa) && !estaFeita(etapa));
+            return {
+                ...acao,
+                titulo: tarefa.titulo || acao.titulo,
+                status: tarefa.status,
+                area_tematica: tarefa.area_tematica || acao.area_tematica,
+                horario_inicio: tarefa.horario_inicio || null,
+                horario_fim: tarefa.horario_fim || null,
+                data_limite: dataLimite || acao.data_limite,
+                prazo_final: tarefa.prazo_final || null,
+                etapas_feitas: etapasFeitas,
+                etapas_totais: etapasTotais,
+                proximo_passo: corrente ? textoDaSubtarefa(corrente) : null,
+                subtarefa_do_dia: corrente ? {
+                    id: corrente.id || null,
+                    texto: textoDaSubtarefa(corrente),
+                    estado: estadoDaSubtarefa(corrente),
+                    data_prevista: String(corrente.data_prevista || dataLimite || '').slice(0, 10) || null,
+                    aguardando_de: corrente.aguardando_de || null,
+                    degradation_count: Number(corrente.degradation_count || 0),
+                } : null,
+            };
+        })
+        .filter((acao): acao is ResumoAcao => acao !== null);
 
     // O passo de hoje está esperando terceiro -- sinal granular, independente
     // de `execution_lane` (que classifica a ação inteira e pode não refletir isso).
@@ -991,7 +1053,7 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
 
         // O resumo diário só tem o próximo passo. O plano completo é lido sob
         // demanda para mostrar as etapas reais sem listeners permanentes extras.
-        if (!vaiAbrir || id in planos || carregandoPlanos[id]) return;
+        if (!vaiAbrir || id in planos || id in acoesAoVivo || carregandoPlanos[id]) return;
         setCarregandoPlanos(prev => ({ ...prev, [id]: true }));
         try {
             const snap = await getDoc(doc(db, 'tarefas', id));
@@ -1061,7 +1123,7 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
                                 : null;
                             const isOpen = !!expanded[a.id];
                             const pct = a.etapas_totais > 0 ? Math.round((a.etapas_feitas / a.etapas_totais) * 100) : 0;
-                            const etapasAbertas = (planos[a.id] || [])
+                            const etapasAbertas = (acoesAoVivo[a.id]?.plano_acao || planos[a.id] || [])
                                 .filter(etapa => textoDaSubtarefa(etapa) && !estaFeita(etapa));
                             return (
                                 <div key={a.id} className={`rounded-2xl border ${isDark ? 'bg-[#151c27] border-[#2a313d]' : 'bg-white border-[#f3f4f6]'}`}>

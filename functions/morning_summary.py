@@ -52,7 +52,7 @@ Sistema pessoal de um único usuário — as coleções não são filtradas por
 from datetime import datetime, timedelta, timezone
 
 from firebase_admin import firestore
-from firebase_functions import https_fn, scheduler_fn, options
+from firebase_functions import firestore_fn, https_fn, scheduler_fn, options
 
 import os
 
@@ -75,6 +75,15 @@ JANELA_LIVRE_MINIMA_MIN = 45
 MAX_JANELAS_LIVRES = 3
 
 STATUS_ATIVOS = ["em andamento", "stand-by"]
+
+# Campos que mudam quem aparece em "Ações de Hoje" ou o conteúdo exibido no
+# card. Escritas técnicas (ex.: contexto do agente) não devem reconstruir o
+# resumo inteiro.
+_CAMPOS_QUE_ATUALIZAM_RESUMO = frozenset({
+    "titulo", "status", "area_tematica", "projeto", "horario_inicio", "horario_fim",
+    "data_limite", "prazo_final", "plano_acao", "execution_lane", "degradation_count",
+    "auto_data_atualizada", "estrategia_objetivo_id", "acompanhamento",
+})
 
 _DIAS_SEMANA = [
     "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
@@ -1318,6 +1327,34 @@ def gerar_resumo_matinal(event: scheduler_fn.ScheduledEvent = None) -> None:
         f"[ResumoMatinal] {resumo['data']} gerado — {c['hoje']} ação(ões) hoje, "
         f"{c['herdadas']} herdada(s), {c['criticas']} crítica(s), {c['pendencias']} pendência(s)."
     )
+
+
+def _mudanca_impacta_resumo(antes: dict, depois: dict) -> bool:
+    """Diz se uma escrita em `tarefas` precisa renovar o retrato do dia."""
+    if not antes or not depois:
+        return True
+    return any(antes.get(campo) != depois.get(campo) for campo in _CAMPOS_QUE_ATUALIZAM_RESUMO)
+
+
+@firestore_fn.on_document_written(
+    document="tarefas/{taskId}",
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=120,
+)
+def atualizar_resumo_matinal_por_acao(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot | None]]) -> None:
+    """Reflete no resumo de hoje alterações externas relevantes em ações."""
+    if not event.data:
+        return
+    antes = event.data.before.to_dict() if event.data.before and event.data.before.exists else {}
+    depois = event.data.after.to_dict() if event.data.after and event.data.after.exists else {}
+    if not _mudanca_impacta_resumo(antes or {}, depois or {}):
+        return
+
+    from main import get_db
+    db = get_db()
+    resumo = build_morning_summary(db)
+    _persistir(db, resumo)
+    print(f"[ResumoMatinal] Atualizado após alteração da ação {event.params['taskId']}.")
 
 
 @https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=120)
