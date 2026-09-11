@@ -27,10 +27,29 @@ from morning_summary import (
     _coletar_passivo_de_elevacao,
     _coletar_ultima_tentativa_elevacao,
     _ultima_medida,
+    _mudanca_impacta_resumo,
     _shift,
 )
 
 HOJE = "2026-08-20"  # quinta-feira
+
+
+class TestAtualizacaoEmTempoReal(unittest.TestCase):
+    def test_mudanca_relevante_renova_resumo(self):
+        self.assertTrue(_mudanca_impacta_resumo(
+            {"plano_acao": [{"text": "Enviar", "completed": False}]},
+            {"plano_acao": [{"text": "Enviar", "completed": True}]},
+        ))
+
+    def test_escrita_tecnica_nao_renova_resumo(self):
+        self.assertFalse(_mudanca_impacta_resumo(
+            {"titulo": "Ação", "contexto_agente": "antigo"},
+            {"titulo": "Ação", "contexto_agente": "novo"},
+        ))
+
+    def test_criacao_e_remocao_renovam_resumo(self):
+        self.assertTrue(_mudanca_impacta_resumo({}, {"titulo": "Nova ação"}))
+        self.assertTrue(_mudanca_impacta_resumo({"titulo": "Ação"}, {}))
 
 
 # --------------------------------------------------------------------------- #
