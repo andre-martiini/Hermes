@@ -4,7 +4,8 @@ import { db } from './firebase';
 import {
     Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry,
     HealthWeight, HealthSettings, ExerciseLog, WalkBlock,
-    formatDateLocalISO, sumWalkBlocksKm
+    formatDateLocalISO, sumWalkBlocksKm,
+    ResumoMatinal, ResumoAcao
 } from './types';
 import { buildDiaryEmailNote, buildDiaryGenericNote, buildDiaryWhatsappNote, DiaryWhatsappActionItem } from './src/utils/diaryEntries';
 import { computeWeightHeadline, addDays } from './src/utils/healthAnalytics';
@@ -916,6 +917,218 @@ const EmailLinkSuggestionsPanel: React.FC<{
     );
 };
 
+// --- CARD: AÇÕES DE HOJE (colapsável + barra do dia) ---
+// N29: um card por ação de hoje, com progresso real (etapas_feitas/etapas_totais,
+// já calculado em morning_summary.py) e uma barra do dia que soma esse progresso.
+// Ação cuja `subtarefa_do_dia` está aguardando terceiro sai da lista principal e
+// vira "em espera" automaticamente -- não conta na barra, porque hoje não depende
+// de André. Lê resumo_matinal/{data} ao vivo, mesmo padrão de listener que o
+// EmailLinkSuggestionsPanel já usa acima.
+const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
+    const [resumo, setResumo] = useState<ResumoMatinal | null>(null);
+    const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+    useEffect(() => {
+        const hojeId = formatDateLocalISO(new Date());
+        const ref = doc(db, 'resumo_matinal', hojeId);
+        const unsub = onSnapshot(ref, (snap) => {
+            setResumo(snap.exists() ? (snap.data() as ResumoMatinal) : null);
+        });
+        return () => unsub();
+    }, []);
+
+    if (!resumo) return null;
+
+    // `atrasadas` não é disjunta de `avanco`/`continuo` -- o backend grava a
+    // mesma ação atrasada na lane e em `atrasadas` (functions/morning_summary.py).
+    // Dedup por id evita cards duplicados, key colidindo e o % do dia contando
+    // a mesma ação duas vezes.
+    const candidatasPorId = new Map<string, ResumoAcao>();
+    for (const a of [
+        ...(resumo.hoje?.avanco ?? []),
+        ...(resumo.hoje?.continuo ?? []),
+        ...(resumo.hoje?.atrasadas ?? []),
+    ]) {
+        candidatasPorId.set(a.id, a);
+    }
+    const candidatas: ResumoAcao[] = Array.from(candidatasPorId.values());
+
+    // O passo de hoje está esperando terceiro -- sinal granular, independente
+    // de `execution_lane` (que classifica a ação inteira e pode não refletir isso).
+    const emEsperaHoje = candidatas.filter(a => a.subtarefa_do_dia?.estado === 'aguardando_terceiro');
+    const emEsperaIds = new Set(emEsperaHoje.map(a => a.id));
+    const emEspera: ResumoAcao[] = [
+        ...emEsperaHoje,
+        ...(resumo.hoje?.aguardando_terceiro ?? []).filter(a => !emEsperaIds.has(a.id)),
+    ];
+    const ativas = candidatas.filter(a => !emEsperaIds.has(a.id));
+
+    if (ativas.length === 0 && emEspera.length === 0) return null;
+
+    const totalFeitas = ativas.reduce((sum, a) => sum + (a.etapas_feitas || 0), 0);
+    const totalPassos = ativas.reduce((sum, a) => sum + (a.etapas_totais || 0), 0);
+    const diaPct = totalPassos > 0 ? Math.round((totalFeitas / totalPassos) * 100) : 0;
+    const concluida = (a: ResumoAcao) => a.etapas_totais > 0 && a.etapas_feitas >= a.etapas_totais;
+    const concluidasHoje = ativas.filter(concluida).length;
+    const diaConcluido = ativas.length > 0 && diaPct >= 100;
+
+    const corBarra = (a: ResumoAcao) => {
+        if (concluida(a)) return '#10b981';
+        if (a.degradation_count > 0) return '#9a5c00';
+        return '#9333ea';
+    };
+
+    const toggle = (id: string) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+
+    return (
+        <DashboardCard title="Ações de Hoje" isDark={isDark}>
+            <div className="flex flex-col gap-5">
+                {/* Barra do dia */}
+                <div>
+                    <div className="flex items-baseline justify-between gap-3 mb-2 flex-wrap">
+                        <div className="flex items-baseline gap-2">
+                            <span className={`text-[28px] font-extrabold tabular-nums ${diaConcluido ? 'text-[#10b981]' : 'text-[#9333ea]'}`}>
+                                {diaPct}%
+                            </span>
+                            <span className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-[#4d4354]'}`}>
+                                {concluidasHoje} de {ativas.length} ações concluídas hoje
+                            </span>
+                        </div>
+                        {emEspera.length > 0 && (
+                            <span className={`text-[11px] font-bold whitespace-nowrap ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>
+                                {emEspera.length} em espera
+                            </span>
+                        )}
+                    </div>
+                    <div className={`h-[6px] w-full rounded-full overflow-hidden ${isDark ? 'bg-[#2a313d]' : 'bg-[#f3f4f6]'}`}>
+                        <div
+                            style={{ width: `${Math.min(diaPct, 100)}%`, background: diaConcluido ? '#10b981' : '#9333ea' }}
+                            className="h-full rounded-full transition-all duration-500"
+                        />
+                    </div>
+                    {diaConcluido && (
+                        <div className={`mt-3 pt-3 flex items-center justify-between gap-3 flex-wrap border-t ${isDark ? 'border-[#2a313d]' : 'border-[#f3f4f6]'}`}>
+                            <p className="text-[13px] font-bold m-0">Dia concluído — as ações de hoje estão fechadas.</p>
+                            {/* N29: ainda sem ação real por trás -- desabilitados até termos o
+                                encerramento de expediente e a fila da semana ligados ao backend. */}
+                            <div className="flex gap-2">
+                                <button type="button" disabled title="Em breve" className="text-[12px] font-bold px-3.5 py-2 rounded-lg bg-[#2563eb] text-white opacity-50 cursor-not-allowed">
+                                    Encerrar expediente
+                                </button>
+                                <button type="button" disabled title="Em breve" className={`text-[12px] font-bold px-3.5 py-2 rounded-lg border opacity-50 cursor-not-allowed ${isDark ? 'border-[#2a313d] text-slate-300' : 'border-[#e5e7eb] text-[#4d4354]'}`}>
+                                    Puxar 1 ação da semana
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Lista de ações ativas */}
+                {ativas.length > 0 && (
+                    <div className="flex flex-col gap-2.5">
+                        {ativas.map((a) => {
+                            const done = concluida(a);
+                            const alerta = done && a.degradation_count > 0
+                                ? `Adiada ${a.degradation_count}x apesar dos passos concluídos — falta um passo de fechamento.`
+                                : null;
+                            const isOpen = !!expanded[a.id];
+                            const pct = a.etapas_totais > 0 ? Math.round((a.etapas_feitas / a.etapas_totais) * 100) : 0;
+                            return (
+                                <div key={a.id} className={`rounded-2xl border ${isDark ? 'bg-[#151c27] border-[#2a313d]' : 'bg-white border-[#f3f4f6]'}`}>
+                                    <button
+                                        type="button"
+                                        onClick={() => toggle(a.id)}
+                                        className="w-full flex items-center gap-3 px-4 py-3.5 text-left"
+                                    >
+                                        <span
+                                            className="w-[22px] h-[22px] rounded-full flex items-center justify-center flex-shrink-0"
+                                            style={{ background: done ? '#10b981' : (isDark ? '#232b3a' : '#e7eefe') }}
+                                        >
+                                            {done && (
+                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                                            )}
+                                        </span>
+                                        <div className="flex-1 min-w-0">
+                                            <p className={`m-0 text-[13.5px] font-bold truncate ${isDark ? 'text-[#ebf1ff]' : 'text-[#151c27]'}`}>{a.titulo}</p>
+                                            {alerta && (
+                                                <p className="m-0 mt-0.5 text-[11px] font-semibold text-[#9a5c00]">{alerta}</p>
+                                            )}
+                                            <div className="flex items-center gap-2 mt-1.5">
+                                                {a.etapas_totais > 0 ? (
+                                                    <>
+                                                        <div className={`flex-1 max-w-[220px] h-[6px] rounded-full overflow-hidden ${isDark ? 'bg-[#2a313d]' : 'bg-[#f3f4f6]'}`}>
+                                                            <div style={{ width: `${pct}%`, background: corBarra(a) }} className="h-full rounded-full transition-all duration-500" />
+                                                        </div>
+                                                        <span className="text-[11px] font-bold tabular-nums" style={{ color: corBarra(a) }}>
+                                                            {a.etapas_feitas}/{a.etapas_totais}
+                                                        </span>
+                                                    </>
+                                                ) : (
+                                                    <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>sem plano de etapas</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <svg
+                                            width="16" height="16" viewBox="0 0 24 24" fill="none"
+                                            stroke={isDark ? '#7e8aa3' : '#7e7386'} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+                                            className="flex-shrink-0 transition-transform"
+                                            style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                                        >
+                                            <path d="m6 9 6 6 6-6" />
+                                        </svg>
+                                    </button>
+                                    {isOpen && (
+                                        <div className="px-4 pb-4 pl-[50px] flex flex-col gap-1.5">
+                                            {a.proximo_passo && (
+                                                <p className={`m-0 text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-[#4d4354]'}`}>{a.proximo_passo}</p>
+                                            )}
+                                            <div className="flex gap-2 mt-1 flex-wrap">
+                                                {a.area_tematica && (
+                                                    <span className={`text-[10.5px] font-bold px-2 py-1 rounded-md ${isDark ? 'bg-[#1e293b] text-slate-300' : 'bg-[#f0f3ff] text-[#4d4354]'}`}>{a.area_tematica}</span>
+                                                )}
+                                                <span className={`text-[10.5px] font-bold px-2 py-1 rounded-md ${isDark ? 'bg-[#1e293b] text-slate-300' : 'bg-[#f0f3ff] text-[#4d4354]'}`}>
+                                                    Prazo: {a.data_limite}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+
+                {/* Em espera -- não conta na barra do dia */}
+                {emEspera.length > 0 && (
+                    <div>
+                        <p className={`text-[10.5px] font-bold font-mono uppercase tracking-wider mb-2 ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>
+                            Em espera — não conta hoje
+                        </p>
+                        <div className="flex flex-col gap-2">
+                            {emEspera.map((a) => {
+                                const aguardandoDe = a.subtarefa_do_dia?.aguardando_de ?? null;
+                                return (
+                                    <div key={a.id} className={`flex items-center gap-3 px-4 py-3 rounded-2xl border border-dashed ${isDark ? 'bg-[#1e293b] border-[#2a313d]' : 'bg-[#f0f3ff] border-[#e5e7eb]'}`}>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={isDark ? '#7e8aa3' : '#7e7386'} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+                                            <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
+                                        </svg>
+                                        <div className="flex-1 min-w-0">
+                                            <p className={`m-0 text-[13px] font-bold truncate ${isDark ? 'text-slate-300' : 'text-[#4d4354]'}`}>{a.titulo}</p>
+                                            <p className={`m-0 mt-0.5 text-[11.5px] ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>
+                                                {aguardandoDe ? `Aguardando: ${aguardandoDe}` : 'Aguardando terceiro'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+            </div>
+        </DashboardCard>
+    );
+};
+
 // --- MAIN COMPONENT ---
 const DashboardView: React.FC<DashboardViewProps> = ({
     tarefas = [],
@@ -1192,6 +1405,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         >
 
             <EmailLinkSuggestionsPanel isDark={isDark} onOpenTask={onOpenTask} onAskCopiloto={onAskCopiloto} />
+
+            <AcoesDoDiaCard isDark={isDark} />
 
             <div className="flex flex-col gap-6 w-full">
 
