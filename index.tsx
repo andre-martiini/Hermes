@@ -24,7 +24,7 @@ import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, deleteD
 import { httpsCallable } from 'firebase/functions';
 import { ref, uploadBytes } from 'firebase/storage';
 import FinanceView from './FinanceView';
-import DashboardView from './DashboardView';
+import DashboardView, { AcoesDoDiaCard } from './DashboardView';
 import MorningSummaryView, { MorningSummaryRoute } from './src/views/MorningSummaryView';
 import { MobileShortcutsView } from './src/views/MobileShortcutsView';
 import KnowledgeView from './KnowledgeView';
@@ -1840,6 +1840,14 @@ const App: React.FC = () => {
   const [notifications, setNotifications] = useState<HermesNotification[]>([]);
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  // A composição do dashboard muda no celular. A troca é por montagem
+  // condicional para não deixar listeners Firestore das duas versões ativos.
+  const [isMobileDashboardViewport, setIsMobileDashboardViewport] = useState(() => window.innerWidth < 640);
+  useEffect(() => {
+    const handleDashboardResize = () => setIsMobileDashboardViewport(window.innerWidth < 640);
+    window.addEventListener('resize', handleDashboardResize);
+    return () => window.removeEventListener('resize', handleDashboardResize);
+  }, []);
   const [syncData, setSyncData] = useState<any>(null);
   const [activePopup, setActivePopup] = useState<HermesNotification | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -5326,9 +5334,11 @@ const App: React.FC = () => {
                     }}
                   />
                 ) : viewMode === 'dashboard' ? (
-                  <>
-                    {/* Mobile: Atalhos Inteligentes */}
-                    <div className="sm:hidden">
+                  isMobileDashboardViewport ? (
+                    <>
+                      <div className="px-4 pt-4">
+                        <AcoesDoDiaCard isDark={isDarkTheme} />
+                      </div>
                       <MobileShortcutsView
                         isDark={isDarkTheme}
                         onOpenCopilotoText={() => { setCopilotoAutoStartMic(false); setIsCopilotoOpen(true); }}
@@ -5347,9 +5357,10 @@ const App: React.FC = () => {
                         onSync={handleSync}
                         onOpenSettings={() => setIsSettingsModalOpen(true)}
                       />
-                    </div>
-                    {/* Desktop: Dashboard completo */}
-                    <div className="hidden sm:block">
+                    </>
+                  ) : (
+                    <>
+                      {/* Desktop: Dashboard completo */}
                       <DashboardView
                         tarefas={tarefas}
                         isDark={isDarkTheme}
@@ -5374,8 +5385,8 @@ const App: React.FC = () => {
                           setIsCopilotoOpen(true);
                         }}
                       />
-                    </div>
-                  </>
+                    </>
+                  )
                 ) : viewMode === 'strategy' ? (
                   <div className={isStrategySplitCopilot ? 'flex h-[calc(100vh-7.5rem)] min-h-[640px] gap-4 overflow-hidden' : ''}>
                     <div className={isStrategySplitCopilot ? 'min-w-0 flex-1 overflow-y-auto pr-1' : ''}>

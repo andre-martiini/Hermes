@@ -1,14 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { arrayUnion, collection, doc, onSnapshot, query, runTransaction, updateDoc, where } from 'firebase/firestore';
+import { arrayUnion, collection, doc, getDoc, onSnapshot, query, runTransaction, updateDoc, where } from 'firebase/firestore';
 import { db } from './firebase';
 import {
-    Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry,
+    Tarefa, ActionPlanItem, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry,
     HealthWeight, HealthSettings, ExerciseLog, WalkBlock,
     formatDateLocalISO, sumWalkBlocksKm,
     ResumoMatinal, ResumoAcao
 } from './types';
 import { buildDiaryEmailNote, buildDiaryGenericNote, buildDiaryWhatsappNote, DiaryWhatsappActionItem } from './src/utils/diaryEntries';
 import { computeWeightHeadline, addDays } from './src/utils/healthAnalytics';
+import { estaFeita, estadoDaSubtarefa, ROTULO_ESTADO, textoDaSubtarefa } from './src/utils/subtarefas';
 
 interface DashboardViewProps {
     tarefas: Tarefa[];
@@ -924,9 +925,15 @@ const EmailLinkSuggestionsPanel: React.FC<{
 // vira "em espera" automaticamente -- não conta na barra, porque hoje não depende
 // de André. Lê resumo_matinal/{data} ao vivo, mesmo padrão de listener que o
 // EmailLinkSuggestionsPanel já usa acima.
-const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
+// Exportado -- também usado fora do Dashboard desktop, na visão mobile
+// (index.tsx renderiza este card acima da MobileShortcutsView), já que
+// abaixo do breakpoint `sm` o DashboardView inteiro não é montado.
+export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
     const [resumo, setResumo] = useState<ResumoMatinal | null>(null);
     const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+    const [planos, setPlanos] = useState<Record<string, ActionPlanItem[]>>({});
+    const [carregandoPlanos, setCarregandoPlanos] = useState<Record<string, boolean>>({});
+    const [errosPlanos, setErrosPlanos] = useState<Record<string, boolean>>({});
 
     useEffect(() => {
         const hojeId = formatDateLocalISO(new Date());
@@ -978,7 +985,28 @@ const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
         return '#9333ea';
     };
 
-    const toggle = (id: string) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+    const toggle = async (id: string) => {
+        const vaiAbrir = !expanded[id];
+        setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+
+        // O resumo diário só tem o próximo passo. O plano completo é lido sob
+        // demanda para mostrar as etapas reais sem listeners permanentes extras.
+        if (!vaiAbrir || id in planos || carregandoPlanos[id]) return;
+        setCarregandoPlanos(prev => ({ ...prev, [id]: true }));
+        try {
+            const snap = await getDoc(doc(db, 'tarefas', id));
+            const plano = snap.exists() && Array.isArray(snap.data().plano_acao)
+                ? snap.data().plano_acao as ActionPlanItem[]
+                : [];
+            setPlanos(prev => ({ ...prev, [id]: plano }));
+            setErrosPlanos(prev => ({ ...prev, [id]: false }));
+        } catch (error) {
+            console.error('Não foi possível carregar as etapas da ação:', error);
+            setErrosPlanos(prev => ({ ...prev, [id]: true }));
+        } finally {
+            setCarregandoPlanos(prev => ({ ...prev, [id]: false }));
+        }
+    };
 
     return (
         <DashboardCard title="Ações de Hoje" isDark={isDark}>
@@ -1033,6 +1061,8 @@ const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
                                 : null;
                             const isOpen = !!expanded[a.id];
                             const pct = a.etapas_totais > 0 ? Math.round((a.etapas_feitas / a.etapas_totais) * 100) : 0;
+                            const etapasAbertas = (planos[a.id] || [])
+                                .filter(etapa => textoDaSubtarefa(etapa) && !estaFeita(etapa));
                             return (
                                 <div key={a.id} className={`rounded-2xl border ${isDark ? 'bg-[#151c27] border-[#2a313d]' : 'bg-white border-[#f3f4f6]'}`}>
                                     <button
@@ -1079,7 +1109,37 @@ const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
                                     </button>
                                     {isOpen && (
                                         <div className="px-4 pb-4 pl-[50px] flex flex-col gap-1.5">
-                                            {a.proximo_passo && (
+                                            {carregandoPlanos[a.id] ? (
+                                                <p className={`m-0 text-xs ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>Carregando etapas…</p>
+                                            ) : errosPlanos[a.id] ? (
+                                                <p className="m-0 text-xs text-rose-500">Não foi possível carregar as etapas agora.</p>
+                                            ) : etapasAbertas.length > 0 ? (
+                                                <div className="flex flex-col gap-2">
+                                                    <p className={`m-0 text-[10.5px] font-bold font-mono uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>
+                                                        Etapas restantes ({etapasAbertas.length})
+                                                    </p>
+                                                    {etapasAbertas.map(etapa => {
+                                                        const estado = estadoDaSubtarefa(etapa);
+                                                        const dataPrevista = String(etapa.data_prevista || '').slice(0, 10);
+                                                        return (
+                                                            <div key={etapa.id} className="flex items-start gap-2 text-xs leading-relaxed">
+                                                                <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                                                                    estado === 'em_andamento' ? 'bg-blue-500' :
+                                                                        estado === 'aguardando_terceiro' ? 'bg-amber-400' : 'bg-slate-400'
+                                                                }`} />
+                                                                <div className="min-w-0">
+                                                                    <p className={`m-0 ${isDark ? 'text-slate-300' : 'text-[#4d4354]'}`}>{textoDaSubtarefa(etapa)}</p>
+                                                                    <p className={`m-0 text-[10px] ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>
+                                                                        {ROTULO_ESTADO[estado]}{dataPrevista ? ` · ${dataPrevista}` : ''}{estado === 'aguardando_terceiro' && etapa.aguardando_de ? ` · ${etapa.aguardando_de}` : ''}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            ) : a.etapas_totais > 0 ? (
+                                                <p className={`m-0 text-xs ${isDark ? 'text-slate-500' : 'text-[#7e7386]'}`}>Todas as etapas deste plano foram concluídas.</p>
+                                            ) : a.proximo_passo && (
                                                 <p className={`m-0 text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-[#4d4354]'}`}>{a.proximo_passo}</p>
                                             )}
                                             <div className="flex gap-2 mt-1 flex-wrap">
