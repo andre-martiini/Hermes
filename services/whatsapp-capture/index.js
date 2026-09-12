@@ -280,9 +280,20 @@ async function syncChatRegistry() {
                 totalSaved++;
 
                 if (countInBatch >= BATCH_SIZE) {
-                    await batch.commit();
-                    batch = db.batch();
-                    countInBatch = 0;
+                    try {
+                        await batch.commit();
+                    } catch (commitErr) {
+                        // O SDK marca o WriteBatch como "commitado" mesmo quando o
+                        // commit falha (erro transitório, doc inválido, etc.) — sem
+                        // recriar o batch aqui, todo chat seguinte quebrava em cascata
+                        // com "Cannot modify a WriteBatch that has been committed"
+                        // (visto em produção em 12/09/2026: 500 chats, ~50 em cascata
+                        // após a falha do lote de 450).
+                        console.error('[Chats] Falha ao commitar lote parcial de chats:', commitErr);
+                    } finally {
+                        batch = db.batch();
+                        countInBatch = 0;
+                    }
                 }
             } catch (itemErr) {
                 console.error('[Chats] Falha ao processar chat individual:', itemErr);
@@ -290,7 +301,11 @@ async function syncChatRegistry() {
         }
 
         if (countInBatch > 0) {
-            await batch.commit();
+            try {
+                await batch.commit();
+            } catch (commitErr) {
+                console.error('[Chats] Falha ao commitar lote final de chats:', commitErr);
+            }
         }
 
         lastChatsSyncMs = Date.now();
