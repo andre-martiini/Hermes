@@ -723,6 +723,49 @@ def mcp_annotations(tool_name: str) -> dict:
 # um terceiro campo (ver o corpo de `_calculadora`). E o candidato de menor
 # risco do catalogo para o primeiro contrato real: nao exigiu investigar
 # comportamento assincrono, paginacao nem variacao de forma por argumento.
+#
+# `buscar_contato` e a segunda (P03 sub-entrega 9/N): `_buscar_contato`
+# (tools/hermes_tools.py) tambem e pura leitura, sem rede (inventario:
+# necessidade_de_rede=False), e devolve so duas formas -- termo vazio,
+# `{"erro": str, "candidatos": []}`, ou sucesso, `{"candidatos": [...]}`
+# -- nunca um terceiro campo no nivel superior (o corpo da funcao so tem
+# esses dois `return`). Cada item de `candidatos` e montado inteiramente a
+# mao dentro da propria funcao, com TODAS as 8 chaves sempre presentes
+# (`modelo_interacao` incluido -- por isso esta em `required` tambem,
+# mesmo podendo valer `None`).
+#
+# ACHADO DA 1a RODADA DE REVISAO ADVERSARIAL (corrigido aqui): a versao
+# original deste comentario afirmava que pessoa_id/nome/email/telefone/
+# whatsapp_chat_id sao "sempre string" so por causa do default `""` em
+# `data.get(campo, "")` -- mas `dict.get(chave, default)` so devolve o
+# default quando a CHAVE ESTA AUSENTE; se `perfil_pessoas` tiver um
+# documento com o campo presente e de outro tipo (ex.: `telefone`
+# gravado como numero, ou `tags` gravado como string em vez de lista --
+# ha pelo menos 10 pontos de escrita diferentes nesta colecao, em
+# main.py, telegram_extended.py, contact_merge_utils.py e outros,
+# nenhum auditado aqui), o valor cru atravessa sem cast, e
+# `structuredContent` (que nunca e validado contra `outputSchema` antes
+# de sair) divergiria silenciosamente do contrato publicado para esse
+# candidato especifico. Isto NAO trava nada no proprio Hermes (nenhum
+# caminho valida o envelope contra o schema antes de responder) e nao e
+# motivo para omitir o contrato -- string/array continuam sendo o tipo
+# PRETENDIDO e majoritario destes campos -- mas e uma garantia mais fraca
+# que a de `calculadora` (onde tudo passa por `str()` explicito no
+# proprio handler) ou a de `score`/`pessoa_id` aqui (score e sempre
+# `float` por construcao no proprio `_buscar_contato`; pessoa_id e
+# sempre `doc.id`, que o SDK do Firestore garante ser string). Registrado
+# como pendencia nao-bloqueante nesta sub-entrega, nao corrigido por
+# validacao adicional -- adicionar tal validacao mudaria o comportamento
+# de producao da tool, fora do escopo de uma fatia de contrato.
+#
+# `modelo_interacao` continua com contrato deliberadamente solto (`type:
+# ["object", "null"]`, sem `properties`/`additionalProperties` aninhado):
+# confirmado em `main.py::parse_resposta_modelo_pessoa`, o unico lugar
+# que escreve este campo, ele e sempre `None` OU um dict de 4 chaves --
+# mas o CONTEUDO desse dict e gerado por LLM, e um contrato errado sobre
+# ele seria pior que declarar so o tipo externo confirmado. Pelo mesmo
+# espirito, `tags` fica tipada como `array` sem `items`: o valor vem
+# direto de `data.get("tags", [])` sem normalizacao de elemento.
 _OUTPUT_SCHEMAS: dict[str, dict] = {
     "calculadora": {
         "type": "object",
@@ -732,6 +775,35 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
             "erro": {"type": "string"},
         },
         "required": ["expressao"],
+        "additionalProperties": False,
+    },
+    "buscar_contato": {
+        "type": "object",
+        "properties": {
+            "erro": {"type": "string"},
+            "candidatos": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "pessoa_id": {"type": "string"},
+                        "nome": {"type": "string"},
+                        "email": {"type": "string"},
+                        "telefone": {"type": "string"},
+                        "whatsapp_chat_id": {"type": "string"},
+                        "tags": {"type": "array"},
+                        "modelo_interacao": {"type": ["object", "null"]},
+                        "score": {"type": "number"},
+                    },
+                    "required": [
+                        "pessoa_id", "nome", "email", "telefone",
+                        "whatsapp_chat_id", "tags", "modelo_interacao", "score",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["candidatos"],
         "additionalProperties": False,
     },
 }
