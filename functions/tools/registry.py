@@ -700,3 +700,60 @@ def mcp_annotations(tool_name: str) -> dict:
     elif entry.dominio_rede == DominioRede.ABERTO:
         annotations["openWorldHint"] = True
     return annotations
+
+
+# P03 passo 3, fatia `outputSchema`/`structuredContent`: ao contrario de
+# `annotations` (que deriva de campos ja classificados no inventario para
+# as 105 tools -- ver `mcp_annotations` acima), outputSchema exige definir
+# um CONTRATO DE DADOS por tool -- nao ha atalho generico (serializar
+# qualquer dict de retorno como "o schema" seria publicar um contrato
+# inventado, nunca verificado contra a forma real do resultado, e um
+# contrato errado e pior que a omissao, mesma razao ja usada para os hints
+# nao investigados de `mcp_annotations`). Por isso comeca como lista
+# FECHADA, uma tool investigada por vez -- mesmo padrao das outras excecoes
+# fechadas deste modulo (`_CAMPOS_COM_TOLERANCIA_A_STRING_JSON`,
+# `_CAMPOS_COM_ENUM_TOLERANTE_A_CASE`).
+#
+# `calculadora` e a primeira: `_calculadora` (tools/hermes_tools.py) e pura
+# e deterministica -- sem rede, sem Firestore (confirmado no inventario:
+# necessidade_de_rede=False, verificador="determinístico, recomputável
+# pelo chamador") -- e sempre devolve um dict achatado com EXATAMENTE duas
+# formas possiveis: sucesso, `{"expressao": str, "resultado": str}`, ou
+# falha, `{"expressao": str, "erro": str}` -- nunca as duas juntas, nunca
+# um terceiro campo (ver o corpo de `_calculadora`). E o candidato de menor
+# risco do catalogo para o primeiro contrato real: nao exigiu investigar
+# comportamento assincrono, paginacao nem variacao de forma por argumento.
+_OUTPUT_SCHEMAS: dict[str, dict] = {
+    "calculadora": {
+        "type": "object",
+        "properties": {
+            "expressao": {"type": "string"},
+            "resultado": {"type": "string"},
+            "erro": {"type": "string"},
+        },
+        "required": ["expressao"],
+        "additionalProperties": False,
+    },
+}
+
+
+def output_schema(tool_name: str) -> dict | None:
+    """`outputSchema` (protocolo MCP) para o catalogo publicado em
+    `tools/list`, quando ha um contrato de dados definido e verificado para
+    a tool -- P03 passo 3 ("Adicionar outputSchema, structuredContent,
+    annotations e envelope aos caminhos compativeis; manter content
+    legado"), a fatia que faltava depois de `annotations` (sub-entregas
+    6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo, deliberadamente:
+    cada tool exige investigar a forma real do retorno do handler antes de
+    publicar um contrato, mesma disciplina das outras funcoes deste modulo
+    (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).
+
+    `mcp_server._handle_tools_call` usa esta mesma funcao para decidir se
+    inclui `structuredContent` no envelope de `tools/call` -- as duas
+    pontas (o schema publicado em `tools/list` e o dado publicado em
+    `tools/call`) tem que vir da MESMA fonte, senao um cliente que valida
+    `structuredContent` contra o `outputSchema` anunciado pode ver os dois
+    divergirem com o tempo.
+    """
+    return _OUTPUT_SCHEMAS.get(tool_name)

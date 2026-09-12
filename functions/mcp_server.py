@@ -915,6 +915,17 @@ def _handle_tools_list() -> dict:
         annotations = registry.mcp_annotations(name)
         if annotations:
             tool_entry["annotations"] = annotations
+        # P03 passo 3, fatia `outputSchema`: contrato de dados do resultado,
+        # quando ha um definido e verificado para a tool (ver docstring de
+        # `registry.output_schema` -- lista FECHADA, uma tool investigada por
+        # vez, comeca so com `calculadora`). Campo OPCIONAL no objeto Tool —
+        # omitido (nao null) quando a tool nao tem contrato publicado, mesma
+        # convencao de `annotations` acima. `_handle_tools_call` usa a MESMA
+        # `registry.output_schema` para decidir se inclui `structuredContent`
+        # no envelope de `tools/call` -- as duas pontas vem da mesma fonte.
+        saida_schema = registry.output_schema(name)
+        if saida_schema:
+            tool_entry["outputSchema"] = saida_schema
         tools.append(tool_entry)
     return {
         "tools": tools,
@@ -1158,10 +1169,36 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
 
     start = time.monotonic()
     is_error = False
+    estruturado = None  # ver comentario de `outputSchema`/`structuredContent` abaixo
     try:
         result = execute_tool(name, arguments, ctx)
         is_error = bool(result.get("erro")) if isinstance(result, dict) else _looks_like_error(result)
         text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, default=str)
+        if isinstance(result, dict) and registry.output_schema(name):
+            # So faz o round-trip quando a tool TEM outputSchema publicado --
+            # achado da 2a rodada de revisao adversarial (sobre o fix da 1a):
+            # a guarda original testava so `isinstance(result, dict)`, entao
+            # rodava `json.loads(text)` em TODA chamada de tool que devolve
+            # dict (a maioria do catalogo de 105), so para descartar o
+            # resultado logo depois quando a tool nao tem outputSchema -- CPU
+            # gasto sem necessidade, fora do escopo desta fatia (so
+            # `calculadora` hoje). `json.loads(text)`, NAO o `result` cru:
+            # `text` acima ja passou por `json.dumps(..., default=str)`, que
+            # nunca falha mesmo se o executor devolver um tipo nao
+            # serializavel por padrao (ex.: datetime, Timestamp do Firestore,
+            # Decimal -- comuns em outros handlers deste catalogo). O
+            # envelope inteiro (com `structuredContent`) e serializado de
+            # novo mais abaixo na pilha, em `_json_response` (`json.dumps(
+            # payload, ...)`, SEM `default=str`, fora de qualquer
+            # try/except) -- usar `result` direto arriscaria essa segunda
+            # serializacao levantar um `TypeError` nao tratado assim que uma
+            # tool futura com outputSchema devolvesse um valor nao-JSON-
+            # nativo. Para `calculadora` os dois sao equivalentes hoje (o
+            # handler ja forca `str()` em tudo), mas o mecanismo geral
+            # precisa ser seguro para a proxima tool que ganhar outputSchema,
+            # nao so para esta primeira (achado da 1a rodada de revisao
+            # adversarial desta sub-entrega).
+            estruturado = json.loads(text)
     except ToolNotAvailable:
         raise McpError(-32003, f"Tool '{name}' nao tem executor ligado ao MCP")
     except Exception as exc:  # noqa: BLE001
@@ -1180,7 +1217,38 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
     # retorno de `tools/call` que nao passa por ela (monta o envelope direto
     # porque `text` aqui pode ja vir como string crua do executor, nao um
     # payload dict a serializar).
-    return {"content": [{"type": "text", "text": text}], "isError": is_error, "resultType": "complete"}
+    envelope = {"content": [{"type": "text", "text": text}], "isError": is_error, "resultType": "complete"}
+    # P03 passo 3, fatia `structuredContent`: `estruturado` so e diferente de
+    # `None` quando as DUAS condicoes do bloco `try` acima ja bateram --
+    # executor devolveu um dict E a tool tem `outputSchema` publicado
+    # (`registry.output_schema` -- lista FECHADA, ver docstring lá e em
+    # `_handle_tools_list` acima) -- entao um simples `is not None` basta
+    # aqui, sem checar `output_schema` de novo. Incluido tanto no caminho de
+    # sucesso quanto no de erro reconhecido pelo proprio executor (`is_error`
+    # por `result.get("erro")`): para `calculadora`, a primeira tool com
+    # contrato, as duas formas (`resultado` e `erro`) satisfazem o mesmo
+    # schema -- nao ha necessidade de omitir num dos dois casos. Excecao
+    # levantada pelo executor (bloco `except` acima) nunca chega aqui:
+    # `estruturado` fica `None`, e nenhum dict de erro ad-hoc e inventado
+    # como "structuredContent" so para preencher o campo.
+    #
+    # Este e so o caminho de EXECUCAO DIRETA (a maioria das tools; ver o
+    # comentario de `resultType` logo acima). `structuredContent` NAO chega
+    # nos caminhos de `_text_result` mais acima nesta funcao (confirmacao
+    # pendente/negada, job assincrono, `confirmar_acao`) -- lacuna aceita
+    # deliberadamente por enquanto: `calculadora` nunca passa por eles hoje
+    # (nao esta em `_CONFIRMACAO_OBRIGATORIA` nem em `_ASYNC_TOOLS`), mas
+    # `_exige_confirmacao` tambem consulta `system/mcp_access.confirm_tools`
+    # em runtime (Firestore) -- ACHADO da revisao adversarial desta
+    # sub-entrega: se um dia alguem configurar `calculadora` la, as chamadas
+    # passariam a sair sem `structuredContent` mesmo com `outputSchema`
+    # continuando anunciado em `tools/list`. Fechar isso direito exigiria
+    # levar `structuredContent` para dentro de `_text_result` (usada por
+    # varios fluxos bem mais amplos que so `calculadora`) -- fora do escopo
+    # desta fatia pequena; ver docs/autonomia/execucao.md.
+    if estruturado is not None:
+        envelope["structuredContent"] = estruturado
+    return envelope
 
 
 def _erro_campos_obrigatorios(name: str, arguments: dict) -> dict | None:
