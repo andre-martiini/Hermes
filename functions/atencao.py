@@ -294,6 +294,68 @@ def _persistir_itens_atencao(db, itens: list[dict]) -> int:
     return gravados
 
 
+def _fechar_itens_obsoletos(db, tipo: str, chaves_validas: set[str], desfecho: str) -> int:
+    """DEV-2026-0004 sub-entrega 6/9, proposta (c)(iii): fecha automaticamente
+    itens da fila de atenção cuja condição não vale mais.
+
+    Achado A da demanda: o item `saude_pesagem_ausente:2026-09-05` ("Pesagem
+    não registrada há 3 dias") continuou ABERTO e com texto CONGELADO mesmo
+    depois de pesagens novas registradas em 08/09, 09/09 e 10/09. A causa:
+    `avaliar_rotinas_saude` usa a data da ÚLTIMA pesagem conhecida como parte
+    do `chave_dedupe` (``saude_pesagem_ausente:{data}``) -- quando chega uma
+    pesagem nova, essa data avança e o próximo lote gera uma chave DIFERENTE
+    (ou nenhum item, se a lacuna deixou de valer); `_persistir_itens_atencao`
+    só sabe atualizar/reabrir o doc da chave que RECEBE, nunca toca no doc
+    antigo, órfão, que nenhum lote futuro volta a endereçar. Mesma lacuna
+    estrutural em `aguardando_terceiro_vencido` (uma resposta do terceiro ou
+    a etapa marcada `feito` tira a etapa do próximo lote de
+    `avaliar_etapas`, mas o doc antigo nunca é revisitado).
+
+    `chaves_validas` é o conjunto de `chave_dedupe` que o `avaliar_*` deste
+    MESMO run já produziu (e `_persistir_itens_atencao` já gravou/atualizou)
+    para este `tipo` -- pode ser vazio, quando a condição não existe mais em
+    lugar nenhum (ex.: pesagem em dia). Qualquer doc do mesmo `tipo` que
+    ainda está ABERTO (estado fora de `ESTADOS_FECHADOS` -- inclui
+    `aberto`, `delegado_ao_agente` e `aguardando_andre`: uma condição que
+    deixou de existir não devia continuar esperando decisão de ninguém) e
+    cuja `chave_dedupe` NÃO está em `chaves_validas` teve sua condição
+    resolvida (ou a chave mudou) e é fechado com o MESMO formato de campos
+    que `resolver_item` grava manualmente -- `estado`, `desfecho`,
+    `resolvido_em`, `atualizado_em` -- para as duas trilhas (manual e
+    automática) ficarem indistinguíveis na leitura.
+
+    Deliberadamente NÃO usado ainda para `TIPO_CONTA_VENCENDO`: a consulta
+    de `detectar_atencao_financeiro` já é escopada ao mês/ano corrente
+    (``fixed_bills.where(month==, year==)``), então um lote deste tipo nunca
+    inclui contas de meses anteriores -- fechar automaticamente todo doc
+    `conta_vencendo` fora do lote atual arriscaria encerrar uma conta
+    vencida de um mês anterior ainda genuinamente em aberto, não paga. Essa
+    verificação (o ciclo de vida de `fixed_bills` mês a mês) fica para uma
+    sub-entrega futura; o detector financeiro também é desligado por padrão
+    (`atencao.financeiro.enabled`), reduzindo o risco prático enquanto isso.
+
+    Diferente de `resolver_item`, NÃO grava nota de diário mesmo quando o
+    item tem `acao_id` -- essa narrativa existe para explicar uma decisão
+    HUMANA; aqui é só o sistema constatando que uma condição computada
+    deixou de ser verdadeira, sem necessidade de explicação adicional."""
+    fechados = 0
+    for doc in db.collection(COLLECTION).where("tipo", "==", tipo).stream():
+        data = doc.to_dict() or {}
+        if data.get("estado") in ESTADOS_FECHADOS:
+            continue
+        chave = str(data.get("chave_dedupe") or doc.id)
+        if chave in chaves_validas:
+            continue
+        doc.reference.update({
+            "estado": ESTADO_RESOLVIDO,
+            "desfecho": desfecho,
+            "resolvido_em": firestore.SERVER_TIMESTAMP,
+            "atualizado_em": firestore.SERVER_TIMESTAMP,
+        })
+        fechados += 1
+    return fechados
+
+
 def avaliar_contas_vencendo(
     contas: list[dict],
     hoje: date,
@@ -558,6 +620,25 @@ def detectar_atencao_saude(
     itens = avaliar_rotinas_saude(registros_saude, hoje_dt)
     if itens:
         _persistir_itens_atencao(db, itens)
+    # DEV-2026-0004 sub-entrega 6/9, proposta (c)(iii): roda mesmo quando
+    # `itens` está vazio -- é exatamente o caso em que a pesagem voltou em
+    # dia e o item antigo (achado A) precisa fechar. Ver `_fechar_itens_obsoletos`.
+    #
+    # Trava de segurança (achado da revisão adversarial): só fecha quando a
+    # consulta a `health_weights` realmente trouxe algum registro no período.
+    # Fechar exige uma pesagem recente o bastante para zerar a lacuna -- ou
+    # seja, `medidas` só pode estar vazia aqui se não houve NENHUM registro
+    # nos últimos 60 dias, o que nunca é o caso genuíno de fechamento (esse
+    # sempre tem pelo menos a pesagem nova em `medidas`). Um `medidas` vazio
+    # é ambíguo -- pode ser "sem pesagem mesmo" ou uma falha silenciosa da
+    # consulta (nome de coleção mudou, índice ausente, etc.) -- e em ambos os
+    # casos o certo é NÃO fechar nada, deixando o item aberto até o próximo
+    # run com dado confiável.
+    if medidas:
+        _fechar_itens_obsoletos(
+            db, TIPO_ROTINA_SAUDE_AUSENTE, {item["chave_dedupe"] for item in itens},
+            desfecho="Pesagem registrada -- condição não é mais válida (fechado automaticamente).",
+        )
     return itens
 
 
@@ -708,6 +789,24 @@ def detectar_atencao_acoes(event: scheduler_fn.ScheduledEvent = None) -> None:
 
     itens = avaliar_etapas(tarefas_ativas, hoje, respostas_por_chat)
     _persistir_itens_atencao(db, itens)
+    # DEV-2026-0004 sub-entrega 6/9, proposta (c)(iii): mesma lógica do
+    # detector de saúde -- fecha itens cuja etapa deixou de estar vencida
+    # (terceiro respondeu, etapa marcada feito, ação encerrada). Ver
+    # `_fechar_itens_obsoletos`.
+    #
+    # Trava de segurança (achado da revisão adversarial): só fecha quando
+    # `tarefas_docs` realmente veio com alguma tarefa. Um `tarefas_docs`
+    # vazio é ambíguo -- pode ser "sistema genuinamente sem tarefas" ou uma
+    # falha/erro de configuração silencioso na consulta (coleção renomeada,
+    # filtro errado, etc.) -- e um lote vazio por engano fecharia em massa,
+    # em silêncio, TODO item `aguardando_terceiro_vencido` hoje aberto, cada
+    # um esperando por um terceiro diferente. Em caso de dúvida, não fecha;
+    # o item fica aberto até um run com dado confiável.
+    if tarefas_docs:
+        _fechar_itens_obsoletos(
+            db, TIPO_AGUARDANDO_TERCEIRO_VENCIDO, {item["chave_dedupe"] for item in itens},
+            desfecho="Condição não é mais válida: terceiro respondeu, etapa concluída ou ação encerrada (fechado automaticamente).",
+        )
 
 
 def _to_iso(val) -> str | None:

@@ -1201,6 +1201,41 @@ class TestEscritaDireta(unittest.TestCase):
         self.assertIn("outbox_pendentes", res)
         self.assertEqual(res["outbox_pendentes"], 3)
 
+    @patch("morning_summary.build_morning_summary")
+    def test_obter_estado_atual_resume_respostas_pendentes(self, mock_build):
+        """DEV-2026-0004 sub-entrega 9/9, proposta (e): mesmo par
+        total/contagem-por-categoria que `fila_atencao` já tinha, agora
+        também para `respostas_pendentes` -- sem que o consumidor precise
+        reabrir a estrutura interna de `inbox_pendentes.coletar()`."""
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+        mock_build.return_value = {
+            "acoes": [],
+            "respostas_pendentes": {
+                "itens": [{"id": "wa:1"}, {"id": "wa:2"}],
+                "filtrados": {"encerramentos": 4, "informativo_llm": 1, "dispensados": 2},
+                "total_omitido": 3,
+            },
+        }
+        ctx = ToolContext(_db=MagicMock())
+        res = hermes_tools.obter_estado_atual(ctx, {})
+        # 2 itens retornados + 3 omitidos pelo corte de `limite` = 5 pendentes de verdade.
+        self.assertEqual(res["respostas_pendentes_total"], 5)
+        self.assertEqual(res["respostas_pendentes_filtrados"],
+                         {"encerramentos": 4, "informativo_llm": 1, "dispensados": 2})
+
+    @patch("morning_summary.build_morning_summary")
+    def test_obter_estado_atual_resume_respostas_pendentes_ausente(self, mock_build):
+        """Sem a chave `respostas_pendentes` (ex.: build_morning_summary
+        degradado), o resumo cai para 0/{} em vez de propagar KeyError."""
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+        mock_build.return_value = {"acoes": []}
+        ctx = ToolContext(_db=MagicMock())
+        res = hermes_tools.obter_estado_atual(ctx, {})
+        self.assertEqual(res["respostas_pendentes_total"], 0)
+        self.assertEqual(res["respostas_pendentes_filtrados"], {})
+
 
 class TestRetornoNaoMenteSobreOEfeito(unittest.TestCase):
     """Os três bugs de 28/08/2026 tinham a mesma forma: retorno sem efeito.

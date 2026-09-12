@@ -526,6 +526,13 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "whatsapp", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",
         dados_sensiveis_categoria="remetente/trecho de conversas de terceiros",
     ),
+    "dispensar_resposta_pendente": ToolInventoryEntry(
+        "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "nenhum — motivo é texto livre do chamador, sem validação de conteúdo",
+        dados_sensiveis_categoria="pode referenciar contato/conversa de terceiro",
+        nota="sem caminho de volta -- não há tool de undispensar; dispensa vale só para o "
+             "trecho/snippet atual (fingerprint no item_id), não para a conversa/thread inteira",
+    ),
     "obter_acao": ToolInventoryEntry(
         "acoes_tarefas", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA, "nenhum necessário",
     ),

@@ -1,0 +1,21 @@
+{
+  "name": "dispensar_resposta_pendente",
+  "description": "Marca um item de listar_respostas_pendentes como tratado/dispensado, gravando o motivo, para nao reaparecer na fila enquanto o conteudo da mensagem nao mudar. Exige confirmacao explicita.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "item_id": {
+        "type": "string",
+        "description": "Campo 'id' devolvido por listar_respostas_pendentes para o item (formato canal:identificador:fingerprint). Nunca deve ser montado a mao."
+      },
+      "motivo": {
+        "type": "string",
+        "description": "Motivo/desfecho da dispensa (ex.: 'Ja tratei por telefone', 'Devolucao de e-mail, nao precisa resposta'). Obrigatorio."
+      }
+    },
+    "required": [
+      "item_id",
+      "motivo"
+    ]
+  }
+}

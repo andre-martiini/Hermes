@@ -108,6 +108,7 @@ _CATALOG: dict[str, str] = {
     "reagendar_acoes_em_lote": "Redistribui acoes por dias uteis e ja aplica",
     "obter_estado_atual": "Panorama do dia numa chamada: acoes, agenda, janelas livres e pendencias",
     "listar_respostas_pendentes": "Lista a fila de respostas pendentes, com opção de auditar itens filtrados",
+    "dispensar_resposta_pendente": "Marca um item da fila de respostas pendentes como tratado, para não reaparecer",
     "obter_acao": "Uma acao inteira e SEM TRUNCAMENTO: descricao, notas, plano completo e diario",
     # Ingestao de arquivo: sem ela, anexo so entrava por link de algo que ja
     # estava no Drive, e comprovante nascido fora dele ficava orfao.
@@ -158,6 +159,7 @@ _CATALOG: dict[str, str] = {
 
 _NEEDS_CONFIRMATION: set[str] = {
     "resolver_item_atencao",
+    "dispensar_resposta_pendente",
     "criar_acao_no_sistema",
     "agendar_lembrete_acao",
     "editar_plano_acao",

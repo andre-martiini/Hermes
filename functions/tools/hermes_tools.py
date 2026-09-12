@@ -1839,6 +1839,28 @@ def obter_estado_atual(ctx: ToolContext, args: dict):
         except Exception:
             estado["fila_atencao"] = []
             estado["fila_atencao_total"] = 0
+        # DEV-2026-0004 sub-entrega 9/9, proposta (e): `respostas_pendentes` já
+        # vem embutido em `estado` (herdado de `build_morning_summary`, que
+        # chama `inbox_pendentes.coletar()`) só com itens "pergunta"/"pedido"
+        # não resolvidos -- os demais rótulos (informativo/encerramento),
+        # dispensados, tratados na ação ou por outro canal já saem filtrados
+        # de lá (ver `coletar()` e `_LLM_ROTULO_PARA_FILTRO`). O que faltava
+        # era o mesmo par `_total`/contagem por categoria que `fila_atencao`
+        # já tem acima, para que um consumidor (briefing matinal, revisão do
+        # dia) não precise reabrir a estrutura interna de `coletar()` só para
+        # saber "quantos pendentes" e "quantos filtrados, por quê" -- os dois
+        # sinais que a proposta (e) pede citar. `total_omitido` conta itens
+        # que passaram no filtro mas ficaram de fora só pelo corte de
+        # `limite`; sem ele, `respostas_pendentes_total` subcontaria sessões
+        # com mais pendências reais do que o limite default de `coletar()`.
+        try:
+            rp = estado.get("respostas_pendentes") or {}
+            rp_itens = rp.get("itens") or []
+            estado["respostas_pendentes_total"] = len(rp_itens) + int(rp.get("total_omitido") or 0)
+            estado["respostas_pendentes_filtrados"] = rp.get("filtrados") or {}
+        except Exception:
+            estado["respostas_pendentes_total"] = 0
+            estado["respostas_pendentes_filtrados"] = {}
         try:
             from agent_requests import contar_pendentes
             estado["agent_requests_pendentes"] = contar_pendentes(ctx.db)
@@ -1859,6 +1881,15 @@ def listar_respostas_pendentes(ctx: ToolContext, args: dict):
     from inbox_pendentes import coletar
     return coletar(ctx.db, incluir_filtrados=bool(args.get("incluir_filtrados")),
                    limite=int(args.get("limite") or 50))
+
+
+def dispensar_resposta_pendente(ctx: ToolContext, args: dict):
+    """DEV-2026-0004 sub-entrega 8/9, proposta (d): marca um item de
+    `listar_respostas_pendentes` como tratado, para não reaparecer na fila
+    enquanto o trecho/snippet que o originou não mudar. `item_id` é o campo
+    `id` devolvido para o item (nunca deve ser montado à mão)."""
+    from inbox_pendentes import dispensar
+    return dispensar(ctx.db, item_id=args.get("item_id"), motivo=args.get("motivo"))
 
 
 def obter_acao(ctx: ToolContext, args: dict):
@@ -2445,6 +2476,7 @@ _HANDLERS: dict = {
     "reagendar_acoes_em_lote": reagendar_acoes_em_lote,
     "obter_estado_atual": obter_estado_atual,
     "listar_respostas_pendentes": listar_respostas_pendentes,
+    "dispensar_resposta_pendente": dispensar_resposta_pendente,
     "obter_acao": obter_acao,
     "listar_conversas_whatsapp": _whatsapp("listar_conversas"),
     "ler_mensagens_whatsapp": _whatsapp("ler_mensagens"),
