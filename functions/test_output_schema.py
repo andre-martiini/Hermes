@@ -34,21 +34,29 @@ garantia de tipo mais forte do grupo até aqui, porque a coleção que ela lê
 de gravar (`agent_runs.montar_registro`) -- ver comentário de
 `_OUTPUT_SCHEMAS` em `tools/registry.py` para o levantamento completo,
 incluindo as duas candidatas descartadas por terem formato alternativo de
-erro.
+erro -- e `consultar_pedidos_agente` (sub-entrega 12/N): quinta tool,
+backed por `agent_requests.listar_pendentes`, cuja coleção (`agent_requests`)
+também tem um único ponto de criação de documento em todo o repositório
+(`atencao_whatsapp.py`, via `agent_requests.enfileirar_ou_atualizar`) --
+ver comentário de `_OUTPUT_SCHEMAS` em `tools/registry.py`, que também
+corrige uma pendência registrada incorretamente na sub-entrega 11/N sobre
+"vários escritores" nesta coleção.
 
 Três frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
    paridade com TODO o catálogo real (não amostra): nenhuma tool além de
-   `calculadora`, `buscar_contato`, `consultar_lista_compras` e
-   `consultar_execucoes_agente` tem contrato publicado hoje.
+   `calculadora`, `buscar_contato`, `consultar_lista_compras`,
+   `consultar_execucoes_agente` e `consultar_pedidos_agente` tem contrato
+   publicado hoje.
 2. `TestHandleToolsListOutputSchema` -- ponta a ponta via
    `mcp_server._handle_tools_list()`: `outputSchema` chega no catálogo
-   publicado só para essas quatro tools.
+   publicado só para essas cinco tools.
 3. `TestIntegracaoHandleToolsCallStructuredContent` -- ponta a ponta via
    `mcp_server._handle_tools_call`: `structuredContent` chega no envelope
    de `tools/call` para `calculadora` (execução real, pura) e para
-   `buscar_contato`/`consultar_lista_compras`/`consultar_execucoes_agente`
-   (executor mockado -- as três dependem de Firestore, então o teste cobre
+   `buscar_contato`/`consultar_lista_compras`/`consultar_execucoes_agente`/
+   `consultar_pedidos_agente`
+   (executor mockado -- as quatro dependem de Firestore, então o teste cobre
    o MECANISMO, não a correção interna dos handlers, mesmo padrão já usado
    para `consultar_processo_sipac` abaixo), é sempre IGUAL ao dict que
    `content[0].text` serializa (mesma fonte, nunca diverge), bate com o
@@ -210,14 +218,59 @@ class TestOutputSchema(unittest.TestCase):
             with self.subTest(campo=campo):
                 self.assertEqual(item["properties"][campo]["type"], ["string", "null"])
 
-    def test_paridade_quatro_tools_tem_output_schema_hoje(self):
+    def test_consultar_pedidos_agente_tem_schema_com_campos_obrigatorios(self):
+        schema = registry.output_schema("consultar_pedidos_agente")
+        self.assertIsNotNone(schema)
+        self.assertEqual(schema["type"], "object")
+        self.assertEqual(schema["required"], ["total", "pedidos"])
+        self.assertEqual(set(schema["properties"].keys()), {"total", "pedidos"})
+        self.assertFalse(schema["additionalProperties"])
+
+        item = schema["properties"]["pedidos"]["items"]
+        campos_item = {
+            "id", "tipo", "status", "payload", "origem",
+            "item_atencao_id", "acao_id", "criado_em", "atualizado_em",
+        }
+        # Todos os 9 campos são sempre chaves presentes no dict construído
+        # por `agent_requests.listar_pendentes` (literal único, sem chave
+        # condicional -- ao contrário de `truncado` em
+        # consultar_lista_compras ou `erro` no nível superior de
+        # buscar_contato).
+        self.assertEqual(set(item["properties"].keys()), campos_item)
+        self.assertEqual(set(item["required"]), campos_item)
+        self.assertFalse(item["additionalProperties"])
+        # status é enum de UM valor -- não por "só um escritor" (garantia
+        # mais fraca, usada para justificar `tipo`/`origem` como string
+        # solta), e sim porque a própria query de listar_pendentes filtra
+        # por `status == "pendente"`: nenhum outro valor pode aparecer no
+        # resultado, não importa quantos escritores a coleção tenha.
+        self.assertEqual(item["properties"]["status"]["enum"], ["pendente"])
+        # payload é um dict livre (conceitualmente por `tipo`, só um tipo
+        # implementado hoje) -- deliberadamente sem "properties" aninhado,
+        # mesmo espírito de `contadores` (consultar_execucoes_agente) e
+        # `modelo_interacao` (buscar_contato).
+        self.assertEqual(item["properties"]["payload"], {"type": "object"})
+        # tipo/origem ficam string solta (não enum), ao contrário de
+        # status: a garantia de valor único hoje vem só de "um único
+        # escritor", não de um filtro de query -- um enum quebraria no dia
+        # em que um segundo tipo de pedido aparecer.
+        self.assertEqual(item["properties"]["tipo"], {"type": "string"})
+        self.assertEqual(item["properties"]["origem"], {"type": "string"})
+        # item_atencao_id/acao_id (nível superior) e criado_em/atualizado_em
+        # são nullable -- sem coerção de tipo no ponto de leitura.
+        for campo in ("item_atencao_id", "acao_id", "criado_em", "atualizado_em"):
+            with self.subTest(campo=campo):
+                self.assertEqual(item["properties"][campo]["type"], ["string", "null"])
+
+    def test_paridade_cinco_tools_tem_output_schema_hoje(self):
         # Não por amostragem: para TODA tool do catálogo real (106 hoje),
         # output_schema devolve algo só para calculadora, buscar_contato,
-        # consultar_lista_compras e consultar_execucoes_agente -- prova que
-        # a lista fechada não vazou para nenhuma outra tool por engano.
+        # consultar_lista_compras, consultar_execucoes_agente e
+        # consultar_pedidos_agente -- prova que a lista fechada não vazou
+        # para nenhuma outra tool por engano.
         com_schema = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
-            "consultar_execucoes_agente",
+            "consultar_execucoes_agente", "consultar_pedidos_agente",
         }
         for nome in registry.list_tool_names():
             with self.subTest(tool=nome):
@@ -257,10 +310,17 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             registry.output_schema("consultar_execucoes_agente"),
         )
 
+    def test_consultar_pedidos_agente_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["consultar_pedidos_agente"])
+        self.assertEqual(
+            self.catalogo["consultar_pedidos_agente"]["outputSchema"],
+            registry.output_schema("consultar_pedidos_agente"),
+        )
+
     def test_nenhuma_outra_tool_publicada_tem_output_schema(self):
         esperadas = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
-            "consultar_execucoes_agente",
+            "consultar_execucoes_agente", "consultar_pedidos_agente",
         }
         com_schema = [
             nome for nome, tool in self.catalogo.items()
@@ -273,7 +333,7 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
         # (anteriores ao P03) continuam presentes e corretos ao lado dele.
         for nome in (
             "calculadora", "buscar_contato", "consultar_lista_compras",
-            "consultar_execucoes_agente",
+            "consultar_execucoes_agente", "consultar_pedidos_agente",
         ):
             with self.subTest(tool=nome):
                 tool = self.catalogo[nome]
@@ -593,6 +653,93 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
             self.assertIn(campo, propriedades, f"campo '{campo}' fora do outputSchema")
         for run in estruturado["runs"]:
             for campo in run:
+                self.assertIn(campo, item_props, f"campo '{campo}' fora do item declarado")
+
+    def test_consultar_pedidos_agente_sucesso_leva_structured_content_igual_ao_content(self):
+        # `agent_requests.listar_pendentes` real depende de Firestore
+        # (`ctx.db.collection("agent_requests")...`); o executor é mockado
+        # aqui com uma forma real que a função produz (ver
+        # `agent_requests.py`), mesmo padrão de
+        # buscar_contato/consultar_lista_compras/consultar_execucoes_agente
+        # acima -- testa o MECANISMO, não a lógica de consulta em si.
+        esperado = {
+            "total": 1,
+            "pedidos": [
+                {
+                    "id": "consolidar_audio:item-1",
+                    "tipo": "consolidar_audio",
+                    "status": "pendente",
+                    "payload": {
+                        "chat_id": "5511999999999@c.us",
+                        "chat_name": "Fulano",
+                        "mensagem_ids": ["wamid-1", "wamid-2"],
+                        "acao_id": None,
+                        "item_atencao_id": "item-1",
+                    },
+                    "origem": "atencao_whatsapp.audio_relevante",
+                    "item_atencao_id": "item-1",
+                    "acao_id": None,
+                    "criado_em": "2026-09-13T18:00:00+00:00",
+                    "atualizado_em": "2026-09-13T18:00:00+00:00",
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_pedidos_agente", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_pedidos_agente_lista_vazia_tambem_leva_structured_content(self):
+        esperado = {"total": 0, "pedidos": []}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_pedidos_agente", "arguments": {"tipo": "consolidar_audio"}},
+                ctx=_ctx(),
+            )
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_consultar_pedidos_agente_structured_content_bate_com_o_output_schema_publicado(self):
+        schema = registry.output_schema("consultar_pedidos_agente")
+        propriedades = schema["properties"]
+        item_props = propriedades["pedidos"]["items"]["properties"]
+        mock_retorno = {
+            "total": 1,
+            "pedidos": [
+                {
+                    "id": "consolidar_audio:item-2",
+                    "tipo": "consolidar_audio",
+                    "status": "pendente",
+                    "payload": {
+                        "chat_id": "5511988888888@c.us",
+                        "chat_name": "Ciclana",
+                        "mensagem_ids": ["wamid-3"],
+                        "acao_id": "acao-9",
+                        "item_atencao_id": "item-2",
+                    },
+                    "origem": "atencao_whatsapp.audio_relevante",
+                    "item_atencao_id": "item-2",
+                    "acao_id": "acao-9",
+                    "criado_em": "2026-09-13T18:05:00+00:00",
+                    "atualizado_em": "2026-09-13T18:05:00+00:00",
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_retorno):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_pedidos_agente", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        for campo in schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(campo, propriedades, f"campo '{campo}' fora do outputSchema")
+        for pedido in estruturado["pedidos"]:
+            for campo in pedido:
                 self.assertIn(campo, item_props, f"campo '{campo}' fora do item declarado")
 
     def test_tool_sem_output_schema_nunca_leva_structured_content_mesmo_com_dict(self):
