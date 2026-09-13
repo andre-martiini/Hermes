@@ -948,6 +948,128 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
         "required": ["total", "runs"],
         "additionalProperties": False,
     },
+    # `consultar_pedidos_agente` (P03 sub-entrega 12/N) -- quinta tool com
+    # outputSchema. Investigadas e descartadas nesta sub-entrega, por
+    # devolverem STRING (json.dumps) em vez de dict -- mesmo motivo de
+    # `consultar_politica` (sub-entrega 10/N): `obter_portal_compras_publico`
+    # e `obter_projeto_bolsas_publico` (`tools/telegram_extended.py`, ambas
+    # `return json.dumps(...)`), e `simular_politica`/`preparar_politica`
+    # (`tools/hermes_tools.py::_simular_politica`/`_preparar_politica`, que
+    # sempre fazem `json.dumps(...)` antes de retornar, mesmo no caminho de
+    # sucesso). `consultar_pedidos_agente` e backed por
+    # `agent_requests.listar_pendentes`, que devolve dict cru -- candidata
+    # viavel.
+    #
+    # Escritor da colecao `agent_requests`: busca exaustiva no repositorio
+    # (grep por `collection("agent_requests")`, por `COLLECTION` do proprio
+    # modulo e por `agent_requests.enfileirar_ou_atualizar`) encontrou UM
+    # UNICO ponto de criacao de documento -- `atencao_whatsapp.py` (fluxo
+    # `audio_relevante`), que sempre chama `enfileirar_ou_atualizar` com
+    # `tipo=agent_requests.TIPO_CONSOLIDAR_AUDIO` ("consolidar_audio",
+    # unica constante de tipo que existe no modulo) e
+    # `origem="atencao_whatsapp.audio_relevante"` -- os dois parametros
+    # obrigatorios (sem default) da funcao, nunca omitidos por esse
+    # chamador. `firestore.rules` nega escrita direta do cliente em
+    # `agent_requests` (mesma lista que nega `agent_runs`), entao o unico
+    # caminho de escrita e mesmo o descrito acima. NOTA CORRETIVA: a
+    # pendencia registrada na sub-entrega 11/N (docs/autonomia/execucao.md)
+    # citava "varios escritores (atencao_whatsapp.py, mcp_jobs.py,
+    # agent_requests.py)" para esta colecao -- essa lista estava errada:
+    # `mcp_jobs.py` so MENCIONA `agent_requests.py` em comentarios de
+    # comparacao de padrao (mesmo estilo de transacao Firestore), nunca
+    # escreve na colecao. O bloco original nao e reescrito (ja arquivado),
+    # mas o erro nao e repetido aqui -- mesma licao ja registrada na
+    # sub-entrega 10/N sobre nao enumerar exaustivamente sem checar cada
+    # nome citado.
+    #
+    # `status` e enum fechado de UM valor (`["pendente"]`) por uma garantia
+    # mais forte que "escritor unico": e o proprio filtro da QUERY
+    # (`listar_pendentes` faz `.where("status", "==", STATUS_PENDENTE)`),
+    # entao nenhum documento com outro valor de `status` jamais aparece no
+    # resultado, independente de quantos escritores a colecao tiver
+    # (inclusive um segundo escritor futuro nao quebraria essa garantia
+    # especifica, ainda que quebrasse outras).
+    #
+    # `payload` fica com contrato solto (`type: object`, sem `properties`
+    # aninhado) DELIBERADAMENTE, mesmo sabendo que o unico `tipo` hoje
+    # (`consolidar_audio`) tem forma fixa e totalmente coagida
+    # (`agent_requests.montar_payload_consolidar_audio`: `chat_id`/
+    # `chat_name` via `str(x or "").strip()`, `mensagem_ids` via
+    # `list(x or [])`, `acao_id`/`item_atencao_id` via
+    # `str(x).strip() if x else None`) -- porque `payload` e conceitualmente
+    # POR TIPO (o proprio docstring do modulo fala em "tarefas autonomas",
+    # so uma implementada ate agora), e modelar a forma de um unico tipo
+    # tornaria o contrato invalido no dia em que um segundo `tipo` aparecer
+    # com payload diferente, sem que ninguem precise mudar este schema --
+    # mesmo espirito de `contadores` (consultar_execucoes_agente) e
+    # `modelo_interacao` (buscar_contato). Pelo mesmo motivo `tipo` (campo
+    # do item, nao o parametro da tool) fica como `string` solta, nao enum:
+    # ao contrario de `status`, a garantia de UM valor aqui vem so de "so
+    # existe um escritor hoje", nao de um filtro de query -- um enum de um
+    # valor ficaria errado assim que o segundo tipo (que o proprio design
+    # antecipa) aparecesse. `origem` tambem fica `string` solta pelo mesmo
+    # motivo (parametro livre da funcao, so hardcoded em UM valor no unico
+    # call site atual).
+    #
+    # `id` e sempre `doc.id` (garantido string pelo SDK do Firestore).
+    # `item_atencao_id`/`acao_id` (campos do NIVEL SUPERIOR do item, nao os
+    # de dentro de `payload`) sao `[string, null]`: vem direto de
+    # `d.get(...)` sem coercao -- no unico call site atual, `item_atencao_id`
+    # sempre recebe uma string (`doc_id`, usado antes como chave do proprio
+    # documento de atencao) e `acao_id` pode ser `None` legitimamente
+    # (`item.get("acao_id")` de um item de atencao sem acao vinculada) --
+    # mas nenhum dos dois passa por `str()`/coercao explicita dentro de
+    # `listar_pendentes`, mesma categoria de risco nao-bloqueante ja
+    # registrada para campos sem coercao no ponto de leitura (`ordem` em
+    # consultar_lista_compras, campos de `perfil_pessoas` em buscar_contato).
+    # `criado_em`/`atualizado_em` passam por uma funcao `_to_iso` PROPRIA de
+    # `agent_requests.py` -- funcionalmente identica a de `agent_runs.py`
+    # (mesmo corpo: `None` vira `None`, objeto com `.isoformat()` vira
+    # string, qualquer outra coisa vira `str()`), mas uma DUPLICATA, nao
+    # importada de la -- achado da 1a rodada de revisao adversarial desta
+    # sub-entrega, corrigindo uma versao anterior deste comentario que
+    # dizia "a mesma `_to_iso`" (as duas funcoes podem divergir no futuro
+    # sem que a outra mude). De qualquer forma, string ou `None`, nunca
+    # outro tipo.
+    #
+    # Historico completo da revisao adversarial desta sub-entrega (quantas
+    # rodadas, o que cada uma achou): docs/autonomia/execucao.md, sub-entrega
+    # 12/N -- mesma licao ja registrada na sub-entrega 10/N sobre uma
+    # narrativa rodada-a-rodada nao pertencer a um comentario de codigo
+    # permanente (o numero de rodadas muda enquanto a revisao ainda esta em
+    # andamento; fixar esse numero aqui no meio do processo e o mesmo erro,
+    # so que sobre o proprio processo de revisao em vez de sobre a
+    # colecao Firestore).
+    "consultar_pedidos_agente": {
+        "type": "object",
+        "properties": {
+            "total": {"type": "integer"},
+            "pedidos": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "tipo": {"type": "string"},
+                        "status": {"type": "string", "enum": ["pendente"]},
+                        "payload": {"type": "object"},
+                        "origem": {"type": "string"},
+                        "item_atencao_id": {"type": ["string", "null"]},
+                        "acao_id": {"type": ["string", "null"]},
+                        "criado_em": {"type": ["string", "null"]},
+                        "atualizado_em": {"type": ["string", "null"]},
+                    },
+                    "required": [
+                        "id", "tipo", "status", "payload", "origem",
+                        "item_atencao_id", "acao_id", "criado_em", "atualizado_em",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["total", "pedidos"],
+        "additionalProperties": False,
+    },
 }
 
 
@@ -958,7 +1080,7 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (102 das 106 tools
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (101 das 106 tools
     hoje), deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
