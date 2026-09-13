@@ -806,6 +806,73 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
         "required": ["candidatos"],
         "additionalProperties": False,
     },
+    # `consultar_lista_compras` (P03 sub-entrega 10/N) -- terceira tool com
+    # outputSchema, mais segura que `buscar_contato` quanto a garantia de
+    # tipo NA PROPRIA FUNCAO (campos passados direto do documento do
+    # Firestore ali, sem coercao): `tools/lista_compras.py::_item_publico`
+    # forca `str()`/`bool()` em CADA campo do item antes de devolver, com
+    # uma excecao: `ordem` (opcional, so presente quando o documento tem o
+    # campo) e passado adiante sem coercao de tipo. A colecao `shopping_items`
+    # tambem e lida/escrita por outros caminhos de codigo fora de
+    # `tools/lista_compras.py` (pelo menos `tools/telegram_extended.py`,
+    # `security_portals.py` e o frontend web); nenhum dos que foram
+    # inspecionados grava `ordem` com tipo diferente de inteiro, mas isso e
+    # uma verificacao empirica dos caminhos checados, nao uma auditoria
+    # completa da colecao -- risco aceito e nao-bloqueante, mesma categoria
+    # e mesmo tratamento da pendencia equivalente registrada para
+    # `buscar_contato`/`perfil_pessoas` na sub-entrega 9/N (ver historico
+    # completo desta verificacao, incluindo os achados de revisao
+    # adversarial que motivaram esta redacao, no diario desta sub-entrega).
+    # `filtro` e enum fechado (`_FILTROS` em
+    # lista_compras.py resolve qualquer entrada para um destes 5 valores
+    # antes de devolver; entrada invalida levanta erro ANTES de montar a
+    # resposta, nunca aparece aqui). `total`/`planejados`/`comprados`
+    # descrevem sempre a lista inteira, nao a fatia filtrada (ver docstring
+    # de `lista_compras.consultar`) -- por isso nao sao redundantes com
+    # `encontrados`/`retornados`, que sim refletem o filtro/paginacao
+    # aplicados. `truncado` fica de fora de `required`: so aparece quando
+    # `True` (o handler nunca escreve `truncado: False`).
+    "consultar_lista_compras": {
+        "type": "object",
+        "properties": {
+            "total": {"type": "integer"},
+            "planejados": {"type": "integer"},
+            "comprados": {"type": "integer"},
+            "filtro": {
+                "type": "string",
+                "enum": ["todos", "planejados", "comprados", "pendentes", "nao_planejados"],
+            },
+            "encontrados": {"type": "integer"},
+            "retornados": {"type": "integer"},
+            "itens": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "item_id": {"type": "string"},
+                        "nome": {"type": "string"},
+                        "categoria": {"type": "string"},
+                        "quantidade": {"type": "string"},
+                        "unit": {"type": "string"},
+                        "isPlanned": {"type": "boolean"},
+                        "isPurchased": {"type": "boolean"},
+                        "ordem": {"type": "integer"},
+                    },
+                    "required": [
+                        "item_id", "nome", "categoria", "quantidade",
+                        "unit", "isPlanned", "isPurchased",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+            "truncado": {"type": "boolean"},
+        },
+        "required": [
+            "total", "planejados", "comprados", "filtro",
+            "encontrados", "retornados", "itens",
+        ],
+        "additionalProperties": False,
+    },
 }
 
 
@@ -816,7 +883,8 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo, deliberadamente:
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (103 das 106 tools
+    hoje), deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
     (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).
