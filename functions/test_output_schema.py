@@ -17,26 +17,39 @@ formas no nível superior (termo vazio ou sucesso), cujo item de
 `candidatos` é montado inteiramente a mão dentro da própria função, exceto
 `modelo_interacao` (sempre `None` ou dict, mas com conteúdo gerado por LLM
 sem a mesma garantia estrutural -- ver comentário de `_OUTPUT_SCHEMAS` em
-`tools/registry.py`).
+`tools/registry.py`) -- e `consultar_lista_compras` (sub-entrega 10/N):
+terceira tool, mais segura que `buscar_contato` quanto à garantia de tipo
+NA PRÓPRIA FUNÇÃO (não a mais forte das três: `calculadora` força `str()`
+em TODO campo sem exceção; `consultar_lista_compras` tem uma exceção sem
+coerção, o campo opcional `ordem`), porque `tools/lista_compras.py::_item_publico`
+força `str()`/`bool()` nos demais campos do item antes de devolver -- mas
+a coleção `shopping_items` também é lida/escrita por outros caminhos, risco
+aceito e não-bloqueante (ver comentário de `_OUTPUT_SCHEMAS` em
+`tools/registry.py`, e o diário desta sub-entrega para o histórico
+completo da revisão adversarial que motivou essa redação).
 
 Três frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
    paridade com TODO o catálogo real (não amostra): nenhuma tool além de
-   `calculadora` e `buscar_contato` tem contrato publicado hoje.
+   `calculadora`, `buscar_contato` e `consultar_lista_compras` tem contrato
+   publicado hoje.
 2. `TestHandleToolsListOutputSchema` -- ponta a ponta via
    `mcp_server._handle_tools_list()`: `outputSchema` chega no catálogo
-   publicado só para essas duas tools.
+   publicado só para essas três tools.
 3. `TestIntegracaoHandleToolsCallStructuredContent` -- ponta a ponta via
    `mcp_server._handle_tools_call`: `structuredContent` chega no envelope
    de `tools/call` para `calculadora` (execução real, pura) e para
-   `buscar_contato` (executor mockado -- a função real depende de
-   Firestore, então o teste cobre o MECANISMO, não a correção interna de
-   `_buscar_contato`, mesmo padrão já usado para `consultar_processo_sipac`
-   abaixo), é sempre IGUAL ao dict que `content[0].text` serializa (mesma
-   fonte, nunca diverge), bate com o `outputSchema` publicado campo a
-   campo, e nunca aparece para uma tool sem contrato publicado -- nem
-   quando o resultado real também é um dict, nem quando o executor levanta
-   uma exceção não tratada por ele mesmo.
+   `buscar_contato`/`consultar_lista_compras` (executor mockado -- as duas
+   dependem de Firestore, então o teste cobre o MECANISMO, não a correção
+   interna dos handlers, mesmo padrão já usado para
+   `consultar_processo_sipac` abaixo), é sempre IGUAL ao dict que
+   `content[0].text` serializa (mesma fonte, nunca diverge), bate com o
+   `outputSchema` publicado campo a campo, e nunca aparece para uma tool
+   sem contrato publicado -- nem quando o resultado real também é um dict,
+   nem quando o executor levanta uma exceção não tratada por ele mesmo, nem
+   quando o handler devolve uma string crua de erro (caminho real de
+   `consultar_lista_compras` para filtro inválido, ver
+   `tools/hermes_tools.py::_consultar_lista_compras`).
 """
 
 from __future__ import annotations
@@ -109,12 +122,54 @@ class TestOutputSchema(unittest.TestCase):
         # elemento -- deliberadamente sem `items` aninhado, mesmo motivo.
         self.assertEqual(item["properties"]["tags"], {"type": "array"})
 
-    def test_paridade_calculadora_e_buscar_contato_tem_output_schema_hoje(self):
+    def test_consultar_lista_compras_tem_schema_com_campos_obrigatorios(self):
+        schema = registry.output_schema("consultar_lista_compras")
+        self.assertIsNotNone(schema)
+        self.assertEqual(schema["type"], "object")
+        self.assertEqual(
+            schema["required"],
+            ["total", "planejados", "comprados", "filtro", "encontrados", "retornados", "itens"],
+        )
+        self.assertEqual(
+            set(schema["properties"].keys()),
+            {"total", "planejados", "comprados", "filtro", "encontrados", "retornados",
+             "itens", "truncado"},
+        )
+        self.assertFalse(schema["additionalProperties"])
+        # truncado só aparece quando True (handler nunca escreve
+        # truncado=False) -- por isso fica fora de required, ao contrário
+        # das contagens de topo, que estão sempre presentes.
+        self.assertNotIn("truncado", schema["required"])
+        # filtro é enum fechado -- lista_compras._FILTROS já resolve
+        # qualquer entrada para um destes 5 valores antes de devolver.
+        self.assertEqual(
+            set(schema["properties"]["filtro"]["enum"]),
+            {"todos", "planejados", "comprados", "pendentes", "nao_planejados"},
+        )
+
+        item = schema["properties"]["itens"]["items"]
+        self.assertEqual(
+            set(item["properties"].keys()),
+            {"item_id", "nome", "categoria", "quantidade", "unit",
+             "isPlanned", "isPurchased", "ordem"},
+        )
+        self.assertEqual(
+            set(item["required"]),
+            {"item_id", "nome", "categoria", "quantidade", "unit", "isPlanned", "isPurchased"},
+        )
+        # ordem é o único campo opcional do item (só presente quando o
+        # documento do Firestore tem o campo) -- por isso fica fora de
+        # required, diferente dos outros 7 campos que _item_publico sempre
+        # inclui.
+        self.assertNotIn("ordem", item["required"])
+        self.assertFalse(item["additionalProperties"])
+
+    def test_paridade_tres_tools_tem_output_schema_hoje(self):
         # Não por amostragem: para TODA tool do catálogo real (106 hoje),
-        # output_schema devolve algo só para calculadora e buscar_contato --
-        # prova que a lista fechada não vazou para nenhuma outra tool por
-        # engano.
-        com_schema = {"calculadora", "buscar_contato"}
+        # output_schema devolve algo só para calculadora, buscar_contato e
+        # consultar_lista_compras -- prova que a lista fechada não vazou
+        # para nenhuma outra tool por engano.
+        com_schema = {"calculadora", "buscar_contato", "consultar_lista_compras"}
         for nome in registry.list_tool_names():
             with self.subTest(tool=nome):
                 if nome in com_schema:
@@ -139,8 +194,15 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             self.catalogo["buscar_contato"]["outputSchema"], registry.output_schema("buscar_contato")
         )
 
+    def test_consultar_lista_compras_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["consultar_lista_compras"])
+        self.assertEqual(
+            self.catalogo["consultar_lista_compras"]["outputSchema"],
+            registry.output_schema("consultar_lista_compras"),
+        )
+
     def test_nenhuma_outra_tool_publicada_tem_output_schema(self):
-        esperadas = {"calculadora", "buscar_contato"}
+        esperadas = {"calculadora", "buscar_contato", "consultar_lista_compras"}
         com_schema = [
             nome for nome, tool in self.catalogo.items()
             if nome not in esperadas and "outputSchema" in tool
@@ -150,7 +212,7 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
     def test_output_schema_nao_interfere_no_resto_do_tool_entry(self):
         # Campo aditivo -- annotations (sub-entregas 6/N-7/N) e _meta
         # (anteriores ao P03) continuam presentes e corretos ao lado dele.
-        for nome in ("calculadora", "buscar_contato"):
+        for nome in ("calculadora", "buscar_contato", "consultar_lista_compras"):
             with self.subTest(tool=nome):
                 tool = self.catalogo[nome]
                 self.assertIn("_meta", tool)
@@ -285,6 +347,105 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
         for candidato in estruturado["candidatos"]:
             for campo in candidato:
                 self.assertIn(campo, candidato_props, f"campo '{campo}' fora do item declarado")
+
+    def test_consultar_lista_compras_sucesso_leva_structured_content_igual_ao_content(self):
+        # `_consultar_lista_compras` real depende de Firestore
+        # (`ctx.db.collection("shopping_items")...`); o executor é mockado
+        # aqui com uma forma real que `lista_compras.consultar` produz (ver
+        # `tools/lista_compras.py::consultar`/`_item_publico`), mesmo padrão
+        # de `buscar_contato` acima -- testa o MECANISMO, não a lógica de
+        # filtragem/busca em si.
+        esperado = {
+            "total": 3,
+            "planejados": 2,
+            "comprados": 1,
+            "filtro": "todos",
+            "encontrados": 3,
+            "retornados": 3,
+            "itens": [
+                {
+                    "item_id": "abc123",
+                    "nome": "leite",
+                    "categoria": "Geral",
+                    "quantidade": "2",
+                    "unit": "un",
+                    "isPlanned": True,
+                    "isPurchased": False,
+                    "ordem": 1,
+                },
+                {
+                    "item_id": "def456",
+                    "nome": "pao",
+                    "categoria": "Padaria",
+                    "quantidade": "1",
+                    "unit": "un",
+                    "isPlanned": True,
+                    "isPurchased": True,
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_lista_compras", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_lista_compras_filtro_invalido_nunca_leva_structured_content(self):
+        # Caminho real de erro de `_consultar_lista_compras`: filtro
+        # inválido levanta `ListaComprasError`, capturado pelo próprio
+        # handler e devolvido como STRING "ERRO|..." (não dict) -- mesmo
+        # mecanismo genérico de `test_resultado_string_nunca_leva_structured_content`
+        # abaixo, mas exercitado aqui com o caminho de erro real desta tool
+        # específica, não um mock genérico sobre `calculadora`.
+        with patch.object(mcp_server, "execute_tool", return_value="ERRO|Filtro invalido."):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_lista_compras", "arguments": {"filtro": "invalido"}}, ctx=_ctx()
+            )
+        self.assertNotIn("structuredContent", resultado)
+
+    def test_consultar_lista_compras_structured_content_bate_com_o_output_schema_publicado(self):
+        schema = registry.output_schema("consultar_lista_compras")
+        propriedades = schema["properties"]
+        item_props = propriedades["itens"]["items"]["properties"]
+        mock_retorno = {
+            "total": 1,
+            "planejados": 0,
+            "comprados": 0,
+            "filtro": "nao_planejados",
+            "encontrados": 1,
+            "retornados": 1,
+            "itens": [
+                {
+                    "item_id": "xyz789",
+                    "nome": "sal",
+                    "categoria": "Geral",
+                    "quantidade": "1",
+                    "unit": "un",
+                    "isPlanned": False,
+                    "isPurchased": False,
+                },
+            ],
+            "truncado": True,
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_retorno):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_lista_compras", "arguments": {"filtro": "nao_planejados"}},
+                ctx=_ctx(),
+            )
+        estruturado = resultado["structuredContent"]
+        for campo in schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(campo, propriedades, f"campo '{campo}' fora do outputSchema")
+        for item in estruturado["itens"]:
+            for campo in item:
+                self.assertIn(campo, item_props, f"campo '{campo}' fora do item declarado")
+        # truncado=True chegou intacto -- prova que o campo opcional
+        # atravessa o mecanismo igual aos obrigatórios.
+        self.assertTrue(estruturado["truncado"])
 
     def test_tool_sem_output_schema_nunca_leva_structured_content_mesmo_com_dict(self):
         # `consultar_processo_sipac` não tem outputSchema publicado; mesmo
