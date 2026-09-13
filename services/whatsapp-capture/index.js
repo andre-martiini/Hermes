@@ -887,6 +887,58 @@ db.collection('whatsapp_sync_requests')
         });
     }, (err) => console.error('[Sync] Falha ao observar whatsapp_sync_requests:', err));
 
+// --- Sincronização do registro de chats sob demanda ---
+// syncChatRegistry() roda sozinho 60s depois do client ficar pronto e, depois
+// disso, só de novo quando o cron de 5 em 5 minutos perceber que já se passaram
+// CHATS_SYNC_INTERVAL_MS (6h) desde a última passagem. Isso é ótimo para o
+// regime normal, mas deixa um grupo novo (ou renomeado) até 6h fora de
+// whatsapp_chats. Este watcher dá um atalho: qualquer processo grava um doc
+// pending em whatsapp_chats_sync_requests e este worker roda a sincronização
+// completa na hora — mesmo padrão do backfill sob demanda acima
+// (whatsapp_sync_requests), mas para o registro inteiro de chats em vez de um
+// chat só. syncChatRegistry() já tem sua própria trava (isSyncingChats), então
+// pedir aqui enquanto uma passagem já está em andamento apenas aguarda essa
+// passagem terminar, sem duplicar trabalho nem gravar duas vezes.
+const processingChatsSyncRequests = new Set();
+
+async function handleChatsSyncRequest(requestId, data) {
+    if (processingChatsSyncRequests.has(requestId)) return;
+    processingChatsSyncRequests.add(requestId);
+
+    const ref = db.collection('whatsapp_chats_sync_requests').doc(requestId);
+    try {
+        if (!isClientReady) {
+            await ref.set({ status: 'error', error: 'worker_not_ready', updated_at: admin.firestore.Timestamp.now() }, { merge: true });
+            return;
+        }
+        await ref.set({ status: 'processing', updated_at: admin.firestore.Timestamp.now() }, { merge: true });
+        const wasAlreadySyncing = isSyncingChats;
+        await syncChatRegistry();
+        await ref.set({
+            status: 'done',
+            skipped_concurrent: wasAlreadySyncing,
+            synced_at: admin.firestore.Timestamp.now(),
+            updated_at: admin.firestore.Timestamp.now(),
+        }, { merge: true });
+        console.log(`[ChatsSync] Sincronização sob demanda concluída (pedido ${requestId}).`);
+    } catch (err) {
+        console.error(`[ChatsSync] Falha ao atender pedido ${requestId}:`, err.message || err);
+        await ref.set({ status: 'error', error: String(err.message || err), updated_at: admin.firestore.Timestamp.now() }, { merge: true }).catch(() => {});
+    } finally {
+        processingChatsSyncRequests.delete(requestId);
+    }
+}
+
+db.collection('whatsapp_chats_sync_requests')
+    .where('status', '==', 'pending')
+    .onSnapshot((snap) => {
+        snap.docChanges().forEach((change) => {
+            if (change.type === 'added' || change.type === 'modified') {
+                handleChatsSyncRequest(change.doc.id, change.doc.data());
+            }
+        });
+    }, (err) => console.error('[ChatsSync] Falha ao observar whatsapp_chats_sync_requests:', err));
+
 client.initialize();
 
 // Varredura horária de reparo de mídia (além da passada pós-ready) — recupera
