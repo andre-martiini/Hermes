@@ -873,6 +873,81 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
         ],
         "additionalProperties": False,
     },
+    # `consultar_execucoes_agente` (P03 sub-entrega 11/N) -- quarta tool com
+    # outputSchema, e a com a garantia de tipo mais forte encontrada ate
+    # agora no catalogo: a colecao Firestore que ela le (`agent_runs`) tem
+    # UM UNICO ESCRITOR em todo o repositorio -- `agent_runs.registrar`,
+    # chamado so pela tool `registrar_execucao_agente` -- e esse escritor
+    # SEMPRE passa por `agent_runs.montar_registro` antes de gravar, que
+    # valida cada campo (rotina/resumo nao podem ser vazios, status tem que
+    # estar no enum de 3 valores, contadores so e aceito se for dict ou
+    # None) e devolve so `{"erro": ...}` sem chamar `col.add(...)` quando
+    # algum campo obrigatorio falha -- nunca grava um documento fora dessa
+    # forma. Confirmado por busca exaustiva no repositorio: nenhum outro
+    # arquivo escreve na colecao `agent_runs` por fora de `registrar`
+    # (`retro_agente.py`, o unico outro modulo que menciona a colecao, so a
+    # LE). Diferente de `buscar_contato`/`perfil_pessoas` e
+    # `consultar_lista_compras`/`shopping_items` (sub-entregas 9/N e 10/N),
+    # aqui nao ha varios pontos de escrita nao auditados -- ha exatamente
+    # um, e ele valida antes de gravar. Duas candidatas do mesmo formato
+    # (leitura de sugestoes pendentes) foram descartadas nesta sub-entrega:
+    # `consultar_elevacoes_sugeridas`/`deteccao_subproduto.listar_pendentes`
+    # e `consultar_promocoes_autonomia_sugeridas`/
+    # `promocao_autonomia.listar_promocoes_pendentes` tem as duas um formato
+    # ALTERNATIVO de erro (`{"total": 0, "sugestoes"|"promocoes": [],
+    # "erro": str(exc)}`) quando a consulta ao Firestore falha -- modelar
+    # outputSchema pra elas exigiria decidir se o contrato cobre as duas
+    # formas possiveis ou so a normal, investigacao maior que esta fatia;
+    # `agent_runs.listar_recentes` nao tem esse formato alternativo (uma
+    # falha de consulta propaga como excecao nao tratada, fora do escopo de
+    # outputSchema, mesmo tratamento generico de qualquer handler sem
+    # try/except ao redor da consulta). `contadores` fica com contrato
+    # solto (`type: object`, sem `properties` aninhado): e um dict livre
+    # passado por quem chama `registrar_execucao_agente`, sem forma fixa
+    # entre rotinas diferentes -- mesmo espirito ja usado para
+    # `modelo_interacao` (buscar_contato). `erro`/`iniciado_em`/
+    # `finalizado_em`/`criado_em` sao `["string", "null"]`: `_to_iso`
+    # (`agent_runs.py`) sempre devolve string ou `None`, nunca outro tipo;
+    # `finalizado_em` e `criado_em` sao sempre preenchidos pelo proprio
+    # `registrar` quando ausentes (`firestore.SERVER_TIMESTAMP`), entao na
+    # pratica nunca chegam `None` por um caminho de escrita atual -- o
+    # `null` fica so como precaucao contra documento legado sem o campo,
+    # nunca observado, mesmo tratamento dado a `finalizado_em`/`iniciado_em`
+    # de outras tools deste modulo quando a garantia de presenca nao vem do
+    # proprio schema JSON e sim de um comportamento de codigo auditado.
+    "consultar_execucoes_agente": {
+        "type": "object",
+        "properties": {
+            "total": {"type": "integer"},
+            "runs": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "rotina": {"type": "string"},
+                        "status": {
+                            "type": "string",
+                            "enum": ["sucesso", "erro", "parcial"],
+                        },
+                        "resumo": {"type": "string"},
+                        "contadores": {"type": "object"},
+                        "erro": {"type": ["string", "null"]},
+                        "iniciado_em": {"type": ["string", "null"]},
+                        "finalizado_em": {"type": ["string", "null"]},
+                        "criado_em": {"type": ["string", "null"]},
+                    },
+                    "required": [
+                        "id", "rotina", "status", "resumo", "contadores",
+                        "erro", "iniciado_em", "finalizado_em", "criado_em",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["total", "runs"],
+        "additionalProperties": False,
+    },
 }
 
 
@@ -883,7 +958,7 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (103 das 106 tools
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (102 das 106 tools
     hoje), deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo

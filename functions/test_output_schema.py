@@ -26,23 +26,31 @@ força `str()`/`bool()` nos demais campos do item antes de devolver -- mas
 a coleção `shopping_items` também é lida/escrita por outros caminhos, risco
 aceito e não-bloqueante (ver comentário de `_OUTPUT_SCHEMAS` em
 `tools/registry.py`, e o diário desta sub-entrega para o histórico
-completo da revisão adversarial que motivou essa redação).
+completo da revisão adversarial que motivou essa redação) -- e
+`consultar_execucoes_agente` (sub-entrega 11/N): quarta tool, com a
+garantia de tipo mais forte do grupo até aqui, porque a coleção que ela lê
+(`agent_runs`) tem um único escritor em todo o repositório
+(`agent_runs.registrar`), que sempre valida os campos obrigatórios antes
+de gravar (`agent_runs.montar_registro`) -- ver comentário de
+`_OUTPUT_SCHEMAS` em `tools/registry.py` para o levantamento completo,
+incluindo as duas candidatas descartadas por terem formato alternativo de
+erro.
 
 Três frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
    paridade com TODO o catálogo real (não amostra): nenhuma tool além de
-   `calculadora`, `buscar_contato` e `consultar_lista_compras` tem contrato
-   publicado hoje.
+   `calculadora`, `buscar_contato`, `consultar_lista_compras` e
+   `consultar_execucoes_agente` tem contrato publicado hoje.
 2. `TestHandleToolsListOutputSchema` -- ponta a ponta via
    `mcp_server._handle_tools_list()`: `outputSchema` chega no catálogo
-   publicado só para essas três tools.
+   publicado só para essas quatro tools.
 3. `TestIntegracaoHandleToolsCallStructuredContent` -- ponta a ponta via
    `mcp_server._handle_tools_call`: `structuredContent` chega no envelope
    de `tools/call` para `calculadora` (execução real, pura) e para
-   `buscar_contato`/`consultar_lista_compras` (executor mockado -- as duas
-   dependem de Firestore, então o teste cobre o MECANISMO, não a correção
-   interna dos handlers, mesmo padrão já usado para
-   `consultar_processo_sipac` abaixo), é sempre IGUAL ao dict que
+   `buscar_contato`/`consultar_lista_compras`/`consultar_execucoes_agente`
+   (executor mockado -- as três dependem de Firestore, então o teste cobre
+   o MECANISMO, não a correção interna dos handlers, mesmo padrão já usado
+   para `consultar_processo_sipac` abaixo), é sempre IGUAL ao dict que
    `content[0].text` serializa (mesma fonte, nunca diverge), bate com o
    `outputSchema` publicado campo a campo, e nunca aparece para uma tool
    sem contrato publicado -- nem quando o resultado real também é um dict,
@@ -164,12 +172,53 @@ class TestOutputSchema(unittest.TestCase):
         self.assertNotIn("ordem", item["required"])
         self.assertFalse(item["additionalProperties"])
 
-    def test_paridade_tres_tools_tem_output_schema_hoje(self):
+    def test_consultar_execucoes_agente_tem_schema_com_campos_obrigatorios(self):
+        schema = registry.output_schema("consultar_execucoes_agente")
+        self.assertIsNotNone(schema)
+        self.assertEqual(schema["type"], "object")
+        self.assertEqual(schema["required"], ["total", "runs"])
+        self.assertEqual(set(schema["properties"].keys()), {"total", "runs"})
+        self.assertFalse(schema["additionalProperties"])
+
+        item = schema["properties"]["runs"]["items"]
+        campos_item = {
+            "id", "rotina", "status", "resumo", "contadores",
+            "erro", "iniciado_em", "finalizado_em", "criado_em",
+        }
+        self.assertEqual(set(item["properties"].keys()), campos_item)
+        # Todos os 9 campos são sempre chaves presentes no dict construído
+        # por `agent_runs.listar_recentes` (mesmo quando o valor é None) --
+        # nenhum é omitido condicionalmente, ao contrário de `truncado`
+        # (consultar_lista_compras) ou `erro` no nível superior de
+        # buscar_contato.
+        self.assertEqual(set(item["required"]), campos_item)
+        self.assertFalse(item["additionalProperties"])
+        # status é enum fechado -- agent_runs.montar_registro só grava um
+        # destes 3 valores (STATUS_VALIDOS), rejeitando a escrita antes de
+        # chegar no Firestore para qualquer outro.
+        self.assertEqual(
+            set(item["properties"]["status"]["enum"]), {"sucesso", "erro", "parcial"}
+        )
+        # contadores é um dict livre passado por quem chama
+        # registrar_execucao_agente, sem forma fixa entre rotinas --
+        # deliberadamente sem "properties" aninhado, mesmo espírito de
+        # modelo_interacao (buscar_contato).
+        self.assertEqual(item["properties"]["contadores"], {"type": "object"})
+        # erro/iniciado_em/finalizado_em/criado_em passam por _to_iso, que
+        # só devolve string ou None -- nunca outro tipo.
+        for campo in ("erro", "iniciado_em", "finalizado_em", "criado_em"):
+            with self.subTest(campo=campo):
+                self.assertEqual(item["properties"][campo]["type"], ["string", "null"])
+
+    def test_paridade_quatro_tools_tem_output_schema_hoje(self):
         # Não por amostragem: para TODA tool do catálogo real (106 hoje),
-        # output_schema devolve algo só para calculadora, buscar_contato e
-        # consultar_lista_compras -- prova que a lista fechada não vazou
-        # para nenhuma outra tool por engano.
-        com_schema = {"calculadora", "buscar_contato", "consultar_lista_compras"}
+        # output_schema devolve algo só para calculadora, buscar_contato,
+        # consultar_lista_compras e consultar_execucoes_agente -- prova que
+        # a lista fechada não vazou para nenhuma outra tool por engano.
+        com_schema = {
+            "calculadora", "buscar_contato", "consultar_lista_compras",
+            "consultar_execucoes_agente",
+        }
         for nome in registry.list_tool_names():
             with self.subTest(tool=nome):
                 if nome in com_schema:
@@ -201,8 +250,18 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             registry.output_schema("consultar_lista_compras"),
         )
 
+    def test_consultar_execucoes_agente_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["consultar_execucoes_agente"])
+        self.assertEqual(
+            self.catalogo["consultar_execucoes_agente"]["outputSchema"],
+            registry.output_schema("consultar_execucoes_agente"),
+        )
+
     def test_nenhuma_outra_tool_publicada_tem_output_schema(self):
-        esperadas = {"calculadora", "buscar_contato", "consultar_lista_compras"}
+        esperadas = {
+            "calculadora", "buscar_contato", "consultar_lista_compras",
+            "consultar_execucoes_agente",
+        }
         com_schema = [
             nome for nome, tool in self.catalogo.items()
             if nome not in esperadas and "outputSchema" in tool
@@ -212,7 +271,10 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
     def test_output_schema_nao_interfere_no_resto_do_tool_entry(self):
         # Campo aditivo -- annotations (sub-entregas 6/N-7/N) e _meta
         # (anteriores ao P03) continuam presentes e corretos ao lado dele.
-        for nome in ("calculadora", "buscar_contato", "consultar_lista_compras"):
+        for nome in (
+            "calculadora", "buscar_contato", "consultar_lista_compras",
+            "consultar_execucoes_agente",
+        ):
             with self.subTest(tool=nome):
                 tool = self.catalogo[nome]
                 self.assertIn("_meta", tool)
@@ -446,6 +508,92 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
         # truncado=True chegou intacto -- prova que o campo opcional
         # atravessa o mecanismo igual aos obrigatórios.
         self.assertTrue(estruturado["truncado"])
+
+    def test_consultar_execucoes_agente_sucesso_leva_structured_content_igual_ao_content(self):
+        # `agent_runs.listar_recentes` real depende de Firestore
+        # (`ctx.db.collection("agent_runs")...`); o executor é mockado aqui
+        # com uma forma real que a função produz (ver `agent_runs.py`),
+        # mesmo padrão de buscar_contato/consultar_lista_compras acima --
+        # testa o MECANISMO, não a lógica de consulta em si.
+        esperado = {
+            "total": 2,
+            "runs": [
+                {
+                    "id": "run-1",
+                    "rotina": "briefing_matinal",
+                    "status": "sucesso",
+                    "resumo": "Briefing enviado sem pendências.",
+                    "contadores": {"acoes_atrasadas": 0},
+                    "erro": None,
+                    "iniciado_em": "2026-09-13T07:00:00+00:00",
+                    "finalizado_em": "2026-09-13T07:00:04+00:00",
+                    "criado_em": "2026-09-13T07:00:04+00:00",
+                },
+                {
+                    "id": "run-2",
+                    "rotina": "avanco_autonomo_hermes",
+                    "status": "parcial",
+                    "resumo": "Argos indisponível; só leitura pública.",
+                    "contadores": {},
+                    "erro": "conector_indisponivel",
+                    "iniciado_em": "2026-09-13T11:00:00+00:00",
+                    "finalizado_em": None,
+                    "criado_em": "2026-09-13T11:00:00+00:00",
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_execucoes_agente", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_execucoes_agente_lista_vazia_tambem_leva_structured_content(self):
+        esperado = {"total": 0, "runs": []}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_execucoes_agente", "arguments": {"rotina": "inexistente"}},
+                ctx=_ctx(),
+            )
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_consultar_execucoes_agente_structured_content_bate_com_o_output_schema_publicado(self):
+        schema = registry.output_schema("consultar_execucoes_agente")
+        propriedades = schema["properties"]
+        item_props = propriedades["runs"]["items"]["properties"]
+        mock_retorno = {
+            "total": 1,
+            "runs": [
+                {
+                    "id": "run-3",
+                    "rotina": "revisao_semanal",
+                    "status": "erro",
+                    "resumo": "Falha ao gerar proposta.",
+                    "contadores": {"tentativas": 3},
+                    "erro": "timeout ao consultar politica",
+                    "iniciado_em": "2026-09-13T12:00:00+00:00",
+                    "finalizado_em": "2026-09-13T12:00:30+00:00",
+                    "criado_em": "2026-09-13T12:00:30+00:00",
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_retorno):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_execucoes_agente", "arguments": {"rotina": "revisao_semanal"}},
+                ctx=_ctx(),
+            )
+        estruturado = resultado["structuredContent"]
+        for campo in schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(campo, propriedades, f"campo '{campo}' fora do outputSchema")
+        for run in estruturado["runs"]:
+            for campo in run:
+                self.assertIn(campo, item_props, f"campo '{campo}' fora do item declarado")
 
     def test_tool_sem_output_schema_nunca_leva_structured_content_mesmo_com_dict(self):
         # `consultar_processo_sipac` não tem outputSchema publicado; mesmo
