@@ -1070,6 +1070,169 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
         "required": ["total", "pedidos"],
         "additionalProperties": False,
     },
+    # `consultar_historico_acoes` (P03 sub-entrega 14/N) -- sexta tool com
+    # outputSchema, e a PRIMEIRA a usar `oneOf`: ao contrario das cinco
+    # anteriores, o handler (`tools/hermes_tools.py::_consultar_historico_acoes`)
+    # tem duas formas de nivel superior genuinamente diferentes, nao uma
+    # forma unica com campos as vezes ausentes (`truncado` em
+    # `consultar_lista_compras`, `erro` em `buscar_contato`) -- SUCESSO e
+    # ERRO aqui sao dois conjuntos de campos obrigatorios DISJUNTOS:
+    #   - sucesso: `{"total_retornado": int, "resultados": [...], "filtros": {...}}`
+    #   - erro: `{"erro": str, "resultados": []}` (`resultados` SEMPRE lista
+    #     vazia -- hardcoded pelo proprio handler, que descarta o que
+    #     `buscar_tarefas` devolveu em `resultados` no seu dict de erro)
+    # Esta era a pendencia deixada pelas sub-entregas 12/N e 13/N ("avaliar
+    # `oneOf` -- nunca usado neste catalogo -- antes de escolher qual
+    # candidata fazer primeiro"). Decidido usar `oneOf` com as duas formas
+    # COMPLETAS (cada uma com seu proprio `required`/
+    # `additionalProperties: False`) em vez de uma forma unica com todos os
+    # campos fora de `required`: a alternativa aceitaria hibridos invalidos
+    # (ex.: `erro` e `filtros` juntos) que o handler real nunca produz.
+    #
+    # Handler investigado direto no codigo: `_consultar_historico_acoes`
+    # chama `busca_grafo.buscar_tarefas` (ate duas vezes -- reintentando com
+    # `match_mode="any"` quando a tentativa com `match_mode="all"` nao acha
+    # nada, controle de fluxo interno que nunca aparece na forma da
+    # resposta final). Se `buscar_tarefas` devolver `erro` (excecao
+    # capturada dentro dela mesma, ou falha na consulta base ao Firestore),
+    # o handler devolve `{"erro": ..., "resultados": []}` e para; senao,
+    # monta a forma de sucesso. Nao ha terceiro formato -- `buscar_tarefas`
+    # tambem pode devolver um campo `aviso` (string, quando precisou
+    # relaxar filtros ou ampliar a busca), mas esse campo NUNCA chega ao
+    # retorno do handler: ele so le `res.get("erro")` e
+    # `res.get("resultados", [])`, o resto de `res` e descartado.
+    #
+    # `resultados` (forma de sucesso) e uma lista de itens montados por
+    # `busca_grafo._formatar_resultado`, sempre o MESMO dict literal de 15
+    # chaves (nenhuma condicional): `id` (sempre `doc.id`, garantido string
+    # pelo SDK do Firestore); `criado_em` (coercao de tipo garantida por
+    # `str()` explicito -- `str(data.get("data_criacao", ""))[:10]`, sempre
+    # string mesmo que o campo no Firestore seja Timestamp/data/ausente);
+    # `plano_acao` e `acompanhamento_recente` (as duas construidas
+    # inteiramente a mao dentro de `_formatar_resultado`, so anexando
+    # strings formatadas -- `f"{marcador} {texto[:200]}"` e `f"[{data}]
+    # {nota[:300]}"` -- garantia de tipo tao forte quanto `criado_em`, ao
+    # contrario dos demais campos textuais, por isso `array` de `string`,
+    # nao `array` solto); e sete campos (`titulo`, `status`, `tipo_acao`,
+    # `responsavel`, `area`, `data_limite`, `processo_sei`) que sao
+    # `data.get(campo, default)` CRU, sem coercao nenhuma no ponto de
+    # leitura (`default` e `"sem titulo"` so para `titulo`; `""` para os
+    # outros seis) -- se o documento (`GRAFO_COLLECTION`) tiver algum desses
+    # campos gravado com tipo diferente de string, o valor cru vaza para a
+    # resposta --
+    # mesma categoria de risco ja aceita e nao-bloqueante de `ordem`
+    # (`consultar_lista_compras`) e dos campos de `perfil_pessoas`
+    # (`buscar_contato`), sem auditoria de todo escritor de
+    # `GRAFO_COLLECTION` feita nesta sub-entrega. `tags` fica `array` solto
+    # (mesmo espirito de `buscar_contato`); `descricao`/`notas`/
+    # `sintese_demanda` sao `(data.get(campo) or "")[:500|400]` -- coagido
+    # para string se o valor original for falsy ou ja string. ACHADO da 3a
+    # rodada de revisao adversarial desta sub-entrega, corrigindo uma
+    # versao anterior deste comentario que dizia que um valor truthy
+    # nao-string aqui sempre levantaria `TypeError`: isso so vale para
+    # ESCALARES nao-fatiaveis (int/float/bool) -- uma SEQUENCIA truthy
+    # (list/tuple/bytes/range) sobrevive ao `[:500]`/`[:400]` sem erro e
+    # vaza para a resposta do jeito que veio do Firestore (confirmado:
+    # `(["a", "b"] or "")[:500]` devolve `["a", "b"]`, nao levanta nada).
+    # Ou seja, estes tres campos tem a MESMA categoria de risco nao-
+    # bloqueante dos sete campos crus acima para entradas tipo sequencia
+    # (vazamento silencioso), e uma categoria mais segura (falha ruidosa)
+    # so para entradas escalares nao-fatiaveis -- nao a garantia
+    # uniformemente mais segura que a redacao anterior alegava.
+    #
+    # `filtros` (forma de sucesso) e eco dos ARGUMENTOS DE ENTRADA, nao
+    # dados persistidos: `query` e sempre string (`str(args.get("query") or
+    # "")`, mesma coercao de `expressao` em `calculadora`); os quatro
+    # campos restantes (`area_tematica`, `status`, `data_limite_inicio`,
+    # `data_limite_fim`) sao `None` quando o chamador omite (o schema
+    # publicado em `tools/schemas/consultar_historico_acoes.json` os
+    # declara como `string` opcional, nao `required`) ou `str(valor)`
+    # quando informado -- por isso `["string", "null"]`. ACHADO da revisao
+    # adversarial desta sub-entrega: ate a correcao, esses quatro campos
+    # eram `args.get(campo)` CRU (sem `str()`) -- como o schema publicado
+    # em `tools/list` so declara o tipo esperado sem checagem escalar em
+    # runtime (ver `registry.tipos_invalidos`), um chamador MCP mandando
+    # `area_tematica: 5` ou `status: ["a", "b"]` fazia esse valor vazar sem
+    # coercao para `filtros`, violando o proprio contrato aqui publicado --
+    # reproduzido de verdade (nao so hipotetico) antes da correcao. Corrigido
+    # com `tools/hermes_tools.py::_filtro_str_ou_none` (ver docstring la
+    # para o raciocinio completo, incluindo por que a coercao fica so no
+    # ECO de saida, nao dentro de `busca_grafo.buscar_tarefas`).
+    #
+    # Historico completo da revisao adversarial desta sub-entrega:
+    # docs/autonomia/execucao.md, sub-entrega 14/N.
+    "consultar_historico_acoes": {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "total_retornado": {"type": "integer"},
+                    "resultados": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "titulo": {"type": "string"},
+                                "status": {"type": "string"},
+                                "tipo_acao": {"type": "string"},
+                                "responsavel": {"type": "string"},
+                                "criado_em": {"type": "string"},
+                                "area": {"type": "string"},
+                                "data_limite": {"type": "string"},
+                                "processo_sei": {"type": "string"},
+                                "tags": {"type": "array"},
+                                "descricao": {"type": "string"},
+                                "notas": {"type": "string"},
+                                "sintese_demanda": {"type": "string"},
+                                "plano_acao": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "acompanhamento_recente": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            },
+                            "required": [
+                                "id", "titulo", "status", "tipo_acao", "responsavel",
+                                "criado_em", "area", "data_limite", "processo_sei",
+                                "tags", "descricao", "notas", "sintese_demanda",
+                                "plano_acao", "acompanhamento_recente",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "filtros": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "area_tematica": {"type": ["string", "null"]},
+                            "status": {"type": ["string", "null"]},
+                            "data_limite_inicio": {"type": ["string", "null"]},
+                            "data_limite_fim": {"type": ["string", "null"]},
+                        },
+                        "required": [
+                            "query", "area_tematica", "status",
+                            "data_limite_inicio", "data_limite_fim",
+                        ],
+                        "additionalProperties": False,
+                    },
+                },
+                "required": ["total_retornado", "resultados", "filtros"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "erro": {"type": "string"},
+                    "resultados": {"type": "array", "maxItems": 0},
+                },
+                "required": ["erro", "resultados"],
+                "additionalProperties": False,
+            },
+        ],
+    },
 }
 
 
@@ -1080,8 +1243,9 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (101 das 106 tools
-    hoje), deliberadamente:
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (100 das 106 tools
+    hoje, apos a sexta entrada, `consultar_historico_acoes`, sub-entrega
+    14/N), deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
     (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).
