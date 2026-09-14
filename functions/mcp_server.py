@@ -779,6 +779,21 @@ def _executar_confirmacao(ctx: ToolContext, confirmation_id: object, *, tool_esp
         result = execute_tool(nome, argumentos, ctx)
     except Exception as exc:  # não deixar uma confirmação reivindicada sem resultado
         result = {"erro": f"Falha ao executar a confirmação: {exc}"}
+        # Achado da revisão adversarial desta sub-entrega (fatia `envelope`):
+        # `ctx.mcp_confirmed_tool` já estava setado (linha acima, antes deste
+        # try/except) para permitir o `_audit_log` de uma execução que FALHOU
+        # -- proposital, não é revertido aqui por isso. Mas o chamador
+        # (`_handle_tools_call`) usa esse MESMO nome como `schema_tool` para
+        # decidir se anexa `structuredContent` contra o `outputSchema`
+        # publicado da tool -- e este `result` aqui é um wrapper de erro
+        # genérico do PRÓPRIO mecanismo de confirmação, não a forma real do
+        # retorno da tool (que nunca chegou a ser produzida). Se a tool tiver
+        # outputSchema com campos `required` (ex.: `calculadora` exige
+        # `expressao`), publicar `structuredContent: {"erro": ...}` como se
+        # fosse validado contra esse contrato seria uma violação silenciosa
+        # dele. Sinalizar isso explicitamente para o chamador não reverter
+        # `ctx.mcp_confirmed_tool` (que seguiria valendo para o audit log).
+        ctx.mcp_confirmed_tool_execucao_falhou = True
     if nome == "schedule_whatsapp_message":
         result = _resultado_confirmacao_whatsapp(ctx, argumentos, result)
     executed_at = datetime.now(timezone.utc)
@@ -946,6 +961,7 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
         # funcao correta tambem quando chamada diretamente em testes.
         ctx.mcp_confirmed_tool = None
         ctx.mcp_confirmed_arguments = None
+        ctx.mcp_confirmed_tool_execucao_falhou = False
         start = time.monotonic()
         result = _executar_confirmacao(ctx, arguments.get("confirmation_id"))
         confirmed_tool = getattr(ctx, "mcp_confirmed_tool", None)
@@ -955,7 +971,17 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
                        arguments=getattr(ctx, "mcp_confirmed_arguments", {}),
                        latency_ms=(time.monotonic() - start) * 1000,
                        is_error=is_err)
-        return _text_result(result, is_error=is_err)
+        # `confirmed_tool` so garante que a tool foi IDENTIFICADA (setado
+        # antes do try/except em `_executar_confirmacao`, de proposito, para
+        # o audit log acima cobrir tambem uma execucao que falhou) -- nao que
+        # `result` seja de fato a forma real do retorno dela. Quando a
+        # execucao levantou excecao, `result` e um wrapper de erro generico
+        # do mecanismo de confirmacao (ver comentario em
+        # `_executar_confirmacao`), que nao respeita o outputSchema
+        # publicado da tool -- `schema_tool=None` evita publicar
+        # `structuredContent` que violaria esse contrato.
+        schema_tool = None if getattr(ctx, "mcp_confirmed_tool_execucao_falhou", False) else confirmed_tool
+        return _text_result(result, is_error=is_err, schema_tool=schema_tool)
 
     if not registry.is_mcp_enabled(name):
         raise McpError(-32003, f"Tool '{name}' nao esta disponivel via MCP")
@@ -969,6 +995,7 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
             # argumentos que o cliente reenviou.
             ctx.mcp_confirmed_tool = None
             ctx.mcp_confirmed_arguments = None
+            ctx.mcp_confirmed_tool_execucao_falhou = False
             start = time.monotonic()
             result = _executar_confirmacao(ctx, confirmation_id, tool_esperada=name)
             confirmed_tool = getattr(ctx, "mcp_confirmed_tool", None)
@@ -978,7 +1005,13 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
                            arguments=getattr(ctx, "mcp_confirmed_arguments", {}),
                            latency_ms=(time.monotonic() - start) * 1000,
                            is_error=is_err)
-            return _text_result(result, is_error=is_err)
+            # Mesmo raciocinio do ramo `confirmar_acao` acima: `confirmed_tool`
+            # so identifica a tool (para o audit log cobrir tambem uma
+            # execucao que falhou); `schema_tool` so vai junto quando o
+            # resultado veio de uma execucao real, nao do wrapper de erro
+            # generico do `except` em `_executar_confirmacao`.
+            schema_tool = None if getattr(ctx, "mcp_confirmed_tool_execucao_falhou", False) else confirmed_tool
+            return _text_result(result, is_error=is_err, schema_tool=schema_tool)
         else:
             # Tools do piso sempre exigem o confirmation_id de uma confirmação
             # real e persistida, hook de prévia ou não (P02 sub-entrega 2/N —
@@ -1360,8 +1393,8 @@ def _looks_like_error(result) -> bool:
     return result.startswith("ERRO|") or result.startswith("⚠️")
 
 
-def _text_result(payload: dict, *, is_error: bool) -> dict:
-    return {
+def _text_result(payload: dict, *, is_error: bool, schema_tool: str | None = None) -> dict:
+    envelope = {
         "content": [{"type": "text", "text": json.dumps(payload, ensure_ascii=False)}],
         "isError": is_error,
         # Fecha o achado do Codex na PR #193 (07/09/2026): `_SUPPORTED_PROTOCOL_
@@ -1384,6 +1417,37 @@ def _text_result(payload: dict, *, is_error: bool) -> dict:
         # incondicionalmente nao quebra nenhum cliente legado.
         "resultType": "complete",
     }
+    # P03 passo 3, fatia `envelope` (docs/autonomia/execucao.md, pendencia
+    # aberta desde a sub-entrega 8/N): fecha a lacuna ja documentada no
+    # caminho de EXECUCAO DIRETA (mais abaixo neste arquivo) de que
+    # `structuredContent` "nao chega nos caminhos de `_text_result`". Dos 17
+    # pontos de retorno que passam por `_text_result` em `_handle_tools_call`,
+    # so DOIS devolvem o resultado CRU de uma tool real (nao um wrapper de
+    # status da propria mecanica de confirmacao, como `{"status":
+    # "ja_executada", ...}` ou `{"status": "em_execucao", ...}`, que nunca
+    # bateriam contra o outputSchema de tool nenhuma): os dois ramos de
+    # `confirmar_acao` (com e sem `_confirmed`+`_confirmation_id`) que chamam
+    # `_executar_confirmacao`, quando ela chega a executar de fato o
+    # executor da tool (`ctx.mcp_confirmed_tool` fica setado so nesse ponto,
+    # nunca nos retornos antecipados de erro/claim da propria funcao). Os
+    # dois call sites passam esse nome real como `schema_tool` -- todos os
+    # OUTROS 15 call sites de `_text_result` continuam omitindo o parametro
+    # (default `None`), preservando o comportamento anterior sem
+    # `structuredContent`, porque seus payloads sao wrappers de status da
+    # mecanica de confirmacao/piso, nunca a forma publicada em
+    # `_OUTPUT_SCHEMAS` de tool nenhuma -- inventar `structuredContent` para
+    # eles seria publicar um contrato nunca verificado, exatamente o erro que
+    # este modulo evita em toda outra parte (ver `registry.output_schema`).
+    #
+    # `payload` (nao um round-trip via `json.loads(text)`, ao contrario do
+    # caminho de execucao direta) e seguro aqui porque e o MESMO objeto que
+    # acabou de ser serializado com sucesso duas linhas acima para `text` --
+    # se aquele `json.dumps` nao lancou, serializar o mesmo objeto de novo
+    # (aqui, ou depois em `_json_response`) tambem nao lanca; nao ha
+    # `default=str` em nenhum dos dois pontos para divergir.
+    if schema_tool and isinstance(payload, dict) and registry.output_schema(schema_tool):
+        envelope["structuredContent"] = payload
+    return envelope
 
 
 def _handle_prompts_list() -> dict:

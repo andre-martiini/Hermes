@@ -72,6 +72,7 @@ de segurança própria.
 """
 
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import mcp_server
@@ -600,6 +601,37 @@ class TestTextResultContract(unittest.TestCase):
         self.assertEqual(r["content"][0]["type"], "text")
         self.assertIn('"a": 1', r["content"][0]["text"])
 
+    def test_sem_schema_tool_nunca_inclui_structuredcontent(self):
+        # Default (nenhum dos 15 call sites de status/erro da mecanica de
+        # confirmacao passa `schema_tool`) preserva o comportamento anterior
+        # a esta sub-entrega: sem o parametro, nunca ha `structuredContent`,
+        # mesmo que o payload por acaso pareca com o de uma tool com schema.
+        r = mcp_server._text_result({"expressao": "1+1", "resultado": "2"}, is_error=False)
+        self.assertNotIn("structuredContent", r)
+
+    def test_schema_tool_com_outputschema_inclui_structuredcontent_igual_ao_payload(self):
+        payload = {"expressao": "1+1", "resultado": "2"}
+        with patch.object(mcp_server.registry, "output_schema", return_value={"type": "object"}):
+            r = mcp_server._text_result(payload, is_error=False, schema_tool="calculadora")
+        self.assertEqual(r["structuredContent"], payload)
+
+    def test_schema_tool_sem_outputschema_nao_inclui_structuredcontent(self):
+        # `schema_tool` informado, mas a tool nao tem entrada em
+        # `_OUTPUT_SCHEMAS` (a maioria do catalogo) -- nao inventa contrato.
+        with patch.object(mcp_server.registry, "output_schema", return_value=None):
+            r = mcp_server._text_result({"ok": True}, is_error=False, schema_tool="obter_estado_atual")
+        self.assertNotIn("structuredContent", r)
+
+    def test_schema_tool_com_payload_nao_dict_nao_inclui_structuredcontent(self):
+        # `_executar_confirmacao` sempre normaliza para dict antes de
+        # devolver (`result if isinstance(result, dict) else {"resultado":
+        # result}`), mas a guarda de tipo aqui e defensiva, nao suposta —
+        # mesmo espirito do `isinstance(result, dict)` ja usado no calculo de
+        # `is_err` nos dois call sites de `confirmar_acao`.
+        with patch.object(mcp_server.registry, "output_schema", return_value={"type": "object"}):
+            r = mcp_server._text_result("um texto qualquer", is_error=False, schema_tool="calculadora")
+        self.assertNotIn("structuredContent", r)
+
 
 class TestHandleToolsCallResultType(unittest.TestCase):
     """Exercita `_handle_tools_call` de ponta a ponta (não só `_text_result`
@@ -652,6 +684,147 @@ class TestHandleToolsCallResultType(unittest.TestCase):
             )
         self.assertEqual(r["resultType"], "complete")
         self.assertTrue(r["isError"])
+
+    def test_confirmar_acao_com_tool_de_schema_inclui_structuredcontent(self):
+        # Fecha a lacuna documentada em docs/autonomia/execucao.md (fatia
+        # `envelope` do passo 3, aberta desde a sub-entrega 8/N): quando
+        # `confirmar_acao` de fato executa uma tool com outputSchema
+        # publicado (`ctx.mcp_confirmed_tool` fica setado dentro de
+        # `_executar_confirmacao`, so quando ela chega a chamar o executor
+        # real -- imitado aqui pelo `side_effect`), o envelope MCP passa a
+        # levar `structuredContent`, igual ao caminho de execucao direta ja
+        # faz para a mesma tool.
+        def _fake_confirmacao(ctx, confirmation_id, *, tool_esperada=None):
+            ctx.mcp_confirmed_tool = "calculadora"
+            ctx.mcp_confirmed_arguments = {"expressao": "1+1"}
+            return {"expressao": "1+1", "resultado": "2"}
+
+        with patch.object(mcp_server, "_executar_confirmacao", side_effect=_fake_confirmacao), \
+             patch.object(mcp_server, "_audit_log"):
+            r = mcp_server._handle_tools_call(
+                {"name": "confirmar_acao", "arguments": {"confirmation_id": "c1"}}, ctx=_ctx_result_type()
+            )
+        self.assertEqual(r["structuredContent"], {"expressao": "1+1", "resultado": "2"})
+        self.assertFalse(r["isError"])
+
+    def test_confirmar_acao_com_tool_sem_schema_nao_inclui_structuredcontent(self):
+        # A MAIORIA do catalogo nao tem outputSchema publicado (ver
+        # `registry.output_schema`) -- confirmar uma dessas tools nao deve
+        # inventar um contrato nunca verificado.
+        def _fake_confirmacao(ctx, confirmation_id, *, tool_esperada=None):
+            ctx.mcp_confirmed_tool = "obter_estado_atual"
+            ctx.mcp_confirmed_arguments = {}
+            return {"algo": "sem contrato publicado"}
+
+        with patch.object(mcp_server, "_executar_confirmacao", side_effect=_fake_confirmacao), \
+             patch.object(mcp_server, "_audit_log"):
+            r = mcp_server._handle_tools_call(
+                {"name": "confirmar_acao", "arguments": {"confirmation_id": "c1"}}, ctx=_ctx_result_type()
+            )
+        self.assertNotIn("structuredContent", r)
+
+    def test_confirmar_acao_ja_executada_nao_inclui_structuredcontent_mesmo_parecendo_schema(self):
+        # `ctx.mcp_confirmed_tool` nunca e setado neste ramo -- `_executar_
+        # confirmacao` devolve `{"status": "ja_executada", ...}` num retorno
+        # ANTECIPADO, antes do ponto onde chegaria a executar a tool de
+        # verdade. Mesmo que `resultado_anterior` por acaso tenha a MESMA
+        # forma do schema publicado de `calculadora`, nao ha `schema_tool`
+        # para publicar contra (o wrapper de status e que seria descrito,
+        # nao o resultado real) -- `structuredContent` fica de fora.
+        with patch.object(
+            mcp_server, "_executar_confirmacao",
+            return_value={"status": "ja_executada", "resultado_anterior": {"expressao": "1+1", "resultado": "2"}},
+        ), patch.object(mcp_server, "_audit_log"):
+            r = mcp_server._handle_tools_call(
+                {"name": "confirmar_acao", "arguments": {"confirmation_id": "c1"}}, ctx=_ctx_result_type()
+            )
+        self.assertNotIn("structuredContent", r)
+
+    def test_confirmed_true_com_confirmation_id_e_tool_de_schema_inclui_structuredcontent(self):
+        # Segundo call site com a mesma lacuna (compatibilidade legada:
+        # `_confirmed=true` + `_confirmation_id` na propria chamada da tool
+        # original, em vez de `confirmar_acao`) -- mesma correcao, mesmo
+        # teste do de cima.
+        def _fake_confirmacao(ctx, confirmation_id, *, tool_esperada=None):
+            ctx.mcp_confirmed_tool = "calculadora"
+            ctx.mcp_confirmed_arguments = {"expressao": "1+1"}
+            return {"expressao": "1+1", "resultado": "2"}
+
+        with patch.object(mcp_server, "_exige_confirmacao", return_value=True), \
+             patch.object(mcp_server, "_executar_confirmacao", side_effect=_fake_confirmacao), \
+             patch.object(mcp_server, "_audit_log"):
+            r = mcp_server._handle_tools_call(
+                {"name": "calculadora", "arguments": {"_confirmed": True, "_confirmation_id": "c1"}},
+                ctx=_ctx_result_type(),
+            )
+        self.assertEqual(r["structuredContent"], {"expressao": "1+1", "resultado": "2"})
+
+    def _ctx_confirmacao_persistida(self, *, uid="dono-uid", tool="calculadora", arguments=None):
+        """`ToolContext` com `db` mockado o suficiente para `_executar_
+        confirmacao` REAL (nao um `side_effect` substituindo a funcao
+        inteira) percorrer o caminho feliz ate `execute_tool` -- confirmacao
+        existe, pertence ao uid, nao executada, sem claim pendente, nao
+        expirada, tool habilitada."""
+        ref = MagicMock()
+        snap = MagicMock(exists=True)
+        snap.to_dict.return_value = {
+            "uid": uid,
+            "tool": tool,
+            "arguments": arguments or {},
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
+            "created_at": datetime.now(timezone.utc),
+            "preview": None,
+        }
+        ref.get.return_value = snap
+        claim = MagicMock()
+        claim.get.return_value = MagicMock(exists=False)
+        ref.collection.return_value.document.return_value = claim
+        db = MagicMock()
+        db.collection.return_value.document.return_value = ref
+        return ToolContext(user_uid=uid, canal="mcp", _db=db)
+
+    def test_confirmar_acao_com_excecao_na_execucao_real_nao_inclui_structuredcontent(self):
+        # Achado da revisão adversarial desta sub-entrega: os testes acima
+        # substituem `_executar_confirmacao` inteira por um `side_effect` —
+        # nenhum exercita a função REAL até o ponto em que ela seta
+        # `ctx.mcp_confirmed_tool` e DEPOIS o `execute_tool` real levanta uma
+        # exceção (`_executar_confirmacao`, bloco `except`). Nesse caminho, o
+        # `result` devolvido é `{"erro": "Falha ao executar a confirmação:
+        # ..."}` — um wrapper genérico do mecanismo de confirmação, não a
+        # forma real do retorno de `calculadora` — e publicá-lo como
+        # `structuredContent` violaria o `outputSchema` da tool (que exige
+        # `expressao`). Este teste roda `_executar_confirmacao` de verdade
+        # (só `execute_tool` é substituído, para forçar a exceção) e confirma
+        # que `structuredContent` fica de fora, mas o audit log ainda
+        # acontece (a tool foi identificada, só a execução falhou).
+        with patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), \
+             patch.object(mcp_server, "execute_tool", side_effect=RuntimeError("boom")), \
+             patch.object(mcp_server, "_audit_log") as mock_audit:
+            r = mcp_server._handle_tools_call(
+                {"name": "confirmar_acao", "arguments": {"confirmation_id": "conf-1"}},
+                ctx=self._ctx_confirmacao_persistida(),
+            )
+        self.assertTrue(r["isError"])
+        self.assertNotIn("structuredContent", r)
+        self.assertIn("Falha ao executar a confirmação", r["content"][0]["text"])
+        mock_audit.assert_called_once()
+        self.assertEqual(mock_audit.call_args.kwargs["tool"], "calculadora")
+        self.assertTrue(mock_audit.call_args.kwargs["is_error"])
+
+    def test_confirmar_acao_com_execucao_real_bem_sucedida_inclui_structuredcontent(self):
+        # Contraponto do teste acima, também via `_executar_confirmacao`
+        # real (não um `side_effect`): quando `execute_tool` de fato devolve
+        # o dict da tool, sem exceção, `structuredContent` deve aparecer —
+        # prova de que a correção acima não desligou o caminho feliz.
+        with patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), \
+             patch.object(mcp_server, "execute_tool", return_value={"expressao": "1+1", "resultado": "2"}), \
+             patch.object(mcp_server, "_audit_log"):
+            r = mcp_server._handle_tools_call(
+                {"name": "confirmar_acao", "arguments": {"confirmation_id": "conf-1"}},
+                ctx=self._ctx_confirmacao_persistida(),
+            )
+        self.assertFalse(r["isError"])
+        self.assertEqual(r["structuredContent"], {"expressao": "1+1", "resultado": "2"})
 
     def test_tool_exigindo_confirmacao_primeira_chamada_inclui_resulttype(self):
         with patch.object(mcp_server, "_exige_confirmacao", return_value=True), \
