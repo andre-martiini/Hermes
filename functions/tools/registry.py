@@ -3,6 +3,7 @@ import os
 
 from tools.inventory import (
     DominioRede,
+    Idempotencia,
     LeituraEscrita,
     Reversibilidade,
     get_inventory_entry,
@@ -618,13 +619,15 @@ def get_required_params(tool_name: str) -> list[str]:
 
 def mcp_annotations(tool_name: str) -> dict:
     """`ToolAnnotations` do MCP (`readOnlyHint`/`destructiveHint`/
-    `openWorldHint`) para o catalogo publicado em `tools/list` -- P03 passo 3
-    do plano de autonomia ("Adicionar outputSchema, structuredContent,
-    annotations e envelope aos caminhos compativeis"). `readOnlyHint`/
-    `destructiveHint` vieram da sub-entrega 6/N; `openWorldHint`, desta
-    sub-entrega 7/N. `outputSchema`/`structuredContent`/envelope seguem fora
-    de escopo -- exigem definir um contrato de dados por tool, ver
-    docs/autonomia/execucao.md.
+    `openWorldHint`/`idempotentHint`) para o catalogo publicado em
+    `tools/list` -- P03 passo 3 do plano de autonomia ("Adicionar
+    outputSchema, structuredContent, annotations e envelope aos caminhos
+    compativeis"). `readOnlyHint`/`destructiveHint` vieram da sub-entrega
+    6/N; `openWorldHint`, da sub-entrega 7/N; `idempotentHint`, PARCIAL, da
+    sub-entrega 16/N (9 das ~59 tools de escrita/leitura_e_escrita
+    investigadas ate agora -- ver `Idempotencia` em `tools/inventory.py`).
+    `outputSchema`/`structuredContent`/envelope seguem fora de escopo --
+    exigem definir um contrato de dados por tool, ver docs/autonomia/execucao.md.
 
     `readOnlyHint` vem de `leitura_escrita` e `destructiveHint` de
     `reversibilidade` -- ambos do inventario investigado em P03 sub-entrega
@@ -657,14 +660,36 @@ def mcp_annotations(tool_name: str) -> dict:
     mercado via yfinance/SGS-Bacen -- fora do controle direto do Hermes e
     do proprio servico).
 
-    `idempotentHint` continua inteiramente fora de escopo: pede saber, por
-    HANDLER, se chamar de novo com os MESMOS argumentos tem efeito
-    adicional (ex.: `criar_acao_no_sistema` dedupla por titulo/data;
-    `agendar_lembrete_acao` nao dedupla nada) -- nenhum campo do inventario
-    atual registra isso (nem `dominio_rede`, que e sobre O QUE a tool
-    alcança pela rede, nao sobre REPETIR a chamada sem custo); precisaria de
-    investigacao dedicada por handler, do mesmo porte da sub-entrega 1/N,
-    candidata a uma sub-entrega futura propria.
+    `idempotentHint` vem do campo `idempotencia` (P03 sub-entrega 16/N,
+    `Idempotencia`) -- pede saber, por HANDLER, se chamar de novo com os
+    MESMOS argumentos tem efeito adicional no ambiente; nenhum outro campo
+    do inventario sustenta essa pergunta (nem `reversibilidade`, que e
+    sobre "da para desfazer depois", nem `dominio_rede`, que e sobre O QUE a
+    tool alcança pela rede, nao sobre REPETIR a chamada sem custo). So faz
+    sentido quando `readOnlyHint` e False, mesma convencao de
+    `destructiveHint` -- e so e emitido quando `entry.idempotencia` esta de
+    fato classificado.
+
+    9 tools investigadas nesta primeira fatia (leitura direta do handler
+    real, nao do nome/descricao): `criar_acao_no_sistema`,
+    `salvar_memoria_global`, `dispensar_resposta_pendente` e
+    `concluir_pedido_agente` sao IDEMPOTENTE (dedup por chave exata,
+    dedup por similaridade de embedding, `.set()` com ID deterministico, e
+    transacao Firestore com `already_decided`, respectivamente -- ver
+    `nota` de cada uma em `tools/inventory.py`). IDEMPOTENTE aqui nao
+    significa "sem limite de tempo": `criar_acao_no_sistema` so dedupla
+    DENTRO da janela de `ttl_minutes=15` de `claim_action_dedup_slot`
+    (main.py) -- repetir a MESMA chamada depois desse intervalo cria uma
+    acao nova, ver `test_action_dedup_slot.py` para as duas metades desse
+    comportamento provadas. `agendar_lembrete_acao`,
+    `registrar_no_diario`, `editar_acao`, `resolver_item_atencao` e
+    `registrar_execucao_agente` sao NAO_IDEMPOTENTE (todas por `append`
+    sem chave de dedup -- `ArrayUnion`/`ArrayUnion` indireto via
+    `registrar_no_diario`, ou `col.add()` sem ID deterministico). As
+    demais ~50 tools de escrita/leitura_e_escrita permanecem SEM
+    classificacao (`idempotencia=None`, hint omitido) -- candidatas a
+    fatias futuras, mesmo padrao incremental ja usado para `dominio_rede`
+    (sub-entrega 7/N) e para `outputSchema` (sub-entregas 8/N em diante).
 
     Omitir hints nao investigados com confianca nao e regressao: a
     especificacao MCP ja define default conservador para quem nao declara
@@ -695,6 +720,16 @@ def mcp_annotations(tool_name: str) -> dict:
         # pretende comunicar; tratada como False, mesmo grupo de
         # `reversivel`.
         annotations["destructiveHint"] = entry.reversibilidade == Reversibilidade.IRREVERSIVEL
+        # Mesma condicao "so quando readOnlyHint e False" de destructiveHint
+        # acima (secao 6.1 do plano e a especificacao MCP) -- idempotencia
+        # so e populada no inventario para tools nao-leitura-pura (ver
+        # docstring de Idempotencia), entao esta guarda e redundante com o
+        # dado hoje, mas documenta a regra em vez de depender so da
+        # invariante de dados.
+        if entry.idempotencia == Idempotencia.IDEMPOTENTE:
+            annotations["idempotentHint"] = True
+        elif entry.idempotencia == Idempotencia.NAO_IDEMPOTENTE:
+            annotations["idempotentHint"] = False
     if entry.dominio_rede == DominioRede.FECHADO:
         annotations["openWorldHint"] = False
     elif entry.dominio_rede == DominioRede.ABERTO:
