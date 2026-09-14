@@ -116,6 +116,42 @@ class TestConsistenciaDosCampos(unittest.TestCase):
                         f"{nome}: dominio_rede classificado sem necessidade_de_rede=True",
                     )
 
+    def test_idempotencia_e_enum_valido_ou_ausente(self) -> None:
+        for nome, entrada in inventory._INVENTORY.items():
+            with self.subTest(tool=nome):
+                self.assertTrue(
+                    entrada.idempotencia is None or isinstance(entrada.idempotencia, inventory.Idempotencia),
+                    f"{nome}: idempotencia não é None nem Idempotencia válido",
+                )
+
+    def test_idempotencia_nunca_classificada_para_leitura_pura(self) -> None:
+        """`idempotencia` (P03 sub-entrega 16/N) só é significativa quando
+        `readOnlyHint` é False (mesma convenção de `destructiveHint`, ver
+        `registry.mcp_annotations`) -- uma tool LEITURA pura não tem efeito
+        nenhum a repetir, então classificá-la seria um campo vazio de
+        conteúdo."""
+        for nome, entrada in inventory._INVENTORY.items():
+            if entrada.leitura_escrita is inventory.LeituraEscrita.LEITURA:
+                with self.subTest(tool=nome):
+                    self.assertIsNone(
+                        entrada.idempotencia,
+                        f"{nome}: leitura pura não deveria ter idempotencia classificada",
+                    )
+
+    def test_idempotencia_classificada_exige_nota_explicando(self) -> None:
+        """Mesmo padrão de exigência de `nota` já usado para outras
+        classificações não-óbvias deste inventário (ver
+        `test_leitura_e_escrita_com_reversibilidade_nao_aplica_exige_nota_explicando`
+        abaixo): a evidência por handler que sustenta IDEMPOTENTE/
+        NAO_IDEMPOTENTE precisa estar documentada, não só declarada."""
+        for nome, entrada in inventory._INVENTORY.items():
+            if entrada.idempotencia is not None:
+                with self.subTest(tool=nome):
+                    self.assertTrue(
+                        entrada.nota and entrada.nota.strip(),
+                        f"{nome}: idempotencia classificada sem nota explicando a evidência",
+                    )
+
     def test_leitura_e_escrita_com_reversibilidade_nao_aplica_exige_nota_explicando(self) -> None:
         """Achado da revisão adversarial (sub-entrega P03 1/N): o filtro original só
         comparava contra ESCRITA (`is`), nunca contra LEITURA_E_ESCRITA -- ficava sem
