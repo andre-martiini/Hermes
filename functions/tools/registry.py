@@ -1233,6 +1233,241 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
             },
         ],
     },
+    # `obter_acao` (P03 sub-entrega 15/N) -- setima tool com outputSchema,
+    # e a com MAIS campos de nivel superior ate agora (24). Handler
+    # (`tools/hermes_tools.py::obter_acao`) tem 3 `return` no total, nao 2:
+    # `{"erro": "Informe task_id."}` (sem `task_id`, nem proprio nem de
+    # `ctx.task_id`); `{"erro": "...", "status": "not_found"}` (doc
+    # inexistente); e a forma de sucesso. Ao contrario de
+    # `consultar_historico_acoes` (sub-entrega 14/N), as duas formas de erro
+    # NAO sao disjuntas o bastante para justificar um terceiro ramo de
+    # `oneOf`: a unica diferenca entre elas e a PRESENCA do campo `status`
+    # (sempre o mesmo unico valor, `"not_found"`, quando aparece) -- mesmo
+    # padrao ja usado para campo opcional que so aparece as vezes (`truncado`
+    # em `consultar_lista_compras`), nao um formato alternativo genuino.
+    # Modelado como UM ramo de erro com `status` fora de `required`, e
+    # `oneOf` com so 2 ramos no total (sucesso / erro), nao 3.
+    #
+    # `id`/`titulo`/`descricao`/`notas`/`status`/`area_tematica`/`projeto`/
+    # `data_limite`/`data_inicio`/`prazo_final`/`horario_inicio`/
+    # `horario_fim`/`tags`/`estrategia_objetivo_id` sao os MESMOS campos
+    # (mesma colecao `tarefas`, confirmado em `busca_grafo.GRAFO_COLLECTION
+    # == "tarefas"`) que `consultar_historico_acoes` ja expos com risco
+    # aceito e nao-bloqueante para tipo errado -- mas aqui SEM o `or
+    # default` que aquela tool aplica (`data.get(campo, "")`): `obter_acao`
+    # faz `d.get(campo)` cru, sem segundo argumento, entao o campo AUSENTE
+    # vira `None` de verdade (nao `""`), e por isso tem `null` no tipo onde
+    # aquela tool nao precisou. `descricao`/`notas` sao a excecao: usam `or
+    # ""`, que cobre o caso ausente/falsy com string vazia (mesmo risco
+    # residual de valor truthy nao-string vazar cru, categoria ja aceita
+    # para `descricao`/`notas`/`sintese_demanda` em `consultar_historico_
+    # acoes`) -- por isso ficam sem `null`. `id` e sempre `snap.id`
+    # (garantido string pelo SDK do Firestore).
+    #
+    # `tags` e `d.get("tags") or []`: mesmo risco aceito de
+    # `buscar_contato`/`consultar_historico_acoes` (valor truthy nao-lista
+    # vaza cru) -- fica `array` solto, sem `null` (o `or []` cobre o caso
+    # ausente).
+    #
+    # `execution_lane` (`subtarefas.derivar_lane`) e `degradation_count`
+    # (`subtarefas.degradacao_da_acao`) sao os dois campos com a garantia de
+    # tipo MAIS FORTE desta tool: as duas funcoes SEMPRE devolvem,
+    # respectivamente, `str(...)` e `int(...)` explicitos em todo ramo
+    # interno (lidas as duas funcoes por completo em `subtarefas.py`) --
+    # nunca passam o valor gravado adiante sem coercao. `execution_lane`
+    # fica como `string` solta, nao enum: o ramo "sem etapa aberta" pode
+    # devolver o `lane_gravada` ORIGINAL sem normalizar quando ele nao for
+    # vazio (`return str(lane_gravada or "").strip() or "avanco"`), e nada
+    # impede hoje um valor gravado direto no Firestore por fora desta
+    # funcao -- um enum fechado quebraria nesse caso, mesmo motivo ja usado
+    # para `tipo`/`origem` em `consultar_pedidos_agente` (sub-entrega 12/N).
+    #
+    # `contexto_agente` (`d.get("contexto_agente")`) tem UM UNICO escritor
+    # em todo o repositorio: `main.py::processar_contexto_agente`, chamado
+    # so pelo gatilho Firestore `on_document_written` em `tarefas/{taskId}`
+    # -- busca exaustiva por `"contexto_agente":` como CHAVE DE ESCRITA
+    # confirma isso. Esse escritor grava sempre `None` (quando o parse do
+    # LLM falha ou fica vazio -- nesse caso grava so `last_processed_
+    # contexto_hash`, sem tocar `contexto_agente`) ou o dict devolvido por
+    # `parse_resposta_contexto`, que TEM forma fixa e coagida (`resumo`:
+    # `str(...).strip()`, nunca vazio quando o dict e devolvido;
+    # `pessoas_chave`/`ultimas_decisoes`/`travas`: sempre listas, cada item
+    # `str(...).strip()`; `onde_esta_o_codigo`: `None` ou string;
+    # `atualizado_em`: sempre string ISO). Fica com contrato solto (`type:
+    # ["object", "null"]`, sem `properties` aninhado) DELIBERADAMENTE, mesmo
+    # sabendo a forma exata -- mesmo espirito de `modelo_interacao`
+    # (`buscar_contato`): e conteudo gerado por LLM sobre texto livre da
+    # acao, e nao ha nenhum OUTRO leitor deste campo no catalogo MCP hoje
+    # que precise validar sub-campos individualmente. Aprofundar o contrato
+    # pode ser feito numa fatia futura, sem quebrar este.
+    #
+    # `plano_acao` (`etapas`, construido no proprio handler) -- a parte mais
+    # trabalhosa desta sub-entrega: alem de `converter_plano`/`mesclar_plano`
+    # (que sempre terminam em `subtarefas.normalizar`, garantindo `id`
+    # string nao-vazia, `estado` num dos 4 valores fechados, `aguardando_de`
+    # string ate 200 chars quando presente, `degradation_count` int quando
+    # presente), ha um OITAVO ponto de escrita que NAO passa por
+    # `normalizar`: `tools/pausar_conversa.py` monta a etapa de pausa a mao
+    # (`{"id": str(uuid.uuid4())[:8], "text": ..., "estado":
+    # "aguardando_terceiro", "aguardando_de": "André", "data_prevista":
+    # pause_until, ...}`). Os TIPOS gravados por esse caminho batem com o
+    # que `normalizar` produziria (id string, estado enum valido,
+    # aguardando_de string literal), mas por caminho diferente -- por isso
+    # este comentario, e nao so "escritor unico via normalizar", documenta
+    # os dois caminhos. `texto`/`estado` no proprio `obter_acao` passam por
+    # `subtarefas.texto_de`/`estado_de` (sempre string / sempre um dos 4
+    # valores de `ESTADOS`, mesmo em documento legado sem `estado` gravado
+    # -- `estado_de` deduz de `completed`), garantia forte independente de
+    # quem escreveu. `data_prevista` passa por `subtarefas.data_prevista_de`
+    # (sempre `str(...)` internamente) + `or None` no handler -- string
+    # nao-vazia ou `None`, nunca outro tipo, MESMO que o valor gravado no
+    # Firestore por `pausar_conversa.py` (`pause_until`) tenha outro tipo
+    # antes de passar por `str()`. JA `id` da etapa e `i.get("id")` CRU, sem
+    # `estado_de`/`texto_de` no meio -- documento legado de ANTES de
+    # `subtarefas.py` (2026-08-26, ver docstring do modulo: "subtarefa era
+    # texto com marcador de concluida") pode ter etapa em formato dict sem
+    # `id` nenhum, nunca tocada por `mesclar_plano` desde entao; por isso
+    # `id` da etapa tem `null` no tipo, ao contrario do `id` do nivel
+    # superior (`snap.id`, sempre garantido pelo SDK).
+    #
+    # `anexos` (`pool_dados` filtrado por `tipo == "arquivo"`) -- 4
+    # escritores encontrados (`main.py` linhas ~8805, ~11303/11326,
+    # `tools/anexar_arquivo.py`, mais `tools/hermes_tools.py::
+    # criar_acao_no_sistema` que so REPASSA itens ja montados por um dos
+    # tres primeiros): todos gravam `nome` (string) e `valor` (string, URL,
+    # sempre truthy nos 4 -- o fallback `x.get("link")` no handler e
+    # morto hoje, nenhum escritor usa a chave `"link"`); `drive_file_id`
+    # SO aparece em 2 dos 4 (ausente no caminho SIPAC, `main.py` ~8805) --
+    # por isso `["string", "null"]`. `nome`/`link` ficam tambem com `null`
+    # no tipo por precaucao contra item de `pool_dados` anterior a estes
+    # 4 escritores (mesma categoria de risco do `id` da etapa acima, nao
+    # demonstrado, so nao descartado).
+    #
+    # `diario` (`acompanhamento[-limite_diario:]`) -- `data` e SEMPRE
+    # string: `str(e.get("data"))` no proprio handler, sem `or` no meio,
+    # entao ATE `None` vira a string literal `"None"` (comportamento real,
+    # nao um bug desta sub-entrega). `nota` e `e.get("nota")` CRU. A via
+    # principal de escrita hoje (tool MCP `registrar_no_diario`) GARANTE
+    # string de fato: `nota = args.get("nota")` seguido de `(nota or
+    # "").strip()` para validar vazio -- um valor truthy NAO-string
+    # (ex.: `nota: 5`) levanta `AttributeError` NESSA MESMA LINHA (`int`
+    # nao tem `.strip()`), capturado pelo `try/except` externo da funcao e
+    # devolvido como erro da tool, nunca chega a gravar. As demais escritas
+    # de `acompanhamento` encontradas no repositorio (main.py,
+    # telegram_extended.py, hermes_tools.py, pausar_conversa.py,
+    # anexar_arquivo.py, email_action_linker.py, investimentos_sync.py,
+    # outbox_aprovacao.py) usam f-string (`f"..."`, coage para string
+    # sempre, independente do tipo interpolado) ou uma variavel de string
+    # ja validada -- nenhuma grava um valor cru nao-string encontrada nesta
+    # busca, mas a lista de escritores e grande o bastante (8+) para nao
+    # reivindicar auditoria exaustiva de cada um; risco residual aceito e
+    # nao-bloqueante, mesma categoria das demais leituras cruas desta tool.
+    #
+    # `etapas_feitas`/`etapas_totais` (`subtarefas.contar`) e `diario_total`
+    # (`len(acomp)`) sao sempre `int` (contagem local, sem ler campo
+    # gravado). `observacao` e sempre string (f-string montada no proprio
+    # handler).
+    #
+    # Investigacao completa (as 8 fontes de `plano_acao`, os 4 escritores de
+    # `pool_dados`/anexo, o escritor unico de `contexto_agente`, a analise
+    # de `registrar_no_diario` sobre `nota`) e as rodadas de revisao
+    # adversarial: docs/autonomia/execucao.md, sub-entrega 15/N.
+    "obter_acao": {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "titulo": {"type": ["string", "null"]},
+                    "descricao": {"type": "string"},
+                    "notas": {"type": "string"},
+                    "status": {"type": ["string", "null"]},
+                    "area_tematica": {"type": ["string", "null"]},
+                    "projeto": {"type": ["string", "null"]},
+                    "data_limite": {"type": ["string", "null"]},
+                    "data_inicio": {"type": ["string", "null"]},
+                    "prazo_final": {"type": ["string", "null"]},
+                    "horario_inicio": {"type": ["string", "null"]},
+                    "horario_fim": {"type": ["string", "null"]},
+                    "tags": {"type": "array"},
+                    "execution_lane": {"type": "string"},
+                    "degradation_count": {"type": "integer"},
+                    "estrategia_objetivo_id": {"type": ["string", "null"]},
+                    "contexto_agente": {"type": ["object", "null"]},
+                    "plano_acao": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": ["string", "null"]},
+                                "texto": {"type": "string"},
+                                "estado": {
+                                    "type": "string",
+                                    "enum": [
+                                        "pendente", "em_andamento",
+                                        "aguardando_terceiro", "feito",
+                                    ],
+                                },
+                                "data_prevista": {"type": ["string", "null"]},
+                                "aguardando_de": {"type": "string"},
+                                "degradation_count": {"type": "integer"},
+                            },
+                            "required": ["id", "texto", "estado", "data_prevista"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "etapas_feitas": {"type": "integer"},
+                    "etapas_totais": {"type": "integer"},
+                    "anexos": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "nome": {"type": ["string", "null"]},
+                                "link": {"type": ["string", "null"]},
+                                "drive_file_id": {"type": ["string", "null"]},
+                            },
+                            "required": ["nome", "link", "drive_file_id"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "diario": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "data": {"type": "string"},
+                                "nota": {"type": ["string", "null"]},
+                            },
+                            "required": ["data", "nota"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "diario_total": {"type": "integer"},
+                    "observacao": {"type": "string"},
+                },
+                "required": [
+                    "id", "titulo", "descricao", "notas", "status",
+                    "area_tematica", "projeto", "data_limite", "data_inicio",
+                    "prazo_final", "horario_inicio", "horario_fim", "tags",
+                    "execution_lane", "degradation_count",
+                    "estrategia_objetivo_id", "contexto_agente", "plano_acao",
+                    "etapas_feitas", "etapas_totais", "anexos", "diario",
+                    "diario_total", "observacao",
+                ],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "erro": {"type": "string"},
+                    "status": {"type": "string", "enum": ["not_found"]},
+                },
+                "required": ["erro"],
+                "additionalProperties": False,
+            },
+        ],
+    },
 }
 
 
@@ -1243,9 +1478,9 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (100 das 106 tools
-    hoje, apos a sexta entrada, `consultar_historico_acoes`, sub-entrega
-    14/N), deliberadamente:
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (99 das 106 tools
+    hoje, apos a setima entrada, `obter_acao`, sub-entrega 15/N),
+    deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
     (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).

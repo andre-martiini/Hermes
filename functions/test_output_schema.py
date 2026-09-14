@@ -51,33 +51,43 @@ sempre lista vazia) -- ver comentário de `_OUTPUT_SCHEMAS` em
 `tools/registry.py` para o levantamento completo, incluindo por que
 `oneOf` (nunca usado neste catálogo até esta sub-entrega, pendência
 deixada pelas sub-entregas 12/N e 13/N) foi escolhido em vez de uma forma
-única com tudo fora de `required`.
+única com tudo fora de `required` -- e `obter_acao` (sub-entrega 15/N):
+sétima tool, e a com mais campos de nível superior até agora (24).
+Também usa `oneOf`, mas por um motivo diferente de
+`consultar_historico_acoes`: o handler
+(`tools/hermes_tools.py::obter_acao`) tem 3 `return`, não 2 -- a
+diferença entre os dois caminhos de erro é só a presença opcional do
+campo `status` (sempre `"not_found"` quando aparece), então os dois
+colapsam num único branch de erro com `status` fora de `required` -- ver
+comentário de `_OUTPUT_SCHEMAS` em `tools/registry.py` para o
+levantamento completo, incluindo as 8 fontes de escrita de `plano_acao` e
+os 4 escritores de `pool_dados`/anexo investigados nesta sub-entrega.
 
 Quatro frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
    paridade com TODO o catálogo real (não amostra): nenhuma tool além de
    `calculadora`, `buscar_contato`, `consultar_lista_compras`,
-   `consultar_execucoes_agente`, `consultar_pedidos_agente` e
-   `consultar_historico_acoes` tem contrato publicado hoje.
+   `consultar_execucoes_agente`, `consultar_pedidos_agente`,
+   `consultar_historico_acoes` e `obter_acao` tem contrato publicado hoje.
 2. `TestHandleToolsListOutputSchema` -- ponta a ponta via
    `mcp_server._handle_tools_list()`: `outputSchema` chega no catálogo
-   publicado só para essas seis tools.
+   publicado só para essas sete tools.
 3. `TestIntegracaoHandleToolsCallStructuredContent` -- ponta a ponta via
    `mcp_server._handle_tools_call`: `structuredContent` chega no envelope
    de `tools/call` para `calculadora` (execução real, pura) e para
    `buscar_contato`/`consultar_lista_compras`/`consultar_execucoes_agente`/
-   `consultar_pedidos_agente`/`consultar_historico_acoes`
-   (executor mockado -- as cinco dependem de Firestore, então o teste cobre
+   `consultar_pedidos_agente`/`consultar_historico_acoes`/`obter_acao`
+   (executor mockado -- as seis dependem de Firestore, então o teste cobre
    o MECANISMO, não a correção interna dos handlers, mesmo padrão já usado
    para `consultar_processo_sipac` abaixo), é sempre IGUAL ao dict que
    `content[0].text` serializa (mesma fonte, nunca diverge), bate com o
-   `outputSchema` publicado campo a campo (para `consultar_historico_acoes`,
-   contra o branch `oneOf` correspondente à forma retornada), e nunca
-   aparece para uma tool sem contrato publicado -- nem quando o resultado
-   real também é um dict, nem quando o executor levanta uma exceção não
-   tratada por ele mesmo, nem quando o handler devolve uma string crua de
-   erro (caminho real de `consultar_lista_compras` para filtro inválido,
-   ver `tools/hermes_tools.py::_consultar_lista_compras`).
+   `outputSchema` publicado campo a campo (para `consultar_historico_acoes`
+   e `obter_acao`, contra o branch `oneOf` correspondente à forma
+   retornada), e nunca aparece para uma tool sem contrato publicado -- nem
+   quando o resultado real também é um dict, nem quando o executor levanta
+   uma exceção não tratada por ele mesmo, nem quando o handler devolve uma
+   string crua de erro (caminho real de `consultar_lista_compras` para
+   filtro inválido, ver `tools/hermes_tools.py::_consultar_lista_compras`).
 4. `TestConsultarHistoricoAcoesFiltrosCoercao` -- exercita o HANDLER REAL
    (`hermes_tools._consultar_historico_acoes`, com
    `busca_grafo.buscar_tarefas` mockado, não `execute_tool` inteiro como
@@ -118,9 +128,10 @@ class TestOutputSchema(unittest.TestCase):
         # Nenhuma outra tool do catálogo tem outputSchema publicado ainda --
         # lista deliberadamente fechada, uma tool investigada por vez (ver
         # docstring de registry.output_schema). consultar_historico_acoes
-        # ganhou contrato nesta sub-entrega (14/N) -- saiu desta lista, ver
-        # test_consultar_historico_acoes_tem_schema_oneof_sucesso_e_erro.
-        for nome in ("obter_acao", "criar_acao_no_sistema", "obter_estado_atual"):
+        # (14/N) e obter_acao (15/N) ganharam contrato e saíram desta lista
+        # -- ver test_consultar_historico_acoes_tem_schema_oneof_sucesso_e_erro
+        # e test_obter_acao_tem_schema_oneof_sucesso_e_erro.
+        for nome in ("criar_acao_no_sistema", "obter_estado_atual"):
             with self.subTest(tool=nome):
                 self.assertIsNone(registry.output_schema(nome))
 
@@ -351,16 +362,116 @@ class TestOutputSchema(unittest.TestCase):
         # próprio handler, não o que buscar_tarefas devolveu em erro.
         self.assertEqual(erro["properties"]["resultados"], {"type": "array", "maxItems": 0})
 
-    def test_paridade_seis_tools_tem_output_schema_hoje(self):
+    def test_obter_acao_tem_schema_oneof_sucesso_e_erro(self):
+        schema = registry.output_schema("obter_acao")
+        self.assertIsNotNone(schema)
+        # oneOf pelo mesmo motivo estrutural de consultar_historico_acoes
+        # (sucesso e erro são formas com required disjuntos), mas aqui os
+        # DOIS retornos de erro do handler (task_id ausente / ação não
+        # encontrada) colapsam num único branch -- a diferença entre eles é
+        # só a presença opcional de "status", não um segundo formato.
+        self.assertEqual(set(schema.keys()), {"oneOf"})
+        self.assertEqual(len(schema["oneOf"]), 2)
+        sucesso, erro = schema["oneOf"]
+
+        self.assertEqual(sucesso["type"], "object")
+        campos_sucesso = {
+            "id", "titulo", "descricao", "notas", "status", "area_tematica",
+            "projeto", "data_limite", "data_inicio", "prazo_final",
+            "horario_inicio", "horario_fim", "tags", "execution_lane",
+            "degradation_count", "estrategia_objetivo_id", "contexto_agente",
+            "plano_acao", "etapas_feitas", "etapas_totais", "anexos",
+            "diario", "diario_total", "observacao",
+        }
+        self.assertEqual(set(sucesso["properties"].keys()), campos_sucesso)
+        # Os 24 campos são sempre chaves presentes no dict literal montado
+        # por `obter_acao` -- nenhuma condicional no nível superior (ao
+        # contrário do item de `plano_acao`/`anexos`, ver abaixo).
+        self.assertEqual(set(sucesso["required"]), campos_sucesso)
+        self.assertFalse(sucesso["additionalProperties"])
+
+        # execution_lane/degradation_count são os únicos dois campos com
+        # coerção garantida pela própria função (subtarefas.derivar_lane
+        # sempre str, subtarefas.degradacao_da_acao sempre int) -- os
+        # demais campos "crus" da coleção `tarefas` (mesma coleção que
+        # consultar_historico_acoes lê) são nullable aqui porque
+        # `d.get(campo)` não tem valor padrão.
+        self.assertEqual(sucesso["properties"]["execution_lane"], {"type": "string"})
+        self.assertEqual(sucesso["properties"]["degradation_count"], {"type": "integer"})
+        for campo in (
+            "titulo", "status", "area_tematica", "projeto", "data_limite",
+            "data_inicio", "prazo_final", "horario_inicio", "horario_fim",
+            "estrategia_objetivo_id",
+        ):
+            with self.subTest(campo=campo):
+                self.assertEqual(sucesso["properties"][campo]["type"], ["string", "null"])
+        # descricao/notas usam `or ""` (sempre string, nunca null).
+        for campo in ("descricao", "notas"):
+            with self.subTest(campo=campo):
+                self.assertEqual(sucesso["properties"][campo], {"type": "string"})
+        self.assertEqual(sucesso["properties"]["tags"], {"type": "array"})
+        # contexto_agente tem um único escritor (gatilho Firestore
+        # processar_contexto_agente) com forma fixa, mas fica com contrato
+        # solto de propósito -- mesmo espírito de modelo_interacao
+        # (buscar_contato) e contadores (consultar_execucoes_agente).
+        self.assertEqual(sucesso["properties"]["contexto_agente"], {"type": ["object", "null"]})
+
+        etapa = sucesso["properties"]["plano_acao"]["items"]
+        self.assertEqual(
+            set(etapa["properties"].keys()),
+            {"id", "texto", "estado", "data_prevista", "aguardando_de", "degradation_count"},
+        )
+        # aguardando_de/degradation_count só aparecem quando truthy no item
+        # de origem -- por isso fora de required, ao contrário dos outros 4.
+        self.assertEqual(set(etapa["required"]), {"id", "texto", "estado", "data_prevista"})
+        self.assertFalse(etapa["additionalProperties"])
+        self.assertEqual(etapa["properties"]["texto"], {"type": "string"})
+        self.assertEqual(
+            set(etapa["properties"]["estado"]["enum"]),
+            {"pendente", "em_andamento", "aguardando_terceiro", "feito"},
+        )
+        # id da etapa é `i.get("id")` cru, sem passar por subtarefas.*_de --
+        # documento legado de antes de subtarefas.py pode não ter a chave.
+        self.assertEqual(etapa["properties"]["id"]["type"], ["string", "null"])
+        self.assertEqual(etapa["properties"]["data_prevista"]["type"], ["string", "null"])
+
+        anexo = sucesso["properties"]["anexos"]["items"]
+        self.assertEqual(set(anexo["properties"].keys()), {"nome", "link", "drive_file_id"})
+        self.assertEqual(set(anexo["required"]), {"nome", "link", "drive_file_id"})
+        self.assertFalse(anexo["additionalProperties"])
+        for campo in ("nome", "link", "drive_file_id"):
+            with self.subTest(campo=campo):
+                self.assertEqual(anexo["properties"][campo]["type"], ["string", "null"])
+
+        diario_item = sucesso["properties"]["diario"]["items"]
+        self.assertEqual(set(diario_item["properties"].keys()), {"data", "nota"})
+        self.assertEqual(set(diario_item["required"]), {"data", "nota"})
+        self.assertFalse(diario_item["additionalProperties"])
+        # data é `str(e.get("data"))` sem "or" -- sempre string, mesmo para
+        # None (viraria a string literal "None").
+        self.assertEqual(diario_item["properties"]["data"], {"type": "string"})
+        self.assertEqual(diario_item["properties"]["nota"]["type"], ["string", "null"])
+
+        self.assertEqual(erro["type"], "object")
+        self.assertEqual(set(erro["properties"].keys()), {"erro", "status"})
+        # status só aparece na forma "não encontrada" -- por isso fora de
+        # required, ao contrário de "erro", presente nos dois retornos.
+        self.assertEqual(set(erro["required"]), {"erro"})
+        self.assertFalse(erro["additionalProperties"])
+        self.assertEqual(erro["properties"]["erro"], {"type": "string"})
+        self.assertEqual(erro["properties"]["status"], {"type": "string", "enum": ["not_found"]})
+
+    def test_paridade_sete_tools_tem_output_schema_hoje(self):
         # Não por amostragem: para TODA tool do catálogo real (106 hoje),
         # output_schema devolve algo só para calculadora, buscar_contato,
         # consultar_lista_compras, consultar_execucoes_agente,
-        # consultar_pedidos_agente e consultar_historico_acoes -- prova que
-        # a lista fechada não vazou para nenhuma outra tool por engano.
+        # consultar_pedidos_agente, consultar_historico_acoes e obter_acao
+        # -- prova que a lista fechada não vazou para nenhuma outra tool
+        # por engano.
         com_schema = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
-            "consultar_historico_acoes",
+            "consultar_historico_acoes", "obter_acao",
         }
         for nome in registry.list_tool_names():
             with self.subTest(tool=nome):
@@ -417,11 +528,21 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
         # reduzido a uma das duas formas.
         self.assertIn("oneOf", self.catalogo["consultar_historico_acoes"]["outputSchema"])
 
+    def test_obter_acao_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["obter_acao"])
+        self.assertEqual(
+            self.catalogo["obter_acao"]["outputSchema"],
+            registry.output_schema("obter_acao"),
+        )
+        # oneOf chega intacto no catálogo publicado, não achatado nem
+        # reduzido a uma das duas formas.
+        self.assertIn("oneOf", self.catalogo["obter_acao"]["outputSchema"])
+
     def test_nenhuma_outra_tool_publicada_tem_output_schema(self):
         esperadas = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
-            "consultar_historico_acoes",
+            "consultar_historico_acoes", "obter_acao",
         }
         com_schema = [
             nome for nome, tool in self.catalogo.items()
@@ -435,7 +556,7 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
         for nome in (
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
-            "consultar_historico_acoes",
+            "consultar_historico_acoes", "obter_acao",
         ):
             with self.subTest(tool=nome):
                 tool = self.catalogo[nome]
@@ -1000,6 +1121,161 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
         with patch.object(mcp_server, "execute_tool", return_value=mock_erro):
             resultado = mcp_server._handle_tools_call(
                 {"name": "consultar_historico_acoes", "arguments": {"query": "x"}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        for campo in erro_schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(
+                campo, erro_schema["properties"],
+                f"campo '{campo}' fora do branch de erro do outputSchema",
+            )
+
+    def test_obter_acao_sucesso_leva_structured_content_igual_ao_content(self):
+        # `obter_acao` real depende de Firestore
+        # (`ctx.db.collection("tarefas").document(task_id).get()`); o
+        # executor é mockado aqui com uma forma real que o handler produz
+        # (ver `tools/hermes_tools.py::obter_acao`), mesmo padrão das tools
+        # acima -- testa o MECANISMO, não a lógica de leitura em si.
+        esperado = {
+            "id": "acao-3",
+            "titulo": "Renovar certificado SSL",
+            "descricao": "Certificado vence em 30 dias.",
+            "notas": "",
+            "status": "em andamento",
+            "area_tematica": "TI",
+            "projeto": None,
+            "data_limite": "2026-10-01",
+            "data_inicio": None,
+            "prazo_final": None,
+            "horario_inicio": None,
+            "horario_fim": None,
+            "tags": ["infra"],
+            "execution_lane": "avanco",
+            "degradation_count": 0,
+            "estrategia_objetivo_id": None,
+            "contexto_agente": None,
+            "plano_acao": [
+                {"id": "abc12345", "texto": "Gerar CSR", "estado": "feito", "data_prevista": None},
+            ],
+            "etapas_feitas": 1,
+            "etapas_totais": 1,
+            "anexos": [],
+            "diario": [{"data": "2026-09-01T00:00:00+00:00", "nota": "Iniciado"}],
+            "diario_total": 1,
+            "observacao": "Campos completos, sem truncamento.",
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "obter_acao", "arguments": {"task_id": "acao-3"}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_obter_acao_nao_encontrada_tambem_leva_structured_content(self):
+        # Segunda forma do branch de erro: "status" presente.
+        esperado = {"erro": "Acao 'inexistente' nao encontrada.", "status": "not_found"}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "obter_acao", "arguments": {"task_id": "inexistente"}}, ctx=_ctx()
+            )
+        self.assertTrue(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_obter_acao_sem_task_id_tambem_leva_structured_content(self):
+        # Primeira forma do branch de erro: "status" AUSENTE (a diferença
+        # entre os dois retornos de erro do handler é só essa presença
+        # opcional -- por isso um único branch de erro no oneOf, não dois).
+        esperado = {"erro": "Informe task_id."}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "obter_acao", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertTrue(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertNotIn("status", resultado["structuredContent"])
+
+    def test_obter_acao_structured_content_bate_com_o_output_schema_publicado(self):
+        # Paridade campo a campo contra o branch `oneOf` correspondente à
+        # forma efetivamente devolvida (sucesso ou erro), mesmo padrão de
+        # consultar_historico_acoes acima.
+        schema = registry.output_schema("obter_acao")
+        sucesso_schema, erro_schema = schema["oneOf"]
+
+        mock_sucesso = {
+            "id": "acao-4",
+            "titulo": None,
+            "descricao": "",
+            "notas": "",
+            "status": None,
+            "area_tematica": None,
+            "projeto": None,
+            "data_limite": None,
+            "data_inicio": None,
+            "prazo_final": None,
+            "horario_inicio": None,
+            "horario_fim": None,
+            "tags": [],
+            "execution_lane": "continuo",
+            "degradation_count": 0,
+            "estrategia_objetivo_id": None,
+            "contexto_agente": {
+                "resumo": "Migração de servidor em andamento.",
+                "pessoas_chave": [],
+                "onde_esta_o_codigo": None,
+                "ultimas_decisoes": [],
+                "travas": [],
+                "atualizado_em": "2026-09-01T00:00:00+00:00",
+            },
+            "plano_acao": [
+                {
+                    "id": None,
+                    "texto": "Etapa legada sem id",
+                    "estado": "aguardando_terceiro",
+                    "data_prevista": "2026-09-20",
+                    "aguardando_de": "André",
+                    "degradation_count": 2,
+                },
+            ],
+            "etapas_feitas": 0,
+            "etapas_totais": 1,
+            "anexos": [
+                {"nome": None, "link": None, "drive_file_id": None},
+            ],
+            "diario": [{"data": "None", "nota": None}],
+            "diario_total": 1,
+            "observacao": "Campos completos, sem truncamento.",
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_sucesso):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "obter_acao", "arguments": {"task_id": "acao-4"}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        etapa_props = sucesso_schema["properties"]["plano_acao"]["items"]["properties"]
+        anexo_props = sucesso_schema["properties"]["anexos"]["items"]["properties"]
+        for campo in sucesso_schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(
+                campo, sucesso_schema["properties"],
+                f"campo '{campo}' fora do branch de sucesso do outputSchema",
+            )
+        for etapa in estruturado["plano_acao"]:
+            for campo in etapa:
+                self.assertIn(campo, etapa_props, f"campo '{campo}' fora da etapa declarada")
+        for anexo in estruturado["anexos"]:
+            for campo in anexo:
+                self.assertIn(campo, anexo_props, f"campo '{campo}' fora do anexo declarado")
+
+        mock_erro = {"erro": "Acao 'x' nao encontrada.", "status": "not_found"}
+        with patch.object(mcp_server, "execute_tool", return_value=mock_erro):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "obter_acao", "arguments": {"task_id": "x"}}, ctx=_ctx()
             )
         estruturado = resultado["structuredContent"]
         for campo in erro_schema["required"]:
