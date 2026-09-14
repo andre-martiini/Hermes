@@ -97,12 +97,36 @@ class DominioRede(str, Enum):
     ABERTO = "aberto"  # conteúdo externo arbitrário/imprevisível -- busca na web, URL arbitrária
 
 
+class Idempotencia(str, Enum):
+    """Se repetir a chamada com os MESMOS argumentos tem efeito adicional no
+    ambiente -- P03 sub-entrega 16/N, para sustentar `idempotentHint` do
+    protocolo MCP (ver `tools/registry.py::mcp_annotations`). Investigado por
+    HANDLER (não inferido de outro campo do inventário): `reversibilidade` é
+    sobre "dá para desfazer depois", `idempotencia` é sobre "repetir agora
+    muda algo além da primeira vez" -- as duas perguntas têm respostas
+    independentes (ex.: `concluir_pedido_agente` é IRREVERSIVEL e
+    IDEMPOTENTE ao mesmo tempo: a transição é definitiva, mas chamar de novo
+    com o mesmo `request_id` não sobrescreve nada, só devolve
+    `already_decided`).
+
+    Só atribuído a tools com `leitura_escrita != LEITURA` -- a especificação
+    MCP só considera o hint significativo quando `readOnlyHint` é `false`
+    (mesma convenção já usada para `destructiveHint`, ver
+    `registry.mcp_annotations`): leitura pura não tem efeito nenhum a
+    repetir, então o hint seria vazio de conteúdo ali."""
+
+    IDEMPOTENTE = "idempotente"
+    NAO_IDEMPOTENTE = "nao_idempotente"
+
+
 @dataclass(frozen=True)
 class ToolInventoryEntry:
     """Uma linha do inventário — ver docstring do módulo para os 7 campos
     pedidos pelo passo 1 do P03. `rede_servico`/`dados_sensiveis_categoria`
     são o "qual" complementar dos dois campos booleanos. `dominio_rede` é o
-    "qual" complementar de `necessidade_de_rede`, ver `DominioRede`."""
+    "qual" complementar de `necessidade_de_rede`, ver `DominioRede`.
+    `idempotencia` (P03 sub-entrega 16/N) é independente dos outros seis --
+    ver `Idempotencia`."""
 
     dominio: str
     leitura_escrita: LeituraEscrita
@@ -115,11 +139,13 @@ class ToolInventoryEntry:
     dados_sensiveis_categoria: str | None = None
     nota: str | None = None
     dominio_rede: DominioRede | None = None
+    idempotencia: Idempotencia | None = None
 
 
 _L = LeituraEscrita
 _R = Reversibilidade
 _C = ClasseEfeito
+_I = Idempotencia
 
 _INVENTORY: dict[str, ToolInventoryEntry] = {
     "consultar_historico_acoes": ToolInventoryEntry(
@@ -165,10 +191,21 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "nenhum dedicado — dedup evita duplicata; reconsulta via obter_acao",
         rede_servico="Google Calendar (checagem de conflito) + Gemini condicional (embedding se houver texto-fonte)",
         dominio_rede=DominioRede.FECHADO,
+        idempotencia=_I.IDEMPOTENTE,
+        nota="idempotente via `claim_action_dedup_slot` (main.py): chave (titulo, data_limite, "
+        "horario_inicio) reivindicada atomicamente, repetir com a mesma chave devolve "
+        "'OK|{task_id}' da acao ja criada em vez de duplicar -- mas só dentro da janela de "
+        "ttl_minutes=15 do slot; repetir a mesma chamada depois desse intervalo cria uma acao "
+        "nova (P03 sub-entrega 16/N)",
     ),
     "agendar_lembrete_acao": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum — não confirma que o lembrete foi de fato entregue no horário",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="handler real (tools/telegram_extended.py::execute, ramo 'agendar_lembrete_acao') monta "
+        "um `new_reminder` com `uuid.uuid4()` novo e faz `append` na lista `reminders` em TODA "
+        "chamada, sem checar se já existe um lembrete igual -- repetir com os mesmos argumentos "
+        "cria um segundo lembrete duplicado, não devolve o mesmo (P03 sub-entrega 16/N)",
     ),
     "salvar_memoria_global": ToolInventoryEntry(
         "memoria_e_procedimentos", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
@@ -176,9 +213,43 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         rede_servico="Gemini (classificador de retenção + embedding)",
         dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="fato pessoal do usuário ou de terceiro, sem filtro de categoria",
+        idempotencia=_I.IDEMPOTENTE,
         nota="reversível via resolver_conflito_memoria — mas só na prática quando uma gravação futura for "
         "detectada como similar o bastante para abrir um conflito; não há tool neste catálogo para buscar "
-        "e corrigir uma memória específica sob demanda (achado da revisão adversarial desta sub-entrega)",
+        "e corrigir uma memória específica sob demanda (achado da revisão adversarial desta sub-entrega). "
+        "Idempotente por similaridade, não por chave exata (P03 sub-entrega 16/N): "
+        "`_save_memory_node` (main.py) busca os 3 nós mais similares por embedding e, acima de "
+        "MEMORY_SIMILARITY_DUPLICATE_THRESHOLD=0.965, devolve status='ignored'/reason='duplicate' em "
+        "vez de criar um nó novo -- repetir o MESMO `fato` NÃO produz o mesmo embedding, ao contrário "
+        "do que uma leitura apressada sugeriria (3ª rodada de revisão adversarial desta sub-entrega, "
+        "achado real): `_save_memory_node` embeda o fato para GRAVAR com "
+        "task_type='RETRIEVAL_DOCUMENT', mas `_find_similar_memory_nodes` (chamada na repetição) embeda "
+        "o MESMO texto para BUSCAR com task_type='RETRIEVAL_QUERY' -- os dois vetores são diferentes "
+        "por design (par assimétrico de embeddings de recuperação). A proteção real contra duplicata "
+        "tem duas camadas: a similaridade cruzada (query vs. document) do MESMO texto tende a ficar "
+        "bem alta em modelos de recuperação bem treinados, o suficiente para passar do piso "
+        "MEMORY_SIMILARITY_CREATE_THRESHOLD=0.90 (não demonstrado numericamente aqui, apenas plausível "
+        "pelo desenho do par assimétrico) -- e SÓ DEPOIS disso o fallback de texto exato "
+        "(`best_text == fato_norm`) garante o 'duplicate' mesmo se a similaridade cruzada ficar abaixo "
+        "de 0.965. Se a similaridade cruzada do MESMO texto cair abaixo de 0.90, o candidato nem entra "
+        "na comparação e um nó novo é criado -- risco residual não-bloqueante, sem teste de handler "
+        "para descartá-lo (ver GAP CONHECIDO abaixo). O classificador de retenção (LLM, chamado antes "
+        "da busca de similaridade) pode variar entre chamadas, mas em NENHUM dos dois "
+        "resultados possíveis (should_save=False -> ignored/retention_filter; should_save=True -> "
+        "busca de similaridade protege contra duplicata, sujeita ao risco acima) o handler persiste "
+        "duas vezes por si só -- risco residual adicional, não-bloqueante, só para duas chamadas quase "
+        "simultâneas, antes do primeiro nó ficar indexado para busca vetorial (condição de corrida não "
+        "observada, não demonstrada). Repetir "
+        "não é um no-op puro: no ramo 'duplicate', `_save_memory_node` ainda faz `ref.set(..., "
+        "merge=True)` no nó existente, atualizando `data_atualizacao`/`ultima_sessao_id`/"
+        "`ultimo_usuario_id`/`ultimo_fato_observado` a cada chamada -- mesmo padrão de metadado "
+        "auxiliar sempre atualizado já aceito em `dispensar_resposta_pendente` (`dispensado_em`), não "
+        "cria um segundo nó nem duplica o fato em si. GAP CONHECIDO (2ª rodada de revisão adversarial "
+        "desta sub-entrega): ao contrário de `criar_acao_no_sistema` (test_action_dedup_slot.py) e "
+        "`dispensar_resposta_pendente` (test_inbox_pendentes.py), esta classificação não tem teste de "
+        "HANDLER dedicado -- exigiria mockar embedding (Gemini) e o classificador de retenção (LLM), "
+        "sem nenhum precedente de mock nesse formato na suíte hoje; apoiada só em leitura de código, "
+        "registrado aqui em vez de omitido",
     ),
     "registrar_correcao_procedimento": ToolInventoryEntry(
         "memoria_e_procedimentos", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
@@ -433,9 +504,12 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     ),
     "registrar_no_diario": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.IRREVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL, "nenhum",
+        idempotencia=_I.NAO_IDEMPOTENTE,
         nota="o plano (seção 5.1) usa 'diário factual' como exemplo textual de escrita reversível, mas "
         "nenhuma tool deste catálogo remove uma entrada já escrita (ArrayUnion) — reversibilidade é "
-        "conceitual, não uma capacidade real hoje",
+        "conceitual, não uma capacidade real hoje. Não idempotente (P03 sub-entrega 16/N): cada "
+        "chamada monta `entry` com `datetime.now(timezone.utc)` novo e faz `ArrayUnion([entry])` -- "
+        "repetir com a mesma nota acrescenta uma segunda linha ao diário, nunca substitui a primeira",
     ),
     "gerar_imagem": ToolInventoryEntry(
         "utilitario", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.PREPARACAO_INTERNA,
@@ -508,6 +582,18 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "editar_acao": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum automático — devolve campos_alterados; reconferência via obter_acao é opcional",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="o `set` dos campos em `alteracoes` é idempotente isoladamente (mesmo valor produz o "
+        "mesmo estado), mas o handler delega para `main.py::confirmarEdicaoAcao`, que monta seu "
+        "PRÓPRIO `diary_entry` (com `now_iso` novo) e faz `ArrayUnion([diary_entry])` em TODA chamada "
+        "bem-sucedida, incondicionalmente -- não só quando `motivo`/`motivo_adiamento` está presente "
+        "(correção da 4ª rodada de revisão adversarial desta sub-entrega: a redação anterior atribuía "
+        "a não idempotência só ao caminho opcional de `motivo`). Repetir a MESMA chamada com os MESMOS "
+        "`alteracoes`, mesmo sem `motivo`, já acrescenta uma nova linha ao diário a cada vez -- essa é "
+        "a razão primária. `motivo_adiamento`/`motivo`, quando presente, aciona um SEGUNDO append "
+        "separado (inline em tools/hermes_tools.py, mesmo padrão ArrayUnion, mas não uma chamada "
+        "literal a `registrar_no_diario`) -- soma-se ao primeiro, não é a única causa (P03 sub-entrega "
+        "16/N)",
     ),
     "editar_acoes_em_lote": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
@@ -530,8 +616,13 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum — motivo é texto livre do chamador, sem validação de conteúdo",
         dados_sensiveis_categoria="pode referenciar contato/conversa de terceiro",
+        idempotencia=_I.IDEMPOTENTE,
         nota="sem caminho de volta -- não há tool de undispensar; dispensa vale só para o "
-             "trecho/snippet atual (fingerprint no item_id), não para a conversa/thread inteira",
+             "trecho/snippet atual (fingerprint no item_id), não para a conversa/thread inteira. "
+             "Idempotente (P03 sub-entrega 16/N): `inbox_pendentes.dispensar` grava com "
+             "`.document(item_id).set(...)`, ID determinístico igual ao próprio item_id -- repetir "
+             "com o mesmo item_id/motivo sobrescreve o mesmo documento (só `dispensado_em` muda), "
+             "nunca cria um segundo registro nem duplica o efeito de 'não reaparecer na fila'",
     ),
     "obter_acao": ToolInventoryEntry(
         "acoes_tarefas", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA, "nenhum necessário",
@@ -628,7 +719,12 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "atencao_fila", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum — desfecho é texto livre do chamador, sem validação de conteúdo",
         dados_sensiveis_categoria="pode referenciar contato/conversa de terceiro",
-        nota="sem caminho de volta a 'aberto' por esta tool",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="sem caminho de volta a 'aberto' por esta tool. Não idempotente (P03 sub-entrega 16/N): "
+        "o `.update()` do próprio item de atenção converge para o mesmo estado, mas quando o item "
+        "tem `acao_id` e `desfecho` (obrigatório para resolver/descartar), `atencao.resolver_item` "
+        "chama `registrar_no_diario` -- que acrescenta uma nova linha ao diário da ação a cada "
+        "chamada, sem checar se a nota já existe",
     ),
     "consultar_pedidos_agente": ToolInventoryEntry(
         "autonomia_pedidos_agente", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA, "nenhum",
@@ -637,11 +733,20 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "autonomia_pedidos_agente", _L.ESCRITA, _R.IRREVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "transação Firestore impede duas conclusões concorrentes; não confere se resultado/erro é "
         "factualmente correto",
-        nota="transição terminal, sem tool de reabertura",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="transição terminal, sem tool de reabertura. Idempotente por desenho, não só por "
+        "observação (P03 sub-entrega 16/N): `agent_requests.concluir` já documenta 'É idempotente' "
+        "na própria docstring -- `validar_transicao` recusa qualquer transição a partir de um "
+        "status já terminal e devolve `status='already_decided'` sem tocar no registro existente, "
+        "dentro de uma transação Firestore (protege inclusive contra duas chamadas concorrentes)",
     ),
     "registrar_execucao_agente": ToolInventoryEntry(
         "autonomia_pedidos_agente", _L.ESCRITA, _R.IRREVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
-        "nenhum — grava o que o chamador declarar, sem contraprova", nota="log append-only",
+        "nenhum — grava o que o chamador declarar, sem contraprova",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="log append-only. Não idempotente (P03 sub-entrega 16/N): `agent_runs.registrar` sempre "
+        "faz `col.add(payload)` -- Firestore gera um ID novo a cada chamada, sem chave de dedup "
+        "nenhuma; repetir os mesmos argumentos cria um segundo registro de execução distinto",
     ),
     "consultar_execucoes_agente": ToolInventoryEntry(
         "autonomia_pedidos_agente", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA, "nenhum",
