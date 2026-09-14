@@ -7,24 +7,28 @@ caminhos compatíveis; manter content legado". `readOnlyHint`/
 `destructiveHint` vieram da sub-entrega 6/N, derivados com confiança do
 inventário tipado da sub-entrega 1/N (`tools/inventory.py`):
 `readOnlyHint` de `leitura_escrita`, `destructiveHint` de
-`reversibilidade`. `openWorldHint` vem desta sub-entrega (7/N), do campo
+`reversibilidade`. `openWorldHint` vem da sub-entrega 7/N, do campo
 `dominio_rede` (`tools/inventory.py::DominioRede`) -- não de
 `necessidade_de_rede` direto, ver a docstring de `registry.mcp_annotations`
-para o porquê. `idempotentHint` continua deliberadamente fora -- nenhum
-campo do inventário atual sustenta esse hint com confiança, e um hint
-errado é pior que a omissão, já que a própria especificação MCP já assume o
-lado mais cauteloso -- `destructiveHint`/`openWorldHint` default `true` --
-para quem não declara `ToolAnnotations`.
+para o porquê. `idempotentHint` vem, PARCIALMENTE, da sub-entrega 16/N: 9
+das ~59 tools de escrita/leitura_e_escrita têm `idempotencia` classificada
+no inventário (`tools/inventory.py::Idempotencia`) -- as demais continuam
+sem o hint (omitido, não um valor inventado), mesmo raciocínio já usado
+para `dominio_rede` (a espec. MCP já assume o lado mais cauteloso --
+`destructiveHint`/`openWorldHint` default `true` -- para quem não declara
+`ToolAnnotations`, e um hint errado é pior que a omissão).
 
 Duas frentes:
 1. `TestMcpAnnotations` -- a função pura em `tools/registry.py`, incluindo
-   paridade com TODAS as 105 entradas reais do inventário (não amostra):
-   toda tool leitura pura tem `readOnlyHint=True` e nunca leva
-   `destructiveHint`; toda tool de escrita (pura ou mista) tem
+   paridade com TODAS as entradas reais do inventário (não amostra): toda
+   tool leitura pura tem `readOnlyHint=True` e nunca leva `destructiveHint`
+   nem `idempotentHint`; toda tool de escrita (pura ou mista) tem
    `readOnlyHint=False` e `destructiveHint` correspondendo exatamente à
    `reversibilidade` (`irreversivel`->`True`, `reversivel`/`nao_aplica`->
    `False`); `openWorldHint` correspondendo exatamente a `dominio_rede`
-   (`FECHADO`->`False`, `ABERTO`->`True`, `None`->omitido).
+   (`FECHADO`->`False`, `ABERTO`->`True`, `None`->omitido); `idempotentHint`
+   correspondendo exatamente a `idempotencia` quando classificada
+   (`IDEMPOTENTE`->`True`, `NAO_IDEMPOTENTE`->`False`, `None`->omitido).
 2. `TestHandleToolsListAnnotations` -- ponta a ponta via
    `mcp_server._handle_tools_list()`: o campo `annotations` chega no
    catálogo publicado, com os valores corretos para tools reais de cada
@@ -38,7 +42,7 @@ import unittest
 
 import mcp_server
 from tools import inventory, registry
-from tools.inventory import DominioRede, LeituraEscrita, Reversibilidade
+from tools.inventory import DominioRede, Idempotencia, LeituraEscrita, Reversibilidade
 
 
 class TestMcpAnnotations(unittest.TestCase):
@@ -64,9 +68,16 @@ class TestMcpAnnotations(unittest.TestCase):
         # `criar_acao_no_sistema`: escrita, reversivel. rede_servico=
         # "Google Calendar (...) + Gemini condicional" -- dominio_rede=
         # FECHADO (agenda do proprio dono + chamada de IA interna).
+        # idempotentHint=True desde a sub-entrega 16/N -- dedup por chave
+        # exata (titulo, data_limite, horario_inicio) em claim_action_dedup_slot.
         self.assertEqual(
             registry.mcp_annotations("criar_acao_no_sistema"),
-            {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+            {
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
         )
 
     def test_criar_rascunho_whatsapp_e_destructive_hint_true(self):
@@ -106,13 +117,45 @@ class TestMcpAnnotations(unittest.TestCase):
                     {"readOnlyHint": False, "destructiveHint": False},
                 )
 
-    def test_annotations_nunca_leva_idempotent_hint(self):
-        # idempotentHint continua inteiramente fora de escopo (ver docstring
-        # de registry.mcp_annotations) -- em toda tool, com ou sem rede, com
-        # ou sem openWorldHint.
-        for nome in ("consultar_historico_acoes", "criar_acao_no_sistema", "pesquisar_internet"):
+    def test_leitura_pura_nunca_leva_idempotent_hint(self):
+        # Leitura pura nunca leva idempotentHint -- o hint só é significativo
+        # quando readOnlyHint é False (mesma convenção de destructiveHint),
+        # e `idempotencia` nunca é classificada para LEITURA (ver docstring
+        # de `Idempotencia` em tools/inventory.py).
+        for nome in ("consultar_historico_acoes", "pesquisar_internet"):
             with self.subTest(tool=nome):
                 self.assertNotIn("idempotentHint", registry.mcp_annotations(nome))
+
+    def test_escrita_ainda_nao_investigada_omite_idempotent_hint(self):
+        # `criar_rascunho_email`: escrita/leitura_e_escrita real, mas fora
+        # das 9 tools investigadas na sub-entrega 16/N -- idempotencia=None,
+        # hint omitido (não um valor inventado).
+        self.assertNotIn("idempotentHint", registry.mcp_annotations("criar_rascunho_email"))
+
+    def test_idempotente_leva_idempotent_hint_true(self):
+        # As 4 tools classificadas IDEMPOTENTE na sub-entrega 16/N (ver nota
+        # de cada uma em tools/inventory.py para a evidência por handler).
+        for nome in (
+            "criar_acao_no_sistema",
+            "salvar_memoria_global",
+            "dispensar_resposta_pendente",
+            "concluir_pedido_agente",
+        ):
+            with self.subTest(tool=nome):
+                self.assertEqual(registry.mcp_annotations(nome).get("idempotentHint"), True)
+
+    def test_nao_idempotente_leva_idempotent_hint_false(self):
+        # As 5 tools classificadas NAO_IDEMPOTENTE na sub-entrega 16/N (ver
+        # nota de cada uma em tools/inventory.py para a evidência por handler).
+        for nome in (
+            "agendar_lembrete_acao",
+            "registrar_no_diario",
+            "editar_acao",
+            "resolver_item_atencao",
+            "registrar_execucao_agente",
+        ):
+            with self.subTest(tool=nome):
+                self.assertEqual(registry.mcp_annotations(nome).get("idempotentHint"), False)
 
     def test_dominio_rede_fechado_e_open_world_hint_false(self):
         # `criar_acao_no_sistema`: rede_servico envolve Google Calendar (do
@@ -146,10 +189,10 @@ class TestMcpAnnotations(unittest.TestCase):
                 self.assertNotIn("openWorldHint", registry.mcp_annotations(nome))
 
     def test_paridade_com_todas_as_entradas_reais_do_inventario(self):
-        # Não por amostragem: para TODA tool do catálogo (105 hoje), o trio
-        # (readOnlyHint, destructiveHint, openWorldHint) tem que corresponder
-        # exatamente à classificação real do inventário -- nunca um valor
-        # inventado nem uma tool esquecida.
+        # Não por amostragem: para TODA tool do catálogo, o quarteto
+        # (readOnlyHint, destructiveHint, openWorldHint, idempotentHint) tem
+        # que corresponder exatamente à classificação real do inventário --
+        # nunca um valor inventado nem uma tool esquecida.
         for nome, entry in sorted(inventory.list_inventory().items()):
             with self.subTest(tool=nome):
                 anotacoes = registry.mcp_annotations(nome)
@@ -157,9 +200,16 @@ class TestMcpAnnotations(unittest.TestCase):
                 self.assertEqual(anotacoes.get("readOnlyHint"), esperado_read_only)
                 if esperado_read_only:
                     self.assertNotIn("destructiveHint", anotacoes)
+                    self.assertNotIn("idempotentHint", anotacoes)
                 else:
                     esperado_destructive = entry.reversibilidade == Reversibilidade.IRREVERSIVEL
                     self.assertEqual(anotacoes.get("destructiveHint"), esperado_destructive)
+                    if entry.idempotencia == Idempotencia.IDEMPOTENTE:
+                        self.assertEqual(anotacoes.get("idempotentHint"), True)
+                    elif entry.idempotencia == Idempotencia.NAO_IDEMPOTENTE:
+                        self.assertEqual(anotacoes.get("idempotentHint"), False)
+                    else:
+                        self.assertNotIn("idempotentHint", anotacoes)
                 if entry.dominio_rede == DominioRede.FECHADO:
                     self.assertEqual(anotacoes.get("openWorldHint"), False)
                 elif entry.dominio_rede == DominioRede.ABERTO:
@@ -194,8 +244,27 @@ class TestHandleToolsListAnnotations(unittest.TestCase):
     def test_escrita_reversivel_chega_com_destructive_hint_false(self):
         self.assertEqual(
             self.catalogo["criar_acao_no_sistema"]["annotations"],
-            {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+            {
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
         )
+
+    def test_escrita_nao_idempotente_chega_com_idempotent_hint_false(self):
+        # `registrar_execucao_agente`: escrita, irreversivel, sem rede,
+        # NAO_IDEMPOTENTE desde a sub-entrega 16/N (agent_runs.registrar faz
+        # col.add() sem chave de dedup).
+        self.assertEqual(
+            self.catalogo["registrar_execucao_agente"]["annotations"],
+            {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False},
+        )
+
+    def test_escrita_nao_investigada_chega_sem_idempotent_hint(self):
+        # `criar_rascunho_email`: fora das 9 tools investigadas na
+        # sub-entrega 16/N -- idempotentHint omitido, não um valor inventado.
+        self.assertNotIn("idempotentHint", self.catalogo["criar_rascunho_email"]["annotations"])
 
     def test_dominio_aberto_chega_com_open_world_hint_true(self):
         self.assertEqual(
