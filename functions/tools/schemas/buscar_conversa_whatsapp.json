@@ -1,0 +1,12 @@
+{
+  "name": "buscar_conversa_whatsapp",
+  "description": "Busca conversas de WhatsApp por nome ou ID. Retorna somente metadados, nunca mensagens.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "termo": {"type": "string", "description": "Parte do nome ou ID da conversa"},
+      "limite": {"type": "integer", "description": "Máximo de resultados (padrão 20)"}
+    },
+    "required": ["termo"]
+  }
+}

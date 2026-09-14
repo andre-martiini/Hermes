@@ -566,6 +566,15 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "whatsapp", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",
         dados_sensiveis_categoria="nomes/ids de conversas",
     ),
+    "buscar_conversa_whatsapp": ToolInventoryEntry(
+        "whatsapp", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",
+        dados_sensiveis_categoria="nomes/ids de conversas",
+    ),
+    "ressincronizar_conversas_whatsapp": ToolInventoryEntry(
+        "whatsapp", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "o resultado real vem do worker; a tool só enfileira a solicitação",
+        dados_sensiveis_categoria="metadados operacionais do worker",
+    ),
     "ler_mensagens_whatsapp": ToolInventoryEntry(
         "whatsapp", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
         "allowlist de chat monitorado é o único portão, não uma verificação de resultado",

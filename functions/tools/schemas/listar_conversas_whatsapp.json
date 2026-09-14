@@ -10,7 +10,7 @@
       },
       "limite": {
         "type": "integer",
-        "description": "Máximo de conversas (padrão 60)"
+        "description": "Máximo de conversas (padrão 60; máximo 500), ordenadas por atividade recente"
       }
     },
     "required": []

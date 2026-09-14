@@ -46,6 +46,14 @@ COL_CHATS = "whatsapp_chats"
 COL_MENSAGENS = "whatsapp_messages"
 COL_CONSOLIDACOES = "whatsapp_consolidacoes"
 COL_OUTBOX = "whatsapp_outbox"
+COL_CHATS_SYNC_REQUESTS = "whatsapp_chats_sync_requests"
+
+# A lista do MCP só traz metadados, não conteúdo. Ainda assim, não devemos
+# cortar por ID antes de ordenar: em 14/09/2026 um grupo que era o 5º mais
+# recente ficou de fora porque seu documento era o 552º por ID. O teto protege
+# a chamada contra um registro anormalmente grande; a resposta informa quando
+# ele for alcançado.
+LIMITE_REGISTRO_CHATS = 3_000
 
 # O cron do outbox roda de minuto em minuto, entao a entrega acontece ate ~60s
 # depois do horario agendado. Passado este limite sem sair do `pending`, algo
@@ -122,6 +130,40 @@ def _iso(valor) -> str | None:
     return valor.isoformat() if hasattr(valor, "isoformat") else str(valor)
 
 
+def _conversas_conhecidas(ctx, apenas_monitoradas: bool) -> tuple[list[dict], bool]:
+    """Carrega metadados dos chats e ordena após ler o registro inteiro.
+
+    Firestore sem ``order_by`` entrega documentos por ID. Aplicar ``limit``
+    nessa consulta e ordenar em memória depois parece correto, mas omite chats
+    recentes cujo ID cai fora da primeira página. Até haver paginação por cursor
+    no contrato MCP, lemos o registro limitado e explicitamos a truncagem.
+    """
+    monitoradas = _allowlist(ctx.db)
+    captura_total = _captura_total(ctx.db)
+    leitura_total = _leitura_total(ctx.db)
+    snaps = list(ctx.db.collection(COL_CHATS).limit(LIMITE_REGISTRO_CHATS).stream())
+    registro_truncado = len(snaps) >= LIMITE_REGISTRO_CHATS
+
+    conversas = []
+    for snap in snaps:
+        dados = snap.to_dict() or {}
+        chat_id = str(dados.get("chat_id") or snap.id)
+        monitorada = leitura_total or chat_id in monitoradas
+        if apenas_monitoradas and not monitorada:
+            continue
+        conversas.append({
+            "chat_id": chat_id,
+            "chat_name": dados.get("chat_name") or chat_id,
+            "grupo": bool(dados.get("is_group")),
+            "monitorada": monitorada,
+            "capturada": captura_total or monitorada,
+            "ultima_atividade": _iso(dados.get("last_activity_ts")),
+        })
+
+    conversas.sort(key=lambda c: (c["ultima_atividade"] or ""), reverse=True)
+    return conversas, registro_truncado
+
+
 # --------------------------------------------------------------------------
 # Leitura
 # --------------------------------------------------------------------------
@@ -132,35 +174,13 @@ def listar_conversas(ctx, args: dict) -> dict:
     Enxerga alem da allowlist de proposito — nome de conversa nao e conteudo, e
     sem isso nao ha como descobrir o que poderia ser monitorado.
     """
-    monitoradas = _allowlist(ctx.db)
     captura_total = _captura_total(ctx.db)
     leitura_total = _leitura_total(ctx.db)
     apenas_monitoradas = args.get("apenas_monitoradas")
     apenas_monitoradas = True if apenas_monitoradas is None else bool(apenas_monitoradas)
-    limite = max(1, min(int(args.get("limite") or 60), 200))
-
-    conversas = []
-    for snap in ctx.db.collection(COL_CHATS).limit(500).stream():
-        dados = snap.to_dict() or {}
-        chat_id = str(dados.get("chat_id") or snap.id)
-        monitorada = leitura_total or chat_id in monitoradas
-        if apenas_monitoradas and not monitorada:
-            continue
-        conversas.append({
-            "chat_id": chat_id,
-            "chat_name": dados.get("chat_name") or chat_id,
-            "grupo": bool(dados.get("is_group")),
-            # `monitorada` = o agente pode ler. `capturada` = o Hermes esta
-            # guardando. Sao coisas distintas desde 27/08/2026, e confundi-las
-            # faria o agente achar que tem acesso ao que so esta armazenado.
-            "monitorada": monitorada,
-            "capturada": captura_total or monitorada,
-            "ultima_atividade": _iso(dados.get("last_activity_ts")),
-        })
-
-    # Sem atividade conhecida vai para o fim, em vez de encabecar a lista.
-    conversas.sort(key=lambda c: (c["ultima_atividade"] or ""), reverse=True)
-    return {
+    limite = max(1, min(int(args.get("limite") or 60), 500))
+    conversas, registro_truncado = _conversas_conhecidas(ctx, apenas_monitoradas)
+    resposta = {
         "total": len(conversas),
         "monitoradas": sum(1 for c in conversas if c["monitorada"]),
         "conversas": conversas[:limite],
@@ -174,6 +194,65 @@ def listar_conversas(ctx, args: dict) -> dict:
                 if captura_total else "")
              if apenas_monitoradas else
              "monitorada=false: aparece na lista, mas o conteúdo não é acessível.")),
+    }
+    if registro_truncado:
+        resposta["aviso"] = (
+            f"O registro atingiu o teto de {LIMITE_REGISTRO_CHATS} chats; "
+            "a lista pode estar incompleta."
+        )
+    return resposta
+
+
+def buscar_conversas(ctx, args: dict) -> dict:
+    """Busca chats por nome ou ID, sem expor conteúdo de mensagens."""
+    termo = str(args.get("termo") or "").strip()
+    if not termo:
+        return {"erro": "Termo de busca vazio.", "conversas": []}
+    limite = max(1, min(int(args.get("limite") or 20), 100))
+    needle = termo.casefold()
+    conversas, registro_truncado = _conversas_conhecidas(ctx, apenas_monitoradas=False)
+    encontrados = [
+        conversa for conversa in conversas
+        if needle in str(conversa["chat_name"]).casefold()
+        or needle in str(conversa["chat_id"]).casefold()
+    ]
+    resposta = {
+        "termo": termo,
+        "total": len(encontrados),
+        "conversas": encontrados[:limite],
+        "observacao": "Busca apenas metadados de conversa (nome e ID), nunca o conteúdo.",
+    }
+    if registro_truncado:
+        resposta["aviso"] = (
+            f"O registro atingiu o teto de {LIMITE_REGISTRO_CHATS} chats; "
+            "o resultado pode estar incompleto."
+        )
+    return resposta
+
+
+def ressincronizar_conversas(ctx, args: dict) -> dict:
+    """Pede ao worker WhatsApp uma atualização imediata do registro de chats."""
+    from google.cloud import firestore as gcf
+
+    worker = ctx.db.collection("system").document("whatsapp_worker").get()
+    worker_data = (worker.to_dict() or {}) if worker.exists else {}
+    request = ctx.db.collection(COL_CHATS_SYNC_REQUESTS).document()
+    request.set({
+        "status": "pending",
+        "requested_by": "mcp",
+        "requested_at": gcf.SERVER_TIMESTAMP,
+    })
+    ready = bool(worker_data.get("ready"))
+    return {
+        "status": "queued",
+        "request_id": request.id,
+        "worker_ready": ready,
+        "message": (
+            "Ressincronização solicitada; consulte listar_conversas_whatsapp em alguns instantes."
+            if ready else
+            "Pedido enfileirado, mas o worker WhatsApp não está pronto; ele precisa ser reautenticado "
+            "ou reconectado antes de processar a solicitação."
+        ),
     }
 
 

@@ -121,6 +121,8 @@ _CATALOG: dict[str, str] = {
     # WhatsApp: a consolidacao ja existia e so era acionavel pela Caixa de
     # Entrada na web. Leitura de conteudo exige chat na allowlist.
     "listar_conversas_whatsapp": "Lista as conversas de WhatsApp, marcando quais estao monitoradas",
+    "buscar_conversa_whatsapp": "Busca conversas de WhatsApp por nome ou ID, sem ler mensagens",
+    "ressincronizar_conversas_whatsapp": "Pede ao worker WhatsApp uma sincronizacao imediata do registro de conversas",
     "ler_mensagens_whatsapp": "Le as mensagens de uma conversa monitorada, para escolher o recorte",
     "consolidar_whatsapp": "Consolida um recorte de mensagens: transcreve midia e sintetiza resumo e itens de acao",
     "ler_consolidacao_whatsapp": "Le uma consolidacao inteira, ou as mais recentes de uma conversa",

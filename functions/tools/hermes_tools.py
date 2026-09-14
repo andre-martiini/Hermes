@@ -2447,6 +2447,8 @@ _HANDLERS: dict = {
     "listar_respostas_pendentes": listar_respostas_pendentes,
     "obter_acao": obter_acao,
     "listar_conversas_whatsapp": _whatsapp("listar_conversas"),
+    "buscar_conversa_whatsapp": _whatsapp("buscar_conversas"),
+    "ressincronizar_conversas_whatsapp": _whatsapp("ressincronizar_conversas"),
     "ler_mensagens_whatsapp": _whatsapp("ler_mensagens"),
     "consolidar_whatsapp": _whatsapp("consolidar"),
     "ler_consolidacao_whatsapp": _whatsapp("ler_consolidacao"),

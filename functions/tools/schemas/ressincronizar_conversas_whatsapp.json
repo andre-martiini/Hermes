@@ -1,0 +1,9 @@
+{
+  "name": "ressincronizar_conversas_whatsapp",
+  "description": "Pede ao worker do WhatsApp uma sincronização imediata do registro de conversas. Não lê mensagens nem altera a allowlist.",
+  "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": []
+  }
+}

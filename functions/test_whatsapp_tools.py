@@ -262,6 +262,41 @@ class TestListagem(unittest.TestCase):
         r = wa.listar_conversas(self.ctx, {"apenas_monitoradas": False})
         self.assertEqual(r["conversas"][0]["chat_id"], LIVRE)
 
+    def test_chat_recente_depois_dos_primeiros_500_por_id_nao_some(self):
+        """A pagina do Firestore não pode ser escolhida antes da ordenação.
+
+        Reproduz o incidente de 14/09: o chat recente tinha ID na posição 552,
+        logo não entrava em ``collection.limit(500)`` mesmo sendo um dos mais
+        recentes por atividade.
+        """
+        chats = {
+            f"{i:04d}@c.us": {
+                "chat_id": f"{i:04d}@c.us", "chat_name": f"Chat {i}",
+                "last_activity_ts": "2026-08-01T00:00:00",
+            }
+            for i in range(600)
+        }
+        chats["0552@g.us"] = {
+            "chat_id": "0552@g.us", "chat_name": "Família Alexandre 💙",
+            "is_group": True, "last_activity_ts": "2026-09-14T14:44:18",
+        }
+        ctx = _Ctx(_Db(allowlist=[], chats=chats))
+        r = wa.listar_conversas(ctx, {"apenas_monitoradas": False, "limite": 10})
+        self.assertEqual(r["conversas"][0]["chat_name"], "Família Alexandre 💙")
+        self.assertEqual(r["total"], 601)
+
+    def test_busca_por_nome_de_grupo(self):
+        r = wa.buscar_conversas(self.ctx, {"termo": "equipe"})
+        self.assertEqual(r["total"], 1)
+        self.assertEqual(r["conversas"][0]["chat_id"], MONITORADO)
+
+    def test_ressincronizacao_enfileira_sem_ler_conteudo(self):
+        r = wa.ressincronizar_conversas(self.ctx, {})
+        self.assertEqual(r["status"], "queued")
+        pedido = self.ctx.db._cols[wa.COL_CHATS_SYNC_REQUESTS].dados[r["request_id"]]
+        self.assertEqual(pedido["status"], "pending")
+        self.assertEqual(pedido["requested_by"], "mcp")
+
 
 class TestConsolidar(unittest.TestCase):
     def test_job_criado_com_o_contrato_do_trigger(self):

@@ -529,7 +529,13 @@ async function persistMessage(message, chat, chatId, isGroup) {
             chatLastActivityMs.set(chatId, msgTsMs);
             await db.collection('whatsapp_chats').doc(chatId).set({
                 chat_id: chatId,
+                // A mensagem ao vivo e o primeiro sinal confiável de um chat
+                // recém-criado. Não espere o registro periódico (6h) para que
+                // ele apareça com nome e tipo corretos na listagem.
+                chat_name: chatTitle,
+                is_group: isGroup,
                 last_activity_ts: msgData.timestamp,
+                last_message_ingested_at: admin.firestore.FieldValue.serverTimestamp(),
             }, { merge: true });
         }
     } catch (chatUpdateErr) {
