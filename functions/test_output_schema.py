@@ -40,42 +40,64 @@ também tem um único ponto de criação de documento em todo o repositório
 (`atencao_whatsapp.py`, via `agent_requests.enfileirar_ou_atualizar`) --
 ver comentário de `_OUTPUT_SCHEMAS` em `tools/registry.py`, que também
 corrige uma pendência registrada incorretamente na sub-entrega 11/N sobre
-"vários escritores" nesta coleção.
+"vários escritores" nesta coleção -- e `consultar_historico_acoes`
+(sub-entrega 14/N): sexta tool, e a PRIMEIRA com `oneOf` -- ao contrário
+das cinco anteriores (uma forma só, com campos às vezes ausentes), o
+handler (`tools/hermes_tools.py::_consultar_historico_acoes`, sobre
+`tools/busca_grafo.py::buscar_tarefas`) tem duas formas de nível superior
+com conjuntos de campos obrigatórios DISJUNTOS -- sucesso
+(`total_retornado`/`resultados`/`filtros`) ou erro (`erro`/`resultados`,
+sempre lista vazia) -- ver comentário de `_OUTPUT_SCHEMAS` em
+`tools/registry.py` para o levantamento completo, incluindo por que
+`oneOf` (nunca usado neste catálogo até esta sub-entrega, pendência
+deixada pelas sub-entregas 12/N e 13/N) foi escolhido em vez de uma forma
+única com tudo fora de `required`.
 
-Três frentes:
+Quatro frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
    paridade com TODO o catálogo real (não amostra): nenhuma tool além de
    `calculadora`, `buscar_contato`, `consultar_lista_compras`,
-   `consultar_execucoes_agente` e `consultar_pedidos_agente` tem contrato
-   publicado hoje.
+   `consultar_execucoes_agente`, `consultar_pedidos_agente` e
+   `consultar_historico_acoes` tem contrato publicado hoje.
 2. `TestHandleToolsListOutputSchema` -- ponta a ponta via
    `mcp_server._handle_tools_list()`: `outputSchema` chega no catálogo
-   publicado só para essas cinco tools.
+   publicado só para essas seis tools.
 3. `TestIntegracaoHandleToolsCallStructuredContent` -- ponta a ponta via
    `mcp_server._handle_tools_call`: `structuredContent` chega no envelope
    de `tools/call` para `calculadora` (execução real, pura) e para
    `buscar_contato`/`consultar_lista_compras`/`consultar_execucoes_agente`/
-   `consultar_pedidos_agente`
-   (executor mockado -- as quatro dependem de Firestore, então o teste cobre
+   `consultar_pedidos_agente`/`consultar_historico_acoes`
+   (executor mockado -- as cinco dependem de Firestore, então o teste cobre
    o MECANISMO, não a correção interna dos handlers, mesmo padrão já usado
    para `consultar_processo_sipac` abaixo), é sempre IGUAL ao dict que
    `content[0].text` serializa (mesma fonte, nunca diverge), bate com o
-   `outputSchema` publicado campo a campo, e nunca aparece para uma tool
-   sem contrato publicado -- nem quando o resultado real também é um dict,
-   nem quando o executor levanta uma exceção não tratada por ele mesmo, nem
-   quando o handler devolve uma string crua de erro (caminho real de
-   `consultar_lista_compras` para filtro inválido, ver
-   `tools/hermes_tools.py::_consultar_lista_compras`).
+   `outputSchema` publicado campo a campo (para `consultar_historico_acoes`,
+   contra o branch `oneOf` correspondente à forma retornada), e nunca
+   aparece para uma tool sem contrato publicado -- nem quando o resultado
+   real também é um dict, nem quando o executor levanta uma exceção não
+   tratada por ele mesmo, nem quando o handler devolve uma string crua de
+   erro (caminho real de `consultar_lista_compras` para filtro inválido,
+   ver `tools/hermes_tools.py::_consultar_lista_compras`).
+4. `TestConsultarHistoricoAcoesFiltrosCoercao` -- exercita o HANDLER REAL
+   (`hermes_tools._consultar_historico_acoes`, com
+   `busca_grafo.buscar_tarefas` mockado, não `execute_tool` inteiro como
+   na frente 3): regressão do achado de revisão adversarial da
+   sub-entrega 14/N -- antes da correção, `area_tematica`/`status`/
+   `data_limite_inicio`/`data_limite_fim` saíam do handler com o tipo cru
+   que o chamador MCP mandasse (o schema publicado em `tools/list` não
+   valida tipo escalar em runtime -- ver `registry.tipos_invalidos`),
+   violando o `["string", "null"]` que o próprio `outputSchema` desta
+   sub-entrega declara para eles.
 """
 
 from __future__ import annotations
 
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import mcp_server
-from tools import registry
+from tools import hermes_tools, registry
 from tools.tool_context import ToolContext
 
 
@@ -95,8 +117,10 @@ class TestOutputSchema(unittest.TestCase):
     def test_tool_sem_contrato_devolve_none(self):
         # Nenhuma outra tool do catálogo tem outputSchema publicado ainda --
         # lista deliberadamente fechada, uma tool investigada por vez (ver
-        # docstring de registry.output_schema).
-        for nome in ("consultar_historico_acoes", "criar_acao_no_sistema", "obter_estado_atual"):
+        # docstring de registry.output_schema). consultar_historico_acoes
+        # ganhou contrato nesta sub-entrega (14/N) -- saiu desta lista, ver
+        # test_consultar_historico_acoes_tem_schema_oneof_sucesso_e_erro.
+        for nome in ("obter_acao", "criar_acao_no_sistema", "obter_estado_atual"):
             with self.subTest(tool=nome):
                 self.assertIsNone(registry.output_schema(nome))
 
@@ -262,15 +286,81 @@ class TestOutputSchema(unittest.TestCase):
             with self.subTest(campo=campo):
                 self.assertEqual(item["properties"][campo]["type"], ["string", "null"])
 
-    def test_paridade_cinco_tools_tem_output_schema_hoje(self):
+    def test_consultar_historico_acoes_tem_schema_oneof_sucesso_e_erro(self):
+        schema = registry.output_schema("consultar_historico_acoes")
+        self.assertIsNotNone(schema)
+        # Único schema do catálogo hoje que usa `oneOf` no nível superior --
+        # sucesso e erro são duas formas com `required` DISJUNTOS, não uma
+        # forma única com campos condicionalmente ausentes (ver comentário
+        # de `_OUTPUT_SCHEMAS` em `tools/registry.py`).
+        self.assertEqual(set(schema.keys()), {"oneOf"})
+        self.assertEqual(len(schema["oneOf"]), 2)
+        sucesso, erro = schema["oneOf"]
+
+        self.assertEqual(sucesso["type"], "object")
+        self.assertEqual(
+            set(sucesso["required"]), {"total_retornado", "resultados", "filtros"}
+        )
+        self.assertEqual(
+            set(sucesso["properties"].keys()), {"total_retornado", "resultados", "filtros"}
+        )
+        self.assertFalse(sucesso["additionalProperties"])
+
+        item = sucesso["properties"]["resultados"]["items"]
+        campos_item = {
+            "id", "titulo", "status", "tipo_acao", "responsavel", "criado_em",
+            "area", "data_limite", "processo_sei", "tags", "descricao", "notas",
+            "sintese_demanda", "plano_acao", "acompanhamento_recente",
+        }
+        # Os 15 campos são sempre chaves presentes no dict literal montado
+        # por `busca_grafo._formatar_resultado` -- nenhuma condicional.
+        self.assertEqual(set(item["properties"].keys()), campos_item)
+        self.assertEqual(set(item["required"]), campos_item)
+        self.assertFalse(item["additionalProperties"])
+        # plano_acao/acompanhamento_recente são as únicas listas com `items`
+        # tipado (`string`) -- construídas por _formatar_resultado só
+        # anexando strings formatadas, garantia de tipo tão forte quanto
+        # criado_em; tags fica array solto (mesmo espírito de buscar_contato).
+        self.assertEqual(item["properties"]["plano_acao"], {"type": "array", "items": {"type": "string"}})
+        self.assertEqual(
+            item["properties"]["acompanhamento_recente"],
+            {"type": "array", "items": {"type": "string"}},
+        )
+        self.assertEqual(item["properties"]["tags"], {"type": "array"})
+
+        filtros = sucesso["properties"]["filtros"]
+        campos_filtros = {
+            "query", "area_tematica", "status", "data_limite_inicio", "data_limite_fim",
+        }
+        self.assertEqual(set(filtros["properties"].keys()), campos_filtros)
+        self.assertEqual(set(filtros["required"]), campos_filtros)
+        self.assertFalse(filtros["additionalProperties"])
+        # query é sempre string (str(args.get("query") or "")); os outros
+        # quatro são args.get(campo) cru -- None quando o chamador omite.
+        self.assertEqual(filtros["properties"]["query"], {"type": "string"})
+        for campo in ("area_tematica", "status", "data_limite_inicio", "data_limite_fim"):
+            with self.subTest(campo=campo):
+                self.assertEqual(filtros["properties"][campo]["type"], ["string", "null"])
+
+        self.assertEqual(erro["type"], "object")
+        self.assertEqual(set(erro["required"]), {"erro", "resultados"})
+        self.assertEqual(set(erro["properties"].keys()), {"erro", "resultados"})
+        self.assertFalse(erro["additionalProperties"])
+        self.assertEqual(erro["properties"]["erro"], {"type": "string"})
+        # resultados no ramo de erro é SEMPRE lista vazia -- hardcoded pelo
+        # próprio handler, não o que buscar_tarefas devolveu em erro.
+        self.assertEqual(erro["properties"]["resultados"], {"type": "array", "maxItems": 0})
+
+    def test_paridade_seis_tools_tem_output_schema_hoje(self):
         # Não por amostragem: para TODA tool do catálogo real (106 hoje),
         # output_schema devolve algo só para calculadora, buscar_contato,
-        # consultar_lista_compras, consultar_execucoes_agente e
-        # consultar_pedidos_agente -- prova que a lista fechada não vazou
-        # para nenhuma outra tool por engano.
+        # consultar_lista_compras, consultar_execucoes_agente,
+        # consultar_pedidos_agente e consultar_historico_acoes -- prova que
+        # a lista fechada não vazou para nenhuma outra tool por engano.
         com_schema = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
+            "consultar_historico_acoes",
         }
         for nome in registry.list_tool_names():
             with self.subTest(tool=nome):
@@ -317,10 +407,21 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             registry.output_schema("consultar_pedidos_agente"),
         )
 
+    def test_consultar_historico_acoes_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["consultar_historico_acoes"])
+        self.assertEqual(
+            self.catalogo["consultar_historico_acoes"]["outputSchema"],
+            registry.output_schema("consultar_historico_acoes"),
+        )
+        # oneOf chega intacto no catálogo publicado, não achatado nem
+        # reduzido a uma das duas formas.
+        self.assertIn("oneOf", self.catalogo["consultar_historico_acoes"]["outputSchema"])
+
     def test_nenhuma_outra_tool_publicada_tem_output_schema(self):
         esperadas = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
+            "consultar_historico_acoes",
         }
         com_schema = [
             nome for nome, tool in self.catalogo.items()
@@ -334,6 +435,7 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
         for nome in (
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
+            "consultar_historico_acoes",
         ):
             with self.subTest(tool=nome):
                 tool = self.catalogo[nome]
@@ -742,6 +844,172 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
             for campo in pedido:
                 self.assertIn(campo, item_props, f"campo '{campo}' fora do item declarado")
 
+    def test_consultar_historico_acoes_sucesso_leva_structured_content_igual_ao_content(self):
+        # `busca_grafo.buscar_tarefas` real depende de Firestore
+        # (`firestore.Client()...`); o executor é mockado aqui com uma forma
+        # real que `_consultar_historico_acoes` produz no caminho de sucesso
+        # (ver `tools/hermes_tools.py::_consultar_historico_acoes` e
+        # `tools/busca_grafo.py::_formatar_resultado`), mesmo padrão de
+        # buscar_contato/consultar_lista_compras/consultar_execucoes_agente/
+        # consultar_pedidos_agente acima -- testa o MECANISMO, não a lógica
+        # de busca/ranqueamento em si.
+        esperado = {
+            "total_retornado": 1,
+            "resultados": [
+                {
+                    "id": "acao-1",
+                    "titulo": "Contratação de mobiliário para som e eventos",
+                    "status": "em andamento",
+                    "tipo_acao": "processo",
+                    "responsavel": "André",
+                    "criado_em": "2026-08-01",
+                    "area": "FINANCEIRO",
+                    "data_limite": "2026-09-30",
+                    "processo_sei": "23543.000286/2026-39",
+                    "tags": ["compras", "eventos"],
+                    "descricao": "Aquisição de mobiliário para eventos institucionais.",
+                    "notas": "Aguardando parecer jurídico.",
+                    "sintese_demanda": "Mobiliário para auditório.",
+                    "plano_acao": ["✓ Elaborar TR", "○ Publicar edital"],
+                    "acompanhamento_recente": ["[2026-09-01] TR enviado para revisão"],
+                },
+            ],
+            "filtros": {
+                "query": "mobiliário eventos",
+                "area_tematica": None,
+                "status": None,
+                "data_limite_inicio": None,
+                "data_limite_fim": None,
+            },
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_historico_acoes", "arguments": {"query": "mobiliário eventos"}},
+                ctx=_ctx(),
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_historico_acoes_lista_vazia_tambem_leva_structured_content(self):
+        esperado = {
+            "total_retornado": 0,
+            "resultados": [],
+            "filtros": {
+                "query": "termo sem correspondência",
+                "area_tematica": "TI",
+                "status": "concluída",
+                "data_limite_inicio": "2026-01-01",
+                "data_limite_fim": "2026-12-31",
+            },
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {
+                    "name": "consultar_historico_acoes",
+                    "arguments": {"query": "termo sem correspondência"},
+                },
+                ctx=_ctx(),
+            )
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_consultar_historico_acoes_erro_tambem_leva_structured_content(self):
+        # Caminho real de erro: `buscar_tarefas` devolve `erro` (falha na
+        # consulta base ao Firestore, ou exceção capturada dentro dela
+        # mesma) -- `_consultar_historico_acoes` propaga como
+        # `{"erro": ..., "resultados": []}`, a SEGUNDA forma do `oneOf`.
+        # Ainda é um dict, então ainda leva structuredContent -- ao
+        # contrário de `consultar_lista_compras` com filtro inválido, cujo
+        # erro real é uma STRING "ERRO|...", não um dict.
+        esperado = {
+            "erro": "[ERRO BuscaGrafo] ServiceUnavailable: Firestore indisponível",
+            "resultados": [],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_historico_acoes", "arguments": {"query": "qualquer coisa"}},
+                ctx=_ctx(),
+            )
+        self.assertTrue(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_historico_acoes_structured_content_bate_com_o_output_schema_publicado(self):
+        # Paridade campo a campo contra o branch `oneOf` correspondente à
+        # forma efetivamente devolvida (sucesso ou erro) -- diferente das
+        # tools anteriores (uma forma só), aqui escolher o branch errado
+        # deixaria passar um campo que não pertence a NENHUMA das duas
+        # formas reais.
+        schema = registry.output_schema("consultar_historico_acoes")
+        sucesso_schema, erro_schema = schema["oneOf"]
+
+        mock_sucesso = {
+            "total_retornado": 1,
+            "resultados": [
+                {
+                    "id": "acao-2",
+                    "titulo": "Relatório financeiro",
+                    "status": "concluída",
+                    "tipo_acao": "tarefa",
+                    "responsavel": "André",
+                    "criado_em": "2026-07-15",
+                    "area": "FINANCEIRO",
+                    "data_limite": "2026-07-30",
+                    "processo_sei": "",
+                    "tags": [],
+                    "descricao": "",
+                    "notas": "",
+                    "sintese_demanda": "",
+                    "plano_acao": [],
+                    "acompanhamento_recente": [],
+                },
+            ],
+            "filtros": {
+                "query": "relatório financeiro",
+                "area_tematica": "FINANCEIRO",
+                "status": None,
+                "data_limite_inicio": None,
+                "data_limite_fim": None,
+            },
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_sucesso):
+            resultado = mcp_server._handle_tools_call(
+                {
+                    "name": "consultar_historico_acoes",
+                    "arguments": {"query": "relatório financeiro"},
+                },
+                ctx=_ctx(),
+            )
+        estruturado = resultado["structuredContent"]
+        item_props = sucesso_schema["properties"]["resultados"]["items"]["properties"]
+        for campo in sucesso_schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(
+                campo, sucesso_schema["properties"],
+                f"campo '{campo}' fora do branch de sucesso do outputSchema",
+            )
+        for item in estruturado["resultados"]:
+            for campo in item:
+                self.assertIn(campo, item_props, f"campo '{campo}' fora do item declarado")
+
+        mock_erro = {"erro": "[ERRO TECNICO BuscaGrafo] Timeout: ...", "resultados": []}
+        with patch.object(mcp_server, "execute_tool", return_value=mock_erro):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_historico_acoes", "arguments": {"query": "x"}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        for campo in erro_schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(
+                campo, erro_schema["properties"],
+                f"campo '{campo}' fora do branch de erro do outputSchema",
+            )
+
     def test_tool_sem_output_schema_nunca_leva_structured_content_mesmo_com_dict(self):
         # `consultar_processo_sipac` não tem outputSchema publicado; mesmo
         # quando o executor devolve um dict de verdade, o envelope não
@@ -809,3 +1077,149 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
         # para JSON sem `default=str` -- a mesma chamada que
         # `mcp_server._json_response` faz na resposta HTTP real.
         json.dumps(resultado, ensure_ascii=False)
+
+
+class TestConsultarHistoricoAcoesFiltrosCoercao(unittest.TestCase):
+    """Regressão do achado de revisão adversarial da sub-entrega 14/N.
+
+    Diferente de `TestIntegracaoHandleToolsCallStructuredContent` acima
+    (que mocka `execute_tool` inteiro, nunca exercitando o corpo real de
+    `_consultar_historico_acoes`), estes testes chamam o HANDLER REAL, só
+    mockando `busca_grafo.buscar_tarefas` (a única dependência de
+    Firestore dele) -- para provar que a própria função, não um mock,
+    coage `area_tematica`/`status`/`data_limite_inicio`/`data_limite_fim`
+    para `str`/`None` antes de ecoá-los em `filtros`, como
+    `["string", "null"]` (o `outputSchema` publicado) exige.
+
+    `test_busca_recebe_valores_crus_nao_coagidos` cobre o achado da 2a
+    rodada de revisão adversarial sobre a 1a versão desta correção: a
+    coerção tem que acontecer SÓ no eco de `filtros`, nunca nos parâmetros
+    passados para `buscar_tarefas` -- ver docstring de
+    `hermes_tools._filtro_str_ou_none` para o porquê (valor falsy-mas-não-
+    None, ex. `False`/`[]`, vira string truthy, e vários pontos de
+    `busca_grafo.py` decidem se aplicam um filtro por truthiness pura da
+    mesma variável -- coagir cedo demais faria um filtro hoje ignorado
+    passar a excluir tudo).
+    """
+
+    def test_filtros_com_tipo_nao_string_sao_coagidos_para_string(self):
+        with patch(
+            "tools.busca_grafo.buscar_tarefas",
+            return_value={"resultados": [], "erro": None},
+        ):
+            resultado = hermes_tools._consultar_historico_acoes(
+                _ctx(),
+                {
+                    "query": "x",
+                    "area_tematica": 5,
+                    "status": ["a", "b"],
+                    "data_limite_inicio": 20260101,
+                    "data_limite_fim": False,
+                },
+            )
+        self.assertEqual(
+            resultado["filtros"],
+            {
+                "query": "x",
+                "area_tematica": "5",
+                "status": "['a', 'b']",
+                "data_limite_inicio": "20260101",
+                "data_limite_fim": "False",
+            },
+        )
+        for campo, valor in resultado["filtros"].items():
+            with self.subTest(campo=campo):
+                self.assertIsInstance(valor, str)
+
+    def test_filtros_omitidos_continuam_none_nao_viram_string_none(self):
+        # None tem que continuar None (não virar a string "None") -- só o
+        # TIPO errado é coagido, a AUSÊNCIA continua ausência.
+        with patch(
+            "tools.busca_grafo.buscar_tarefas",
+            return_value={"resultados": [], "erro": None},
+        ):
+            resultado = hermes_tools._consultar_historico_acoes(_ctx(), {"query": "x"})
+        for campo in ("area_tematica", "status", "data_limite_inicio", "data_limite_fim"):
+            with self.subTest(campo=campo):
+                self.assertIsNone(resultado["filtros"][campo])
+
+    def test_filtros_ja_string_passam_intactos(self):
+        with patch(
+            "tools.busca_grafo.buscar_tarefas",
+            return_value={"resultados": [], "erro": None},
+        ):
+            resultado = hermes_tools._consultar_historico_acoes(
+                _ctx(),
+                {
+                    "query": "x",
+                    "area_tematica": "FINANCEIRO",
+                    "status": "concluída",
+                    "data_limite_inicio": "2026-01-01",
+                    "data_limite_fim": "2026-12-31",
+                },
+            )
+        self.assertEqual(resultado["filtros"]["area_tematica"], "FINANCEIRO")
+        self.assertEqual(resultado["filtros"]["status"], "concluída")
+        self.assertEqual(resultado["filtros"]["data_limite_inicio"], "2026-01-01")
+        self.assertEqual(resultado["filtros"]["data_limite_fim"], "2026-12-31")
+
+    def test_filtros_coagidos_ainda_batem_com_tipos_do_output_schema_publicado(self):
+        # Prova final, sem depender de lib externa de validação de
+        # JSON Schema (não usada em nenhum outro teste deste catálogo):
+        # confere manualmente, campo a campo, contra o tipo declarado no
+        # branch de sucesso do outputSchema publicado.
+        schema = registry.output_schema("consultar_historico_acoes")
+        sucesso_schema = schema["oneOf"][0]
+        tipos_filtros = sucesso_schema["properties"]["filtros"]["properties"]
+        with patch(
+            "tools.busca_grafo.buscar_tarefas",
+            return_value={"resultados": [], "erro": None},
+        ):
+            resultado = hermes_tools._consultar_historico_acoes(
+                _ctx(), {"query": "x", "area_tematica": 5, "data_limite_fim": None}
+            )
+        for campo, valor in resultado["filtros"].items():
+            with self.subTest(campo=campo):
+                tipo_declarado = tipos_filtros[campo]["type"]
+                tipos_aceitos = [tipo_declarado] if isinstance(tipo_declarado, str) else tipo_declarado
+                if valor is None:
+                    self.assertIn("null", tipos_aceitos)
+                else:
+                    self.assertIn("string", tipos_aceitos)
+                    self.assertIsInstance(valor, str)
+
+    def test_busca_recebe_valores_crus_nao_coagidos(self):
+        # Achado da 2a rodada de revisão adversarial (sobre a 1a versão
+        # desta correção): `status=False`/`area_tematica=[]` são FALSY, e
+        # vários pontos de `busca_grafo.py` só aplicam o filtro
+        # correspondente quando o valor é truthy (`if status and ...`,
+        # `if area_tematica and ...`) -- exatamente para permitir que um
+        # chamador mande um valor "vazio" como "sem filtro". Coagir para
+        # `"False"`/`"[]"` ANTES de chamar `buscar_tarefas` tornaria esses
+        # valores TRUTHY, ligando um filtro que hoje é corretamente
+        # ignorado e reduzindo o resultado a zero contra uma string sem
+        # sentido. Este teste prova que `buscar_tarefas` recebe os valores
+        # ORIGINAIS (crus), não a versão coagida usada só no eco de
+        # `filtros` -- mocka `buscar_tarefas` com um `MagicMock` (não um
+        # `return_value` fixo) para inspecionar os argumentos reais da
+        # chamada, ao contrário dos outros testes desta classe, que só
+        # olham para o retorno.
+        mock_buscar_tarefas = MagicMock(return_value={"resultados": [], "erro": None})
+        with patch("tools.busca_grafo.buscar_tarefas", mock_buscar_tarefas):
+            hermes_tools._consultar_historico_acoes(
+                _ctx(),
+                {
+                    "query": "",
+                    "area_tematica": [],
+                    "status": False,
+                    "data_limite_inicio": 0,
+                    "data_limite_fim": None,
+                },
+            )
+        self.assertEqual(mock_buscar_tarefas.call_count, 1)
+        _, kwargs = mock_buscar_tarefas.call_args
+        # Continuam os valores CRUS (falsy), não "[]"/"False"/"0" (truthy).
+        self.assertEqual(kwargs["area_tematica"], [])
+        self.assertIs(kwargs["status"], False)
+        self.assertEqual(kwargs["data_limite_inicio"], 0)
+        self.assertIsNone(kwargs["data_limite_fim"])

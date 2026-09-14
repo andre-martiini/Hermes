@@ -176,6 +176,48 @@ _STOPWORDS_QUERY = {
 }
 
 
+def _filtro_str_ou_none(valor):
+    """`None` passa direto; qualquer outro valor vira `str()`.
+
+    P03 sub-entrega 14/N -- achado da 1a rodada de revisao adversarial: o
+    outputSchema publicado para `consultar_historico_acoes` declara
+    `area_tematica`/`status`/`data_limite_inicio`/`data_limite_fim`
+    (ecoados em `filtros`) como `["string", "null"]`, mas antes desta
+    correcao eles eram `args.get(campo)` cru -- um chamador MCP que manda
+    `area_tematica: 5` ou `status: ["a", "b"]` (o schema publicado em
+    `tools/list` so declara o TIPO esperado, sem checagem escalar em
+    runtime -- ver `registry.tipos_invalidos`) fazia esse valor vazar sem
+    coercao para o `filtros` do retorno, violando o proprio contrato
+    publicado.
+
+    Usada SO no eco de `filtros` no retorno -- NUNCA nos parametros
+    passados a `busca_grafo.buscar_tarefas` (que continuam recebendo os
+    valores CRUS de `args.get(...)`, sem tocar nesta funcao). ACHADO da 2a
+    rodada de revisao adversarial (sobre a 1a versao desta correcao, que
+    aplicava esta mesma coercao tambem aos parametros de busca): valores
+    falsy-mas-nao-None (`False`, `0`, `[]`, `{}`) viram string TRUTHY apos
+    `str()` (`"False"`, `"0"`, `"[]"`) -- e varios pontos de
+    `busca_grafo.py` decidem se aplicam um filtro por truthiness pura da
+    MESMA variavel (`if status and ...` em `_matches_filters`; `if
+    area_tematica and not _query_menciona_filtro(...)`; `if
+    effective_status:` antes da query ao Firestore). Coagir a variavel
+    ANTES de passar para `buscar_tarefas` faria um filtro que hoje e
+    ignorado (valor falsy, comportamento correto e existente) passar a ser
+    aplicado de verdade contra uma string sem sentido (`"False"`, `"[]"`)
+    que nunca bate com nenhum documento -- reduzindo silenciosamente o
+    resultado a zero para um chamador que mandou `status: false` ou
+    `area_tematica: []` como "sem filtro". Confirmado ao vivo (revisao
+    trocando a ordem via um probe local, revertido depois): com a
+    coercao ANTES da busca, `buscar_tarefas("", status=False)` ia de 2
+    resultados (comportamento correto, hoje) para 0 apos a troca. Por isso
+    esta funcao so entra na montagem de `filtros`, depois que
+    `buscar_tarefas` ja rodou com os valores originais -- ver
+    `TestConsultarHistoricoAcoesFiltrosCoercao.test_busca_recebe_valores_crus_nao_coagidos`
+    em `test_output_schema.py` para a regressao especifica deste achado.
+    """
+    return valor if valor is None else str(valor)
+
+
 def _consultar_historico_acoes(ctx: ToolContext, args: dict):
     from tools.busca_grafo import buscar_tarefas
 
@@ -192,6 +234,10 @@ def _consultar_historico_acoes(ctx: ToolContext, args: dict):
     initial_mode = "all" if len(q_terms) >= 2 else "any"
 
     def _run(mode):
+        # area_tematica/status/data_limite_inicio/data_limite_fim vao CRUS
+        # aqui, de proposito -- ver docstring de `_filtro_str_ou_none` para
+        # o porque de a coercao so acontecer mais abaixo, no eco de
+        # `filtros`, nunca nestes parametros de busca.
         return buscar_tarefas(
             query,
             area_tematica=area_tematica,
@@ -215,10 +261,10 @@ def _consultar_historico_acoes(ctx: ToolContext, args: dict):
         "resultados": resultados,
         "filtros": {
             "query": query,
-            "area_tematica": area_tematica,
-            "status": status,
-            "data_limite_inicio": data_limite_inicio,
-            "data_limite_fim": data_limite_fim,
+            "area_tematica": _filtro_str_ou_none(area_tematica),
+            "status": _filtro_str_ou_none(status),
+            "data_limite_inicio": _filtro_str_ou_none(data_limite_inicio),
+            "data_limite_fim": _filtro_str_ou_none(data_limite_fim),
         },
     }
 
