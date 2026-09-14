@@ -36,6 +36,11 @@ import re
 import sys
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
+
+# Ver gemini_cost_controls.TZ — mesmo motivo: system_usage é indexado pelo dia
+# civil em America/Sao_Paulo, não UTC (achado 5 de 04/09/2026).
+TZ = ZoneInfo("America/Sao_Paulo")
 
 _installed = False
 _db_factory = None  # injetável nos testes
@@ -96,11 +101,17 @@ def caller_label() -> str:
 # --------------------------------------------------------------------------- #
 # Gemini: chamadas diretas
 # --------------------------------------------------------------------------- #
-def _log_gemini(response: Any, model: str) -> None:
+def _log_gemini(response: Any, model: str, *, usage_override: dict[str, Any] | None = None) -> None:
     try:
         from gemini_cost_controls import log_gemini_usage
 
-        log_gemini_usage(response, model=str(model), feature=f"auto:{caller_label()}", db=_get_db())
+        log_gemini_usage(
+            response,
+            model=str(model),
+            feature=f"auto:{caller_label()}",
+            db=_get_db(),
+            usage_override=usage_override,
+        )
     except Exception as exc:
         print(f"[LLMUsageHooks] falha ao registrar uso Gemini: {exc}")
 
@@ -177,9 +188,22 @@ def _wrap_embed_content(original):
         response = original(self, *args, **kwargs)
         try:
             if not inside_logged_wrapper():
-                # EmbedContentResponse não traz usage_metadata: registra a chamada
-                # (calls +1) com o modelo, sem tokens.
-                _log_gemini(response, kwargs.get("model") or "unknown")
+                model = kwargs.get("model") or (args[0] if args else "unknown")
+                from gemini_cost_controls import _usage_dict, count_input_tokens_free
+
+                usage = _usage_dict(response)
+                if not usage:
+                    # EmbedContentResponse não traz usage_metadata na Gemini
+                    # Developer API (achado 6 de 04/09/2026) — sem isso a
+                    # chamada saía do relatório com custo zero, sempre.
+                    # count_tokens é gratuito; usamos como fallback. `self`
+                    # aqui já É o objeto Models (mesmo que client.models).
+                    contents = kwargs.get("contents") or (args[1] if len(args) > 1 else None)
+                    if contents is not None:
+                        tokens = count_input_tokens_free(self, model=model, contents=contents)
+                        if tokens:
+                            usage = {"prompt_token_count": tokens, "total_token_count": tokens}
+                _log_gemini(response, model, usage_override=usage or None)
         except Exception:
             pass
         return response
@@ -324,7 +348,7 @@ def log_claude_usage(usage: dict[str, Any], *, model: str, feature: str, db: Any
         db = db or _get_db()
         if db is None:
             return payload
-        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        day = datetime.now(TZ).strftime("%Y-%m-%d")
         db.collection("system_usage").document("claude").collection("daily").document(day).set(
             build_claude_usage_update(usage, model, feature, day), merge=True
         )

@@ -45,6 +45,13 @@ import threading
 import time
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
+
+# Ver gemini_cost_controls.TZ — mesmo motivo: o documento diário é indexado
+# pelo dia civil em America/Sao_Paulo, não UTC (achado 5 de 04/09/2026,
+# estendido para este módulo em 14/09/2026 — o relatório combina este bloco
+# com o de IA num só dia, e os dois precisam bater).
+TZ = ZoneInfo("America/Sao_Paulo")
 
 FLUSH_INTERVAL_S = int(os.environ.get("HERMES_FIRESTORE_METRICS_FLUSH_S", "60"))
 FLUSH_OPS_THRESHOLD = int(os.environ.get("HERMES_FIRESTORE_METRICS_FLUSH_OPS", "2000"))
@@ -220,7 +227,7 @@ def flush() -> bool:
             return False
         data = _reset_locked()
     now = datetime.now(timezone.utc)
-    day = now.strftime("%Y-%m-%d")
+    day = datetime.now(TZ).strftime("%Y-%m-%d")
     _internal.active = True
     try:
         db = _get_client()

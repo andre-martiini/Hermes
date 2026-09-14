@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime
 from unittest import mock
 
 import firestore_metrics as fm
@@ -168,7 +168,9 @@ class FirestoreMetricsTest(unittest.TestCase):
 
         self.assertEqual(len(client.calls), 1)
         path, payload, merge = client.calls[0]
-        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        # Indexado por dia civil em America/Sao_Paulo, não UTC (achado 5 de
+        # 04/09/2026, estendido a este módulo em 14/09/2026).
+        day = datetime.now(fm.TZ).strftime("%Y-%m-%d")
         self.assertEqual(path, f"system_usage/firestore/daily/{day}")
         self.assertTrue(merge)
         from google.cloud.firestore_v1 import Increment
