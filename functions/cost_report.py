@@ -27,7 +27,7 @@ account das functions precisa de ``roles/bigquery.jobUser`` no projeto e
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -365,7 +365,7 @@ def gerar_relatorio_custos(db, now: datetime | None = None, bq: BigQueryRest | N
         gcp_error = str(exc)[:160]
         print(f"[CustosHermes] BigQuery falhou: {exc}")
 
-    day_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")  # system_usage é indexado em UTC
+    day_key = today.isoformat()  # system_usage/{gemini,claude,firestore} indexado em America/Sao_Paulo (14/09/2026)
     gemini = _usage_doc(db, "gemini", day_key)
     claude = _usage_doc(db, "claude", day_key)
     openai = _usage_doc(db, "openai", day_key)

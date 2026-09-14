@@ -8,6 +8,14 @@ import re
 import copy
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
+
+# Dia de faturamento visto pelo André é o dia civil em America/Sao_Paulo, não o
+# dia UTC. Os documentos diários de system_usage (aqui e em llm_usage_hooks.py/
+# firestore_metrics.py) são indexados por este fuso — antes eram indexados por
+# UTC, o que jogava o consumo das 21h-24h BRT (0h-3h UTC do dia seguinte) para
+# o documento do dia seguinte (achado 5 de 04/09/2026).
+TZ = ZoneInfo("America/Sao_Paulo")
 
 
 GEMINI_LIGHT_MODEL = os.environ.get("GEMINI_LIGHT_MODEL", "gemini-3.5-flash-lite")
@@ -48,6 +56,20 @@ _MODEL_PRICE_USD_PER_MTOK = {
     "gemini-3.1-pro-preview": {"input": 2.00, "output": 12.00, "cached_input": 0.20},
     "gemini-2.5-pro": {"input": 1.25, "output": 10.00, "cached_input": 0.125},
     "gemini-embedding-001": {"input": 0.15, "output": 0.00, "cached_input": 0.00},
+    # Modelos que faltavam na tabela (achado 2 de 04/09/2026) — toda chamada
+    # com eles saía do relatório como custo zero. Preços confirmados em
+    # ai.google.dev/gemini-api/docs/pricing (checado em 14/09/2026); sem
+    # "cached_input" publicado para nenhum dos dois, então o fallback em
+    # _estimate_usd usa o preço de input normal para tokens em cache.
+    # Saída de imagem é cobrada por token, mas o próprio Google já resolve a
+    # tabela para um preço fixo por imagem por faixa de resolução (0,5K/1K/2K/4K)
+    # — o preço por token abaixo reproduz esse valor quando aplicado ao
+    # candidates_token_count devolvido pela API.
+    "gemini-3.1-flash-image": {"input": 0.50, "output": 60.00},
+    # O modelo legado continua listado na página oficial de preços (verificado
+    # em 14/09/2026): US$0,50/Mtok de texto de entrada e US$10/Mtok de áudio
+    # de saída no tier Standard. GEMINI_TTS_MODEL ainda o usa como padrão.
+    "gemini-2.5-flash-preview-tts": {"input": 0.50, "output": 10.00},
 }
 
 
@@ -203,6 +225,15 @@ def _estimate_usd(model: str, usage: dict[str, Any], service_tier: str | None = 
         return None
     input_tokens = _usage_int(usage, "prompt_token_count", "promptTokenCount")
     output_tokens = _usage_int(usage, "candidates_token_count", "candidatesTokenCount")
+    # Tokens de raciocínio (extended thinking) são cobrados à MESMA taxa dos
+    # tokens de saída — confirmado em ai.google.dev/gemini-api/docs/thinking
+    # ("response pricing is the sum of output tokens and thinking tokens") e
+    # na própria tabela de preços, cuja coluna de saída é rotulada "Output
+    # price (including thinking tokens)". Sem somar aqui (achado 3 de
+    # 04/09/2026), o custo de todo raciocínio ficava fora da conta — foi o que
+    # explicou a diferença de 4.177 tokens no total_token_count de 03/09 que
+    # não batia com prompt+candidates.
+    thoughts_tokens = _usage_int(usage, "thoughts_token_count", "thoughtsTokenCount")
     cached_tokens = _usage_int(
         usage,
         "cached_content_token_count",
@@ -212,10 +243,21 @@ def _estimate_usd(model: str, usage: dict[str, Any], service_tier: str | None = 
     cost = (
         billable_input * price["input"]
         + cached_tokens * price.get("cached_input", price["input"])
-        + output_tokens * price["output"]
+        + (output_tokens + thoughts_tokens) * price["output"]
     ) / 1_000_000
-    if service_tier == "flex":
-        cost *= 0.5
+    # NÃO aplicamos mais desconto de Flex aqui (achado 4 de 04/09/2026,
+    # revisitado em 14/09/2026): a resposta de generate_content não devolve
+    # nenhum campo que confirme se a requisição foi de fato servida em tier
+    # flex. Verificado no SDK google-genai (types.py): GenerateContentResponse
+    # .usage_metadata não tem "service_tier"; o único campo candidato,
+    # traffic_type, tem a docstring "This enum is not supported in Gemini
+    # API." (é exclusivo do LiveServerMessage, outro endpoint). Aplicar 50% de
+    # desconto por INTENÇÃO (`use_flex`), sem confirmação, é exatamente o tipo
+    # de subdimensionamento que esta investigação apurou — então a estimativa
+    # assume o pior caso (preço padrão) até existir uma forma confiável de
+    # confirmar o tier realmente aplicado. `service_tier` continua no payload
+    # de log (campo "extra") só como registro do que foi pedido, não do que
+    # foi de fato cobrado.
     return round(cost, 8)
 
 
@@ -226,9 +268,16 @@ def log_gemini_usage(
     feature: str,
     db: Any = None,
     extra: dict[str, Any] | None = None,
+    usage_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Log Gemini token usage without ever failing the caller."""
-    usage = _usage_dict(response)
+    """Log Gemini token usage without ever failing the caller.
+
+    ``usage_override`` substitui o usage lido de ``response.usage_metadata``
+    quando o chamador já sabe que a resposta não vai trazer nada usável ali
+    (caso de ``embed_content`` — ver ``count_input_tokens_free``) e mediu os
+    tokens por outra via.
+    """
+    usage = usage_override if usage_override is not None else _usage_dict(response)
     total_tokens = _usage_int(usage, "total_token_count", "totalTokenCount")
     service_tier = str((extra or {}).get("service_tier") or "").strip().lower() or None
     estimated_usd = _estimate_usd(model, usage, service_tier=service_tier)
@@ -251,7 +300,7 @@ def log_gemini_usage(
     try:
         from firebase_admin import firestore
 
-        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        day = datetime.now(TZ).strftime("%Y-%m-%d")
         doc = (
             db.collection("system_usage")
             .document("gemini")
@@ -262,6 +311,7 @@ def log_gemini_usage(
         feature_key = _safe_key(feature)
         prompt_tokens = _usage_int(usage, "prompt_token_count", "promptTokenCount")
         output_tokens = _usage_int(usage, "candidates_token_count", "candidatesTokenCount")
+        thoughts_tokens = _usage_int(usage, "thoughts_token_count", "thoughtsTokenCount")
         cached_tokens = _usage_int(
             usage,
             "cached_content_token_count",
@@ -284,6 +334,10 @@ def log_gemini_usage(
             tokens_fields["input"] = firestore.Increment(prompt_tokens)
         if output_tokens:
             tokens_fields["output"] = firestore.Increment(output_tokens)
+        if thoughts_tokens:
+            # Registrado à parte para visibilidade, mas já somado ao output
+            # em _estimate_usd — cobrado à mesma taxa (ver comentário lá).
+            tokens_fields["thoughts"] = firestore.Increment(thoughts_tokens)
         if cached_tokens:
             tokens_fields["cached_input"] = firestore.Increment(cached_tokens)
 
@@ -352,6 +406,24 @@ def send_message_logged(
     return response
 
 
+def count_input_tokens_free(models: Any, *, model: str, contents: Any) -> int:
+    """Conta tokens de entrada via ``count_tokens`` — endpoint gratuito da
+    Gemini API (confirmado em firebase.google.com/docs/ai-logic/count-tokens:
+    "There's no charge for calling countTokens"). Usado como fallback quando a
+    resposta não traz ``usage_metadata`` utilizável (caso de ``embed_content``
+    — ver ``embed_content_logged``). ``models`` é o objeto com o método
+    ``count_tokens(model=..., contents=...)`` (``client.models`` ou, dentro do
+    hook de interceptação, o próprio ``Models`` já vinculado). Nunca lança:
+    retorna 0 em caso de falha, para não impedir a chamada original.
+    """
+    try:
+        result = models.count_tokens(model=model, contents=contents)
+        return int(getattr(result, "total_tokens", 0) or 0)
+    except Exception as exc:
+        print(f"[GeminiUsage] count_tokens falhou para {model}: {exc}")
+        return 0
+
+
 def embed_content_logged(
     client: Any,
     *,
@@ -362,7 +434,17 @@ def embed_content_logged(
     **kwargs: Any,
 ) -> Any:
     response = client.models.embed_content(model=model, contents=contents, **kwargs)
-    log_gemini_usage(response, model=model, feature=feature, db=db)
+    usage = _usage_dict(response)
+    if not usage:
+        # EmbedContentResponse não traz usage_metadata na Gemini Developer API
+        # (confirmado no SDK: só é preenchido na rota Vertex :embedContent, e
+        # mesmo lá não para gemini-embedding-001, o modelo padrão daqui) — sem
+        # isso, TODA chamada de embedding saía do relatório com custo zero,
+        # sempre (achado 6 de 04/09/2026, estrutural, não um bug ocasional).
+        tokens = count_input_tokens_free(client.models, model=model, contents=contents)
+        if tokens:
+            usage = {"prompt_token_count": tokens, "total_token_count": tokens}
+    log_gemini_usage(response, model=model, feature=feature, db=db, usage_override=usage)
     return response
 
 

@@ -39,6 +39,9 @@ class _FakeModels:
     def embed_content(self, *, model, contents, config=None):
         return types.SimpleNamespace(embeddings=[])
 
+    def count_tokens(self, *, model, contents):
+        return types.SimpleNamespace(total_tokens=42)
+
 
 class _RecordingDB:
     def __init__(self):
@@ -76,8 +79,14 @@ class GeminiHooksTest(unittest.TestCase):
         self._patch.stop()
         h._db_factory = None
 
-    def _fake_log(self, response, *, model, feature, db=None, extra=None):
-        self.logged.append({"model": model, "feature": feature, "db": db, "usage": getattr(response, "usage_metadata", None)})
+    def _fake_log(self, response, *, model, feature, db=None, extra=None, usage_override=None):
+        self.logged.append({
+            "model": model,
+            "feature": feature,
+            "db": db,
+            "usage": getattr(response, "usage_metadata", None),
+            "usage_override": usage_override,
+        })
         return {}
 
     def test_install_is_idempotent(self):
@@ -119,6 +128,16 @@ class GeminiHooksTest(unittest.TestCase):
         self.cls().embed_content(model="gemini-embedding-001", contents="x")
         self.assertEqual(len(self.logged), 1)
         self.assertEqual(self.logged[0]["model"], "gemini-embedding-001")
+
+    def test_embed_content_falls_back_to_count_tokens_when_usage_missing(self):
+        # EmbedContentResponse não traz usage_metadata (achado 6 de 04/09/2026)
+        # — o hook precisa contar via count_tokens (gratuito) em vez de deixar
+        # a chamada sem custo estimado.
+        self.cls().embed_content(model="gemini-embedding-001", contents="x")
+        self.assertEqual(
+            self.logged[0]["usage_override"],
+            {"prompt_token_count": 42, "total_token_count": 42},
+        )
 
     def test_hook_failure_never_breaks_caller(self):
         self._patch.stop()

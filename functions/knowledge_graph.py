@@ -151,6 +151,42 @@ def _gemini_client(api_key: str):
     return genai.Client(api_key=api_key)
 
 
+# ─── Cache em memória de perfil_pessoas (DEV-2026-0003 / Issue #203) ────────
+# on_tarefa_written_extract_people fazia um .limit(200).stream() completo em
+# perfil_pessoas a cada nome não encontrado por match exato — medido em
+# 314.845 leituras/dia (38,6% do total) em 13/09/2026. Este cache reduz isso a
+# no máximo 1 leitura da coleção por instância quente a cada
+# _PERFIL_PESSOAS_CACHE_TTL_S segundos, e é atualizado localmente quando o
+# próprio gatilho cria um perfil novo, para não recriar duplicatas do mesmo
+# nome dentro do TTL. Ver docs/okf/operacoes/custos.md.
+_PERFIL_PESSOAS_CACHE_TTL_S = 600  # 10 minutos
+_perfil_pessoas_cache: dict = {"loaded_at": None, "pessoas": []}  # [(id, nome_lower)]
+
+
+def _get_perfil_pessoas_cache(db, force_reload: bool = False) -> list[tuple[str, str]]:
+    """Lista (id, nome_lower) de perfil_pessoas, cacheada por instância quente."""
+    now = time.monotonic()
+    loaded_at = _perfil_pessoas_cache["loaded_at"]
+    fresh = (
+        loaded_at is not None
+        and (now - loaded_at) < _PERFIL_PESSOAS_CACHE_TTL_S
+    )
+    if fresh and not force_reload:
+        return _perfil_pessoas_cache["pessoas"]
+    pessoas = [
+        (doc.id, ((doc.to_dict() or {}).get("nome") or "").lower())
+        for doc in db.collection("perfil_pessoas").stream()
+    ]
+    _perfil_pessoas_cache["pessoas"] = pessoas
+    _perfil_pessoas_cache["loaded_at"] = now
+    return pessoas
+
+
+def _perfil_pessoas_cache_add(pessoa_id: str, nome: str) -> None:
+    """Registra um perfil recém-criado no cache em memória, sem esperar o TTL."""
+    _perfil_pessoas_cache["pessoas"].append((pessoa_id, (nome or "").lower()))
+
+
 _EMBEDDING_DIM = 768  # dimensão esperada do gemini-embedding-001
 
 
@@ -2737,15 +2773,13 @@ Sua resposta em JSON:"""
             if q_name:
                 pessoa_id = q_name[0].id
             else:
-                # Busca por similaridade simples
-                all_people = db.collection('perfil_pessoas').limit(200).stream()
-                best_match = None
+                # Busca por similaridade simples (cache em memória — evita
+                # reler perfil_pessoas inteira a cada nome não encontrado)
                 p_name_lower = p_name.lower()
-                for p_doc in all_people:
-                    p_data = p_doc.to_dict() or {}
-                    db_name = (p_data.get('nome') or "").lower()
+                best_match = None
+                for pid, db_name in _get_perfil_pessoas_cache(db):
                     if db_name == p_name_lower or p_name_lower in db_name or db_name in p_name_lower:
-                        best_match = p_doc.id
+                        best_match = pid
                         break
                 if best_match:
                     pessoa_id = best_match
@@ -2772,6 +2806,7 @@ Sua resposta em JSON:"""
                 }
                 new_ref.set(new_payload)
                 pessoa_id = new_ref.id
+                _perfil_pessoas_cache_add(pessoa_id, p_name)
                 
             # Cria interacao única
             context_hash = hashlib.md5(p_context.encode('utf-8')).hexdigest()[:8]
