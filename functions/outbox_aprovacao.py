@@ -24,6 +24,13 @@ STATUS_DESCARTADO = "descartado"
 STATUS_EXPIRADO = "expirado"
 STATUS_SENT = "sent"
 STATUS_FAILED = "failed"
+# Os três abaixo pertencem ao caminho `schedule_whatsapp_message` (via
+# `confirmar_acao`) + despacho, não ao fluxo de rascunho/aprovação acima --
+# ver `cancelar_envio` e docs/okf/integracoes/whatsapp.md §5 para o ciclo de
+# vida completo.
+STATUS_SENDING = "sending"
+STATUS_NOTIFIED = "notified"
+STATUS_CANCELED = "canceled"
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +53,28 @@ def validar_transicao_descarte(status_atual: str | None) -> tuple[bool, str]:
     if status_atual is None:
         return False, "Rascunho não encontrado."
     return False, f"já decidido (status atual: {status_atual})"
+
+
+def validar_transicao_cancelamento(status_atual: str | None) -> tuple[bool, str]:
+    """Valida se um job agendado por `schedule_whatsapp_message` (ou promovido
+    para `notified` pelo despacho por Telegram) ainda pode ser cancelado.
+
+    Achado do dono (14/09/2026): `descartar_rascunho_whatsapp` só transiciona
+    a partir de `aguardando_aprovacao`/`aguardando_janela` (o fluxo
+    `criar_rascunho_whatsapp`) -- chamado sobre um job `pending` (o fluxo
+    direto `schedule_whatsapp_message` + `confirmar_acao`) devolve
+    "já decidido", que não é o problema real: os dois fluxos gravam na mesma
+    coleção mas não compartilham ferramenta de cancelamento. `cancelar_envio`
+    é a contraparte para os únicos dois estados pré-entrega desse outro
+    fluxo -- `pending` (recém-confirmado) e `notified` (o worker local não
+    respondeu a tempo e o despacho por Telegram, `ai_notification_planner.
+    dispatch_scheduled_whatsapp_messages`, já mandou o card com link wa.me).
+    """
+    if status_atual in (STATUS_PENDING, STATUS_NOTIFIED):
+        return True, ""
+    if status_atual is None:
+        return False, "Job não encontrado."
+    return False, f"não pode mais ser cancelado (status atual: {status_atual})"
 
 
 def montar_card_telegram(
@@ -719,6 +748,105 @@ def descartar_rascunho(
         "status": "ok",
         "outbox_id": outbox_id,
         "mensagem": "Rascunho descartado com sucesso.",
+    }
+
+
+def cancelar_envio(
+    db,
+    job_id: str,
+    motivo: str | None = None,
+) -> dict:
+    """Cancela um job do outbox ainda não entregue, agendado por
+    `schedule_whatsapp_message` (status `pending`) ou já promovido para
+    `notified` pelo despacho de fallback via Telegram (worker local
+    indisponível). Ver `validar_transicao_cancelamento` para o porquê deste
+    par de estados ser separado do fluxo de `descartar_rascunho`.
+
+    Transação atômica Firestore, mesmo padrão de `aprovar_rascunho`/
+    `descartar_rascunho` (achado A04): evita cancelar um job que o worker já
+    reivindicou (`sending`) entre a leitura e a escrita -- se o worker vencer
+    a corrida, esta função vê `sending` dentro da própria transação e recusa
+    em vez de sobrescrever um envio já em andamento.
+
+    Reaproveitada pelo callback `wa_cancel:` do Telegram
+    (`telegram_callbacks_confirmacoes.py`), que antes fazia um `.update()`
+    direto sem revalidar status e com um bug (`datetime.datetime` dentro de
+    `from datetime import datetime` -- `AttributeError` silencioso) que
+    impedia a escrita de `canceled` de acontecer de fato, mesmo o Telegram
+    respondendo "cancelado" ao dono.
+    """
+    job_id = str(job_id or "").strip()
+    if not job_id:
+        return {"erro": "job_id é obrigatório."}
+
+    doc_ref = db.collection(COLLECTION).document(job_id)
+
+    if not hasattr(db, "transaction"):
+        return {
+            "status": "erro_configuracao",
+            "erro": "Backend Firestore sem suporte a transação; cancelamento recusado para evitar condição de corrida.",
+        }
+
+    try:
+        transaction = db.transaction()
+
+        @firestore.transactional
+        def _exec_cancel(tx):
+            snap = doc_ref.get(transaction=tx)
+            if not snap.exists:
+                return {"status": "not_found", "erro": f"Envio '{job_id}' não encontrado."}
+            data = snap.to_dict() or {}
+            status_atual = data.get("status")
+
+            if status_atual in (STATUS_AGUARDANDO, STATUS_AGUARDANDO_JANELA):
+                return {
+                    "status": "rascunho_nao_aprovado",
+                    "erro": (
+                        f"'{job_id}' é um rascunho ainda não aprovado (status '{status_atual}'), "
+                        "criado por criar_rascunho_whatsapp -- use descartar_rascunho_whatsapp "
+                        "para cancelá-lo, não cancelar_envio_whatsapp."
+                    ),
+                    "dados": data,
+                }
+
+            valido, motivo_invalido = validar_transicao_cancelamento(status_atual)
+            if not valido:
+                return {
+                    "status": "already_decided",
+                    "erro": f"Envio {motivo_invalido}",
+                    "dados": data,
+                }
+
+            update_fields = {
+                "status": STATUS_CANCELED,
+                "canceled_at": firestore.SERVER_TIMESTAMP,
+            }
+            if motivo:
+                update_fields["canceled_motivo"] = str(motivo).strip()
+
+            tx.update(doc_ref, update_fields)
+            return {"status": "ok", "dados": data}
+
+        transaction_result = _exec_cancel(transaction)
+    except Exception as tx_err:
+        # Falha real de transação. Sem fallback para escrita desprotegida —
+        # retorna erro explícito em vez de arriscar uma condição de corrida
+        # com o worker (`services/whatsapp-capture`) reivindicando o mesmo job.
+        print(f"[OutboxAprovacao] Transação Firestore de cancelamento falhou: {tx_err}")
+        return {
+            "status": "erro_transacao",
+            "erro": f"Não foi possível cancelar de forma atômica: {tx_err}",
+        }
+
+    if transaction_result.get("status") != "ok":
+        return transaction_result
+
+    data = transaction_result.get("dados") or {}
+    return {
+        "status": "ok",
+        "job_id": job_id,
+        "destino": data.get("to_number"),
+        "mensagem": "Envio cancelado antes da entrega.",
     }
 
 

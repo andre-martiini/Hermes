@@ -102,7 +102,8 @@ Dois mecanismos completam o que a captura ao vivo não viu, ambos sobre `chat.fe
 ## 5. Envio (`whatsapp_outbox`)
 
 - Fila alimentada por `functions/tools/schedule_whatsapp_message.py` (tool do copiloto), pela confirmação `confirm_whatsapp` no Telegram, pela ponte de voz (`hermes-voice-bridge/tools.py`) e pela tool `criar_rascunho_whatsapp` (aprovação com um toque no Telegram).
-- Dois consumidores coordenados por `system/settings.whatsapp_auto_send_enabled` + o heartbeat do worker (§1): quando habilitado e o worker está vivo (heartbeat ≤ 10 min), o **cron do worker Node** reivindica e envia de verdade via `client.sendMessage`; caso contrário, a Cloud Function `dispatch_scheduled_whatsapp_messages` manda um card no Telegram com link `wa.me` para envio manual.
+- Dois consumidores coordenados por `system/settings.whatsapp_auto_send_enabled` + o heartbeat do worker (§1): quando habilitado e o worker está vivo (heartbeat ≤ 10 min), o **cron do worker Node** reivindica e envia de verdade via `client.sendMessage`; caso contrário, a Cloud Function `dispatch_scheduled_whatsapp_messages` (`functions/ai_notification_planner.py`) manda um card no Telegram com link `wa.me` para envio manual e um botão `❌ Cancelar` (callback `wa_cancel:{id}`).
+- **Cancelamento**: `descartar_rascunho_whatsapp` só cobre o ramo `aguardando_aprovacao`/`aguardando_janela` (rascunhos de `criar_rascunho_whatsapp`). Para `pending`/`notified` (o fluxo direto `schedule_whatsapp_message` + `confirmar_acao`), a tool é `cancelar_envio_whatsapp` (`functions/outbox_aprovacao.py::cancelar_envio`), usada tanto pelo canal MCP quanto pelo callback `wa_cancel:` do Telegram — os dois pontos de entrada não tinham ferramenta de cancelamento própria até 14/09/2026 (achado do dono: chamar `descartar_rascunho_whatsapp` num job `pending` devolvia "já decidido", sem indicar a tool certa).
 
 ### Ciclo de vida e Estados do Outbox
 
@@ -123,28 +124,35 @@ Dois mecanismos completam o que a captura ao vivo não viu, ambos sobre `chat.fe
                      │  └─────────┘ └────────────┘
                      ▼
                  ┌───────────────────────┐
-[schedule_msg] ─>│        pending        │
-                 └───────────────────────┘
-                             │
-                     (claim pelo worker)
-                             ▼
-                 ┌───────────────────────┐
-                 │        sending        │
-                 └───────────────────────┘
-                     │               │
-            (entrega com sucesso) (falha ou destino inválido)
-                     │               │
-                     ▼               ▼
-                 ┌─────────┐    ┌─────────┐
-                 │  sent   │    │ failed  │
-                 └─────────┘    └─────────┘
+[schedule_msg] ─>│        pending        │<──────────────────────────┐
+                 └───────────────────────┘                           │
+                       │              │                              │
+              (claim pelo worker)  (worker offline/auto-send off:    │
+                       │            dispatch_scheduled_whatsapp_-    │
+                       ▼            messages notifica no Telegram)   │
+                 ┌───────────┐             │                         │
+                 │  sending  │             ▼                         │
+                 └───────────┘     ┌───────────────┐   [envio manual pelo
+                  │           │    │   notified    │    dono, fora do Hermes]
+       (sucesso) (falha ou dest.  └───────────────┘
+                  inválido)         │            │
+                  │           │  [cancelar_envio_whatsapp   (sem toque em
+                  ▼           ▼   ou "❌ Cancelar"]           48h+: fica
+             ┌─────────┐ ┌─────────┐   │                      "notified",
+             │  sent   │ │ failed  │   ▼                    sem expiração
+             └─────────┘ └─────────┘ ┌──────────┐            automática)
+                                     │ canceled │
+                                     └──────────┘
 ```
 
 - `aguardando_aprovacao`: Rascunho criado pelo agente/copiloto. Fica rigorosamente fora do envio do worker até a aprovação humana via botão inline no Telegram (`outbox:{id}:ok`). Toque em `✏️ Editar` mantém este estado após atualização do texto;
+- `aguardando_janela`: Rascunho de tipo promovido (`criar_rascunho_whatsapp`) que libera sozinho ao fim da janela de cancelamento (`system/mcp_access.janela_cancelamento_min`), salvo toque em `🛑 Cancelar` no card do Telegram;
 - `pending`: Mensagem pronta para despacho pelo worker (ou pela CF de fallback);
 - `sending`: Reivindicada com lock pelo worker durante a tentativa de envio;
 - `sent`: Entregue com sucesso no WhatsApp (registra `sent_at`, `sent_to`, `wa_message_id`);
 - `failed`: Falha permanente no envio (registra `failed_at`, `error_message`);
+- `notified`: O worker local não reivindicou a tempo (offline, ou `whatsapp_auto_send_enabled=false`); `dispatch_scheduled_whatsapp_messages` mandou um card no Telegram com link `wa.me` (envio manual, fora do controle do Hermes) e o botão `❌ Cancelar`. Não expira sozinho — fica `notified` indefinidamente até um toque humano ou `cancelar_envio_whatsapp`;
+- `canceled`: Cancelado antes da entrega, a partir de `pending` ou `notified` — via `cancelar_envio_whatsapp` (MCP) ou o botão `❌ Cancelar` no Telegram (registra `canceled_at`, `canceled_motivo`);
 - `descartado`: Descartada pelo dono no Telegram via botão `🗑️ Descartar` (não envia; reabre item da fila de atenção se vinculado);
 - `expirado`: Expiração automática pelo cron após 48h em `aguardando_aprovacao` sem decisão humana.
 

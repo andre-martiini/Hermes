@@ -629,6 +629,47 @@ class TestConsultarEnvio(unittest.TestCase):
         self.assertEqual(r["status"], "descartado")
         self.assertIn("Descartado pelo dono", r["message"])
 
+    def test_notified_descreve_estado_e_orienta_cancelar(self):
+        # Achado do dono (14/09/2026): `status: "notified"` (gravado por
+        # `ai_notification_planner.dispatch_scheduled_whatsapp_messages` quando o
+        # worker local não respondeu a tempo) não tinha nenhum tratamento aqui —
+        # a consulta devolvia os campos genéricos sem `message` nenhuma, sem
+        # avisar que o envio, se acontecer, agora é manual e fora do Hermes.
+        ctx = self._ctx({"j_notif": {"status": "notified", "to_number": "+5527999990000",
+                                     "content": "Olá", "notified_at": "2026-09-14T11:00:00Z"}})
+        r = wa.consultar_envio(ctx, {"job_id": "j_notif"})
+        self.assertEqual(r["status"], "notified")
+        self.assertEqual(r["notificado_em"], "2026-09-14T11:00:00Z")
+        self.assertIn("NAO diga", r["message"])
+        self.assertIn("cancelar_envio_whatsapp", r["message"])
+
+    def test_canceled_descreve_estado_e_motivo(self):
+        ctx = self._ctx({"j_canc": {"status": "canceled", "to_number": "+5527999990000",
+                                    "content": "Olá", "canceled_at": "2026-09-14T11:05:00Z",
+                                    "canceled_motivo": "reagendado para outro horário"}})
+        r = wa.consultar_envio(ctx, {"job_id": "j_canc"})
+        self.assertEqual(r["status"], "canceled")
+        self.assertEqual(r["cancelado_em"], "2026-09-14T11:05:00Z")
+        self.assertEqual(r["cancelado_motivo"], "reagendado para outro horário")
+        self.assertIn("não foi enviado", r["message"])
+
+    def test_sending_descreve_estado_como_irreversivel(self):
+        ctx = self._ctx({"j_send": {"status": "sending", "to_number": "+5527999990000",
+                                    "content": "Olá"}})
+        r = wa.consultar_envio(ctx, {"job_id": "j_send"})
+        self.assertEqual(r["status"], "sending")
+        self.assertIn("nao e mais", r["message"].replace("é", "e"))
+
+    def test_aguardando_janela_descreve_estado_e_alerta(self):
+        ctx = self._ctx({"j_janela": {"status": "aguardando_janela", "to_number": "+5527999990000",
+                                      "destinatario_nome": "Carlos", "motivo": "Confirmação",
+                                      "content": "Olá", "envio_liberado_em": "2026-09-14T11:10:00Z"}})
+        r = wa.consultar_envio(ctx, {"job_id": "j_janela"})
+        self.assertEqual(r["status"], "aguardando_janela")
+        self.assertEqual(r["envio_liberado_em"], "2026-09-14T11:10:00Z")
+        self.assertIn("NAO diga", r["message"])
+        self.assertIn("descartar_rascunho_whatsapp", r["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

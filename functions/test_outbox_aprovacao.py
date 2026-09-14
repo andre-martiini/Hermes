@@ -194,6 +194,22 @@ class TestLogicaPura(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("já decidido", msg)
 
+    def test_validar_transicao_cancelamento(self):
+        for status in (oa.STATUS_PENDING, oa.STATUS_NOTIFIED):
+            ok, msg = oa.validar_transicao_cancelamento(status)
+            self.assertTrue(ok, f"status {status} deveria ser cancelável")
+            self.assertEqual(msg, "")
+
+        for status in (oa.STATUS_SENDING, oa.STATUS_SENT, oa.STATUS_FAILED,
+                       oa.STATUS_CANCELED, oa.STATUS_AGUARDANDO, oa.STATUS_AGUARDANDO_JANELA):
+            ok, msg = oa.validar_transicao_cancelamento(status)
+            self.assertFalse(ok, f"status {status} não deveria ser cancelável")
+            self.assertIn("não pode mais ser cancelado", msg)
+
+        ok, msg = oa.validar_transicao_cancelamento(None)
+        self.assertFalse(ok)
+        self.assertIn("não encontrado", msg)
+
     def test_montar_card_telegram(self):
         corpo, botoes = oa.montar_card_telegram(
             destinatario_nome="João Silva",
@@ -447,6 +463,148 @@ class TestDescarte(unittest.TestCase):
             self.assertIn("Motivo: Mensagem já enviada por email", texto_editado)
 
 
+class TestCancelamento(unittest.TestCase):
+    """Testes de `cancelar_envio` -- contraparte de `descartar_rascunho` para o
+    fluxo direto (`schedule_whatsapp_message` + `confirmar_acao`), que grava
+    `pending` sem nunca passar por `aguardando_aprovacao`. Achado do dono
+    (14/09/2026): `descartar_rascunho_whatsapp` devolvia "já decidido" para um
+    job `pending`, sem nenhuma ferramenta capaz de cancelar de fato."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.outbox = self.db.collection(oa.COLLECTION)
+
+    def test_cancelar_pending_sucesso(self):
+        self.outbox._docs["job-p"] = {
+            "status": oa.STATUS_PENDING,
+            "to_number": "+5527999990000",
+            "content": "Oi",
+        }
+        res = oa.cancelar_envio(self.db, "job-p")
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["destino"], "+5527999990000")
+        self.assertEqual(self.outbox._docs["job-p"]["status"], oa.STATUS_CANCELED)
+        self.assertIn("canceled_at", self.outbox._docs["job-p"])
+
+    def test_cancelar_notified_sucesso(self):
+        self.outbox._docs["job-n"] = {
+            "status": oa.STATUS_NOTIFIED,
+            "to_number": "+5527999990000",
+            "content": "Oi",
+        }
+        res = oa.cancelar_envio(self.db, "job-n", motivo="reagendado para outro horário")
+        self.assertEqual(res["status"], "ok")
+        doc = self.outbox._docs["job-n"]
+        self.assertEqual(doc["status"], oa.STATUS_CANCELED)
+        self.assertEqual(doc["canceled_motivo"], "reagendado para outro horário")
+
+    def test_cancelar_ja_enviado_falha_com_erro_claro(self):
+        self.outbox._docs["job-s"] = {"status": oa.STATUS_SENT, "to_number": "+55"}
+        res = oa.cancelar_envio(self.db, "job-s")
+        self.assertEqual(res["status"], "already_decided")
+        self.assertIn("sent", res["erro"])
+        # Não regride o status de um job já entregue.
+        self.assertEqual(self.outbox._docs["job-s"]["status"], oa.STATUS_SENT)
+
+    def test_cancelar_ja_falhou_falha_com_erro_claro(self):
+        self.outbox._docs["job-f"] = {"status": oa.STATUS_FAILED, "to_number": "+55"}
+        res = oa.cancelar_envio(self.db, "job-f")
+        self.assertEqual(res["status"], "already_decided")
+        self.assertIn("failed", res["erro"])
+
+    def test_cancelar_em_sending_recusa_worker_ja_reivindicou(self):
+        # Corrida com o worker: se ele já reivindicou (claimOutboxMessage,
+        # services/whatsapp-capture/index.js) entre a leitura e a escrita,
+        # cancelar aqui não pode sobrescrever um envio em andamento.
+        self.outbox._docs["job-send"] = {"status": oa.STATUS_SENDING, "to_number": "+55"}
+        res = oa.cancelar_envio(self.db, "job-send")
+        self.assertEqual(res["status"], "already_decided")
+        self.assertEqual(self.outbox._docs["job-send"]["status"], oa.STATUS_SENDING)
+
+    def test_cancelar_ja_cancelado_falha(self):
+        self.outbox._docs["job-c"] = {"status": oa.STATUS_CANCELED, "to_number": "+55"}
+        res = oa.cancelar_envio(self.db, "job-c")
+        self.assertEqual(res["status"], "already_decided")
+
+    def test_cancelar_rascunho_aguardando_aprovacao_aponta_para_descartar(self):
+        self.outbox._docs["job-draft"] = {"status": oa.STATUS_AGUARDANDO, "to_number": "+55"}
+        res = oa.cancelar_envio(self.db, "job-draft")
+        self.assertEqual(res["status"], "rascunho_nao_aprovado")
+        self.assertIn("descartar_rascunho_whatsapp", res["erro"])
+        self.assertEqual(self.outbox._docs["job-draft"]["status"], oa.STATUS_AGUARDANDO)
+
+    def test_cancelar_rascunho_aguardando_janela_aponta_para_descartar(self):
+        self.outbox._docs["job-janela"] = {"status": oa.STATUS_AGUARDANDO_JANELA, "to_number": "+55"}
+        res = oa.cancelar_envio(self.db, "job-janela")
+        self.assertEqual(res["status"], "rascunho_nao_aprovado")
+        self.assertIn("descartar_rascunho_whatsapp", res["erro"])
+
+    def test_cancelar_job_inexistente_not_found(self):
+        res = oa.cancelar_envio(self.db, "nao-existe")
+        self.assertEqual(res["status"], "not_found")
+
+    def test_cancelar_sem_job_id_erro(self):
+        res = oa.cancelar_envio(self.db, "")
+        self.assertIn("erro", res)
+
+
+class TestWaCancelTelegramCallback(unittest.TestCase):
+    """Regressão do botão '❌ Cancelar' do card de despacho por Telegram
+    (`ai_notification_planner.dispatch_scheduled_whatsapp_messages`, status
+    `notified`). Antes desta correção, o handler `wa_cancel:` em
+    `telegram_callbacks_confirmacoes.py` chamava
+    `datetime.datetime.now(datetime.timezone.utc)` com `datetime` já
+    importado como CLASSE (`from datetime import datetime, timezone`) --
+    `AttributeError` ao montar o próprio payload do `.update()`, capturado
+    silenciosamente pelo `except Exception` do handler. O bot sempre
+    respondia "cancelado" ao dono sem jamais gravar `status: canceled`; o job
+    ficava para sempre em `notified`. Agora o handler delega para
+    `outbox_aprovacao.cancelar_envio` (mesma função usada pela tool MCP)."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.outbox = self.db.collection(oa.COLLECTION)
+
+    def test_wa_cancel_grava_status_canceled_de_fato(self):
+        import telegram_callbacks_confirmacoes as tcc
+
+        self.outbox._docs["job-wa"] = {
+            "status": oa.STATUS_NOTIFIED,
+            "to_number": "+5527999990000",
+            "content": "Oi",
+        }
+
+        with mock.patch.object(tcc, "_answer_callback_query") as mock_answer, \
+                mock.patch.object(tcc, "_send_telegram_message") as mock_send:
+            tratou = tcc.handle(
+                self.db, "fake-token", "q1", "123456", "wa_cancel:job-wa",
+                {}, {}, "copilot-session", lambda *a, **k: None, None, None,
+            )
+
+        self.assertTrue(tratou)
+        self.assertEqual(self.outbox._docs["job-wa"]["status"], oa.STATUS_CANCELED)
+        mock_answer.assert_called_once()
+        mock_send.assert_called_once()
+        texto_final = mock_send.call_args.args[2]
+        self.assertIn("cancelado", texto_final.lower())
+
+    def test_wa_cancel_sobre_job_ja_enviado_nao_sobrescreve(self):
+        import telegram_callbacks_confirmacoes as tcc
+
+        self.outbox._docs["job-sent"] = {"status": oa.STATUS_SENT, "to_number": "+55"}
+
+        with mock.patch.object(tcc, "_answer_callback_query"), \
+                mock.patch.object(tcc, "_send_telegram_message") as mock_send:
+            tcc.handle(
+                self.db, "fake-token", "q1", "123456", "wa_cancel:job-sent",
+                {}, {}, "copilot-session", lambda *a, **k: None, None, None,
+            )
+
+        self.assertEqual(self.outbox._docs["job-sent"]["status"], oa.STATUS_SENT)
+        texto_final = mock_send.call_args.args[2]
+        self.assertIn("Não foi possível cancelar", texto_final)
+
+
 class _BrokenMockTransaction(_MockTransaction):
     """Simula falha real de transação (ex.: Firestore indisponível ao iniciar
     a transação). Falha em ``_begin`` — antes de qualquer leitura/escrita —
@@ -530,6 +688,23 @@ class TestSemFallbackParaEscritaDesprotegida(unittest.TestCase):
         res = oa.descartar_rascunho(db_sem_tx, "job-sem-tx-desc")
         self.assertEqual(res["status"], "erro_configuracao")
         self.assertEqual(self.outbox._docs["job-sem-tx-desc"]["status"], oa.STATUS_AGUARDANDO)
+
+    def test_cancelar_com_falha_de_transacao_retorna_erro_sem_escrever(self):
+        self.outbox._docs["job-falha-canc"] = {"status": oa.STATUS_PENDING, "to_number": "+55"}
+        db_quebrado = _MockDbTransacaoQuebrada()
+        db_quebrado._cols[oa.COLLECTION] = self.outbox
+
+        res = oa.cancelar_envio(db_quebrado, "job-falha-canc")
+        self.assertEqual(res["status"], "erro_transacao")
+        self.assertEqual(self.outbox._docs["job-falha-canc"]["status"], oa.STATUS_PENDING)
+
+    def test_cancelar_sem_suporte_a_transacao_retorna_erro_sem_escrever(self):
+        self.outbox._docs["job-sem-tx-canc"] = {"status": oa.STATUS_NOTIFIED, "to_number": "+55"}
+        db_sem_tx = _MockDbSemTransacao(self.real_db)
+
+        res = oa.cancelar_envio(db_sem_tx, "job-sem-tx-canc")
+        self.assertEqual(res["status"], "erro_configuracao")
+        self.assertEqual(self.outbox._docs["job-sem-tx-canc"]["status"], oa.STATUS_NOTIFIED)
 
     def test_editar_com_falha_de_transacao_retorna_erro_sem_escrever(self):
         self.outbox._docs["job-falha-edicao"] = {
@@ -1022,13 +1197,18 @@ class TestHermesToolsOutboxCowork(unittest.TestCase):
 
         self.assertIn("aprovar_rascunho_whatsapp", registry._CATALOG)
         self.assertIn("descartar_rascunho_whatsapp", registry._CATALOG)
+        self.assertIn("cancelar_envio_whatsapp", registry._CATALOG)
 
         self.assertTrue(registry.needs_confirmation("aprovar_rascunho_whatsapp"))
         self.assertTrue(registry.needs_confirmation("descartar_rascunho_whatsapp"))
+        self.assertTrue(registry.needs_confirmation("cancelar_envio_whatsapp"))
 
-        # Não deve estar em _CONFIRMACAO_OBRIGATORIA
+        # Não deve estar em _CONFIRMACAO_OBRIGATORIA: cancelar é a direção
+        # segura/protetora (impede um compromisso com terceiro), não um novo
+        # compromisso -- mesmo raciocínio já aplicado a aprovar/descartar.
         self.assertNotIn("aprovar_rascunho_whatsapp", _CONFIRMACAO_OBRIGATORIA)
         self.assertNotIn("descartar_rascunho_whatsapp", _CONFIRMACAO_OBRIGATORIA)
+        self.assertNotIn("cancelar_envio_whatsapp", _CONFIRMACAO_OBRIGATORIA)
 
     def test_execute_aprovar_rascunho_whatsapp(self):
         from tools import hermes_tools
@@ -1059,6 +1239,36 @@ class TestHermesToolsOutboxCowork(unittest.TestCase):
         self.assertEqual(res["status"], "ok")
         self.assertEqual(self.outbox._docs["r-desc"]["status"], oa.STATUS_DESCARTADO)
         self.assertEqual(self.outbox._docs["r-desc"]["descartado_motivo"], "Desnecessário")
+
+    def test_execute_cancelar_envio_whatsapp(self):
+        from tools import hermes_tools
+        self.outbox._docs["j-canc"] = {
+            "status": oa.STATUS_PENDING,
+            "to_number": "+5527999990000",
+            "content": "Olá teste cancelar",
+        }
+        res = hermes_tools.execute(
+            "cancelar_envio_whatsapp",
+            {"job_id": "j-canc", "motivo": "duplicado"},
+            self.ctx,
+        )
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(self.outbox._docs["j-canc"]["status"], oa.STATUS_CANCELED)
+        self.assertEqual(self.outbox._docs["j-canc"]["canceled_motivo"], "duplicado")
+
+    def test_execute_cancelar_envio_whatsapp_sobre_rascunho_redireciona(self):
+        from tools import hermes_tools
+        self.outbox._docs["j-draft"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "content": "Rascunho ainda não aprovado",
+        }
+        res = hermes_tools.execute(
+            "cancelar_envio_whatsapp",
+            {"job_id": "j-draft"},
+            self.ctx,
+        )
+        self.assertEqual(res["status"], "rascunho_nao_aprovado")
+        self.assertIn("descartar_rascunho_whatsapp", res["erro"])
 
 
 class TestLiberarRascunhosPromovidosPreflightAutonomia(unittest.TestCase):

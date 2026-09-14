@@ -256,17 +256,35 @@ def handle(db, token, query_id, chat_id, data, message, session, copilot_session
 
     elif data.startswith("wa_cancel:"):
         doc_id = data.split("wa_cancel:")[1].strip()
-        _answer_callback_query(token, query_id, "Agendamento cancelado.")
-        try:
-            if doc_id:
-                db.collection("whatsapp_outbox").document(doc_id).update({
-                    "status": "canceled",
-                    "canceled_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
-                })
-        except Exception as exc:
-            print(f"[TelegramCallback] Erro ao cancelar WhatsApp agendado {doc_id}: {exc}")
+        _answer_callback_query(token, query_id, "Processando cancelamento...")
 
-        response_text = "❌ <b>Envio de WhatsApp agendado foi cancelado.</b>"
+        # Delega para `outbox_aprovacao.cancelar_envio` (transação atômica,
+        # revalida o status antes de escrever) em vez do `.update()` direto
+        # que existia aqui antes: aquele código tinha um bug real --
+        # `datetime.datetime.now(datetime.timezone.utc)` com `datetime` já
+        # importado como CLASSE (`from datetime import datetime, timezone`,
+        # topo do arquivo) levanta `AttributeError` ao montar o próprio
+        # payload do `.update()`, antes de qualquer escrita -- capturado
+        # pelo `except Exception` abaixo, então o botão sempre respondia
+        # "cancelado" ao dono sem jamais gravar `status: canceled` de fato.
+        # O job ficava para sempre em `notified`/`pending`, sujeito a reenvio
+        # (link wa.me ainda clicável) ou a ficar encalhado sem explicação.
+        resultado = {"status": "erro", "erro": "id do agendamento ausente"}
+        if doc_id:
+            try:
+                from outbox_aprovacao import cancelar_envio
+                resultado = cancelar_envio(db, doc_id, motivo="cancelado via Telegram")
+            except Exception as exc:
+                print(f"[TelegramCallback] Erro ao cancelar WhatsApp agendado {doc_id}: {exc}")
+                resultado = {"status": "erro", "erro": str(exc)}
+
+        if resultado.get("status") == "ok":
+            response_text = "❌ <b>Envio de WhatsApp agendado foi cancelado.</b>"
+        else:
+            response_text = (
+                "⚠️ <b>Não foi possível cancelar este agendamento.</b>\n"
+                f"{html.escape(str(resultado.get('erro') or 'motivo desconhecido'))}"
+            )
         _persist_callback_turn("Botão: cancelar WhatsApp agendado", response_text)
         _send_telegram_message(token, chat_id, response_text)
 

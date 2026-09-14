@@ -395,13 +395,44 @@ def consultar_envio(ctx, args: dict) -> dict:
         if d.get("status") == "aguardando_aprovacao":
             saida["motivo"] = d.get("motivo")
             saida["destinatario_nome"] = d.get("destinatario_nome")
-            saida["message"] = "Aguardando aprovação do dono no Telegram — NAO diga ao usuario que a mensagem foi enviada."
+            saida["message"] = ("Aguardando aprovação do dono no Telegram — NAO diga ao usuario que a "
+                                 "mensagem foi enviada. Use descartar_rascunho_whatsapp para cancelar.")
+        if d.get("status") == "aguardando_janela":
+            # Rascunho de tipo promovido (criar_rascunho_whatsapp): libera
+            # sozinho ao fim da janela de cancelamento, sem nova confirmação.
+            saida["motivo"] = d.get("motivo")
+            saida["destinatario_nome"] = d.get("destinatario_nome")
+            saida["envio_liberado_em"] = _iso(d.get("envio_liberado_em"))
+            saida["message"] = ("Tipo promovido — vai para a fila automaticamente ao fim da janela de "
+                                 "cancelamento, salvo toque em '🛑 Cancelar' no Telegram. NAO diga ao "
+                                 "usuario que a mensagem foi enviada. Use descartar_rascunho_whatsapp "
+                                 "para cancelar antes disso.")
         if d.get("status") == "descartado":
             saida["descartado_em"] = _iso(d.get("descartado_em"))
             saida["message"] = "Descartado pelo dono."
         if d.get("status") == "expirado":
             saida["expirado_em"] = _iso(d.get("expirado_em"))
             saida["message"] = "Expirado sem aprovação (mais de 48h)."
+        if d.get("status") == "canceled":
+            saida["cancelado_em"] = _iso(d.get("canceled_at"))
+            saida["cancelado_motivo"] = d.get("canceled_motivo")
+            saida["message"] = "Cancelado antes da entrega — não foi enviado."
+        if d.get("status") == "sending":
+            saida["message"] = ("Reivindicado pelo worker local para entrega agora — nao e mais "
+                                 "possivel cancelar. Consulte de novo em instantes para confirmar "
+                                 "sent/failed.")
+        if d.get("status") == "notified":
+            # `ai_notification_planner.dispatch_scheduled_whatsapp_messages`: quando o
+            # worker local nao respondeu a tempo, este e o despacho de fallback — manda
+            # um card no Telegram com link wa.me para envio manual, mais um botao de
+            # cancelar. A partir daqui o envio, se acontecer, e um toque humano fora do
+            # Hermes, nao mais o worker automatico.
+            saida["notificado_em"] = _iso(d.get("notified_at"))
+            saida["message"] = ("O worker local nao respondeu a tempo; o Hermes mandou um card no "
+                                 "Telegram com link wa.me para o dono enviar manualmente, ou o botao "
+                                 "'❌ Cancelar'. NAO diga ao usuario que a mensagem foi enviada — a "
+                                 "partir daqui a entrega e uma decisao humana no Telegram, nao mais "
+                                 "automatica. Use cancelar_envio_whatsapp para cancelar programaticamente.")
         if d.get("status") == "pending":
             # Um `pending` que passou da hora nao e "esperando": e um envio
             # encalhado. Sem esta distincao ele fica "na fila" para sempre, que
@@ -423,7 +454,9 @@ def consultar_envio(ctx, args: dict) -> dict:
                 saida["message"] = (
                     "Ainda na fila — NAO diga ao usuario que a mensagem foi enviada. "
                     "A entrega acontece em ate ~60s depois do horario agendado "
-                    "(o worker varre a fila a cada minuto); consulte de novo depois disso.")
+                    "(o worker varre a fila a cada minuto); consulte de novo depois disso. "
+                    "Use cancelar_envio_whatsapp para cancelar ou schedule_whatsapp_message "
+                    "para agendar outra mensagem.")
         saida["worker"] = worker
         return saida
 

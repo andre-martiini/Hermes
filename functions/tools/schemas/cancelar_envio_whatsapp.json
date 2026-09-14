@@ -1,0 +1,18 @@
+{
+  "name": "cancelar_envio_whatsapp",
+  "description": "Cancela um envio de WhatsApp agendado por schedule_whatsapp_message (status pending ou notified) antes de ser entregue. Não se aplica a rascunhos criados por criar_rascunho_whatsapp (status aguardando_aprovacao/aguardando_janela) -- para esses, use descartar_rascunho_whatsapp. Devolve erro claro se o job já foi enviado (sent), falhou (failed), já está sendo entregue (sending) ou já foi cancelado.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "job_id": {
+        "type": "string",
+        "description": "ID do job devolvido por schedule_whatsapp_message (o mesmo id usado em consultar_envio_whatsapp)."
+      },
+      "motivo": {
+        "type": "string",
+        "description": "Motivo opcional do cancelamento, para auditoria/histórico."
+      }
+    },
+    "required": ["job_id"]
+  }
+}

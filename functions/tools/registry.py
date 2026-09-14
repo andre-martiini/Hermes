@@ -126,6 +126,9 @@ _CATALOG: dict[str, str] = {
     "consolidar_whatsapp": "Consolida um recorte de mensagens: transcreve midia e sintetiza resumo e itens de acao",
     "ler_consolidacao_whatsapp": "Le uma consolidacao inteira, ou as mais recentes de uma conversa",
     "consultar_envio_whatsapp": "Estado real de uma mensagem enfileirada: enviada, na fila ou falhou",
+    # Contraparte de cancelamento do fluxo direto (schedule_whatsapp_message):
+    # descartar_rascunho_whatsapp só cobre o outro fluxo (criar_rascunho_whatsapp).
+    "cancelar_envio_whatsapp": "Cancela um envio de WhatsApp agendado (pending/notified) antes da entrega, pelo job_id devolvido por schedule_whatsapp_message",
     # Investimentos: o Hermes nao decide nem executa nada: le a carteira do
     # servico `decisao-investimentos` e registra o que o USUARIO declarou ter
     # feito na corretora. Quem decide e o motor deterministico do outro lado.
@@ -217,6 +220,10 @@ _NEEDS_CONFIRMATION: set[str] = {
     # Aprovação e descarte de rascunhos de WhatsApp via Cowork
     "aprovar_rascunho_whatsapp",
     "descartar_rascunho_whatsapp",
+    # Cancelamento do fluxo direto (schedule_whatsapp_message); mesmo
+    # tratamento de mutates direto do par acima, sem gate de confirmar_acao
+    # (é a direção segura/protetora, não um novo compromisso com terceiro).
+    "cancelar_envio_whatsapp",
     # Portao de autorizacao Telegram para o conector Claude-Argos: as duas que
     # mutam estado (pedir e consumir); consultar e so leitura, fica de fora.
     "solicitar_autorizacao_argos",

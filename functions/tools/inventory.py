@@ -595,6 +595,21 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "ela mesma é o verificador de schedule_whatsapp_message ('enfileirar não é enviar')",
         dados_sensiveis_categoria="número de destino e trecho da mensagem",
     ),
+    "cancelar_envio_whatsapp": ToolInventoryEntry(
+        "whatsapp", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "consultar_envio_whatsapp confirma o novo status 'canceled'",
+        dados_sensiveis_categoria="número de destino do envio cancelado",
+        nota="cobre os dois estados pré-entrega do fluxo schedule_whatsapp_message (pending) + "
+        "despacho de fallback por Telegram (notified, quando o worker local não respondeu a "
+        "tempo) -- achado do dono (14/09/2026): descartar_rascunho_whatsapp só transiciona a "
+        "partir de aguardando_aprovacao/aguardando_janela (fluxo criar_rascunho_whatsapp), "
+        "devolvendo 'já decidido' para pending/notified em vez de cancelar. Chamada sobre um "
+        "rascunho em aguardando_aprovacao/aguardando_janela devolve erro apontando para "
+        "descartar_rascunho_whatsapp em vez do genérico. Reaproveitada pelo callback wa_cancel: "
+        "do Telegram (telegram_callbacks_confirmacoes.py), que antes desta entrega tinha um bug "
+        "(AttributeError silencioso em datetime.datetime) que impedia a escrita de 'canceled' de "
+        "acontecer de fato -- o botão sempre respondia 'cancelado' sem cancelar nada.",
+    ),
     "consultar_investimentos": ToolInventoryEntry(
         "investimentos", _L.LEITURA_E_ESCRITA, _R.NAO_APLICA, True, True, _C.OBSERVACAO_AUTORIZADA,
         "nenhum quanto à exatidão da carteira externa — Hermes repassa a resposta sem conferência própria",

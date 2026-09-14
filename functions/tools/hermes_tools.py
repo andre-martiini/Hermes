@@ -567,6 +567,20 @@ def descartar_rascunho_whatsapp(ctx: ToolContext, args: dict):
     )
 
 
+def cancelar_envio_whatsapp(ctx: ToolContext, args: dict):
+    """Cancela um job agendado por schedule_whatsapp_message (pending ou
+    notified) antes da entrega -- contraparte de descartar_rascunho_whatsapp
+    para o fluxo direto, que não passa por criar_rascunho_whatsapp."""
+    from outbox_aprovacao import cancelar_envio
+    job_id = str(args.get("job_id") or "").strip()
+    motivo = args.get("motivo")
+    return cancelar_envio(
+        ctx.db,
+        job_id=job_id,
+        motivo=motivo,
+    )
+
+
 def solicitar_autorizacao_argos(ctx: ToolContext, args: dict):
     from argos_autorizacao import solicitar_autorizacao
     return solicitar_autorizacao(
@@ -2483,6 +2497,7 @@ _HANDLERS: dict = {
     "consolidar_whatsapp": _whatsapp("consolidar"),
     "ler_consolidacao_whatsapp": _whatsapp("ler_consolidacao"),
     "consultar_envio_whatsapp": _whatsapp("consultar_envio"),
+    "cancelar_envio_whatsapp": cancelar_envio_whatsapp,
     "anexar_arquivo": anexar_arquivo,
     "preparar_upload": preparar_upload,
     "remover_anexo": remover_anexo,
