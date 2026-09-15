@@ -574,13 +574,34 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "criar_objetivo_estrategico": ToolInventoryEntry(
         "estrategico", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum automático; corrigível via editar_objetivo_estrategico",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="`strategy_tools.criar_objetivo_estrategico` sempre grava em "
+        "`db.collection('estrategia_pessoal').document()` (ID automático do Firestore) -- repetir a MESMA "
+        "chamada cria um SEGUNDO objetivo estratégico distinto, nunca devolve o já existente (P03 "
+        "sub-entrega 18/N)",
     ),
     "editar_objetivo_estrategico": ToolInventoryEntry(
         "estrategico", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL, "nenhum",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="`strategy_tools.editar_objetivo_estrategico` faz `ref.update(updates)` num objetivo já "
+        "existente identificado por `objetivo_id` -- `updates` é recomputado deterministicamente a partir "
+        "dos argumentos a cada chamada (mesmos argumentos -> mesmo dict), sem nenhum append/ArrayUnion; "
+        "repetir grava os mesmos valores de negócio de novo. Único campo que muda a cada chamada é "
+        "`timestamp` (SERVER_TIMESTAMP), não lido por nenhuma decisão/rotina (confirmado por busca no "
+        "código) -- mesmo espírito do caveat de `mcp_checked_at` já aceito em `registrar_saude` (P03 "
+        "sub-entrega 17/N) (P03 sub-entrega 18/N)",
     ),
     "gerenciar_item_estrategico": ToolInventoryEntry(
         "estrategico", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "transação Firestore evita perda de escrita concorrente; não verifica o resultado semanticamente",
+        nota="idempotência investigada e deixada SEM classificação (P03 sub-entrega 18/N): o comportamento "
+        "depende do parâmetro `acao` (`adicionar`/`editar`/`remover`/`concluir`), interno a esta única tool "
+        "-- `adicionar` gera `novo_id_estrategia()` novo a cada chamada (NAO_IDEMPOTENTE, cria um segundo "
+        "item); `editar` sobrescreve a descrição do mesmo item por `item_id` (IDEMPOTENTE); `remover` erra "
+        "na segunda chamada porque o item já não está mais na lista (mesma ambiguidade de "
+        "`revogar_promocao_autonomia`); `concluir` regrava `dataConclusao` com um timestamp NOVO a cada "
+        "chamada -- efeito adicional real, não só inerte. Um hint único não descreveria os quatro ramos "
+        "honestamente -- um hint errado é pior que a omissão.",
     ),
     "excluir_objetivo_estrategico": ToolInventoryEntry(
         "estrategico", _L.ESCRITA, _R.IRREVERSIVEL, False, False,
@@ -589,7 +610,12 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         nota="delete() definitivo, sem soft-delete nem tool de restauração — 'exclusão definitiva' é exemplo "
         "textual desta classe na matriz do plano (seção 5.1). ACHADO: apesar disso, esta tool não está no "
         "piso FLOOR_CONFIRMACAO_OBRIGATORIA do MCP — hoje uma sessão MCP pode excluir um objetivo estratégico "
-        "numa única chamada, sem segunda confirmação estrutural.",
+        "numa única chamada, sem segunda confirmação estrutural. Idempotência investigada e deixada SEM "
+        "classificação (P03 sub-entrega 18/N): `ref.delete()` em si não tem efeito adicional se repetido, "
+        "mas o HANDLER (`carregar_objetivo_estrategico`, fail-closed) já barra a segunda chamada antes de "
+        "chegar em `delete()` -- devolve `status=error/objetivo_nao_encontrado` em vez de um 'já excluído' "
+        "gracioso, a mesma ambiguidade resposta-muda-mas-ambiente-não já aceita para "
+        "`revogar_promocao_autonomia` (sub-entrega 16/N): um hint errado é pior que a omissão.",
     ),
     "consultar_processo_sipac": ToolInventoryEntry(
         "sipac", _L.LEITURA, _R.NAO_APLICA, True, True, _C.OBSERVACAO_AUTORIZADA,
@@ -678,15 +704,22 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "vinculação à tarefa falhar",
         rede_servico="Google Drive sempre; Gmail API ou URL arbitrária conforme a origem",
         dados_sensiveis_categoria="pode ser comprovante/documento pessoal (prestação de contas, recibo)",
-        nota="reversível via remover_anexo",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="reversível via remover_anexo. NAO_IDEMPOTENTE (P03 sub-entrega 18/N): "
+        "`tools/anexar_arquivo.py::anexar` sempre cria um arquivo NOVO no Drive (`service.files().create()`, "
+        "ID novo do Google a cada chamada) e um item novo no pool (`uuid.uuid4()[:8]`) -- repetir a MESMA "
+        "chamada sobe o mesmo conteúdo duas vezes, como dois anexos distintos, nunca devolve o já existente",
     ),
     "preparar_upload": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, True, False, _C.PREPARACAO_INTERNA,
         "conferência real (tamanho/sha256) acontece na chamada seguinte, dentro de anexar_arquivo",
         rede_servico="Google Cloud IAM signBlob (URL assinada)",
         dominio_rede=DominioRede.FECHADO,
+        idempotencia=_I.NAO_IDEMPOTENTE,
         nota="grava doc em uploads_pendentes apesar do nome sugerir só preparo em memória; token de uso "
-        "único, expira em 15 min, nada é aplicado a nenhuma tarefa por esta chamada",
+        "único, expira em 15 min, nada é aplicado a nenhuma tarefa por esta chamada. NAO_IDEMPOTENTE (P03 "
+        "sub-entrega 18/N): `token = f\"upl-{secrets.token_urlsafe(16)}\"` é gerado novo a cada chamada -- "
+        "repetir a MESMA chamada devolve uma URL assinada e um token DIFERENTES, nunca o mesmo",
     ),
     "remover_anexo": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.IRREVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
@@ -694,8 +727,12 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         rede_servico="Google Drive (mover para lixeira)",
         dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="documento anexado",
+        idempotencia=_I.NAO_IDEMPOTENTE,
         nota="sem tool para restaurar o vínculo exato; arquivo vai para a lixeira do Drive (recuperável por "
-        "30 dias fora do Hermes)",
+        "30 dias fora do Hermes). NAO_IDEMPOTENTE (P03 sub-entrega 18/N): todo sucesso faz `ArrayUnion` de "
+        "uma nova nota de retificação com timestamp novo em `acompanhamento`; além disso, repetir a MESMA "
+        "chamada depois do item já removido do `pool_dados` devolve erro ('não está no pool'), não um "
+        "sucesso silencioso",
     ),
     "consultar_fatura_cartao": ToolInventoryEntry(
         "financas_pessoais", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",
@@ -820,8 +857,13 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "whatsapp_secretario", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.COORDENACAO_LIMITADA,
         "nenhum — resolução de contato pode ambiguar e nada revalida depois",
         dados_sensiveis_categoria="nome/telefone/assunto de terceiro",
+        idempotencia=_I.NAO_IDEMPOTENTE,
         nota="grava direto no Firestore apesar do nome 'preparar_'; não há segunda chamada de confirmação "
-        "como nas demais preparar_*; reversível via cancelar_contato_prioritario_secretario",
+        "como nas demais preparar_*; reversível via cancelar_contato_prioritario_secretario. "
+        "NAO_IDEMPOTENTE (P03 sub-entrega 18/N): `valido_ate` é recalculado a partir de 'agora' a cada "
+        "chamada (estende o prazo do briefing a cada repetição), `criado_em` é regravado com um timestamp "
+        "NOVO em vez de preservar o original, e a conversa vinculada é resetada por completo "
+        "(`historico_mensagens=[]`, `trocas_count=0`, `estado=EM_ATENDIMENTO`) em TODA chamada bem-sucedida",
     ),
     "consultar_contatos_prioritarios_secretario": ToolInventoryEntry(
         "whatsapp_secretario", _L.LEITURA_E_ESCRITA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
@@ -833,17 +875,33 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "cancelar_contato_prioritario_secretario": ToolInventoryEntry(
         "whatsapp_secretario", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum", dados_sensiveis_categoria="dados de contato prioritário",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="`secretario_whatsapp.cancelar_contato_prioritario` faz `.update({'status': CANCELADO, "
+        "'atualizado_em': SERVER_TIMESTAMP})` sobre o mesmo doc encontrado por chat_id, sem checar o status "
+        "atual antes -- repetir a MESMA chamada devolve sucesso de novo e mantém `status=CANCELADO` (nenhum "
+        "outro campo de negócio muda); só `atualizado_em` bate um timestamp novo a cada chamada, não lido "
+        "por nenhuma decisão/rotina (mesmo espírito do caveat de `mcp_checked_at`, sub-entrega 17/N) (P03 "
+        "sub-entrega 18/N)",
     ),
     "ativar_modo_secretario": ToolInventoryEntry(
         "whatsapp_secretario", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.COORDENACAO_LIMITADA,
         "nenhum — reconferência via consultar_status_modo_secretario é opcional",
         dados_sensiveis_categoria="allowlist de contatos terceiros",
+        idempotencia=_I.NAO_IDEMPOTENTE,
         nota="só grava system/settings — nenhuma chamada à infra de envio do WhatsApp acontece nesta tool; "
-        "reversível via desativar_modo_secretario",
+        "reversível via desativar_modo_secretario. NAO_IDEMPOTENTE (P03 sub-entrega 18/N): quando "
+        "`duracao_horas` é informado, `desativa_em` é recalculado a partir de 'agora' a cada chamada -- "
+        "repetir a MESMA chamada mais tarde ESTENDE o prazo de desativação automática, um efeito real no "
+        "ambiente, não só cosmético (quando `duracao_horas` é omitido o efeito converge, mas a classificação "
+        "cobre a tool como um todo, lado conservador)",
     ),
     "desativar_modo_secretario": ToolInventoryEntry(
         "whatsapp_secretario", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum — desligar é sempre seguro/imediato por design",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="`secretario_whatsapp.desativar_modo_secretario` sempre grava `enabled=False, desativa_em=None` "
+        "-- sem nenhum campo variável por chamada (nem timestamp), repetir a MESMA chamada produz exatamente "
+        "o mesmo estado persistido todas as vezes (P03 sub-entrega 18/N)",
     ),
     "consultar_status_modo_secretario": ToolInventoryEntry(
         "whatsapp_secretario", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
