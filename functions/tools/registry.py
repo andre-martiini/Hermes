@@ -624,8 +624,9 @@ def mcp_annotations(tool_name: str) -> dict:
     outputSchema, structuredContent, annotations e envelope aos caminhos
     compativeis"). `readOnlyHint`/`destructiveHint` vieram da sub-entrega
     6/N; `openWorldHint`, da sub-entrega 7/N; `idempotentHint`, PARCIAL, das
-    sub-entregas 16/N e 17/N (18 das ~59 tools de escrita/leitura_e_escrita
-    investigadas ate agora -- ver `Idempotencia` em `tools/inventory.py`).
+    sub-entregas 16/N, 17/N e 18/N (27 das ~59 tools de escrita/
+    leitura_e_escrita investigadas ate agora -- ver `Idempotencia` em
+    `tools/inventory.py`).
     `outputSchema`/`structuredContent`/envelope seguem fora de escopo --
     exigem definir um contrato de dados por tool, ver docs/autonomia/execucao.md.
 
@@ -704,7 +705,31 @@ def mcp_annotations(tool_name: str) -> dict:
     investimento` sao NAO_IDEMPOTENTE (auto-ID sem dedup, ou efeito
     externo documentado no proprio modulo -- ver `nota` de cada uma).
 
-    As demais ~41 tools de escrita/leitura_e_escrita permanecem SEM
+    Mais 9 tools investigadas na sub-entrega 18/N: `desativar_modo_
+    secretario`, `cancelar_contato_prioritario_secretario` e `editar_
+    objetivo_estrategico` sao IDEMPOTENTE (reset determinístico de um
+    singleton sem campo variável; `.update()` sem checar status atual,
+    convergindo para o mesmo status a cada chamada; `.update()`
+    determinístico por `objetivo_id`, sem append -- ver `nota` de cada
+    uma). `ativar_modo_secretario`, `preparar_contato_prioritario_
+    secretario`, `remover_anexo`, `criar_objetivo_estrategico`,
+    `preparar_upload` e `anexar_arquivo` sao NAO_IDEMPOTENTE: as duas
+    primeiras recalculam um prazo (`desativa_em`/`valido_ate`) a partir de
+    "agora" a cada chamada, estendendo-o de verdade a cada repetição; as
+    demais quatro criam um recurso novo por chamada (ID automático do
+    Firestore, ID novo do Drive, token aleatório, ou `ArrayUnion` com
+    timestamp novo) sem nenhuma chave de dedup. Duas tools do mesmo módulo
+    `strategy_tools.py` foram investigadas e deliberadamente deixadas SEM
+    classificação (mesmo critério de `revogar_promocao_autonomia`, sub-
+    entrega 16/N -- "um hint errado é pior que a omissão"): `excluir_
+    objetivo_estrategico` (repetir depois do primeiro sucesso devolve erro
+    em vez de um "já excluído" gracioso, embora o AMBIENTE não mude mais)
+    e `gerenciar_item_estrategico` (o comportamento depende do parâmetro
+    `acao` interno à tool -- os quatro ramos têm respostas diferentes à
+    pergunta de idempotência, um hint único não os descreveria
+    honestamente).
+
+    As demais ~32 tools de escrita/leitura_e_escrita permanecem SEM
     classificacao (`idempotencia=None`, hint omitido) -- candidatas a
     fatias futuras, mesmo padrao incremental ja usado para `dominio_rede`
     (sub-entrega 7/N) e para `outputSchema` (sub-entregas 8/N em diante).

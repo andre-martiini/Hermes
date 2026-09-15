@@ -512,6 +512,38 @@ class TestSecretarioSelfService(unittest.TestCase):
         self.assertTrue(cfg["enabled"])
         self.assertEqual(cfg["desativa_em"], res["desativa_em"])
 
+    def test_ativar_modo_secretario_repetir_com_duracao_estende_desativa_em(self):
+        """NAO_IDEMPOTENTE (P03 sub-entrega 18/N): `desativa_em` é recalculado a
+        partir de 'agora' a cada chamada -- repetir a MESMA chamada mais tarde
+        estende o prazo de desativação automática, não devolve o mesmo valor."""
+        t1 = datetime(2026, 9, 15, 10, 0, 0, tzinfo=timezone(timedelta(hours=-3)))
+        t2 = t1 + timedelta(hours=1)
+        with mock.patch("secretario_whatsapp._agora_sp", side_effect=[t1, t2]):
+            res1 = sec.ativar_modo_secretario(self.db, duracao_horas=2.0)
+            res2 = sec.ativar_modo_secretario(self.db, duracao_horas=2.0)
+        self.assertNotEqual(res1["desativa_em"], res2["desativa_em"])
+        self.assertGreater(
+            datetime.fromisoformat(res2["desativa_em"]),
+            datetime.fromisoformat(res1["desativa_em"]),
+        )
+
+    def test_desativar_modo_secretario_repetir_e_idempotente(self):
+        """IDEMPOTENTE (P03 sub-entrega 18/N): sem campo variável por chamada,
+        repetir produz exatamente o mesmo estado persistido todas as vezes."""
+        self.db.collection("system").document("settings").set({
+            "whatsapp_secretario": {
+                "enabled": True,
+                "desativa_em": "2030-01-01T12:00:00-03:00",
+                "chats_allowlist": ["5511999999999@c.us"],
+            }
+        })
+        res1 = sec.desativar_modo_secretario(self.db)
+        res2 = sec.desativar_modo_secretario(self.db)
+        self.assertEqual(res1, res2)
+        cfg = sec.obter_config_secretario(self.db)
+        self.assertFalse(cfg["enabled"])
+        self.assertIsNone(cfg["desativa_em"])
+
     def test_obter_config_expira_passivamente_quando_desativa_em_passou(self):
         # Data no passado
         desativa_passado = "2020-01-01T12:00:00-03:00"
@@ -759,6 +791,51 @@ class TestSecretarioContatoPrioritario(unittest.TestCase):
 
         doc = self.db.collection(sec.COLLECTION_PRIORITARIOS).document(chat_id).get().to_dict()
         self.assertEqual(doc["status"], sec.STATUS_PRIORITARIO_CANCELADO)
+
+    def test_cancelar_contato_prioritario_repetir_e_idempotente(self):
+        """IDEMPOTENTE (P03 sub-entrega 18/N): repetir depois do primeiro
+        cancelamento continua devolvendo sucesso e mantendo status=CANCELADO,
+        sem checar o status atual antes de gravar."""
+        chat_id = "5511888888888@c.us"
+        self.db.collection(sec.COLLECTION_PRIORITARIOS).document(chat_id).set({
+            "chat_id": chat_id,
+            "chat_name": "Parceiro",
+            "status": sec.STATUS_PRIORITARIO_ATIVO,
+        })
+
+        res1 = sec.cancelar_contato_prioritario(self.db, chat_id)
+        res2 = sec.cancelar_contato_prioritario(self.db, chat_id)
+        self.assertEqual(res1["status"], "ok")
+        self.assertEqual(res2["status"], "ok")
+
+        doc = self.db.collection(sec.COLLECTION_PRIORITARIOS).document(chat_id).get().to_dict()
+        self.assertEqual(doc["status"], sec.STATUS_PRIORITARIO_CANCELADO)
+
+    def test_preparar_contato_prioritario_repetir_estende_valido_ate(self):
+        """NAO_IDEMPOTENTE (P03 sub-entrega 18/N): `valido_ate` é recalculado a
+        partir de 'agora' a cada chamada -- repetir a MESMA chamada mais tarde
+        estende o prazo do briefing, não devolve o mesmo valor."""
+        chat_id = "5511444444444@c.us"
+        t1 = datetime(2026, 9, 15, 10, 0, 0, tzinfo=timezone(timedelta(hours=-3)))
+        t2 = t1 + timedelta(hours=3)
+
+        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={"encontrado": True, "chat_id": chat_id, "nome": "Contato"}):
+            res1 = sec.preparar_contato_prioritario(
+                self.db, identificador_contato=chat_id, assunto="Assunto",
+                o_que_precisa_saber="Info", validade_horas=4.0, agora_sp=t1,
+            )
+            res2 = sec.preparar_contato_prioritario(
+                self.db, identificador_contato=chat_id, assunto="Assunto",
+                o_que_precisa_saber="Info", validade_horas=4.0, agora_sp=t2,
+            )
+
+        self.assertEqual(res1["status"], "ok")
+        self.assertEqual(res2["status"], "ok")
+        self.assertNotEqual(res1["valido_ate"], res2["valido_ate"])
+        self.assertGreater(
+            datetime.fromisoformat(res2["valido_ate"]),
+            datetime.fromisoformat(res1["valido_ate"]),
+        )
 
     def test_contato_prioritario_estende_conversa_alem_de_2_trocas(self):
         chat_id = "5511888888888@c.us"
