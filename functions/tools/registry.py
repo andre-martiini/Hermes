@@ -622,13 +622,12 @@ def mcp_annotations(tool_name: str) -> dict:
     `openWorldHint`/`idempotentHint`) para o catalogo publicado em
     `tools/list` -- P03 passo 3 do plano de autonomia ("Adicionar
     outputSchema, structuredContent, annotations e envelope aos caminhos
-    compativeis; manter content legado"). `readOnlyHint`/`destructiveHint`
-    vieram da sub-entrega 6/N; `openWorldHint`, da sub-entrega 7/N;
-    `idempotentHint`, PARCIAL, das sub-entregas 16/N e 17/N (18 das ~59
-    tools de escrita/leitura_e_escrita investigadas ate agora -- ver
-    `Idempotencia` em `tools/inventory.py`). `outputSchema`/
-    `structuredContent`/envelope seguem fora de escopo -- exigem definir
-    um contrato de dados por tool, ver docs/autonomia/execucao.md.
+    compativeis"). `readOnlyHint`/`destructiveHint` vieram da sub-entrega
+    6/N; `openWorldHint`, da sub-entrega 7/N; `idempotentHint`, PARCIAL, das
+    sub-entregas 16/N e 17/N (18 das ~59 tools de escrita/leitura_e_escrita
+    investigadas ate agora -- ver `Idempotencia` em `tools/inventory.py`).
+    `outputSchema`/`structuredContent`/envelope seguem fora de escopo --
+    exigem definir um contrato de dados por tool, ver docs/autonomia/execucao.md.
 
     `readOnlyHint` vem de `leitura_escrita` e `destructiveHint` de
     `reversibilidade` -- ambos do inventario investigado em P03 sub-entrega
