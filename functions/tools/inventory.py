@@ -1017,6 +1017,7 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
 
 del _L, _R, _C
 
+
 def get_inventory_entry(tool_name: str) -> ToolInventoryEntry | None:
     return _INVENTORY.get(tool_name)
 
