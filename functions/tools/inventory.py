@@ -253,7 +253,13 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     ),
     "registrar_correcao_procedimento": ToolInventoryEntry(
         "memoria_e_procedimentos", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
-        "nenhum na própria tool", nota="reversível via resolver_conflito_procedimento",
+        "nenhum na própria tool",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="reversível via resolver_conflito_procedimento. Não idempotente (P03 sub-entrega 19/N): "
+        "`tools/hermes_tools.py::registrar_correcao_procedimento` gera `_corr_id = uuid4()[:12]` e faz "
+        "`.set()` incondicional em `correcoes_pendentes/{_corr_id}` a cada chamada, sem nenhuma checagem de "
+        "dedup por título/área -- repetir a MESMA correção cria um SEGUNDO documento pendente distinto, que "
+        "o Motor de Evolução processaria duas vezes.",
     ),
     "buscar_e_analisar_email": ToolInventoryEntry(
         "email", _L.LEITURA, _R.NAO_APLICA, True, True, _C.OBSERVACAO_AUTORIZADA,
@@ -274,24 +280,65 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "salvar_pop_global": ToolInventoryEntry(
         "memoria_e_procedimentos", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="handler real é `tools/telegram_extended.py::execute`, ramo 'salvar_pop_global' -- a closure "
+        "homônima em main.py é uma implementação independente para o copiloto web, não usada pelo servidor "
+        "MCP (comentário explícito no próprio código: 'esta função é independente da salvar_pop_global "
+        "embutida em main.py'). Idempotente (P03 sub-entrega 19/N): antes de escrever, varre "
+        "`pops_diretrizes` por título OU gatilho normalizado já existente -- se achar, faz `.set(merge=True)` "
+        "no MESMO doc (só `updated_at` muda); só cria doc novo quando NENHUM POP existente casa por título "
+        "ou gatilho. Repetir a MESMA chamada acha o POP recém-criado por título e converge. Caveat: a "
+        "varredura é consulta-depois-escreve sem exclusão mútua atômica (mesmo espírito do caveat já aceito "
+        "em `registrar_saude`/`consultar_investimentos`, sub-entrega 17/N) -- duas chamadas genuinamente "
+        "concorrentes poderiam ambas não achar nada e criar dois POPs.",
     ),
     "resolver_conflito_memoria": ToolInventoryEntry(
         "memoria_e_procedimentos", _L.ESCRITA, _R.REVERSIVEL, True, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum", rede_servico="Gemini (embedding), só quando decisão=substituir_pelo_novo",
         dominio_rede=DominioRede.FECHADO,
+        idempotencia=_I.IDEMPOTENTE,
+        nota="handler real é `tools/telegram_extended.py::execute`, ramo 'resolver_conflito_memoria' (mesma "
+        "ressalva de fonte única de salvar_pop_global/atualizar_personalidade). Idempotente (P03 sub-entrega "
+        "19/N): os dois ramos de decisão escrevem por ID JÁ CONHECIDO (`memoria_id`), nunca geram ID novo -- "
+        "`manter_existente` faz `.set(merge=True)` direto no doc; `substituir_pelo_novo` delega a "
+        "`main.py::_save_memory_node` com `force_update_id=memoria_id`, mesmo padrão de convergência-por-ID "
+        "já aceito em `editar_objetivo_estrategico` (sub-entrega 18/N) -- diferente de `salvar_memoria_global` "
+        "(sem ID conhecido de antemão, dedup por similaridade de embedding), aqui não há ambiguidade de "
+        "embedding assimétrico porque o ID já veio resolvido pelo próprio card do conflito.",
     ),
     "atualizar_personalidade": ToolInventoryEntry(
         "memoria_e_procedimentos", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum — grava direto sem revisão",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="handler real é `tools/telegram_extended.py::execute`, ramo 'atualizar_personalidade' (mesma "
+        "ressalva de fonte única já registrada em `salvar_pop_global`: a closure em main.py é a versão "
+        "independente do copiloto web). Idempotente (P03 sub-entrega 19/N): grava sempre no MESMO documento "
+        "singleton `system/copilot_soul` via `.set(merge=True)` -- repetir a MESMA chamada produz o mesmo "
+        "`content`/`last_reason` persistidos, só `updated_at` muda.",
     ),
     "resolver_conflito_procedimento": ToolInventoryEntry(
         "memoria_e_procedimentos", _L.LEITURA_E_ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "a exigência de confirmar_contrato=True na chamada é o único verificador pré-escrita",
-        nota="sem confirmar_contrato é só preview textual (leitura); versão antiga vira backup, não é apagada",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="sem confirmar_contrato é só preview textual (leitura); versão antiga vira backup, não é apagada. "
+        "Não idempotente (P03 sub-entrega 19/N): com `confirmar_contrato=True`, `tools/telegram_extended.py::"
+        "execute` arquiva o procedimento atual (`status: arquivado_backup`) e cria um documento NOVO com "
+        "`uuid4()[:12]` em `conhecimento_mestre` -- repetir a MESMA chamada (mesmo já arquivado) cria um "
+        "SEGUNDO procedimento 'evoluído' distinto a cada vez, sem dedup. O ramo `confirmar_contrato=False` "
+        "isolado, se chamado repetidamente, seria idempotente (só leitura) -- mas a tool inteira, como "
+        "definida pelo contrato de dois passos, não é: o efeito real (a escrita) está no segundo passo, que "
+        "não converge.",
     ),
     "editar_plano_acao": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "salvaguardas pré-escrita (plano degenerado, plano esvaziado) bloqueiam gravações claramente erradas",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="handler real é `tools/telegram_extended.py::execute`, ramo 'editar_plano_acao'. "
+        "`subtarefas.mesclar_plano` em si converge (mesclar o mesmo `novo_plano` produz o mesmo "
+        "`plano_final`), mas o handler faz `task_ref.update` com `firestore.ArrayUnion([{data, nota}])` em "
+        "`acompanhamento`, INCONDICIONALMENTE, em toda chamada bem-sucedida -- mesmo padrão de append "
+        "incondicional já aceito em `editar_acao` (sub-entrega 16/N) e `pausar_conversa`/`registrar_execucao_"
+        "investimento` (sub-entrega 17/N). Não idempotente (P03 sub-entrega 19/N).",
     ),
     "preparar_edicao_acao": ToolInventoryEntry(
         "acoes_tarefas", _L.LEITURA, _R.NAO_APLICA, False, False, _C.PREPARACAO_INTERNA,
@@ -306,12 +353,17 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "nenhum — texto do LLM é gravado sem conferência de qualidade",
         rede_servico="Gemini (múltiplas chamadas: esqueleto + cada seção)",
         dominio_rede=DominioRede.FECHADO,
+        idempotencia=_I.NAO_IDEMPOTENTE,
         nota="classificação PREPARACAO_INTERNA discutível: ao contrário de preparar_edicao_acao (que é "
         "LEITURA/NAO_APLICA, sem persistir nada até confirmar_edicao_acao), esta tool já persiste um "
         "documento final em relatorios/{id} sem passo de confirmação — mais perto de ESCRITA_INTERNA_"
         "REVERSIVEL. Mantido PREPARACAO_INTERNA por ser conteúdo interno de baixo risco sem contato com "
         "terceiro, mas é ambiguidade genuína a revisitar quando classe_efeito for religada à decisão de "
-        "política de fato (achado da revisão adversarial desta sub-entrega).",
+        "política de fato (achado da revisão adversarial desta sub-entrega). Não idempotente (P03 "
+        "sub-entrega 19/N): handler real é `tools/telegram_extended.py::execute`, ramo 'gerar_relatorio' -- "
+        "gera `report_id = uuid4()[:16]` e faz `.set()` incondicional em `relatorios/{report_id}`, sem dedup "
+        "por título/contexto; repetir o MESMO pedido cria um SEGUNDO relatório com ID novo (e conteúdo "
+        "potencialmente diferente, já que a síntese do LLM não é determinística).",
     ),
     "gerar_rascunho_formulario": ToolInventoryEntry(
         "utilitario", _L.LEITURA, _R.NAO_APLICA, False, False, _C.PREPARACAO_INTERNA, "nenhum",
@@ -337,11 +389,24 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     ),
     "mutar_portal_compras_publico": ToolInventoryEntry(
         "compras", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL, "nenhum",
-        nota="duplica lógica de escrita com mutar_lista_compras sobre a mesma coleção shopping_items — candidato a consolidação",
+        nota="duplica lógica de escrita com mutar_lista_compras sobre a mesma coleção shopping_items — "
+        "candidato a consolidação. Idempotência investigada e deixada SEM classificação (P03 sub-entrega "
+        "19/N): despacha por `acao` interno -- `toggle_planned`/`toggle_purchased` fazem "
+        "`ref.update({\"isPlanned\": not bool(...)})`, um TOGGLE de verdade (cada chamada tem efeito "
+        "DIFERENTE da anterior, viola idempotência por definição), enquanto `update_quantity`/"
+        "`clear_planning`/`finalize` convergem -- mesmo problema de múltiplos ramos com comportamentos "
+        "opostos já aceito para `gerenciar_item_estrategico` (sub-entrega 18/N): um hint único mentiria "
+        "para pelo menos um ramo.",
     ),
     "mutar_lista_compras": ToolInventoryEntry(
         "compras", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "consultar_lista_compras foi desenhada para reconferir o efeito ('fecha o ciclo', docstring do módulo)",
+        nota="idempotência investigada e deixada SEM classificação (P03 sub-entrega 19/N): despacha por "
+        "`acao` interno (`criar` gera ID novo sempre -- NAO_IDEMPOTENTE; `atualizar` sobrescreve por ID -- "
+        "provável IDEMPOTENTE; `remover` provavelmente erra 'já removido' na repetição, mesma ambiguidade "
+        "de `revogar_promocao_autonomia`; `import_batch`/`limpar_planejamento` não investigados a fundo "
+        "nesta sub-entrega) -- mesmo problema de múltiplos ramos já aceito para `mutar_portal_compras_"
+        "publico` acima e `gerenciar_item_estrategico` (sub-entrega 18/N).",
     ),
     "consultar_lista_compras": ToolInventoryEntry(
         "compras", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,
@@ -353,7 +418,12 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "decidir_elevacao": ToolInventoryEntry(
         "estrategico", _L.ESCRITA, _R.IRREVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum — mudança de status não é reconferida",
-        nota="irreversível só para a decisão 'nunca' (permanente por desenho); 'aceitar'/'adiar' são revisáveis",
+        nota="irreversível só para a decisão 'nunca' (permanente por desenho); 'aceitar'/'adiar' são "
+        "revisáveis. Idempotência investigada e deixada SEM classificação (P03 sub-entrega 19/N): "
+        "`deteccao_subproduto.py::decidir` já é transação Firestore falha-fechada -- a segunda chamada não "
+        "escreve de novo -- mas devolve só `{\"ok\": False, \"erro\": \"texto livre\"}`, sem um status "
+        "estruturado tipo 'já decidido' que distinga isso de um erro genuíno; mesma ambiguidade "
+        "resposta-muda-mas-ambiente-não já aceita para `revogar_promocao_autonomia` (sub-entrega 16/N).",
     ),
     "consultar_promocoes_autonomia_sugeridas": ToolInventoryEntry(
         "autonomia_politica", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA, "nenhum",
@@ -364,7 +434,11 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         nota="irreversível só para 'nunca'; 'aceitar' é revisável via revogar_promocao_autonomia. "
         "Efeito real de 'aceitar': remove a exigência de aprovação humana prévia no Telegram para uma "
         "categoria inteira de mensagens WhatsApp autônomas dali em diante — risco maior do que 'escrita "
-        "interna' sugeriria, por isso COORDENACAO_LIMITADA e não ESCRITA_INTERNA_REVERSIVEL.",
+        "interna' sugeriria, por isso COORDENACAO_LIMITADA e não ESCRITA_INTERNA_REVERSIVEL. Idempotência "
+        "investigada e deixada SEM classificação (P03 sub-entrega 19/N): `promocao_autonomia.py::decidir_"
+        "promocao_autonomia` também falha-fechado na repetição (ambiente não muda), mas devolve só "
+        "`{\"ok\": False, \"erro\": \"texto livre\"}` sem status estruturado -- mesma ambiguidade de "
+        "`decidir_elevacao` acima.",
     ),
     "revogar_promocao_autonomia": ToolInventoryEntry(
         "autonomia_politica", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
@@ -409,13 +483,18 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         rede_servico="Telegram Bot API (notifica o dono)",
         dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="destinatário e conteúdo de terceiro",
+        idempotencia=_I.NAO_IDEMPOTENTE,
         nota="irreversível só para tipos promovidos (liberam sozinhos ao fim da janela de cancelamento, sem "
         "nova confirmação); outros tipos são revisáveis via descartar_rascunho_whatsapp. Classificado "
         "IRREVERSIVEL ao nível da tool (mesma convenção de decidir_elevacao/decidir_promocao_autonomia para "
         "a mesma forma de nuance -- 'irreversível só para um subconjunto') -- achado da revisão adversarial "
         "de P03 sub-entrega 6/N: a classificação original (REVERSIVEL) divergia dessa convenção e produzia "
         "destructiveHint=False enganoso em tools/registry.py::mcp_annotations para o caso de risco real "
-        "(tipo promovido).",
+        "(tipo promovido). Não idempotente (P03 sub-entrega 19/N): `outbox_aprovacao.py::criar_rascunho` faz "
+        "`db.collection('whatsapp_outbox').document()` (ID automático) + `.set()` incondicional, sem dedup "
+        "por destinatário/mensagem/motivo -- repetir a MESMA chamada cria um SEGUNDO rascunho distinto, "
+        "dispara um SEGUNDO card no Telegram e, se o tipo já estiver promovido para autonomia, pode liberar "
+        "uma SEGUNDA mensagem real de WhatsApp sozinho ao fim da janela.",
     ),
     "listar_rascunhos_pendentes": ToolInventoryEntry(
         "whatsapp", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",
@@ -463,7 +542,12 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         nota="gate genérico: delega para a tool do piso originalmente pedida (hoje: schedule_whatsapp_message, "
         "pausar_conversa, criar_rascunho_email, registrar_aporte_investimento, registrar_execucao_investimento). "
         "Os campos acima refletem o pior caso do piso atual (financeiro), não uma execução fixa — a "
-        "classificação real de cada chamada é a da tool delegada.",
+        "classificação real de cada chamada é a da tool delegada, idempotência incluída (não investigada "
+        "nesta sub-entrega, P03 sub-entrega 19/N, por depender do gate MCP e da tool delegada em cada "
+        "chamada, fora do escopo de uma leitura direta de handler único). O claim atômico (create) do "
+        "próprio gate evita RE-EXECUÇÃO da MESMA confirmação (retry de rede) -- mas uma NOVA confirmação "
+        "para o mesmo pedido do usuário gera um `mcp_confirmation_id` diferente e delega de novo, mesmo "
+        "caveat já aceito em `pausar_conversa` (sub-entrega 17/N).",
     ),
     "pausar_conversa": ToolInventoryEntry(
         "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.COMPROMISSO_TERCEIROS, "nenhum",
@@ -561,7 +645,14 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "nenhum — não confere se a imagem corresponde ao prompt nem se a URL segue acessível",
         rede_servico="Gemini (geração) + Google Cloud Storage (upload)",
         dominio_rede=DominioRede.FECHADO,
-        nota="upload permanente no bucket público; sem tool de exclusão",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="upload permanente no bucket público; sem tool de exclusão. Não idempotente (P03 sub-entrega "
+        "19/N): `tools/hermes_tools.py::gerar_imagem` nomeia o blob com `uuid4().hex[:8]` e faz "
+        "`upload_from_string` incondicional a cada chamada -- repetir o MESMO prompt gera uma SEGUNDA "
+        "imagem persistida com URL distinta. Efeito adicional a mais, sem relação com o upload: "
+        "`check_and_increment_limit` (gemini_cost_controls.py) incrementa um contador diário de cota ANTES "
+        "da geração, em toda chamada que passa da checagem -- outro estado que muda a cada repetição, mesmo "
+        "que a imagem em si falhasse depois.",
     ),
     "preparar_reagendamento_em_lote": ToolInventoryEntry(
         "acoes_tarefas", _L.LEITURA, _R.NAO_APLICA, False, False, _C.PREPARACAO_INTERNA,
@@ -925,7 +1016,6 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
 }
 
 del _L, _R, _C
-
 
 def get_inventory_entry(tool_name: str) -> ToolInventoryEntry | None:
     return _INVENTORY.get(tool_name)
