@@ -10,10 +10,11 @@ inventário tipado da sub-entrega 1/N (`tools/inventory.py`):
 `reversibilidade`. `openWorldHint` vem da sub-entrega 7/N, do campo
 `dominio_rede` (`tools/inventory.py::DominioRede`) -- não de
 `necessidade_de_rede` direto, ver a docstring de `registry.mcp_annotations`
-para o porquê. `idempotentHint` vem, PARCIALMENTE, da sub-entrega 16/N: 9
-das ~59 tools de escrita/leitura_e_escrita têm `idempotencia` classificada
-no inventário (`tools/inventory.py::Idempotencia`) -- as demais continuam
-sem o hint (omitido, não um valor inventado), mesmo raciocínio já usado
+para o porquê. `idempotentHint` vem, PARCIALMENTE, das sub-entregas
+16/N-18/N: 27 das ~59 tools de escrita/leitura_e_escrita têm `idempotencia`
+classificada no inventário (`tools/inventory.py::Idempotencia`) -- as
+demais continuam sem o hint (omitido, não um valor inventado), mesmo
+raciocínio já usado
 para `dominio_rede` (a espec. MCP já assume o lado mais cauteloso --
 `destructiveHint`/`openWorldHint` default `true` -- para quem não declara
 `ToolAnnotations`, e um hint errado é pior que a omissão).
@@ -143,8 +144,8 @@ class TestMcpAnnotations(unittest.TestCase):
 
     def test_idempotente_leva_idempotent_hint_true(self):
         # As 4 tools classificadas IDEMPOTENTE na sub-entrega 16/N + as 2 da
-        # sub-entrega 17/N (ver nota de cada uma em tools/inventory.py para a
-        # evidência por handler).
+        # sub-entrega 17/N + as 3 da sub-entrega 18/N (ver nota de cada uma
+        # em tools/inventory.py para a evidência por handler).
         for nome in (
             "criar_acao_no_sistema",
             "salvar_memoria_global",
@@ -152,14 +153,17 @@ class TestMcpAnnotations(unittest.TestCase):
             "concluir_pedido_agente",
             "registrar_saude",
             "consultar_investimentos",
+            "desativar_modo_secretario",
+            "cancelar_contato_prioritario_secretario",
+            "editar_objetivo_estrategico",
         ):
             with self.subTest(tool=nome):
                 self.assertEqual(registry.mcp_annotations(nome).get("idempotentHint"), True)
 
     def test_nao_idempotente_leva_idempotent_hint_false(self):
         # As 5 tools classificadas NAO_IDEMPOTENTE na sub-entrega 16/N + as 7
-        # da sub-entrega 17/N (ver nota de cada uma em tools/inventory.py
-        # para a evidência por handler).
+        # da sub-entrega 17/N + as 6 da sub-entrega 18/N (ver nota de cada
+        # uma em tools/inventory.py para a evidência por handler).
         for nome in (
             "agendar_lembrete_acao",
             "registrar_no_diario",
@@ -173,6 +177,12 @@ class TestMcpAnnotations(unittest.TestCase):
             "registrar_interacao_contato",
             "registrar_aporte_investimento",
             "registrar_execucao_investimento",
+            "ativar_modo_secretario",
+            "preparar_contato_prioritario_secretario",
+            "remover_anexo",
+            "criar_objetivo_estrategico",
+            "preparar_upload",
+            "anexar_arquivo",
         ):
             with self.subTest(tool=nome):
                 self.assertEqual(registry.mcp_annotations(nome).get("idempotentHint"), False)
