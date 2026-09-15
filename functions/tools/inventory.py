@@ -324,7 +324,13 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "registrar_transacao_financeira_publica": ToolInventoryEntry(
         "financas_publicas_portal", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum — grava sem checar duplicidade/fonte", dados_sensiveis_categoria="financeiro",
-        nota="sem tool de exclusão/correção neste catálogo; a leitura já trata status==deleted, indício de que esse caminho existe fora do MCP",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="sem tool de exclusão/correção neste catálogo; a leitura já trata status==deleted, indício de que esse "
+        "caminho existe fora do MCP. Não idempotente (P03 sub-entrega 17/N): o handler real "
+        "(tools/telegram_extended.py::execute, ramo 'registrar_transacao_financeira_publica') cria "
+        "`db.collection('finance_transactions').document()` com ID automático e faz `.set()` incondicional em "
+        "toda chamada, sem checar description/amount repetidos -- repetir com os mesmos argumentos cria uma "
+        "segunda transação, não devolve a mesma.",
     ),
     "obter_portal_compras_publico": ToolInventoryEntry(
         "compras", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA, "nenhum",
@@ -380,7 +386,11 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "financas_pessoais", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum — ao contrário de registrar_saude, não é idempotente por dia",
         dados_sensiveis_categoria="financeiro pessoal",
-        nota="sempre cria doc novo; nenhuma tool deste catálogo edita/exclui um lançamento",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="sempre cria doc novo; nenhuma tool deste catálogo edita/exclui um lançamento. Não idempotente "
+        "(P03 sub-entrega 17/N): as 3 ramificações de `tipo` (renda/obrigacao_fixa/transacao_avulsa) em "
+        "tools/telegram_extended.py::execute usam `db.collection(...).document()` com ID automático + `.set()` "
+        "incondicional, mesmo padrão nas três -- repetir cria um lançamento novo em vez de devolver o existente.",
     ),
     "calculadora": ToolInventoryEntry(
         "utilitario", _L.LEITURA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,
@@ -458,7 +468,16 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "pausar_conversa": ToolInventoryEntry(
         "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.COMPROMISSO_TERCEIROS, "nenhum",
         dados_sensiveis_categoria="conversa com terceiro",
-        nota="classificação COMPROMISSO_TERCEIROS já existe em autonomy/policy.py::CLASSE_EFEITO_PISO",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="classificação COMPROMISSO_TERCEIROS já existe em autonomy/policy.py::CLASSE_EFEITO_PISO. Não "
+        "idempotente (P03 sub-entrega 17/N): `pausar()` (tools/pausar_conversa.py) chama "
+        "`schedule_whatsapp_message(..., idempotency_key=ctx.mcp_confirmation_id)` -- o dedup só protege "
+        "reenvio dentro da MESMA confirmação MCP (retry de rede), não uma segunda chamada da tool com os "
+        "mesmos argumentos através de uma NOVA confirmação, que gera um `mcp_confirmation_id` diferente e "
+        "portanto uma segunda mensagem real de WhatsApp enfileirada -- por si só já desqualifica idempotentHint; "
+        "quando há ação vinculada (task and task_ref, não sempre), `task_ref.update` também grava "
+        "`firestore.ArrayUnion` em `acompanhamento` (nota nova com timestamp novo) a cada chamada bem-sucedida "
+        "nesse caminho -- mesmo padrão de não idempotência já usado para `editar_acao` (sub-entrega 16/N).",
     ),
     "criar_rascunho_email": ToolInventoryEntry(
         "email", _L.LEITURA_E_ESCRITA, _R.IRREVERSIVEL, True, True, _C.COMPROMISSO_TERCEIROS,
@@ -466,8 +485,13 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         rede_servico="Gmail API (drafts.create, threads.get, getProfile)",
         dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="destinatário e conteúdo de terceiro",
+        idempotencia=_I.NAO_IDEMPOTENTE,
         nota="classificação COMPROMISSO_TERCEIROS já existe em autonomy/policy.py::CLASSE_EFEITO_PISO, apesar "
-        "da descrição do catálogo dizer 'nunca envia'; nenhuma tool exclui um rascunho Gmail já criado",
+        "da descrição do catálogo dizer 'nunca envia'; nenhuma tool exclui um rascunho Gmail já criado. Não "
+        "idempotente (P03 sub-entrega 17/N): `tools/criar_rascunho_email.py::criar` chama "
+        "`service.users().drafts().create(...)` sem nenhuma chave de idempotência passada à API do Gmail -- "
+        "repetir com os mesmos argumentos cria um segundo rascunho com `draft_id` novo, e se `acao_id` estiver "
+        "presente também grava um segundo `firestore.ArrayUnion` em `acompanhamento`.",
     ),
     "buscar_contato": ToolInventoryEntry(
         "contatos", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum necessário",
@@ -486,7 +510,11 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "registrar_interacao_contato": ToolInventoryEntry(
         "contatos", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL, "nenhum",
         dados_sensiveis_categoria="histórico de interação com terceiro",
-        nota="sem tool de edição/remoção de uma interação já registrada",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="sem tool de edição/remoção de uma interação já registrada. Não idempotente (P03 sub-entrega "
+        "17/N): `tools/hermes_tools.py::registrar_interacao_contato` usa "
+        "`ctx.db.collection('interacoes_pessoas').document()` (ID automático) + `.set()` incondicional -- sem "
+        "chave de dedup, repetir com os mesmos argumentos cria uma segunda interação.",
     ),
     "consultar_saude": ToolInventoryEntry(
         "saude", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum necessário",
@@ -496,6 +524,23 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "saude", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum automático, mas upsert idempotente por dia+campo permite correção via nova chamada",
         dados_sensiveis_categoria="saúde",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="idempotente por dia+campo (P03 sub-entrega 17/N): peso/cintura usam `_gravar_por_data` "
+        "(tools/registrar_saude.py) -- consulta o doc do dia ANTES de escrever, atualiza em vez de duplicar "
+        "(coberto por test_registrar_saude.py::test_peso_duas_vezes_nao_duplica); dor/sono/calorias usam ID "
+        "determinístico (`COL_LOGS.document(dia)`) com `.set(merge=True)`. Caveat 1 (encontrado nesta "
+        "sub-entrega): quando algum `dor_*` está presente, `log_updates['pain']` inclui `mcp_checked_at` com "
+        "timestamp NOVO a cada chamada -- o valor gravado muda mesmo repetindo os mesmos argumentos. Corrigido "
+        "na 1ª rodada de revisão adversarial: NÃO é escrita-apenas como a versão inicial desta nota afirmava -- "
+        "`health_tools.py::build_health_summary` reencaminha o dict `pain` inteiro (mcp_checked_at incluso) "
+        "para `consultar_saude`/Godmode, então É observável por um cliente MCP; é inerte (nenhuma rotina, "
+        "decisão ou valor de negócio lê especificamente esse campo), mas 'nunca lido' era impreciso. Caveat 2 "
+        "(idem): nem `_gravar_por_data` nem o `.set(merge=True)` por data usam exclusão mútua atômica (ao "
+        "contrário de `claim_action_dedup_slot`, usado por `criar_acao_no_sistema`) -- é consulta-depois-escreve; "
+        "duas chamadas genuinamente CONCORRENTES (não um retry sequencial após resposta) poderiam, em teoria, "
+        "ambas passarem pela checagem antes de qualquer uma gravar. Nenhum dos dois caveats muda a classificação "
+        "-- mesmo espírito do caveat de TTL em `criar_acao_no_sistema` (sub-entrega 16/N): documentado para "
+        "nenhum cliente MCP assumir garantia mais forte do que a tool de fato oferece.",
     ),
     "consultar_dados_cadastrais": ToolInventoryEntry(
         "dados_cadastrais", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
@@ -691,8 +736,18 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "nenhum quanto à exatidão da carteira externa — Hermes repassa a resposta sem conferência própria",
         rede_servico="serviço externo decisao-investimentos (Cloud Run, yfinance + SGS/Bacen)",
         dados_sensiveis_categoria="financeiro",
+        idempotencia=_I.IDEMPOTENTE,
         nota="escrita é efeito colateral condicional e idempotente (dedupe por tag, só quando a decisão "
-        "externa mudou), não o propósito da tool — por isso nao_aplica em vez de reversivel/irreversivel",
+        "externa mudou), não o propósito da tool — por isso nao_aplica em vez de reversivel/irreversivel. "
+        "Idempotente (P03 sub-entrega 17/N): `investimentos_sync.sincronizar_decisao_investimentos` "
+        "consulta `tarefas` por `tags array_contains 'investimentos-decisao-{mes}'` ANTES de criar -- se já "
+        "existe, devolve `status: ja_existe` sem gravar de novo; sem TTL/janela de expiração (dedup permanente "
+        "por mês), diferente do caveat de `criar_acao_no_sistema`. Coberto por "
+        "test_investimentos_sync.py::test_idempotencia_nao_duplica_acao. Caveat (achado da revisão adversarial "
+        "desta sub-entrega): a checagem não usa exclusão mútua atômica (`create()`/transação, como "
+        "`claim_action_dedup_slot`) -- é consulta-depois-escreve; duas chamadas genuinamente CONCORRENTES "
+        "(não um retry sequencial após resposta) poderiam, em teoria, ambas passar pela checagem antes de "
+        "qualquer uma criar a ação, duplicando-a. Não corrigido nesta fatia, só documentado.",
     ),
     "registrar_aporte_investimento": ToolInventoryEntry(
         "investimentos", _L.ESCRITA, _R.IRREVERSIVEL, True, True,
@@ -700,16 +755,26 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "nenhum automático — timeout/5xx marca escrita_ambigua; instrução é reconsultar via "
         "consultar_investimentos, nunca repetir",
         rede_servico="POST ao serviço externo decisao-investimentos", dados_sensiveis_categoria="financeiro",
+        idempotencia=_I.NAO_IDEMPOTENTE,
         nota="classificação canônica em autonomy/policy.py::CLASSE_EFEITO_PISO; soma ao aporte total externo, "
-        "sem endpoint de estorno",
+        "sem endpoint de estorno. Não idempotente (P03 sub-entrega 17/N): a docstring do próprio "
+        "`investimentos.registrar_aporte` é explícita -- 'Não é idempotente do lado do serviço: chamar duas "
+        "vezes com R$ 500 registra R$ 1.000' -- repetir ACUMULA, não converge para o mesmo estado.",
     ),
     "registrar_execucao_investimento": ToolInventoryEntry(
         "investimentos", _L.ESCRITA, _R.REVERSIVEL, True, True,
         _C.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
         "mesmo padrão do aporte — reconsulta manual via consultar_investimentos é o único caminho",
         rede_servico="POST ao serviço externo decisao-investimentos", dados_sensiveis_categoria="financeiro",
+        idempotencia=_I.NAO_IDEMPOTENTE,
         nota="classificação canônica em autonomy/policy.py::CLASSE_EFEITO_PISO; declarativo (repetir não "
-        "acumula posição), mas grava uma 2ª linha no log de movimentos, não apagável",
+        "acumula posição), mas grava uma 2ª linha no log de movimentos, não apagável. Não idempotente (P03 "
+        "sub-entrega 17/N): apesar de a posição final da carteira não mudar numa repetição "
+        "(`investimentos.confirmar_execucao` é declarativo), a própria docstring do módulo confirma que cada "
+        "chamada 'grava uma segunda linha no log de movimentos' -- um efeito adicional real e persistente (não "
+        "apagável), que desqualifica idempotentHint mesmo com o estado principal convergindo; mesmo critério "
+        "que classificou `editar_acao` como não idempotente por um append incondicional (sub-entrega 16/N), "
+        "aqui aplicado a um serviço externo em vez do Firestore próprio.",
     ),
     "obter_fila_atencao": ToolInventoryEntry(
         "atencao_fila", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",

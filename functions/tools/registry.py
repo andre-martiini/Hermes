@@ -623,8 +623,8 @@ def mcp_annotations(tool_name: str) -> dict:
     `tools/list` -- P03 passo 3 do plano de autonomia ("Adicionar
     outputSchema, structuredContent, annotations e envelope aos caminhos
     compativeis"). `readOnlyHint`/`destructiveHint` vieram da sub-entrega
-    6/N; `openWorldHint`, da sub-entrega 7/N; `idempotentHint`, PARCIAL, da
-    sub-entrega 16/N (9 das ~59 tools de escrita/leitura_e_escrita
+    6/N; `openWorldHint`, da sub-entrega 7/N; `idempotentHint`, PARCIAL, das
+    sub-entregas 16/N e 17/N (18 das ~59 tools de escrita/leitura_e_escrita
     investigadas ate agora -- ver `Idempotencia` em `tools/inventory.py`).
     `outputSchema`/`structuredContent`/envelope seguem fora de escopo --
     exigem definir um contrato de dados por tool, ver docs/autonomia/execucao.md.
@@ -685,8 +685,26 @@ def mcp_annotations(tool_name: str) -> dict:
     `registrar_no_diario`, `editar_acao`, `resolver_item_atencao` e
     `registrar_execucao_agente` sao NAO_IDEMPOTENTE (todas por `append`
     sem chave de dedup -- `ArrayUnion`/`ArrayUnion` indireto via
-    `registrar_no_diario`, ou `col.add()` sem ID deterministico). As
-    demais ~50 tools de escrita/leitura_e_escrita permanecem SEM
+    `registrar_no_diario`, ou `col.add()` sem ID deterministico).
+
+    Mais 9 tools investigadas na sub-entrega 17/N: `registrar_saude` e
+    `consultar_investimentos` sao IDEMPOTENTE (upsert por dia+campo com
+    consulta antes de escrever, e dedup por tag `investimentos-decisao-
+    {mes}` antes de criar, respectivamente -- ver `nota` de cada uma).
+    Assim como o TTL de `criar_acao_no_sistema`, nenhuma das duas usa
+    exclusao mutua atomica (`create()`/transacao) -- e "consulta, depois
+    escreve" quando chamadas se sobrepoem de verdade (duas tentativas em
+    voo ao mesmo tempo, nao um retry sequencial depois de receber a
+    resposta) pode, em teoria, deixar as duas passarem pela checagem antes
+    de qualquer uma escrever; nao corrigido nesta fatia, so documentado
+    (achado da revisao adversarial da sub-entrega 17/N). `registrar_
+    transacao_financeira_publica`, `registrar_item_financeiro_v2`,
+    `pausar_conversa`, `criar_rascunho_email`, `registrar_interacao_
+    contato`, `registrar_aporte_investimento` e `registrar_execucao_
+    investimento` sao NAO_IDEMPOTENTE (auto-ID sem dedup, ou efeito
+    externo documentado no proprio modulo -- ver `nota` de cada uma).
+
+    As demais ~41 tools de escrita/leitura_e_escrita permanecem SEM
     classificacao (`idempotencia=None`, hint omitido) -- candidatas a
     fatias futuras, mesmo padrao incremental ja usado para `dominio_rede`
     (sub-entrega 7/N) e para `outputSchema` (sub-entregas 8/N em diante).

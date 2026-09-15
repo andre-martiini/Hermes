@@ -105,6 +105,41 @@ class PausarConversaTest(unittest.TestCase):
         self.assertEqual(enqueue.call_args.kwargs['idempotency_key'], 'confirmacao-1')
         self.assertIn('2026-09-01T13:00:00', str(ctx.db.task_ref.update_calls[-1]['acompanhamento']))
 
+    def test_duas_confirmacoes_separadas_nao_deduplicam(self):
+        """P03 sub-entrega 17/N: evidencia para a classificacao NAO_IDEMPOTENTE em
+        tools/inventory.py. O `idempotency_key` passado a schedule_whatsapp_message
+        e o `mcp_confirmation_id` -- protege so um RETRY dentro da MESMA
+        confirmacao. Repetir a tool com os MESMOS argumentos de negocio (mesmo
+        contato, mesma mensagem, mesmo retomar_em) atraves de uma SEGUNDA
+        confirmacao MCP gera um `mcp_confirmation_id` diferente e portanto uma
+        segunda mensagem real enfileirada -- nao ha deduplicacao entre chamadas."""
+        args = {'contato_ou_grupo': 'Gabriela', 'retomar_em': 'amanha_manha'}
+        preview_data = {
+            'destinatario': {'nome': 'Gabriela', 'chat_id': '55@c.us', 'to_number': '+5527999990000', 'tipo': 'contato'},
+            'mensagem': 'Texto que o usuário aprovou',
+            'retomar_em': '2026-09-02T08:00:00-03:00',
+            'acao_vinculada': {},
+        }
+        chaves_usadas = []
+
+        def _enfileirar(db, to_number, mensagem, agendado_para, *, idempotency_key=None):
+            chaves_usadas.append(idempotency_key)
+            return f'Mensagem ENFILEIRADA job_id={idempotency_key}'
+
+        with mock.patch('tools.pausar_conversa.preview', side_effect=AssertionError('não deve recalcular')), \
+             mock.patch('tools.schedule_whatsapp_message.schedule_whatsapp_message', side_effect=_enfileirar) as enqueue, \
+             mock.patch('tools.pausar_conversa.firestore.ArrayUnion', side_effect=lambda values: values):
+            for confirmacao_id in ('confirmacao-1', 'confirmacao-2'):
+                ctx = _Ctx()
+                ctx.mcp_confirmation_id = confirmacao_id
+                ctx.mcp_confirmation_created_at = datetime(2026, 9, 1, 13, 0)
+                ctx.mcp_confirmation_preview = dict(preview_data)
+                pausar(ctx, dict(args))
+
+        self.assertEqual(enqueue.call_count, 2, "duas confirmações deveriam gerar duas tentativas de envio")
+        self.assertEqual(chaves_usadas, ['confirmacao-1', 'confirmacao-2'],
+                          "cada confirmação usa sua própria idempotency_key, sem dedup entre elas")
+
 
 class _OutboxSnap:
     def __init__(self, ref): self.exists = ref.exists

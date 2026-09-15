@@ -58,10 +58,11 @@ class TestMcpAnnotations(unittest.TestCase):
     def test_escrita_irreversivel_e_destructive_hint_true(self):
         # `criar_rascunho_email`: leitura_e_escrita, irreversivel (COMPROMISSO_
         # TERCEIROS -- ver nota em tools/inventory.py). rede_servico="Gmail
-        # API" -- dominio_rede=FECHADO (conta do proprio dono).
+        # API" -- dominio_rede=FECHADO (conta do proprio dono). NAO_IDEMPOTENTE
+        # desde a sub-entrega 17/N (drafts.create sem chave de idempotencia).
         self.assertEqual(
             registry.mcp_annotations("criar_rascunho_email"),
-            {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
+            {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False},
         )
 
     def test_escrita_reversivel_e_destructive_hint_false(self):
@@ -102,20 +103,28 @@ class TestMcpAnnotations(unittest.TestCase):
         )
 
     def test_leitura_e_escrita_com_efeito_colateral_passivo_e_destructive_hint_false(self):
-        # As 3 tools leitura_e_escrita/nao_aplica (escrita e efeito colateral
-        # passivo ou idempotente, nunca o propósito da tool -- ver nota de
-        # cada uma em tools/inventory.py): tratadas como não-destrutivas,
-        # não como um terceiro valor especial.
+        # As 2 tools leitura_e_escrita/nao_aplica ainda sem idempotencia
+        # classificada (escrita e efeito colateral passivo, nunca o propósito
+        # da tool -- ver nota de cada uma em tools/inventory.py): tratadas
+        # como não-destrutivas, não como um terceiro valor especial.
         for nome in (
             "consultar_autorizacao_argos",
             "consultar_contatos_prioritarios_secretario",
-            "consultar_investimentos",
         ):
             with self.subTest(tool=nome):
                 self.assertEqual(
                     registry.mcp_annotations(nome),
                     {"readOnlyHint": False, "destructiveHint": False},
                 )
+
+    def test_leitura_e_escrita_idempotente_e_destructive_hint_false(self):
+        # `consultar_investimentos`: leitura_e_escrita/nao_aplica, mas
+        # IDEMPOTENTE desde a sub-entrega 17/N (dedupe por tag em
+        # investimentos_sync -- ver nota em tools/inventory.py).
+        self.assertEqual(
+            registry.mcp_annotations("consultar_investimentos"),
+            {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True},
+        )
 
     def test_leitura_pura_nunca_leva_idempotent_hint(self):
         # Leitura pura nunca leva idempotentHint -- o hint só é significativo
@@ -127,32 +136,43 @@ class TestMcpAnnotations(unittest.TestCase):
                 self.assertNotIn("idempotentHint", registry.mcp_annotations(nome))
 
     def test_escrita_ainda_nao_investigada_omite_idempotent_hint(self):
-        # `criar_rascunho_email`: escrita/leitura_e_escrita real, mas fora
-        # das 9 tools investigadas na sub-entrega 16/N -- idempotencia=None,
-        # hint omitido (não um valor inventado).
-        self.assertNotIn("idempotentHint", registry.mcp_annotations("criar_rascunho_email"))
+        # `criar_rascunho_whatsapp`: escrita real, mas fora das 18 tools
+        # investigadas até a sub-entrega 17/N -- idempotencia=None, hint
+        # omitido (não um valor inventado).
+        self.assertNotIn("idempotentHint", registry.mcp_annotations("criar_rascunho_whatsapp"))
 
     def test_idempotente_leva_idempotent_hint_true(self):
-        # As 4 tools classificadas IDEMPOTENTE na sub-entrega 16/N (ver nota
-        # de cada uma em tools/inventory.py para a evidência por handler).
+        # As 4 tools classificadas IDEMPOTENTE na sub-entrega 16/N + as 2 da
+        # sub-entrega 17/N (ver nota de cada uma em tools/inventory.py para a
+        # evidência por handler).
         for nome in (
             "criar_acao_no_sistema",
             "salvar_memoria_global",
             "dispensar_resposta_pendente",
             "concluir_pedido_agente",
+            "registrar_saude",
+            "consultar_investimentos",
         ):
             with self.subTest(tool=nome):
                 self.assertEqual(registry.mcp_annotations(nome).get("idempotentHint"), True)
 
     def test_nao_idempotente_leva_idempotent_hint_false(self):
-        # As 5 tools classificadas NAO_IDEMPOTENTE na sub-entrega 16/N (ver
-        # nota de cada uma em tools/inventory.py para a evidência por handler).
+        # As 5 tools classificadas NAO_IDEMPOTENTE na sub-entrega 16/N + as 7
+        # da sub-entrega 17/N (ver nota de cada uma em tools/inventory.py
+        # para a evidência por handler).
         for nome in (
             "agendar_lembrete_acao",
             "registrar_no_diario",
             "editar_acao",
             "resolver_item_atencao",
             "registrar_execucao_agente",
+            "registrar_transacao_financeira_publica",
+            "registrar_item_financeiro_v2",
+            "pausar_conversa",
+            "criar_rascunho_email",
+            "registrar_interacao_contato",
+            "registrar_aporte_investimento",
+            "registrar_execucao_investimento",
         ):
             with self.subTest(tool=nome):
                 self.assertEqual(registry.mcp_annotations(nome).get("idempotentHint"), False)
@@ -238,7 +258,7 @@ class TestHandleToolsListAnnotations(unittest.TestCase):
     def test_escrita_irreversivel_chega_com_destructive_hint_true(self):
         self.assertEqual(
             self.catalogo["criar_rascunho_email"]["annotations"],
-            {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
+            {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False},
         )
 
     def test_escrita_reversivel_chega_com_destructive_hint_false(self):
@@ -262,9 +282,9 @@ class TestHandleToolsListAnnotations(unittest.TestCase):
         )
 
     def test_escrita_nao_investigada_chega_sem_idempotent_hint(self):
-        # `criar_rascunho_email`: fora das 9 tools investigadas na
-        # sub-entrega 16/N -- idempotentHint omitido, não um valor inventado.
-        self.assertNotIn("idempotentHint", self.catalogo["criar_rascunho_email"]["annotations"])
+        # `criar_rascunho_whatsapp`: fora das 18 tools investigadas até a
+        # sub-entrega 17/N -- idempotentHint omitido, não um valor inventado.
+        self.assertNotIn("idempotentHint", self.catalogo["criar_rascunho_whatsapp"]["annotations"])
 
     def test_dominio_aberto_chega_com_open_world_hint_true(self):
         self.assertEqual(

@@ -117,6 +117,24 @@ class TestIdempotencia(unittest.TestCase):
         self.assertEqual(doc["walkBlocks"], [{"distance": 2.6}], "apagou a caminhada")
         self.assertEqual(doc["pain"]["morning"], 4, "apagou a dor da manhã")
 
+    def test_dor_repetida_mesmo_valor_atualiza_mcp_checked_at(self):
+        """P03 sub-entrega 17/N: caveat documentado em tools/inventory.py para a
+        classificacao idempotente de registrar_saude -- repetir a MESMA chamada de
+        dor_* nao muda o valor gravado (`pain.morning` continua 3), mas
+        `pain.mcp_checked_at` recebe um timestamp NOVO a cada chamada. O campo e
+        escrita-apenas (nenhum outro modulo le `mcp_checked_at`), entao isto nao
+        contradiz a classificacao IDEMPOTENTE -- mas fica provado aqui para que
+        nenhuma correcao futura assuma, por engano, que o documento fica
+        byte-a-byte identico numa repeticao."""
+        ctx = _Ctx()
+        rs.registrar(ctx, {"dor_manha": 3})
+        primeiro = ctx.db.cols[rs.COL_LOGS].dados[HOJE]["pain"]["mcp_checked_at"]
+        rs.registrar(ctx, {"dor_manha": 3})
+        doc = ctx.db.cols[rs.COL_LOGS].dados[HOJE]
+        self.assertEqual(doc["pain"]["morning"], 3, "valor observavel mudou numa repeticao identica")
+        self.assertNotEqual(doc["pain"]["mcp_checked_at"], primeiro,
+                             "mcp_checked_at deveria mudar a cada chamada (campo escrita-apenas)")
+
 
 class TestRecusaValorImplausivel(unittest.TestCase):
 
