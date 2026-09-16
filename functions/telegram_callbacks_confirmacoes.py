@@ -261,13 +261,40 @@ def handle(db, token, query_id, chat_id, data, message, session, copilot_session
             if doc_id:
                 db.collection("whatsapp_outbox").document(doc_id).update({
                     "status": "canceled",
-                    "canceled_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    # Bug corrigido: "datetime" aqui e a CLASSE (from datetime import
+                    # datetime, timezone), nao o modulo -- "datetime.datetime.now(...)"
+                    # lancava AttributeError, engolido pelo except abaixo, entao o Firestore
+                    # nunca era atualizado mesmo o usuario recebendo "cancelado" na tela.
+                    "canceled_at": datetime.now(timezone.utc).isoformat()
                 })
         except Exception as exc:
             print(f"[TelegramCallback] Erro ao cancelar WhatsApp agendado {doc_id}: {exc}")
 
         response_text = "❌ <b>Envio de WhatsApp agendado foi cancelado.</b>"
         _persist_callback_turn("Botão: cancelar WhatsApp agendado", response_text)
+        _send_telegram_message(token, chat_id, response_text)
+
+    elif data.startswith("wa_confirm_sent:"):
+        # Fecha o ciclo do fallback de notificacao manual (ai_notification_planner.py::
+        # dispatch_scheduled_whatsapp_messages): o botao "Sim, Enviar no WhatsApp" e um
+        # link wa.me que abre o app e o toque final de enviar e invisivel para o Hermes.
+        # Sem este handler, o doc ficava para sempre em status "notified"/tentativas=0,
+        # mesmo apos a entrega real (caso relatado por Andre em 16/09/2026, job
+        # bae25bc6-0729-4213-a24d-c37feea5d687, entregue as 16:28 e nunca marcado "sent").
+        doc_id = data.split("wa_confirm_sent:")[1].strip()
+        _answer_callback_query(token, query_id, "Marcado como enviado.")
+        try:
+            if doc_id:
+                db.collection("whatsapp_outbox").document(doc_id).update({
+                    "status": "sent",
+                    "sent_at": datetime.now(timezone.utc),
+                    "sent_via": "telegram_confirmacao_manual",
+                })
+        except Exception as exc:
+            print(f"[TelegramCallback] Erro ao confirmar envio manual de WhatsApp {doc_id}: {exc}")
+
+        response_text = "☑️ <b>Envio de WhatsApp confirmado como feito.</b>"
+        _persist_callback_turn("Botão: confirmar envio manual de WhatsApp", response_text)
         _send_telegram_message(token, chat_id, response_text)
 
     else:
