@@ -556,6 +556,37 @@ class TestEnvioEncalhado(unittest.TestCase):
         self.assertIsNotNone(r["agendado_para"])
 
 
+class TestNotificadoAguardandoConfirmacao(unittest.TestCase):
+    """`notified` e o fallback do dispatch_scheduled_whatsapp_messages (Cloud Function):
+    quando o worker local nao esta confirmadamente online, ele manda um link wa.me pelo
+    Telegram para o dono enviar manualmente. O toque final no WhatsApp e invisivel para o
+    Hermes -- sem esta distincao o job ficava preso em "notified" para sempre (caso real:
+    job bae25bc6-0729-4213-a24d-c37feea5d687, entregue as 16:28 de 16/09/2026 e nunca
+    marcado "sent" ate a correcao).
+    """
+
+    def _ctx(self, minutos_atras):
+        from datetime import datetime, timedelta, timezone
+        agora = datetime.now(timezone.utc)
+        db = _db_padrao()
+        db._cols[wa.COL_OUTBOX] = _Colecao({"j": {
+            "status": "notified", "to_number": "+5527998754054", "content": "oi",
+            "notified_at": agora - timedelta(minutes=minutos_atras),
+        }})
+        return _Ctx(db)
+
+    def test_notificado_ha_pouco_so_aguarda(self):
+        r = wa.consultar_envio(self._ctx(0), {"job_id": "j"})
+        self.assertEqual(r["status"], "notified")
+        self.assertNotIn("status_efetivo", r)
+        self.assertIn("NAO diga ao usuario que a mensagem foi enviada", r["message"])
+
+    def test_notificado_ha_muito_tempo_pede_confirmacao(self):
+        r = wa.consultar_envio(self._ctx(10), {"job_id": "j"})
+        self.assertEqual(r["status_efetivo"], "aguardando_confirmacao_manual")
+        self.assertIn("SEM CONFIRMACAO", r["message"])
+
+
 class TestConsultarEnvio(unittest.TestCase):
     """Enfileirar não é enviar — e sem esta consulta não havia como saber.
 
