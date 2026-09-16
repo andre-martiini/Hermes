@@ -3043,6 +3043,19 @@ def run_full_sync(trigger_reason='unspecified'):
             # propria (2 leituras completas redundantes por ciclo de sync, 48
             # ciclos/dia - achado da investigacao de custo de 04/09/2026).
             tarefas_snapshot = list(db.collection('tarefas').stream())
+
+            # Reaproveita a leitura acima para o detector aguardando_terceiro_vencido
+            # (antes em atencao.py::detectar_atencao_acoes, que fazia sua PRÓPRIA
+            # leitura completa de 'tarefas' a cada 30 min -- duas varreduras inteiras
+            # e independentes da mesma coleção na mesma janela. Extraído e chamado
+            # aqui em 16/09/2026 (achado de custo, análise de PR3/DEV-2026-0003).
+            # Protegido por try/except próprio: nunca deve derrubar o sync.
+            try:
+                from atencao import detectar_aguardando_terceiro_vencido
+                detectar_aguardando_terceiro_vencido(db, tarefas_snapshot)
+            except Exception as e_atencao:
+                log_to_firestore(sync_ref, logs, f"[ATENCAO][ERRO] Falha inesperada no detector aguardando_terceiro_vencido: {e_atencao}", True)
+
             # Primeiro puxa o Calendar para permitir sincronia inversa (agenda -> Hermes) antes do push
             tarefas_atualizadas = sync_google_calendar(cs, sync_ref, logs, tarefas_docs=tarefas_snapshot)
             sync_google_tasks_push(ts, cs, sync_ref, logs, tarefas_atualizadas=tarefas_atualizadas)
@@ -3150,7 +3163,7 @@ def on_sync_request(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.D
 
 
 
-@scheduler_fn.on_schedule(schedule="every 30 minutes", timeout_sec=540, memory=options.MemoryOption.GB_1)
+@scheduler_fn.on_schedule(schedule="every 60 minutes", timeout_sec=540, memory=options.MemoryOption.GB_1)
 
 def scheduled_sync(event: scheduler_fn.ScheduledEvent) -> None:
 
@@ -3259,7 +3272,7 @@ def _page_monitor_build_message(apelido: str, objetivo: str, url: str, resumo: s
 
 
 @scheduler_fn.on_schedule(
-    schedule="every 30 minutes",
+    schedule="every 60 minutes",
     timeout_sec=540,
     memory=options.MemoryOption.GB_1,
 )
