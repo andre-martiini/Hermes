@@ -368,6 +368,10 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
   const [isCopilotCollapsed, setIsCopilotCollapsed] = useState(false);
   const [isMobileCopilotOpen, setIsMobileCopilotOpen] = useState(false);
   const [copilotPrompt, setCopilotPrompt] = useState<string | null>(null);
+  // Guardada aqui (fora do HermesGlobalChat) para que a conversa sobreviva caso o painel
+  // desktop/mobile seja desmontado e remontado — ex.: ao mover, minimizar ou redimensionar
+  // a janela, o que cruza o breakpoint de 1024px e troca qual instância fica montada.
+  const [copilotSessionId, setCopilotSessionId] = useState<string | null>(null);
 
   // Escalonamento de assistência: últimos 30 segundos
   const [sugestaoUltimos30s, setSugestaoUltimos30s] = useState<string | null>(null);
@@ -396,6 +400,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
   const meetingStartedAtRef = useRef<Date | null>(null);
   const meetingHistoryRef = useRef<MeetingHistoryEntry[]>([]);
   const lastPersistedMeetingIdRef = useRef<string | null>(null);
+  const firestorePersistedMeetingIdRef = useRef<string | null>(null);
   const systemAudioActivityDetectedRef = useRef(false);
   const isRecordingRef = useRef(false);
   const driveLinkByMeetingIdRef = useRef<Record<string, string>>({});
@@ -798,6 +803,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
       setDriveSaveInfo(null);
       meetingStartedAtRef.current = startedNow;
       lastPersistedMeetingIdRef.current = null;
+      firestorePersistedMeetingIdRef.current = null;
 
       micStreamRef.current = micStream;
       systemStreamRef.current = systemStream;
@@ -905,7 +911,12 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
 
   useEffect(() => {
     return () => {
-      stopRecording(false);
+      // true: se a ferramenta for desmontada com uma reunião em andamento (ex.: o usuário
+      // trocou de aba/ferramenta sem clicar em "Parar"), salva o que já foi transcrito em vez
+      // de descartar. Os guards de meetingId em persistCurrentMeetingToHistory e
+      // finalizeAndPersistMeeting evitam duplicar o registro quando a gravação já tinha sido
+      // parada e salva manualmente antes deste unmount.
+      stopRecording(true);
     };
   }, [stopRecording]);
 
@@ -1044,7 +1055,11 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
     const startedAt = meetingStartedAtRef.current;
     if (!startedAt) return;
     const meetingId = startedAt.toISOString();
+    if (firestorePersistedMeetingIdRef.current === meetingId) return;
+    firestorePersistedMeetingIdRef.current = meetingId;
     const transcriptSnapshot = [...transcriptsRef.current];
+
+    if (transcriptSnapshot.length === 0) return;
 
     setIsTitleGenerating(true);
     const titulo = await generateMeetingTitle(transcriptSnapshot);
@@ -1813,6 +1828,8 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
                 showToolsMenu={false}
                 showMinimizeButton={false}
                 resetSessionOnOpen={false}
+                initialSessionId={copilotSessionId}
+                onSessionChange={setCopilotSessionId}
                 headerTitle="Copiloto da Reunião"
                 headerSubtitle={copilotHeaderSubtitle}
                 emptyStateTitle="Pergunte sobre a reunião"
@@ -2000,6 +2017,8 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
             showToolsMenu={false}
             showMinimizeButton={false}
             resetSessionOnOpen={false}
+            initialSessionId={copilotSessionId}
+            onSessionChange={setCopilotSessionId}
             headerTitle="Copiloto da Reunião"
             headerSubtitle={copilotHeaderSubtitle}
             emptyStateTitle="Pergunte sobre a reunião"
