@@ -17,6 +17,7 @@ import HealthView from './HealthView';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { UpdatePrompt } from './src/components/UpdatePrompt';
 import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscriptionTool';
+import { useMeetingRecordingEngine, MeetingRecordingEngineContext } from './src/hooks/useMeetingRecordingEngine';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
 import { db, functions, auth, storage, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -1635,6 +1636,11 @@ const App: React.FC = () => {
   const removeToast = (id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
+  // Motor de gravação de reunião: instanciado uma vez aqui (raiz do app, nunca
+  // desmonta por navegação) e distribuído via Context — é isso que faz uma
+  // gravação em andamento sobreviver a trocar de aba/ferramenta em vez de
+  // ser interrompida quando MeetingTranscriptionTool desmonta.
+  const meetingRecordingEngine = useMeetingRecordingEngine(showToast, !!user);
   const handleExportModule = () => {
     let md = '';
     let filename = 'hermes_export';
@@ -4633,7 +4639,7 @@ const App: React.FC = () => {
   );
 
   return (
-    <>
+    <MeetingRecordingEngineContext.Provider value={meetingRecordingEngine}>
       <div className={`min-h-screen flex flex-col md:flex-row relative transition-colors ${appBgClass}`}>
         {/* Pop-up de Notificação */}
         {activePopup && (
@@ -7417,8 +7423,23 @@ const App: React.FC = () => {
           onOpenTool={handleCopilotoOpenTool}
         />
         )}
+        {/* A gravação de reunião agora continua em segundo plano ao trocar de aba/
+            ferramenta (o motor vive na raiz do app, não dentro da view da ferramenta).
+            Sem isso o usuário não teria como saber que o microfone/tela ainda estão
+            sendo capturados enquanto navega para outro lugar do Hermes. */}
+        {meetingRecordingEngine.isRecording && !isMeetingToolActive && (
+          <button
+            type="button"
+            onClick={() => { setViewMode('ferramentas'); setActiveFerramenta('meeting_transcription'); }}
+            className="fixed bottom-6 left-6 z-[650] flex items-center gap-2 rounded-full border border-rose-500/40 bg-rose-600 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-rose-600/30 transition-all hover:-translate-y-0.5 hover:bg-rose-500"
+            title="Voltar para a reunião em gravação"
+          >
+            <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
+            Gravando reunião
+          </button>
+        )}
       </div>
-    </>
+    </MeetingRecordingEngineContext.Provider>
   );
 };
 declare global {
