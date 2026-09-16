@@ -11,7 +11,7 @@ inventário tipado da sub-entrega 1/N (`tools/inventory.py`):
 `dominio_rede` (`tools/inventory.py::DominioRede`) -- não de
 `necessidade_de_rede` direto, ver a docstring de `registry.mcp_annotations`
 para o porquê. `idempotentHint` vem, PARCIALMENTE, das sub-entregas
-16/N-18/N: 27 das ~59 tools de escrita/leitura_e_escrita têm `idempotencia`
+16/N-19/N: 36 das ~59 tools de escrita/leitura_e_escrita têm `idempotencia`
 classificada no inventário (`tools/inventory.py::Idempotencia`) -- as
 demais continuam sem o hint (omitido, não um valor inventado), mesmo
 raciocínio já usado
@@ -98,9 +98,16 @@ class TestMcpAnnotations(unittest.TestCase):
         # em mcp_annotations, não só a classificação bruta do inventário.
         # rede_servico="Telegram Bot API (notifica o dono)" -- dominio_rede=
         # FECHADO (canal fixo e conhecido, não conteúdo externo arbitrário).
+        # NAO_IDEMPOTENTE desde a sub-entrega 19/N (outbox_aprovacao.py::
+        # criar_rascunho sem dedup, ID automático a cada chamada).
         self.assertEqual(
             registry.mcp_annotations("criar_rascunho_whatsapp"),
-            {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
+            {
+                "readOnlyHint": False,
+                "destructiveHint": True,
+                "idempotentHint": False,
+                "openWorldHint": False,
+            },
         )
 
     def test_leitura_e_escrita_com_efeito_colateral_passivo_e_destructive_hint_false(self):
@@ -137,15 +144,18 @@ class TestMcpAnnotations(unittest.TestCase):
                 self.assertNotIn("idempotentHint", registry.mcp_annotations(nome))
 
     def test_escrita_ainda_nao_investigada_omite_idempotent_hint(self):
-        # `criar_rascunho_whatsapp`: escrita real, mas fora das 18 tools
-        # investigadas até a sub-entrega 17/N -- idempotencia=None, hint
-        # omitido (não um valor inventado).
-        self.assertNotIn("idempotentHint", registry.mcp_annotations("criar_rascunho_whatsapp"))
+        # `schedule_whatsapp_message`: escrita real, mas ainda fora das 36
+        # tools investigadas até a sub-entrega 19/N -- idempotencia=None,
+        # hint omitido (não um valor inventado). `criar_rascunho_whatsapp`
+        # (usada aqui até a sub-entrega 18/N) foi classificada NAO_IDEMPOTENTE
+        # na sub-entrega 19/N e não serve mais de exemplo de "não investigada".
+        self.assertNotIn("idempotentHint", registry.mcp_annotations("schedule_whatsapp_message"))
 
     def test_idempotente_leva_idempotent_hint_true(self):
         # As 4 tools classificadas IDEMPOTENTE na sub-entrega 16/N + as 2 da
-        # sub-entrega 17/N + as 3 da sub-entrega 18/N (ver nota de cada uma
-        # em tools/inventory.py para a evidência por handler).
+        # sub-entrega 17/N + as 3 da sub-entrega 18/N + as 3 da sub-entrega
+        # 19/N (ver nota de cada uma em tools/inventory.py para a evidência
+        # por handler).
         for nome in (
             "criar_acao_no_sistema",
             "salvar_memoria_global",
@@ -156,14 +166,18 @@ class TestMcpAnnotations(unittest.TestCase):
             "desativar_modo_secretario",
             "cancelar_contato_prioritario_secretario",
             "editar_objetivo_estrategico",
+            "salvar_pop_global",
+            "atualizar_personalidade",
+            "resolver_conflito_memoria",
         ):
             with self.subTest(tool=nome):
                 self.assertEqual(registry.mcp_annotations(nome).get("idempotentHint"), True)
 
     def test_nao_idempotente_leva_idempotent_hint_false(self):
         # As 5 tools classificadas NAO_IDEMPOTENTE na sub-entrega 16/N + as 7
-        # da sub-entrega 17/N + as 6 da sub-entrega 18/N (ver nota de cada
-        # uma em tools/inventory.py para a evidência por handler).
+        # da sub-entrega 17/N + as 6 da sub-entrega 18/N + as 6 da sub-entrega
+        # 19/N (ver nota de cada uma em tools/inventory.py para a evidência
+        # por handler).
         for nome in (
             "agendar_lembrete_acao",
             "registrar_no_diario",
@@ -183,6 +197,12 @@ class TestMcpAnnotations(unittest.TestCase):
             "criar_objetivo_estrategico",
             "preparar_upload",
             "anexar_arquivo",
+            "registrar_correcao_procedimento",
+            "resolver_conflito_procedimento",
+            "editar_plano_acao",
+            "gerar_relatorio",
+            "gerar_imagem",
+            "criar_rascunho_whatsapp",
         ):
             with self.subTest(tool=nome):
                 self.assertEqual(registry.mcp_annotations(nome).get("idempotentHint"), False)
@@ -292,9 +312,11 @@ class TestHandleToolsListAnnotations(unittest.TestCase):
         )
 
     def test_escrita_nao_investigada_chega_sem_idempotent_hint(self):
-        # `criar_rascunho_whatsapp`: fora das 18 tools investigadas até a
-        # sub-entrega 17/N -- idempotentHint omitido, não um valor inventado.
-        self.assertNotIn("idempotentHint", self.catalogo["criar_rascunho_whatsapp"]["annotations"])
+        # `schedule_whatsapp_message`: ainda fora das 36 tools investigadas
+        # até a sub-entrega 19/N -- idempotentHint omitido, não um valor
+        # inventado. `criar_rascunho_whatsapp` (usada aqui até a sub-entrega
+        # 18/N) foi classificada NAO_IDEMPOTENTE na sub-entrega 19/N.
+        self.assertNotIn("idempotentHint", self.catalogo["schedule_whatsapp_message"]["annotations"])
 
     def test_dominio_aberto_chega_com_open_world_hint_true(self):
         self.assertEqual(

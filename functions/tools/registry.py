@@ -624,7 +624,7 @@ def mcp_annotations(tool_name: str) -> dict:
     outputSchema, structuredContent, annotations e envelope aos caminhos
     compativeis"). `readOnlyHint`/`destructiveHint` vieram da sub-entrega
     6/N; `openWorldHint`, da sub-entrega 7/N; `idempotentHint`, PARCIAL, das
-    sub-entregas 16/N, 17/N e 18/N (27 das ~59 tools de escrita/
+    sub-entregas 16/N, 17/N, 18/N e 19/N (36 das ~59 tools de escrita/
     leitura_e_escrita investigadas ate agora -- ver `Idempotencia` em
     `tools/inventory.py`).
     `outputSchema`/`structuredContent`/envelope seguem fora de escopo --
@@ -729,10 +729,44 @@ def mcp_annotations(tool_name: str) -> dict:
     pergunta de idempotência, um hint único não os descreveria
     honestamente).
 
-    As demais ~32 tools de escrita/leitura_e_escrita permanecem SEM
-    classificacao (`idempotencia=None`, hint omitido) -- candidatas a
+    Mais 9 tools investigadas na sub-entrega 19/N: `salvar_pop_global`,
+    `atualizar_personalidade` e `resolver_conflito_memoria` sao
+    IDEMPOTENTE (dedup por título/gatilho antes de escrever; `.set(merge=
+    True)` num documento singleton; e escrita sempre por `memoria_id` já
+    conhecido em vez de ID novo, respectivamente -- ver `nota` de cada
+    uma). `registrar_correcao_procedimento`, `resolver_conflito_
+    procedimento`, `editar_plano_acao`, `gerar_relatorio`, `gerar_imagem`
+    e `criar_rascunho_whatsapp` sao NAO_IDEMPOTENTE (ID novo por `uuid4()`
+    sem dedup, ou `ArrayUnion` incondicional a cada chamada -- ver `nota`
+    de cada uma). Achado incidental desta sub-entrega: para 6 das 9 tools
+    (`salvar_pop_global`, `resolver_conflito_memoria`, `atualizar_
+    personalidade`, `resolver_conflito_procedimento`, `editar_plano_acao`,
+    `gerar_relatorio`), o HANDLER REAL do servidor MCP é `tools/
+    telegram_extended.py::execute` -- as closures homônimas em `main.py`
+    (usadas pelo copiloto web) são implementações independentes, não
+    delegadas (comentário explícito no próprio código-fonte); a
+    classificação e os testes desta sub-entrega leem o código de `tools/
+    telegram_extended.py`, não o de `main.py`. Mais 5 tools foram
+    investigadas e deliberadamente deixadas SEM classificação por
+    ambiguidade genuína, mesmo critério já usado para `revogar_promocao_
+    autonomia`/`gerenciar_item_estrategico` (sub-entregas 16/N e 18/N):
+    `decidir_elevacao` e `decidir_promocao_autonomia` (falham-fechado na
+    repetição, mas devolvem só `{"ok": False, "erro": ...}` sem status
+    estruturado que distinga "já decidido" de erro real), `confirmar_acao`
+    (idempotência depende da tool delegada em cada chamada, fora do
+    escopo de leitura de um handler único), e `mutar_portal_compras_
+    publico`/`mutar_lista_compras` (múltiplos ramos por parâmetro `acao`
+    interno, com pelo menos um ramo — um toggle de verdade — violando
+    idempotência por definição).
+
+    As demais ~15 tools de escrita/leitura_e_escrita ainda não foram
+    investigadas (`idempotencia=None`, hint omitido) -- candidatas a
     fatias futuras, mesmo padrao incremental ja usado para `dominio_rede`
     (sub-entrega 7/N) e para `outputSchema` (sub-entregas 8/N em diante).
+    Mais 8 tools (as listadas acima, entre esta sub-entrega e as
+    anteriores) foram investigadas e deliberadamente deixadas sem
+    classificação por ambiguidade genuína -- ver `nota` de cada uma em
+    `tools/inventory.py` para não repetir a investigação.
 
     Omitir hints nao investigados com confianca nao e regressao: a
     especificacao MCP ja define default conservador para quem nao declara

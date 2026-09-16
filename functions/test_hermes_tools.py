@@ -1383,5 +1383,78 @@ class _CtxVazio:
     db = None
 
 
+class TestRegistrarCorrecaoProcedimentoNaoIdempotente(unittest.TestCase):
+    """`registrar_correcao_procedimento` (P03 sub-entrega 19/N): sem dedup
+    por título/área -- cada chamada grava um documento novo com ID
+    `uuid4()[:12]`, mesmo repetindo os mesmos argumentos."""
+
+    def test_repetir_a_mesma_correcao_grava_dois_documentos_distintos(self):
+        from tools.tool_context import ToolContext
+
+        db = MagicMock()
+        ctx = ToolContext(_db=db)
+        args = {
+            "area_tematica": "financeiro",
+            "titulo_procedimento": "Fechamento mensal",
+            "correcao_descrita": "faltou o passo Y",
+            "novo_conteudo_proposto": "adicionar passo Y antes de X",
+            "justificativa": "usuário apontou a lacuna",
+        }
+
+        hermes_tools.registrar_correcao_procedimento(ctx, args)
+        hermes_tools.registrar_correcao_procedimento(ctx, args)
+
+        ids_usados = [call.args[0] for call in db.collection.return_value.document.call_args_list]
+        self.assertEqual(len(ids_usados), 2)
+        self.assertEqual(len(set(ids_usados)), 2, "cada chamada deve usar um ID novo distinto")
+        self.assertEqual(db.collection.return_value.document.return_value.set.call_count, 2)
+
+
+class TestGerarImagemNaoIdempotente(unittest.TestCase):
+    """`gerar_imagem` (P03 sub-entrega 19/N): nome de blob novo
+    (`uuid4().hex[:8]`) e upload incondicional a cada chamada -- repetir o
+    MESMO prompt persiste uma segunda imagem. Também incrementa a cota
+    diária (`check_and_increment_limit`) a cada chamada que passa da
+    checagem, outro efeito adicional real."""
+
+    def _ctx_com_genai_fake(self, image_bytes: bytes):
+        from tools.tool_context import ToolContext
+
+        part = MagicMock()
+        part.inline_data.data = image_bytes
+        candidate = MagicMock()
+        candidate.content.parts = [part]
+        resp = MagicMock()
+        resp.candidates = [candidate]
+
+        genai_client = MagicMock()
+        genai_client.models.generate_content.return_value = resp
+        return ToolContext(_db=MagicMock(), _genai_client=genai_client), genai_client
+
+    def test_repetir_o_mesmo_prompt_gera_dois_blobs_com_nomes_distintos(self):
+        ctx, genai_client = self._ctx_com_genai_fake(b"fake-image-bytes")
+
+        bucket = MagicMock()
+        blobs_criados = []
+
+        def _blob(nome):
+            blobs_criados.append(nome)
+            return MagicMock()
+
+        bucket.blob.side_effect = _blob
+
+        with patch("hermes_core_logic._get_hermes_storage_bucket", return_value=bucket), \
+                patch("hermes_core_logic._blob_public_url", return_value="https://exemplo/img.jpg"), \
+                patch("gemini_cost_controls.check_and_increment_limit", return_value=True) as fake_limit:
+            r1 = hermes_tools.gerar_imagem(ctx, {"prompt": "um gato"})
+            r2 = hermes_tools.gerar_imagem(ctx, {"prompt": "um gato"})
+
+        self.assertNotIn("ERRO|", r1)
+        self.assertNotIn("ERRO|", r2)
+        self.assertEqual(len(blobs_criados), 2)
+        self.assertEqual(len(set(blobs_criados)), 2, "cada chamada deve gerar um nome de blob novo")
+        self.assertEqual(fake_limit.call_count, 2, "a cota diária é incrementada a cada chamada, não só na 1ª")
+
+
 if __name__ == "__main__":
     unittest.main()
