@@ -499,6 +499,9 @@ def dispatch_scheduled_whatsapp_messages(db, now) -> None:
         keyboard = [
             [
                 {"text": "✅ Sim, Enviar no WhatsApp", "url": whatsapp_url},
+            ],
+            [
+                {"text": "☑️ Já enviei", "callback_data": f"wa_confirm_sent:{doc_snap.id}"},
                 {"text": "❌ Cancelar", "callback_data": f"wa_cancel:{doc_snap.id}"}
             ]
         ]
@@ -507,8 +510,9 @@ def dispatch_scheduled_whatsapp_messages(db, now) -> None:
         if sent:
             doc_snap.reference.update({
                 "status": "notified",
-                "notified_at": now.isoformat(),
+                # Timestamp real (nao string) para que consultar_envio_whatsapp consiga
+                # medir ha quanto tempo esta parado, igual ja faz com scheduled_for.
+                "notified_at": now,
                 "telegram_sent": True
             })
             print(f"[WhatsAppOutbox] Agendamento {doc_snap.id} notificado via Telegram com sucesso.")
-
