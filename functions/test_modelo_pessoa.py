@@ -403,7 +403,7 @@ class TestBuscarContatoTool(unittest.TestCase):
         }
 
         db_mock = MagicMock()
-        db_mock.collection.return_value.limit.return_value.stream.return_value = [doc_mock]
+        db_mock.collection.return_value.stream.return_value = [doc_mock]
 
         ctx = ToolContext(_db=db_mock, user_uid="user123", task_id="t1")
         res = _buscar_contato(ctx, {"termo": "guilherme"})
@@ -424,7 +424,7 @@ class TestBuscarContatoTool(unittest.TestCase):
         }
 
         db_mock = MagicMock()
-        db_mock.collection.return_value.limit.return_value.stream.return_value = [doc_mock]
+        db_mock.collection.return_value.stream.return_value = [doc_mock]
 
         ctx = ToolContext(_db=db_mock, user_uid="user123", task_id="t1")
         res = _buscar_contato(ctx, {"termo": "iris"})
