@@ -3481,7 +3481,7 @@ def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
 
 @scheduler_fn.on_schedule(
     schedule="every 1 minutes",
-    memory=options.MemoryOption.GB_1,
+    memory=options.MemoryOption.MB_256,
     timeout_sec=120,
 )
 
