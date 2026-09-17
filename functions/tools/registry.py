@@ -1394,11 +1394,16 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     # funcao -- um enum fechado quebraria nesse caso, mesmo motivo ja usado
     # para `tipo`/`origem` em `consultar_pedidos_agente` (sub-entrega 12/N).
     #
-    # `contexto_agente` (`d.get("contexto_agente")`) tem UM UNICO escritor
+    # `contexto_agente` (`d.get("contexto_agente")`) tinha UM UNICO escritor
     # em todo o repositorio: `main.py::processar_contexto_agente`, chamado
     # so pelo gatilho Firestore `on_document_written` em `tarefas/{taskId}`
     # -- busca exaustiva por `"contexto_agente":` como CHAVE DE ESCRITA
-    # confirma isso. Esse escritor grava sempre `None` (quando o parse do
+    # confirma isso. REMOVIDO em 17/09/2026 (custo -- ~90% do Gemini do
+    # Hermes vinha desse gatilho e do irmao de extracao de pessoas; ver
+    # diario da acao b066fbd2-8552-4321-b): o campo agora e so-leitura,
+    # so aparece em tarefas ja processadas antes da remocao, nunca mais
+    # cresce. O formato abaixo documenta o que ja existe gravado. Esse
+    # escritor gravava sempre `None` (quando o parse do
     # LLM falha ou fica vazio -- nesse caso grava so `last_processed_
     # contexto_hash`, sem tocar `contexto_agente`) ou o dict devolvido por
     # `parse_resposta_contexto`, que TEM forma fixa e coagida (`resumo`:

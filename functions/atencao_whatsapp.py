@@ -387,10 +387,13 @@ def _flag_audio(db) -> tuple[bool, int]:
 def _pessoa_vinculada_a_acao_ativa(db, chat_id: str) -> dict | None:
     """Condicao 2 do detector audio_relevante: o contato do chat individual
     (`perfil_pessoas.whatsapp_chat_id`, gravado por `linkWhatsappContacts`) tem
-    mencao a alguma acao ativa via `interacoes_pessoas.tarefa_id` (extraida por
-    `on_tarefa_written_extract_people`, knowledge_graph.py). So chamada quando a
-    condicao 1 (whatsapp_vinculos direto na acao) ja falhou - mecanismo best
-    effort, mais raro, nao vale cachear como a condicao 1."""
+    mencao a alguma acao ativa via `interacoes_pessoas.tarefa_id`. Ate 17/09/2026
+    essas interacoes vinham em boa parte de um gatilho automatico em
+    knowledge_graph.py (removido por custo -- ver diario da acao
+    b066fbd2-8552-4321-b); agora vem so de `whatsapp_consolidation.py` e do que
+    o Claude registra manualmente via `registrar_interacao_contato` numa sessao.
+    So chamada quando a condicao 1 (whatsapp_vinculos direto na acao) ja falhou -
+    mecanismo best effort, mais raro, nao vale cachear como a condicao 1."""
     pessoas = list(
         db.collection("perfil_pessoas").where("whatsapp_chat_id", "==", chat_id).limit(1).stream()
     )
