@@ -36,6 +36,7 @@ from atencao import (
     esta_na_janela_silencio,
     avaliar_interrupcao_atencao,
     detectar_atencao_acoes,
+    detectar_aguardando_terceiro_vencido,
 )
 
 
@@ -1236,8 +1237,12 @@ class TestDetectarAtencaoAcoesIntegracao(unittest.TestCase):
 
 class TestDetectarAtencaoAcoesAutoFechamento(unittest.TestCase):
     """DEV-2026-0004 sub-entrega 6/9, proposta (c)(iii): fechamento automático
-    de `aguardando_terceiro_vencido` dentro do fluxo real de
-    `detectar_atencao_acoes` (não apenas o helper isolado)."""
+    de `aguardando_terceiro_vencido`.
+
+    Extraído de `detectar_atencao_acoes` para `detectar_aguardando_terceiro_vencido`
+    em 16/09/2026 (achado de custo: leitura duplicada de `tarefas`, ver atencao.py).
+    Os testes abaixo chamam a função extraída diretamente, passando `tarefas_docs`
+    já carregado -- mesmo shape que `run_full_sync` (main.py) usa em produção."""
 
     def _settings(self):
         return {"atencao": {"aguardando_terceiro": {"enabled": True}}}
@@ -1268,8 +1273,8 @@ class TestDetectarAtencaoAcoesAutoFechamento(unittest.TestCase):
         })
         mock_get_db.return_value = db
 
-        fn = getattr(detectar_atencao_acoes, "__wrapped__", detectar_atencao_acoes)
-        fn()
+        tarefas_docs = list(db.collection("tarefas").stream())
+        detectar_aguardando_terceiro_vencido(db, tarefas_docs)
 
         doc = db.collection(COLLECTION).document("aguardando_terceiro_vencido:task-1:step-1")
         data = doc.to_dict()
@@ -1310,8 +1315,8 @@ class TestDetectarAtencaoAcoesAutoFechamento(unittest.TestCase):
         })
         mock_get_db.return_value = db
 
-        fn = getattr(detectar_atencao_acoes, "__wrapped__", detectar_atencao_acoes)
-        fn()
+        tarefas_docs = list(db.collection("tarefas").stream())
+        detectar_aguardando_terceiro_vencido(db, tarefas_docs)
 
         doc = db.collection(COLLECTION).document("aguardando_terceiro_vencido:task-1:step-1")
         self.assertEqual(doc.to_dict()["estado"], ESTADO_ABERTO)
@@ -1339,8 +1344,8 @@ class TestDetectarAtencaoAcoesAutoFechamento(unittest.TestCase):
         })
         mock_get_db.return_value = db
 
-        fn = getattr(detectar_atencao_acoes, "__wrapped__", detectar_atencao_acoes)
-        fn()
+        tarefas_docs = list(db.collection("tarefas").stream())
+        detectar_aguardando_terceiro_vencido(db, tarefas_docs)
 
         doc = db.collection(COLLECTION).document("aguardando_terceiro_vencido:task-1:step-1")
         self.assertEqual(doc.to_dict()["estado"], ESTADO_ABERTO)

@@ -726,13 +726,25 @@ def avaliar_emails_nao_entregues(bounces: list[dict], hoje: date) -> list[dict]:
 
 
 @scheduler_fn.on_schedule(
-    schedule="every 30 minutes",
+    schedule="every 60 minutes",
     timezone="America/Sao_Paulo",
     memory=options.MemoryOption.MB_256,
     timeout_sec=120,
 )
 def detectar_atencao_acoes(event: scheduler_fn.ScheduledEvent = None) -> None:
-    """Cloud Function agendada a cada 30 min para detectar pendências determinísticas."""
+    """Cloud Function agendada a cada 60 min para detectar pendências determinísticas
+    de finanças e saúde.
+
+    ACHADO DE CUSTO DE 16/09/2026: até aqui, esta função também fazia sua própria
+    leitura completa de `tarefas` para o detector `aguardando_terceiro_vencido` --
+    uma segunda varredura inteira da coleção, independente e na mesma janela de 30
+    (agora 60) min em que `scheduled_sync`/`run_full_sync` (main.py) já lê `tarefas`
+    por completo a cada ciclo. Esse detector foi extraído para
+    `detectar_aguardando_terceiro_vencido` (abaixo) e passou a ser chamado por
+    `run_full_sync`, reaproveitando a leitura que o próprio sync já faz -- mesmo
+    resultado, uma leitura completa a menos por ciclo. Continua chamável isolado
+    (passando `tarefas_docs` de qualquer fonte), inclusive para teste/reprocesso manual.
+    """
     from main import get_db
 
     db = get_db()
@@ -748,6 +760,25 @@ def detectar_atencao_acoes(event: scheduler_fn.ScheduledEvent = None) -> None:
         detectar_atencao_saude(db, hoje, settings=settings)
     except Exception as fs_err:
         print(f"[Atencao] Falha ao executar detectores de financeiro/saude: {fs_err}")
+
+
+def detectar_aguardando_terceiro_vencido(db, tarefas_docs: list, hoje=None, settings: dict | None = None) -> None:
+    """Detector de etapas 'aguardando_terceiro' vencidas.
+
+    Extraído de `detectar_atencao_acoes` em 16/09/2026 (achado de custo: leitura
+    duplicada e independente de `tarefas` a cada 30 min). Recebe `tarefas_docs` já
+    carregado por quem chama -- hoje, `run_full_sync` em main.py, logo após seu
+    próprio `db.collection('tarefas').stream()`. Mesma lógica e mesma trava de
+    segurança de antes, só sem a leitura redundante.
+    """
+    if hoje is None:
+        sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
+        hoje = datetime.now(sp_tz).date()
+
+    if settings is None:
+        settings_doc = db.collection("system").document("settings").get()
+        settings = settings_doc.to_dict() if settings_doc.exists else {}
+
     enabled = (
         settings.get("atencao", {})
         .get("aguardando_terceiro", {})
@@ -757,7 +788,6 @@ def detectar_atencao_acoes(event: scheduler_fn.ScheduledEvent = None) -> None:
         print("[Atencao] Detector aguardando_terceiro_vencido desligado em system/settings; abortando.")
         return
 
-    tarefas_docs = list(db.collection("tarefas").stream())
     tarefas_ativas: list[dict] = []
     chats_para_consultar: set[str] = set()
 
