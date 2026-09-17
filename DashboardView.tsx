@@ -974,12 +974,16 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
     // `atrasadas` não é disjunta de `avanco`/`continuo` -- o backend grava a
     // mesma ação atrasada na lane e em `atrasadas` (functions/morning_summary.py).
     // Dedup por id evita cards duplicados, key colidindo e o % do dia contando
-    // a mesma ação duas vezes.
+    // a mesma ação duas vezes. `aguardando_terceiro` entra aqui também (e não
+    // só depois, cru) para passar pelo mesmo filtro ao vivo abaixo -- senão uma
+    // ação arquivada/concluída/reagendada que já nasceu nessa lane fica presa
+    // em "Em espera" pelo resto do dia, porque nunca é reavaliada contra `acoesAoVivo`.
     const candidatasPorId = new Map<string, ResumoAcao>();
     for (const a of [
         ...(resumo.hoje?.avanco ?? []),
         ...(resumo.hoje?.continuo ?? []),
         ...(resumo.hoje?.atrasadas ?? []),
+        ...(resumo.hoje?.aguardando_terceiro ?? []),
     ]) {
         candidatasPorId.set(a.id, a);
     }
@@ -1024,12 +1028,11 @@ export const AcoesDoDiaCard: React.FC<{ isDark?: boolean }> = ({ isDark = false 
 
     // O passo de hoje está esperando terceiro -- sinal granular, independente
     // de `execution_lane` (que classifica a ação inteira e pode não refletir isso).
-    const emEsperaHoje = candidatas.filter(a => a.subtarefa_do_dia?.estado === 'aguardando_terceiro');
-    const emEsperaIds = new Set(emEsperaHoje.map(a => a.id));
-    const emEspera: ResumoAcao[] = [
-        ...emEsperaHoje,
-        ...(resumo.hoje?.aguardando_terceiro ?? []).filter(a => !emEsperaIds.has(a.id)),
-    ];
+    // `candidatas` já inclui as ações que vieram da lane `aguardando_terceiro`
+    // (ver acima) e já passaram pelo filtro ao vivo, então dá pra classificar
+    // ativa vs. em espera direto por elas, sem reintroduzir a lista crua do backend.
+    const emEspera = candidatas.filter(a => a.subtarefa_do_dia?.estado === 'aguardando_terceiro');
+    const emEsperaIds = new Set(emEspera.map(a => a.id));
     const ativas = candidatas.filter(a => !emEsperaIds.has(a.id));
 
     if (ativas.length === 0 && emEspera.length === 0) return null;

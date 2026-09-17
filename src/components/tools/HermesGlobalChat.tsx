@@ -207,6 +207,10 @@ interface HermesGlobalChatProps {
   showMinimizeButton?: boolean;
   /** Quando false, reabrir o painel (isOpen true→true após toggle) não zera a conversa em andamento. */
   resetSessionOnOpen?: boolean;
+  /** Sessão a retomar ao montar (ex.: guardada pelo componente pai). Útil quando este componente pode ser desmontado/remontado (ex.: troca de layout desktop/mobile) sem perder a conversa. */
+  initialSessionId?: string | null;
+  /** Notificado sempre que a sessão ativa muda, para o pai poder persistir e devolver via initialSessionId. */
+  onSessionChange?: (sessionId: string | null) => void;
   headerTitle?: string;
   headerSubtitle?: string;
   emptyStateTitle?: string;
@@ -261,6 +265,8 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   showToolsMenu = true,
   showMinimizeButton = true,
   resetSessionOnOpen = true,
+  initialSessionId,
+  onSessionChange,
   headerTitle,
   headerSubtitle,
   emptyStateTitle,
@@ -268,7 +274,11 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   composerPlaceholder,
 }) => {
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [currentSessionId, setCurrentSessionIdState] = useState<string | null>(() => initialSessionId ?? null);
+  const setCurrentSessionId = (sessionId: string | null) => {
+    setCurrentSessionIdState(sessionId);
+    onSessionChange?.(sessionId);
+  };
   const [messages, setMessages] = useState<Message[]>([]);
   const [isComposingNewSession, setIsComposingNewSession] = useState(false);
   const [input, setInput] = useState('');

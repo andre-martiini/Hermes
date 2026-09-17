@@ -834,6 +834,32 @@ class TestTipoEEudicaoOutbox(unittest.TestCase):
             self.assertFalse(doc["foi_editado"])
 
 
+class TestCriarRascunhoNaoIdempotente(unittest.TestCase):
+    """`criar_rascunho_whatsapp` (P03 sub-entrega 19/N): `criar_rascunho`
+    sempre usa `db.collection(COLLECTION).document()` (ID automático) e
+    `.set()` incondicional -- sem dedup por destinatário/mensagem/motivo,
+    repetir a MESMA chamada cria um SEGUNDO rascunho e dispara um SEGUNDO
+    card no Telegram."""
+
+    def setUp(self):
+        self.db = _MockDb()
+
+    def test_repetir_a_mesma_chamada_cria_dois_rascunhos_distintos(self):
+        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={
+            "encontrado": True, "nome": "Mariana", "chat_id": "5527998887777@c.us"
+        }), mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=123) as fake_send, \
+                mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"), \
+                mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
+            res1 = oa.criar_rascunho(
+                self.db, contact_number="+5527998887777", message="Mesma mensagem", motivo="Mesmo motivo")
+            res2 = oa.criar_rascunho(
+                self.db, contact_number="+5527998887777", message="Mesma mensagem", motivo="Mesmo motivo")
+
+        self.assertNotEqual(res1["outbox_id"], res2["outbox_id"])
+        self.assertEqual(len(self.db.collection(oa.COLLECTION)._docs), 2)
+        self.assertEqual(fake_send.call_count, 2, "um card novo no Telegram por chamada, sem dedup")
+
+
 class TestMetricasPorTipo(unittest.TestCase):
     """Testes da função metricas_por_tipo (PR 1 da Fase 3)."""
 

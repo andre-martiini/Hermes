@@ -1324,6 +1324,27 @@ class DispensarTest(unittest.TestCase):
         self.assertEqual(doc.data['motivo'], 'Já resolvi por telefone')
         self.assertEqual(doc.data['item_id'], item_id)
 
+    def test_dispensa_repetida_com_mesmo_item_id_nao_duplica_documento(self):
+        """P03 sub-entrega 16/N: sustenta a classificação IDEMPOTENTE de
+        `dispensar_resposta_pendente` em tools/inventory.py -- repetir a
+        MESMA chamada (item_id/motivo iguais) usa `.document(item_id).set()`
+        com um ID DETERMINÍSTICO, então sobrescreve o mesmo documento em vez
+        de criar um segundo. Só a segunda chamada (motivo diferente) prova
+        que a sobrescrita de fato aconteceu, não que a segunda chamada foi
+        ignorada."""
+        db = Db({})
+        item_id = _chave_item_dispensavel('w', 'Já tratamos isso?', False)
+
+        primeiro = dispensar(db, item_id=item_id, motivo='Já resolvi por telefone')
+        segundo = dispensar(db, item_id=item_id, motivo='Resolvido de outro jeito')
+
+        self.assertEqual(primeiro['status'], 'ok')
+        self.assertEqual(segundo['status'], 'ok')
+        colecao = db.collection(DISPENSA_COLLECTION)
+        self.assertEqual(len(colecao.docs_by_id), 1, "duas chamadas com o mesmo item_id criaram dois documentos")
+        doc = colecao.document(item_id)
+        self.assertEqual(doc.data['motivo'], 'Resolvido de outro jeito')
+
     def test_dispensa_sem_item_id_devolve_erro_e_nao_grava(self):
         db = Db({})
         resultado = dispensar(db, item_id='', motivo='Motivo qualquer')

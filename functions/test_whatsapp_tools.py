@@ -262,6 +262,25 @@ class TestListagem(unittest.TestCase):
         r = wa.listar_conversas(self.ctx, {"apenas_monitoradas": False})
         self.assertEqual(r["conversas"][0]["chat_id"], LIVRE)
 
+    def test_nao_omite_chat_depois_do_antigo_corte_de_500(self):
+        chats = {
+            f"chat-{i:03d}": {
+                "chat_id": f"chat-{i:03d}", "chat_name": f"Chat {i}",
+                "last_activity_ts": "2026-01-01T00:00:00",
+            }
+            for i in range(500)
+        }
+        chats["flavia@lid"] = {
+            "chat_id": "flavia@lid", "chat_name": "Flávia Nascimento Ribeiro",
+            "last_activity_ts": "2026-09-17T14:00:24",
+        }
+        ctx = _Ctx(_Db(allowlist=[], chats=chats))
+
+        r = wa.listar_conversas(ctx, {"apenas_monitoradas": False, "limite": 200})
+
+        self.assertEqual(r["total"], 501)
+        self.assertEqual(r["conversas"][0]["chat_id"], "flavia@lid")
+
 
 class TestConsolidar(unittest.TestCase):
     def test_job_criado_com_o_contrato_do_trigger(self):
@@ -554,6 +573,37 @@ class TestEnvioEncalhado(unittest.TestCase):
         r = wa.consultar_envio(self._ctx(0, 30), {"job_id": "j"})
         self.assertIsNotNone(r["enfileirado_em"])
         self.assertIsNotNone(r["agendado_para"])
+
+
+class TestNotificadoAguardandoConfirmacao(unittest.TestCase):
+    """`notified` e o fallback do dispatch_scheduled_whatsapp_messages (Cloud Function):
+    quando o worker local nao esta confirmadamente online, ele manda um link wa.me pelo
+    Telegram para o dono enviar manualmente. O toque final no WhatsApp e invisivel para o
+    Hermes -- sem esta distincao o job ficava preso em "notified" para sempre (caso real:
+    job bae25bc6-0729-4213-a24d-c37feea5d687, entregue as 16:28 de 16/09/2026 e nunca
+    marcado "sent" ate a correcao).
+    """
+
+    def _ctx(self, minutos_atras):
+        from datetime import datetime, timedelta, timezone
+        agora = datetime.now(timezone.utc)
+        db = _db_padrao()
+        db._cols[wa.COL_OUTBOX] = _Colecao({"j": {
+            "status": "notified", "to_number": "+5527998754054", "content": "oi",
+            "notified_at": agora - timedelta(minutes=minutos_atras),
+        }})
+        return _Ctx(db)
+
+    def test_notificado_ha_pouco_so_aguarda(self):
+        r = wa.consultar_envio(self._ctx(0), {"job_id": "j"})
+        self.assertEqual(r["status"], "notified")
+        self.assertNotIn("status_efetivo", r)
+        self.assertIn("NAO diga ao usuario que a mensagem foi enviada", r["message"])
+
+    def test_notificado_ha_muito_tempo_pede_confirmacao(self):
+        r = wa.consultar_envio(self._ctx(10), {"job_id": "j"})
+        self.assertEqual(r["status_efetivo"], "aguardando_confirmacao_manual")
+        self.assertIn("SEM CONFIRMACAO", r["message"])
 
 
 class TestConsultarEnvio(unittest.TestCase):

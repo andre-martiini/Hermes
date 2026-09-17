@@ -140,7 +140,12 @@ def listar_conversas(ctx, args: dict) -> dict:
     limite = max(1, min(int(args.get("limite") or 60), 200))
 
     conversas = []
-    for snap in ctx.db.collection(COL_CHATS).limit(500).stream():
+    # Não limite a leitura antes de ordenar.  O Firestore entrega documentos sem
+    # uma ordenação útil nesse caso; aplicar ``limit(500)`` aqui ocultava chats
+    # perfeitamente válidos que caíam depois desse corte (inclusive chats com
+    # atividade recente). O volume do registro de chats é pequeno e esta tool
+    # precisa ser uma fonte de descoberta completa.
+    for snap in ctx.db.collection(COL_CHATS).stream():
         dados = snap.to_dict() or {}
         chat_id = str(dados.get("chat_id") or snap.id)
         monitorada = leitura_total or chat_id in monitoradas
@@ -402,6 +407,30 @@ def consultar_envio(ctx, args: dict) -> dict:
         if d.get("status") == "expirado":
             saida["expirado_em"] = _iso(d.get("expirado_em"))
             saida["message"] = "Expirado sem aprovação (mais de 48h)."
+        if d.get("status") == "notified":
+            # Fallback do dispatch_scheduled_whatsapp_messages (Cloud Function): quando o
+            # worker local nao esta confirmadamente online, ele notifica o dono no Telegram
+            # com um link wa.me em vez de enviar de verdade. O toque final do dono no
+            # WhatsApp e invisivel para o Hermes, entao sem confirmacao manual ("Ja enviei"
+            # no Telegram) o doc fica preso aqui para sempre, com tentativas=0 -- foi
+            # exatamente o que aconteceu em 16/09/2026 (job bae25bc6-0729-4213-a24d-
+            # c37feea5d687: entregue as 16:28, rastreador so soube depois da correcao).
+            atraso = _atraso_segundos(d.get("notified_at"), agora)
+            saida["notificado_em"] = _iso(d.get("notified_at"))
+            if atraso is not None and atraso > ATRASO_SUSPEITO_SEG:
+                saida["status_efetivo"] = "aguardando_confirmacao_manual"
+                saida["message"] = (
+                    f"NOTIFICADO HA {atraso // 60} MIN, SEM CONFIRMACAO: o Hermes mandou um "
+                    "link de WhatsApp pelo Telegram para o dono enviar manualmente, mas "
+                    "ninguem confirmou o envio ainda (botao 'Ja enviei' no Telegram). Pode "
+                    "ja ter sido entregue de fato -- pergunte ao usuario antes de afirmar "
+                    "qualquer coisa, e peça para tocar em 'Ja enviei' ou 'Cancelar' na "
+                    "mensagem do Telegram para o status refletir a realidade.")
+            else:
+                saida["message"] = (
+                    "Notificado no Telegram com um link de envio manual — aguardando o "
+                    "dono confirmar ('Ja enviei') ou cancelar. NAO diga ao usuario que a "
+                    "mensagem foi enviada sem essa confirmacao.")
         if d.get("status") == "pending":
             # Um `pending` que passou da hora nao e "esperando": e um envio
             # encalhado. Sem esta distincao ele fica "na fila" para sempre, que

@@ -3,6 +3,7 @@ import os
 
 from tools.inventory import (
     DominioRede,
+    Idempotencia,
     LeituraEscrita,
     Reversibilidade,
     get_inventory_entry,
@@ -618,13 +619,16 @@ def get_required_params(tool_name: str) -> list[str]:
 
 def mcp_annotations(tool_name: str) -> dict:
     """`ToolAnnotations` do MCP (`readOnlyHint`/`destructiveHint`/
-    `openWorldHint`) para o catalogo publicado em `tools/list` -- P03 passo 3
-    do plano de autonomia ("Adicionar outputSchema, structuredContent,
-    annotations e envelope aos caminhos compativeis"). `readOnlyHint`/
-    `destructiveHint` vieram da sub-entrega 6/N; `openWorldHint`, desta
-    sub-entrega 7/N. `outputSchema`/`structuredContent`/envelope seguem fora
-    de escopo -- exigem definir um contrato de dados por tool, ver
-    docs/autonomia/execucao.md.
+    `openWorldHint`/`idempotentHint`) para o catalogo publicado em
+    `tools/list` -- P03 passo 3 do plano de autonomia ("Adicionar
+    outputSchema, structuredContent, annotations e envelope aos caminhos
+    compativeis"). `readOnlyHint`/`destructiveHint` vieram da sub-entrega
+    6/N; `openWorldHint`, da sub-entrega 7/N; `idempotentHint`, PARCIAL, das
+    sub-entregas 16/N, 17/N, 18/N e 19/N (36 das ~59 tools de escrita/
+    leitura_e_escrita investigadas ate agora -- ver `Idempotencia` em
+    `tools/inventory.py`).
+    `outputSchema`/`structuredContent`/envelope seguem fora de escopo --
+    exigem definir um contrato de dados por tool, ver docs/autonomia/execucao.md.
 
     `readOnlyHint` vem de `leitura_escrita` e `destructiveHint` de
     `reversibilidade` -- ambos do inventario investigado em P03 sub-entrega
@@ -657,14 +661,112 @@ def mcp_annotations(tool_name: str) -> dict:
     mercado via yfinance/SGS-Bacen -- fora do controle direto do Hermes e
     do proprio servico).
 
-    `idempotentHint` continua inteiramente fora de escopo: pede saber, por
-    HANDLER, se chamar de novo com os MESMOS argumentos tem efeito
-    adicional (ex.: `criar_acao_no_sistema` dedupla por titulo/data;
-    `agendar_lembrete_acao` nao dedupla nada) -- nenhum campo do inventario
-    atual registra isso (nem `dominio_rede`, que e sobre O QUE a tool
-    alcança pela rede, nao sobre REPETIR a chamada sem custo); precisaria de
-    investigacao dedicada por handler, do mesmo porte da sub-entrega 1/N,
-    candidata a uma sub-entrega futura propria.
+    `idempotentHint` vem do campo `idempotencia` (P03 sub-entrega 16/N,
+    `Idempotencia`) -- pede saber, por HANDLER, se chamar de novo com os
+    MESMOS argumentos tem efeito adicional no ambiente; nenhum outro campo
+    do inventario sustenta essa pergunta (nem `reversibilidade`, que e
+    sobre "da para desfazer depois", nem `dominio_rede`, que e sobre O QUE a
+    tool alcança pela rede, nao sobre REPETIR a chamada sem custo). So faz
+    sentido quando `readOnlyHint` e False, mesma convencao de
+    `destructiveHint` -- e so e emitido quando `entry.idempotencia` esta de
+    fato classificado.
+
+    9 tools investigadas nesta primeira fatia (leitura direta do handler
+    real, nao do nome/descricao): `criar_acao_no_sistema`,
+    `salvar_memoria_global`, `dispensar_resposta_pendente` e
+    `concluir_pedido_agente` sao IDEMPOTENTE (dedup por chave exata,
+    dedup por similaridade de embedding, `.set()` com ID deterministico, e
+    transacao Firestore com `already_decided`, respectivamente -- ver
+    `nota` de cada uma em `tools/inventory.py`). IDEMPOTENTE aqui nao
+    significa "sem limite de tempo": `criar_acao_no_sistema` so dedupla
+    DENTRO da janela de `ttl_minutes=15` de `claim_action_dedup_slot`
+    (main.py) -- repetir a MESMA chamada depois desse intervalo cria uma
+    acao nova, ver `test_action_dedup_slot.py` para as duas metades desse
+    comportamento provadas. `agendar_lembrete_acao`,
+    `registrar_no_diario`, `editar_acao`, `resolver_item_atencao` e
+    `registrar_execucao_agente` sao NAO_IDEMPOTENTE (todas por `append`
+    sem chave de dedup -- `ArrayUnion`/`ArrayUnion` indireto via
+    `registrar_no_diario`, ou `col.add()` sem ID deterministico).
+
+    Mais 9 tools investigadas na sub-entrega 17/N: `registrar_saude` e
+    `consultar_investimentos` sao IDEMPOTENTE (upsert por dia+campo com
+    consulta antes de escrever, e dedup por tag `investimentos-decisao-
+    {mes}` antes de criar, respectivamente -- ver `nota` de cada uma).
+    Assim como o TTL de `criar_acao_no_sistema`, nenhuma das duas usa
+    exclusao mutua atomica (`create()`/transacao) -- e "consulta, depois
+    escreve" quando chamadas se sobrepoem de verdade (duas tentativas em
+    voo ao mesmo tempo, nao um retry sequencial depois de receber a
+    resposta) pode, em teoria, deixar as duas passarem pela checagem antes
+    de qualquer uma escrever; nao corrigido nesta fatia, so documentado
+    (achado da revisao adversarial da sub-entrega 17/N). `registrar_
+    transacao_financeira_publica`, `registrar_item_financeiro_v2`,
+    `pausar_conversa`, `criar_rascunho_email`, `registrar_interacao_
+    contato`, `registrar_aporte_investimento` e `registrar_execucao_
+    investimento` sao NAO_IDEMPOTENTE (auto-ID sem dedup, ou efeito
+    externo documentado no proprio modulo -- ver `nota` de cada uma).
+
+    Mais 9 tools investigadas na sub-entrega 18/N: `desativar_modo_
+    secretario`, `cancelar_contato_prioritario_secretario` e `editar_
+    objetivo_estrategico` sao IDEMPOTENTE (reset determinístico de um
+    singleton sem campo variável; `.update()` sem checar status atual,
+    convergindo para o mesmo status a cada chamada; `.update()`
+    determinístico por `objetivo_id`, sem append -- ver `nota` de cada
+    uma). `ativar_modo_secretario`, `preparar_contato_prioritario_
+    secretario`, `remover_anexo`, `criar_objetivo_estrategico`,
+    `preparar_upload` e `anexar_arquivo` sao NAO_IDEMPOTENTE: as duas
+    primeiras recalculam um prazo (`desativa_em`/`valido_ate`) a partir de
+    "agora" a cada chamada, estendendo-o de verdade a cada repetição; as
+    demais quatro criam um recurso novo por chamada (ID automático do
+    Firestore, ID novo do Drive, token aleatório, ou `ArrayUnion` com
+    timestamp novo) sem nenhuma chave de dedup. Duas tools do mesmo módulo
+    `strategy_tools.py` foram investigadas e deliberadamente deixadas SEM
+    classificação (mesmo critério de `revogar_promocao_autonomia`, sub-
+    entrega 16/N -- "um hint errado é pior que a omissão"): `excluir_
+    objetivo_estrategico` (repetir depois do primeiro sucesso devolve erro
+    em vez de um "já excluído" gracioso, embora o AMBIENTE não mude mais)
+    e `gerenciar_item_estrategico` (o comportamento depende do parâmetro
+    `acao` interno à tool -- os quatro ramos têm respostas diferentes à
+    pergunta de idempotência, um hint único não os descreveria
+    honestamente).
+
+    Mais 9 tools investigadas na sub-entrega 19/N: `salvar_pop_global`,
+    `atualizar_personalidade` e `resolver_conflito_memoria` sao
+    IDEMPOTENTE (dedup por título/gatilho antes de escrever; `.set(merge=
+    True)` num documento singleton; e escrita sempre por `memoria_id` já
+    conhecido em vez de ID novo, respectivamente -- ver `nota` de cada
+    uma). `registrar_correcao_procedimento`, `resolver_conflito_
+    procedimento`, `editar_plano_acao`, `gerar_relatorio`, `gerar_imagem`
+    e `criar_rascunho_whatsapp` sao NAO_IDEMPOTENTE (ID novo por `uuid4()`
+    sem dedup, ou `ArrayUnion` incondicional a cada chamada -- ver `nota`
+    de cada uma). Achado incidental desta sub-entrega: para 6 das 9 tools
+    (`salvar_pop_global`, `resolver_conflito_memoria`, `atualizar_
+    personalidade`, `resolver_conflito_procedimento`, `editar_plano_acao`,
+    `gerar_relatorio`), o HANDLER REAL do servidor MCP é `tools/
+    telegram_extended.py::execute` -- as closures homônimas em `main.py`
+    (usadas pelo copiloto web) são implementações independentes, não
+    delegadas (comentário explícito no próprio código-fonte); a
+    classificação e os testes desta sub-entrega leem o código de `tools/
+    telegram_extended.py`, não o de `main.py`. Mais 5 tools foram
+    investigadas e deliberadamente deixadas SEM classificação por
+    ambiguidade genuína, mesmo critério já usado para `revogar_promocao_
+    autonomia`/`gerenciar_item_estrategico` (sub-entregas 16/N e 18/N):
+    `decidir_elevacao` e `decidir_promocao_autonomia` (falham-fechado na
+    repetição, mas devolvem só `{"ok": False, "erro": ...}` sem status
+    estruturado que distinga "já decidido" de erro real), `confirmar_acao`
+    (idempotência depende da tool delegada em cada chamada, fora do
+    escopo de leitura de um handler único), e `mutar_portal_compras_
+    publico`/`mutar_lista_compras` (múltiplos ramos por parâmetro `acao`
+    interno, com pelo menos um ramo — um toggle de verdade — violando
+    idempotência por definição).
+
+    As demais ~15 tools de escrita/leitura_e_escrita ainda não foram
+    investigadas (`idempotencia=None`, hint omitido) -- candidatas a
+    fatias futuras, mesmo padrao incremental ja usado para `dominio_rede`
+    (sub-entrega 7/N) e para `outputSchema` (sub-entregas 8/N em diante).
+    Mais 8 tools (as listadas acima, entre esta sub-entrega e as
+    anteriores) foram investigadas e deliberadamente deixadas sem
+    classificação por ambiguidade genuína -- ver `nota` de cada uma em
+    `tools/inventory.py` para não repetir a investigação.
 
     Omitir hints nao investigados com confianca nao e regressao: a
     especificacao MCP ja define default conservador para quem nao declara
@@ -695,6 +797,16 @@ def mcp_annotations(tool_name: str) -> dict:
         # pretende comunicar; tratada como False, mesmo grupo de
         # `reversivel`.
         annotations["destructiveHint"] = entry.reversibilidade == Reversibilidade.IRREVERSIVEL
+        # Mesma condicao "so quando readOnlyHint e False" de destructiveHint
+        # acima (secao 6.1 do plano e a especificacao MCP) -- idempotencia
+        # so e populada no inventario para tools nao-leitura-pura (ver
+        # docstring de Idempotencia), entao esta guarda e redundante com o
+        # dado hoje, mas documenta a regra em vez de depender so da
+        # invariante de dados.
+        if entry.idempotencia == Idempotencia.IDEMPOTENTE:
+            annotations["idempotentHint"] = True
+        elif entry.idempotencia == Idempotencia.NAO_IDEMPOTENTE:
+            annotations["idempotentHint"] = False
     if entry.dominio_rede == DominioRede.FECHADO:
         annotations["openWorldHint"] = False
     elif entry.dominio_rede == DominioRede.ABERTO:
@@ -1070,6 +1182,404 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
         "required": ["total", "pedidos"],
         "additionalProperties": False,
     },
+    # `consultar_historico_acoes` (P03 sub-entrega 14/N) -- sexta tool com
+    # outputSchema, e a PRIMEIRA a usar `oneOf`: ao contrario das cinco
+    # anteriores, o handler (`tools/hermes_tools.py::_consultar_historico_acoes`)
+    # tem duas formas de nivel superior genuinamente diferentes, nao uma
+    # forma unica com campos as vezes ausentes (`truncado` em
+    # `consultar_lista_compras`, `erro` em `buscar_contato`) -- SUCESSO e
+    # ERRO aqui sao dois conjuntos de campos obrigatorios DISJUNTOS:
+    #   - sucesso: `{"total_retornado": int, "resultados": [...], "filtros": {...}}`
+    #   - erro: `{"erro": str, "resultados": []}` (`resultados` SEMPRE lista
+    #     vazia -- hardcoded pelo proprio handler, que descarta o que
+    #     `buscar_tarefas` devolveu em `resultados` no seu dict de erro)
+    # Esta era a pendencia deixada pelas sub-entregas 12/N e 13/N ("avaliar
+    # `oneOf` -- nunca usado neste catalogo -- antes de escolher qual
+    # candidata fazer primeiro"). Decidido usar `oneOf` com as duas formas
+    # COMPLETAS (cada uma com seu proprio `required`/
+    # `additionalProperties: False`) em vez de uma forma unica com todos os
+    # campos fora de `required`: a alternativa aceitaria hibridos invalidos
+    # (ex.: `erro` e `filtros` juntos) que o handler real nunca produz.
+    #
+    # Handler investigado direto no codigo: `_consultar_historico_acoes`
+    # chama `busca_grafo.buscar_tarefas` (ate duas vezes -- reintentando com
+    # `match_mode="any"` quando a tentativa com `match_mode="all"` nao acha
+    # nada, controle de fluxo interno que nunca aparece na forma da
+    # resposta final). Se `buscar_tarefas` devolver `erro` (excecao
+    # capturada dentro dela mesma, ou falha na consulta base ao Firestore),
+    # o handler devolve `{"erro": ..., "resultados": []}` e para; senao,
+    # monta a forma de sucesso. Nao ha terceiro formato -- `buscar_tarefas`
+    # tambem pode devolver um campo `aviso` (string, quando precisou
+    # relaxar filtros ou ampliar a busca), mas esse campo NUNCA chega ao
+    # retorno do handler: ele so le `res.get("erro")` e
+    # `res.get("resultados", [])`, o resto de `res` e descartado.
+    #
+    # `resultados` (forma de sucesso) e uma lista de itens montados por
+    # `busca_grafo._formatar_resultado`, sempre o MESMO dict literal de 15
+    # chaves (nenhuma condicional): `id` (sempre `doc.id`, garantido string
+    # pelo SDK do Firestore); `criado_em` (coercao de tipo garantida por
+    # `str()` explicito -- `str(data.get("data_criacao", ""))[:10]`, sempre
+    # string mesmo que o campo no Firestore seja Timestamp/data/ausente);
+    # `plano_acao` e `acompanhamento_recente` (as duas construidas
+    # inteiramente a mao dentro de `_formatar_resultado`, so anexando
+    # strings formatadas -- `f"{marcador} {texto[:200]}"` e `f"[{data}]
+    # {nota[:300]}"` -- garantia de tipo tao forte quanto `criado_em`, ao
+    # contrario dos demais campos textuais, por isso `array` de `string`,
+    # nao `array` solto); e sete campos (`titulo`, `status`, `tipo_acao`,
+    # `responsavel`, `area`, `data_limite`, `processo_sei`) que sao
+    # `data.get(campo, default)` CRU, sem coercao nenhuma no ponto de
+    # leitura (`default` e `"sem titulo"` so para `titulo`; `""` para os
+    # outros seis) -- se o documento (`GRAFO_COLLECTION`) tiver algum desses
+    # campos gravado com tipo diferente de string, o valor cru vaza para a
+    # resposta --
+    # mesma categoria de risco ja aceita e nao-bloqueante de `ordem`
+    # (`consultar_lista_compras`) e dos campos de `perfil_pessoas`
+    # (`buscar_contato`), sem auditoria de todo escritor de
+    # `GRAFO_COLLECTION` feita nesta sub-entrega. `tags` fica `array` solto
+    # (mesmo espirito de `buscar_contato`); `descricao`/`notas`/
+    # `sintese_demanda` sao `(data.get(campo) or "")[:500|400]` -- coagido
+    # para string se o valor original for falsy ou ja string. ACHADO da 3a
+    # rodada de revisao adversarial desta sub-entrega, corrigindo uma
+    # versao anterior deste comentario que dizia que um valor truthy
+    # nao-string aqui sempre levantaria `TypeError`: isso so vale para
+    # ESCALARES nao-fatiaveis (int/float/bool) -- uma SEQUENCIA truthy
+    # (list/tuple/bytes/range) sobrevive ao `[:500]`/`[:400]` sem erro e
+    # vaza para a resposta do jeito que veio do Firestore (confirmado:
+    # `(["a", "b"] or "")[:500]` devolve `["a", "b"]`, nao levanta nada).
+    # Ou seja, estes tres campos tem a MESMA categoria de risco nao-
+    # bloqueante dos sete campos crus acima para entradas tipo sequencia
+    # (vazamento silencioso), e uma categoria mais segura (falha ruidosa)
+    # so para entradas escalares nao-fatiaveis -- nao a garantia
+    # uniformemente mais segura que a redacao anterior alegava.
+    #
+    # `filtros` (forma de sucesso) e eco dos ARGUMENTOS DE ENTRADA, nao
+    # dados persistidos: `query` e sempre string (`str(args.get("query") or
+    # "")`, mesma coercao de `expressao` em `calculadora`); os quatro
+    # campos restantes (`area_tematica`, `status`, `data_limite_inicio`,
+    # `data_limite_fim`) sao `None` quando o chamador omite (o schema
+    # publicado em `tools/schemas/consultar_historico_acoes.json` os
+    # declara como `string` opcional, nao `required`) ou `str(valor)`
+    # quando informado -- por isso `["string", "null"]`. ACHADO da revisao
+    # adversarial desta sub-entrega: ate a correcao, esses quatro campos
+    # eram `args.get(campo)` CRU (sem `str()`) -- como o schema publicado
+    # em `tools/list` so declara o tipo esperado sem checagem escalar em
+    # runtime (ver `registry.tipos_invalidos`), um chamador MCP mandando
+    # `area_tematica: 5` ou `status: ["a", "b"]` fazia esse valor vazar sem
+    # coercao para `filtros`, violando o proprio contrato aqui publicado --
+    # reproduzido de verdade (nao so hipotetico) antes da correcao. Corrigido
+    # com `tools/hermes_tools.py::_filtro_str_ou_none` (ver docstring la
+    # para o raciocinio completo, incluindo por que a coercao fica so no
+    # ECO de saida, nao dentro de `busca_grafo.buscar_tarefas`).
+    #
+    # Historico completo da revisao adversarial desta sub-entrega:
+    # docs/autonomia/execucao.md, sub-entrega 14/N.
+    "consultar_historico_acoes": {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "total_retornado": {"type": "integer"},
+                    "resultados": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "titulo": {"type": "string"},
+                                "status": {"type": "string"},
+                                "tipo_acao": {"type": "string"},
+                                "responsavel": {"type": "string"},
+                                "criado_em": {"type": "string"},
+                                "area": {"type": "string"},
+                                "data_limite": {"type": "string"},
+                                "processo_sei": {"type": "string"},
+                                "tags": {"type": "array"},
+                                "descricao": {"type": "string"},
+                                "notas": {"type": "string"},
+                                "sintese_demanda": {"type": "string"},
+                                "plano_acao": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "acompanhamento_recente": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            },
+                            "required": [
+                                "id", "titulo", "status", "tipo_acao", "responsavel",
+                                "criado_em", "area", "data_limite", "processo_sei",
+                                "tags", "descricao", "notas", "sintese_demanda",
+                                "plano_acao", "acompanhamento_recente",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "filtros": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "area_tematica": {"type": ["string", "null"]},
+                            "status": {"type": ["string", "null"]},
+                            "data_limite_inicio": {"type": ["string", "null"]},
+                            "data_limite_fim": {"type": ["string", "null"]},
+                        },
+                        "required": [
+                            "query", "area_tematica", "status",
+                            "data_limite_inicio", "data_limite_fim",
+                        ],
+                        "additionalProperties": False,
+                    },
+                },
+                "required": ["total_retornado", "resultados", "filtros"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "erro": {"type": "string"},
+                    "resultados": {"type": "array", "maxItems": 0},
+                },
+                "required": ["erro", "resultados"],
+                "additionalProperties": False,
+            },
+        ],
+    },
+    # `obter_acao` (P03 sub-entrega 15/N) -- setima tool com outputSchema,
+    # e a com MAIS campos de nivel superior ate agora (24). Handler
+    # (`tools/hermes_tools.py::obter_acao`) tem 3 `return` no total, nao 2:
+    # `{"erro": "Informe task_id."}` (sem `task_id`, nem proprio nem de
+    # `ctx.task_id`); `{"erro": "...", "status": "not_found"}` (doc
+    # inexistente); e a forma de sucesso. Ao contrario de
+    # `consultar_historico_acoes` (sub-entrega 14/N), as duas formas de erro
+    # NAO sao disjuntas o bastante para justificar um terceiro ramo de
+    # `oneOf`: a unica diferenca entre elas e a PRESENCA do campo `status`
+    # (sempre o mesmo unico valor, `"not_found"`, quando aparece) -- mesmo
+    # padrao ja usado para campo opcional que so aparece as vezes (`truncado`
+    # em `consultar_lista_compras`), nao um formato alternativo genuino.
+    # Modelado como UM ramo de erro com `status` fora de `required`, e
+    # `oneOf` com so 2 ramos no total (sucesso / erro), nao 3.
+    #
+    # `id`/`titulo`/`descricao`/`notas`/`status`/`area_tematica`/`projeto`/
+    # `data_limite`/`data_inicio`/`prazo_final`/`horario_inicio`/
+    # `horario_fim`/`tags`/`estrategia_objetivo_id` sao os MESMOS campos
+    # (mesma colecao `tarefas`, confirmado em `busca_grafo.GRAFO_COLLECTION
+    # == "tarefas"`) que `consultar_historico_acoes` ja expos com risco
+    # aceito e nao-bloqueante para tipo errado -- mas aqui SEM o `or
+    # default` que aquela tool aplica (`data.get(campo, "")`): `obter_acao`
+    # faz `d.get(campo)` cru, sem segundo argumento, entao o campo AUSENTE
+    # vira `None` de verdade (nao `""`), e por isso tem `null` no tipo onde
+    # aquela tool nao precisou. `descricao`/`notas` sao a excecao: usam `or
+    # ""`, que cobre o caso ausente/falsy com string vazia (mesmo risco
+    # residual de valor truthy nao-string vazar cru, categoria ja aceita
+    # para `descricao`/`notas`/`sintese_demanda` em `consultar_historico_
+    # acoes`) -- por isso ficam sem `null`. `id` e sempre `snap.id`
+    # (garantido string pelo SDK do Firestore).
+    #
+    # `tags` e `d.get("tags") or []`: mesmo risco aceito de
+    # `buscar_contato`/`consultar_historico_acoes` (valor truthy nao-lista
+    # vaza cru) -- fica `array` solto, sem `null` (o `or []` cobre o caso
+    # ausente).
+    #
+    # `execution_lane` (`subtarefas.derivar_lane`) e `degradation_count`
+    # (`subtarefas.degradacao_da_acao`) sao os dois campos com a garantia de
+    # tipo MAIS FORTE desta tool: as duas funcoes SEMPRE devolvem,
+    # respectivamente, `str(...)` e `int(...)` explicitos em todo ramo
+    # interno (lidas as duas funcoes por completo em `subtarefas.py`) --
+    # nunca passam o valor gravado adiante sem coercao. `execution_lane`
+    # fica como `string` solta, nao enum: o ramo "sem etapa aberta" pode
+    # devolver o `lane_gravada` ORIGINAL sem normalizar quando ele nao for
+    # vazio (`return str(lane_gravada or "").strip() or "avanco"`), e nada
+    # impede hoje um valor gravado direto no Firestore por fora desta
+    # funcao -- um enum fechado quebraria nesse caso, mesmo motivo ja usado
+    # para `tipo`/`origem` em `consultar_pedidos_agente` (sub-entrega 12/N).
+    #
+    # `contexto_agente` (`d.get("contexto_agente")`) tem UM UNICO escritor
+    # em todo o repositorio: `main.py::processar_contexto_agente`, chamado
+    # so pelo gatilho Firestore `on_document_written` em `tarefas/{taskId}`
+    # -- busca exaustiva por `"contexto_agente":` como CHAVE DE ESCRITA
+    # confirma isso. Esse escritor grava sempre `None` (quando o parse do
+    # LLM falha ou fica vazio -- nesse caso grava so `last_processed_
+    # contexto_hash`, sem tocar `contexto_agente`) ou o dict devolvido por
+    # `parse_resposta_contexto`, que TEM forma fixa e coagida (`resumo`:
+    # `str(...).strip()`, nunca vazio quando o dict e devolvido;
+    # `pessoas_chave`/`ultimas_decisoes`/`travas`: sempre listas, cada item
+    # `str(...).strip()`; `onde_esta_o_codigo`: `None` ou string;
+    # `atualizado_em`: sempre string ISO). Fica com contrato solto (`type:
+    # ["object", "null"]`, sem `properties` aninhado) DELIBERADAMENTE, mesmo
+    # sabendo a forma exata -- mesmo espirito de `modelo_interacao`
+    # (`buscar_contato`): e conteudo gerado por LLM sobre texto livre da
+    # acao, e nao ha nenhum OUTRO leitor deste campo no catalogo MCP hoje
+    # que precise validar sub-campos individualmente. Aprofundar o contrato
+    # pode ser feito numa fatia futura, sem quebrar este.
+    #
+    # `plano_acao` (`etapas`, construido no proprio handler) -- a parte mais
+    # trabalhosa desta sub-entrega: alem de `converter_plano`/`mesclar_plano`
+    # (que sempre terminam em `subtarefas.normalizar`, garantindo `id`
+    # string nao-vazia, `estado` num dos 4 valores fechados, `aguardando_de`
+    # string ate 200 chars quando presente, `degradation_count` int quando
+    # presente), ha um OITAVO ponto de escrita que NAO passa por
+    # `normalizar`: `tools/pausar_conversa.py` monta a etapa de pausa a mao
+    # (`{"id": str(uuid.uuid4())[:8], "text": ..., "estado":
+    # "aguardando_terceiro", "aguardando_de": "André", "data_prevista":
+    # pause_until, ...}`). Os TIPOS gravados por esse caminho batem com o
+    # que `normalizar` produziria (id string, estado enum valido,
+    # aguardando_de string literal), mas por caminho diferente -- por isso
+    # este comentario, e nao so "escritor unico via normalizar", documenta
+    # os dois caminhos. `texto`/`estado` no proprio `obter_acao` passam por
+    # `subtarefas.texto_de`/`estado_de` (sempre string / sempre um dos 4
+    # valores de `ESTADOS`, mesmo em documento legado sem `estado` gravado
+    # -- `estado_de` deduz de `completed`), garantia forte independente de
+    # quem escreveu. `data_prevista` passa por `subtarefas.data_prevista_de`
+    # (sempre `str(...)` internamente) + `or None` no handler -- string
+    # nao-vazia ou `None`, nunca outro tipo, MESMO que o valor gravado no
+    # Firestore por `pausar_conversa.py` (`pause_until`) tenha outro tipo
+    # antes de passar por `str()`. JA `id` da etapa e `i.get("id")` CRU, sem
+    # `estado_de`/`texto_de` no meio -- documento legado de ANTES de
+    # `subtarefas.py` (2026-08-26, ver docstring do modulo: "subtarefa era
+    # texto com marcador de concluida") pode ter etapa em formato dict sem
+    # `id` nenhum, nunca tocada por `mesclar_plano` desde entao; por isso
+    # `id` da etapa tem `null` no tipo, ao contrario do `id` do nivel
+    # superior (`snap.id`, sempre garantido pelo SDK).
+    #
+    # `anexos` (`pool_dados` filtrado por `tipo == "arquivo"`) -- 4
+    # escritores encontrados (`main.py` linhas ~8805, ~11303/11326,
+    # `tools/anexar_arquivo.py`, mais `tools/hermes_tools.py::
+    # criar_acao_no_sistema` que so REPASSA itens ja montados por um dos
+    # tres primeiros): todos gravam `nome` (string) e `valor` (string, URL,
+    # sempre truthy nos 4 -- o fallback `x.get("link")` no handler e
+    # morto hoje, nenhum escritor usa a chave `"link"`); `drive_file_id`
+    # SO aparece em 2 dos 4 (ausente no caminho SIPAC, `main.py` ~8805) --
+    # por isso `["string", "null"]`. `nome`/`link` ficam tambem com `null`
+    # no tipo por precaucao contra item de `pool_dados` anterior a estes
+    # 4 escritores (mesma categoria de risco do `id` da etapa acima, nao
+    # demonstrado, so nao descartado).
+    #
+    # `diario` (`acompanhamento[-limite_diario:]`) -- `data` e SEMPRE
+    # string: `str(e.get("data"))` no proprio handler, sem `or` no meio,
+    # entao ATE `None` vira a string literal `"None"` (comportamento real,
+    # nao um bug desta sub-entrega). `nota` e `e.get("nota")` CRU. A via
+    # principal de escrita hoje (tool MCP `registrar_no_diario`) GARANTE
+    # string de fato: `nota = args.get("nota")` seguido de `(nota or
+    # "").strip()` para validar vazio -- um valor truthy NAO-string
+    # (ex.: `nota: 5`) levanta `AttributeError` NESSA MESMA LINHA (`int`
+    # nao tem `.strip()`), capturado pelo `try/except` externo da funcao e
+    # devolvido como erro da tool, nunca chega a gravar. As demais escritas
+    # de `acompanhamento` encontradas no repositorio (main.py,
+    # telegram_extended.py, hermes_tools.py, pausar_conversa.py,
+    # anexar_arquivo.py, email_action_linker.py, investimentos_sync.py,
+    # outbox_aprovacao.py) usam f-string (`f"..."`, coage para string
+    # sempre, independente do tipo interpolado) ou uma variavel de string
+    # ja validada -- nenhuma grava um valor cru nao-string encontrada nesta
+    # busca, mas a lista de escritores e grande o bastante (8+) para nao
+    # reivindicar auditoria exaustiva de cada um; risco residual aceito e
+    # nao-bloqueante, mesma categoria das demais leituras cruas desta tool.
+    #
+    # `etapas_feitas`/`etapas_totais` (`subtarefas.contar`) e `diario_total`
+    # (`len(acomp)`) sao sempre `int` (contagem local, sem ler campo
+    # gravado). `observacao` e sempre string (f-string montada no proprio
+    # handler).
+    #
+    # Investigacao completa (as 8 fontes de `plano_acao`, os 4 escritores de
+    # `pool_dados`/anexo, o escritor unico de `contexto_agente`, a analise
+    # de `registrar_no_diario` sobre `nota`) e as rodadas de revisao
+    # adversarial: docs/autonomia/execucao.md, sub-entrega 15/N.
+    "obter_acao": {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "titulo": {"type": ["string", "null"]},
+                    "descricao": {"type": "string"},
+                    "notas": {"type": "string"},
+                    "status": {"type": ["string", "null"]},
+                    "area_tematica": {"type": ["string", "null"]},
+                    "projeto": {"type": ["string", "null"]},
+                    "data_limite": {"type": ["string", "null"]},
+                    "data_inicio": {"type": ["string", "null"]},
+                    "prazo_final": {"type": ["string", "null"]},
+                    "horario_inicio": {"type": ["string", "null"]},
+                    "horario_fim": {"type": ["string", "null"]},
+                    "tags": {"type": "array"},
+                    "execution_lane": {"type": "string"},
+                    "degradation_count": {"type": "integer"},
+                    "estrategia_objetivo_id": {"type": ["string", "null"]},
+                    "contexto_agente": {"type": ["object", "null"]},
+                    "plano_acao": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": ["string", "null"]},
+                                "texto": {"type": "string"},
+                                "estado": {
+                                    "type": "string",
+                                    "enum": [
+                                        "pendente", "em_andamento",
+                                        "aguardando_terceiro", "feito",
+                                    ],
+                                },
+                                "data_prevista": {"type": ["string", "null"]},
+                                "aguardando_de": {"type": "string"},
+                                "degradation_count": {"type": "integer"},
+                            },
+                            "required": ["id", "texto", "estado", "data_prevista"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "etapas_feitas": {"type": "integer"},
+                    "etapas_totais": {"type": "integer"},
+                    "anexos": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "nome": {"type": ["string", "null"]},
+                                "link": {"type": ["string", "null"]},
+                                "drive_file_id": {"type": ["string", "null"]},
+                            },
+                            "required": ["nome", "link", "drive_file_id"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "diario": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "data": {"type": "string"},
+                                "nota": {"type": ["string", "null"]},
+                            },
+                            "required": ["data", "nota"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "diario_total": {"type": "integer"},
+                    "observacao": {"type": "string"},
+                },
+                "required": [
+                    "id", "titulo", "descricao", "notas", "status",
+                    "area_tematica", "projeto", "data_limite", "data_inicio",
+                    "prazo_final", "horario_inicio", "horario_fim", "tags",
+                    "execution_lane", "degradation_count",
+                    "estrategia_objetivo_id", "contexto_agente", "plano_acao",
+                    "etapas_feitas", "etapas_totais", "anexos", "diario",
+                    "diario_total", "observacao",
+                ],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "erro": {"type": "string"},
+                    "status": {"type": "string", "enum": ["not_found"]},
+                },
+                "required": ["erro"],
+                "additionalProperties": False,
+            },
+        ],
+    },
 }
 
 
@@ -1080,8 +1590,9 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (101 das 106 tools
-    hoje), deliberadamente:
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (99 das 106 tools
+    hoje, apos a setima entrada, `obter_acao`, sub-entrega 15/N),
+    deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
     (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).

@@ -145,8 +145,18 @@ class FormatTest(unittest.TestCase):
         self.assertEqual(cr.brl(1234.5), "R$ 1.234,50")
         self.assertEqual(cr.brl(0), "R$ 0,00")
 
+    def test_format_ai_block_labels_its_own_day(self):
+        gemini = {"estimated_usd": 1.25, "calls": 40, "tokens": {"total": 900000, "input": 800000, "output": 100000}}
+        lines = cr.format_ai_block(gemini, None, None, usd_brl=5.0, day=date(2026, 9, 9))
+        self.assertIn("🤖 <b>IA — 09/09 (parcial, até agora)</b>", lines)
+        self.assertIn("  • Gemini: US$ 1.25 (~R$ 6,25) | 40 chamadas | 900.000 tokens", lines)
+
     def test_build_message_full(self):
+        # GCP (day) e IA/Firestore (today) são propositalmente dias diferentes
+        # aqui, para provar que cada bloco é rotulado com a sua própria data
+        # (a causa raiz do bug de rotulagem corrigido em 17/09/2026).
         day = date(2026, 9, 8)
+        today = date(2026, 9, 9)
         summary = {
             "total_day": 9.3, "avg7": 10.0, "month_to_date": 79.3, "projection": 297.4,
             "monthly_budget": 200.0,
@@ -158,6 +168,7 @@ class FormatTest(unittest.TestCase):
         msg = cr.build_message(
             day, summary, [{"function_name": "scheduled-sync", "custo": 1.1}], gemini, None, None,
             ["Firestore medido (backend): 120.000 leituras | 3.000 escritas | 900 consultas"], usd_brl=5.0,
+            today=today,
         )
         self.assertIn("Custos do Hermes — 08/09/2026", msg)
         self.assertIn("⚠️ Projeção do mês (R$ 297,40) acima do orçamento (R$ 200,00)", msg)
@@ -166,15 +177,26 @@ class FormatTest(unittest.TestCase):
         self.assertIn("Firestore Read Ops: R$ 3,00", msg)
         self.assertIn("Serviços: Firestore R$ 3,00 · Gemini R$ 3,20", msg)
         self.assertIn("scheduled-sync: R$ 1,10", msg)
+        # Cabeçalho geral e bloco GCP usam a data de ontem (day)...
+        self.assertIn("Custos do Hermes — 08/09/2026", msg)
+        # ...enquanto IA e Firestore, dados parciais do dia corrente, usam
+        # explicitamente a data de hoje (today) — não a mesma do cabeçalho.
+        self.assertIn("IA — 09/09 (parcial, até agora)", msg)
+        self.assertIn("Firestore por function — 09/09 (parcial, até agora)", msg)
         self.assertIn("Gemini: US$ 1.25 (~R$ 6,25) | 40 chamadas | 900.000 tokens", msg)
         self.assertIn("Claude: sem telemetria ainda (PR 2)", msg)
         self.assertIn("Firestore medido (backend): 120.000 leituras", msg)
         self.assertIn("~1 dia de atraso", msg)
+        self.assertIn("IA e Firestore = dia corrente, parcial", msg)
 
     def test_build_message_without_gcp_data(self):
-        msg = cr.build_message(date(2026, 9, 8), None, None, None, None, None, None, 5.0, gcp_error="permissão negada")
+        msg = cr.build_message(date(2026, 9, 8), None, None, None, None, None, None, 5.0, gcp_error="permissão negada", today=date(2026, 9, 8))
         self.assertIn("sem dados do export para 08/09 (permissão negada)", msg)
         self.assertNotIn("⚠️", msg)
+
+    def test_build_message_requires_today_keyword(self):
+        with self.assertRaises(TypeError):
+            cr.build_message(date(2026, 9, 8), None, None, None, None, None, None, 5.0)
 
 
 class GerarRelatorioTest(unittest.TestCase):
@@ -217,9 +239,16 @@ class GerarRelatorioTest(unittest.TestCase):
                     return [{"dia": "2026-09-08", "custo": 4.0}, {"dia": "2026-09-07", "custo": 2.0}]
                 raise AssertionError(sql)
 
+        # now = 09/09 19h BRT: yesterday = 08/09 (bloco GCP), today = 09/09
+        # (blocos de IA/Firestore). A chave de telemetria própria (system_usage)
+        # é indexada pelo dia corrente (09/09) — por isso o dado de teste abaixo
+        # usa 2026-09-09, não 2026-09-08: é exatamente o dia que gerar_relatorio_custos
+        # de fato consulta, e é o que prova que a etiqueta "today" no relatório
+        # corresponde aos dados "today" realmente lidos (a regressão do bug de
+        # rotulagem corrigido em 17/09/2026).
         store = {
             "system/cost_controls": {"monthly_budget_brl": 150},
-            "system_usage/gemini/daily/2026-09-08": {"estimated_usd": 0.5, "calls": 3, "tokens": {"total": 1000}},
+            "system_usage/gemini/daily/2026-09-09": {"estimated_usd": 0.5, "calls": 3, "tokens": {"total": 1000}},
         }
         fake_main = types.ModuleType("main")
         fake_main._cached_doc_get = lambda db, c, d: db.collection(c).document(d).get()
@@ -240,10 +269,15 @@ class GerarRelatorioTest(unittest.TestCase):
                 sys.modules["main"] = saved
             else:
                 sys.modules.pop("main", None)
+        # Cabeçalho e bloco GCP: dia anterior (08/09, o que o export do Billing tem).
         self.assertIn("Custos do Hermes — 08/09/2026", msg)
         self.assertIn("GCP 08/09</b>: R$ 4,00", msg)
         self.assertIn("de R$ 150,00", msg)
         self.assertIn("Gemini R$ 4,00", msg)
+        # Bloco de IA: dia corrente (09/09), com os dados reais lidos de
+        # system_usage/gemini/daily/2026-09-09 — não "sem uso registrado".
+        self.assertIn("IA — 09/09 (parcial, até agora)", msg)
+        self.assertIn("Gemini: US$ 0.50", msg)
 
 
 if __name__ == "__main__":
