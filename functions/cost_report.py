@@ -22,6 +22,14 @@ Acesso ao BigQuery pela API REST com a credencial padrão da function
 (``google-auth`` + ``requests``, já presentes) — sem dependência nova. A service
 account das functions precisa de ``roles/bigquery.jobUser`` no projeto e
 ``roles/bigquery.dataViewer`` no dataset do export (ver docs/okf/operacoes/custos.md).
+
+NOTA SOBRE DATAS (17/09/2026): o bloco GCP (1) e os blocos de IA/Firestore (2, 3)
+são intencionalmente de dias diferentes — o export do Billing sempre atrasa
+~1 dia, enquanto a telemetria própria é lida ao vivo no momento em que o job
+roda (19h BRT), ainda em andamento. ``build_message`` rotula cada bloco com a
+sua própria data (``day`` para o GCP, ``today`` para IA/Firestore) para deixar
+isso explícito — um relatório anterior rotulava tudo só com a data do GCP
+(``yesterday``), fazendo dados parciais de hoje parecerem fechados de ontem.
 """
 
 from __future__ import annotations
@@ -246,8 +254,16 @@ def _short(text: str, n: int = 58) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
-def format_ai_block(gemini: dict[str, Any] | None, claude: dict[str, Any] | None, openai: dict[str, Any] | None, usd_brl: float) -> list[str]:
-    lines = ["🤖 <b>IA hoje (telemetria própria)</b>"]
+def format_ai_block(
+    gemini: dict[str, Any] | None,
+    claude: dict[str, Any] | None,
+    openai: dict[str, Any] | None,
+    usd_brl: float,
+    day: date,
+) -> list[str]:
+    """Bloco de telemetria própria de IA. ``day`` é o dia corrente (rótulo próprio,
+    distinto do dia do bloco GCP — ver nota no topo do módulo)."""
+    lines = [f"🤖 <b>IA — {day.strftime('%d/%m')} (parcial, até agora)</b>"]
 
     def _line(label: str, data: dict[str, Any] | None, missing: str) -> str:
         if not data:
@@ -277,7 +293,15 @@ def build_message(
     firestore_lines: list[str] | None,
     usd_brl: float,
     gcp_error: str | None = None,
+    *,
+    today: date,
 ) -> str:
+    """Monta a mensagem final. ``day`` é o dia do bloco GCP (sempre o dia anterior,
+    pelo atraso do export do Billing); ``today`` é o dia corrente, usado para
+    rotular os blocos de IA e Firestore — que são medidos ao vivo, parciais até
+    o horário em que este relatório roda (19h BRT). Os dois podem (e normalmente
+    vão) ser dias diferentes; cada bloco mostra a sua própria data para deixar
+    isso claro."""
     lines: list[str] = []
     alerts: list[str] = []
     if gcp_summary:
@@ -293,13 +317,17 @@ def build_message(
     else:
         lines.append(f"☁️ GCP: sem dados do export para {day.strftime('%d/%m')}" + (f" ({gcp_error})" if gcp_error else ""))
     lines.append("")
-    lines.extend(format_ai_block(gemini, claude, openai, usd_brl))
+    lines.extend(format_ai_block(gemini, claude, openai, usd_brl, today))
     if firestore_lines:
         lines.append("")
-        lines.append("🗄️ <b>Firestore por function (hoje)</b>")
+        lines.append(f"🗄️ <b>Firestore por function — {today.strftime('%d/%m')} (parcial, até agora)</b>")
         lines.extend(firestore_lines)
     lines.append("")
-    lines.append("Obs.: GCP = dia anterior (export do Billing tem ~1 dia de atraso; o último dia pode estar parcial). Anthropic/OpenAI/Groq/Tavily/Twilio não entram na fatura GCP.")
+    lines.append(
+        "Obs.: GCP = dia anterior (export do Billing tem ~1 dia de atraso; o último dia pode estar parcial). "
+        "IA e Firestore = dia corrente, parcial até o horário de geração deste relatório (19h BRT). "
+        "Anthropic/OpenAI/Groq/Tavily/Twilio não entram na fatura GCP."
+    )
     return "\n".join(lines)
 
 
@@ -365,7 +393,11 @@ def gerar_relatorio_custos(db, now: datetime | None = None, bq: BigQueryRest | N
         gcp_error = str(exc)[:160]
         print(f"[CustosHermes] BigQuery falhou: {exc}")
 
-    day_key = today.isoformat()  # system_usage/{gemini,claude,firestore} indexado em America/Sao_Paulo (14/09/2026)
+    # system_usage/{gemini,claude,firestore} são indexados em America/Sao_Paulo,
+    # pelo DIA CORRENTE — telemetria própria lida ao vivo no momento em que o job
+    # roda, por isso parcial. O rótulo exibido a André usa "today" explicitamente
+    # (ver build_message/format_ai_block), não o "day"/"yesterday" do bloco GCP.
+    day_key = today.isoformat()
     gemini = _usage_doc(db, "gemini", day_key)
     claude = _usage_doc(db, "claude", day_key)
     openai = _usage_doc(db, "openai", day_key)
@@ -385,7 +417,7 @@ def gerar_relatorio_custos(db, now: datetime | None = None, bq: BigQueryRest | N
     except Exception:
         usd_brl = 5.30
 
-    return build_message(yesterday, gcp_summary, cpu_rows, gemini, claude, openai, firestore_lines, usd_brl, gcp_error)
+    return build_message(yesterday, gcp_summary, cpu_rows, gemini, claude, openai, firestore_lines, usd_brl, gcp_error, today=today)
 
 
 @scheduler_fn.on_schedule(
