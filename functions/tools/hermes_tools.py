@@ -281,15 +281,20 @@ def _buscar_arquivos_acervo(ctx: ToolContext, args: dict):
 
 def _buscar_contato(ctx: ToolContext, args: dict):
     termo = str(args.get("termo") or "").strip().lower()
+    termo_telefone = "".join(c for c in termo if c.isdigit())
     limite = max(1, min(int(args.get("limite") or 5), 20))
     if not termo:
         return {"erro": "Termo de busca vazio.", "candidatos": []}
 
     candidatos = []
-    for doc in ctx.db.collection("perfil_pessoas").limit(500).stream():
+    # A busca é local porque suporta trecho de nome, e-mail e tags. Não se pode
+    # cortar a coleção antes desse filtro: a ordem padrão é pelo ID do documento
+    # e ocultava, por exemplo, perfis no fim da coleção.
+    for doc in ctx.db.collection("perfil_pessoas").stream():
         data = doc.to_dict() or {}
         nome = str(data.get("nome") or "").lower()
         email = str(data.get("email") or "").lower()
+        telefone = "".join(c for c in str(data.get("telefone") or "") if c.isdigit())
         tags = [str(t).lower() for t in (data.get("tags") or [])]
 
         score = 0.0
@@ -301,6 +306,14 @@ def _buscar_contato(ctx: ToolContext, args: dict):
             score = 0.7
         elif any(termo in t for t in tags):
             score = 0.5
+        # Google Contacts pode guardar o número sem DDI, enquanto a consulta
+        # costuma vir no formato internacional (+55...). Aceita os dois
+        # formatos completos antes da correspondência parcial abaixo.
+        elif termo_telefone and telefone and (telefone == termo_telefone or telefone.endswith(termo_telefone)
+                                 or termo_telefone.endswith(telefone)):
+            score = 0.9
+        elif termo_telefone and telefone and len(termo_telefone) >= 8 and termo_telefone in telefone:
+            score = 0.8
 
         if score > 0:
             candidatos.append({

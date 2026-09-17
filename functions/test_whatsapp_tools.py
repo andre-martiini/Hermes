@@ -262,6 +262,25 @@ class TestListagem(unittest.TestCase):
         r = wa.listar_conversas(self.ctx, {"apenas_monitoradas": False})
         self.assertEqual(r["conversas"][0]["chat_id"], LIVRE)
 
+    def test_nao_omite_chat_depois_do_antigo_corte_de_500(self):
+        chats = {
+            f"chat-{i:03d}": {
+                "chat_id": f"chat-{i:03d}", "chat_name": f"Chat {i}",
+                "last_activity_ts": "2026-01-01T00:00:00",
+            }
+            for i in range(500)
+        }
+        chats["flavia@lid"] = {
+            "chat_id": "flavia@lid", "chat_name": "Flávia Nascimento Ribeiro",
+            "last_activity_ts": "2026-09-17T14:00:24",
+        }
+        ctx = _Ctx(_Db(allowlist=[], chats=chats))
+
+        r = wa.listar_conversas(ctx, {"apenas_monitoradas": False, "limite": 200})
+
+        self.assertEqual(r["total"], 501)
+        self.assertEqual(r["conversas"][0]["chat_id"], "flavia@lid")
+
 
 class TestConsolidar(unittest.TestCase):
     def test_job_criado_com_o_contrato_do_trigger(self):

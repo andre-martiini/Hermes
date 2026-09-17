@@ -140,7 +140,12 @@ def listar_conversas(ctx, args: dict) -> dict:
     limite = max(1, min(int(args.get("limite") or 60), 200))
 
     conversas = []
-    for snap in ctx.db.collection(COL_CHATS).limit(500).stream():
+    # Não limite a leitura antes de ordenar.  O Firestore entrega documentos sem
+    # uma ordenação útil nesse caso; aplicar ``limit(500)`` aqui ocultava chats
+    # perfeitamente válidos que caíam depois desse corte (inclusive chats com
+    # atividade recente). O volume do registro de chats é pequeno e esta tool
+    # precisa ser uma fonte de descoberta completa.
+    for snap in ctx.db.collection(COL_CHATS).stream():
         dados = snap.to_dict() or {}
         chat_id = str(dados.get("chat_id") or snap.id)
         monitorada = leitura_total or chat_id in monitoradas

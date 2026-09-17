@@ -125,6 +125,33 @@ class TestSchemasBemFormados(unittest.TestCase):
 
 
 class TestExecucao(unittest.TestCase):
+    def test_buscar_contato_encontra_perfil_apos_os_primeiros_500_e_por_telefone(self):
+        class Snap:
+            def __init__(self, ident, data):
+                self.id = ident
+                self._data = data
+
+            def to_dict(self):
+                return self._data
+
+        perfis = [
+            Snap(f"pessoa-{i:03d}", {"nome": f"Pessoa {i}"})
+            for i in range(500)
+        ]
+        perfis.append(Snap("flavia", {
+            "nome": "Flávia Nascimento Ribeiro",
+            "telefone": "27999161673",
+            "whatsapp_chat_id": "74122679869571@lid",
+        }))
+        db = MagicMock()
+        db.collection.return_value.stream.return_value = perfis
+        ctx = type("Ctx", (), {"db": db})()
+
+        resultado = hermes_tools._buscar_contato(ctx, {"termo": "+55 27 99916-1673"})
+
+        self.assertEqual(resultado["candidatos"][0]["nome"], "Flávia Nascimento Ribeiro")
+        db.collection.return_value.limit.assert_not_called()
+
     def test_tool_desconhecida_levanta(self):
         from tools.tool_context import ToolContext
 
