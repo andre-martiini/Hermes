@@ -1,6 +1,6 @@
 {
   "name": "ler_mensagens_whatsapp",
-  "description": "Lê as mensagens de uma conversa MONITORADA, em ordem cronológica. Use para escolher o recorte antes de consolidar. Áudio e vídeo só têm transcrição depois de consolidados.",
+  "description": "Lê as mensagens de uma conversa MONITORADA, em ordem cronológica. Use para escolher o recorte antes de consolidar. Áudio e vídeo só têm transcrição, e imagem só tem descrição (campo descricao_imagem, com o texto visível nela), depois de consolidados; o aviso imagens_sem_descricao diz quantas faltam.",
   "parameters": {
     "type": "object",
     "properties": {

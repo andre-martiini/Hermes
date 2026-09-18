@@ -201,9 +201,10 @@ def ler_mensagens(ctx, args: dict) -> dict:
     consulta = consulta.order_by("timestamp", direction=gcf.Query.DESCENDING).limit(limite)
 
     mensagens = []
+    imagens_pendentes = 0
     for snap in consulta.stream():
         d = snap.to_dict() or {}
-        mensagens.append({
+        mensagem = {
             # Este `id` e o que `consolidar_whatsapp` espera em message_ids.
             "id": d.get("id") or snap.id,
             "quando": _iso(d.get("timestamp")),
@@ -214,19 +215,31 @@ def ler_mensagens(ctx, args: dict) -> dict:
             # disso o texto vem vazio e o tipo e a unica pista do que ha ali.
             "transcricao": d.get("transcription_text"),
             "links": d.get("links") or [],
-        })
+        }
+        if d.get("message_type") == "image":
+            # Descricao gerada por IA (com o texto visivel na imagem), so existe
+            # depois de consolidada. `texto` e a legenda, quando ha.
+            mensagem["descricao_imagem"] = d.get("image_description")
+            if not d.get("image_description") and (d.get("media") or {}).get("storage_path"):
+                imagens_pendentes += 1
+        mensagens.append(mensagem)
 
     mensagens.reverse()   # cronologico, que e como se le conversa
     pendentes = [m for m in mensagens if m["tipo"] in ("ptt", "audio", "video")
                  and not m["transcricao"]]
+    avisos = []
+    if pendentes:
+        avisos.append(f"{len(pendentes)} mensagem(ns) de áudio/vídeo ainda sem transcrição")
+    if imagens_pendentes:
+        avisos.append(f"{imagens_pendentes} imagem(ns) ainda sem descrição")
     return {
         "chat_id": chat_id,
         "total": len(mensagens),
         "mensagens": mensagens,
         "midia_sem_transcricao": len(pendentes),
-        "observacao": (f"{len(pendentes)} mensagem(ns) de áudio/vídeo ainda sem transcrição — "
-                       "consolidar_whatsapp transcreve como parte do processamento."
-                       if pendentes else None),
+        "imagens_sem_descricao": imagens_pendentes,
+        "observacao": (" e ".join(avisos) + " — consolidar_whatsapp processa tudo isso "
+                       "como parte da consolidação." if avisos else None),
     }
 
 
@@ -247,7 +260,7 @@ def consolidar(ctx, args: dict) -> dict:
 
     Cria o doc que `on_whatsapp_consolidacao_created` consome — o mesmo contrato
     que a Caixa de Entrada usa. E assincrono porque o trabalho real (transcrever
-    audio e video, sintetizar) leva minutos e tem 540s de orcamento no trigger.
+    audio e video, descrever imagens, sintetizar) leva minutos e tem 540s de orcamento no trigger.
     """
     from google.cloud import firestore as gcf
 
@@ -288,7 +301,7 @@ def consolidar(ctx, args: dict) -> dict:
         "job_id": ref.id,
         "chat_id": chat_id,
         "n_mensagens": len(ids),
-        "message": ("Consolidação enfileirada. Transcrever áudio e vídeo leva alguns "
+        "message": ("Consolidação enfileirada. Transcrever áudio e vídeo e descrever imagens leva alguns "
                     "minutos; busque o resultado com ler_consolidacao_whatsapp "
                     f"usando job_id='{ref.id}'."),
     }
@@ -340,6 +353,8 @@ def _formatar_consolidacao(ctx, snap, incluir_transcript: bool) -> dict:
             "audios_ignorados": d.get("n_audios_ignorados"),
             "videos_transcritos": d.get("n_videos_transcritos"),
             "videos_ignorados": d.get("n_videos_ignorados"),
+            "imagens_descritas": d.get("n_imagens_descritas"),
+            "imagens_ignoradas": d.get("n_imagens_ignoradas"),
         },
     }
     if d.get("status") == "queued" or d.get("status") == "processing":
