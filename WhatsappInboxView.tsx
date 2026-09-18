@@ -553,7 +553,10 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
             const d = tsToDate(m.timestamp);
             const time = d ? d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '?';
             const author = m.from_me ? 'Você' : (m.author_name || 'Contato');
-            const text = m.transcription_text || m.content || `[${m.message_type}]`;
+            const text = m.transcription_text
+                || (m.image_description ? `[imagem: ${m.image_description}]${m.content ? ` legenda: ${m.content}` : ''}` : '')
+                || m.content
+                || `[${m.message_type}]`;
             return `[${time}] ${author}: ${text}`;
         });
         let body = lines.join('\n');
@@ -922,6 +925,11 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
                                     <span className={`italic text-[10px] ${mutedCls}`}>[imagem não capturada]</span>
                                 )}
                                 {msg.content && <p className="whitespace-pre-line break-words">{msg.content}</p>}
+                                {msg.image_description && (
+                                    <p className={`text-[10px] leading-relaxed border-l-2 pl-2 ${isDark ? 'border-green-500/30 text-white/60' : 'border-green-200 text-slate-500'}`}>
+                                        {msg.image_description}
+                                    </p>
+                                )}
                             </div>
                         ) : isVideo ? (
                             <div className="space-y-1">
@@ -1148,6 +1156,8 @@ const WhatsappInboxView: React.FC<WhatsappInboxViewProps> = ({ tarefas, userId, 
                                 {(activeJob.n_audios_ignorados || 0) > 0 ? ` · ${activeJob.n_audios_ignorados} áudio(s) ignorado(s)` : ''}
                                 {((activeJob.n_videos_transcritos || 0) > 0 || (activeJob.n_videos_ignorados || 0) > 0) ? ` · ${activeJob.n_videos_transcritos || 0} vídeo(s) transcrito(s)` : ''}
                                 {(activeJob.n_videos_ignorados || 0) > 0 ? ` · ${activeJob.n_videos_ignorados} vídeo(s) ignorado(s)` : ''}
+                                {((activeJob.n_imagens_descritas || 0) > 0 || (activeJob.n_imagens_ignoradas || 0) > 0) ? ` · ${activeJob.n_imagens_descritas || 0} imagem(ns) descrita(s)` : ''}
+                                {(activeJob.n_imagens_ignoradas || 0) > 0 ? ` · ${activeJob.n_imagens_ignoradas} imagem(ns) ignorada(s)` : ''}
                             </p>
                             <p className={`leading-relaxed ${isDark ? 'text-white/85' : 'text-slate-700'}`}>{activeJob.resumo || '(sem resumo)'}</p>
                         </div>

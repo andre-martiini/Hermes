@@ -105,6 +105,8 @@ export interface WhatsappMessageDoc {
     media?: { mimeType: string; sizeBytes: number; storage_path?: string } | null;
     transcription_text?: string | null;
     transcription_model?: string | null;
+    image_description?: string | null; // descrição por IA (com o texto visível), só em message_type 'image'
+    image_description_model?: string | null;
     consolidation_ids?: string[]; // jobs de consolidação que incluíram esta mensagem
 }
 
@@ -142,6 +144,8 @@ export interface WhatsappConsolidacao {
     n_audios_ignorados?: number;
     n_videos_transcritos?: number;
     n_videos_ignorados?: number;
+    n_imagens_descritas?: number;
+    n_imagens_ignoradas?: number;
     attachments?: { message_id: string; mimeType: string; storage_path?: string }[];
     digest_id?: string;      // doc gravado em whatsapp_digests (consol_*)
     // Associação (frontend, ao anexar a uma ação)

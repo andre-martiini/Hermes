@@ -228,6 +228,47 @@ class TestLeituraDeMensagens(unittest.TestCase):
         self.assertEqual(r["midia_sem_transcricao"], 1)
         self.assertIn("transcrição", r["observacao"])
 
+    def _imagem(self, id_, **extra):
+        self.ctx.db._cols[wa.COL_MENSAGENS].dados[id_] = {
+            "id": id_, "chat_id": MONITORADO, "message_type": "image", "content": "",
+            "timestamp": "2026-08-26T09:00:00",
+            "media": {"mimeType": "image/jpeg", "storage_path": f"whatsapp_media/x/{id_}.jpeg"},
+            **extra,
+        }
+
+    def test_imagem_sem_descricao_e_sinalizada(self):
+        """Antes de consolidar a imagem so tem legenda — o aviso evita ler o chat como se nao houvesse imagem."""
+        self._imagem("i1")
+        r = wa.ler_mensagens(self.ctx, {"chat_id": MONITORADO})
+        self.assertEqual(r["imagens_sem_descricao"], 1)
+        self.assertIn("imagem(ns) ainda sem descrição", r["observacao"])
+        self.assertIsNone([m for m in r["mensagens"] if m["id"] == "i1"][0]["descricao_imagem"])
+
+    def test_imagem_descrita_traz_a_descricao_e_nao_conta_como_pendente(self):
+        self._imagem("i1", image_description="Print de comprovante de Pix de R$ 50,00.")
+        r = wa.ler_mensagens(self.ctx, {"chat_id": MONITORADO})
+        msg = [m for m in r["mensagens"] if m["id"] == "i1"][0]
+        self.assertEqual(msg["descricao_imagem"], "Print de comprovante de Pix de R$ 50,00.")
+        self.assertEqual(r["imagens_sem_descricao"], 0)
+        self.assertIsNone(r["observacao"])
+
+    def test_imagem_nao_capturada_nao_e_pendente_para_sempre(self):
+        """Sem arquivo no Storage a consolidacao nao tem o que descrever — avisar todo dia seria ruido."""
+        self._imagem("i1", media=None)
+        r = wa.ler_mensagens(self.ctx, {"chat_id": MONITORADO})
+        self.assertEqual(r["imagens_sem_descricao"], 0)
+
+    def test_descricao_nao_vaza_para_mensagem_de_texto(self):
+        r = wa.ler_mensagens(self.ctx, {"chat_id": MONITORADO})
+        self.assertTrue(all("descricao_imagem" not in m for m in r["mensagens"]))
+
+    def test_consolidacao_informa_contagem_de_imagens(self):
+        snap = _Snap("j", {"chat_id": MONITORADO, "status": "completed",
+                           "n_imagens_descritas": 7, "n_imagens_ignoradas": 1})
+        r = wa._formatar_consolidacao(_Ctx(_db_padrao()), snap, False)
+        self.assertEqual(r["midia"]["imagens_descritas"], 7)
+        self.assertEqual(r["midia"]["imagens_ignoradas"], 1)
+
     def test_mensagem_propria_aparece_como_eu(self):
         self.ctx.db._cols[wa.COL_MENSAGENS].dados["p1"] = {
             "id": "p1", "chat_id": MONITORADO, "content": "ok", "from_me": True,

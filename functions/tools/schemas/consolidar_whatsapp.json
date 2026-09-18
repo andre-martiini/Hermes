@@ -1,6 +1,6 @@
 {
   "name": "consolidar_whatsapp",
-  "description": "Consolida um recorte de mensagens de uma conversa monitorada: transcreve áudio e vídeo, monta o transcript literal e sintetiza resumo, itens de ação e decisões. É assíncrona — devolve job_id; busque o resultado com ler_consolidacao_whatsapp.",
+  "description": "Consolida um recorte de mensagens de uma conversa monitorada: transcreve áudio e vídeo, descreve as imagens (inclusive o texto visível nelas), monta o transcript literal e sintetiza resumo, itens de ação e decisões. É assíncrona — devolve job_id; busque o resultado com ler_consolidacao_whatsapp.",
   "parameters": {
     "type": "object",
     "properties": {
