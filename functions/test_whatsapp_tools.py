@@ -282,6 +282,36 @@ class TestListagem(unittest.TestCase):
         self.assertEqual(r["conversas"][0]["chat_id"], "flavia@lid")
 
 
+class TestSincronizacaoDoCatalogo(unittest.TestCase):
+    def test_cria_pedido_e_consulta_o_mesmo_pedido_sem_duplicar(self):
+        ctx = _Ctx(_db_padrao())
+
+        criado = wa.sincronizar_conversas(ctx, {})
+
+        self.assertEqual(criado["status"], "queued")
+        self.assertEqual(criado["request_id"], "auto1")
+        pedidos = ctx.db._cols[wa.COL_CHATS_SYNC_REQUESTS].dados
+        self.assertEqual(pedidos["auto1"]["status"], "pending")
+        self.assertEqual(pedidos["auto1"]["origem"], "mcp")
+
+        pedidos["auto1"].update({"status": "done", "synced_at": "2026-09-18T13:10:00Z"})
+        consultado = wa.sincronizar_conversas(ctx, {"request_id": "auto1"})
+
+        self.assertEqual(consultado["status"], "done")
+        self.assertEqual(len(pedidos), 1)
+        self.assertIn("Repita a listagem", consultado["message"])
+
+    def test_pedido_inexistente_e_id_invalido_nao_criam_documento(self):
+        ctx = _Ctx(_db_padrao())
+
+        self.assertEqual(
+            wa.sincronizar_conversas(ctx, {"request_id": "nao-existe"})["status"],
+            "not_found",
+        )
+        self.assertIn("erro", wa.sincronizar_conversas(ctx, {"request_id": "a/b"}))
+        self.assertEqual(ctx.db._cols[wa.COL_CHATS_SYNC_REQUESTS].dados, {})
+
+
 class TestConsolidar(unittest.TestCase):
     def test_job_criado_com_o_contrato_do_trigger(self):
         ctx = _Ctx(_db_padrao())

@@ -46,6 +46,7 @@ COL_CHATS = "whatsapp_chats"
 COL_MENSAGENS = "whatsapp_messages"
 COL_CONSOLIDACOES = "whatsapp_consolidacoes"
 COL_OUTBOX = "whatsapp_outbox"
+COL_CHATS_SYNC_REQUESTS = "whatsapp_chats_sync_requests"
 
 # O cron do outbox roda de minuto em minuto, entao a entrega acontece ate ~60s
 # depois do horario agendado. Passado este limite sem sair do `pending`, algo
@@ -179,6 +180,70 @@ def listar_conversas(ctx, args: dict) -> dict:
                 if captura_total else "")
              if apenas_monitoradas else
              "monitorada=false: aparece na lista, mas o conteúdo não é acessível.")),
+    }
+
+
+def sincronizar_conversas(ctx, args: dict) -> dict:
+    """Pede ao worker uma atualização imediata do catálogo de conversas.
+
+    O worker do WhatsApp mantém ``whatsapp_chats`` em intervalos regulares,
+    mas um grupo recém-adicionado pode ainda não estar nesse catálogo. Esta
+    porta usa a fila já observada pelo worker. A primeira chamada cria o
+    pedido; as seguintes, com o ``request_id`` devolvido, apenas consultam o
+    andamento, sem iniciar outra sincronização.
+    """
+    request_id = str(args.get("request_id") or "").strip()
+    if request_id:
+        # Um ID de documento nunca pode conter barra. Recusar também evita que
+        # entrada do cliente seja interpretada como caminho Firestore.
+        if "/" in request_id:
+            return {"erro": "request_id inválido."}
+
+        snap = ctx.db.collection(COL_CHATS_SYNC_REQUESTS).document(request_id).get()
+        if not snap.exists:
+            return {
+                "status": "not_found",
+                "request_id": request_id,
+                "message": "Pedido de sincronização não encontrado.",
+            }
+
+        dados = snap.to_dict() or {}
+        status = str(dados.get("status") or "pending")
+        resposta = {
+            "status": status,
+            "request_id": request_id,
+            "requested_at": _iso(dados.get("requested_at")),
+            "updated_at": _iso(dados.get("updated_at")),
+            "synced_at": _iso(dados.get("synced_at")),
+        }
+        if dados.get("error"):
+            resposta["erro"] = str(dados["error"])
+        if status == "done":
+            resposta["message"] = (
+                "Catálogo sincronizado. Repita a listagem ou a busca pelo grupo agora."
+            )
+        elif status in {"pending", "processing"}:
+            resposta["message"] = (
+                "Sincronização em andamento; consulte novamente usando este request_id."
+            )
+        return resposta
+
+    agora = datetime.now(timezone.utc)
+    ref = ctx.db.collection(COL_CHATS_SYNC_REQUESTS).document()
+    ref.set({
+        "status": "pending",
+        "origem": "mcp",
+        "requested_at": agora,
+        "updated_at": agora,
+    })
+    return {
+        "status": "queued",
+        "request_id": ref.id,
+        "requested_at": _iso(agora),
+        "message": (
+            "Sincronização solicitada ao worker do WhatsApp. Consulte o estado usando "
+            "este request_id; quando estiver done, repita a listagem ou a busca pelo grupo."
+        ),
     }
 
 

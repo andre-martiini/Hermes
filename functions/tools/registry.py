@@ -123,6 +123,7 @@ _CATALOG: dict[str, str] = {
     # WhatsApp: a consolidacao ja existia e so era acionavel pela Caixa de
     # Entrada na web. Leitura de conteudo exige chat na allowlist.
     "listar_conversas_whatsapp": "Lista as conversas de WhatsApp, marcando quais estao monitoradas",
+    "sincronizar_conversas_whatsapp": "Solicita ao worker do WhatsApp uma sincronização imediata do catálogo de conversas; use se um grupo recém-adicionado não aparecer e depois repita a busca",
     "ler_mensagens_whatsapp": "Le as mensagens de uma conversa monitorada, para escolher o recorte",
     "consolidar_whatsapp": "Consolida um recorte de mensagens: transcreve midia e sintetiza resumo e itens de acao",
     "ler_consolidacao_whatsapp": "Le uma consolidacao inteira, ou as mais recentes de uma conversa",
@@ -195,6 +196,8 @@ _NEEDS_CONFIRMATION: set[str] = {
     "remover_anexo",
     # Cria job de processamento e consome transcricao paga de midia.
     "consolidar_whatsapp",
+    # Cria um pedido interno para o worker atualizar o catálogo de chats.
+    "sincronizar_conversas_whatsapp",
     "editar_acao",
     "editar_acoes_em_lote",
     "reagendar_acoes_em_lote",

@@ -837,6 +837,15 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "whatsapp", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",
         dados_sensiveis_categoria="nomes/ids de conversas",
     ),
+    "sincronizar_conversas_whatsapp": ToolInventoryEntry(
+        "whatsapp", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "consultar novamente com o request_id até status=done; então relistar as conversas",
+        dados_sensiveis_categoria="nomes/ids de conversas",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="sem request_id cria um novo pedido em whatsapp_chats_sync_requests a cada chamada; com "
+        "request_id apenas consulta o pedido existente. O efeito é uma atualização recuperável do "
+        "catálogo local, sem enviar mensagem nem alterar conteúdo de conversa.",
+    ),
     "ler_mensagens_whatsapp": ToolInventoryEntry(
         "whatsapp", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
         "allowlist de chat monitorado é o único portão, não uma verificação de resultado",

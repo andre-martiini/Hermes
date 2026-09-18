@@ -1,0 +1,14 @@
+{
+  "name": "sincronizar_conversas_whatsapp",
+  "description": "Solicita ao worker do WhatsApp uma atualização imediata do catálogo de conversas. Use quando um grupo ou conversa recém-adicionado não aparecer na listagem ou na busca. Sem request_id, cria o pedido; com o request_id devolvido, consulta o andamento. Quando o status for done, repita a listagem ou a busca original.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "request_id": {
+        "type": "string",
+        "description": "ID devolvido pela chamada inicial. Omita para solicitar uma nova sincronização; informe-o para consultar o andamento sem criar outro pedido."
+      }
+    },
+    "required": []
+  }
+}
