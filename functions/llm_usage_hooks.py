@@ -1,6 +1,6 @@
 """Telemetria completa de uso de IA (DEV-2026-0003, PR 2).
 
-Fecha dois furos do relatório de custos:
+Fecha um furo do relatório de custos:
 
 1. **Gemini fora do wrapper.** ~50 chamadas do código vão direto em
    ``client.models.generate_content(...)`` (main.py, knowledge_graph.py,
@@ -14,13 +14,9 @@ Fecha dois furos do relatório de custos:
    são ignoradas aqui, para não contar duas vezes. ``Chat.send_message`` usa
    ``Models.generate_content`` por baixo, então chats diretos também ficam cobertos.
 
-2. **Claude sem telemetria.** ``log_claude_usage`` grava em
-   ``system_usage/claude/daily/{dia}`` no mesmo formato de ``system_usage/gemini``
-   (``calls``, ``tokens{input,output,cache_read,cache_write,total}``, ``models``,
-   ``features``, ``estimated_usd``). É chamado por ``llm_providers.claude_provider``
-   ao fim de cada ``run_tool_loop``. Preços (US$/Mtok) em ``_CLAUDE_PRICE_USD_PER_MTOK``
-   — telemetria, não fatura; ajustar via env ``HERMES_CLAUDE_PRICES_JSON``
-   (``{"claude-fable-5": {"input": 5, "output": 25, "cache_read": 0.5, "cache_write": 6.25}}``).
+A telemetria de Claude (``system_usage/claude``) saiu em 2026-09-19, quando o Hermes deixou
+a Anthropic: os agentes passaram a usar ``llm_providers.gemini_provider``, que já registra
+pelo ``generate_content_logged``. O histórico antigo em ``system_usage/claude`` segue no Firestore.
 
 Instalação: ``install()`` é idempotente e é chamada no fim de
 ``gemini_cost_controls`` (importado por ``main.py`` em todas as functions).
@@ -239,120 +235,3 @@ def install(models_cls: Any = None) -> bool:
     _patch("embed_content", _wrap_embed_content)
     _installed = True
     return True
-
-
-# --------------------------------------------------------------------------- #
-# Claude
-# --------------------------------------------------------------------------- #
-# US$ por 1M tokens. Estimativa para telemetria; a fatura da Anthropic é a fonte
-# de verdade. Sobrescrever com HERMES_CLAUDE_PRICES_JSON.
-_CLAUDE_PRICE_USD_PER_MTOK: dict[str, dict[str, float]] = {
-    "claude-fable-5": {"input": 5.00, "output": 25.00, "cache_read": 0.50, "cache_write": 6.25},
-    "claude-opus-4-8": {"input": 5.00, "output": 25.00, "cache_read": 0.50, "cache_write": 6.25},
-    "claude-opus-4-5": {"input": 5.00, "output": 25.00, "cache_read": 0.50, "cache_write": 6.25},
-    "claude-sonnet-4-5": {"input": 3.00, "output": 15.00, "cache_read": 0.30, "cache_write": 3.75},
-    "claude-haiku-4-5": {"input": 1.00, "output": 5.00, "cache_read": 0.10, "cache_write": 1.25},
-}
-
-
-def claude_prices() -> dict[str, dict[str, float]]:
-    table = dict(_CLAUDE_PRICE_USD_PER_MTOK)
-    raw = os.environ.get("HERMES_CLAUDE_PRICES_JSON")
-    if raw:
-        try:
-            for model, prices in json.loads(raw).items():
-                table[str(model)] = {k: float(v) for k, v in dict(prices).items()}
-        except Exception as exc:
-            print(f"[LLMUsageHooks] HERMES_CLAUDE_PRICES_JSON inválido: {exc}")
-    return table
-
-
-def _match_price(model: str, table: dict[str, dict[str, float]]) -> dict[str, float] | None:
-    model = (model or "").lower()
-    if model in table:
-        return table[model]
-    # "claude-opus-4-8-20260301" → prefixo mais longo que case
-    best = None
-    for key in table:
-        if model.startswith(key) and (best is None or len(key) > len(best)):
-            best = key
-    return table.get(best) if best else None
-
-
-def estimate_claude_usd(model: str, usage: dict[str, Any]) -> float | None:
-    prices = _match_price(model, claude_prices())
-    if not prices:
-        return None
-    inp = int(usage.get("input_tokens") or 0)
-    out = int(usage.get("output_tokens") or 0)
-    cache_read = int(usage.get("cache_read_input_tokens") or 0)
-    cache_write = int(usage.get("cache_creation_input_tokens") or 0)
-    usd = (
-        inp * prices.get("input", 0.0)
-        + out * prices.get("output", 0.0)
-        + cache_read * prices.get("cache_read", 0.0)
-        + cache_write * prices.get("cache_write", 0.0)
-    ) / 1_000_000
-    return round(usd, 6)
-
-
-def build_claude_usage_update(usage: dict[str, Any], model: str, feature: str, day: str) -> dict[str, Any]:
-    """Payload de ``set(merge=True)`` com Increment — mesmo formato de system_usage/gemini."""
-    from google.cloud.firestore_v1 import Increment, SERVER_TIMESTAMP
-
-    inp = int(usage.get("input_tokens") or 0)
-    out = int(usage.get("output_tokens") or 0)
-    cache_read = int(usage.get("cache_read_input_tokens") or 0)
-    cache_write = int(usage.get("cache_creation_input_tokens") or 0)
-    total = inp + out + cache_read + cache_write
-    rounds = int(usage.get("rounds") or 1)
-    estimated = estimate_claude_usd(model, usage)
-
-    tokens: dict[str, Any] = {}
-    if inp:
-        tokens["input"] = Increment(inp)
-    if out:
-        tokens["output"] = Increment(out)
-    if cache_read:
-        tokens["cache_read"] = Increment(cache_read)
-    if cache_write:
-        tokens["cache_write"] = Increment(cache_write)
-    if total:
-        tokens["total"] = Increment(total)
-
-    update: dict[str, Any] = {
-        "date": day,
-        "updated_at": SERVER_TIMESTAMP,
-        "calls": Increment(1),
-        "api_rounds": Increment(rounds),
-        "models": {_safe(model): {"calls": Increment(1), "tokens_total": Increment(total)}},
-        "features": {_safe(feature): {"calls": Increment(1), "tokens_total": Increment(total)}},
-    }
-    if tokens:
-        update["tokens"] = tokens
-    if estimated is not None:
-        update["estimated_usd"] = Increment(float(estimated))
-        update["models"][_safe(model)]["estimated_usd"] = Increment(float(estimated))
-        update["features"][_safe(feature)]["estimated_usd"] = Increment(float(estimated))
-    return update
-
-
-def log_claude_usage(usage: dict[str, Any], *, model: str, feature: str, db: Any = None) -> dict[str, Any] | None:
-    """Registra um turno completo do Claude (todas as rodadas) em system_usage/claude."""
-    try:
-        estimated = estimate_claude_usd(model, usage)
-        payload = {"feature": feature, "model": model, "usage": dict(usage), "estimated_usd": estimated}
-        print(f"[ClaudeUsage] {json.dumps(payload, ensure_ascii=False, default=str)}")
-        if os.environ.get("HERMES_CLAUDE_USAGE_FIRESTORE", "1") == "0":
-            return payload
-        db = db or _get_db()
-        if db is None:
-            return payload
-        day = datetime.now(TZ).strftime("%Y-%m-%d")
-        db.collection("system_usage").document("claude").collection("daily").document(day).set(
-            build_claude_usage_update(usage, model, feature, day), merge=True
-        )
-        return payload
-    except Exception as exc:
-        print(f"[ClaudeUsage] falha ao registrar uso: {exc}")
-        return None

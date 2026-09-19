@@ -147,7 +147,7 @@ class FormatTest(unittest.TestCase):
 
     def test_format_ai_block_labels_its_own_day(self):
         gemini = {"estimated_usd": 1.25, "calls": 40, "tokens": {"total": 900000, "input": 800000, "output": 100000}}
-        lines = cr.format_ai_block(gemini, None, None, usd_brl=5.0, day=date(2026, 9, 9))
+        lines = cr.format_ai_block(gemini, None, usd_brl=5.0, day=date(2026, 9, 9))
         self.assertIn("🤖 <b>IA — 09/09 (parcial, até agora)</b>", lines)
         self.assertIn("  • Gemini: US$ 1.25 (~R$ 6,25) | 40 chamadas | 900.000 tokens", lines)
 
@@ -166,7 +166,7 @@ class FormatTest(unittest.TestCase):
         }
         gemini = {"estimated_usd": 1.25, "calls": 40, "tokens": {"total": 900000, "input": 800000, "output": 100000}}
         msg = cr.build_message(
-            day, summary, [{"function_name": "scheduled-sync", "custo": 1.1}], gemini, None, None,
+            day, summary, [{"function_name": "scheduled-sync", "custo": 1.1}], gemini, None,
             ["Firestore medido (backend): 120.000 leituras | 3.000 escritas | 900 consultas"], usd_brl=5.0,
             today=today,
         )
@@ -184,19 +184,19 @@ class FormatTest(unittest.TestCase):
         self.assertIn("IA — 09/09 (parcial, até agora)", msg)
         self.assertIn("Firestore por function — 09/09 (parcial, até agora)", msg)
         self.assertIn("Gemini: US$ 1.25 (~R$ 6,25) | 40 chamadas | 900.000 tokens", msg)
-        self.assertIn("Claude: sem telemetria ainda (PR 2)", msg)
+        self.assertNotIn("Claude", msg)
         self.assertIn("Firestore medido (backend): 120.000 leituras", msg)
         self.assertIn("~1 dia de atraso", msg)
         self.assertIn("IA e Firestore = dia corrente, parcial", msg)
 
     def test_build_message_without_gcp_data(self):
-        msg = cr.build_message(date(2026, 9, 8), None, None, None, None, None, None, 5.0, gcp_error="permissão negada", today=date(2026, 9, 8))
+        msg = cr.build_message(date(2026, 9, 8), None, None, None, None, None, 5.0, gcp_error="permissão negada", today=date(2026, 9, 8))
         self.assertIn("sem dados do export para 08/09 (permissão negada)", msg)
         self.assertNotIn("⚠️", msg)
 
     def test_build_message_requires_today_keyword(self):
         with self.assertRaises(TypeError):
-            cr.build_message(date(2026, 9, 8), None, None, None, None, None, None, 5.0)
+            cr.build_message(date(2026, 9, 8), None, None, None, None, None, 5.0)
 
 
 class GerarRelatorioTest(unittest.TestCase):
