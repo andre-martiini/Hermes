@@ -8,6 +8,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { detectarMencao } from './mentions.js';
+import { criarExecutorCoalescido } from './coalescido.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QR_IMAGE_PATH = path.join(__dirname, 'qr-code.png');
@@ -50,7 +51,6 @@ const client = new Client({
 });
 
 let isClientReady = false;
-let isProcessingOutbox = false;
 let isSyncingChats = false;
 let lastChatsSyncMs = 0;
 const CHATS_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
@@ -385,6 +385,7 @@ client.on('ready', async () => {
     isClientReady = true;
     writeHeartbeat();
     // No `ready` o WhatsApp Web pode ainda não ter hidratado: sem o lid, tenta de novo no mesmo atraso do registro de chats.
+    solicitarOutbox().catch((e) => console.error('[Outbox] Falha na rodada do ready:', e));
     resolverIdsDoDono()
         .then((resolveu) => {
             if (!resolveu) setTimeout(() => resolverIdsDoDono().catch(() => {}), CHATS_READY_DELAY_MS);
@@ -1073,26 +1074,22 @@ async function claimOutboxMessage(doc) {
     return claimed;
 }
 
-// ACTIVE MODULE: Outbox checking cron job.
+// ACTIVE MODULE: envio do outbox.
+// Dois gatilhos para a mesma rodada: uma escuta em tempo real da fila (a resposta
+// do secretário sai em ~1s, e não até 60s depois) e o cron de 1 minuto, que segue
+// como rede de segurança — pega o agendado para mais tarde e o que a escuta perder
+// (reconexão do Firestore). `claimOutboxMessage` é transacional, então nenhum item
+// sai duas vezes mesmo que os dois gatilhos disputem o mesmo doc.
 // Só reivindica mensagens quando system/settings.whatsapp_auto_send_enabled é true —
 // antes este cron e a Cloud Function dispatch_scheduled_whatsapp_messages (que manda
 // um link wa.me pelo Telegram em vez de enviar de verdade) disputavam os mesmos docs
 // 'pending' sem nenhuma coordenação; a CF quase sempre "roubava" o doc primeiro,
 // então o envio automático raramente acontecia de fato.
-cron.schedule('* * * * *', async () => {
-    if (!autoSendEnabled) {
-        return;
-    }
-    if (!isClientReady) {
-        console.log('Skipping cron tick: WhatsApp client not ready.');
-        return;
-    }
-    if (isProcessingOutbox) {
-        console.log('Skipping cron tick: previous outbox run still active.');
+async function rodarOutboxUmaVez() {
+    if (!autoSendEnabled || !isClientReady) {
         return;
     }
 
-    isProcessingOutbox = true;
     try {
         const now = admin.firestore.Timestamp.now();
 
@@ -1151,11 +1148,24 @@ cron.schedule('* * * * *', async () => {
             }
         }
     } catch (err) {
-        console.error('Error during outbox processing cron tick:', err);
-    } finally {
-        isProcessingOutbox = false;
+        console.error('Error during outbox processing:', err);
     }
+}
+
+const solicitarOutbox = criarExecutorCoalescido(rodarOutboxUmaVez);
+
+cron.schedule('* * * * *', () => {
+    if (autoSendEnabled && !isClientReady) {
+        console.log('Skipping cron tick: WhatsApp client not ready.');
+    }
+    solicitarOutbox().catch((e) => console.error('[Outbox] Falha na rodada do cron:', e));
 });
+
+db.collection('whatsapp_outbox').where('status', '==', 'pending').onSnapshot((snap) => {
+    if (snap.docChanges().some((change) => change.type === 'added')) {
+        solicitarOutbox().catch((e) => console.error('[Outbox] Falha na rodada em tempo real:', e));
+    }
+}, (err) => console.error('[Outbox] Falha ao observar a fila:', err));
 
 // Rede de segurança: erros não tratados (ex.: rejeição dentro de handlers do
 // puppeteer/whatsapp-web.js) derrubariam o processo inteiro — e não há

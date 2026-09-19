@@ -238,8 +238,13 @@ def criar_rascunho(
     chat_id: str | int | None = None,
     tipo: str = "outro",
     envio_imediato: bool = False,
+    destinatario_resolvido: dict | None = None,
 ) -> dict:
-    """Cria um rascunho de WhatsApp e envia o card de aprovação ao Telegram."""
+    """Cria um rascunho de WhatsApp e envia o card de aprovação ao Telegram.
+
+    `destinatario_resolvido` ({"chat_id", "nome"}) dispensa a busca do destinatário — para quem já sabe
+    o chat exato, como o secretário respondendo no chat de onde a mensagem veio (a busca custa ~1s).
+    """
     contact_number = str(contact_number or "").strip()
     message = str(message or "").strip()
     motivo = str(motivo or "").strip()
@@ -255,17 +260,24 @@ def criar_rascunho(
         return {"erro": "motivo é obrigatório."}
 
     # Resolução de destinatário reutilizando a mesma lógica do preview
-    try:
-        from tools.hermes_tools import _destinatario_whatsapp_previa
-        if ctx is not None:
-            res_dest = _destinatario_whatsapp_previa(ctx, contact_number)
-        else:
-            from tools.hermes_tools import ToolContext
-            dummy_ctx = ToolContext(_db=db)
-            res_dest = _destinatario_whatsapp_previa(dummy_ctx, contact_number)
-    except Exception as dest_err:
-        print(f"[OutboxAprovacao] Falha ao resolver destinatário: {dest_err}")
-        res_dest = {"encontrado": False, "informado": contact_number, "sugestoes": []}
+    if destinatario_resolvido and destinatario_resolvido.get("chat_id"):
+        res_dest = {
+            "encontrado": True,
+            "nome": destinatario_resolvido.get("nome"),
+            "chat_id": destinatario_resolvido["chat_id"],
+        }
+    else:
+        try:
+            from tools.hermes_tools import _destinatario_whatsapp_previa
+            if ctx is not None:
+                res_dest = _destinatario_whatsapp_previa(ctx, contact_number)
+            else:
+                from tools.hermes_tools import ToolContext
+                dummy_ctx = ToolContext(_db=db)
+                res_dest = _destinatario_whatsapp_previa(dummy_ctx, contact_number)
+        except Exception as dest_err:
+            print(f"[OutboxAprovacao] Falha ao resolver destinatário: {dest_err}")
+            res_dest = {"encontrado": False, "informado": contact_number, "sugestoes": []}
 
     if not res_dest.get("encontrado"):
         ambiguo = res_dest.get("ambiguo")

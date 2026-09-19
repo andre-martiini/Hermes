@@ -12,6 +12,7 @@ from atencao_whatsapp import (
     _obter_whatsapp_owner_chat_id,
     _processar_aprovacao_outbox,
     _processar_audio,
+    _processar_promessa,
     avaliar_audio,
     avaliar_promessas_vencidas,
     decidir_acao_mensagem_from_me,
@@ -724,6 +725,25 @@ class TestAprovacaoOutboxWhatsApp(unittest.TestCase):
         _processar_aprovacao_outbox(db, msg)
 
         mock_send.assert_not_called()
+
+
+class TestPromessaIgnoraRespostaDoBot(unittest.TestCase):
+    """O eco de uma resposta do secretário (from_me) não é promessa nem cumprimento do André."""
+
+    @mock.patch("atencao_whatsapp._flag_promessa", return_value=(True, 4))
+    @mock.patch("atencao_whatsapp.decidir_acao_mensagem_from_me")
+    def test_resposta_do_bot_nao_chega_ao_detector(self, decidir, _flag):
+        _processar_promessa(mock.MagicMock(), {
+            "from_me": True, "chat_id": "c@lid",
+            "content": "**Hermes Bot:** Anotei o recado e te aviso assim que o André voltar.",
+        })
+        decidir.assert_not_called()
+
+    @mock.patch("atencao_whatsapp._flag_promessa", return_value=(True, 4))
+    @mock.patch("atencao_whatsapp.decidir_acao_mensagem_from_me", return_value={"acao": "nada"})
+    def test_mensagem_do_andre_continua_avaliada(self, decidir, _flag):
+        _processar_promessa(mock.MagicMock(), {"from_me": True, "chat_id": "c@lid", "content": "Vou ver e te retorno"})
+        decidir.assert_called_once()
 
 
 if __name__ == "__main__":
