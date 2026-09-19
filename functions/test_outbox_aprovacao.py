@@ -746,6 +746,30 @@ class TestCriarEListarRascunho(unittest.TestCase):
             # Um valor null/ausente nunca satisfaz essa comparação no Firestore.
             self.assertTrue(scheduled_for <= datetime.datetime.now(timezone.utc))
 
+    def test_criar_rascunho_envio_imediato_nao_avisa_no_telegram(self):
+        """O dono já vê a mensagem enviada no WhatsApp: envio imediato não gera eco no Telegram."""
+        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={
+            "encontrado": True, "nome": "Mariana", "chat_id": "5527998887777@c.us"
+        }), mock.patch("hermes_core_logic._send_telegram_message", return_value="tg-1") as mock_info, \
+                mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=555) as mock_card, \
+                mock.patch("hermes_core_logic._get_telegram_token", return_value="tok") as mock_token, \
+                mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
+            res = oa.criar_rascunho(
+                self.db,
+                contact_number="+5527998887777",
+                message="Resposta automática",
+                motivo="Secretário respondeu na hora",
+                envio_imediato=True,
+            )
+
+            self.assertEqual(res["status"], oa.STATUS_PENDING)
+            self.assertFalse(res["telegram_notificado"])
+            mock_info.assert_not_called()
+            mock_card.assert_not_called()
+            mock_token.assert_not_called()
+            doc = self.db.collection(oa.COLLECTION)._docs[res["outbox_id"]]
+            self.assertNotIn("telegram_message_id", doc)
+
 
 class TestTipoEEudicaoOutbox(unittest.TestCase):
     """Testes de tipo e rastreio de edição no outbox de WhatsApp (PR 1 da Fase 3)."""

@@ -339,12 +339,24 @@ def criar_rascunho(
 
     doc_ref.set(payload)
 
-    # Dispara o card no Telegram (ou notificação informativa para envio imediato)
+    # Envio imediato não avisa no Telegram: o dono já vê a mensagem enviada no próprio
+    # WhatsApp, e um eco do texto no Telegram seria só ruído (decisão do dono, 19/09/2026).
+    if envio_imediato:
+        return {
+            "status": STATUS_PENDING,
+            "outbox_id": outbox_id,
+            "destinatario_nome": destinatario_nome,
+            "telegram_notificado": False,
+            "instrucao": (
+                "Rascunho criado com envio imediato e status pending para entrega pelo worker WhatsApp."
+            ),
+        }
+
+    # Dispara o card de aprovação (ou de janela de cancelamento) no Telegram
     telegram_msg_id = None
     try:
         from hermes_core_logic import (
             _get_telegram_token,
-            _send_telegram_message,
             _send_telegram_message_with_keyboard,
         )
         from main import _resolve_default_telegram_chat_id
@@ -352,14 +364,7 @@ def criar_rascunho(
         token = telegram_token or _get_telegram_token(db)
         target_chat = chat_id or _resolve_default_telegram_chat_id(db)
         if token and target_chat:
-            if envio_imediato:
-                # Notificação puramente informativa (sem botões) para visibilidade do que foi respondido
-                texto_info = (
-                    f"🤖 <b>Hermes Bot respondeu a {html.escape(destinatario_nome)}:</b>\n\n"
-                    f"{html.escape(message)}"
-                )
-                telegram_msg_id = _send_telegram_message(token, target_chat, texto_info)
-            elif is_promovido:
+            if is_promovido:
                 card_text, card_keyboard = montar_card_telegram_promovido(
                     destinatario_nome=destinatario_nome,
                     motivo=motivo,
@@ -384,17 +389,6 @@ def criar_rascunho(
                 doc_ref.update({"telegram_message_id": telegram_msg_id})
     except Exception as tg_err:
         print(f"[OutboxAprovacao] Falha ao enviar card Telegram para {outbox_id}: {tg_err}")
-
-    if envio_imediato:
-        return {
-            "status": STATUS_PENDING,
-            "outbox_id": outbox_id,
-            "destinatario_nome": destinatario_nome,
-            "telegram_notificado": bool(telegram_msg_id),
-            "instrucao": (
-                "Rascunho criado com envio imediato e status pending para entrega pelo worker WhatsApp."
-            ),
-        }
 
     if is_promovido and not telegram_msg_id:
         # Se a emissão do card Telegram falhou, degrada para aprovação regular

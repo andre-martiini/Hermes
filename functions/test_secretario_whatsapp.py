@@ -311,12 +311,14 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
             }
 
         with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value={"encontrado": True, "nome": "Carlos Parceiro", "chat_id": chat_id}):
-            with mock.patch("hermes_core_logic._send_telegram_message", return_value="tg-999"):
+            with mock.patch("hermes_core_logic._send_telegram_message", return_value="tg-999") as mock_telegram:
                 res = sec.processar_mensagem_secretario(self.db, msg, llm_runner=mock_llm)
 
         self.assertIsNotNone(res)
         self.assertEqual(res["status"], "ok")
         self.assertEqual(res["trocas_count"], 1)
+        # O dono vê a resposta no próprio WhatsApp: nada da resposta vai para o Telegram.
+        mock_telegram.assert_not_called()
 
         # Verifica estado da conversa
         conversa = self.db.collection(sec.COLLECTION_CONVERSAS).document(chat_id).get().to_dict()
@@ -332,7 +334,7 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
         self.assertEqual(rascunho["tipo"], sec.TIPO_OUTBOX_SECRETARIO)
         self.assertEqual(rascunho["status"], outbox_aprovacao.STATUS_PENDING)
         self.assertIsNone(rascunho.get("envio_liberado_em"))
-        self.assertEqual(rascunho.get("telegram_message_id"), "tg-999")
+        self.assertNotIn("telegram_message_id", rascunho)
         # Regressão: envio imediato precisa gravar scheduled_for = agora, nunca
         # null/ausente, senão a query `scheduled_for <= agora()` do worker jamais
         # seleciona esse job.
