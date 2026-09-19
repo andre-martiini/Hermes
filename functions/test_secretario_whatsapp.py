@@ -721,6 +721,51 @@ class TestAutomationSettingsCallable(unittest.TestCase):
                 self.assertTrue(res_get["atencao"]["financeiro"]["enabled"])
                 self.assertTrue(res_get["atencao"]["saude"]["enabled"])
 
+    def test_orientacoes_padrao_pela_tela_de_configuracoes(self):
+        import inspect
+        import main
+
+        update_fn = inspect.unwrap(main.updateAutomationSettings)
+        get_fn = inspect.unwrap(main.getAutomationSettings)
+
+        class _Req:
+            def __init__(self, data=None):
+                self.data = data or {}
+                self.auth = mock.MagicMock(uid="user-123")
+
+        with mock.patch.object(main, "get_db", return_value=self.db), \
+             mock.patch.object(main, "_require_internal_user", return_value=None):
+            update_fn(_Req({"whatsapp_secretario": {"orientacoes": "  Estou em viagem  \r\n\n\n\n só recados  "}}))
+            lido = get_fn(_Req())["whatsapp_secretario"]["orientacoes"]
+            self.assertTrue(lido.startswith("Estou em viagem"))
+            self.assertNotIn("\n\n\n", lido)
+            # a tela guarda o padrão; o valor efetivo do secretário é o mesmo enquanto não há texto de sessão
+            self.assertEqual(sec.obter_config_secretario(self.db)["orientacoes_padrao"], lido)
+
+            update_fn(_Req({"whatsapp_secretario": {"orientacoes": "   "}}))
+            self.assertEqual(get_fn(_Req())["whatsapp_secretario"]["orientacoes"], "")
+            self.assertIsNone(sec.obter_config_secretario(self.db)["orientacoes_padrao"])
+
+    def test_salvar_orientacoes_envia_so_o_campo_das_orientacoes(self):
+        import inspect
+        import main
+
+        update_fn = inspect.unwrap(main.updateAutomationSettings)
+
+        class _Req:
+            def __init__(self, data=None):
+                self.data = data or {}
+                self.auth = mock.MagicMock(uid="user-123")
+
+        ref = self.db.collection("system").document("settings")
+        with mock.patch.object(main, "get_db", return_value=self.db), \
+             mock.patch.object(main, "_require_internal_user", return_value=None), \
+             mock.patch.object(type(ref), "set") as gravar:
+            update_fn(_Req({"whatsapp_secretario": {"orientacoes": "Só recados"}}))
+        # O Firestore faz merge profundo: só o campo enviado muda, e "enabled"/"desativa_em" ficam como estão.
+        self.assertEqual(gravar.call_args[0][0], {"whatsapp_secretario": {"orientacoes": "Só recados"}})
+        self.assertTrue(gravar.call_args.kwargs["merge"])
+
     def test_reativar_via_settings_sem_desativa_em_limpa_expiracao_anterior(self):
         import inspect
         import main
@@ -1526,6 +1571,159 @@ class TestAgendaParaOPrompt(unittest.TestCase):
         self.assertIn("AGENDA INDISPONÍVEL", texto)
         self.assertIn("token expirou", texto)
         self.assertIn("não trate como agenda vazia", texto)
+
+
+class TestOrientacoesDoSecretario(unittest.TestCase):
+    """Texto opcional do André sobre o que o secretário pode responder."""
+
+    def setUp(self):
+        self.db = _MockDb()
+
+    def _cfg(self):
+        return sec.obter_config_secretario(self.db)
+
+    # -- normalização ---------------------------------------------------
+    def test_normalizar_limpa_controle_e_limita_o_tamanho(self):
+        self.assertIsNone(sec.normalizar_orientacoes(None))
+        self.assertIsNone(sec.normalizar_orientacoes("  \n \t "))
+        limpo = sec.normalizar_orientacoes("  pode  dizer   isso \r\n\n\n\n e aquilo\x00 ")
+        self.assertTrue(limpo.startswith("pode dizer isso"))
+        for ruim in ("\x00", "\r", "\n\n\n", "  "):
+            self.assertNotIn(ruim, limpo)
+        self.assertEqual(len(sec.normalizar_orientacoes("x" * 5000)), sec.MAX_ORIENTACOES_CHARS)
+
+    # -- ativar / desativar ---------------------------------------------
+    def test_ativar_com_orientacoes_vale_so_para_a_ativacao(self):
+        res = sec.ativar_modo_secretario(self.db, orientacoes="Só recados; sem marcar reunião")
+        cfg = self._cfg()
+        self.assertEqual(cfg["orientacoes"], "Só recados; sem marcar reunião")
+        self.assertEqual(cfg["orientacoes_sessao"], "Só recados; sem marcar reunião")
+        self.assertIsNone(cfg["orientacoes_padrao"])
+        self.assertEqual(res["orientacoes_em_vigor"], "Só recados; sem marcar reunião")
+        self.assertIn("esta ativação", res["mensagem"])
+
+    def test_ativar_salvando_como_padrao(self):
+        res = sec.ativar_modo_secretario(self.db, orientacoes="Estou em viagem", salvar_como_padrao=True)
+        cfg = self._cfg()
+        self.assertEqual(cfg["orientacoes_padrao"], "Estou em viagem")
+        self.assertIsNone(cfg["orientacoes_sessao"])
+        self.assertEqual(cfg["orientacoes"], "Estou em viagem")
+        self.assertIn("padrão", res["mensagem"])
+
+    def test_sessao_tem_precedencia_e_reativar_sem_texto_volta_ao_padrao(self):
+        sec.ativar_modo_secretario(self.db, orientacoes="Padrão", salvar_como_padrao=True)
+        sec.ativar_modo_secretario(self.db, orientacoes="Só hoje")
+        self.assertEqual(self._cfg()["orientacoes"], "Só hoje")
+        res = sec.ativar_modo_secretario(self.db)
+        self.assertEqual(self._cfg()["orientacoes"], "Padrão")
+        self.assertIn("padrão salvas", res["mensagem"])
+
+    def test_sem_nenhuma_orientacao_a_mensagem_diz_que_valem_so_as_regras_fixas(self):
+        res = sec.ativar_modo_secretario(self.db)
+        self.assertIsNone(res["orientacoes_em_vigor"])
+        self.assertIn("só as regras fixas", res["mensagem"])
+
+    def test_texto_vazio_salvando_como_padrao_apaga_o_padrao(self):
+        sec.ativar_modo_secretario(self.db, orientacoes="Padrão", salvar_como_padrao=True)
+        res = sec.ativar_modo_secretario(self.db, orientacoes="", salvar_como_padrao=True)
+        self.assertIsNone(self._cfg()["orientacoes_padrao"])
+        self.assertIn("apagadas", res["mensagem"])
+
+    def test_desativar_limpa_a_sessao_e_preserva_o_padrao(self):
+        sec.ativar_modo_secretario(self.db, orientacoes="Padrão", salvar_como_padrao=True)
+        sec.ativar_modo_secretario(self.db, orientacoes="Só hoje")
+        sec.desativar_modo_secretario(self.db)
+        cfg = self._cfg()
+        self.assertIsNone(cfg["orientacoes_sessao"])
+        self.assertEqual(cfg["orientacoes_padrao"], "Padrão")
+
+    def test_status_mostra_as_orientacoes_em_vigor_so_com_o_modo_ativo(self):
+        sec.ativar_modo_secretario(self.db, orientacoes="Só recados")
+        ativo = sec.consultar_status_modo_secretario(self.db)
+        self.assertEqual(ativo["orientacoes_em_vigor"], "Só recados")
+        self.assertIn("Orientações em vigor: Só recados", ativo["mensagem"])
+        sec.desativar_modo_secretario(self.db)
+        self.assertIsNone(sec.consultar_status_modo_secretario(self.db)["orientacoes_em_vigor"])
+
+    # -- prompt ---------------------------------------------------------
+    def test_prompt_traz_as_orientacoes_abaixo_dos_guardrails_sem_revoga_los(self):
+        prompt = sec.montar_system_instruction_secretario(orientacoes="Estou em viagem até dia 25")
+        self.assertIn("ORIENTAÇÕES DO ANDRÉ (opcionais):", prompt)
+        self.assertIn("Estou em viagem até dia 25", prompt)
+        self.assertLess(prompt.index("GUARDRAILS INEGOCIÁVEIS"), prompt.index("ORIENTAÇÕES DO ANDRÉ"))
+        self.assertIn("NUNCA revogam os GUARDRAILS INEGOCIÁVEIS", prompt)
+        self.assertIn("siga o guardrail", prompt)
+
+    def test_prompt_sem_orientacoes_nao_tem_o_bloco(self):
+        for vazio in (None, "", "   "):
+            with self.subTest(valor=vazio):
+                self.assertNotIn("ORIENTAÇÕES DO ANDRÉ", sec.montar_system_instruction_secretario(orientacoes=vazio))
+
+    # -- orquestração ---------------------------------------------------
+    def _mensagem(self, chat_id):
+        return {"chat_id": chat_id, "chat_name": "Carlos", "from_me": False, "content": "Oi André", "wa_message_id": "m1"}
+
+    def _processar(self, runner, orientacoes_sessao=None, orientacoes_padrao=None):
+        chat_id = "5511999999999@c.us"
+        self.db.collection("system").document("settings").set({"whatsapp_secretario": {
+            "enabled": True, "chats_allowlist": [chat_id], "max_trocas": 2,
+            "orientacoes": orientacoes_padrao, "orientacoes_sessao": orientacoes_sessao}})
+        with mock.patch("hermes_core_logic._get_telegram_token", return_value="t"), \
+             mock.patch("main._resolve_default_telegram_chat_id", return_value="1"), \
+             mock.patch("hermes_core_logic._send_telegram_message", return_value="tg"):
+            return sec.processar_mensagem_secretario(self.db, self._mensagem(chat_id), llm_runner=runner)
+
+    def test_orientacoes_em_vigor_chegam_ao_runner(self):
+        vistos = {}
+
+        def runner(**kwargs):
+            vistos.update(kwargs)
+            return {"resposta_para_contato": "ok", "resumo_recado": "r", "forcou_decisao": False, "assunto_sensivel": False}
+
+        self._processar(runner, orientacoes_sessao="Só hoje", orientacoes_padrao="Padrão")
+        self.assertEqual(vistos["orientacoes"], "Só hoje")
+
+    def test_runner_com_assinatura_antiga_nao_recebe_orientacoes(self):
+        def runner(db, chat_name, texto_mensagem, historico, agora_sp):
+            return {"resposta_para_contato": "ok", "resumo_recado": "r", "forcou_decisao": False, "assunto_sensivel": False}
+
+        res = self._processar(runner, orientacoes_padrao="Padrão")
+        self.assertEqual(res["status"], "ok")
+
+    def test_executar_llm_repassa_as_orientacoes_ao_system_instruction(self):
+        capturado = {}
+
+        def falso_loop(**kwargs):
+            capturado.update(kwargs)
+            kwargs["function_map"]["finalizar_atendimento"](resposta_para_contato="ok", resumo_recado="r")
+            return {"text": ""}
+
+        with mock.patch("main._cached_doc_get", return_value=_DocFalso({"gemini_api_key": "k"})), \
+             mock.patch("google.genai.Client"), \
+             mock.patch("llm_providers.gemini_provider.run_tool_loop", side_effect=falso_loop), \
+             mock.patch.object(sec, "_agenda_para_o_prompt", return_value=None):
+            sec._executar_llm_secretario(
+                db=_MockDb(), chat_name="Carlos", texto_mensagem="Oi", historico=[], agora_sp="x",
+                orientacoes="Pode dizer que estou em viagem")
+        self.assertIn("Pode dizer que estou em viagem", capturado["system_instruction"])
+
+    # -- MCP e configurações da web -------------------------------------
+    def test_handler_mcp_repassa_orientacoes_e_o_flag_de_padrao(self):
+        hermes_tools._ativar_modo_secretario(
+            ToolContext(_db=self.db), {"orientacoes": "Só recados", "salvar_como_padrao": True})
+        cfg = self._cfg()
+        self.assertEqual(cfg["orientacoes_padrao"], "Só recados")
+        self.assertIsNone(cfg["orientacoes_sessao"])
+
+    def test_esquema_da_ferramenta_documenta_os_dois_parametros(self):
+        import json
+        import pathlib
+
+        esquema = json.loads((pathlib.Path(__file__).parent / "tools" / "schemas" / "ativar_modo_secretario.json")
+                             .read_text(encoding="utf-8"))
+        props = esquema["parameters"]["properties"]
+        self.assertEqual(props["orientacoes"]["type"], "string")
+        self.assertEqual(props["salvar_como_padrao"]["type"], "boolean")
 
 
 if __name__ == "__main__":

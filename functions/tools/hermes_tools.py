@@ -2263,6 +2263,8 @@ def _ativar_modo_secretario(ctx: ToolContext, args: dict):
         contatos=contatos,
         duracao_horas=duracao_horas,
         ctx=ctx,
+        orientacoes=args.get("orientacoes"),
+        salvar_como_padrao=bool(args.get("salvar_como_padrao")),
     )
 
 

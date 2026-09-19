@@ -13636,6 +13636,7 @@ def getAutomationSettings(req: https_fn.CallableRequest) -> dict:
             "enabled": bool(sec_cfg.get("enabled", False)),
             "chats_allowlist": list(sec_cfg.get("chats_allowlist") or []),
             "desativa_em": sec_cfg.get("desativa_em"),
+            "orientacoes": sec_cfg.get("orientacoes_padrao") or "",
         },
         "atencao": {
             "aguardando_terceiro": {
@@ -13725,6 +13726,9 @@ def updateAutomationSettings(req: https_fn.CallableRequest) -> dict:
             sec_updates["chats_allowlist"] = [str(x).strip() for x in sec_cfg["chats_allowlist"] if str(x).strip()]
         if "desativa_em" in sec_cfg:
             sec_updates["desativa_em"] = sec_cfg["desativa_em"]
+        if "orientacoes" in sec_cfg:
+            import secretario_whatsapp
+            sec_updates["orientacoes"] = secretario_whatsapp.normalizar_orientacoes(sec_cfg["orientacoes"])
         if sec_updates:
             updates["whatsapp_secretario"] = sec_updates
 

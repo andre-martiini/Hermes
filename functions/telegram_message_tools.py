@@ -774,20 +774,33 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
 
     # O Telegram usa closures próprias (inclusive confirmações por botões),
     # não o catálogo MCP. Reutilizar os handlers mantém a regra de negócio única.
-    def ativar_modo_secretario(contatos: list[str] = None, duracao_horas: float = None) -> str:
+    def ativar_modo_secretario(
+        contatos: list[str] = None,
+        duracao_horas: float = None,
+        orientacoes: str = None,
+        salvar_como_padrao: bool = False,
+    ) -> str:
         """Ativa o atendimento autônomo no WhatsApp para contatos autorizados.
 
         Args:
             contatos: Nomes, telefones ou JIDs. Omitir mantém a lista atual.
             duracao_horas: Duração em horas; 0.5 equivale a 30 minutos.
                 Omitir mantém ativo até desligar manualmente.
+            orientacoes: Opcional. O que o secretário pode responder e onde parar
+                (até 2000 caracteres). Nunca afrouxa as regras fixas.
+            salvar_como_padrao: True guarda as orientações como padrão das próximas ativações.
         """
         from tools.hermes_tools import execute
         from tools.tool_context import ToolContext
 
         resultado = execute(
             "ativar_modo_secretario",
-            {"contatos": contatos, "duracao_horas": duracao_horas},
+            {
+                "contatos": contatos,
+                "duracao_horas": duracao_horas,
+                "orientacoes": orientacoes,
+                "salvar_como_padrao": salvar_como_padrao,
+            },
             ToolContext(_db=db, canal="telegram"),
         )
         return json.dumps(resultado, ensure_ascii=False, default=str)
