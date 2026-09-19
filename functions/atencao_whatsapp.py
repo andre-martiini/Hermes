@@ -422,6 +422,12 @@ def _pessoa_vinculada_a_acao_ativa(db, chat_id: str) -> dict | None:
 def _processar_promessa(db, mensagem: dict) -> None:
     if not mensagem.get("from_me") or mensagem.get("is_group"):
         return
+    from secretario_whatsapp import eh_mensagem_do_bot
+
+    # A resposta do secretário sai pela conta do André e volta como from_me: não é promessa dele, nem
+    # cumpre a que ele fez (uma resposta longa do bot fecharia a promessa em aberto).
+    if eh_mensagem_do_bot(mensagem):
+        return
     enabled, horas = _flag_promessa(db)
     if not enabled:
         return
@@ -670,6 +676,14 @@ def on_whatsapp_message_atencao(event: firestore_fn.Event[firestore_fn.DocumentS
     from main import get_db
     db = get_db()
 
+    # O secretário vai primeiro: é o único caminho em que alguém espera uma resposta agora, e os
+    # detectores abaixo (cada um isolado) não dependem dele nem ele deles.
+    try:
+        from secretario_whatsapp import processar_mensagem_secretario
+        processar_mensagem_secretario(db, mensagem)
+    except Exception as exc:
+        print(f"[AtencaoWhatsApp] Falha no modo secretario: {exc}")
+
     try:
         _processar_promessa(db, mensagem)
     except Exception as exc:
@@ -684,12 +698,6 @@ def on_whatsapp_message_atencao(event: firestore_fn.Event[firestore_fn.DocumentS
         _processar_aprovacao_outbox(db, mensagem)
     except Exception as exc:
         print(f"[AtencaoWhatsApp] Falha no detector aprovacao_outbox: {exc}")
-
-    try:
-        from secretario_whatsapp import processar_mensagem_secretario
-        processar_mensagem_secretario(db, mensagem)
-    except Exception as exc:
-        print(f"[AtencaoWhatsApp] Falha no modo secretario: {exc}")
 
 
 @scheduler_fn.on_schedule(
