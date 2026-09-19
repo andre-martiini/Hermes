@@ -148,7 +148,7 @@ _CATALOG: dict[str, str] = {
     "consultar_contatos_prioritarios_secretario": "Lista os briefings prioritários cadastrados para o Modo Secretário no WhatsApp",
     "cancelar_contato_prioritario_secretario": "Cancela ou encerra antecipadamente o briefing prioritário de um contato no Modo Secretário",
     # Modo Secretário no WhatsApp (ativação self-service)
-    "ativar_modo_secretario": "Ativa o Modo Secretário no WhatsApp com contatos autorizados e duração opcional",
+    "ativar_modo_secretario": "Ativa o Modo Secretário no WhatsApp com contatos autorizados, duração e orientações opcionais",
     "desativar_modo_secretario": "Desativa imediatamente o Modo Secretário no WhatsApp",
     "consultar_status_modo_secretario": "Consulta o status atual do Modo Secretário (ativo, contatos na allowlist e expiração)",
     # Motor de política de autonomia (P02 passo 7, autonomy/policy.py) — leitura

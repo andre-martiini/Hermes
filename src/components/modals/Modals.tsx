@@ -86,7 +86,7 @@ interface AutomationSettingsData {
   email_action_linker: { enabled: boolean; ignored_senders?: string[] };
   personal_diary: { enabled: boolean };
   whatsapp_ingest: { enabled: boolean; linked_chats_only: boolean; chats_allowlist: string[]; capturar_todos: boolean; leitura_total: boolean };
-  whatsapp_secretario?: { enabled: boolean; chats_allowlist: string[]; desativa_em?: string | null };
+  whatsapp_secretario?: { enabled: boolean; chats_allowlist: string[]; desativa_em?: string | null; orientacoes?: string };
   whatsapp_auto_send_enabled: boolean;
   whatsapp_worker: { online: boolean; last_seen: string | null };
 }
@@ -100,6 +100,7 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
   const [error, setError] = useState<string | null>(null);
   const [allowlistText, setAllowlistText] = useState('');
   const [secretarioAllowlistText, setSecretarioAllowlistText] = useState('');
+  const [secretarioOrientacoesText, setSecretarioOrientacoesText] = useState('');
   const [ignoredSendersText, setIgnoredSendersText] = useState('');
 
   useEffect(() => {
@@ -115,6 +116,7 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
         setData(d);
         setAllowlistText((d.whatsapp_ingest?.chats_allowlist || []).join('\n'));
         setSecretarioAllowlistText((d.whatsapp_secretario?.chats_allowlist || []).join('\n'));
+        setSecretarioOrientacoesText(d.whatsapp_secretario?.orientacoes || '');
         setIgnoredSendersText((d.email_action_linker?.ignored_senders || []).join('\n'));
       } catch (e: any) {
         if (!cancelled) setError(e?.message || 'Falha ao carregar configurações.');
@@ -243,6 +245,15 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
       setData({ ...data, whatsapp_secretario: { ...current, chats_allowlist: list } });
     }
     save({ whatsapp_secretario: { chats_allowlist: list } });
+  };
+
+  const saveSecretarioOrientacoes = () => {
+    const texto = secretarioOrientacoesText.trim();
+    if (data) {
+      const current = data.whatsapp_secretario || { enabled: false, chats_allowlist: [], desativa_em: null };
+      setData({ ...data, whatsapp_secretario: { ...current, orientacoes: texto } });
+    }
+    save({ whatsapp_secretario: { orientacoes: texto } });
   };
 
   if (loading) {
@@ -478,6 +489,30 @@ const AutomationsSettingsTab: React.FC<{ isDarkTheme: boolean }> = ({ isDarkThem
             className={`mt-1 px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all disabled:opacity-50 ${isDarkTheme ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-slate-900 text-white hover:bg-slate-700'}`}
           >
             Salvar lista do Secretário
+          </button>
+        </div>
+        <div className={`space-y-1 pt-3 border-t border-dashed ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'}`}>
+          <label className={`text-[9px] font-bold uppercase tracking-wider block ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>
+            Orientações padrão do Secretário (opcional)
+          </label>
+          <textarea
+            value={secretarioOrientacoesText}
+            onChange={(e) => setSecretarioOrientacoesText(e.target.value)}
+            placeholder="Ex.: Estou em viagem até dia 25. Pode dizer isso e anotar recados; não marque reuniões."
+            rows={5}
+            maxLength={2000}
+            className={`w-full border rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-purple-500 ${isDarkTheme ? 'bg-slate-700 border-slate-600 text-white placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-900'}`}
+          />
+          <p className={`text-[9px] italic ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>
+            Diga o que o secretário pode responder e onde ele deve parar. Vale para toda ativação, a menos que você informe outra ao ativar pelo Claude ou pelo Telegram. Nunca afrouxa as regras fixas: finanças e saúde ficam vetadas, ele não decide nem promete e não confirma horário.
+          </p>
+          <button
+            type="button"
+            onClick={saveSecretarioOrientacoes}
+            disabled={saving}
+            className={`mt-1 px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all disabled:opacity-50 ${isDarkTheme ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-slate-900 text-white hover:bg-slate-700'}`}
+          >
+            Salvar orientações do Secretário
           </button>
         </div>
       </div>

@@ -41,6 +41,7 @@ PREFIXO_ASSINATURA = "**Hermes Bot:** "
 DEFAULT_MAX_TROCAS = 2
 DEFAULT_MAX_TROCAS_PRIORITARIO = 6
 DEFAULT_JANELA_MIN = 10
+MAX_ORIENTACOES_CHARS = 2000
 TIPO_OUTBOX_SECRETARIO = "secretario_whatsapp"
 ORIGEM_SECRETARIO = "secretario_whatsapp"
 
@@ -80,6 +81,17 @@ def prefixar_assinatura(texto: str) -> str:
     # Se tiver variações como "**Hermes Bot:**" sem espaço ou sem negrito
     sem_tag = re.sub(r"^\*{0,2}Hermes Bot:?\*{0,2}\s*", "", limpo, flags=re.IGNORECASE).strip()
     return f"{PREFIXO_ASSINATURA}{sem_tag}"
+
+
+def normalizar_orientacoes(texto) -> str | None:
+    """Texto livre do dono sobre o que o secretário pode responder e onde parar. None se vazio."""
+    if texto is None:
+        return None
+    limpo = str(texto).replace("\r", "")
+    limpo = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", limpo)
+    limpo = re.sub(r"[^\S\n]+", " ", limpo)
+    limpo = re.sub(r"\n{3,}", "\n\n", limpo).strip()
+    return limpo[:MAX_ORIENTACOES_CHARS] or None
 
 
 def extrair_digitos(texto: str) -> str:
@@ -176,6 +188,9 @@ def obter_config_secretario(db) -> dict:
             "max_trocas": int(cfg.get("max_trocas", DEFAULT_MAX_TROCAS)),
             "max_trocas_prioritario": int(cfg.get("max_trocas_prioritario", DEFAULT_MAX_TROCAS_PRIORITARIO)),
             "janela_cancelamento_min": int(cfg.get("janela_cancelamento_min", DEFAULT_JANELA_MIN)),
+            "orientacoes_padrao": normalizar_orientacoes(cfg.get("orientacoes")),
+            "orientacoes_sessao": normalizar_orientacoes(cfg.get("orientacoes_sessao")),
+            "orientacoes": normalizar_orientacoes(cfg.get("orientacoes_sessao")) or normalizar_orientacoes(cfg.get("orientacoes")),
         }
     except Exception as exc:
         print(f"[SecretarioWhatsApp] Erro ao ler system/settings: {exc}")
@@ -186,6 +201,9 @@ def obter_config_secretario(db) -> dict:
             "max_trocas": DEFAULT_MAX_TROCAS,
             "max_trocas_prioritario": DEFAULT_MAX_TROCAS_PRIORITARIO,
             "janela_cancelamento_min": DEFAULT_JANELA_MIN,
+            "orientacoes_padrao": None,
+            "orientacoes_sessao": None,
+            "orientacoes": None,
         }
 
 
@@ -302,6 +320,8 @@ def ativar_modo_secretario(
     contatos: list[str] | None = None,
     duracao_horas: float | None = None,
     ctx=None,
+    orientacoes: str | None = None,
+    salvar_como_padrao: bool = False,
 ) -> dict:
     """Ativa o Modo Secretário no WhatsApp em system/settings.
     
@@ -309,6 +329,10 @@ def ativar_modo_secretario(
       a chats_allowlist resolvendo cada entrada para chat_id. Se omitido, preserva a existente.
     - duracao_horas: Opcional. Se informado, calcula e grava desativa_em (ISO).
       A configuração expirará automaticamente na leitura. Se omitido, desativa_em é setado para None.
+    - orientacoes: Opcional. Texto livre do que o secretário pode responder e onde parar (até 2000
+      caracteres). Vale só para esta ativação; com salvar_como_padrao=True vira o padrão salvo. Omitido,
+      vale o padrão salvo (se houver). Texto vazio com salvar_como_padrao=True apaga o padrão. Nunca
+      afrouxa os guardrails fixos (finanças/saúde, decisões, agenda).
     """
     settings_ref = db.collection("system").document("settings")
     snap = settings_ref.get()
@@ -316,6 +340,17 @@ def ativar_modo_secretario(
     sec_cfg = dict(settings_data.get("whatsapp_secretario") or {})
 
     sec_cfg["enabled"] = True
+
+    if orientacoes is None:
+        sec_cfg["orientacoes_sessao"] = None
+    elif salvar_como_padrao:
+        sec_cfg["orientacoes"] = normalizar_orientacoes(orientacoes)
+        sec_cfg["orientacoes_sessao"] = None
+    else:
+        sec_cfg["orientacoes_sessao"] = normalizar_orientacoes(orientacoes)
+    orientacoes_em_vigor = (
+        normalizar_orientacoes(sec_cfg.get("orientacoes_sessao")) or normalizar_orientacoes(sec_cfg.get("orientacoes"))
+    )
 
     desativa_em = None
     if duracao_horas is not None and float(duracao_horas) > 0:
@@ -357,6 +392,14 @@ def ativar_modo_secretario(
         msg_partes.append(f"Allowlist configurada para {len(sec_cfg['chats_allowlist'])} contato(s).")
     else:
         msg_partes.append(f"Allowlist existente preservada com {len(sec_cfg.get('chats_allowlist', []))} contato(s).")
+    if orientacoes is not None and salvar_como_padrao:
+        msg_partes.append("Orientações salvas como padrão." if sec_cfg.get("orientacoes") else "Orientações padrão apagadas.")
+    elif orientacoes_em_vigor and orientacoes is not None:
+        msg_partes.append("Orientações registradas para esta ativação.")
+    elif orientacoes_em_vigor:
+        msg_partes.append("Valem as orientações padrão salvas.")
+    else:
+        msg_partes.append("Sem orientações extras: valem só as regras fixas do secretário.")
 
     return {
         "success": True,
@@ -364,6 +407,7 @@ def ativar_modo_secretario(
         "desativa_em": desativa_em,
         "chats_allowlist": sec_cfg.get("chats_allowlist", []),
         "contatos_resolvidos": contatos_resolvidos,
+        "orientacoes_em_vigor": orientacoes_em_vigor,
         "mensagem": " ".join(msg_partes),
     }
 
@@ -377,6 +421,7 @@ def desativar_modo_secretario(db) -> dict:
 
     sec_cfg["enabled"] = False
     sec_cfg["desativa_em"] = None
+    sec_cfg["orientacoes_sessao"] = None
 
     settings_ref.set({"whatsapp_secretario": sec_cfg}, merge=True)
 
@@ -395,6 +440,7 @@ def consultar_status_modo_secretario(db) -> dict:
     enabled = cfg.get("enabled", False)
     desativa_em = cfg.get("desativa_em")
     allowlist = cfg.get("chats_allowlist", [])
+    orientacoes = cfg.get("orientacoes")
 
     contatos_detalhes = []
     for cid in allowlist:
@@ -424,12 +470,17 @@ def consultar_status_modo_secretario(db) -> dict:
         msg_partes.append(f"Contatos/grupos autorizados ({len(allowlist)}): {', '.join(nomes)}.")
     else:
         msg_partes.append("Nenhum contato na allowlist configurada (vazio).")
+    if enabled and orientacoes:
+        msg_partes.append(f"Orientações em vigor: {orientacoes}")
 
     return {
         "enabled": enabled,
         "desativa_em": desativa_em,
         "chats_allowlist": allowlist,
         "contatos_detalhes": contatos_detalhes,
+        "orientacoes_em_vigor": orientacoes if enabled else None,
+        "orientacoes_padrao": cfg.get("orientacoes_padrao"),
+        "orientacoes_sessao": cfg.get("orientacoes_sessao"),
         "mensagem": " ".join(msg_partes),
     }
 
@@ -986,9 +1037,21 @@ def _construir_tools_secretario(db, briefing: dict | None = None) -> tuple[list[
 def montar_system_instruction_secretario(
     historico: list[dict] | None = None,
     briefing: dict | None = None,
+    orientacoes: str | None = None,
 ) -> str:
     """Monta a instrução de sistema do secretário adaptada ao estado da conversa."""
     system_instruction = SECRETARIO_SYSTEM_PROMPT
+
+    orientacoes = normalizar_orientacoes(orientacoes)
+    if orientacoes:
+        system_instruction += f"""
+ORIENTAÇÕES DO ANDRÉ (opcionais):
+O André deixou estas orientações sobre o que você pode responder e onde parar. Siga-as ao atender:
+<<<
+{orientacoes}
+>>>
+Elas ajustam o que você pode dizer, mas NUNCA revogam os GUARDRAILS INEGOCIÁVEIS acima: finanças e saúde continuam vetadas, você continua sem decidir nem prometer, e a regra de agenda continua valendo. Se uma orientação conflitar com um guardrail, siga o guardrail.
+"""
 
     if not historico:
         system_instruction += """
@@ -1071,6 +1134,7 @@ def _executar_llm_secretario(
     historico: list[dict],
     agora_sp: str,
     briefing: dict | None = None,
+    orientacoes: str | None = None,
 ) -> dict:
     """Uma chamada ao Gemini que devolve a resposta pela ferramenta terminal (sem rodadas extras)."""
     from main import _cached_doc_get
@@ -1099,7 +1163,9 @@ def _executar_llm_secretario(
     terminais = {tool["name"] for tool in tools}
     client = genai.Client(api_key=gemini_key)
 
-    system_instruction = montar_system_instruction_secretario(historico=historico, briefing=briefing)
+    system_instruction = montar_system_instruction_secretario(
+        historico=historico, briefing=briefing, orientacoes=orientacoes
+    )
 
     user_msg = (
         f"Data/hora atual: {agora_sp}\n"
@@ -1508,23 +1574,14 @@ def processar_mensagem_secretario(
         import inspect
         sig = inspect.signature(llm_runner)
         accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+        kwargs_llm = dict(
+            db=db, chat_name=chat_name, texto_mensagem=texto_msg, historico=historico, agora_sp=agora_sp,
+        )
         if "briefing" in sig.parameters or accepts_kwargs:
-            decisao = llm_runner(
-                db=db,
-                chat_name=chat_name,
-                texto_mensagem=texto_msg,
-                historico=historico,
-                agora_sp=agora_sp,
-                briefing=briefing,
-            )
-        else:
-            decisao = llm_runner(
-                db=db,
-                chat_name=chat_name,
-                texto_mensagem=texto_msg,
-                historico=historico,
-                agora_sp=agora_sp,
-            )
+            kwargs_llm["briefing"] = briefing
+        if "orientacoes" in sig.parameters or accepts_kwargs:
+            kwargs_llm["orientacoes"] = cfg.get("orientacoes")
+        decisao = llm_runner(**kwargs_llm)
     else:
         decisao = _executar_llm_secretario(
             db=db,
@@ -1533,6 +1590,7 @@ def processar_mensagem_secretario(
             historico=historico,
             agora_sp=agora_sp,
             briefing=briefing,
+            orientacoes=cfg.get("orientacoes"),
         )
 
     resposta_texto = prefixar_assinatura(decisao.get("resposta_para_contato") or "")
