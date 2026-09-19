@@ -13,10 +13,10 @@ Permite ao Hermes conversar com contatos autorizados no WhatsApp em nome do Andr
 - Proteção de dados sensíveis:
     * NUNCA responde com ou discute dados financeiros ou de saúde do André com terceiros;
       qualquer solicitação é recusada com polidez e escalada imediatamente ao André.
-- Veto humano garantido:
-    * Toda resposta enviada passa pela janela de cancelamento existente do outbox
-      (tipo 'secretario_whatsapp' promovido, status 'aguardando_janela'), com card no Telegram
-      e botão de cancelamento imediato. Se o card Telegram falhar, degrada para aprovação manual.
+- Envio imediato, sem eco no Telegram:
+    * A resposta vai direto para o outbox (status 'pending', sem janela de cancelamento) e o
+      André a vê no próprio WhatsApp; o Telegram só recebe o que exige atenção (escalonamentos
+      pela fila de atenção), nunca o texto das respostas já enviadas.
 - Identidade explícita obrigatória:
     * Toda mensagem enviada pelo bot começa rigorosamente com '**Hermes Bot:** '.
 """
