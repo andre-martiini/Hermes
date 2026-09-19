@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { detectarMencao } from './mentions.js';
 import { criarExecutorCoalescido } from './coalescido.js';
+import { criarOpcoesPuppeteer, SINAIS_DE_DESLIGAMENTO } from './puppeteer_opcoes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QR_IMAGE_PATH = path.join(__dirname, 'qr-code.png');
@@ -45,9 +46,9 @@ const FieldValue = admin.firestore.FieldValue;
 
 const client = new Client({
     authStrategy: new LocalAuth({ dataPath: AUTH_DIR, rmMaxRetries: 8 }),
-    // Mídias grandes estouravam o protocolTimeout padrão (180s) do puppeteer no
-    // downloadMedia ("Runtime.callFunctionOn timed out") — visto em produção.
-    puppeteer: { protocolTimeout: 300000 },
+    // Timeout de mídias grandes e o desligamento dos handlers de sinal do puppeteer
+    // (senão Ctrl+C mata o Chromium e sai antes do `desligar`): ver puppeteer_opcoes.js.
+    puppeteer: criarOpcoesPuppeteer(),
 });
 
 let isClientReady = false;
@@ -1213,5 +1214,6 @@ async function desligar(sinal) {
         process.exit(0);
     }
 }
-process.on('SIGINT', () => desligar('SIGINT'));
-process.on('SIGTERM', () => desligar('SIGTERM'));
+for (const sinal of SINAIS_DE_DESLIGAMENTO) {
+    process.on(sinal, () => desligar(sinal));
+}
