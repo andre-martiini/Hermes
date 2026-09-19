@@ -29,7 +29,7 @@ Total: **R$ 307,57** em 30 dias (orçamento do projeto: R$ 200/mês).
 
 Leitura: infraestrutura de leitura + CPU = 62%; IA = 26%. **Deploy (Cloud Build + Artifact Registry) não é o problema** (R$ 6,43).
 
-Custos **fora do GCP** gerados pelo Hermes, sem alerta e (até o PR 2) sem telemetria: Anthropic (Godmode, planejador de notificações, secretário WhatsApp, elevações — `claude-fable-5`), OpenAI (`gpt-5.6-luna`), Groq (Whisper), Tavily, Twilio.
+Custos **fora do GCP** gerados pelo Hermes, sem alerta e (até o PR 2) sem telemetria: Anthropic (planejador de notificações, secretário WhatsApp, elevações — `claude-fable-5`; o Godmode foi extinto em 2026-09-19 e a saída da Anthropic está em andamento), OpenAI (`gpt-5.6-luna`), Groq (Whisper), Tavily, Twilio.
 
 ## 2. Por que a fatura não diz "quem"
 

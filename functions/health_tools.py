@@ -1,6 +1,6 @@
 """
 Resumo de saúde (peso, caminhada, calorias, sono, dor) compartilhado entre o
-Copiloto padrão (main.py, tool `consultar_saude`) e o Godmode (godmode.py) —
+Copiloto padrão (main.py, tool `consultar_saude`) —
 mesmo padrão de extração já usado para finanças (`tools/telegram_extended.py`)
 e estratégia (`strategy_tools.py`).
 """

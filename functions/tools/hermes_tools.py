@@ -442,9 +442,9 @@ def _consultar_dados_cadastrais(ctx: ToolContext, args: dict):
         # inteiro para string antes de devolver, entao a chave nunca chegava
         # a ser vista por `mcp_server._handle_tools_call` (que so olha
         # `.get("erro")` em dict, ou o prefixo `ERRO|`/`⚠️` em string). Nao
-        # renomeio a chave em `dados_cadastrais.py` porque `godmode.py`
-        # consome o dict cru dessa mesma funcao (outro loop de tool-calling,
-        # sem este contrato) -- o ajuste fica isolado aqui, no wrapper MCP.
+        # renomeio a chave em `dados_cadastrais.py` porque o loop do copiloto
+        # consome o dict cru dessa mesma funcao (sem este contrato) -- o
+        # ajuste fica isolado aqui, no wrapper MCP.
         if isinstance(resultado, dict) and resultado.get("error"):
             return f"ERRO|{texto}"
         return texto

@@ -6,7 +6,7 @@ em `usuarios/{uid}.dados_cadastrais`.
 Diferente de `ai_profile` (nome/cargo/setor/email + preferências + personalidade
 destilada do diário), este campo NÃO é injetado na persona estática de nenhuma
 superfície — é lido sob demanda por uma ferramenta (`consultar_dados_cadastrais`,
-registrada em `main.py` e `godmode.py`), só declarada ao modelo quando o assunto
+registrada em `main.py`), só declarada ao modelo quando o assunto
 aparece na conversa (ver os `_gate_dados_cadastrais`/gate equivalente em cada
 callable). Isso existe porque parte desse dado é sensível (CPF, RG, dados
 bancários) — colocá-lo sempre no contexto multiplicaria sem necessidade quantas
@@ -18,9 +18,8 @@ atualizado do mesmo jeito quando mudar — não vale o risco de deixar o modelo
 reescrever CPF/RG/dados bancários a partir de uma instrução de chat.
 
 O objeto completo (~11k caracteres com o perfil atual) estoura o teto de
-truncamento do resultado de ferramenta em ambos os loops de tool-calling
-(8000 chars no Godmode, `claude_provider.GODMODE_TOOL_RESULT_CHAR_LIMIT`;
-12000 chars no copiloto padrão) — um corte no meio do JSON quebraria a
+truncamento do resultado de ferramenta no loop de tool-calling
+(12000 chars no copiloto padrão) — um corte no meio do JSON quebraria a
 resposta. Por isso a leitura é sempre por seção: sem `secao`, devolve só o
 índice de seções disponíveis; com `secao`, devolve o conteúdo completo
 daquela seção (a maior seção individual hoje tem ~2.3k caracteres).

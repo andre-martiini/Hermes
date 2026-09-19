@@ -7,7 +7,7 @@ na voz do usuário — não um relatório frio de métricas.
 Um consolidador semanal destila os diários acumulados (e os ajustes que o
 próprio usuário pediu neles) num perfil de personalidade gravado em
 `usuarios/{uid}.ai_profile.personalidade` — como esse campo já é lido pelo
-copiloto web, pelo Godmode e pela ponte de voz, o perfil se propaga para
+copiloto web e pela ponte de voz, o perfil se propaga para
 todas as superfícies sem nenhuma mudança adicional nelas.
 
 Ver docs/okf/propostas/automacoes-canais-e-diario-pessoal.md (eixo 3).
@@ -170,7 +170,7 @@ def _collect_diary_material(db, date_str: str) -> dict:
             material["feedback_ia"].append({"title": d.get("title"), "feedback": d.get("feedback")})
 
     # Conversas com o copiloto: sessões tocadas no dia, em qualquer superfície
-    # (web global/drawer/task view, voz, Telegram, Godmode) — lastMessageAt é
+    # (web global/drawer/task view, voz, Telegram) — lastMessageAt é
     # Timestamp nativo em ambas as coleções de sessão.
     start_utc, end_utc = _day_bounds(date_str)
 
@@ -190,7 +190,7 @@ def _collect_diary_material(db, date_str: str) -> dict:
         for sess_doc in sessions:
             sess_data = sess_doc.to_dict() or {}
             # source por mensagem só é gravado hoje em web/drawer/voz/telegram; sessões antigas ou
-            # turnos do backend (askCopilotoHermes/askHermesGodmode) caem para o canal padrão.
+            # turnos do backend (askCopilotoHermes) caem para o canal padrão.
             canal = sess_data.get("channel") or sess_data.get("copilotScope") or canal_padrao
             try:
                 msgs = list(
@@ -218,7 +218,6 @@ def _collect_diary_material(db, date_str: str) -> dict:
                 material["conversas"].append({"canal": m_data.get("source") or canal, "trechos": trechos[:20]})
 
     _collect_sessions("sessoes_copiloto", "web")
-    _collect_sessions("sessoes_godmode", "godmode")
 
     return material
 
