@@ -1,7 +1,7 @@
 """
 Grava/atualiza os dados cadastrais pessoais completos do usuário em
 usuarios/{uid}.dados_cadastrais (ver functions/dados_cadastrais.py). Lido sob
-demanda pela ferramenta consultar_dados_cadastrais (main.py e godmode.py) —
+demanda pela ferramenta consultar_dados_cadastrais (main.py) —
 não é injetado na persona estática de nenhuma superfície.
 
 O payload em si (CPF, RG, dados bancários etc.) NÃO fica neste script nem no

@@ -66,9 +66,6 @@ from allcare_portal import (
     parse_portal_date,
 )
 from firestore_resilience import stream_collection_resilient
-from godmode import (  # noqa: F401 — registra as Cloud Functions
-    askHermesGodmode,
-)
 from mcp_server import mcpServer  # noqa: F401 — registra a Cloud Function
 from mcp_oauth import mcpOAuth  # noqa: F401 — registra a Cloud Function
 from mcp_jobs import on_mcp_job_created  # noqa: F401 — registra a Cloud Function
@@ -10714,7 +10711,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         # ─── FERRAMENTAS DO MÓDULO ESTRATÉGIA (CRUD) ─────────────────────────────
         # Só são declaradas quando copilot_mode == 'estrategia' (ver static_tools).
         # Operam exclusivamente sobre a coleção estrategia_pessoal do usuário atual.
-        # Implementação em strategy_tools.py — compartilhada com o Godmode (godmode.py).
+        # Implementação em strategy_tools.py.
         import strategy_tools as _strategy_tools
 
         def criar_objetivo_estrategico(

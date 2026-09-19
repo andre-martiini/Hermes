@@ -68,7 +68,6 @@ import PublicShoppingPortal from './src/components/public/PublicShoppingPortal';
 import { TranscriptionTool } from './src/components/tools/TranscriptionTool';
 import { ShoppingListTool } from './src/components/tools/ShoppingListTool';
 import { FerramentasView } from './src/components/tools/FerramentasView';
-import { HermesGodmodeView } from './src/components/tools/HermesGodmodeView';
 import { QuickNoteModal } from './src/components/modals/QuickNoteModal';
 import { SpeedDialMenu } from './src/components/ui/SpeedDialMenu';
 import { HermesCopilotoDrawer } from './src/components/tools/HermesCopilotoDrawer';
@@ -1780,7 +1779,7 @@ const App: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [completedLimit, setCompletedLimit] = useState(10);
   const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude' | 'servicos' | 'estrategia'>('home');
-  const [viewMode, setViewMode] = useState<'home' | 'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'finance' | 'saude' | 'ferramentas' | 'knowledge' | 'services' | 'rag-bases' | 'concluidas' | 'strategy' | 'godmode' | 'contacts' | 'diario' | 'whatsapp'>('home');
+  const [viewMode, setViewMode] = useState<'home' | 'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'finance' | 'saude' | 'ferramentas' | 'knowledge' | 'services' | 'rag-bases' | 'concluidas' | 'strategy' | 'contacts' | 'diario' | 'whatsapp'>('home');
   const [morningSummaryAccessKey, setMorningSummaryAccessKey] = useState(0);
   // Navegação de módulo (sidebar/menu mobile): activeModule e viewMode precisam mudar juntos.
   // flushSync força um commit síncrono único para os dois, em vez de duas chamadas de setState
@@ -4471,10 +4470,6 @@ const App: React.FC = () => {
         setActiveModule('estrategia');
         setViewMode('strategy');
         label = 'Estratégia';
-      } else if (mod.includes('godmode') || mod.includes('god')) {
-        setActiveModule('estrategia');
-        setViewMode('godmode');
-        label = 'Godmode';
       } else if (mod.includes('conhec') || mod.includes('wiki')) {
         setActiveModule('acoes');
         setViewMode('knowledge');
@@ -4704,7 +4699,6 @@ const App: React.FC = () => {
                 { id: 'finance', label: 'Financeiro', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>, active: activeModule === 'financeiro', onClick: () => navigateToModule('financeiro', 'finance') },
                 { id: 'saude', label: 'Saúde', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>, active: activeModule === 'saude', onClick: () => navigateToModule('saude', 'saude') },
                 { id: 'strategy', label: 'Estratégia', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 6.75V15m6-6v8.25M4.5 19.5h15M6 19.5V4.5h12v15" /></svg>, active: activeModule === 'estrategia' && viewMode === 'strategy', onClick: () => navigateToModule('estrategia', 'strategy') },
-                { id: 'godmode', label: 'Godmode', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>, active: viewMode === 'godmode', onClick: () => navigateToModule('estrategia', 'godmode') },
                 { id: 'contacts', label: 'Contatos', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>, active: viewMode === 'contacts', onClick: () => navigateToModule('acoes', 'contacts') },
                 { id: 'conhecimento', label: 'Conhecimento', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>, active: viewMode === 'knowledge', onClick: () => navigateToModule('acoes', 'knowledge') },
                 { id: 'rag-bases', label: 'Áreas Temáticas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>, active: viewMode === 'rag-bases', onClick: () => navigateToModule('acoes', 'rag-bases') },
@@ -4886,7 +4880,7 @@ const App: React.FC = () => {
                       onCreateAction={() => setIsCreateModalOpen(true)}
                       isDark={isDarkTheme}
                     />
-                    {viewMode !== 'home' && viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && viewMode !== 'whatsapp' && (
+                    {viewMode !== 'home' && viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'whatsapp' && (
                       <button
                         onClick={() => setIsCreateModalOpen(true)}
                         className="bg-slate-900 text-white p-1.5 rounded-lg md:rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
@@ -5002,7 +4996,6 @@ const App: React.FC = () => {
                                 viewMode === 'diario' ? 'Diário Pessoal' :
                                 viewMode === 'whatsapp' ? 'Caixa de Entrada WhatsApp' :
                                 viewMode === 'ferramentas' ? 'Ferramentas' :
-                                  viewMode === 'godmode' ? 'Godmode' :
                                   activeModule === 'dashboard' ? 'Dashboard' :
                                       activeModule === 'acoes' ? 'Ações' :
                                         activeModule === 'financeiro' ? 'Financeiro' :
@@ -5011,7 +5004,7 @@ const App: React.FC = () => {
                         </h1>
                       </div>
                     </div>
-                    {viewMode !== 'home' && viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'diario' && viewMode !== 'whatsapp' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
+                    {viewMode !== 'home' && viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'diario' && viewMode !== 'whatsapp' && viewMode !== 'services' && viewMode !== 'strategy' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
                       <nav className={`flex flex-wrap items-center gap-1`}>
                         <button
                           onClick={() => {
@@ -5132,7 +5125,7 @@ const App: React.FC = () => {
                     </div>
                   )}
                   {/* Standard Action Buttons (Search, Sync, Create) */}
-                  {viewMode !== 'home' && viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'godmode' && viewMode !== 'whatsapp' && (
+                  {viewMode !== 'home' && viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'strategy' && viewMode !== 'whatsapp' && (
                     <div className="ml-auto flex items-center justify-end gap-3">
                       {activeModule !== 'dashboard' && (
                         <div className={`hidden lg:flex h-10 items-center border rounded-lg px-4 w-72 xl:w-80 group focus-within:ring-1 focus-within:ring-primary-tactile transition-all ${inputSurfaceClass} border-[#e5e7eb] dark:border-slate-800`}>
@@ -5272,7 +5265,6 @@ const App: React.FC = () => {
                       { label: 'Financeiro', active: activeModule === 'financeiro', onClick: () => navigateToModule('financeiro', 'finance') },
                       { label: 'Saúde', active: activeModule === 'saude', onClick: () => navigateToModule('saude', 'saude') },
                       { label: 'Estratégia', active: activeModule === 'estrategia' && viewMode === 'strategy', onClick: () => navigateToModule('estrategia', 'strategy') },
-                      { label: 'Godmode', active: viewMode === 'godmode', onClick: () => navigateToModule('estrategia', 'godmode') },
                       { label: 'Contatos', active: viewMode === 'contacts', onClick: () => navigateToModule('acoes', 'contacts') },
                       { label: 'Conhecimento', active: viewMode === 'knowledge', onClick: () => navigateToModule('acoes', 'knowledge') },
                       { label: 'Áreas Temáticas', active: viewMode === 'rag-bases', onClick: () => navigateToModule('acoes', 'rag-bases') },
@@ -5325,7 +5317,7 @@ const App: React.FC = () => {
             </header>
             <div className={`w-full ${(viewMode === 'home' || viewMode === 'dashboard' || viewMode === 'whatsapp') ? 'px-0 py-0' : 'px-0 md:px-8 py-6'}`}>
               {/* Painel de Estatísticas e Filtros - APENAS NA VISÃO GERAL */}
-              <main className={(viewMode === 'home' || viewMode === 'dashboard' || viewMode === 'godmode' || viewMode === 'whatsapp') ? '' : 'mb-20'}>
+              <main className={(viewMode === 'home' || viewMode === 'dashboard' || viewMode === 'whatsapp') ? '' : 'mb-20'}>
                 {viewMode === 'home' ? (
                   <MorningSummaryView
                     key={morningSummaryAccessKey}
@@ -5422,8 +5414,6 @@ const App: React.FC = () => {
                       </aside>
                     )}
                   </div>
-                ) : viewMode === 'godmode' ? (
-                  <HermesGodmodeView userId={user?.uid || ''} isDark={isDarkTheme} showToast={showToast} />
                 ) : viewMode === 'gallery' ? (
                   <>
                     {/* Mobile Search Bar */}
@@ -7329,7 +7319,7 @@ const App: React.FC = () => {
             />
           )
         }
-        {!isCopilotoOpen && !isVoiceLiveActive && viewMode !== 'godmode' && !isMeetingToolActive && !isWhatsappInboxActive && !(selectedTask && (taskModalMode === 'execute' || (taskModalMode === 'default' && selectedTask.area_tematica === 'CLC'))) && (
+        {!isCopilotoOpen && !isVoiceLiveActive && !isMeetingToolActive && !isWhatsappInboxActive && !(selectedTask && (taskModalMode === 'execute' || (taskModalMode === 'default' && selectedTask.area_tematica === 'CLC'))) && (
           <>
             {/* Backdrop invisivel: clique fora fecha o menu do launcher */}
             {isCopilotoLauncherOpen && (

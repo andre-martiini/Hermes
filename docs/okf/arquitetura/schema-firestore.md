@@ -60,8 +60,8 @@ Documentos vetorizados por `process_vectorization` — uso decrescente, mantido 
 ### `sessoes_copiloto` (+ subcoleção `mensagens`)
 Sessões de conversa multi-turno com o Copiloto: `userId`, `lastMessageAt`, `task_id`, `session_id`, `channel` (`"telegram"` quando originada lá), `copilotScope`; subcoleção `sessoes_copiloto/{id}/mensagens` guarda o histórico (`ChatMessage`: role, content, timestamp, `source` — `telegram`\|`telegram_callback`\|`web_global`\|`web_drawer`\|`web_task_view`\|`voice_web`; ausente nos writes de `askCopilotoHermes` e em sessões antigas). Escrito por `askCopilotoHermes` e diretamente pelo frontend (`HermesGlobalChat.tsx`, `HermesCopilotoDrawer.tsx`, `TaskExecutionView.tsx`). Índice: `userId+lastMessageAt` (DESC).
 
-### `sessoes_godmode` (+ subcoleção `mensagens`)
-Mesmo formato de `sessoes_copiloto` (`userId`, `lastMessageAt`, `titulo`; subcoleção `mensagens` com `role`/`content`/`timestamp`), mas para o modo Godmode (`godmode.py:askHermesGodmode`, Claude em vez de Gemini). Ambas as coleções de sessão são lidas por `gerar_diario_pessoal` (`personal_diary.py`) para compor o diário do dia — conversas com o Godmode também alimentam o ciclo diário → `ai_profile.personalidade`.
+### `sessoes_godmode` — REMOVIDA (2026-09-19)
+O Godmode foi extinto e o histórico apagado; não há mais leitura nem escrita nesta coleção.
 
 ### `usuarios`
 Perfis de IA por usuário: criado por `_bootstrap_user_ai_profile`, sinais de prompt atualizados por `_save_user_profile_signal` (`ai_profile.historico_deduzido`, rolling últimos 10). Campo `ai_profile.personalidade` — traços/estilo/rotinas destilados semanalmente do diário pessoal por `consolidar_personalidade` (`personal_diary.py`), com `personalidade_historico[]` (últimas 6 versões). Lido por `_format_ai_profile_for_prompt` (copiloto web/Godmode) e `context.py:_format_user_profile` (ponte de voz) — grava uma vez, propaga para as três superfícies.

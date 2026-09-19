@@ -1,7 +1,7 @@
 """
 CRUD de objetivos estratégicos pessoais (`estrategia_pessoal`), compartilhado
-entre o Copiloto padrão (main.py, ferramentas do `copilot_mode == 'estrategia'`)
-e o Godmode (godmode.py) — mesmo padrão de extração já usado para finanças
+no Copiloto padrão (main.py, ferramentas do `copilot_mode == 'estrategia'`) —
+mesmo padrão de extração já usado para finanças
 (`tools/telegram_extended.py`).
 
 Todas as funções operam sobre `db` e exigem `user_uid` (fail-closed: só

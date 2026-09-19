@@ -146,7 +146,7 @@ GEMINI_TOOL_DECLARATIONS = [
                 "description": (
                     "Navega na interface do sistema Hermes para um modulo ou visao especifica. "
                     "Use quando o usuario pedir para ir, abrir ou acessar uma tela/modulo, ou para 'programar o meu dia' / 'fazer a programação do dia'. "
-                    "Modulos aceitos: 'dashboard', 'programacao_dia' (abrir agenda do dia), 'financeiro', 'saude', 'acoes', 'servicos', 'estrategia', 'godmode', 'conhecimento', 'contatos', 'rag-bases', 'ferramentas', 'licitacoes', 'assistencia', 'pgc', 'concluidas'."
+                    "Modulos aceitos: 'dashboard', 'programacao_dia' (abrir agenda do dia), 'financeiro', 'saude', 'acoes', 'servicos', 'estrategia', 'conhecimento', 'contatos', 'rag-bases', 'ferramentas', 'licitacoes', 'assistencia', 'pgc', 'concluidas'."
                 ),
                 "parameters": {
                     "type": "OBJECT",
