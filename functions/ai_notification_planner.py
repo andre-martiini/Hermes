@@ -1,7 +1,7 @@
 """
 Planejador proativo de notificações — módulo aditivo, independente do
-Copiloto e do Godmode. Uma vez por dia, um agente sobre Claude (mesmo
-provider/loop de tool-calling do Godmode) varre tarefas ativas e metas
+Copiloto. Uma vez por dia, um agente sobre Gemini (`llm_providers/gemini_provider.py`)
+varre tarefas ativas e metas
 estratégicas pessoais e decide, com um teto diário rígido, se algum insight
 cruzando esses domínios merece virar notificação no Telegram — sem duplicar
 os lembretes determinísticos que o Hermes já dispara (prazo de tarefa
@@ -31,10 +31,11 @@ except ImportError:
 from firebase_admin import firestore
 from firebase_functions import scheduler_fn, options
 
-from llm_providers import claude_provider
+from gemini_cost_controls import GEMINI_AGENT_FALLBACK_MODEL, GEMINI_AGENT_MODEL
+from llm_providers import gemini_provider
 
-AI_PLANNER_MODEL = os.environ.get("AI_PLANNER_MODEL", "claude-fable-5")
-AI_PLANNER_FALLBACK_MODEL = os.environ.get("AI_PLANNER_FALLBACK_MODEL", "claude-opus-4-8")
+AI_PLANNER_MODEL = os.environ.get("AI_PLANNER_MODEL", GEMINI_AGENT_MODEL)
+AI_PLANNER_FALLBACK_MODEL = os.environ.get("AI_PLANNER_FALLBACK_MODEL", GEMINI_AGENT_FALLBACK_MODEL)
 AI_PLANNER_MAX_TOKENS = int(os.environ.get("AI_PLANNER_MAX_TOKENS", "2048"))
 AI_PLANNER_MAX_DAILY_NOTIFICATIONS = int(os.environ.get("AI_PLANNER_MAX_DAILY_NOTIFICATIONS", "3"))
 AI_PLANNER_WINDOW_START = os.environ.get("AI_PLANNER_WINDOW_START", "07:00")
@@ -85,7 +86,7 @@ def _ai_planner_counter_ref(db, today_str: str):
 def _reserve_and_create_notification(db, today_str: str, doc_ref, doc_payload: dict) -> bool:
     """
     Reserva atomicamente uma vaga no teto diario e cria o documento da notificacao na
-    MESMA transacao Firestore. Necessario porque claude_provider.run_tool_loop executa as
+    MESMA transacao Firestore. Necessario porque gemini_provider.run_tool_loop executa as
     tool calls de uma mesma rodada em paralelo (ThreadPoolExecutor) — um contador em
     memória (nonlocal) permitiria duas threads lerem a mesma contagem antes de qualquer
     uma incrementar, estourando o teto. A transacao do Firestore serializa essa leitura+
@@ -315,24 +316,20 @@ def ai_notification_planner_daily(event: scheduler_fn.ScheduledEvent):
     """Roda o planejador de IA 1x/dia; grava propostas em scheduled_notifications (status pending)."""
     from main import get_db, _cached_doc_get
 
-    try:
-        import anthropic
-    except ImportError:
-        print("[AIPlanner] Dependência 'anthropic' não instalada; abortando.")
-        return
+    from google import genai
 
     db = get_db()
     keys_doc = _cached_doc_get(db, "system", "api_keys")
-    claude_key = (keys_doc.to_dict() or {}).get("claude_api_key") if keys_doc.exists else None
-    if not claude_key:
-        print("[AIPlanner] claude_api_key não configurada em system/api_keys; abortando.")
+    gemini_key = (keys_doc.to_dict() or {}).get("gemini_api_key") if keys_doc.exists else None
+    if not gemini_key:
+        print("[AIPlanner] gemini_api_key não configurada em system/api_keys; abortando.")
         return
 
     sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
     now_sp = datetime.datetime.now(sp_tz)
     today_str = now_sp.strftime("%Y-%m-%d")
 
-    # Leitura só para decidir se vale a pena chamar a Claude (economia de custo) — não é o
+    # Leitura só para decidir se vale a pena chamar o modelo (economia de custo) — não é o
     # mecanismo de enforcement do teto, que é feito atomicamente dentro de propor_notificacao
     # via _reserve_and_create_notification (transação Firestore).
     existing_today = 0
@@ -347,7 +344,7 @@ def ai_notification_planner_daily(event: scheduler_fn.ScheduledEvent):
         return
 
     tools, function_map = _build_tools(db, now_sp, today_str)
-    client = anthropic.Anthropic(api_key=claude_key)
+    client = genai.Client(api_key=gemini_key)
     user_message = (
         f"Hoje é {today_str}. Analise o estado atual do sistema e proponha, via a ferramenta "
         "propor_notificacao, apenas os lembretes/insights que realmente merecem interromper o "
@@ -356,7 +353,7 @@ def ai_notification_planner_daily(event: scheduler_fn.ScheduledEvent):
     )
 
     try:
-        result = claude_provider.run_tool_loop(
+        result = gemini_provider.run_tool_loop(
             client=client,
             model=AI_PLANNER_MODEL,
             system_instruction=AI_PLANNER_PERSONA,
@@ -366,9 +363,11 @@ def ai_notification_planner_daily(event: scheduler_fn.ScheduledEvent):
             user_message=user_message,
             max_tokens=AI_PLANNER_MAX_TOKENS,
             fallback_model=AI_PLANNER_FALLBACK_MODEL,
+            feature="ai_notification_planner",
+            db=db,
         )
     except Exception as exc:
-        print(f"[AIPlanner] Falha na chamada à Claude API: {exc}")
+        print(f"[AIPlanner] Falha na chamada ao modelo: {exc}")
         return
 
     print(
