@@ -7,6 +7,7 @@ import admin from 'firebase-admin';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { detectarMencao } from './mentions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QR_IMAGE_PATH = path.join(__dirname, 'qr-code.png');
@@ -86,12 +87,26 @@ let chatsAllowlist = new Set();
 let allowlistLoaded = false;
 let capturarTodos = false;
 let autoSendEnabled = false;
+// Ids do dono (`...@c.us` e `...@lid`) que vêm da config; `idsResolvidos` vem do
+// próprio WhatsApp no `ready`. A união dos dois alimenta `mentions_andre`.
+let andreChatIds = new Set();
+let idsResolvidos = new Set();
+
+/** Todos os ids conhecidos do dono. Vazio só antes do `ready` e sem config. */
+function idsDoDono() {
+    const wid = String(client?.info?.wid?._serialized || '');
+    return new Set([...idsResolvidos, ...andreChatIds, ...(wid ? [wid] : [])]);
+}
 
 db.collection('system').doc('settings').onSnapshot((snap) => {
     const data = snap.exists ? (snap.data() || {}) : {};
     const ingestCfg = data.whatsapp_ingest || {};
     const list = Array.isArray(ingestCfg.chats_allowlist) ? ingestCfg.chats_allowlist : [];
     chatsAllowlist = new Set(list);
+    andreChatIds = new Set(
+        (Array.isArray(ingestCfg.andre_chat_ids) ? ingestCfg.andre_chat_ids : [])
+            .map((id) => String(id || '').trim()).filter(Boolean)
+    );
     capturarTodos = !!ingestCfg.capturar_todos;
     allowlistLoaded = true;
     autoSendEnabled = !!data.whatsapp_auto_send_enabled;
@@ -194,6 +209,38 @@ async function telefoneDoChat(chatId, chat) {
         // Contato apagado ou sem numero visivel.
     }
     return null;
+}
+
+/**
+ * Descobre o lid do próprio dono. `client.info.wid` só traz o telefone, e desde
+ * a migração para `@lid` a menção em grupo chega com o lid — sem ele
+ * `mentions_andre` nunca fica verdadeiro. Se a consulta falhar, o worker segue
+ * com o que vier de `whatsapp_ingest.andre_chat_ids`.
+ */
+async function resolverIdsDoDono() {
+    const wid = String(client?.info?.wid?._serialized || '');
+    if (!wid) return false;
+    const ids = new Set([wid]);
+    try {
+        const lid = await client.pupPage.evaluate(async (id) => {
+            try {
+                const r = await window.WWebJS.enforceLidAndPnRetrieval(id);
+                const l = r?.lid;
+                return l?._serialized || (l?.user ? `${l.user}@lid` : null);
+            } catch (e) {
+                return null;
+            }
+        }, wid);
+        if (lid) ids.add(String(lid));
+    } catch (e) {
+        console.warn('[Identidade] Não consegui consultar o lid do dono:', e.message || e);
+    }
+    idsResolvidos = ids;
+    const temLid = [...ids].some((id) => id.endsWith('@lid'));
+    console.log(`[Identidade] Ids do dono: ${ids.size} resolvido(s), ${andreChatIds.size} da config.`
+        + (temLid || [...andreChatIds].some((id) => id.endsWith('@lid'))
+            ? '' : ' ATENÇÃO: nenhum @lid conhecido — menções em grupo podem passar despercebidas; preencha whatsapp_ingest.andre_chat_ids.'));
+    return temLid;
 }
 
 async function syncChatRegistry() {
@@ -337,6 +384,12 @@ client.on('ready', async () => {
     console.log('WhatsApp client is ready!');
     isClientReady = true;
     writeHeartbeat();
+    // No `ready` o WhatsApp Web pode ainda não ter hidratado: sem o lid, tenta de novo no mesmo atraso do registro de chats.
+    resolverIdsDoDono()
+        .then((resolveu) => {
+            if (!resolveu) setTimeout(() => resolverIdsDoDono().catch(() => {}), CHATS_READY_DELAY_MS);
+        })
+        .catch((e) => console.error('[Identidade] Falha ao resolver ids do dono:', e));
     setTimeout(syncChatRegistry, CHATS_READY_DELAY_MS);
     // Recuperação retroativa: o que chegou com o worker desligado não passa pelo
     // message_create; ao ficar pronto, completamos o buraco a partir do histórico.
@@ -470,7 +523,6 @@ async function persistMessage(message, chat, chatId, isGroup) {
     const mentionedIds = Array.isArray(message.mentionedIds)
         ? message.mentionedIds.map((id) => String(id?._serialized || id)).filter(Boolean)
         : [];
-    const ownWid = String(client?.info?.wid?._serialized || '');
     const rawQuoted = message?._data?.quotedMsg || message?._data?.quotedMessage || {};
     const rawQuotedId = message?._data?.quotedStanzaID || message?._data?.quotedMsgId
         || rawQuoted?.id?._serialized || null;
@@ -510,7 +562,7 @@ async function persistMessage(message, chat, chatId, isGroup) {
         message_type: message.type,
         content: message.body || '',
         mentioned_ids: mentionedIds,
-        mentions_andre: !!ownWid && mentionedIds.includes(ownWid),
+        mentions_andre: detectarMencao({ mentionedIds, body: message.body, ownIds: idsDoDono() }),
         quoted_msg_id: rawQuotedId ? String(rawQuotedId) : null,
         quoted_from_me: typeof rawQuotedFromMe === 'boolean' ? rawQuotedFromMe : null,
         quoted_author: rawQuotedAuthor ? String(rawQuotedAuthor) : null,

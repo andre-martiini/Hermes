@@ -48,6 +48,14 @@ Dois mecanismos completam o que a captura ao vivo não viu, ambos sobre `chat.fe
 - **Precedência de nomes**: nos seletores e listagens (`listWhatsappChats`), a precedência de exibição é ID cru (allowlist) < nome em mensagem capturada < nome no registro `whatsapp_chats` (título mais atualizado).
 - **Parâmetro `include_all`**: a callable `listWhatsappChats` aceita `include_all: bool`. Por padrão (`false`), retorna apenas conversas monitoradas (allowlist ∪ capturadas). Com `true`, retorna todo o registro, marcando `monitored: false` nas conversas fora da captura.
 
+### Menção ao dono em grupo (`mentions_andre`)
+
+Desde a migração do WhatsApp para `@lid`, a menção chega com o **lid** do dono (`144…@lid`), e `client.info.wid` só traz o telefone (`55…@c.us`). Até 2026-09-19 o worker comparava `mentionedIds` só com o telefone, então `mentions_andre` ficou falso em **todas** as mensagens — 0 de 45 menções reais em 30 dias — e as duas telas que dependem dele (respostas pendentes de grupo em `inbox_pendentes.py` e o fast path de grupo do modo secretário) ficaram cegas sem erro visível. Em ~40% das menções `mentionedIds` nem vem preenchido: só o corpo traz o token `@<lid>`.
+
+- **Detecção** (`services/whatsapp-capture/mentions.js`, testada com `npm test`): verdadeira se `mentionedIds` contém qualquer id do dono, ou se o corpo traz `@<dígitos>` de um deles (o `@` só vale após início de texto ou caractere que não seja letra/número, para não confundir com e-mail).
+- **Ids do dono**: união do `client.info.wid`, do lid resolvido no `ready` (`resolverIdsDoDono`, via `WWebJS.enforceLidAndPnRetrieval`) e de **`system/settings.whatsapp_ingest.andre_chat_ids`** — o mesmo campo que `inbox_pendentes.py` e `secretario_whatsapp.py` já liam. Está preenchido com `144929460330697@lid` e `5527998754054@c.us`. Se a consulta do lid falhar, o worker segue só com a config e avisa no log (`[Identidade]`).
+- O worker roda fora do deploy do Firebase: **reiniciar** (`run-hidden.bat`) para pegar a mudança. Mensagens já gravadas continuam com `mentions_andre=false`; o `andre_chat_ids` cobre no servidor as que têm o lid em `mentioned_ids`, mas menção só no texto exige o flag novo.
+
 ## 2. Armazenamento no Firebase
 
 - Coleção Firestore: `whatsapp_messages`
