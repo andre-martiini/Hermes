@@ -9,7 +9,7 @@ relatório às 19h BRT com quatro blocos:
    (padrão R$ 200), top serviços e top SKUs; CPU por function quando o export
    detalhado ("Custo detalhado de uso") estiver ligado.
 2. **IA por telemetria própria** (dia corrente): Gemini (``system_usage/gemini``),
-   Claude (``system_usage/claude`` — criado no PR 2), OpenAI (``system_usage/openai``).
+   OpenAI (``system_usage/openai``).
 3. **Firestore medido por function/coleção** (``firestore_metrics``, dia corrente).
 4. Alertas: dia > 1,3× a média de 7 dias, ou projeção do mês > orçamento.
 
@@ -256,7 +256,6 @@ def _short(text: str, n: int = 58) -> str:
 
 def format_ai_block(
     gemini: dict[str, Any] | None,
-    claude: dict[str, Any] | None,
     openai: dict[str, Any] | None,
     usd_brl: float,
     day: date,
@@ -278,7 +277,6 @@ def format_ai_block(
         )
 
     lines.append(_line("Gemini", gemini, "sem uso registrado"))
-    lines.append(_line("Claude", claude, "sem telemetria ainda (PR 2)"))
     lines.append(_line("OpenAI", openai, "sem uso registrado"))
     return lines
 
@@ -288,7 +286,6 @@ def build_message(
     gcp_summary: dict[str, Any] | None,
     cpu_rows: list[dict[str, Any]] | None,
     gemini: dict[str, Any] | None,
-    claude: dict[str, Any] | None,
     openai: dict[str, Any] | None,
     firestore_lines: list[str] | None,
     usd_brl: float,
@@ -317,7 +314,7 @@ def build_message(
     else:
         lines.append(f"☁️ GCP: sem dados do export para {day.strftime('%d/%m')}" + (f" ({gcp_error})" if gcp_error else ""))
     lines.append("")
-    lines.extend(format_ai_block(gemini, claude, openai, usd_brl, today))
+    lines.extend(format_ai_block(gemini, openai, usd_brl, today))
     if firestore_lines:
         lines.append("")
         lines.append(f"🗄️ <b>Firestore por function — {today.strftime('%d/%m')} (parcial, até agora)</b>")
@@ -326,7 +323,7 @@ def build_message(
     lines.append(
         "Obs.: GCP = dia anterior (export do Billing tem ~1 dia de atraso; o último dia pode estar parcial). "
         "IA e Firestore = dia corrente, parcial até o horário de geração deste relatório (19h BRT). "
-        "Anthropic/OpenAI/Groq/Tavily/Twilio não entram na fatura GCP."
+        "OpenAI/Groq/Tavily/Twilio não entram na fatura GCP."
     )
     return "\n".join(lines)
 
@@ -393,13 +390,12 @@ def gerar_relatorio_custos(db, now: datetime | None = None, bq: BigQueryRest | N
         gcp_error = str(exc)[:160]
         print(f"[CustosHermes] BigQuery falhou: {exc}")
 
-    # system_usage/{gemini,claude,firestore} são indexados em America/Sao_Paulo,
+    # system_usage/{gemini,openai,firestore} são indexados em America/Sao_Paulo,
     # pelo DIA CORRENTE — telemetria própria lida ao vivo no momento em que o job
     # roda, por isso parcial. O rótulo exibido a André usa "today" explicitamente
     # (ver build_message/format_ai_block), não o "day"/"yesterday" do bloco GCP.
     day_key = today.isoformat()
     gemini = _usage_doc(db, "gemini", day_key)
-    claude = _usage_doc(db, "claude", day_key)
     openai = _usage_doc(db, "openai", day_key)
 
     firestore_lines = None
@@ -417,7 +413,7 @@ def gerar_relatorio_custos(db, now: datetime | None = None, bq: BigQueryRest | N
     except Exception:
         usd_brl = 5.30
 
-    return build_message(yesterday, gcp_summary, cpu_rows, gemini, claude, openai, firestore_lines, usd_brl, gcp_error, today=today)
+    return build_message(yesterday, gcp_summary, cpu_rows, gemini, openai, firestore_lines, usd_brl, gcp_error, today=today)
 
 
 @scheduler_fn.on_schedule(

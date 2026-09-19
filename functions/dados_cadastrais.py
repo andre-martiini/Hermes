@@ -10,7 +10,7 @@ registrada em `main.py`), só declarada ao modelo quando o assunto
 aparece na conversa (ver os `_gate_dados_cadastrais`/gate equivalente em cada
 callable). Isso existe porque parte desse dado é sensível (CPF, RG, dados
 bancários) — colocá-lo sempre no contexto multiplicaria sem necessidade quantas
-vezes ele trafega para a API do Gemini/Claude.
+vezes ele trafega para a API do Gemini.
 
 Não há ferramenta de escrita para a IA: o dado é gravado uma vez via
 `scripts/seed_dados_cadastrais.py` (execução local, fora deste callable) e

@@ -1,8 +1,7 @@
 """
-Loop de tool-calling sobre a Gemini API, com a mesma interface de
-`claude_provider.run_tool_loop` (tools no formato {"name", "description",
-"input_schema"}, `function_map`, histórico em texto) para os agentes do Hermes
-trocarem de provedor sem reescrever suas ferramentas.
+Loop de tool-calling sobre a Gemini API para os agentes do Hermes (planejador,
+elevações, secretário): tools no formato {"name", "description", "input_schema"},
+`function_map` e histórico em texto.
 
 Diferenças que importam do Gemini 3.x:
 - `max_output_tokens` inclui o raciocínio (~300-600 tokens mesmo em pergunta
@@ -110,7 +109,9 @@ def run_tool_loop(
     Executa um turno completo de conversa com tool-calling na Gemini API.
 
     client: instância de google.genai.Client
-    tools / function_map / history / user_message: como em claude_provider
+    tools: lista de {"name", "description", "input_schema"} (JSON Schema)
+    function_map: {nome_da_tool: callable(**kwargs) -> objeto serializável em JSON}
+    history: [{"role": "user"|"assistant", "content": str}, ...]; user_message: a nova mensagem
     max_tokens: orçamento da resposta visível (o provider soma a folga do raciocínio)
     fallback_model: usado quando o principal falha por modelo inexistente ou sem
              capacidade (404/429/5xx); as rodadas seguintes do turno o mantêm
