@@ -14000,14 +14000,14 @@ def detectar_subproduto_semanal(event: scheduler_fn.ScheduledEvent) -> None:
 
     db = get_db()
     keys_doc = _cached_doc_get(db, "system", "api_keys")
-    claude_key = (keys_doc.to_dict() or {}).get("claude_api_key") if keys_doc.exists else None
-    if not claude_key:
-        print("[Elevacao] claude_api_key não configurada em system/api_keys; abortando.")
+    gemini_key = (keys_doc.to_dict() or {}).get("gemini_api_key") if keys_doc.exists else None
+    if not gemini_key:
+        print("[Elevacao] gemini_api_key não configurada em system/api_keys; abortando.")
         return
 
     hoje = _hoje_sp()
     deteccao_subproduto.rodar_deteccao(
-        db, hoje, _coletar_acoes(db, hoje).get("carga_semana") or [], claude_key)
+        db, hoje, _coletar_acoes(db, hoje).get("carga_semana") or [], gemini_key)
 
 # Import personal diary + weekly personality consolidation jobs
 from personal_diary import gerar_diario_pessoal, consolidar_personalidade, ajustarDiarioPessoal

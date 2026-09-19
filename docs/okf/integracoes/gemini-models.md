@@ -72,3 +72,12 @@ feature real de alto volume e baixo risco: o roteador de intenção de
 - **Comparação:** os custos de cada provider ficam em coleções paralelas
   (`system_usage/gemini` e `system_usage/openai`), agregáveis por dia/feature
   para decidir se vale expandir o Luna para mais chamadas do Hermes.
+
+
+## Agentes com tool-calling (2026-09-19)
+
+- Os agentes do Hermes que chamam ferramentas (planejador diário, elevações semanais e, na sequência, o secretário) usam `llm_providers/gemini_provider.py` — mesma interface do antigo `claude_provider`. Modelo padrão `GEMINI_AGENT_MODEL` = `gemini-3.8-flash`, reserva `GEMINI_AGENT_FALLBACK_MODEL` = `gemini-3.5-flash-lite` (troca automática em 404/429/5xx).
+- **O raciocínio do 3.8 Flash não desliga**: `thinking_level=minimal` e `thinking_budget=0` não são aceitos; `low` é o mais rápido que funciona (~2,2 s por chamada trivial, contra ~3,2 s no padrão e ~0,8 s do Flash-Lite, que não raciocina).
+- **`max_output_tokens` inclui o raciocínio** (~300–600 tokens mesmo em pergunta trivial): sem folga a resposta visível sai cortada. O provider soma `THINKING_HEADROOM_TOKENS` (2048) ao orçamento pedido.
+- Preço (telemetria em `gemini_cost_controls._MODEL_PRICE_USD_PER_MTOK`): US$0,75 entrada / US$3,75 saída por Mtok até 31/12/2026; **a partir de 01/01/2027 a tarifa padrão é US$1,50 / US$7,50** (tratada em `_PRICE_FROM_DATE`). O pensamento é cobrado como saída.
+- Medido em produção (dry-run): planejador diário ~US$0,01 por execução (era ~US$0,10 no Fable); elevações ~6 s por rodada.

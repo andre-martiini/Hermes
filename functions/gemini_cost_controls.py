@@ -21,6 +21,8 @@ TZ = ZoneInfo("America/Sao_Paulo")
 GEMINI_LIGHT_MODEL = os.environ.get("GEMINI_LIGHT_MODEL", "gemini-3.5-flash-lite")
 GEMINI_BALANCED_MODEL = os.environ.get("GEMINI_BALANCED_MODEL", "gemini-3.5-flash-lite")
 GEMINI_FRONTIER_MODEL = os.environ.get("GEMINI_FRONTIER_MODEL", "gemini-3.6-flash")
+GEMINI_AGENT_MODEL = os.environ.get("GEMINI_AGENT_MODEL", "gemini-3.8-flash")
+GEMINI_AGENT_FALLBACK_MODEL = os.environ.get("GEMINI_AGENT_FALLBACK_MODEL", GEMINI_LIGHT_MODEL)
 GEMINI_PRO_MODEL = os.environ.get("GEMINI_PRO_MODEL", "gemini-3.1-pro-preview")
 GEMINI_ROUTING_MODEL = os.environ.get("GEMINI_ROUTING_MODEL", GEMINI_LIGHT_MODEL)
 GEMINI_STRUCTURED_MODEL = os.environ.get("GEMINI_STRUCTURED_MODEL", GEMINI_LIGHT_MODEL)
@@ -47,6 +49,7 @@ _DEFAULT_FLEX_FEATURES = {
 # Text-token estimate for Gemini Developer API paid tier, USD per 1M tokens.
 # This is telemetry only; billing source of truth remains Google/AI Studio.
 _MODEL_PRICE_USD_PER_MTOK = {
+    "gemini-3.8-flash": {"input": 0.75, "output": 3.75},  # introdutório; ver _PRICE_FROM_DATE. Sem cached_input publicado.
     "gemini-3.6-flash": {"input": 1.50, "output": 7.50, "cached_input": 0.15},
     "gemini-3.5-flash-lite": {"input": 0.30, "output": 2.50, "cached_input": 0.03},
     "gemini-3.5-flash": {"input": 1.50, "output": 9.00, "cached_input": 0.15},
@@ -219,8 +222,20 @@ def _usage_int(usage: dict[str, Any], *names: str) -> int:
     return 0
 
 
-def _estimate_usd(model: str, usage: dict[str, Any], service_tier: str | None = None) -> float | None:
+# O preço introdutório do 3.8 Flash vale até 31/12/2026 (ai.google.dev, checado em 19/09/2026); a partir da data abaixo vale a tarifa padrão.
+_PRICE_FROM_DATE = {"gemini-3.8-flash": ("2027-01-01", {"input": 1.50, "output": 7.50})}
+
+
+def _price_for(model: str) -> dict[str, float] | None:
     price = _MODEL_PRICE_USD_PER_MTOK.get(model)
+    change = _PRICE_FROM_DATE.get(model)
+    if price and change and datetime.now(TZ).strftime("%Y-%m-%d") >= change[0]:
+        return change[1]
+    return price
+
+
+def _estimate_usd(model: str, usage: dict[str, Any], service_tier: str | None = None) -> float | None:
+    price = _price_for(model)
     if not price:
         return None
     input_tokens = _usage_int(usage, "prompt_token_count", "promptTokenCount")

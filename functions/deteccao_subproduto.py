@@ -56,6 +56,8 @@ from __future__ import annotations
 
 import os
 
+from gemini_cost_controls import GEMINI_AGENT_FALLBACK_MODEL, GEMINI_AGENT_MODEL
+
 COL_ELEVACOES = "elevacoes_sugeridas"
 
 # Quantas elevacoes por mes. Tres e o comeco sugerido pelo usuario; a trava
@@ -105,8 +107,8 @@ COTA_PASSIVO = int(os.environ.get("ELEVACAO_COTA_PASSIVO", "10"))
 # documento que ja nasce descartado, e o passivo util levaria um ano para passar.
 LEITURA_PASSIVO = int(os.environ.get("ELEVACAO_LEITURA_PASSIVO", "200"))
 
-MODELO = os.environ.get("ELEVACAO_MODEL", "claude-fable-5")
-MODELO_FALLBACK = os.environ.get("ELEVACAO_FALLBACK_MODEL", "claude-opus-4-8")
+MODELO = os.environ.get("ELEVACAO_MODEL", GEMINI_AGENT_MODEL)
+MODELO_FALLBACK = os.environ.get("ELEVACAO_FALLBACK_MODEL", GEMINI_AGENT_FALLBACK_MODEL)
 MAX_TOKENS = int(os.environ.get("ELEVACAO_MAX_TOKENS", "2048"))
 
 STATUS_PENDENTE = "pendente"
@@ -644,7 +646,7 @@ def reservar_no_firestore(db, hoje: str, teto: int, ref, payload: dict,
                           ja_no_mes: int = 0) -> bool:
     """Confere o teto do mes e grava a sugestao na MESMA transacao.
 
-    `claude_provider.run_tool_loop` executa as tool calls de uma rodada em
+    `gemini_provider.run_tool_loop` executa as tool calls de uma rodada em
     paralelo, num ThreadPoolExecutor. Um contador em memoria deixaria duas
     threads lerem a mesma contagem antes de qualquer uma gravar, e uma rodada com
     uma vaga sobrando persistiria varias sugestoes — o teto e a unica coisa que
@@ -1264,17 +1266,17 @@ def mensagem_da_rodada(rodada: dict, limite_candidatos: int = LIMITE_CANDIDATAS)
 # ficava indistinguivel de sucesso. `nenhuma_acao_com_corpo` e sucesso real
 # ficam de fora: nesses a rodada de fato terminou de olhar a janela.
 _MOTIVOS_DE_BLOQUEIO_OU_FALHA = frozenset({
-    "sem_anthropic", "historico_indisponivel", "semana_cheia",
+    "sem_genai", "historico_indisponivel", "semana_cheia",
     "teto_do_mes", "nenhum_objetivo_elegivel", "marcador_indisponivel",
     "falha_no_modelo",
 })
 
 
-def rodar_deteccao(db, hoje: str, carga_semana, claude_key: str) -> dict:
+def rodar_deteccao(db, hoje: str, carga_semana, api_key: str) -> dict:
     """Ponto de entrada do agendador: roda uma rodada e sempre registra a tentativa.
 
     A gravacao fica aqui fora, e nao dentro de `_rodar_uma_rodada`, para cobrir
-    todo caminho de saida com uma linha so — inclusive `sem_anthropic`, que
+    todo caminho de saida com uma linha so — inclusive `sem_genai`, que
     nunca chega em `preparar_rodada`.
 
     O `try/except` cobre um segundo achado da revisao do Codex: se
@@ -1289,7 +1291,7 @@ def rodar_deteccao(db, hoje: str, carga_semana, claude_key: str) -> dict:
     Ver `marcar_tentativa`.
     """
     try:
-        resultado = _rodar_uma_rodada(db, hoje, carga_semana, claude_key)
+        resultado = _rodar_uma_rodada(db, hoje, carga_semana, api_key)
     except Exception:
         marcar_tentativa(db, hoje, "erro_inesperado")
         raise
@@ -1298,7 +1300,7 @@ def rodar_deteccao(db, hoje: str, carga_semana, claude_key: str) -> dict:
     return resultado
 
 
-def _rodar_uma_rodada(db, hoje: str, carga_semana, claude_key: str) -> dict:
+def _rodar_uma_rodada(db, hoje: str, carga_semana, api_key: str) -> dict:
     """Uma rodada completa: prepara, chama o modelo uma vez, grava o que passar.
 
     O modulo inteiro fica sem importar `firebase_functions` de proposito — o
@@ -1307,10 +1309,10 @@ def _rodar_uma_rodada(db, hoje: str, carga_semana, claude_key: str) -> dict:
     ela precisa estar: e ela que impede o recurso de virar praga.
     """
     try:
-        import anthropic
+        from google import genai
     except ImportError:
-        print("[Elevacao] Dependencia 'anthropic' nao instalada; abortando.")
-        return {"rodou": False, "motivo": "sem_anthropic"}
+        print("[Elevacao] Dependencia 'google-genai' nao instalada; abortando.")
+        return {"rodou": False, "motivo": "sem_genai"}
 
     rodada = preparar_rodada(db, hoje, carga_semana)
     if not rodada["rodar"]:
@@ -1334,10 +1336,10 @@ def _rodar_uma_rodada(db, hoje: str, carga_semana, claude_key: str) -> dict:
     aceitas: list[str] = []
     tools, function_map = _ferramenta_propor(db, hoje, rodada, aceitas)
     try:
-        from llm_providers import claude_provider
+        from llm_providers import gemini_provider
 
-        resultado = claude_provider.run_tool_loop(
-            client=anthropic.Anthropic(api_key=claude_key),
+        resultado = gemini_provider.run_tool_loop(
+            client=genai.Client(api_key=api_key),
             model=MODELO,
             system_instruction=PERSONA,
             tools=tools,
@@ -1346,6 +1348,8 @@ def _rodar_uma_rodada(db, hoje: str, carga_semana, claude_key: str) -> dict:
             user_message=mensagem_da_rodada(rodada),
             max_tokens=MAX_TOKENS,
             fallback_model=MODELO_FALLBACK,
+            feature="elevacao",
+            db=db,
         )
     except Exception as exc:
         print(f"[Elevacao] Falha na chamada ao modelo: {exc}")

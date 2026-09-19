@@ -139,11 +139,11 @@ O backend roda em Cloud Functions Python (gen2). Há ~80 funções exportadas em
 
 ## `functions/ai_notification_planner.py`
 
-Planejador proativo de notificações por IA — módulo aditivo, usa o provider/loop de tool-calling com Claude (`llm_providers/claude_provider.py`), mas roda sem interação do usuário.
+Planejador proativo de notificações por IA — módulo aditivo, usa o provider/loop de tool-calling com Gemini (`llm_providers/gemini_provider.py`, modelo `GEMINI_AGENT_MODEL`), mas roda sem interação do usuário.
 
 | Função | Trigger | O que faz |
 |---|---|---|
-| `ai_notification_planner_daily` | Scheduler (6h30 BRT, diário) | Agente com Claude analisa tarefas ativas e metas estratégicas (`estrategia_pessoal`) e propõe, via ferramenta `propor_notificacao`, no máximo `AI_PLANNER_MAX_DAILY_NOTIFICATIONS` (padrão 3) notificações para o dia, gravadas em `scheduled_notifications` (status `pending`) |
+| `ai_notification_planner_daily` | Scheduler (6h30 BRT, diário) | Agente com Gemini analisa tarefas ativas e metas estratégicas (`estrategia_pessoal`) e propõe, via ferramenta `propor_notificacao`, no máximo `AI_PLANNER_MAX_DAILY_NOTIFICATIONS` (padrão 3) notificações para o dia, gravadas em `scheduled_notifications` (status `pending`) |
 | `dispatch_pending_ai_notifications` | (interno, chamado por `check_and_send_reminders`) | Envia ao Telegram as notificações agendadas cujo `send_at` já chegou, com botões inline de feedback (👍 útil / 👎 dispensar), e marca `status: sent`/`failed` |
 
 Financeiro e saúde ainda estão fora do escopo deste planejador — ele não foi migrado para os módulos `health_tools.py`/`tools/telegram_extended.py` compartilhados com o Copiloto padrão.

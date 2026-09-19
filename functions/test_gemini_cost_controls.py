@@ -8,6 +8,7 @@ do Hermes" (achados 2, 3, 4 e 6 de 04/09/2026).
 from __future__ import annotations
 
 import unittest
+from datetime import datetime
 from unittest import mock
 
 import gemini_cost_controls as gcc
@@ -66,6 +67,26 @@ class EstimateUsdTest(unittest.TestCase):
         usage = {"prompt_token_count": 1_000_000, "candidates_token_count": 1_000_000}
         # gemini-3.5-flash-lite: input 0.30 + output 2.50 = 2.80
         self.assertAlmostEqual(gcc._estimate_usd("gemini-3.5-flash-lite", usage), 2.80)
+
+    def test_gemini_3_8_flash_introductory_price_until_2026_end(self):
+        usage = {"prompt_token_count": 1_000_000, "candidates_token_count": 1_000_000}
+        with mock.patch.object(gcc, "datetime") as fake:
+            fake.now.return_value = datetime(2026, 12, 31, 23, 0, tzinfo=gcc.TZ)
+            # input 0.75 + output 3.75
+            self.assertAlmostEqual(gcc._estimate_usd("gemini-3.8-flash", usage), 4.50)
+
+    def test_gemini_3_8_flash_standard_price_from_2027(self):
+        usage = {"prompt_token_count": 1_000_000, "candidates_token_count": 1_000_000}
+        with mock.patch.object(gcc, "datetime") as fake:
+            fake.now.return_value = datetime(2027, 1, 1, 0, 30, tzinfo=gcc.TZ)
+            # tarifa padrão: input 1.50 + output 7.50
+            self.assertAlmostEqual(gcc._estimate_usd("gemini-3.8-flash", usage), 9.00)
+
+    def test_gemini_3_8_flash_thinking_tokens_billed_as_output(self):
+        usage = {"prompt_token_count": 0, "candidates_token_count": 0, "thoughts_token_count": 1_000_000}
+        with mock.patch.object(gcc, "datetime") as fake:
+            fake.now.return_value = datetime(2026, 9, 19, tzinfo=gcc.TZ)
+            self.assertAlmostEqual(gcc._estimate_usd("gemini-3.8-flash", usage), 3.75)
 
     def test_thoughts_tokens_are_billed_as_output(self):
         # Achado 3 de 04/09/2026: thoughts_token_count nunca entrava na conta.
