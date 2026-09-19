@@ -1139,9 +1139,26 @@ def _executar_llm_secretario(
 # Operações de Banco de Dados e Fila
 # ---------------------------------------------------------------------------
 
+_RE_ASSINATURA_BOT = re.compile(r"^\*{0,2}\s*Hermes Bot:?\*{0,2}", re.IGNORECASE)
+
+
+def eh_mensagem_do_bot(mensagem: dict) -> bool:
+    """A resposta do secretário sai pela conta do André, então volta capturada como
+    `from_me`. Toda resposta começa com a assinatura (`prefixar_assinatura`), que é o
+    que a distingue de uma mensagem que o André escreveu de verdade."""
+    texto = str(mensagem.get("content") or mensagem.get("text") or "").strip()
+    return bool(_RE_ASSINATURA_BOT.match(texto))
+
+
 def processar_mensagem_from_me(db, mensagem: dict) -> None:
     """Quando o próprio André envia mensagem para um chat, marca o estado da conversa
-    como 'assumido_por_andre' para que o bot não interfira."""
+    como 'assumido_por_andre' para que o bot não interfira.
+
+    Resposta do próprio bot não conta: tratá-la como o André assumindo zerava o
+    histórico e as trocas a cada resposta, e o bot se reapresentava em toda mensagem.
+    """
+    if eh_mensagem_do_bot(mensagem):
+        return
     chat_id = str(mensagem.get("chat_id") or "").strip()
     if not chat_id:
         return

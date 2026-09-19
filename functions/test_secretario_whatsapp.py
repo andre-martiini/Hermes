@@ -229,6 +229,69 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
         doc = self.db.collection(sec.COLLECTION_CONVERSAS).document(chat_id).get().to_dict()
         self.assertEqual(doc.get("estado"), sec.ESTADO_ASSUMIDO_POR_ANDRE)
 
+    def test_resposta_do_proprio_bot_capturada_como_from_me_nao_zera_a_conversa(self):
+        """A resposta do bot sai pela conta do André e volta capturada como from_me.
+        Tratá-la como 'André assumiu' zerava histórico e trocas e o bot se reapresentava."""
+        chat_id = "5511999999999@c.us"
+        self.db.collection(sec.COLLECTION_CONVERSAS).document(chat_id).set({
+            "chat_id": chat_id,
+            "estado": sec.ESTADO_EM_ATENDIMENTO,
+            "trocas_count": 1,
+            "historico_mensagens": [{"role": "user", "content": "oi"}, {"role": "assistant", "content": "**Hermes Bot:** olá"}],
+        })
+        for i, texto in enumerate([
+            "**Hermes Bot:** Anotei o recado.",
+            "Hermes Bot: Anotei o recado.",
+            "*Hermes Bot:* Anotei o recado.",
+            "  **hermes bot:** Anotei o recado.",
+        ]):
+            with self.subTest(texto=texto):
+                res = sec.processar_mensagem_secretario(self.db, {
+                    "chat_id": chat_id, "from_me": True, "content": texto, "wa_message_id": f"eco-{i}",
+                })
+                self.assertIsNone(res)
+                doc = self.db.collection(sec.COLLECTION_CONVERSAS).document(chat_id).get().to_dict()
+                self.assertEqual(doc.get("estado"), sec.ESTADO_EM_ATENDIMENTO)
+
+    def test_mensagem_do_andre_que_apenas_cita_o_bot_ainda_assume_a_conversa(self):
+        chat_id = "5511999999999@c.us"
+        self.db.collection(sec.COLLECTION_CONVERSAS).document(chat_id).set({
+            "chat_id": chat_id, "estado": sec.ESTADO_EM_ATENDIMENTO, "trocas_count": 1,
+        })
+        sec.processar_mensagem_secretario(self.db, {
+            "chat_id": chat_id, "from_me": True,
+            "content": "Oi! O Hermes Bot já te respondeu? Assumo daqui.", "wa_message_id": "andre-1",
+        })
+        doc = self.db.collection(sec.COLLECTION_CONVERSAS).document(chat_id).get().to_dict()
+        self.assertEqual(doc.get("estado"), sec.ESTADO_ASSUMIDO_POR_ANDRE)
+
+    def test_segunda_mensagem_chega_ao_llm_com_historico_apos_o_eco_da_resposta(self):
+        """Fim a fim do defeito: mensagem -> resposta do bot -> eco from_me -> nova mensagem.
+        Antes, o eco zerava a conversa e a segunda mensagem chegava ao LLM sem histórico."""
+        chat_id = "5511999999999@c.us"
+        historicos = []
+
+        def llm(**kwargs):
+            historicos.append(list(kwargs["historico"]))
+            return {"resposta_para_contato": "Anotei.", "resumo_recado": "recado",
+                    "forcou_decisao": False, "assunto_sensivel": False}
+
+        destino = {"encontrado": True, "nome": "Carlos", "chat_id": chat_id}
+        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value=destino):
+            sec.processar_mensagem_secretario(self.db, {
+                "chat_id": chat_id, "chat_name": "Carlos", "from_me": False,
+                "content": "Oi André", "wa_message_id": "m1"}, llm_runner=llm)
+            sec.processar_mensagem_secretario(self.db, {
+                "chat_id": chat_id, "from_me": True,
+                "content": "**Hermes Bot:** Anotei.", "wa_message_id": "eco1"})
+            res = sec.processar_mensagem_secretario(self.db, {
+                "chat_id": chat_id, "chat_name": "Carlos", "from_me": False,
+                "content": "Pode me ligar hoje?", "wa_message_id": "m2"}, llm_runner=llm)
+
+        self.assertEqual(historicos[0], [])
+        self.assertEqual(len(historicos[1]), 2)
+        self.assertEqual(res["trocas_count"], 2)
+
     def test_fluxo_normal_gera_outbox_com_assinatura_e_envio_imediato(self):
         chat_id = "5511999999999@c.us"
         msg = {
