@@ -1842,6 +1842,13 @@ def anexar_arquivo(ctx: ToolContext, args: dict):
     return anexar(ctx, args)
 
 
+def atualizar_arquivo_drive(ctx: ToolContext, args: dict):
+    """Substitui o conteudo de um arquivo que ja existe no Drive, no mesmo ID."""
+    from tools.drive_arquivos import atualizar_conteudo
+
+    return atualizar_conteudo(ctx, args)
+
+
 def _whatsapp(nome: str):
     """Handler das tools de WhatsApp, com a recusa por allowlist virando erro
     legivel em vez de excecao — o limite e esperado, nao falha."""
@@ -2584,6 +2591,7 @@ _HANDLERS: dict = {
     "ler_consolidacao_whatsapp": _whatsapp("ler_consolidacao"),
     "consultar_envio_whatsapp": _whatsapp("consultar_envio"),
     "anexar_arquivo": anexar_arquivo,
+    "atualizar_arquivo_drive": atualizar_arquivo_drive,
     "preparar_upload": preparar_upload,
     "remover_anexo": remover_anexo,
     "consultar_fatura_cartao": consultar_fatura_cartao,
