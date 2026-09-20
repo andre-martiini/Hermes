@@ -166,7 +166,7 @@ Três camadas, todas obrigatórias:
    `arguments._confirmed = true`.
 
 Além disso: rate limit de 60 chamadas/minuto por UID e log de auditoria de toda
-chamada em `mcp_audit_log` (uid, tool, argumentos, latência).
+chamada em `mcp_audit_log` (uid, tool, argumentos, latência e, nas execuções diretas, `result_chars`: o tamanho da resposta em caracteres, para achar as ferramentas que enchem o contexto do cliente).
 
 ### Por que só o WhatsApp
 

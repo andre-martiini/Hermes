@@ -1202,6 +1202,7 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
 
     start = time.monotonic()
     is_error = False
+    text = ""
     estruturado = None  # ver comentario de `outputSchema`/`structuredContent` abaixo
     try:
         result = execute_tool(name, arguments, ctx)
@@ -1244,6 +1245,7 @@ def _handle_tools_call(params: dict, *, ctx: ToolContext) -> dict:
             arguments=arguments,
             latency_ms=(time.monotonic() - start) * 1000,
             is_error=is_error,
+            result_chars=len(text),
         )
 
     # Mesmo motivo do `resultType` em `_text_result` acima — este e o unico
@@ -1548,17 +1550,23 @@ def _audit_log(
     arguments: dict,
     latency_ms: float,
     is_error: bool = False,
+    result_chars: int | None = None,
 ) -> None:
     try:
         db = firestore.client()
-        db.collection("mcp_audit_log").add({
+        registro = {
             "uid": uid,
             "tool": tool,
             "arguments": json.loads(json.dumps(arguments, ensure_ascii=False, default=str)),
             "latency_ms": round(latency_ms, 1),
             "is_error": bool(is_error),
             "timestamp": firestore.SERVER_TIMESTAMP,
-        })
+        }
+        # Tamanho da resposta em caracteres: só existe nas chamadas de execução
+        # direta (as demais, como job assíncrono e confirmação, não medem).
+        if result_chars is not None:
+            registro["result_chars"] = int(result_chars)
+        db.collection("mcp_audit_log").add(registro)
     except Exception as exc:
         print(f"[mcp_server] Falha ao gravar audit log (tool={tool}): {exc}")
 

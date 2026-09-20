@@ -175,6 +175,14 @@ _STOPWORDS_QUERY = {
     "nos", "nas", "ao", "se", "ou",
 }
 
+# `consultar_historico_acoes` (MCP): quantas ações vêm completas no modo `auto`
+# e quais campos somem das resumidas. Descrição, notas, plano e diário são ~80%
+# do tamanho da resposta (medido em 20/09/2026: 33-46 mil caracteres para 20 ações).
+_HISTORICO_ITENS_COMPLETOS_AUTO = 5
+_HISTORICO_CAMPOS_PESADOS = (
+    "descricao", "notas", "sintese_demanda", "plano_acao", "acompanhamento_recente",
+)
+
 
 def _filtro_str_ou_none(valor):
     """`None` passa direto; qualquer outro valor vira `str()`.
@@ -218,6 +226,12 @@ def _filtro_str_ou_none(valor):
     return valor if valor is None else str(valor)
 
 
+def _resumir_acao_do_historico(item: dict) -> dict:
+    resumo = {k: v for k, v in item.items() if k not in _HISTORICO_CAMPOS_PESADOS}
+    resumo["resumido"] = True
+    return resumo
+
+
 def _consultar_historico_acoes(ctx: ToolContext, args: dict):
     from tools.busca_grafo import buscar_tarefas
 
@@ -256,7 +270,23 @@ def _consultar_historico_acoes(ctx: ToolContext, args: dict):
         return {"erro": res["erro"], "resultados": []}
 
     resultados = res.get("resultados", [])
-    return {
+
+    # A busca é ranqueada: as primeiras ações são as que importam, o resto serve
+    # para reconhecer qual abrir. `enum` de `detalhe` já é validado no preflight.
+    detalhe = args.get("detalhe") or "auto"
+    if detalhe == "completo":
+        n_completos = len(resultados)
+    elif detalhe == "resumo":
+        n_completos = 0
+    else:
+        n_completos = _HISTORICO_ITENS_COMPLETOS_AUTO
+    n_resumidos = max(0, len(resultados) - n_completos)
+    if n_resumidos:
+        resultados = resultados[:n_completos] + [
+            _resumir_acao_do_historico(r) for r in resultados[n_completos:]
+        ]
+
+    saida = {
         "total_retornado": len(resultados),
         "resultados": resultados,
         "filtros": {
@@ -267,6 +297,13 @@ def _consultar_historico_acoes(ctx: ToolContext, args: dict):
             "data_limite_fim": _filtro_str_ou_none(data_limite_fim),
         },
     }
+    if n_resumidos:
+        saida["aviso"] = (
+            f"{n_resumidos} de {len(resultados)} ações vieram resumidas (resumido=true, sem "
+            "descrição, notas, plano de ação e diário). Abra uma com obter_acao(task_id) "
+            "ou repita a busca com detalhe='completo'."
+        )
+    return saida
 
 
 def _buscar_arquivos_acervo(ctx: ToolContext, args: dict):

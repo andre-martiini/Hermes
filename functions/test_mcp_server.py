@@ -926,5 +926,53 @@ class TestOutrosMetodosResultType(unittest.TestCase):
         self.assertIn("faça x", r["messages"][0]["content"]["text"])
 
 
+class TestAuditLogTamanhoDaResposta(unittest.TestCase):
+    """`mcp_audit_log.result_chars` (20/09/2026): sem o tamanho da resposta não dá
+    para saber quais ferramentas enchem o contexto do cliente."""
+
+    def _registro_gravado(self, **extra):
+        db = MagicMock()
+        with patch.object(mcp_server.firestore, "client", return_value=db):
+            mcp_server._audit_log(uid="u", tool="t", arguments={}, latency_ms=1.0, **extra)
+        return db.collection.return_value.add.call_args.args[0]
+
+    def _chamar(self, **execute_tool_kwargs):
+        with patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), \
+             patch.object(mcp_server, "_exige_confirmacao", return_value=False), \
+             patch.object(mcp_server, "execute_tool", **execute_tool_kwargs), \
+             patch.object(mcp_server, "_audit_log") as audit:
+            try:
+                r = mcp_server._handle_tools_call(
+                    {"name": "obter_estado_atual", "arguments": {}}, ctx=_ctx_result_type()
+                )
+            except mcp_server.McpError:
+                r = None
+        return r, audit
+
+    def test_grava_result_chars_quando_informado(self):
+        self.assertEqual(self._registro_gravado(result_chars=1234)["result_chars"], 1234)
+
+    def test_omite_result_chars_quando_nao_informado(self):
+        self.assertNotIn("result_chars", self._registro_gravado())
+
+    def test_execucao_direta_audita_o_tamanho_do_texto_devolvido(self):
+        r, audit = self._chamar(return_value={"resultado": "ok"})
+        chars = audit.call_args.kwargs["result_chars"]
+        self.assertEqual(chars, len(r["content"][0]["text"]))
+        self.assertGreater(chars, 0)
+
+    def test_falha_na_execucao_tambem_audita_o_tamanho_do_erro(self):
+        r, audit = self._chamar(side_effect=RuntimeError("boom"))
+        self.assertTrue(r["isError"])
+        self.assertEqual(audit.call_args.kwargs["result_chars"], len(r["content"][0]["text"]))
+
+    def test_tool_sem_executor_nao_vira_nameerror_no_finally(self):
+        # `text` nasce antes do try: ToolNotAvailable levanta McpError e o
+        # `finally` que audita não pode mascará-lo com um NameError.
+        r, audit = self._chamar(side_effect=mcp_server.ToolNotAvailable("x"))
+        self.assertIsNone(r)
+        self.assertEqual(audit.call_args.kwargs["result_chars"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

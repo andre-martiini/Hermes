@@ -1308,12 +1308,14 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
                                     "type": "array",
                                     "items": {"type": "string"},
                                 },
+                                "resumido": {"type": "boolean"},
                             },
+                            # Só os 10 campos leves são sempre presentes: os 5 pesados
+                            # somem dos itens resumidos (`resumido: true`, `detalhe`).
                             "required": [
                                 "id", "titulo", "status", "tipo_acao", "responsavel",
                                 "criado_em", "area", "data_limite", "processo_sei",
-                                "tags", "descricao", "notas", "sintese_demanda",
-                                "plano_acao", "acompanhamento_recente",
+                                "tags",
                             ],
                             "additionalProperties": False,
                         },
@@ -1333,6 +1335,7 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
                         ],
                         "additionalProperties": False,
                     },
+                    "aviso": {"type": "string"},
                 },
                 "required": ["total_retornado", "resultados", "filtros"],
                 "additionalProperties": False,
