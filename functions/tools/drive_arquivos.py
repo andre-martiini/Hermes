@@ -10,6 +10,14 @@ Escopo estreito de proposito: Google Docs e arquivos de texto. Importar CSV numa
 Planilha existente substitui o arquivo inteiro e apaga as outras abas;
 Apresentacao, PDF, imagem e .docx nao tem como ser reescritos a partir de texto.
 
+Salvaguardas (alem de recusar vazio, lixeira, sem permissao e tipo nao suportado):
+so atualiza arquivo que e do dono (`ownedByMe`), para uma injecao de prompt nao
+conseguir reescrever documento de colega ou de Drive compartilhado; e recusa um
+conteudo muito menor que o atual (`LIMITE_REDUCAO`), que e o jeito mais provavel
+de perder texto sem ninguem ver: a ferramenta exige o documento COMPLETO, e um
+envio incompleto apagaria o resto. `permitir_reducao=true` libera o encurtamento
+de proposito.
+
 Comportamento comprovado contra o Drive real em 20/09/2026: Doc atualizado com
 `text/html`, `text/markdown` e `text/plain` mantem ID, link e tipo (a conversao
 gera titulos, listas, tabelas e negrito); arquivo de texto comum mantem ID, nome
@@ -20,12 +28,15 @@ from __future__ import annotations
 
 import hashlib
 import re
+from html.parser import HTMLParser
 
 MAX_BYTES = 2 * 1024 * 1024
 MIME_DOC = "application/vnd.google-apps.document"
 TIPOS_CONTEUDO_DOC = ("text/html", "text/markdown", "text/plain")
+LIMITE_REDUCAO = 0.4
+MIN_TAMANHO_PARA_GUARDA = 500  # abaixo disso, encurtar nao e sinal de truncamento
 
-_CAMPOS = "id,name,mimeType,trashed,capabilities(canEdit)"
+_CAMPOS = "id,name,mimeType,trashed,ownedByMe,driveId,size,capabilities(canEdit)"
 _CAMPOS_ATUALIZADO = "id,name,mimeType,modifiedTime,webViewLink,md5Checksum"
 
 _MOTIVO_TIPO_GOOGLE = {
@@ -59,6 +70,57 @@ def _extrair_id(valor: str) -> str:
 
 def _eh_texto(mime: str) -> bool:
     return mime.startswith("text/") or mime == "application/json"
+
+
+class _ExtratorTexto(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.partes: list[str] = []
+        self._ignorar = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style"):
+            self._ignorar += 1
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style") and self._ignorar:
+            self._ignorar -= 1
+
+    def handle_data(self, data):
+        if not self._ignorar:
+            self.partes.append(data)
+
+
+def _colapsar(texto: str) -> str:
+    return re.sub(r"\s+", " ", texto.replace("\ufeff", "")).strip()
+
+
+def _texto_visivel(conteudo: str, tipo: str) -> str:
+    """Estimativa do texto que o Doc mostrara, para comparar com o atual."""
+    if tipo == "text/html":
+        extrator = _ExtratorTexto()
+        try:
+            extrator.feed(conteudo)
+            extrator.close()
+        except Exception:  # noqa: BLE001 — HTML quebrado: melhor medir o bruto do que falhar
+            return _colapsar(conteudo)
+        return _colapsar(" ".join(extrator.partes))
+    if tipo == "text/markdown":
+        sem_links = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", conteudo)
+        return _colapsar(re.sub(r"[#*_`>|~-]+", " ", sem_links))
+    return _colapsar(conteudo)
+
+
+def _tamanhos_para_a_guarda(service, file_id, mime, meta, conteudo, tipo, dados):
+    """(tamanho atual, tamanho novo) na mesma unidade, ou (None, None) se nao deu para medir."""
+    try:
+        if mime == MIME_DOC:
+            exportado = service.files().export(fileId=file_id, mimeType="text/plain").execute()
+            texto = exportado.decode("utf-8", "replace") if isinstance(exportado, bytes) else str(exportado)
+            return len(_colapsar(texto)), len(_texto_visivel(conteudo, tipo))
+        return int(meta.get("size") or 0), len(dados)
+    except Exception:  # noqa: BLE001 — sem medir, a guarda nao bloqueia
+        return None, None
 
 
 def _erro_do_drive(exc: Exception) -> str:
@@ -95,6 +157,12 @@ def atualizar_conteudo(ctx, args: dict) -> dict:
     if not (meta.get("capabilities") or {}).get("canEdit"):
         return {"erro": "O Hermes nao tem permissao para editar este arquivo. Nada foi alterado."}
 
+    # `ownedByMe` NAO vem preenchido em item de Drive compartilhado: la o sinal e o `driveId`.
+    if meta.get("ownedByMe") is False or meta.get("driveId"):
+        return {"erro": "O arquivo pertence a outra pessoa (ou a um Drive compartilhado): por seguranca o "
+                        "Hermes so atualiza arquivos do proprio dono. Edite pela interface do Google. "
+                        "Nada foi alterado."}
+
     mime = meta.get("mimeType") or ""
     if mime == MIME_DOC:
         tipo = str(args.get("tipo_conteudo") or "text/html")
@@ -109,6 +177,15 @@ def atualizar_conteudo(ctx, args: dict) -> dict:
     else:
         return {"erro": f"Tipo '{mime}' nao suportado: so Google Docs e arquivos de texto "
                         "(text/*, JSON) podem ser reescritos a partir de texto. Nada foi alterado."}
+
+    if not args.get("permitir_reducao"):
+        atual, novo = _tamanhos_para_a_guarda(service, file_id, mime, meta, conteudo, tipo, dados)
+        if atual is not None and atual >= MIN_TAMANHO_PARA_GUARDA and novo < atual * LIMITE_REDUCAO:
+            unidade = "caracteres" if mime == MIME_DOC else "bytes"
+            return {"erro": f"O conteudo novo tem {novo} {unidade} e o atual tem {atual} "
+                            f"({100 * novo // atual}% do tamanho): parece uma reescrita incompleta e "
+                            "apagaria o resto. Reenvie o arquivo COMPLETO; se encurtar e intencional, "
+                            "chame de novo com permitir_reducao=true. Nada foi alterado."}
 
     try:
         atualizado = service.files().update(

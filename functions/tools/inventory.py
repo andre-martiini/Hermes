@@ -804,8 +804,9 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "atualizar_arquivo_drive": ToolInventoryEntry(
         "utilitario", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "confere o md5 devolvido pelo Drive (arquivo de texto) ou que o Doc não ficou vazio após a "
-        "conversão; recusa conteúdo vazio, tipo não suportado, arquivo na lixeira e arquivo sem permissão "
-        "de edição antes de gravar",
+        "conversão; recusa conteúdo vazio, tipo não suportado, arquivo na lixeira, arquivo sem permissão "
+        "de edição, arquivo que não é do dono e conteúdo com menos de 40% do tamanho atual (reescrita "
+        "incompleta) antes de gravar; o conteúdo não vai para o mcp_audit_log (só tamanho e sha256)",
         rede_servico="Google Drive (conta do próprio dono)",
         dados_sensiveis_categoria="qualquer documento do Drive do dono",
         nota="reversível: a versão anterior fica no histórico de versões do PRÓPRIO arquivo (Arquivo > Histórico "

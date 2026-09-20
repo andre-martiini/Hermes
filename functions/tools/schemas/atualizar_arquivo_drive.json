@@ -1,6 +1,6 @@
 {
   "name": "atualizar_arquivo_drive",
-  "description": "Substitui o conteúdo de um arquivo que JÁ existe no Drive, mantendo o MESMO ID, link e permissões. Use esta ferramenta — e não o create_file do conector do Drive — sempre que precisar atualizar um arquivo criado antes: criar de novo gera ID e link novos e deixa a versão antiga solta. A versão anterior fica no histórico de versões do próprio arquivo. Serve para Google Docs (o conteúdo é convertido: HTML, Markdown ou texto puro viram títulos, listas, tabelas e negrito) e para arquivos de texto (.md, .txt, .csv, .json). Não serve para Planilhas, Apresentações, PDF, imagens nem .docx. O conteúdo enviado SUBSTITUI tudo: se o dono pode ter editado o arquivo desde que você o leu, releia antes e preserve o que ele mudou.",
+  "description": "Substitui o conteúdo de um arquivo que JÁ existe no Drive, mantendo o MESMO ID, link e permissões. Use esta ferramenta — e não o create_file do conector do Drive — sempre que precisar atualizar um arquivo criado antes: criar de novo gera ID e link novos e deixa a versão antiga solta. A versão anterior fica no histórico de versões do próprio arquivo. Serve para Google Docs (o conteúdo é convertido: HTML, Markdown ou texto puro viram títulos, listas, tabelas e negrito) e para arquivos de texto (.md, .txt, .csv, .json). Não serve para Planilhas, Apresentações, PDF, imagens nem .docx. O conteúdo enviado SUBSTITUI tudo: se o dono pode ter editado o arquivo desde que você o leu, releia antes e preserve o que ele mudou. Recusa arquivo que não é do dono e conteúdo muito menor que o atual (parece reescrita incompleta): reenvie o arquivo COMPLETO, ou use permitir_reducao se encurtar for de propósito.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -16,6 +16,10 @@
         "type": "string",
         "enum": ["text/html", "text/markdown", "text/plain"],
         "description": "Só para Google Docs: formato do `conteudo` (padrão text/html). Em arquivos de texto comuns o tipo do arquivo é mantido e este campo é ignorado."
+      },
+      "permitir_reducao": {
+        "type": "boolean",
+        "description": "Padrão false. Só use true quando o dono pediu para ENCURTAR o arquivo de propósito: sem isso, um conteúdo com menos de 40% do tamanho atual é recusado, porque costuma ser um envio incompleto que apagaria o resto."
       }
     },
     "required": ["file_id", "conteudo"]
