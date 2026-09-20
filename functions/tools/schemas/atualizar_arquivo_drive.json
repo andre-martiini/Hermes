@@ -1,6 +1,6 @@
 {
   "name": "atualizar_arquivo_drive",
-  "description": "Substitui o conteúdo de um arquivo que JÁ existe no Drive, mantendo o MESMO ID, link e permissões. Use esta ferramenta — e não o create_file do conector do Drive — sempre que precisar atualizar um arquivo criado antes: criar de novo gera ID e link novos e deixa a versão antiga solta. A versão anterior fica no histórico de versões do próprio arquivo. Serve para Google Docs (o conteúdo é convertido: HTML, Markdown ou texto puro viram títulos, listas, tabelas e negrito) e para arquivos de texto (.md, .txt, .csv, .json). Não serve para Planilhas, Apresentações, PDF, imagens nem .docx. O conteúdo enviado SUBSTITUI tudo: se o dono pode ter editado o arquivo desde que você o leu, releia antes e preserve o que ele mudou. Recusa arquivo que não é do dono e conteúdo muito menor que o atual (parece reescrita incompleta): reenvie o arquivo COMPLETO, ou use permitir_reducao se encurtar for de propósito.",
+  "description": "Substitui o conteúdo de um arquivo que JÁ existe no Drive, mantendo o MESMO ID, link e permissões. Use esta ferramenta — e não o create_file do conector do Drive — sempre que precisar atualizar um arquivo criado antes: criar de novo gera ID e link novos e deixa a versão antiga solta. A versão anterior fica no histórico de versões do próprio arquivo. Serve para Google Docs (o conteúdo é convertido: HTML, Markdown ou texto puro viram títulos, listas, tabelas e negrito) e para arquivos de texto (.md, .txt, .csv, .json). Não serve para Planilhas, Apresentações, PDF, imagens nem .docx. O conteúdo enviado SUBSTITUI tudo. Para não apagar uma edição do dono feita depois da sua leitura: chame o get_file_metadata do conector do Drive ANTES de ler o arquivo e passe o `modifiedTime` dele em esperado_modificado_em; se o arquivo mudou desde então, a escrita é recusada e você relê e reaplica (depois de uma escrita sua, o `modificado_em` devolvido serve para a próxima). Recusa arquivo que não é do dono e conteúdo muito menor que o atual (parece reescrita incompleta): reenvie o arquivo COMPLETO, ou use permitir_reducao se encurtar for de propósito.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -20,6 +20,10 @@
       "permitir_reducao": {
         "type": "boolean",
         "description": "Padrão false. Só use true quando o dono pediu para ENCURTAR o arquivo de propósito: sem isso, um conteúdo com menos de 40% do tamanho atual é recusado, porque costuma ser um envio incompleto que apagaria o resto."
+      },
+      "esperado_modificado_em": {
+        "type": "string",
+        "description": "Recomendado ao reescrever um arquivo que você leu antes. O `modifiedTime` exato que o get_file_metadata devolveu ANTES de você ler o conteúdo (ex.: 2026-09-20T15:36:42.677Z), ou o `modificado_em` que esta ferramenta devolveu na última escrita. Se o arquivo foi modificado depois disso, nada é gravado e a resposta diz o que fazer. Sem este campo, não há checagem."
       }
     },
     "required": ["file_id", "conteudo"]
