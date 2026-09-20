@@ -175,13 +175,14 @@ _STOPWORDS_QUERY = {
     "nos", "nas", "ao", "se", "ou",
 }
 
-# `consultar_historico_acoes` (MCP): quantas ações vêm completas no modo `auto`
-# e quais campos somem das resumidas. Descrição, notas, plano e diário são ~80%
-# do tamanho da resposta (medido em 20/09/2026: 33-46 mil caracteres para 20 ações).
+# `consultar_historico_acoes` (MCP): no modo `auto` só as primeiras ações vão completas.
+# Descrição, notas, plano e diário são ~80% do tamanho da resposta (medido em 20/09/2026:
+# 33-46 mil caracteres para 20 ações). As resumidas mantêm os 15 campos e NENHUM campo novo:
+# o cliente valida o structuredContent contra o outputSchema que guardou em cache, e uma
+# forma nova (item sem campo obrigatório, `resumido`, `aviso`) volta como erro (PR #293).
 _HISTORICO_ITENS_COMPLETOS_AUTO = 5
-_HISTORICO_CAMPOS_PESADOS = (
-    "descricao", "notas", "sintese_demanda", "plano_acao", "acompanhamento_recente",
-)
+_HISTORICO_EXCERTO_DESCRICAO = 100
+_HISTORICO_MARCA_RESUMIDO = "(resumido — use obter_acao)"
 
 
 def _filtro_str_ou_none(valor):
@@ -227,8 +228,16 @@ def _filtro_str_ou_none(valor):
 
 
 def _resumir_acao_do_historico(item: dict) -> dict:
-    resumo = {k: v for k, v in item.items() if k not in _HISTORICO_CAMPOS_PESADOS}
-    resumo["resumido"] = True
+    resumo = dict(item)
+    descricao = str(item.get("descricao") or "")
+    if len(descricao) > _HISTORICO_EXCERTO_DESCRICAO:
+        resumo["descricao"] = descricao[:_HISTORICO_EXCERTO_DESCRICAO].rstrip() + "…"
+    for campo in ("notas", "sintese_demanda"):
+        if item.get(campo):
+            resumo[campo] = _HISTORICO_MARCA_RESUMIDO
+    for campo, rotulo in (("plano_acao", "etapa(s)"), ("acompanhamento_recente", "entrada(s) do diário")):
+        if item.get(campo):
+            resumo[campo] = [f"(resumido: {len(item[campo])} {rotulo} — use obter_acao)"]
     return resumo
 
 
@@ -280,13 +289,12 @@ def _consultar_historico_acoes(ctx: ToolContext, args: dict):
         n_completos = 0
     else:
         n_completos = _HISTORICO_ITENS_COMPLETOS_AUTO
-    n_resumidos = max(0, len(resultados) - n_completos)
-    if n_resumidos:
+    if len(resultados) > n_completos:
         resultados = resultados[:n_completos] + [
             _resumir_acao_do_historico(r) for r in resultados[n_completos:]
         ]
 
-    saida = {
+    return {
         "total_retornado": len(resultados),
         "resultados": resultados,
         "filtros": {
@@ -297,13 +305,6 @@ def _consultar_historico_acoes(ctx: ToolContext, args: dict):
             "data_limite_fim": _filtro_str_ou_none(data_limite_fim),
         },
     }
-    if n_resumidos:
-        saida["aviso"] = (
-            f"{n_resumidos} de {len(resultados)} ações vieram resumidas (resumido=true, sem "
-            "descrição, notas, plano de ação e diário). Abra uma com obter_acao(task_id) "
-            "ou repita a busca com detalhe='completo'."
-        )
-    return saida
 
 
 def _buscar_arquivos_acervo(ctx: ToolContext, args: dict):
