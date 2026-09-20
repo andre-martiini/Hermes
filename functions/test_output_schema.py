@@ -312,12 +312,9 @@ class TestOutputSchema(unittest.TestCase):
         self.assertEqual(
             set(sucesso["required"]), {"total_retornado", "resultados", "filtros"}
         )
-        # `aviso` é opcional (fora de `required`): só aparece quando há itens resumidos.
         self.assertEqual(
-            set(sucesso["properties"].keys()),
-            {"total_retornado", "resultados", "filtros", "aviso"},
+            set(sucesso["properties"].keys()), {"total_retornado", "resultados", "filtros"}
         )
-        self.assertEqual(sucesso["properties"]["aviso"], {"type": "string"})
         self.assertFalse(sucesso["additionalProperties"])
 
         item = sucesso["properties"]["resultados"]["items"]
@@ -327,15 +324,9 @@ class TestOutputSchema(unittest.TestCase):
             "sintese_demanda", "plano_acao", "acompanhamento_recente",
         }
         # Os 15 campos são sempre chaves presentes no dict literal montado
-        # por `busca_grafo._formatar_resultado` -- nenhuma condicional. Nos itens
-        # resumidos (`detalhe`) os 5 pesados somem e aparece `resumido`; por isso
-        # só os 10 leves são `required`.
-        campos_pesados = {
-            "descricao", "notas", "sintese_demanda", "plano_acao", "acompanhamento_recente",
-        }
-        self.assertEqual(set(item["properties"].keys()), campos_item | {"resumido"})
-        self.assertEqual(set(item["required"]), campos_item - campos_pesados)
-        self.assertEqual(item["properties"]["resumido"], {"type": "boolean"})
+        # por `busca_grafo._formatar_resultado` -- nenhuma condicional.
+        self.assertEqual(set(item["properties"].keys()), campos_item)
+        self.assertEqual(set(item["required"]), campos_item)
         self.assertFalse(item["additionalProperties"])
         # plano_acao/acompanhamento_recente são as únicas listas com `items`
         # tipado (`string`) -- construídas por _formatar_resultado só
@@ -1510,9 +1501,9 @@ class TestConsultarHistoricoAcoesFiltrosCoercao(unittest.TestCase):
         self.assertIsNone(kwargs["data_limite_fim"])
 
 
-_PESADOS_HISTORICO = {
+_PESADOS_HISTORICO = (
     "descricao", "notas", "sintese_demanda", "plano_acao", "acompanhamento_recente",
-}
+)
 
 
 def _acao_completa_historico(i: int) -> dict:
@@ -1520,16 +1511,24 @@ def _acao_completa_historico(i: int) -> dict:
         "id": f"acao-{i}", "titulo": f"Ação {i}", "status": "em andamento",
         "tipo_acao": "processo", "responsavel": "André", "criado_em": "2026-08-01",
         "area": "FINANCEIRO", "data_limite": "2026-09-30", "processo_sei": "",
-        "tags": ["a"], "descricao": "d" * 200, "notas": "n" * 100,
-        "sintese_demanda": "s" * 50, "plano_acao": ["✓ passo 1", "○ passo 2"],
-        "acompanhamento_recente": ["[2026-09-01] nota"],
+        "tags": ["a"], "descricao": "d" * 600, "notas": "n" * 300,
+        "sintese_demanda": "s" * 150,
+        "plano_acao": [f"✓ etapa {k} " + "p" * 50 for k in range(6)],
+        "acompanhamento_recente": [f"[2026-09-0{k + 1}] " + "x" * 110 for k in range(4)],
     }
 
 
 class TestConsultarHistoricoAcoesDetalhe(unittest.TestCase):
     """`detalhe` (20/09/2026): descrição, notas, plano e diário são ~80% do tamanho
     da resposta; no modo `auto` só as 5 primeiras ações (as mais bem ranqueadas) vão
-    completas e as demais viram uma linha leve (`resumido: true`)."""
+    completas e as demais ficam curtas.
+
+    O cliente do Claude valida o `structuredContent` contra o `outputSchema` que
+    guardou em cache do connector. A primeira versão (PR #293) tirava campos
+    obrigatórios e criava `resumido`/`aviso`, e em produção a chamada voltou como
+    erro de esquema. Por isso as resumidas mantêm os 15 campos, com os mesmos tipos,
+    e nenhum campo novo aparece.
+    """
 
     def _rodar(self, n: int, **args):
         itens = [_acao_completa_historico(i) for i in range(n)]
@@ -1542,14 +1541,20 @@ class TestConsultarHistoricoAcoesDetalhe(unittest.TestCase):
     def test_auto_traz_as_5_primeiras_completas_e_resume_o_resto(self):
         r = self._rodar(20)
         self.assertEqual(r["total_retornado"], 20)
-        for item in r["resultados"][:5]:
-            self.assertNotIn("resumido", item)
-            self.assertTrue(_PESADOS_HISTORICO <= set(item))
-        for item in r["resultados"][5:]:
-            self.assertIs(item["resumido"], True)
-            self.assertFalse(_PESADOS_HISTORICO & set(item))
-        self.assertIn("15 de 20", r["aviso"])
-        self.assertIn("obter_acao", r["aviso"])
+        for i, item in enumerate(r["resultados"][:5]):
+            self.assertEqual(item, _acao_completa_historico(i))
+        for i, item in enumerate(r["resultados"][5:], start=5):
+            base = _acao_completa_historico(i)
+            self.assertNotEqual(item, base)
+            self.assertLessEqual(len(item["descricao"]), 101)
+            self.assertTrue(base["descricao"].startswith(item["descricao"].rstrip("…")))
+            self.assertEqual(item["notas"], "(resumido — use obter_acao)")
+            self.assertEqual(item["sintese_demanda"], "(resumido — use obter_acao)")
+            self.assertEqual(item["plano_acao"], ["(resumido: 6 etapa(s) — use obter_acao)"])
+            self.assertEqual(
+                item["acompanhamento_recente"],
+                ["(resumido: 4 entrada(s) do diário — use obter_acao)"],
+            )
 
     def test_padrao_sem_detalhe_e_igual_a_auto(self):
         self.assertEqual(self._rodar(12), self._rodar(12, detalhe="auto"))
@@ -1558,42 +1563,59 @@ class TestConsultarHistoricoAcoesDetalhe(unittest.TestCase):
         for n in (0, 1, 5):
             with self.subTest(n=n):
                 r = self._rodar(n)
-                self.assertNotIn("aviso", r)
                 self.assertEqual(r["resultados"], [_acao_completa_historico(i) for i in range(n)])
 
     def test_resumo_resume_todas(self):
         r = self._rodar(3, detalhe="resumo")
-        self.assertTrue(all(item["resumido"] is True for item in r["resultados"]))
-        self.assertIn("3 de 3", r["aviso"])
+        for item in r["resultados"]:
+            self.assertEqual(item["notas"], "(resumido — use obter_acao)")
 
-    def test_completo_devolve_tudo_sem_aviso(self):
+    def test_completo_devolve_tudo(self):
         r = self._rodar(20, detalhe="completo")
         self.assertEqual(r["resultados"], [_acao_completa_historico(i) for i in range(20)])
-        self.assertNotIn("aviso", r)
+
+    def test_resumida_com_campos_vazios_nao_inventa_conteudo(self):
+        item = {**_acao_completa_historico(0), "descricao": "curta", "notas": "", "sintese_demanda": "",
+                "plano_acao": [], "acompanhamento_recente": []}
+        with patch("tools.busca_grafo.buscar_tarefas", return_value={"resultados": [item], "erro": None}):
+            r = hermes_tools._consultar_historico_acoes(_ctx(), {"query": "x", "detalhe": "resumo"})
+        resumida = r["resultados"][0]
+        self.assertEqual(resumida["descricao"], "curta")
+        self.assertEqual(resumida["notas"], "")
+        self.assertEqual(resumida["sintese_demanda"], "")
+        self.assertEqual(resumida["plano_acao"], [])
+        self.assertEqual(resumida["acompanhamento_recente"], [])
 
     def test_resumidas_mantem_ordem_e_campos_leves(self):
         r = self._rodar(8)
         self.assertEqual([i["id"] for i in r["resultados"]], [f"acao-{i}" for i in range(8)])
         base = _acao_completa_historico(7)
-        for campo in set(base) - _PESADOS_HISTORICO:
+        for campo in set(base) - set(_PESADOS_HISTORICO):
             self.assertEqual(r["resultados"][7][campo], base[campo])
 
     def test_modo_auto_reduz_bastante_o_tamanho(self):
         completo = len(json.dumps(self._rodar(20, detalhe="completo"), ensure_ascii=False))
         auto = len(json.dumps(self._rodar(20), ensure_ascii=False))
-        self.assertLess(auto, completo * 0.7)
+        self.assertLess(auto, completo * 0.6)
 
-    def test_saida_respeita_o_output_schema_publicado(self):
+    def test_forma_da_resposta_e_exatamente_a_do_output_schema_publicado(self):
+        # Regressão do PR #293: nenhum campo novo e nenhum campo obrigatório a menos,
+        # nem no topo nem nos itens, em qualquer modo.
         sucesso = registry.output_schema("consultar_historico_acoes")["oneOf"][0]
         item_schema = sucesso["properties"]["resultados"]["items"]
+        tipos = {"string": str, "array": list}
         for detalhe in ("auto", "resumo", "completo"):
             r = self._rodar(8, detalhe=detalhe)
             with self.subTest(detalhe=detalhe):
-                self.assertTrue(set(r) <= set(sucesso["properties"]))
-                self.assertTrue(set(sucesso["required"]) <= set(r))
+                self.assertEqual(set(r), set(sucesso["properties"]))
                 for item in r["resultados"]:
-                    self.assertTrue(set(item) <= set(item_schema["properties"]))
-                    self.assertTrue(set(item_schema["required"]) <= set(item))
+                    self.assertEqual(set(item), set(item_schema["required"]))
+                    self.assertEqual(set(item), set(item_schema["properties"]))
+                    for campo, prop in item_schema["properties"].items():
+                        tipo = prop["type"]
+                        self.assertIsInstance(item[campo], tipos[tipo], campo)
+                        if tipo == "array" and prop.get("items", {}).get("type") == "string":
+                            self.assertTrue(all(isinstance(x, str) for x in item[campo]), campo)
 
     def test_detalhe_entra_no_esquema_de_entrada_com_enum(self):
         params = registry.get_schema("consultar_historico_acoes")["parameters"]

@@ -31,7 +31,7 @@
       "detalhe": {
         "type": "string",
         "enum": ["auto", "resumo", "completo"],
-        "description": "Quanto detalhe cada ação traz. 'auto' (padrão): as 5 primeiras completas e as demais resumidas (resumido=true, sem descrição, notas, plano e diário; abra uma com obter_acao). 'resumo': todas resumidas. 'completo': todas completas (resposta grande)."
+        "description": "Quanto detalhe cada ação traz. 'auto' (padrão): as 5 primeiras completas e as demais resumidas (descrição cortada em 100 caracteres; notas, síntese, plano e diário viram '(resumido ...)' com a contagem de itens; abra uma com obter_acao). 'resumo': todas resumidas. 'completo': todas completas (resposta grande)."
       }
     },
     "required": [

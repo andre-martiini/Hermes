@@ -412,6 +412,8 @@ Três coisas, sempre juntas — o teste `test_hermes_tools.py` falha se faltar a
 
 Se a tool grava algo, adicione também em `registry._NEEDS_CONFIRMATION`.
 
+**Não mude a forma de uma resposta que já tem `outputSchema` publicado** (campos obrigatórios, campos extras, tipos). O cliente do Claude valida o `structuredContent` contra o esquema que guardou em cache do connector, então uma forma nova volta como erro até ele atualizar o `tools/list` (aconteceu em 20/09/2026 com `consultar_historico_acoes`). Para encolher uma resposta, reduza o conteúdo dentro do mesmo esquema. Acrescentar parâmetro de ENTRADA opcional é seguro.
+
 ## Convergência do `main.py` — não há duplicação
 
 As tools do copiloto web viviam como *closures* dentro de `askCopilotoHermes`
