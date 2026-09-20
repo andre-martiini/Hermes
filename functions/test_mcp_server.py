@@ -974,5 +974,53 @@ class TestAuditLogTamanhoDaResposta(unittest.TestCase):
         self.assertEqual(audit.call_args.kwargs["result_chars"], 0)
 
 
+import hashlib as _hashlib
+import json as _json
+
+
+class TestAuditLogRedigeConteudoDeDocumento(unittest.TestCase):
+    """O texto de um documento do dono (ate 2 MB) nao pode ser copiado para o
+    `mcp_audit_log`: duplicaria dado sensivel e, acima de 1 MiB, o documento do
+    Firestore nem cabe (a auditoria da chamada sumiria em silencio)."""
+
+    SEGREDO = "TEXTO-SECRETO-DO-DOCUMENTO " * 50
+
+    def _registro(self, tool, arguments):
+        db = MagicMock()
+        with patch.object(mcp_server.firestore, "client", return_value=db):
+            mcp_server._audit_log(uid="u", tool=tool, arguments=arguments, latency_ms=1.0)
+        return db.collection.return_value.add.call_args.args[0]
+
+    def test_conteudo_vira_tamanho_e_sha256(self):
+        r = self._registro("atualizar_arquivo_drive",
+                           {"file_id": "abc", "conteudo": self.SEGREDO, "tipo_conteudo": "text/html"})
+        self.assertEqual(r["arguments"]["conteudo"], {
+            "redigido": True, "chars": len(self.SEGREDO),
+            "sha256": _hashlib.sha256(self.SEGREDO.encode("utf-8")).hexdigest()})
+        self.assertEqual(r["arguments"]["file_id"], "abc")
+        self.assertEqual(r["arguments"]["tipo_conteudo"], "text/html")
+        self.assertNotIn("TEXTO-SECRETO", _json.dumps(r, default=str))
+
+    def test_outras_tools_seguem_gravando_os_argumentos_como_antes(self):
+        r = self._registro("consultar_historico_acoes", {"query": "x", "conteudo": "fica"})
+        self.assertEqual(r["arguments"], {"query": "x", "conteudo": "fica"})
+
+    def test_sem_conteudo_nao_inventa_o_campo(self):
+        self.assertNotIn("conteudo", self._registro("atualizar_arquivo_drive", {"file_id": "abc"})["arguments"])
+
+    def test_ponta_a_ponta_pelo_handle_tools_call_nada_vaza(self):
+        db = MagicMock()
+        with patch.object(mcp_server.registry, "is_mcp_enabled", return_value=True), \
+             patch.object(mcp_server, "_exige_confirmacao", return_value=False), \
+             patch.object(mcp_server, "execute_tool", return_value={"status": "ok"}), \
+             patch.object(mcp_server.firestore, "client", return_value=db):
+            mcp_server._handle_tools_call(
+                {"name": "atualizar_arquivo_drive", "arguments": {"file_id": "abc", "conteudo": self.SEGREDO}},
+                ctx=_ctx_result_type())
+        adds = db.collection.return_value.add.call_args_list
+        self.assertTrue(adds)
+        self.assertNotIn("TEXTO-SECRETO", _json.dumps([c.args for c in adds], default=str))
+
+
 if __name__ == "__main__":
     unittest.main()

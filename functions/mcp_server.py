@@ -47,6 +47,7 @@ Decisoes de escopo:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -1548,6 +1549,28 @@ def _handle_resources_read(params: dict, *, uid: str) -> dict:
 # Auditoria e helpers HTTP
 # --------------------------------------------------------------------------
 
+# Argumentos cujo VALOR nao vai para o `mcp_audit_log`: o texto inteiro de um documento do
+# dono (ate 2 MB) nao pode ser copiado para la, e acima de 1 MiB o documento do Firestore
+# nem cabe (a gravacao falharia em silencio e a auditoria da chamada sumiria).
+_ARGUMENTOS_REDIGIDOS = {"atualizar_arquivo_drive": ("conteudo",)}
+
+
+def _argumentos_para_auditoria(tool: str, arguments: dict) -> dict:
+    campos = _ARGUMENTOS_REDIGIDOS.get(tool)
+    if not campos:
+        return arguments
+    saida = dict(arguments)
+    for campo in campos:
+        if saida.get(campo) is not None:
+            bruto = str(saida[campo])
+            saida[campo] = {
+                "redigido": True,
+                "chars": len(bruto),
+                "sha256": hashlib.sha256(bruto.encode("utf-8")).hexdigest(),
+            }
+    return saida
+
+
 def _audit_log(
     *,
     uid: str | None,
@@ -1562,7 +1585,8 @@ def _audit_log(
         registro = {
             "uid": uid,
             "tool": tool,
-            "arguments": json.loads(json.dumps(arguments, ensure_ascii=False, default=str)),
+            "arguments": json.loads(json.dumps(
+                _argumentos_para_auditoria(tool, arguments), ensure_ascii=False, default=str)),
             "latency_ms": round(latency_ms, 1),
             "is_error": bool(is_error),
             "timestamp": firestore.SERVER_TIMESTAMP,

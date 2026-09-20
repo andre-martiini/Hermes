@@ -38,8 +38,9 @@ class DriveFalso:
     """Duble do servico do Drive (`files()` e `revisions()`)."""
 
     def __init__(self, meta, *, export=None, md5_errado=False, get_erro=None, update_erro=None,
-                 export_erro=None, revisoes=2, revisoes_erro=None):
+                 export_erro=None, revisoes=2, revisoes_erro=None, export_seq=None):
         self.meta = meta
+        self.export_seq = list(export_seq) if export_seq else None
         self.export_valor = (BOM + "Texto do documento").encode("utf-8") if export is None else export
         self.md5_errado, self.get_erro, self.update_erro = md5_errado, get_erro, update_erro
         self.export_erro, self.revisoes, self.revisoes_erro = export_erro, revisoes, revisoes_erro
@@ -67,7 +68,8 @@ class DriveFalso:
                      self.update_erro)
 
     def export(self, **kw):
-        return _Exec(self.export_valor, self.export_erro)
+        valor = self.export_seq.pop(0) if self.export_seq else self.export_valor
+        return _Exec(valor, self.export_erro)
 
     def list(self, **kw):
         return _Exec({"revisions": [{"id": str(i)} for i in range(self.revisoes)]}, self.revisoes_erro)
@@ -75,7 +77,7 @@ class DriveFalso:
 
 def _meta(mime=DOC, **extra):
     return {"id": "ARQ1234567890", "name": "Relatorio", "mimeType": mime,
-            "trashed": False, "capabilities": {"canEdit": True}, **extra}
+            "trashed": False, "ownedByMe": True, "capabilities": {"canEdit": True}, **extra}
 
 
 def _atualizar(drive, args, *, executar=True):
@@ -217,6 +219,108 @@ class TestRecusas(unittest.TestCase):
         self.assertIn("permissao", r["erro"])
         r = _atualizar(DriveFalso(_meta(), update_erro=RuntimeError("boom")), {})
         self.assertIn("Falha ao atualizar", r["erro"])
+
+
+def _texto(n_palavras: int) -> str:
+    return " ".join(["palavra"] * n_palavras)
+
+
+class TestDonoDoArquivo(unittest.TestCase):
+    def test_arquivo_de_outra_pessoa_ou_drive_compartilhado_nao_grava(self):
+        drive = DriveFalso(_meta(ownedByMe=False))
+        r = _atualizar(drive, {})
+        self.assertIn("outra pessoa", r["erro"])
+        self.assertIn("Nada foi alterado", r["erro"])
+        self.assertEqual(drive.updates, 0)
+
+    def test_item_de_drive_compartilhado_nao_grava_mesmo_sem_ownedbyme(self):
+        # A API nao preenche `ownedByMe` nesses itens; o sinal e o `driveId`.
+        meta = _meta(driveId="0AB12345")
+        meta.pop("ownedByMe")
+        drive = DriveFalso(meta)
+        r = _atualizar(drive, {})
+        self.assertIn("Drive compartilhado", r["erro"])
+        self.assertEqual(drive.updates, 0)
+
+    def test_arquivo_do_dono_passa(self):
+        self.assertEqual(_atualizar(DriveFalso(_meta(ownedByMe=True)), {})["status"], "ok")
+
+    def test_campo_ausente_na_resposta_nao_bloqueia(self):
+        meta = _meta()
+        meta.pop("ownedByMe")
+        self.assertEqual(_atualizar(DriveFalso(meta), {})["status"], "ok")
+
+
+class TestGuardaContraReescritaTruncada(unittest.TestCase):
+    """A ferramenta exige o documento COMPLETO; um envio incompleto apagaria o resto."""
+
+    ATUAL = (BOM + _texto(200)).encode("utf-8")  # ~1600 caracteres
+
+    def _drive(self, **kw):
+        return DriveFalso(_meta(), export_seq=[self.ATUAL, self.ATUAL], **kw)
+
+    def test_doc_com_conteudo_muito_menor_e_recusado(self):
+        drive = self._drive()
+        r = _atualizar(drive, {"conteudo": "<p>" + _texto(20) + "</p>"})
+        self.assertIn("permitir_reducao", r["erro"])
+        self.assertIn("caracteres", r["erro"])
+        self.assertIn("Nada foi alterado", r["erro"])
+        self.assertEqual(drive.updates, 0)
+
+    def test_permitir_reducao_libera_o_encurtamento_de_proposito(self):
+        drive = self._drive()
+        r = _atualizar(drive, {"conteudo": "<p>" + _texto(20) + "</p>", "permitir_reducao": True})
+        self.assertEqual(r["status"], "ok")
+        self.assertEqual(drive.updates, 1)
+
+    def test_doc_com_tamanho_parecido_passa(self):
+        self.assertEqual(_atualizar(self._drive(), {"conteudo": "<p>" + _texto(180) + "</p>"})["status"], "ok")
+
+    def test_so_o_texto_visivel_conta_nao_as_tags(self):
+        # ~1100 caracteres brutos de HTML, mas so 50 visiveis: isto e truncamento disfarcado.
+        r = _atualizar(self._drive(), {"conteudo": "<p><b><i>x</i></b></p>" * 50})
+        self.assertIn("permitir_reducao", r["erro"])
+
+    def test_style_e_script_nao_contam_como_texto(self):
+        r = _atualizar(self._drive(), {"conteudo": "<style>" + "a" * 5000 + "</style><p>curto</p>"})
+        self.assertIn("permitir_reducao", r["erro"])
+
+    def test_doc_pequeno_nao_aciona_a_guarda(self):
+        pequeno = (BOM + _texto(20)).encode("utf-8")  # ~160 caracteres, abaixo do minimo
+        drive = DriveFalso(_meta(), export_seq=[pequeno, pequeno])
+        self.assertEqual(_atualizar(drive, {"conteudo": "<p>oi</p>"})["status"], "ok")
+
+    def test_arquivo_de_texto_compara_bytes(self):
+        casos = (("5000", "x" * 100, False), ("5000", "x" * 3000, True), ("5000", "x" * 100, True))
+        for i, (tamanho, conteudo, deve_passar) in enumerate(casos):
+            with self.subTest(tamanho=tamanho, novo=len(conteudo), liberado=(i == 2)):
+                drive = DriveFalso(_meta("text/plain", size=tamanho))
+                args = {"conteudo": conteudo}
+                if i == 2:
+                    args["permitir_reducao"] = True
+                r = _atualizar(drive, args)
+                if deve_passar:
+                    self.assertEqual(r["status"], "ok")
+                else:
+                    self.assertIn("bytes", r["erro"])
+                    self.assertEqual(drive.updates, 0)
+
+    def test_arquivo_de_texto_sem_tamanho_conhecido_nao_bloqueia(self):
+        self.assertEqual(_atualizar(DriveFalso(_meta("text/plain")), {"conteudo": "curto"})["status"], "ok")
+
+    def test_sem_conseguir_medir_a_guarda_nao_bloqueia(self):
+        drive = DriveFalso(_meta(), export_erro=RuntimeError("export caiu"))
+        r = _atualizar(drive, {"conteudo": "<p>curto</p>"})
+        self.assertEqual(r["status"], "ok")
+        self.assertEqual(drive.updates, 1)
+
+    def test_estimativa_do_texto_visivel(self):
+        visivel = drive_arquivos._texto_visivel
+        self.assertEqual(visivel("<h1>Olá</h1><p>mundo <b>bom</b></p><script>alert(1)</script>", "text/html"),
+                         "Olá mundo bom")
+        self.assertEqual(visivel("# Título\n\n**negrito** [link](http://exemplo.com/x)", "text/markdown"),
+                         "Título negrito link")
+        self.assertEqual(visivel("  duas   palavras\n", "text/plain"), "duas palavras")
 
 
 class TestIdDoArquivo(unittest.TestCase):
