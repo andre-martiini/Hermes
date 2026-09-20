@@ -114,6 +114,9 @@ _CATALOG: dict[str, str] = {
     # Ingestao de arquivo: sem ela, anexo so entrava por link de algo que ja
     # estava no Drive, e comprovante nascido fora dele ficava orfao.
     "anexar_arquivo": "Anexa um arquivo a uma acao: grava no Drive, vincula e escreve no diario",
+    # O conector do Drive so cria arquivo; atualizar um documento virava criar outro
+    # (ID e link novos, versao antiga solta). Esta troca o conteudo no MESMO arquivo.
+    "atualizar_arquivo_drive": "Atualiza o conteudo de um arquivo que ja existe no Drive (Google Doc ou texto), no mesmo ID e link",
     "preparar_upload": "Devolve URL assinada para subir arquivo local sem passa-lo pela conversa",
     "remover_anexo": "Remove um anexo da acao, preservando a trilha de auditoria do diario",
     # Fatura de cartao: o que um boleto nao tem — em que se gastou e o que
@@ -193,6 +196,7 @@ _NEEDS_CONFIRMATION: set[str] = {
     "gerar_imagem",
     # Escrita direta, para canais sem card de confirmacao.
     "anexar_arquivo",
+    "atualizar_arquivo_drive",
     "remover_anexo",
     # Cria job de processamento e consome transcricao paga de midia.
     "consolidar_whatsapp",

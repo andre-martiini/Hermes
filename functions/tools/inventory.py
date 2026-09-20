@@ -801,6 +801,20 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "ID novo do Google a cada chamada) e um item novo no pool (`uuid.uuid4()[:8]`) -- repetir a MESMA "
         "chamada sobe o mesmo conteúdo duas vezes, como dois anexos distintos, nunca devolve o já existente",
     ),
+    "atualizar_arquivo_drive": ToolInventoryEntry(
+        "utilitario", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "confere o md5 devolvido pelo Drive (arquivo de texto) ou que o Doc não ficou vazio após a "
+        "conversão; recusa conteúdo vazio, tipo não suportado, arquivo na lixeira e arquivo sem permissão "
+        "de edição antes de gravar",
+        rede_servico="Google Drive (conta do próprio dono)",
+        dados_sensiveis_categoria="qualquer documento do Drive do dono",
+        nota="reversível: a versão anterior fica no histórico de versões do PRÓPRIO arquivo (Arquivo > Histórico "
+        "de versões). Só Google Docs e arquivos de texto; Planilha, Apresentação, PDF, imagem e .docx são "
+        "recusados. IDEMPOTENTE no estado do arquivo (repetir a mesma chamada deixa o mesmo conteúdo), embora o "
+        "Drive possa registrar uma revisão a mais no histórico.",
+        dominio_rede=DominioRede.FECHADO,
+        idempotencia=_I.IDEMPOTENTE,
+    ),
     "preparar_upload": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, True, False, _C.PREPARACAO_INTERNA,
         "conferência real (tamanho/sha256) acontece na chamada seguinte, dentro de anexar_arquivo",

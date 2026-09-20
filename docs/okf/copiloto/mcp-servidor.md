@@ -109,6 +109,15 @@ distribuição por dias úteis; o que se elimina é a volta ao cliente no meio.
 As `preparar_*` e `confirmar_*` continuam expostas, para a web e para quem quiser
 o fluxo em dois passos explicitamente.
 
+### Atualizar um arquivo do Drive no mesmo ID (`atualizar_arquivo_drive`)
+
+O conector do Drive que o Claude usa só **cria** arquivo (`update_file` mexe só em título e pasta). Atualizar um Google Doc virava criar outro: ID e link novos, versão antiga solta, referências quebradas. **`atualizar_arquivo_drive(file_id, conteudo, tipo_conteudo?)`** troca o conteúdo no **mesmo** arquivo, com a credencial do dono (`files().update` com mídia em `functions/tools/drive_arquivos.py`); ID, link e permissões ficam, e a versão anterior fica no histórico de versões do próprio arquivo.
+
+- **Escopo:** Google Docs (o conteúdo em `text/html`, `text/markdown` ou `text/plain` é convertido em títulos, listas, tabelas e negrito) e arquivos de texto (`text/*`, JSON, que mantêm o próprio tipo). Planilha (importar texto apagaria as outras abas), Apresentação, PDF, imagem e .docx são recusados.
+- **Salvaguardas:** recusa conteúdo vazio, acima de 2 MB, arquivo na lixeira e arquivo sem permissão de edição, antes de gravar. Depois de gravar, confere o `md5Checksum` (texto) ou que o Doc não ficou vazio (conversão que falha em silêncio); se não confere, devolve erro e manda restaurar em Arquivo > Histórico de versões.
+- **Escrita direta**, sem `confirmar_acao`, como `anexar_arquivo`. O conteúdo enviado SUBSTITUI tudo: se o dono pode ter editado o arquivo, releia antes.
+- O `_INSTRUCTIONS` do servidor manda o modelo usar esta tool em vez de criar arquivo novo para atualizar outro.
+
 ### Tools longas devolvem `job_id`
 
 `gerar_relatorio`, `ler_documento_na_integra` e `buscar_e_analisar_email` passam
