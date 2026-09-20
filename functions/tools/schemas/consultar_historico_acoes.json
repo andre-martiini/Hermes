@@ -27,6 +27,11 @@
       "ultimas_n_acoes": {
         "type": "integer",
         "description": "Número máximo de ações a retornar (padrão 20)"
+      },
+      "detalhe": {
+        "type": "string",
+        "enum": ["auto", "resumo", "completo"],
+        "description": "Quanto detalhe cada ação traz. 'auto' (padrão): as 5 primeiras completas e as demais resumidas (resumido=true, sem descrição, notas, plano e diário; abra uma com obter_acao). 'resumo': todas resumidas. 'completo': todas completas (resposta grande)."
       }
     },
     "required": [
