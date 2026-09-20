@@ -18,6 +18,12 @@ de perder texto sem ninguem ver: a ferramenta exige o documento COMPLETO, e um
 envio incompleto apagaria o resto. `permitir_reducao=true` libera o encurtamento
 de proposito.
 
+Concorrencia otimista: quem le o arquivo antes de reescreve-lo passa o `modifiedTime` que
+viu em `esperado_modificado_em`; se o dono editou nesse meio tempo, a gravacao e recusada
+em vez de sobrescrever a edicao dele. O Drive nao tem escrita condicional para arquivo:
+conferimos o `modifiedTime` logo antes do `update`, entao resta uma janela de milissegundos.
+Sem o parametro, o comportamento e o de antes (a ferramenta so avisa para reler).
+
 Comportamento comprovado contra o Drive real em 20/09/2026: Doc atualizado com
 `text/html`, `text/markdown` e `text/plain` mantem ID, link e tipo (a conversao
 gera titulos, listas, tabelas e negrito); arquivo de texto comum mantem ID, nome
@@ -28,6 +34,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime
 from html.parser import HTMLParser
 
 MAX_BYTES = 2 * 1024 * 1024
@@ -123,6 +130,55 @@ def _tamanhos_para_a_guarda(service, file_id, mime, meta, conteudo, tipo, dados)
         return None, None
 
 
+def _instante(valor) -> datetime | None:
+    """`modifiedTime` (RFC 3339) -> instante com fuso, ou None se nao der para ler."""
+    try:
+        instante = datetime.fromisoformat(str(valor).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return instante if instante.tzinfo else None
+
+
+def _modified_time(service, file_id: str):
+    return service.files().get(fileId=file_id, fields="modifiedTime",
+                               supportsAllDrives=True).execute().get("modifiedTime")
+
+
+def _versao_mudou(service, file_id: str, esperado_txt: str, esperado: datetime) -> str | None:
+    """Erro se o arquivo mudou desde a leitura de quem chama; None se pode gravar.
+
+    Sem conseguir conferir, recusa: quem pediu a checagem nao quer gravar no escuro.
+    """
+    try:
+        atual_txt = _modified_time(service, file_id)
+    except Exception as exc:  # noqa: BLE001
+        return ("Nao consegui conferir se o arquivo mudou desde a leitura "
+                f"({_erro_do_drive(exc)}). Nada foi alterado.")
+    atual = _instante(atual_txt)
+    if atual is None:
+        return "Nao consegui conferir se o arquivo mudou desde a leitura. Nada foi alterado."
+    if atual == esperado:
+        return None
+    return (f"O arquivo foi modificado depois da sua leitura (esperado_modificado_em={esperado_txt}, "
+            f"modifiedTime atual={atual_txt}): gravar agora apagaria a edicao do dono. Nada foi alterado. "
+            "Releia o arquivo (get_file_metadata e depois read_file_content), incorpore o que mudou e "
+            "reenvie o arquivo COMPLETO com o novo modifiedTime em esperado_modificado_em.")
+
+
+def _modificado_em_assentado(service, file_id: str, do_update):
+    """`modifiedTime` depois que o Drive terminou de gravar.
+
+    Num Google Doc o Drive re-carimba o arquivo logo apos o `update` (medido em 20/09/2026:
+    o valor devolvido pelo update fica 0,3 a 0,8 s atras do que `files.get` mostra dai em
+    diante). Quem reusar o valor devolvido em `esperado_modificado_em` tomaria conflito
+    falso, entao le de novo aqui, depois da verificacao. Arquivo de texto nao tem a diferenca.
+    """
+    try:
+        return _modified_time(service, file_id) or do_update
+    except Exception:  # noqa: BLE001 — so informativo; cai no valor do update
+        return do_update
+
+
 def _erro_do_drive(exc: Exception) -> str:
     status = getattr(getattr(exc, "resp", None), "status", None)
     if status == 404:
@@ -145,6 +201,16 @@ def atualizar_conteudo(ctx, args: dict) -> dict:
     if len(dados) > MAX_BYTES:
         return {"erro": f"Conteudo com {len(dados) // 1024} KB excede o limite de "
                         f"{MAX_BYTES // 1024 // 1024} MB desta ferramenta. Nada foi alterado."}
+
+    esperado_txt = args.get("esperado_modificado_em")
+    esperado = None
+    if esperado_txt is not None:
+        esperado_txt = str(esperado_txt).strip()
+        esperado = _instante(esperado_txt)
+        if esperado is None:
+            return {"erro": f"esperado_modificado_em '{esperado_txt}' invalido: use o `modifiedTime` exato "
+                            "que o get_file_metadata devolveu (RFC 3339 com fuso, ex.: "
+                            "2026-09-20T15:36:42.677Z). Nada foi alterado."}
 
     try:
         service = _servico_drive()
@@ -187,6 +253,11 @@ def atualizar_conteudo(ctx, args: dict) -> dict:
                             "apagaria o resto. Reenvie o arquivo COMPLETO; se encurtar e intencional, "
                             "chame de novo com permitir_reducao=true. Nada foi alterado."}
 
+    if esperado is not None:
+        conflito = _versao_mudou(service, file_id, esperado_txt, esperado)
+        if conflito:
+            return {"erro": conflito}
+
     try:
         atualizado = service.files().update(
             fileId=file_id, media_body=_midia(dados, tipo),
@@ -207,13 +278,15 @@ def atualizar_conteudo(ctx, args: dict) -> dict:
     except Exception:  # noqa: BLE001 — so informativo
         versoes = None
 
+    modificado_em = _modificado_em_assentado(service, file_id, atualizado.get("modifiedTime"))
+
     return {
         "status": "ok",
         "file_id": atualizado.get("id") or file_id,
         "nome": atualizado.get("name") or meta.get("name"),
         "tipo": atualizado.get("mimeType") or mime,
         "link": atualizado.get("webViewLink"),
-        "modificado_em": atualizado.get("modifiedTime"),
+        "modificado_em": modificado_em,
         "bytes_enviados": len(dados),
         "versoes_no_historico": versoes,
         "verificado": verificado is True,

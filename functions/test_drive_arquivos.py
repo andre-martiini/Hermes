@@ -38,8 +38,12 @@ class DriveFalso:
     """Duble do servico do Drive (`files()` e `revisions()`)."""
 
     def __init__(self, meta, *, export=None, md5_errado=False, get_erro=None, update_erro=None,
-                 export_erro=None, revisoes=2, revisoes_erro=None, export_seq=None):
+                 export_erro=None, revisoes=2, revisoes_erro=None, export_seq=None, modified_times=None):
         self.meta = meta
+        # Leituras de `fields="modifiedTime"`, em ordem (a ultima se repete). Um valor que seja
+        # Exception vira erro do Drive. Sem isso, a leitura devolve o `meta` (que nao tem o campo).
+        self.modified_times = list(modified_times) if modified_times else None
+        self.eventos = []
         self.export_seq = list(export_seq) if export_seq else None
         self.export_valor = (BOM + "Texto do documento").encode("utf-8") if export is None else export
         self.md5_errado, self.get_erro, self.update_erro = md5_errado, get_erro, update_erro
@@ -54,12 +58,21 @@ class DriveFalso:
         return self
 
     def get(self, **kw):
+        if kw.get("fields") == "modifiedTime":
+            self.eventos.append("get_modified_time")
+            if self.modified_times is not None:
+                valor = self.modified_times.pop(0) if len(self.modified_times) > 1 else self.modified_times[0]
+                return _Exec(None if isinstance(valor, Exception) else {"modifiedTime": valor},
+                             valor if isinstance(valor, Exception) else None)
+            return _Exec(self.meta, self.get_erro)
         self.get_kw = kw
+        self.eventos.append("get_meta")
         return _Exec(self.meta, self.get_erro)
 
     def update(self, **kw):
         self.update_kw = kw
         self.updates += 1
+        self.eventos.append("update")
         _, dados, _mime = kw["media_body"]
         md5 = "0" * 32 if self.md5_errado else hashlib.md5(dados).hexdigest()
         return _Exec({"id": kw["fileId"], "name": self.meta["name"], "mimeType": self.meta["mimeType"],
@@ -68,10 +81,12 @@ class DriveFalso:
                      self.update_erro)
 
     def export(self, **kw):
+        self.eventos.append("export")
         valor = self.export_seq.pop(0) if self.export_seq else self.export_valor
         return _Exec(valor, self.export_erro)
 
     def list(self, **kw):
+        self.eventos.append("list_revisions")
         return _Exec({"revisions": [{"id": str(i)} for i in range(self.revisoes)]}, self.revisoes_erro)
 
 
@@ -323,6 +338,133 @@ class TestGuardaContraReescritaTruncada(unittest.TestCase):
         self.assertEqual(visivel("  duas   palavras\n", "text/plain"), "duas palavras")
 
 
+class TestConcorrenciaOtimista(unittest.TestCase):
+    """`esperado_modificado_em`: nao sobrescrever o que o dono editou depois da leitura."""
+
+    LIDO = "2026-09-20T15:36:42.677Z"
+
+    def _drive(self, atual=None, mime=DOC, **kw):
+        return DriveFalso(_meta(mime), modified_times=[atual or self.LIDO], **kw)
+
+    def test_arquivo_igual_ao_lido_grava_e_a_checagem_vem_antes_do_update(self):
+        drive = self._drive()
+        r = _atualizar(drive, {"esperado_modificado_em": self.LIDO})
+        self.assertEqual(r["status"], "ok")
+        self.assertEqual(drive.updates, 1)
+        self.assertLess(drive.eventos.index("get_modified_time"), drive.eventos.index("update"))
+
+    def test_arquivo_modificado_depois_da_leitura_nao_grava_e_diz_o_que_fazer(self):
+        drive = self._drive(atual="2026-09-20T15:40:00.000Z")
+        r = _atualizar(drive, {"esperado_modificado_em": self.LIDO})
+        self.assertEqual(drive.updates, 0)
+        self.assertNotIn("status", r)
+        self.assertIn("modificado depois da sua leitura", r["erro"])
+        self.assertIn("Nada foi alterado", r["erro"])
+        self.assertIn(self.LIDO, r["erro"])
+        self.assertIn("2026-09-20T15:40:00.000Z", r["erro"])
+        self.assertIn("get_file_metadata", r["erro"])
+
+    def test_comparacao_e_exata_um_milissegundo_ja_e_conflito(self):
+        drive = self._drive(atual="2026-09-20T15:36:42.678Z")
+        self.assertIn("erro", _atualizar(drive, {"esperado_modificado_em": self.LIDO}))
+        self.assertEqual(drive.updates, 0)
+
+    def test_mesmo_instante_em_outro_formato_nao_e_conflito(self):
+        for atual, esperado in (("2026-09-20T12:36:42.677-03:00", self.LIDO),
+                                (self.LIDO, "2026-09-20T12:36:42.677-03:00"),
+                                ("2026-09-20T15:36:42.677Z", "2026-09-20T15:36:42.677000Z")):
+            with self.subTest(atual=atual, esperado=esperado):
+                drive = self._drive(atual=atual)
+                self.assertEqual(_atualizar(drive, {"esperado_modificado_em": esperado})["status"], "ok")
+
+    def test_vale_tambem_para_arquivo_de_texto(self):
+        drive = self._drive(atual="2026-09-20T16:00:00.000Z", mime="text/plain")
+        r = _atualizar(drive, {"esperado_modificado_em": self.LIDO})
+        self.assertIn("modificado depois da sua leitura", r["erro"])
+        self.assertEqual(drive.updates, 0)
+        self.assertEqual(_atualizar(self._drive(mime="text/plain"), {"esperado_modificado_em": self.LIDO})["status"], "ok")
+
+    def test_confere_com_leitura_nova_e_nao_com_a_do_inicio_da_chamada(self):
+        # O arquivo mudou entre o primeiro `get` (permissoes/tipo) e o `update`: so uma leitura
+        # feita agora, imediatamente antes de gravar, pega isso.
+        drive = DriveFalso(_meta(modifiedTime=self.LIDO), modified_times=["2026-09-20T15:59:59.000Z"])
+        r = _atualizar(drive, {"esperado_modificado_em": self.LIDO})
+        self.assertIn("modificado depois da sua leitura", r["erro"])
+        self.assertEqual(drive.updates, 0)
+
+    def test_sem_o_parametro_nao_ha_checagem_e_nao_le_o_modified_time_antes_de_gravar(self):
+        drive = self._drive(atual="2030-01-01T00:00:00.000Z")
+        r = _atualizar(drive, {})
+        self.assertEqual(r["status"], "ok")
+        self.assertNotIn("get_modified_time", drive.eventos[:drive.eventos.index("update")])
+
+    def test_valor_invalido_e_recusado_antes_de_qualquer_chamada_ao_drive(self):
+        for invalido in ("", "  ", "ontem", "2026-09-20", "2026-09-20T15:36:42", 123, "15:36"):
+            with self.subTest(valor=invalido):
+                drive = self._drive()
+                r = _atualizar(drive, {"esperado_modificado_em": invalido})
+                self.assertIn("invalido", r["erro"])
+                self.assertIn("get_file_metadata", r["erro"])
+                self.assertIn("Nada foi alterado", r["erro"])
+                self.assertEqual(drive.eventos, [])
+
+    def test_sem_conseguir_conferir_recusa_em_vez_de_gravar_no_escuro(self):
+        for rotulo, valor in (("erro do Drive", _erro_http(500)), ("campo ausente", None), ("ilegivel", "quando?")):
+            with self.subTest(rotulo):
+                drive = DriveFalso(_meta(), modified_times=[valor])
+                r = _atualizar(drive, {"esperado_modificado_em": self.LIDO})
+                self.assertIn("Nao consegui conferir", r["erro"])
+                self.assertIn("Nada foi alterado", r["erro"])
+                self.assertEqual(drive.updates, 0)
+
+    def test_a_guarda_de_reducao_continua_valendo_junto(self):
+        atual = (BOM + _texto(200)).encode("utf-8")
+        drive = DriveFalso(_meta(), export_seq=[atual, atual], modified_times=[self.LIDO])
+        r = _atualizar(drive, {"esperado_modificado_em": self.LIDO, "conteudo": "<p>curto</p>"})
+        self.assertIn("permitir_reducao", r["erro"])
+        self.assertEqual(drive.updates, 0)
+
+
+class TestModificadoEmAssentado(unittest.TestCase):
+    """O Drive re-carimba um Doc logo apos o update (medido: +0,3 a +0,8 s): o valor devolvido
+    tem de ser o definitivo, senao quem o reusar em `esperado_modificado_em` toma conflito falso."""
+
+    DO_UPDATE = "2026-09-20T15:00:00.000Z"  # o que o DriveFalso.update devolve
+    DEFINITIVO = "2026-09-20T15:00:00.758Z"
+
+    def test_devolve_o_valor_lido_depois_de_gravar_e_nao_o_do_update(self):
+        drive = DriveFalso(_meta(), modified_times=[self.DEFINITIVO])
+        self.assertEqual(_atualizar(drive, {})["modificado_em"], self.DEFINITIVO)
+
+    def test_a_leitura_vem_depois_do_update_e_da_verificacao(self):
+        drive = DriveFalso(_meta(), modified_times=[self.DEFINITIVO])
+        _atualizar(drive, {})
+        # A releitura e a ultima chamada, depois da verificacao e do historico: da o maximo de
+        # tempo para o Drive assentar o carimbo do Doc.
+        depois = drive.eventos[drive.eventos.index("update"):]
+        self.assertEqual(depois, ["update", "export", "list_revisions", "get_modified_time"])
+
+    def test_o_valor_devolvido_serve_de_esperado_na_escrita_seguinte(self):
+        drive = DriveFalso(_meta(), modified_times=[self.DEFINITIVO])
+        primeira = _atualizar(drive, {})
+        segunda = _atualizar(drive, {"esperado_modificado_em": primeira["modificado_em"]})
+        self.assertEqual(segunda["status"], "ok")
+        self.assertEqual(drive.updates, 2)
+
+    def test_o_valor_bruto_do_update_teria_dado_conflito_falso(self):
+        drive = DriveFalso(_meta(), modified_times=[self.DEFINITIVO])
+        r = _atualizar(drive, {"esperado_modificado_em": self.DO_UPDATE})
+        self.assertIn("modificado depois da sua leitura", r["erro"])
+
+    def test_se_a_releitura_falhar_cai_no_valor_do_update_sem_derrubar_a_gravacao(self):
+        for falha in (_erro_http(500), None):
+            with self.subTest(falha=falha):
+                drive = DriveFalso(_meta(), modified_times=[falha])
+                r = _atualizar(drive, {})
+                self.assertEqual(r["status"], "ok")
+                self.assertEqual(r["modificado_em"], self.DO_UPDATE)
+
+
 class TestIdDoArquivo(unittest.TestCase):
     def test_link_do_docs_e_do_drive_viram_id(self):
         casos = {
@@ -364,6 +506,24 @@ class TestRegistroNoMcp(unittest.TestCase):
         texto = mcp_server._handle_initialize({})["instructions"]
         self.assertIn("atualizar_arquivo_drive", texto)
         self.assertIn("NUNCA crie um arquivo novo", texto)
+
+    def test_esperado_modificado_em_e_parametro_opcional_de_texto(self):
+        params = registry.get_schema(self.NOME)["parameters"]
+        self.assertEqual(params["properties"]["esperado_modificado_em"]["type"], "string")
+        self.assertNotIn("esperado_modificado_em", params["required"])
+        self.assertIn("get_file_metadata", registry.get_schema(self.NOME)["description"])
+
+    def test_a_forma_da_resposta_nao_ganhou_chaves_novas(self):
+        # Sem outputSchema publicado, mas clientes guardam a forma em cache: so o CONTEUDO pode mudar.
+        drive = DriveFalso(_meta(), modified_times=["2026-09-20T15:00:00.758Z"])
+        r = _atualizar(drive, {"esperado_modificado_em": "2026-09-20T15:00:00.758Z"})
+        self.assertEqual(set(r), {"status", "file_id", "nome", "tipo", "link", "modificado_em", "bytes_enviados",
+                                  "versoes_no_historico", "verificado", "aviso"})
+
+    def test_o_servidor_manda_passar_o_modified_time_lido(self):
+        texto = mcp_server._handle_initialize({})["instructions"]
+        self.assertIn("esperado_modificado_em", texto)
+        self.assertIn("get_file_metadata", texto)
 
     def test_o_handler_do_catalogo_delega_para_o_modulo(self):
         with patch.object(drive_arquivos, "atualizar_conteudo", return_value={"status": "ok"}) as m:
