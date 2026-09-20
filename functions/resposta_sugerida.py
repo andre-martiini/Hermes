@@ -23,8 +23,13 @@ qualquer assunto.
 Custo: nenhuma varredura de colecao inteira (o helper que liga chat a acao varre `tarefas`; aqui
 so a busca limitada por pessoa). Uma chamada do Gemini por chat vencido, limitada por dia.
 
+So contato CONHECIDO: esta na `chats_allowlist` explicita ou tem perfil em `perfil_pessoas`.
+`leitura_total` (o Claude pode ler tudo) nao vale aqui: medido em 30 dias, 37% das conversas
+individuais (13% das mensagens) eram numero desconhecido, quase sempre spam ou robo, e cada
+mensagem dele gastaria uma chamada do modelo e parte do limite do dia.
+
 Desligado por padrao, como os outros detectores: `system/settings.atencao.resposta_sugerida`
-(`enabled`, `atraso_min`, `idade_max_h`, `limite_dia`, `limite_por_rodada`).
+(`enabled`, `atraso_min`, `idade_max_h`, `limite_dia`, `limite_por_rodada`, `apenas_conhecidos`).
 """
 
 from __future__ import annotations
@@ -124,31 +129,29 @@ def config_de_settings(settings: dict | None) -> dict:
     settings = settings or {}
     cfg = ((settings.get("atencao") or {}).get("resposta_sugerida")) or {}
     ingest = settings.get("whatsapp_ingest") or {}
-    if ingest.get("leitura_total"):
-        allowlist = {"*"}
-    else:
-        allowlist = {str(x).strip() for x in (ingest.get("chats_allowlist") or []) if str(x).strip()}
+    # `leitura_total` nao libera responder a todo mundo: ver o docstring do modulo.
+    allowlist = {str(x).strip() for x in (ingest.get("chats_allowlist") or []) if str(x).strip()}
     return {
         "enabled": bool(cfg.get("enabled", False)),
         "atraso_min": _int(cfg.get("atraso_min"), DEFAULT_ATRASO_MIN),
         "idade_max_h": _int(cfg.get("idade_max_h"), DEFAULT_IDADE_MAX_H),
         "limite_dia": _int(cfg.get("limite_dia"), DEFAULT_LIMITE_DIA),
         "limite_por_rodada": _int(cfg.get("limite_por_rodada"), DEFAULT_LIMITE_POR_RODADA),
+        "apenas_conhecidos": bool(cfg.get("apenas_conhecidos", True)),
         "allowlist": allowlist,
         "andre_ids": {str(x).strip() for x in (ingest.get("andre_chat_ids") or []) if str(x).strip()},
     }
 
 
 def mensagem_elegivel(mensagem: dict, cfg: dict, agora: datetime | None = None) -> bool:
-    """So conversa individual liberada, com texto, que nao seja do dono nem antiga demais."""
+    """So conversa individual com texto, que nao seja do dono nem antiga demais (a forma da mensagem;
+    se o contato e conhecido e checado a parte, em `contato_conhecido`)."""
     if mensagem.get("from_me") or mensagem.get("is_group"):
         return False
     chat_id = str(mensagem.get("chat_id") or "").strip()
     if not chat_id or chat_id in cfg["andre_ids"]:
         return False
     if not chat_id.endswith(_SUFIXOS_CONVERSA_INDIVIDUAL):
-        return False
-    if "*" not in cfg["allowlist"] and chat_id not in cfg["allowlist"]:
         return False
     if str(mensagem.get("message_type") or "") not in _TIPOS_ACEITOS:
         return False
@@ -285,6 +288,13 @@ def _perfil_do_contato(db, chat_id: str) -> dict | None:
     return None
 
 
+def contato_conhecido(db, cfg: dict, chat_id: str) -> bool:
+    """Contato que o dono liberou (allowlist explicita) ou que tem perfil de pessoa."""
+    if chat_id in cfg["allowlist"]:
+        return True
+    return _perfil_do_contato(db, chat_id) is not None
+
+
 def _acao_relacionada(db, chat_id: str) -> dict | None:
     # Busca limitada por pessoa: `atencao.mapear_acoes_ativas_por_chat` varre `tarefas` inteira.
     try:
@@ -373,6 +383,8 @@ def agendar(db, mensagem: dict, agora: datetime | None = None) -> bool:
     if not cfg["enabled"] or not mensagem_elegivel(mensagem, cfg, agora):
         return False
     chat_id = str(mensagem["chat_id"]).strip()
+    if cfg["apenas_conhecidos"] and not contato_conhecido(db, cfg, chat_id):
+        return False
     db.collection(COLLECTION).document(_doc_id(chat_id)).set({
         "chat_id": chat_id,
         "chat_name": mensagem.get("chat_name"),

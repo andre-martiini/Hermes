@@ -128,10 +128,20 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(cfg["limite_por_rodada"], 2)
 
     def test_allowlist_e_ids_do_dono(self):
-        cfg = rs.config_de_settings({"whatsapp_ingest": {"leitura_total": True, "andre_chat_ids": ["a@lid", " "]}})
-        self.assertEqual(cfg["allowlist"], {"*"})
+        cfg = rs.config_de_settings({"whatsapp_ingest": {"andre_chat_ids": ["a@lid", " "]}})
         self.assertEqual(cfg["andre_ids"], {"a@lid"})
         self.assertEqual(rs.config_de_settings({"whatsapp_ingest": {"chats_allowlist": [CHAT]}})["allowlist"], {CHAT})
+
+    def test_leitura_total_nao_vira_curinga(self):
+        # `leitura_total` deixa o Claude LER tudo; nao autoriza redigir resposta para qualquer numero.
+        cfg = rs.config_de_settings({"whatsapp_ingest": {"leitura_total": True}})
+        self.assertEqual(cfg["allowlist"], set())
+        self.assertNotIn("*", cfg["allowlist"])
+
+    def test_apenas_conhecidos_e_o_padrao_e_pode_ser_desligado(self):
+        self.assertTrue(rs.config_de_settings({})["apenas_conhecidos"])
+        cfg = rs.config_de_settings({"atencao": {"resposta_sugerida": {"apenas_conhecidos": False}}})
+        self.assertFalse(cfg["apenas_conhecidos"])
 
 
 class TestMensagemElegivel(unittest.TestCase):
@@ -150,7 +160,6 @@ class TestMensagemElegivel(unittest.TestCase):
             "grupo": {"is_group": True},
             "chat do proprio dono": {"chat_id": "144929460330697@lid"},
             "chat que nao e individual": {"chat_id": "120363@g.us"},
-            "fora da allowlist": {"chat_id": "5527888880000@c.us"},
             "figurinha": {"message_type": "sticker"},
             "audio sem texto": {"message_type": "ptt", "content": ""},
             "texto curto demais": {"content": "a"},
@@ -161,10 +170,9 @@ class TestMensagemElegivel(unittest.TestCase):
             with self.subTest(nome):
                 self.assertFalse(self._ok(**over))
 
-    def test_leitura_total_libera_qualquer_conversa_individual(self):
-        cfg = rs.config_de_settings({"atencao": {"resposta_sugerida": {"enabled": True}},
-                                     "whatsapp_ingest": {"leitura_total": True}})
-        self.assertTrue(rs.mensagem_elegivel(_mensagem_recebida(chat_id="5527888880000@lid"), cfg, AGORA))
+    def test_a_forma_da_mensagem_nao_depende_da_allowlist(self):
+        # Quem decide se o contato e conhecido e `contato_conhecido` (allowlist OU perfil).
+        self.assertTrue(self._ok(chat_id="5527888880000@lid"))
 
     def test_legenda_de_imagem_conta_como_texto(self):
         self.assertTrue(self._ok(message_type="image", content="olha isso aqui, pode ver?"))
@@ -270,9 +278,11 @@ class TestMontarPrompt(unittest.TestCase):
 class TestAgendar(unittest.TestCase):
     def setUp(self):
         self.db = FakeDb()
-        patcher = patch.object(rs, "obter_config", side_effect=lambda db: self.cfg)
-        self.addCleanup(patcher.stop)
-        patcher.start()
+        self.perfil = None
+        for nome, fn in (("obter_config", lambda db: self.cfg), ("_perfil_do_contato", lambda db, chat_id: self.perfil)):
+            patcher = patch.object(rs, nome, side_effect=fn)
+            self.addCleanup(patcher.stop)
+            patcher.start()
         self.cfg = _cfg()
 
     def _doc(self):
@@ -302,6 +312,37 @@ class TestAgendar(unittest.TestCase):
     def test_mensagem_nao_elegivel_nao_grava_nada(self):
         self.assertFalse(rs.agendar(self.db, _mensagem_recebida(is_group=True), AGORA))
         self.assertIsNone(self._doc())
+
+    def test_numero_desconhecido_nao_agenda(self):
+        # Fora da allowlist e sem perfil de pessoa: quase sempre spam ou robo.
+        self.assertFalse(rs.agendar(self.db, _mensagem_recebida(chat_id="5527888880000@c.us"), AGORA))
+        self.assertEqual(self.db.collection(rs.COLLECTION).docs, {})
+
+    def test_leitura_total_nao_abre_para_numero_desconhecido(self):
+        self.cfg = rs.config_de_settings({"atencao": {"resposta_sugerida": {"enabled": True}},
+                                          "whatsapp_ingest": {"leitura_total": True}})
+        self.assertFalse(rs.agendar(self.db, _mensagem_recebida(), AGORA))
+        self.assertEqual(self.db.collection(rs.COLLECTION).docs, {})
+
+    def test_contato_com_perfil_agenda_mesmo_fora_da_allowlist(self):
+        self.perfil = {"nome": "Carla"}
+        outro = "5527888880000@c.us"
+        self.assertTrue(rs.agendar(self.db, _mensagem_recebida(chat_id=outro), AGORA))
+        self.assertIn(outro, self.db.collection(rs.COLLECTION).docs)
+
+    def test_contato_da_allowlist_agenda_mesmo_sem_perfil(self):
+        self.assertIsNone(self.perfil)
+        self.assertTrue(rs.agendar(self.db, _mensagem_recebida(), AGORA))
+
+    def test_apenas_conhecidos_desligado_agenda_qualquer_numero_individual(self):
+        self.cfg = _cfg(apenas_conhecidos=False)
+        self.assertTrue(rs.agendar(self.db, _mensagem_recebida(chat_id="5527888880000@c.us"), AGORA))
+
+    def test_contato_conhecido_por_allowlist_ou_perfil(self):
+        self.assertTrue(rs.contato_conhecido(self.db, self.cfg, CHAT))
+        self.assertFalse(rs.contato_conhecido(self.db, self.cfg, "5527888880000@c.us"))
+        self.perfil = {"nome": "Carla"}
+        self.assertTrue(rs.contato_conhecido(self.db, self.cfg, "5527888880000@c.us"))
 
     def test_usa_o_atraso_configurado(self):
         self.cfg = _cfg(atraso_min=10)
