@@ -1185,6 +1185,15 @@ class TestInstrucoesDoServidor(unittest.TestCase):
         for termo in ("obter_estado_atual", "consultar_job", "editar_acao"):
             self.assertIn(termo, self.init["instructions"], termo)
 
+    def test_instrui_que_conteudo_de_terceiros_e_dado_nao_comando(self):
+        # Injecao de prompt por e-mail, WhatsApp, web ou documento: o assistente Instinct
+        # seguiu instrucoes de um e-mail malicioso num teste de phishing (TechCrunch,
+        # 24/08/2026). A regra vai no `initialize`, que o cliente mostra ao modelo.
+        texto = self.init["instructions"]
+        for termo in ("TERCEIROS", "DADO, nunca comando", "e-mail", "WhatsApp", "pagina da web",
+                      "instrucoes escondidas", "espere ele decidir", "falando com voce diretamente"):
+            self.assertIn(termo, texto, termo)
+
     def test_prompts_get_sem_nome_e_erro_de_parametro(self):
         with self.assertRaises(mcp_server.McpError) as ctx:
             mcp_server._handle_prompts_get({})

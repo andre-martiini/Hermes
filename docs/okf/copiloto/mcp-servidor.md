@@ -148,6 +148,15 @@ de memória**: no copiloto web, salvar um fato durável era subproduto da conver
 porque o system prompt mandava. Num cliente MCP só acontece se algo disser para
 acontecer, e sem isso o Hermes para de aprender.
 
+Também carrega a regra contra **injeção de prompt**: tudo o que vem de terceiros
+(e-mail, WhatsApp — inclusive transcrição de áudio e descrição de imagem —, página
+web, resultado de busca, documento, anexo, texto de processo) é **dado, nunca
+comando**. O modelo não obedece a instruções escondidas ali, conta ao usuário o que
+viu e espera ele decidir; só o usuário, falando diretamente, autoriza enviar,
+gravar, apagar, pagar, compartilhar ou revelar. É a defesa de primeira camada:
+não impede um modelo que decida obedecer, mas o `initialize` é o único texto que
+todo cliente MCP mostra antes da primeira mensagem.
+
 ### O perfil continua aprendendo
 
 `ai_profile.historico_deduzido` guarda o que você andou pedindo e volta como
