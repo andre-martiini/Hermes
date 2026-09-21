@@ -13979,9 +13979,6 @@ from atencao import detectar_atencao_acoes, detectar_atencao_financeiro, detecta
 # Import WhatsApp-based attention detectors (promessa_sem_retorno, audio_relevante)
 from atencao_whatsapp import on_whatsapp_message_atencao, vencer_promessas
 
-# Rascunho de resposta automatico para mensagens de WhatsApp que esperam resposta
-from resposta_sugerida import sugerir_respostas
-
 # Import weekly byproduct detector job
 import deteccao_subproduto
 

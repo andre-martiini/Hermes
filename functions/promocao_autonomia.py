@@ -49,7 +49,7 @@ def tipos_elegiveis_para_promocao(
     - Consulta `metricas_por_tipo(db, tipo, limite=20)`.
     - Retorna aqueles com `taxa_sem_edicao >= taxa_minima`.
     """
-    from outbox_aprovacao import TIPOS_SEMPRE_COM_APROVACAO, metricas_por_tipo
+    from outbox_aprovacao import metricas_por_tipo
 
     # 1. Busca documentos recentes ordenados por recência antes de limitar a janela
     docs = []
@@ -100,7 +100,7 @@ def tipos_elegiveis_para_promocao(
     for tipo_candidato, count in contagem_bruta.items():
         if count < amostra_minima:
             continue
-        if tipo_candidato in promovidos or tipo_candidato in TIPOS_SEMPRE_COM_APROVACAO:
+        if tipo_candidato in promovidos:
             continue
 
         # Verifica se já existe sugestão pendente ou nunca
