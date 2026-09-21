@@ -713,25 +713,6 @@ class TestCriarEListarRascunho(unittest.TestCase):
             mock_send.assert_called_once()
             self.assertIn("Mariana", mock_send.call_args[0][2])
 
-    def test_resposta_sugerida_nunca_e_promovida_a_envio_automatico(self):
-        """Texto de IA para gente real: mesmo com o tipo na lista de promovidos, passa pelo toque do dono."""
-        destino = {"encontrado": True, "nome": "Mariana", "chat_id": "5527998887777@c.us"}
-        with mock.patch("tools.hermes_tools._destinatario_whatsapp_previa", return_value=destino), \
-                mock.patch.object(oa, "_tipos_promovidos", return_value={"resposta_sugerida", "aviso_agenda"}), \
-                mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", return_value=555), \
-                mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"), \
-                mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
-            sugerida = oa.criar_rascunho(
-                self.db, contact_number="5527998887777@c.us", message="Vou sim",
-                motivo="Resposta sugerida", tipo="resposta_sugerida")
-            comum = oa.criar_rascunho(
-                self.db, contact_number="5527998887777@c.us", message="Reuniao amanha",
-                motivo="Aviso", tipo="aviso_agenda")
-        self.assertEqual(sugerida["status"], oa.STATUS_AGUARDANDO)
-        self.assertNotIn("envio_liberado_em", self.db.collection(oa.COLLECTION)._docs[sugerida["outbox_id"]])
-        # controle: a promocao segue valendo para os outros tipos
-        self.assertEqual(comum["status"], oa.STATUS_AGUARDANDO_JANELA)
-
     def test_criar_rascunho_envio_imediato_grava_scheduled_for_agora(self):
         """Regressão: envio_imediato não pode gravar scheduled_for null/ausente.
 

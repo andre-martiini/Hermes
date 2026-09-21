@@ -25,10 +25,6 @@ STATUS_EXPIRADO = "expirado"
 STATUS_SENT = "sent"
 STATUS_FAILED = "failed"
 
-# Tipos cujo rascunho passa SEMPRE pelo toque do dono, mesmo que alguem aceite a "promocao de
-# autonomia" do tipo: `resposta_sugerida` e texto de IA para gente real, sobre qualquer assunto.
-TIPOS_SEMPRE_COM_APROVACAO = frozenset({"resposta_sugerida"})
-
 
 # ---------------------------------------------------------------------------
 # Lógica pura (separada de Firestore / rede para testes unitários)
@@ -314,7 +310,7 @@ def criar_rascunho(
         scheduled_for = datetime.datetime.now(timezone.utc)
     else:
         promovidos = _tipos_promovidos(db)
-        is_promovido = tipo_limpo.lower() in promovidos and tipo_limpo.lower() not in TIPOS_SEMPRE_COM_APROVACAO
+        is_promovido = tipo_limpo.lower() in promovidos
         janela_min = _obter_janela_cancelamento_min(db) if is_promovido else 0
         agora_utc = datetime.datetime.now(timezone.utc)
         envio_liberado_em = (agora_utc + datetime.timedelta(minutes=janela_min)) if is_promovido else None

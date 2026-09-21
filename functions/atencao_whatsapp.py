@@ -699,14 +699,6 @@ def on_whatsapp_message_atencao(event: firestore_fn.Event[firestore_fn.DocumentS
     except Exception as exc:
         print(f"[AtencaoWhatsApp] Falha no detector aprovacao_outbox: {exc}")
 
-    # Agenda o rascunho de resposta (so grava um documento pequeno; quem chama o Gemini e a
-    # funcao agendada `sugerir_respostas`, depois de o dono ter tido alguns minutos para responder).
-    try:
-        from resposta_sugerida import agendar as agendar_resposta_sugerida
-        agendar_resposta_sugerida(db, mensagem)
-    except Exception as exc:
-        print(f"[AtencaoWhatsApp] Falha ao agendar resposta sugerida: {exc}")
-
 
 @scheduler_fn.on_schedule(
     schedule="every 15 minutes",

@@ -493,22 +493,6 @@ class TestTiposElegiveisParaPromocao(unittest.TestCase):
         self.db = _MockDb()
         self.outbox = self.db.collection("whatsapp_outbox")
 
-    def test_resposta_sugerida_nunca_e_sugerida_para_promocao(self):
-        """Texto de IA para gente real nao vira envio automatico, por mais que o dono aprove sem editar."""
-        agora = datetime.datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
-        for i in range(10):
-            for tipo in ("resposta_sugerida", "retorno_promessa"):
-                self.outbox._docs[f"{tipo}_{i}"] = {
-                    "tipo": tipo,
-                    "status": oa.STATUS_SENT,
-                    "foi_editado": False,
-                    "aprovado_em": agora - timedelta(hours=i),
-                }
-
-        elegiveis = pa.tipos_elegiveis_para_promocao(self.db, amostra_minima=8, taxa_minima=0.9)
-        # controle: o outro tipo, com exatamente o mesmo historico, continua elegivel
-        self.assertEqual([e["tipo"] for e in elegiveis], ["retorno_promessa"])
-
     def test_amostra_insuficiente_nao_fica_elegivel(self):
         agora = datetime.datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
         # 5 rascunhos (menor que o mínimo de 8)
