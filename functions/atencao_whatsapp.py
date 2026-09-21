@@ -699,6 +699,12 @@ def on_whatsapp_message_atencao(event: firestore_fn.Event[firestore_fn.DocumentS
     except Exception as exc:
         print(f"[AtencaoWhatsApp] Falha no detector aprovacao_outbox: {exc}")
 
+    try:
+        import resposta_esperada
+        resposta_esperada.processar_mensagem(db, mensagem)
+    except Exception as exc:
+        print(f"[AtencaoWhatsApp] Falha no sinal resposta_esperada (modo sombra): {exc}")
+
 
 @scheduler_fn.on_schedule(
     schedule="every 15 minutes",
