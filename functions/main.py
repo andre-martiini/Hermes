@@ -3052,6 +3052,16 @@ def run_full_sync(trigger_reason='unspecified'):
             except Exception as e_atencao:
                 log_to_firestore(sync_ref, logs, f"[ATENCAO][ERRO] Falha inesperada no detector aguardando_terceiro_vencido: {e_atencao}", True)
 
+            # Indice das esperas para o sinal de resposta esperada (modo sombra), montado com a
+            # mesma leitura de 'tarefas'; so grava quando algo mudou. Nunca derruba o sync.
+            try:
+                from resposta_esperada import reconstruir_indice
+                stats_esperas = reconstruir_indice(db, tarefas_snapshot)
+                if stats_esperas.get('gravado'):
+                    log_to_firestore(sync_ref, logs, f"[RESPOSTA_ESPERADA] Indice das esperas atualizado: {stats_esperas['esperas_terceiros']} de terceiros, {stats_esperas['esperas_dono_ou_ia']} do dono/IA.")
+            except Exception as e_resp_esp:
+                log_to_firestore(sync_ref, logs, f"[RESPOSTA_ESPERADA][ERRO] Falha ao montar o indice das esperas: {e_resp_esp}", True)
+
             # Primeiro puxa o Calendar para permitir sincronia inversa (agenda -> Hermes) antes do push
             tarefas_atualizadas = sync_google_calendar(cs, sync_ref, logs, tarefas_docs=tarefas_snapshot)
             sync_google_tasks_push(ts, cs, sync_ref, logs, tarefas_atualizadas=tarefas_atualizadas)
