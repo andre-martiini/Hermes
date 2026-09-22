@@ -510,7 +510,7 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         nota="Idempotente (P03 sub-entrega 20/N): outbox_aprovacao.aprovar_rascunho roda dentro de uma "
         "transação Firestore que revalida validar_transicao_aprovacao(status_atual) antes de escrever -- só "
         "aguardando_aprovacao/aguardando_janela transicionam para pending. Repetir a chamada depois da "
-        "primeira aprovação encontra o status já mudado e devolve status=already_decided sem tocar a "
+        "primeira aprovação encontra o status já mudado e devolve status=already_decided sem tocar o "
         "documento nem reenviar nada -- mesmo padrão já aceito para concluir_pedido_agente (reversibilidade "
         "e idempotência são perguntas independentes: a tool é IRREVERSIVEL e IDEMPOTENTE ao mesmo tempo).",
     ),
@@ -1093,6 +1093,7 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
 }
 
 del _L, _R, _C
+
 
 def get_inventory_entry(tool_name: str) -> ToolInventoryEntry | None:
     return _INVENTORY.get(tool_name)
