@@ -11,7 +11,7 @@ inventário tipado da sub-entrega 1/N (`tools/inventory.py`):
 `dominio_rede` (`tools/inventory.py::DominioRede`) -- não de
 `necessidade_de_rede` direto, ver a docstring de `registry.mcp_annotations`
 para o porquê. `idempotentHint` vem, PARCIALMENTE, das sub-entregas
-16/N-20/N: 43 das ~61 tools de escrita/leitura_e_escrita têm `idempotencia`
+16/N-21/N: 47 das ~61 tools de escrita/leitura_e_escrita têm `idempotencia`
 classificada no inventário (`tools/inventory.py::Idempotencia`) -- as
 demais continuam sem o hint (omitido, não um valor inventado), mesmo
 raciocínio já usado
@@ -187,8 +187,8 @@ class TestMcpAnnotations(unittest.TestCase):
     def test_nao_idempotente_leva_idempotent_hint_false(self):
         # As 5 tools classificadas NAO_IDEMPOTENTE na sub-entrega 16/N + as 7
         # da sub-entrega 17/N + as 6 da sub-entrega 18/N + as 6 da sub-entrega
-        # 19/N + a 1 da sub-entrega 20/N (ver nota de cada uma em
-        # tools/inventory.py para a evidência por handler).
+        # 19/N + a 1 da sub-entrega 20/N + as 4 da sub-entrega 21/N (ver nota
+        # de cada uma em tools/inventory.py para a evidência por handler).
         for nome in (
             "agendar_lembrete_acao",
             "registrar_no_diario",
@@ -215,6 +215,10 @@ class TestMcpAnnotations(unittest.TestCase):
             "gerar_imagem",
             "criar_rascunho_whatsapp",
             "solicitar_autorizacao_argos",
+            "confirmar_edicao_em_lote",
+            "editar_acoes_em_lote",
+            "confirmar_reagendamento_em_lote",
+            "reagendar_acoes_em_lote",
         ):
             with self.subTest(tool=nome):
                 self.assertEqual(registry.mcp_annotations(nome).get("idempotentHint"), False)
