@@ -779,10 +779,30 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "confirmar_edicao_em_lote": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "mais fraco que a versão singular — devolve só count, não os campos aplicados por item",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="wrapper fino sobre `main.py::confirmarEdicaoEmLote` (mesma callable usada por "
+        "`editar_acoes_em_lote`, ver a entrada dela). NAO_IDEMPOTENTE (P03 sub-entrega 21/N): o "
+        "`set` por item dentro de `alteracoes` é idempotente isoladamente (mesmo valor produz o "
+        "mesmo estado do campo), mas a callable monta UM `now_iso`/`diary_entry` por chamada e faz "
+        "`batch.update(..., 'acompanhamento': firestore.ArrayUnion([diary_entry]))` para cada item, "
+        "incondicionalmente, a cada sucesso — repetir a MESMA chamada com os MESMOS `items` "
+        "acrescenta uma segunda nota ao diário de cada ação e reescreve `data_atualizacao`/"
+        "`data_conclusao`, mesmo padrão já usado em `editar_acao` (main.py::confirmarEdicaoAcao). "
+        "Diferente da versão singular, não há checagem de `snapshot_ts` aqui — nada bloqueia a "
+        "repetição mesmo que nada tenha mudado desde a primeira chamada.",
     ),
     "confirmar_reagendamento_em_lote": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "mesmo padrão fraco — só count, sem confirmação por item das novas datas aplicadas",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="wrapper fino sobre `main.py::confirmarReagendamentoEmLote` (mesma callable usada por "
+        "`reagendar_acoes_em_lote`, ver a entrada dela). NAO_IDEMPOTENTE (P03 sub-entrega 21/N): "
+        "mesmo padrão de `confirmar_edicao_em_lote` — um `now_iso`/`diary_entry` novo por chamada, "
+        "`batch.update(..., 'acompanhamento': firestore.ArrayUnion([diary_entry]))` incondicional "
+        "por item a cada sucesso. Repetir a MESMA chamada com os MESMOS `items` grava a MESMA "
+        "`nova_data_limite`/horário (sem divergência no valor final dos campos), mas acrescenta uma "
+        "segunda nota ao diário de cada ação e reescreve `data_atualizacao` — efeito adicional, sem "
+        "checagem de estado prévio.",
     ),
     "consultar_job": ToolInventoryEntry(
         "utilitario", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
@@ -811,10 +831,34 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "editar_acoes_em_lote": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum automático",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="`tools/hermes_tools.py::editar_acoes_em_lote` é outro wrapper fino sobre a MESMA "
+        "callable `main.py::confirmarEdicaoEmLote` que `confirmar_edicao_em_lote` usa — só muda o "
+        "nome do parâmetro de entrada aceito (`itens` em vez de `items`), o efeito colateral é "
+        "idêntico. NAO_IDEMPOTENTE pelo mesmo motivo (P03 sub-entrega 21/N): ver a nota de "
+        "`confirmar_edicao_em_lote` para a evidência por handler (ArrayUnion incondicional com "
+        "`now_iso` novo a cada chamada bem-sucedida).",
     ),
     "reagendar_acoes_em_lote": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum automático — devolve contagem, sem reconferência",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="NAO_IDEMPOTENTE (P03 sub-entrega 21/N), e por DOIS motivos independentes. (1) O passo "
+        "final chama `main.py::confirmarReagendamentoEmLote` (mesma callable de "
+        "`confirmar_reagendamento_em_lote`, ver a nota dela) — ArrayUnion incondicional de um novo "
+        "`diary_entry` por item a cada chamada bem-sucedida, mesmo quando a data final gravada é "
+        "idêntica à da chamada anterior. (2) O passo de preparação NÃO é descartado aqui (só a "
+        "ida-e-volta ao cliente é) — `preparar_reagendamento_em_lote` é chamado de novo a cada "
+        "invocação e recalcula a distribuição contra o estado ATUAL das ações; com `task_ids` "
+        "explícito, o conjunto e a ordem tendem a se repetir (ordenação por `data_criacao`/`titulo`/ "
+        "`tipo_acao`, campos que a confirmação não altera), então uma repetição volta a aplicar a "
+        "MESMA distribuição — mas com `filtro_data` (o outro modo de seleção, via "
+        "`_coletar_tarefas_lote`), a consulta filtra por `data_limite == filtro_data`, EXATAMENTE o "
+        "campo que a confirmação acabou de mudar: repetir a MESMA chamada depois de um sucesso tende "
+        "a não encontrar mais nenhuma ação com aquele `filtro_data` e a preparação devolve "
+        "`ERRO|Nenhuma acao encontrada...` sem chegar a confirmar de novo — uma auto-limitação "
+        "parcial e dependente dos dados, não uma proteção estrutural (não é garantida se alguma ação "
+        "calhar de cair de volta no mesmo `filtro_data`, e não existe de todo no modo `task_ids`).",
     ),
     "obter_estado_atual": ToolInventoryEntry(
         "utilitario", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
