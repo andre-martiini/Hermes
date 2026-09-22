@@ -631,13 +631,17 @@ def mcp_annotations(tool_name: str) -> dict:
     outputSchema, structuredContent, annotations e envelope aos caminhos
     compativeis"). `readOnlyHint`/`destructiveHint` vieram da sub-entrega
     6/N; `openWorldHint`, da sub-entrega 7/N; `idempotentHint`, PARCIAL, das
-    sub-entregas 16/N, 17/N, 18/N, 19/N e 20/N (43 das ~61 tools de escrita/
-    leitura_e_escrita investigadas ate agora -- ver `Idempotencia` em
-    `tools/inventory.py`; o universo elegivel cresceu de ~59 para ~61 entre
-    a sub-entrega 19/N e a 20/N por causa de tools novas adicionadas por PRs
-    de funcionalidade fora deste plano, `atualizar_arquivo_drive` e
+    sub-entregas 16/N, 17/N, 18/N, 19/N, 20/N e 21/N (47 das ~61 tools de
+    escrita/leitura_e_escrita investigadas ate agora -- ver `Idempotencia`
+    em `tools/inventory.py`; o universo elegivel cresceu de ~59 para ~61
+    entre a sub-entrega 19/N e a 20/N por causa de tools novas adicionadas
+    por PRs de funcionalidade fora deste plano, `atualizar_arquivo_drive` e
     `sincronizar_conversas_whatsapp`, ja classificadas por quem as
-    implementou).
+    implementou; nota de honestidade -- o diario da sub-entrega 20/N
+    registrou este numero como tendo mudado de 43 para 48, mas o texto
+    aqui continuou em 43 sem edicao correspondente; o valor real antes
+    desta sub-entrega 21/N era 43, e o incremento para 47 abaixo reflete
+    as 4 tools classificadas agora, nao os 48 que o diario alegava).
     `outputSchema`/`structuredContent`/envelope seguem fora de escopo --
     exigem definir um contrato de dados por tool, ver docs/autonomia/execucao.md.
 
@@ -786,12 +790,40 @@ def mcp_annotations(tool_name: str) -> dict:
     tipo/sistema_id/demanda_id -- mesmo padrão já aceito para `criar_
     objetivo_estrategico`/`criar_rascunho_whatsapp`).
 
-    As demais ~10 tools de escrita/leitura_e_escrita ainda não foram
-    investigadas (`idempotencia=None`, hint omitido) -- candidatas a
-    fatias futuras, mesmo padrao incremental ja usado para `dominio_rede`
-    (sub-entrega 7/N) e para `outputSchema` (sub-entregas 8/N em diante).
-    Mais 8 tools (as listadas acima, entre a sub-entrega 19/N e as
-    anteriores) foram investigadas e deliberadamente deixadas sem
+    Mais 4 tools investigadas na sub-entrega 21/N, o grupo coeso de edição/
+    reagendamento em lote de ações já identificado como próxima fatia
+    natural pela sub-entrega 20/N: `confirmar_edicao_em_lote`, `editar_
+    acoes_em_lote`, `confirmar_reagendamento_em_lote` e `reagendar_acoes_
+    em_lote` são as quatro NAO_IDEMPOTENTE -- `confirmar_edicao_em_lote` e
+    `editar_acoes_em_lote` são dois wrappers finos sobre a MESMA callable
+    (`main.py::confirmarEdicaoEmLote`), e `confirmar_reagendamento_em_lote`
+    e `reagendar_acoes_em_lote` sobre `main.py::confirmarReagendamentoEmLote`
+    -- ambas as callables fazem `batch.update(..., 'acompanhamento':
+    firestore.ArrayUnion([diary_entry]))` por item, com um `diary_entry`
+    novo (timestamp novo) a cada chamada bem-sucedida, incondicionalmente;
+    repetir a MESMA chamada com os MESMOS `items` não diverge no valor
+    final dos campos editados, mas acrescenta uma nota nova ao diário de
+    cada ação a cada vez -- mesmo padrão já usado em `editar_acao` (sub-
+    entrega 16/N). `reagendar_acoes_em_lote` acumula um segundo motivo,
+    documentado em `nota`: o passo de preparação (`preparar_reagendamento_
+    em_lote`) é refeito a cada chamada e, quando a seleção é por
+    `filtro_data`, filtra exatamente pelo campo (`data_limite`) que a
+    confirmação acabou de mudar -- repetir tende a não encontrar mais nada
+    e falhar cedo, uma auto-limitação parcial e dependente dos dados, não
+    uma proteção estrutural (ver `nota` de cada uma em `tools/inventory.py`
+    para a evidência por handler e os testes que provam o crescimento do
+    diário em `test_confirmar_lote_nao_idempotente.py`).
+
+    As demais ~6 tools de escrita/leitura_e_escrita ainda não foram
+    investigadas (`idempotencia=None`, hint omitido) -- `acompanhar_
+    processo_sipac`, `confirmar_edicao_acao` (a versão singular do par
+    edição/edição-em-lote coberto nesta sub-entrega 21/N -- candidata óbvia
+    para a próxima fatia), `consolidar_whatsapp`, `consultar_contatos_
+    prioritarios_secretario`, `registrar_inscricao_bolsa_publica` e
+    `schedule_whatsapp_message` -- mesmo padrao incremental ja usado para
+    `dominio_rede` (sub-entrega 7/N) e para `outputSchema` (sub-entregas
+    8/N em diante). Mais 8 tools (as listadas acima, entre a sub-entrega
+    19/N e as anteriores) foram investigadas e deliberadamente deixadas sem
     classificação por ambiguidade genuína -- ver `nota` de cada uma em
     `tools/inventory.py` para não repetir a investigação.
 
