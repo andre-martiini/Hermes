@@ -775,6 +775,30 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "devolve campos_alterados com o que de fato foi gravado (pode divergir do pedido) — verificador "
         "real, raro neste inventário",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="chama a MESMA callable `main.py::confirmarEdicaoAcao` que `editar_acao` (ver a entrada "
+        "dela, sub-entrega 16/N) — mesma raiz do problema: `task_ref.update({**updates, "
+        "'acompanhamento': firestore.ArrayUnion([diary_entry])})` incondicional a cada chamada "
+        "bem-sucedida, com `diary_entry`/`data_atualizacao` novos (timestamp novo) a cada vez. "
+        "Repetir a MESMA chamada com os MESMOS `alteracoes` converge no valor final dos campos, mas "
+        "acrescenta uma nova nota ao diário e reescreve `data_atualizacao` a cada repetição — efeito "
+        "adicional, NAO_IDEMPOTENTE. Diferença real da entrada `editar_acao`: esta tool (a "
+        "contraparte de `preparar_edicao_acao`, ao contrário de `editar_acao`, que é a via direta sem "
+        "o par preparar/confirmar) recebe `snapshot_ts` como parâmetro OPCIONAL do schema "
+        "(`confirmar_edicao_acao.json`) e o repassa para a callable (`_map_confirmar_edicao_acao`, "
+        "diferente de `editar_acao`, que nunca envia `snapshotTs`). Quando o chamador usa o fluxo "
+        "normal (passa o `snapshot_ts` devolvido por `preparar_edicao_acao`), a callable compara "
+        "contra `data_atualizacao`/`data_criacao` ANTES de gravar e recusa com `status: 'invalidated'` "
+        "se divergir — como a própria gravação bem-sucedida já reescreveu `data_atualizacao`, uma "
+        "SEGUNDA chamada idêntica com o MESMO `snapshot_ts` (agora desatualizado) falha em vez de "
+        "duplicar a nota, uma auto-limitação real que `confirmar_edicao_em_lote`/`confirmar_"
+        "reagendamento_em_lote` não têm (sub-entrega 21/N). Não é idempotência de verdade — a segunda "
+        "chamada devolve um resultado DIFERENTE da primeira (erro em vez de sucesso), e a proteção só "
+        "existe quando o chamador de fato envia `snapshot_ts`, campo opcional que um cliente MCP pode "
+        "omitir (nesse caso, mesmo comportamento sem proteção de `editar_acao`). Classificação "
+        "conservadora mantida em NAO_IDEMPOTENTE — mesmo critério de 'hint errado é pior que omissão' "
+        "já usado neste inventário: o caso sem `snapshot_ts` não converge, e a proteção com "
+        "`snapshot_ts` não produz o mesmo efeito observável, só bloqueia a repetição com um erro.",
     ),
     "confirmar_edicao_em_lote": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,

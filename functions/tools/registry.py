@@ -631,7 +631,7 @@ def mcp_annotations(tool_name: str) -> dict:
     outputSchema, structuredContent, annotations e envelope aos caminhos
     compativeis"). `readOnlyHint`/`destructiveHint` vieram da sub-entrega
     6/N; `openWorldHint`, da sub-entrega 7/N; `idempotentHint`, PARCIAL, das
-    sub-entregas 16/N, 17/N, 18/N, 19/N, 20/N e 21/N (47 das ~61 tools de
+    sub-entregas 16/N, 17/N, 18/N, 19/N, 20/N, 21/N e 22/N (48 das ~61 tools de
     escrita/leitura_e_escrita investigadas ate agora -- ver `Idempotencia`
     em `tools/inventory.py`; o universo elegivel cresceu de ~59 para ~61
     entre a sub-entrega 19/N e a 20/N por causa de tools novas adicionadas
@@ -814,11 +814,27 @@ def mcp_annotations(tool_name: str) -> dict:
     para a evidência por handler e os testes que provam o crescimento do
     diário em `test_confirmar_lote_nao_idempotente.py`).
 
-    As demais ~6 tools de escrita/leitura_e_escrita ainda não foram
+    Mais 1 tool investigada na sub-entrega 22/N, a versão singular do par
+    edição/edição-em-lote coberto na sub-entrega 21/N: `confirmar_edicao_
+    acao` é NAO_IDEMPOTENTE -- chama a MESMA callable `main.py::
+    confirmarEdicaoAcao` que `editar_acao` (sub-entrega 16/N), com a mesma
+    raiz (`ArrayUnion` incondicional a cada chamada bem-sucedida). Diferença
+    real: ao contrário de `editar_acao`, esta tool repassa `snapshot_ts`
+    (parâmetro opcional do schema, devolvido por `preparar_edicao_acao`) à
+    callable, que recusa a gravação com `status: 'invalidated'` se o valor
+    não bater com `data_atualizacao` atual -- como a própria gravação já
+    reescreve esse campo, uma SEGUNDA chamada idêntica com o MESMO
+    `snapshot_ts` falha em vez de duplicar a nota, uma auto-limitação real
+    que o grupo em lote da sub-entrega 21/N não tem. Não é idempotência de
+    verdade (a segunda chamada devolve erro, não o mesmo sucesso) e só se
+    aplica quando o chamador de fato envia `snapshot_ts` -- sem ele, mesmo
+    comportamento sem proteção de `editar_acao`. Classificação conservadora
+    mantida em NAO_IDEMPOTENTE (ver `nota` em `tools/inventory.py` e os
+    testes em `test_confirmar_edicao_acao_nao_idempotente.py`).
+
+    As demais ~5 tools de escrita/leitura_e_escrita ainda não foram
     investigadas (`idempotencia=None`, hint omitido) -- `acompanhar_
-    processo_sipac`, `confirmar_edicao_acao` (a versão singular do par
-    edição/edição-em-lote coberto nesta sub-entrega 21/N -- candidata óbvia
-    para a próxima fatia), `consolidar_whatsapp`, `consultar_contatos_
+    processo_sipac`, `consolidar_whatsapp`, `consultar_contatos_
     prioritarios_secretario`, `registrar_inscricao_bolsa_publica` e
     `schedule_whatsapp_message` -- mesmo padrao incremental ja usado para
     `dominio_rede` (sub-entrega 7/N) e para `outputSchema` (sub-entregas
