@@ -631,9 +631,13 @@ def mcp_annotations(tool_name: str) -> dict:
     outputSchema, structuredContent, annotations e envelope aos caminhos
     compativeis"). `readOnlyHint`/`destructiveHint` vieram da sub-entrega
     6/N; `openWorldHint`, da sub-entrega 7/N; `idempotentHint`, PARCIAL, das
-    sub-entregas 16/N, 17/N, 18/N e 19/N (36 das ~59 tools de escrita/
+    sub-entregas 16/N, 17/N, 18/N, 19/N e 20/N (43 das ~61 tools de escrita/
     leitura_e_escrita investigadas ate agora -- ver `Idempotencia` em
-    `tools/inventory.py`).
+    `tools/inventory.py`; o universo elegivel cresceu de ~59 para ~61 entre
+    a sub-entrega 19/N e a 20/N por causa de tools novas adicionadas por PRs
+    de funcionalidade fora deste plano, `atualizar_arquivo_drive` e
+    `sincronizar_conversas_whatsapp`, ja classificadas por quem as
+    implementou).
     `outputSchema`/`structuredContent`/envelope seguem fora de escopo --
     exigem definir um contrato de dados por tool, ver docs/autonomia/execucao.md.
 
@@ -766,11 +770,27 @@ def mcp_annotations(tool_name: str) -> dict:
     interno, com pelo menos um ramo — um toggle de verdade — violando
     idempotência por definição).
 
-    As demais ~15 tools de escrita/leitura_e_escrita ainda não foram
+    Mais 5 tools investigadas na sub-entrega 20/N, o grupo coeso de
+    aprovação/descarte de rascunho + autorização Argos já identificado como
+    próxima fatia natural pela sub-entrega 19/N: `aprovar_rascunho_
+    whatsapp`, `descartar_rascunho_whatsapp`, `consultar_autorizacao_argos`
+    e `consumir_autorizacao_argos` são IDEMPOTENTE (as quatro convergem
+    para um status terminal gracioso -- `already_decided`/`already_used` --
+    dentro de uma transação Firestore que revalida o status atual antes de
+    escrever, ou, no caso de `consultar_autorizacao_argos`, porque a
+    escrita passiva de expiração só acontece enquanto o status ainda é
+    `aguardando_decisao`; ver `nota` de cada uma). `solicitar_autorizacao_
+    argos` é NAO_IDEMPOTENTE (`db.collection(COLLECTION).document()` sem
+    argumento gera um ID novo do Firestore e dispara um novo card no
+    Telegram a cada chamada, sem nenhuma checagem de dedup por
+    tipo/sistema_id/demanda_id -- mesmo padrão já aceito para `criar_
+    objetivo_estrategico`/`criar_rascunho_whatsapp`).
+
+    As demais ~10 tools de escrita/leitura_e_escrita ainda não foram
     investigadas (`idempotencia=None`, hint omitido) -- candidatas a
     fatias futuras, mesmo padrao incremental ja usado para `dominio_rede`
     (sub-entrega 7/N) e para `outputSchema` (sub-entregas 8/N em diante).
-    Mais 8 tools (as listadas acima, entre esta sub-entrega e as
+    Mais 8 tools (as listadas acima, entre a sub-entrega 19/N e as
     anteriores) foram investigadas e deliberadamente deixadas sem
     classificação por ambiguidade genuína -- ver `nota` de cada uma em
     `tools/inventory.py` para não repetir a investigação.

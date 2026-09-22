@@ -503,33 +503,84 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "aprovar_rascunho_whatsapp": ToolInventoryEntry(
         "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, True, True, _C.COMPROMISSO_TERCEIROS,
         "transação Firestore garante exclusão mútua com liberação automática; não verifica entrega",
+        idempotencia=_I.IDEMPOTENTE,
         rede_servico="Telegram (edit_message do card)",
         dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="destinatário e conteúdo de terceiro",
+        nota="Idempotente (P03 sub-entrega 20/N): outbox_aprovacao.aprovar_rascunho roda dentro de uma "
+        "transação Firestore que revalida validar_transicao_aprovacao(status_atual) antes de escrever -- só "
+        "aguardando_aprovacao/aguardando_janela transicionam para pending. Repetir a chamada depois da "
+        "primeira aprovação encontra o status já mudado e devolve status=already_decided sem tocar o "
+        "documento nem reenviar nada -- mesmo padrão já aceito para concluir_pedido_agente (reversibilidade "
+        "e idempotência são perguntas independentes: a tool é IRREVERSIVEL e IDEMPOTENTE ao mesmo tempo).",
     ),
     "descartar_rascunho_whatsapp": ToolInventoryEntry(
         "whatsapp", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "transação Firestore revalida status antes de escrever",
+        idempotencia=_I.IDEMPOTENTE,
         rede_servico="Telegram (edit_message condicional)",
         dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="destinatário e conteúdo de terceiro",
+        nota="Idempotente (P03 sub-entrega 20/N): mesmo desenho de aprovar_rascunho_whatsapp -- "
+        "validar_transicao_descarte dentro da mesma transação Firestore só permite a transição a partir de "
+        "aguardando_aprovacao/aguardando_janela; repetir a chamada devolve status=already_decided antes de "
+        "qualquer escrita. Os efeitos colaterais (reabrir item de atenção, editar mensagem no Telegram) só "
+        "rodam no ramo transaction_result['status'] == 'ok', que só acontece na primeira chamada bem-"
+        "sucedida -- não são reexecutados na repetição.",
     ),
     "solicitar_autorizacao_argos": ToolInventoryEntry(
         "argos_autorizacao", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.COORDENACAO_LIMITADA,
         "nenhum — consultar_autorizacao_argos é chamado depois, manualmente",
-        rede_servico="Telegram Bot API", nota="sem tool de cancelamento; só expira sozinha por tempo",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        rede_servico="Telegram Bot API",
         dominio_rede=DominioRede.FECHADO,
+        nota="sem tool de cancelamento; só expira sozinha por tempo. Não idempotente (P03 sub-entrega "
+        "20/N): argos_autorizacao.solicitar_autorizacao usa doc_ref = db.collection(COLLECTION).document() "
+        "(ID automático do Firestore) e faz .set() incondicional a cada chamada, sem nenhuma checagem de "
+        "dedup por tipo/sistema_id/demanda_id -- repetir a MESMA solicitação cria um SEGUNDO card de "
+        "aprovação distinto no Telegram, mesmo padrão já aceito para criar_objetivo_estrategico/"
+        "criar_rascunho_whatsapp/preparar_upload.",
     ),
     "consultar_autorizacao_argos": ToolInventoryEntry(
         "argos_autorizacao", _L.LEITURA_E_ESCRITA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,
         "ela própria é o verificador informal que outra tool deveria chamar antes de agir no Argos",
+        idempotencia=_I.IDEMPOTENTE,
         nota="escrita é efeito colateral passivo (expira item já vencido durante a leitura), não o "
-        "propósito da tool — por isso nao_aplica em vez de reversivel/irreversivel",
+        "propósito da tool — por isso nao_aplica em vez de reversivel/irreversivel. Idempotente (P03 "
+        "sub-entrega 20/N): _expirar_se_vencida só escreve quando status_atual == aguardando_decisao E o "
+        "prazo já passou; a própria escrita muda o status para expirado, então qualquer chamada seguinte "
+        "encontra a guarda (status != aguardando_decisao) e não escreve de novo -- converge após a primeira "
+        "chamada que encontra o item vencido. Achado da revisão adversarial desta sub-entrega: ao contrário "
+        "das outras 4 tools desta fatia, esta escrita NÃO roda dentro de uma transação Firestore (é um "
+        "get() simples seguido de update() condicionado só por dado já lido em Python) -- duas chamadas "
+        "verdadeiramente simultâneas poderiam, em teoria, passar as duas pela guarda antes de qualquer "
+        "escrever. Não muda o veredito de idempotência porque as duas escritas concorrentes gravariam o "
+        "MESMO valor final sem efeito colateral externo adicional (sem card de Telegram, sem documento "
+        "novo) -- diferente de solicitar_autorizacao_argos, onde a mesma corrida criaria dois recursos "
+        "distintos. Mesma classe de caveat já documentada (não corrigida) para registrar_saude/"
+        "consultar_investimentos na sub-entrega 17/N. Achado ADICIONAL da 2a rodada de revisão "
+        "adversarial desta sub-entrega, mais sério que o anterior: a escrita de "
+        "_expirar_se_vencida não é só não-atômica ENTRE duas chamadas desta mesma tool -- ela "
+        "também pode colidir com decidir_autorizacao/consumir_autorizacao (ambas "
+        "@firestore.transactional, então protegidas uma contra a outra, mas não contra esta). Se "
+        "uma dessas duas commitar uma decisão real (aprovado/recusado/usado) no intervalo entre o "
+        "get() e o update() desta consulta, o update() incondicional desta tool sobrescreveria "
+        "silenciosamente esse status de volta para expirado -- um lost update de verdade entre "
+        "TOOLS DIFERENTES, não só entre duas chamadas repetidas da mesma tool. Não muda o veredito "
+        "de idempotência desta classificação (idempotência é sobre repetir a MESMA chamada, não "
+        "sobre interação entre tools diferentes), mas é um achado de correção que vai além do "
+        "caveat original -- registrado aqui para P04/hardening futuro, não corrigido nesta fatia "
+        "(mesmo critério de escopo já usado para os caveats de sub-entrega 17/N).",
     ),
     "consumir_autorizacao_argos": ToolInventoryEntry(
         "argos_autorizacao", _L.ESCRITA, _R.IRREVERSIVEL, False, False, _C.COORDENACAO_LIMITADA,
         "nenhum — falta o 'recibo do Argos correlacionado' que o próprio plano (seção 4.6) já aponta como lacuna",
-        nota="uso único por desenho — nunca autoriza duas vezes",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="uso único por desenho — nunca autoriza duas vezes. Idempotente (P03 sub-entrega 20/N): a "
+        "transação Firestore recheca status_atual antes de escrever -- só aprovado transiciona para usado; "
+        "repetir com o mesmo solicitacao_id encontra status==usado e devolve status=already_used sem tocar "
+        "o documento de novo, confirmado por leitura direta do handler (não só pela docstring da própria "
+        "tool, que já descrevia esse comportamento).",
     ),
     "confirmar_acao": ToolInventoryEntry(
         "confirmacao_mcp", _L.LEITURA_E_ESCRITA, _R.IRREVERSIVEL, True, True,
