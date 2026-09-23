@@ -61,23 +61,36 @@ campo `status` (sempre `"not_found"` quando aparece), então os dois
 colapsam num único branch de erro com `status` fora de `required` -- ver
 comentário de `_OUTPUT_SCHEMAS` em `tools/registry.py` para o
 levantamento completo, incluindo as 8 fontes de escrita de `plano_acao` e
-os 4 escritores de `pool_dados`/anexo investigados nesta sub-entrega.
+os 4 escritores de `pool_dados`/anexo investigados nesta sub-entrega -- e
+`listar_rascunhos_pendentes` (sub-entrega 24/N): oitava tool, backed por
+`outbox_aprovacao.listar_rascunhos`, com uma forma so (sem `oneOf`) e
+`status` enum de 2 valores pela MESMA garantia de
+`consultar_pedidos_agente` (filtro da propria query, nao "escritor
+unico" -- a colecao `whatsapp_outbox` tem varios). Achado desta
+sub-entrega: `telegram_message_id` e `["integer", "null"]`, nao string --
+vem de `message_id` da API do Telegram (sempre inteiro), confirmado
+tambem pela fixture `"telegram_message_id": 999` ja existente em
+`test_outbox_aprovacao.py` -- ver comentario de `_OUTPUT_SCHEMAS` em
+`tools/registry.py` para o levantamento completo dos pontos de criacao e
+atualizacao de documento investigados.
 
 Quatro frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
    paridade com TODO o catálogo real (não amostra): nenhuma tool além de
    `calculadora`, `buscar_contato`, `consultar_lista_compras`,
    `consultar_execucoes_agente`, `consultar_pedidos_agente`,
-   `consultar_historico_acoes` e `obter_acao` tem contrato publicado hoje.
+   `consultar_historico_acoes`, `obter_acao` e
+   `listar_rascunhos_pendentes` tem contrato publicado hoje.
 2. `TestHandleToolsListOutputSchema` -- ponta a ponta via
    `mcp_server._handle_tools_list()`: `outputSchema` chega no catálogo
-   publicado só para essas sete tools.
+   publicado só para essas oito tools.
 3. `TestIntegracaoHandleToolsCallStructuredContent` -- ponta a ponta via
    `mcp_server._handle_tools_call`: `structuredContent` chega no envelope
    de `tools/call` para `calculadora` (execução real, pura) e para
    `buscar_contato`/`consultar_lista_compras`/`consultar_execucoes_agente`/
-   `consultar_pedidos_agente`/`consultar_historico_acoes`/`obter_acao`
-   (executor mockado -- as seis dependem de Firestore, então o teste cobre
+   `consultar_pedidos_agente`/`consultar_historico_acoes`/`obter_acao`/
+   `listar_rascunhos_pendentes`
+   (executor mockado -- as sete dependem de Firestore, então o teste cobre
    o MECANISMO, não a correção interna dos handlers, mesmo padrão já usado
    para `consultar_processo_sipac` abaixo), é sempre IGUAL ao dict que
    `content[0].text` serializa (mesma fonte, nunca diverge), bate com o
@@ -461,17 +474,73 @@ class TestOutputSchema(unittest.TestCase):
         self.assertEqual(erro["properties"]["erro"], {"type": "string"})
         self.assertEqual(erro["properties"]["status"], {"type": "string", "enum": ["not_found"]})
 
-    def test_paridade_sete_tools_tem_output_schema_hoje(self):
+    def test_listar_rascunhos_pendentes_tem_schema_com_campos_obrigatorios(self):
+        schema = registry.output_schema("listar_rascunhos_pendentes")
+        self.assertIsNotNone(schema)
+        self.assertEqual(schema["type"], "object")
+        self.assertEqual(schema["required"], ["total", "rascunhos"])
+        self.assertEqual(set(schema["properties"].keys()), {"total", "rascunhos"})
+        self.assertFalse(schema["additionalProperties"])
+
+        item = schema["properties"]["rascunhos"]["items"]
+        campos_item = {
+            "id", "status", "destinatario_nome", "to_number", "motivo",
+            "trecho", "acao_id", "item_atencao_id", "origem", "tipo",
+            "foi_editado", "envio_liberado_em", "criado_em",
+            "telegram_message_id",
+        }
+        # Os 14 campos são sempre chaves presentes no dict construído por
+        # `outbox_aprovacao.listar_rascunhos` (literal único, sem chave
+        # condicional).
+        self.assertEqual(set(item["properties"].keys()), campos_item)
+        self.assertEqual(set(item["required"]), campos_item)
+        self.assertFalse(item["additionalProperties"])
+        # status é enum de 2 valores pelo filtro da própria query
+        # (`.where("status", "in", [...])`), não por "escritor único" --
+        # a coleção whatsapp_outbox tem vários escritores.
+        self.assertEqual(
+            item["properties"]["status"]["enum"],
+            ["aguardando_aprovacao", "aguardando_janela"],
+        )
+        # foi_editado/trecho são coagidos na PRÓPRIA leitura
+        # (bool(...)/str(...)[:120]), garantia mais forte que "sem tipo
+        # cru vazando" -- por isso sem null.
+        self.assertEqual(item["properties"]["foi_editado"], {"type": "boolean"})
+        self.assertEqual(item["properties"]["trecho"], {"type": "string"})
+        # telegram_message_id é o achado desta sub-entrega: inteiro (id do
+        # Telegram), não string como os dois campos de data abaixo.
+        self.assertEqual(item["properties"]["telegram_message_id"]["type"], ["integer", "null"])
+        for campo in ("envio_liberado_em", "criado_em"):
+            with self.subTest(campo=campo):
+                self.assertEqual(item["properties"][campo]["type"], ["string", "null"])
+        for campo in ("acao_id", "item_atencao_id"):
+            with self.subTest(campo=campo):
+                self.assertEqual(item["properties"][campo]["type"], ["string", "null"])
+        # Achado de revisão Codex nesta PR: destinatario_nome/to_number/
+        # motivo/origem são lidos com d.get(campo) CRU em
+        # outbox_aprovacao.listar_rascunhos (sem segundo argumento, ao
+        # contrário de tipo -- d.get("tipo", "outro")) -- um documento sem
+        # esses campos (formato legado, edição manual) leria None. Por
+        # isso nullable, ao contrário de tipo/trecho/foi_editado, que têm
+        # garantia mais forte (default ou coerção no próprio ponto de
+        # leitura).
+        for campo in ("destinatario_nome", "to_number", "motivo", "origem"):
+            with self.subTest(campo=campo):
+                self.assertEqual(item["properties"][campo]["type"], ["string", "null"])
+        self.assertEqual(item["properties"]["tipo"], {"type": "string"})
+
+    def test_paridade_oito_tools_tem_output_schema_hoje(self):
         # Não por amostragem: para TODA tool do catálogo real (106 hoje),
         # output_schema devolve algo só para calculadora, buscar_contato,
         # consultar_lista_compras, consultar_execucoes_agente,
-        # consultar_pedidos_agente, consultar_historico_acoes e obter_acao
-        # -- prova que a lista fechada não vazou para nenhuma outra tool
-        # por engano.
+        # consultar_pedidos_agente, consultar_historico_acoes, obter_acao
+        # e listar_rascunhos_pendentes -- prova que a lista fechada não
+        # vazou para nenhuma outra tool por engano.
         com_schema = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
+            "listar_rascunhos_pendentes",
         }
         for nome in registry.list_tool_names():
             with self.subTest(tool=nome):
@@ -538,11 +607,19 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
         # reduzido a uma das duas formas.
         self.assertIn("oneOf", self.catalogo["obter_acao"]["outputSchema"])
 
+    def test_listar_rascunhos_pendentes_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["listar_rascunhos_pendentes"])
+        self.assertEqual(
+            self.catalogo["listar_rascunhos_pendentes"]["outputSchema"],
+            registry.output_schema("listar_rascunhos_pendentes"),
+        )
+
     def test_nenhuma_outra_tool_publicada_tem_output_schema(self):
         esperadas = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
+            "listar_rascunhos_pendentes",
         }
         com_schema = [
             nome for nome, tool in self.catalogo.items()
@@ -557,6 +634,7 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
+            "listar_rascunhos_pendentes",
         ):
             with self.subTest(tool=nome):
                 tool = self.catalogo[nome]
@@ -1285,6 +1363,93 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
                 campo, erro_schema["properties"],
                 f"campo '{campo}' fora do branch de erro do outputSchema",
             )
+
+    def test_listar_rascunhos_pendentes_sucesso_leva_structured_content_igual_ao_content(self):
+        # `outbox_aprovacao.listar_rascunhos` real depende de Firestore
+        # (`ctx.db.collection("whatsapp_outbox")...`); o executor é
+        # mockado aqui com uma forma real que a função produz (ver
+        # `outbox_aprovacao.py`), mesmo padrão das demais tools acima --
+        # testa o MECANISMO, não a lógica de consulta em si.
+        esperado = {
+            "total": 1,
+            "rascunhos": [
+                {
+                    "id": "r_promovido",
+                    "status": "aguardando_janela",
+                    "destinatario_nome": "Carla",
+                    "to_number": "5511999999999@c.us",
+                    "motivo": "Confirmação de reunião",
+                    "trecho": "Olá Carla, confirma a reunião de amanhã?",
+                    "acao_id": None,
+                    "item_atencao_id": None,
+                    "origem": "claude",
+                    "tipo": "confirmacao_reuniao",
+                    "foi_editado": False,
+                    "envio_liberado_em": "2026-09-23T14:08:00+00:00",
+                    "criado_em": "2026-09-23T14:00:00+00:00",
+                    "telegram_message_id": 4242,
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "listar_rascunhos_pendentes", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_listar_rascunhos_pendentes_lista_vazia_tambem_leva_structured_content(self):
+        esperado = {"total": 0, "rascunhos": []}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "listar_rascunhos_pendentes", "arguments": {"limite": 5}},
+                ctx=_ctx(),
+            )
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_listar_rascunhos_pendentes_structured_content_bate_com_o_output_schema_publicado(self):
+        schema = registry.output_schema("listar_rascunhos_pendentes")
+        propriedades = schema["properties"]
+        item_props = propriedades["rascunhos"]["items"]["properties"]
+        # telegram_message_id ausente (envio ao Telegram falhou ou não
+        # havia token/chat configurado) -- vira `None` no dict, não some
+        # da resposta (mesmo padrão de acao_id/item_atencao_id ausentes).
+        mock_retorno = {
+            "total": 1,
+            "rascunhos": [
+                {
+                    "id": "r_regular",
+                    "status": "aguardando_aprovacao",
+                    "destinatario_nome": "Pedro",
+                    "to_number": "5511988888888@c.us",
+                    "motivo": "Aviso urgente",
+                    "trecho": "Mensagem regular sem promoção",
+                    "acao_id": "acao-9",
+                    "item_atencao_id": "item-2",
+                    "origem": "atencao_whatsapp",
+                    "tipo": "outro",
+                    "foi_editado": True,
+                    "envio_liberado_em": None,
+                    "criado_em": "2026-09-23T13:00:00+00:00",
+                    "telegram_message_id": None,
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_retorno):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "listar_rascunhos_pendentes", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        for campo in schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(campo, propriedades, f"campo '{campo}' fora do outputSchema")
+        for rascunho in estruturado["rascunhos"]:
+            for campo in rascunho:
+                self.assertIn(campo, item_props, f"campo '{campo}' fora do item declarado")
 
     def test_tool_sem_output_schema_nunca_leva_structured_content_mesmo_com_dict(self):
         # `consultar_processo_sipac` não tem outputSchema publicado; mesmo

@@ -1047,6 +1047,143 @@ class TestAguardandoJanelaEListarRascunhos(unittest.TestCase):
         self.assertEqual(item_prom["status"], oa.STATUS_AGUARDANDO_JANELA)
         self.assertIsNotNone(item_prom.get("envio_liberado_em"))
 
+    def test_listar_rascunhos_item_tem_exatamente_os_14_campos_do_output_schema(self):
+        # Regressão da tool `listar_rascunhos_pendentes` (P03 sub-entrega
+        # 24/N, outputSchema em tools/registry.py): prova, no HANDLER REAL
+        # (não um mock da forma), que cada item tem exatamente as 14
+        # chaves declaradas -- nem uma a mais, nem uma a menos -- mesmo
+        # quando o documento no Firestore não tem `envio_liberado_em`
+        # (campo condicional na escrita, ausente no caminho regular) nem
+        # `telegram_message_id` (só gravado quando o envio ao Telegram dá
+        # certo).
+        agora = datetime.datetime(2026, 9, 23, 14, 0, tzinfo=timezone.utc)
+        self.outbox._docs["r_minimo"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "to_number": "5511999999999@c.us",
+            "content": "Mensagem minima, sem telegram_message_id nem envio_liberado_em",
+            "motivo": "Motivo obrigatorio",
+            "destinatario_nome": "Fulano",
+            "acao_id": None,
+            "item_atencao_id": None,
+            "origem": "claude",
+            "tipo": "outro",
+            "foi_editado": False,
+            "created_at": agora,
+        }
+        res = oa.listar_rascunhos(self.db, limite=20)
+        item = res["rascunhos"][0]
+        campos_esperados = {
+            "id", "status", "destinatario_nome", "to_number", "motivo",
+            "trecho", "acao_id", "item_atencao_id", "origem", "tipo",
+            "foi_editado", "envio_liberado_em", "criado_em",
+            "telegram_message_id",
+        }
+        self.assertEqual(set(item.keys()), campos_esperados)
+        # Ausentes no documento -> None, não chave faltante.
+        self.assertIsNone(item["envio_liberado_em"])
+        self.assertIsNone(item["telegram_message_id"])
+        # foi_editado/trecho são coagidos NA LEITURA (bool(...)/str(...)[:120]).
+        self.assertIs(item["foi_editado"], False)
+        self.assertIsInstance(item["trecho"], str)
+        self.assertEqual(item["acao_id"], None)
+        self.assertEqual(item["item_atencao_id"], None)
+
+    def test_listar_rascunhos_documento_legado_sem_campos_le_como_none(self):
+        # Achado real de revisão Codex nesta PR: destinatario_nome/
+        # to_number/motivo/origem são lidos com d.get(campo) CRU em
+        # listar_rascunhos (sem segundo argumento) -- um documento que não
+        # tenha esses campos (formato legado de antes deste payload, ou
+        # uma edição manual no Firestore) lê como None, não como string
+        # vazia. Esta prova, contra o handler real, é o que justifica o
+        # outputSchema declarar esses 4 campos como ["string", "null"]
+        # em vez de "string" obrigatório.
+        agora = datetime.datetime(2026, 9, 23, 14, 0, tzinfo=timezone.utc)
+        self.outbox._docs["r_legado"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "content": "Documento legado sem destinatario_nome/to_number/motivo/origem",
+            "created_at": agora,
+        }
+        res = oa.listar_rascunhos(self.db, limite=20)
+        item = res["rascunhos"][0]
+        self.assertIsNone(item["destinatario_nome"])
+        self.assertIsNone(item["to_number"])
+        self.assertIsNone(item["motivo"])
+        self.assertIsNone(item["origem"])
+        # tipo tem default no ponto de leitura (d.get("tipo", "outro")) --
+        # continua "outro", nunca None, mesmo no documento legado.
+        self.assertEqual(item["tipo"], "outro")
+
+    def test_listar_rascunhos_coage_foi_editado_e_trecho_mesmo_com_tipo_bruto_no_firestore(self):
+        # Regressão da 1a rodada de revisão adversarial desta sub-entrega:
+        # os testes anteriores só cobriam `foi_editado` com o default
+        # `False` (que já é bool mesmo SEM a coerção `bool(...)`, porque
+        # `dict.get(chave, False)` devolve o literal Python `False` quando
+        # a chave está ausente) -- por isso não provavam a coerção de
+        # verdade (confirmado por mutação: remover `bool(...)` de
+        # `outbox_aprovacao.listar_rascunhos` não fazia NENHUM teste
+        # falhar). Este teste grava `foi_editado`/`content` com tipos
+        # BRUTOS que só a coerção na leitura (`bool(...)`/`str(...)`)
+        # normaliza -- sem ela, `item["foi_editado"]` seria a string
+        # `"sim"` (truthy, mas não `bool`) e `item["trecho"]` seria um
+        # `int`, não `str`.
+        agora = datetime.datetime(2026, 9, 23, 14, 0, tzinfo=timezone.utc)
+        self.outbox._docs["r_tipo_bruto"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "to_number": "5511999999999@c.us",
+            "content": 12345,
+            "motivo": "Motivo",
+            "destinatario_nome": "Fulano",
+            "tipo": "outro",
+            "foi_editado": "sim",
+            "created_at": agora,
+        }
+        res = oa.listar_rascunhos(self.db, limite=20)
+        item = res["rascunhos"][0]
+        self.assertIs(item["foi_editado"], True)
+        self.assertIsInstance(item["foi_editado"], bool)
+        self.assertEqual(item["trecho"], "12345")
+        self.assertIsInstance(item["trecho"], str)
+
+    def test_listar_rascunhos_telegram_message_id_e_inteiro_quando_presente(self):
+        # Achado desta sub-entrega: `telegram_message_id` vem da API do
+        # Telegram (`message_id`, sempre inteiro) -- não passa por
+        # `_to_iso` como `criado_em`/`envio_liberado_em`, então continua
+        # inteiro depois de `listar_rascunhos`, nunca string.
+        agora = datetime.datetime(2026, 9, 23, 14, 0, tzinfo=timezone.utc)
+        self.outbox._docs["r_com_telegram"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "to_number": "5511999999999@c.us",
+            "content": "Mensagem com telegram_message_id",
+            "motivo": "Motivo",
+            "destinatario_nome": "Fulano",
+            "tipo": "outro",
+            "foi_editado": False,
+            "created_at": agora,
+            "telegram_message_id": 555666,
+        }
+        res = oa.listar_rascunhos(self.db, limite=20)
+        item = res["rascunhos"][0]
+        self.assertEqual(item["telegram_message_id"], 555666)
+        self.assertIsInstance(item["telegram_message_id"], int)
+
+    def test_listar_rascunhos_trecho_e_truncado_em_120_caracteres(self):
+        agora = datetime.datetime(2026, 9, 23, 14, 0, tzinfo=timezone.utc)
+        conteudo_longo = "x" * 200
+        self.outbox._docs["r_longo"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "to_number": "5511999999999@c.us",
+            "content": conteudo_longo,
+            "motivo": "Motivo",
+            "destinatario_nome": "Fulano",
+            "tipo": "outro",
+            "foi_editado": False,
+            "created_at": agora,
+        }
+        res = oa.listar_rascunhos(self.db, limite=20)
+        item = res["rascunhos"][0]
+        self.assertEqual(len(item["trecho"]), 120)
+        self.assertEqual(item["trecho"], conteudo_longo[:120])
+
     def test_contar_pendentes_inclui_aguardando_e_janela_ignora_outros(self):
         self.outbox._docs["r1"] = {"status": oa.STATUS_AGUARDANDO}
         self.outbox._docs["r2"] = {"status": oa.STATUS_AGUARDANDO_JANELA}
