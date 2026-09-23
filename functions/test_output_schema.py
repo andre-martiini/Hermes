@@ -85,7 +85,21 @@ nao corrigido: o campo `truncado` (gravado pelo trigger
 `ler_job` -- ver comentario de `_OUTPUT_SCHEMAS` em `tools/registry.py`
 para o levantamento completo, incluindo por que `resultado` (branch
 "done") e documentado como `string` HOJE como um contrato de SNAPSHOT
-sobre as 3 tools atuais de `_TOOLS_LONGAS`, nao uma garantia estrutural.
+sobre as 3 tools atuais de `_TOOLS_LONGAS`, nao uma garantia estrutural --
+e `buscar_arquivos_acervo` (sub-entrega 26/N): decima tool, backed por
+`tools/busca_acervo.py::buscar_acervo` (wrapper fino em
+`tools/hermes_tools.py::_buscar_arquivos_acervo`), com `oneOf` de 2
+branches (erro/sucesso) pela mesma forma de `consultar_historico_acoes`.
+ACHADO desta sub-entrega: o campo `origem` de cada item NAO e sempre
+string -- um dos 3 escritores da colecao `indice_artefatos` (anexo do
+Copiloto, `main.py`) grava um DICT, nao string, entao o schema declara
+`["string", "object"]`; e o campo `distancia` e uma GARANTIA ESTRUTURAL de
+`null` sempre (`find_nearest` nunca recebe `distance_result_field`, e
+`DocumentSnapshot` da biblioteca `google-cloud-firestore` 2.28.0 nunca tem
+esse atributo) -- ver comentario de `_OUTPUT_SCHEMAS` em
+`tools/registry.py` para o levantamento completo dos 3 escritores e por
+que nenhum teste dedicado existia para esta tool antes desta sub-entrega
+(lacuna fechada em `test_hermes_tools.py`).
 
 Cinco frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
@@ -93,24 +107,25 @@ Cinco frentes:
    `calculadora`, `buscar_contato`, `consultar_lista_compras`,
    `consultar_execucoes_agente`, `consultar_pedidos_agente`,
    `consultar_historico_acoes`, `obter_acao`,
-   `listar_rascunhos_pendentes` e `consultar_job` tem contrato publicado
-   hoje.
+   `listar_rascunhos_pendentes`, `consultar_job` e `buscar_arquivos_acervo`
+   tem contrato publicado hoje.
 2. `TestHandleToolsListOutputSchema` -- ponta a ponta via
    `mcp_server._handle_tools_list()`: `outputSchema` chega no catálogo
-   publicado só para essas nove tools.
+   publicado só para essas dez tools.
 3. `TestIntegracaoHandleToolsCallStructuredContent` -- ponta a ponta via
    `mcp_server._handle_tools_call`: `structuredContent` chega no envelope
    de `tools/call` para `calculadora` (execução real, pura) e para
    `buscar_contato`/`consultar_lista_compras`/`consultar_execucoes_agente`/
    `consultar_pedidos_agente`/`consultar_historico_acoes`/`obter_acao`/
-   `listar_rascunhos_pendentes`/`consultar_job`
-   (executor mockado -- as oito dependem de Firestore, então o teste cobre
+   `listar_rascunhos_pendentes`/`consultar_job`/`buscar_arquivos_acervo`
+   (executor mockado -- as nove dependem de Firestore, então o teste cobre
    o MECANISMO, não a correção interna dos handlers, mesmo padrão já usado
    para `consultar_processo_sipac` abaixo), é sempre IGUAL ao dict que
    `content[0].text` serializa (mesma fonte, nunca diverge), bate com o
    `outputSchema` publicado campo a campo (para `consultar_historico_acoes`,
-   `obter_acao` e `consultar_job`, contra o branch `oneOf` correspondente à
-   forma retornada), e nunca aparece para uma tool sem contrato publicado -- nem
+   `obter_acao`, `consultar_job` e `buscar_arquivos_acervo`, contra o
+   branch `oneOf` correspondente à forma retornada), e nunca aparece para
+   uma tool sem contrato publicado -- nem
    quando o resultado real também é um dict, nem quando o executor levanta
    uma exceção não tratada por ele mesmo, nem quando o handler devolve uma
    string crua de erro (caminho real de `consultar_lista_compras` para
@@ -595,20 +610,53 @@ class TestOutputSchema(unittest.TestCase):
         self.assertEqual(processing["properties"]["status"], {"const": "processing"})
         self.assertFalse(processing["additionalProperties"])
 
-    def test_paridade_nove_tools_tem_output_schema_hoje(self):
+    def test_buscar_arquivos_acervo_tem_schema_oneof_sucesso_e_erro(self):
+        schema = registry.output_schema("buscar_arquivos_acervo")
+        self.assertIsNotNone(schema)
+        self.assertEqual(set(schema.keys()), {"oneOf"})
+        self.assertEqual(len(schema["oneOf"]), 2)
+        sucesso, erro = schema["oneOf"]
+
+        self.assertEqual(sucesso["required"], ["total_retornado", "resultados"])
+        self.assertFalse(sucesso["additionalProperties"])
+        item = sucesso["properties"]["resultados"]["items"]
+        self.assertEqual(
+            set(item["properties"].keys()),
+            {"id", "titulo", "trecho", "fonte", "url_drive", "task_id", "origem", "distancia"},
+        )
+        self.assertEqual(item["required"], list(item["properties"].keys()))
+        self.assertFalse(item["additionalProperties"])
+        # task_id pode faltar no documento (`data.get("task_id")` sem
+        # default) -- nullable.
+        self.assertEqual(item["properties"]["task_id"], {"type": ["string", "null"]})
+        # ACHADO desta sub-entrega: um dos 3 escritores de `indice_
+        # artefatos` (anexo do Copiloto) grava `origem` como dict, não
+        # string -- ver comentário de `_OUTPUT_SCHEMAS`.
+        self.assertEqual(item["properties"]["origem"], {"type": ["string", "object"]})
+        # distancia é garantia ESTRUTURAL de null: `find_nearest` nunca
+        # recebe `distance_result_field` neste código, e `DocumentSnapshot`
+        # nunca tem esse atributo na biblioteca instalada.
+        self.assertEqual(item["properties"]["distancia"], {"type": "null"})
+
+        self.assertEqual(erro["required"], ["erro", "resultados"])
+        self.assertEqual(erro["properties"]["resultados"], {"type": "array", "maxItems": 0})
+        self.assertFalse(erro["additionalProperties"])
+
+    def test_paridade_dez_tools_tem_output_schema_hoje(self):
         # Não por amostragem: para TODA tool do catálogo real (108 hoje --
         # `len(registry.list_tool_names())`; achado da revisão adversarial
-        # desta sub-entrega: "106" estava desatualizado desde antes dela),
-        # output_schema devolve algo só para calculadora, buscar_contato,
-        # consultar_lista_compras, consultar_execucoes_agente,
-        # consultar_pedidos_agente, consultar_historico_acoes, obter_acao,
-        # listar_rascunhos_pendentes e consultar_job -- prova que a lista
+        # da sub-entrega 25/N: "106" estava desatualizado desde antes
+        # dela), output_schema devolve algo só para calculadora,
+        # buscar_contato, consultar_lista_compras,
+        # consultar_execucoes_agente, consultar_pedidos_agente,
+        # consultar_historico_acoes, obter_acao, listar_rascunhos_pendentes,
+        # consultar_job e buscar_arquivos_acervo -- prova que a lista
         # fechada não vazou para nenhuma outra tool por engano.
         com_schema = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
-            "listar_rascunhos_pendentes", "consultar_job",
+            "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
         }
         for nome in registry.list_tool_names():
             with self.subTest(tool=nome):
@@ -693,12 +741,21 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
         self.assertIn("oneOf", self.catalogo["consultar_job"]["outputSchema"])
         self.assertEqual(len(self.catalogo["consultar_job"]["outputSchema"]["oneOf"]), 4)
 
+    def test_buscar_arquivos_acervo_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["buscar_arquivos_acervo"])
+        self.assertEqual(
+            self.catalogo["buscar_arquivos_acervo"]["outputSchema"],
+            registry.output_schema("buscar_arquivos_acervo"),
+        )
+        self.assertIn("oneOf", self.catalogo["buscar_arquivos_acervo"]["outputSchema"])
+        self.assertEqual(len(self.catalogo["buscar_arquivos_acervo"]["outputSchema"]["oneOf"]), 2)
+
     def test_nenhuma_outra_tool_publicada_tem_output_schema(self):
         esperadas = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
-            "listar_rascunhos_pendentes", "consultar_job",
+            "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
         }
         com_schema = [
             nome for nome, tool in self.catalogo.items()
@@ -713,7 +770,7 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
-            "listar_rascunhos_pendentes", "consultar_job",
+            "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
         ):
             with self.subTest(tool=nome):
                 tool = self.catalogo[nome]
@@ -1660,6 +1717,111 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
                         campo, branch["properties"],
                         f"campo '{campo}' fora do branch de status={mock_retorno.get('status')!r}",
                     )
+
+    def test_buscar_arquivos_acervo_sucesso_leva_structured_content_igual_ao_content(self):
+        # `buscar_arquivos_acervo` real depende de embedding (Gemini) e
+        # Firestore (`find_nearest`); o executor é mockado aqui com uma
+        # forma real que o handler produz (ver
+        # `tools/hermes_tools.py::_buscar_arquivos_acervo`), mesmo padrão
+        # das tools acima -- testa o MECANISMO, não a busca vetorial em si.
+        esperado = {
+            "total_retornado": 1,
+            "resultados": [{
+                "id": "art-1",
+                "titulo": "Manual de Onboarding",
+                "trecho": "Resumo executivo do manual.",
+                "fonte": "Drive",
+                "url_drive": "https://drive.google.com/file/d/abc/view",
+                "task_id": "acao-9",
+                "origem": "acervo",
+                "distancia": None,
+            }],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "buscar_arquivos_acervo", "arguments": {"query": "onboarding"}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_buscar_arquivos_acervo_com_origem_dict_leva_structured_content(self):
+        # ACHADO desta sub-entrega: um dos 3 escritores de `indice_
+        # artefatos` (anexo do Copiloto) grava `origem` como dict -- o
+        # envelope não normaliza nem rejeita, repassa como veio.
+        esperado = {
+            "total_retornado": 1,
+            "resultados": [{
+                "id": "art-2",
+                "titulo": "sem título",
+                "trecho": "",
+                "fonte": "",
+                "url_drive": "",
+                "task_id": None,
+                "origem": {"modulo": "copiloto", "id_origem": "sessao-1"},
+                "distancia": None,
+            }],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "buscar_arquivos_acervo", "arguments": {"query": "x"}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertIsInstance(resultado["structuredContent"]["resultados"][0]["origem"], dict)
+
+    def test_buscar_arquivos_acervo_erro_tambem_leva_structured_content(self):
+        esperado = {
+            "erro": "[ERRO TÉCNICO FindNearest] ValueError: falhou",
+            "resultados": [],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "buscar_arquivos_acervo", "arguments": {"query": "x"}}, ctx=_ctx()
+            )
+        self.assertTrue(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_buscar_arquivos_acervo_structured_content_bate_com_o_output_schema_publicado(self):
+        # Paridade campo a campo contra o branch `oneOf` correspondente à
+        # forma efetivamente devolvida, mesmo padrão de
+        # `consultar_historico_acoes`/`obter_acao` acima.
+        schema = registry.output_schema("buscar_arquivos_acervo")
+        sucesso_schema, erro_schema = schema["oneOf"]
+
+        mock_sucesso = {
+            "total_retornado": 1,
+            "resultados": [{
+                "id": "art-3",
+                "titulo": "T",
+                "trecho": "R",
+                "fonte": "F",
+                "url_drive": "",
+                "task_id": None,
+                "origem": "acervo",
+                "distancia": None,
+            }],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_sucesso):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "buscar_arquivos_acervo", "arguments": {"query": "x"}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        self.assertEqual(set(estruturado.keys()), set(sucesso_schema["properties"].keys()))
+        item_schema = sucesso_schema["properties"]["resultados"]["items"]
+        self.assertEqual(
+            set(estruturado["resultados"][0].keys()), set(item_schema["properties"].keys()),
+        )
+
+        mock_erro = {"erro": "falhou", "resultados": []}
+        with patch.object(mcp_server, "execute_tool", return_value=mock_erro):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "buscar_arquivos_acervo", "arguments": {"query": "x"}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        self.assertEqual(set(estruturado.keys()), set(erro_schema["properties"].keys()))
 
     def test_tool_sem_output_schema_nunca_leva_structured_content_mesmo_com_dict(self):
         # `consultar_processo_sipac` não tem outputSchema publicado; mesmo

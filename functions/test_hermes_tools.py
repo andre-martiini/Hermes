@@ -152,6 +152,39 @@ class TestExecucao(unittest.TestCase):
         self.assertEqual(resultado["candidatos"][0]["nome"], "Flávia Nascimento Ribeiro")
         db.collection.return_value.limit.assert_not_called()
 
+    def test_buscar_arquivos_acervo_sucesso_conta_total_retornado(self):
+        # `_buscar_arquivos_acervo` não tinha nenhum teste dedicado antes
+        # desta sub-entrega (P03 26/N, outputSchema) -- nem do handler, nem
+        # de `busca_acervo.buscar_acervo`. `buscar_acervo` é chamado via
+        # `from tools.busca_acervo import buscar_acervo` dentro da própria
+        # função, então o patch precisa mirar o atributo do módulo de
+        # origem (resolvido no momento da chamada), não uma referência já
+        # importada em `hermes_tools`.
+        item = {
+            "id": "art-1", "titulo": "Manual", "trecho": "resumo",
+            "fonte": "Drive", "url_drive": "https://drive.google.com/x",
+            "task_id": None, "origem": "acervo", "distancia": None,
+        }
+        with patch("tools.busca_acervo.buscar_acervo", return_value={"resultados": [item], "erro": None}) as mock_busca:
+            resultado = hermes_tools._buscar_arquivos_acervo(
+                type("Ctx", (), {})(), {"query": "manual de onboarding"}
+            )
+        mock_busca.assert_called_once_with("manual de onboarding")
+        self.assertEqual(resultado, {"total_retornado": 1, "resultados": [item]})
+
+    def test_buscar_arquivos_acervo_erro_devolve_resultados_vazio(self):
+        erro = "[ERRO TÉCNICO FindNearest] ValueError: falhou"
+        with patch("tools.busca_acervo.buscar_acervo", return_value={"resultados": [], "erro": erro}):
+            resultado = hermes_tools._buscar_arquivos_acervo(type("Ctx", (), {})(), {"query": "x"})
+        self.assertEqual(resultado, {"erro": erro, "resultados": []})
+
+    def test_buscar_arquivos_acervo_query_ausente_vira_string_vazia(self):
+        # `str(args.get("query") or "")` -- ausência de `query` não levanta,
+        # chama `buscar_acervo("")`.
+        with patch("tools.busca_acervo.buscar_acervo", return_value={"resultados": [], "erro": None}) as mock_busca:
+            hermes_tools._buscar_arquivos_acervo(type("Ctx", (), {})(), {})
+        mock_busca.assert_called_once_with("")
+
     def test_tool_desconhecida_levanta(self):
         from tools.tool_context import ToolContext
 

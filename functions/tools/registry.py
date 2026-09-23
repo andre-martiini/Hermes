@@ -2013,6 +2013,144 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
             },
         ],
     },
+    # `buscar_arquivos_acervo` (P03 sub-entrega 26/N) -- decima tool com
+    # outputSchema. Handler (`tools/hermes_tools.py::_buscar_arquivos_acervo`)
+    # e um wrapper fino sobre `tools/busca_acervo.py::buscar_acervo`, lido
+    # por completo: SEMPRE devolve exatamente 2 chaves (`resultados`: list,
+    # `erro`: str ou None) -- nunca uma terceira forma, nunca as duas
+    # simultaneamente truthy de outro jeito. O wrapper colapsa isso em 2
+    # branches de oneOf pela mesma checagem `if res.get("erro")`:
+    #   1. erro: `{"erro": <str>, "resultados": []}` -- `resultados` sempre
+    #      lista vazia (o proprio wrapper substitui por `[]` literal, nao
+    #      repassa o que `buscar_acervo` devolveu no ramo de excecao, que
+    #      tambem e sempre `[]`).
+    #   2. sucesso: `{"total_retornado": <int, len()>, "resultados": [...]}`.
+    #
+    # Item de `resultados` (forma de sucesso) tem 8 chaves fixas, montadas a
+    # mao em `busca_acervo.buscar_acervo` (nenhuma vem direto de
+    # `doc.to_dict()` sem passar por `.get(campo, default)`):
+    #   - `id`: sempre `doc.id` -- string garantida pelo SDK do Firestore.
+    #   - `titulo`/`trecho`/`fonte`/`url_drive`: `data.get(campo, "<default
+    #     string>")`. Os 3 escritores conhecidos da colecao `indice_
+    #     artefatos` (unico backing da query, `ACERVO_COLLECTION`) foram
+    #     lidos por completo: `knowledge_graph._write_to_indice_artefatos` e
+    #     o writer de anexo SIPAC (`main.py`, ~linha 8835) NUNCA gravam
+    #     `titulo`/`trecho`/`fonte`/`url_drive` (usam `nome`/`resumo_
+    #     semantico`/`url` em vez disso) -- por isso esses 4 campos caem no
+    #     default string do proprio `.get()` para documentos vindos desses
+    #     2 escritores. O terceiro escritor (anexo do Copiloto, `main.py`,
+    #     ~linha 11291) grava os 4 com esses nomes exatos, mas os valores
+    #     (`titulo_doc`/`resumo_doc`/`natureza_doc`) vem de `meta.get(...)`,
+    #     onde `meta = json.loads(extraction_text)` e a RESPOSTA LIVRE de um
+    #     modelo Gemini (sem `response_schema` nem validacao de tipo) --
+    #     `titulo_doc` tem fallback para `real_file_name` (string), mas o
+    #     campo do JSON, se presente, pode teoricamente vir de outro tipo
+    #     sem que nada rejeite -- risco aceito e nao-bloqueante, mesma
+    #     categoria ja registrada para campos de origem LLM em
+    #     `_buscar_contato` (sub-entrega 9/N, `modelo_interacao`): o
+    #     CONTRATO PRETENDIDO e string, sem garantia estrutural mais forte
+    #     disponivel sem mudar comportamento de producao. `url_drive` so e
+    #     gravado por este 3o escritor -- os outros 2 usam a chave `url`
+    #     (nunca lida por `buscar_acervo`), entao esse campo cai no default
+    #     `""` para qualquer documento fora deste 3o escritor.
+    #   - `task_id`: `data.get("task_id")`, SEM default -- vira `None`
+    #     quando a chave nao existe. Os 3 escritores: `knowledge_graph`
+    #     grava a chave so quando o parametro e truthy (`if task_id:
+    #     entry["task_id"] = task_id`); o writer SIPAC sempre grava
+    #     `"task_id": target_task_id` (string, o id da acao vinculada); o
+    #     writer do Copiloto grava `'task_id': task_id or None` (string ou
+    #     `None` explicito). Em todos os casos, `string` ou `None` -- nunca
+    #     um terceiro tipo -- por isso `["string", "null"]`.
+    #   - `origem`: `data.get("origem", "acervo")` -- ACHADO desta
+    #     sub-entrega: NAO e sempre string. Os 2 primeiros escritores gravam
+    #     `origem` como STRING (`knowledge_graph`: parametro `origem: str`;
+    #     writer SIPAC: literal `"tarefa"`); mas o 3o escritor (Copiloto,
+    #     `main.py` ~linhas 11286-11302) grava um DICT (`{"modulo":
+    #     "tarefa"|"copiloto", "id_origem": ..., "session_id": ...}`
+    #     conforme `task_id` esteja ativo) -- `buscar_acervo` repassa esse
+    #     valor sem normalizar. Documentado como `["string", "object"]`, sem
+    #     `properties` aninhadas (o formato do dict varia por ramo do 3o
+    #     escritor) -- nao corrigido aqui: normalizar o tipo mudaria o dado
+    #     devolvido hoje, fora do escopo de uma fatia so-schema.
+    #   - `distancia`: `getattr(doc, "distance", None)` -- GARANTIA
+    #     ESTRUTURAL, nao so observacao de hoje: `busca_acervo.py` chama
+    #     `find_nearest(...)` SEM passar `distance_result_field` (o unico
+    #     parametro que faria o servidor anexar uma distancia ao resultado
+    #     -- confirmado lendo a assinatura de `find_nearest` em
+    #     `google.cloud.firestore_v1.base_collection`, versao 2.28.0 fixada
+    #     em `requirements.txt`); e `DocumentSnapshot` (`base_document.py`/
+    #     `document.py` da mesma biblioteca) NUNCA define um atributo
+    #     `distance` em nenhum caminho de codigo, com ou sem esse
+    #     parametro. Ou seja, `getattr(doc, "distance", None)` sempre cai no
+    #     default `None` -- confirmado inspecionando a biblioteca instalada,
+    #     nao so lendo a chamada. Documentado como `{"type": "null"}` (nao
+    #     `["number", "null"]`): campo sempre presente, sempre `null`, nao
+    #     um valor as vezes ausente as vezes numerico.
+    #
+    # `resultados` (ramo de erro) e sempre `[]` -- mesma convencao de
+    # `maxItems: 0` ja usada em `consultar_historico_acoes` (sub-entrega
+    # 14/N).
+    #
+    # Colecao `indice_artefatos` tem 3 escritores em 2 arquivos diferentes
+    # (`knowledge_graph.py`, `main.py` x2) -- MAIS de um, mas TODOS os 3
+    # foram lidos e enumerados por completo aqui (nao a mesma situacao de
+    # `whatsapp_outbox`, sub-entrega 24/N, onde a lista de escritores
+    # continuava crescendo a cada rodada de revisao) -- os 3 pontos de
+    # escrita foram encontrados por busca direta (`grep -rn
+    # "indice_artefatos"`) e nenhuma rodada de revisao adversarial desta
+    # sub-entrega encontrou um 4o.
+    #
+    # `buscar_arquivos_acervo` nao tinha NENHUM teste dedicado antes desta
+    # sub-entrega (nem do handler, nem de `busca_acervo.buscar_acervo`) --
+    # lacuna fechada aqui com testes novos em `test_hermes_tools.py`
+    # (`TestExecucao`, mockando `tools.busca_acervo.buscar_acervo`
+    # diretamente), alem dos testes de contrato/`structuredContent` deste
+    # arquivo.
+    #
+    # Investigacao completa desta sub-entrega: docs/autonomia/execucao.md,
+    # sub-entrega 26/N.
+    "buscar_arquivos_acervo": {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "total_retornado": {"type": "integer"},
+                    "resultados": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "titulo": {"type": "string"},
+                                "trecho": {"type": "string"},
+                                "fonte": {"type": "string"},
+                                "url_drive": {"type": "string"},
+                                "task_id": {"type": ["string", "null"]},
+                                "origem": {"type": ["string", "object"]},
+                                "distancia": {"type": "null"},
+                            },
+                            "required": [
+                                "id", "titulo", "trecho", "fonte", "url_drive",
+                                "task_id", "origem", "distancia",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["total_retornado", "resultados"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "erro": {"type": "string"},
+                    "resultados": {"type": "array", "maxItems": 0},
+                },
+                "required": ["erro", "resultados"],
+                "additionalProperties": False,
+            },
+        ],
+    },
 }
 
 
@@ -2023,11 +2161,11 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (99 das 108 tools
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (98 das 108 tools
     hoje -- `len(registry.list_tool_names())`, nao os "106" que este
     docstring citava ate a sub-entrega 24/N, contagem ja desatualizada
-    antes desta fatia e corrigida aqui por tocar esta mesma linha -- apos
-    a nona entrada, `consultar_job`, sub-entrega 25/N), deliberadamente:
+    antes daquela fatia -- apos a decima entrada, `buscar_arquivos_acervo`,
+    sub-entrega 26/N), deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
     (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).
