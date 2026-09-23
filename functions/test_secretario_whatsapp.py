@@ -660,6 +660,27 @@ class TestSecretarioSelfService(unittest.TestCase):
         self.assertEqual(st["contatos_detalhes"][0]["nome"], "Carlos Parceiro")
         self.assertIn("Carlos Parceiro", st["mensagem"])
 
+    def test_consultar_status_modo_secretario_normaliza_desativa_em_nao_string(self):
+        # Regressão do achado do Codex na PR de consultar_status_modo_
+        # secretario (P03 sub-entrega 27/N): main.py::updateAutomationSettings
+        # grava desativa_em sem validar tipo -- um valor não-string gravado
+        # por ali (ou por qualquer outro caminho futuro) não pode vazar cru
+        # até o outputSchema publicado (["string", "null"]).
+        self.db.collection("system").document("settings").set({
+            "whatsapp_secretario": {
+                "enabled": True,
+                "desativa_em": 12345,
+                "chats_allowlist": [],
+            }
+        })
+        cfg = sec.obter_config_secretario(self.db)
+        self.assertEqual(cfg["desativa_em"], "12345")
+        self.assertIsInstance(cfg["desativa_em"], str)
+
+        st = sec.consultar_status_modo_secretario(self.db)
+        self.assertEqual(st["desativa_em"], "12345")
+        self.assertIsInstance(st["desativa_em"], str)
+
     def test_mcp_tools_execucao(self):
         from tools import hermes_tools
         from tools.tool_context import ToolContext

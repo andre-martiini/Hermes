@@ -115,12 +115,15 @@ que também têm forma única mas com campos às vezes ausentes): a função
 nunca levanta exceção (lida por completo, incluindo
 `obter_config_secretario`, que tem seu próprio `try/except` e sempre
 devolve um dict default) e sempre monta as 8 chaves sem nenhum `if` que
-pule uma delas. ACHADO desta sub-entrega, risco aceito e não-bloqueante:
-`desativa_em` tem um segundo escritor sem garantia de tipo
+pule uma delas. ACHADO da revisão do Codex nesta PR, CORRIGIDO:
+`desativa_em` tinha um segundo escritor sem garantia de tipo
 (`main.py::updateAutomationSettings`, callable HTTP do frontend web, que
-repassa o campo direto do corpo da requisição sem coerção) — ver
-comentário de `_OUTPUT_SCHEMAS` em `tools/registry.py` para o
-levantamento completo.
+repassa o campo direto do corpo da requisição sem coerção) — corrigido
+normalizando na LEITURA (`secretario_whatsapp.obter_config_secretario`
+agora coage para `str(...)` quando o valor presente não é string), não no
+endpoint HTTP — ver comentário de `_OUTPUT_SCHEMAS` em
+`tools/registry.py` e `test_secretario_whatsapp.py` para o levantamento
+completo e o teste de regressão.
 
 Cinco frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
@@ -697,9 +700,10 @@ class TestOutputSchema(unittest.TestCase):
 
         self.assertEqual(schema["properties"]["enabled"], {"type": "boolean"})
         self.assertEqual(schema["properties"]["mensagem"], {"type": "string"})
-        # desativa_em: garantia mais fraca que os demais (ver comentário de
-        # _OUTPUT_SCHEMAS) -- ["string", "null"] mesmo assim, sem evidência
-        # de outro tipo na prática hoje.
+        # desativa_em: agora com a MESMA garantia estrutural dos demais
+        # campos, após a correção do achado do Codex nesta PR (coerção em
+        # obter_config_secretario) -- ver comentário de _OUTPUT_SCHEMAS e
+        # test_secretario_whatsapp.py para o teste de regressão.
         self.assertEqual(schema["properties"]["desativa_em"], {"type": ["string", "null"]})
         for campo in ("orientacoes_em_vigor", "orientacoes_padrao", "orientacoes_sessao"):
             self.assertEqual(schema["properties"][campo], {"type": ["string", "null"]})

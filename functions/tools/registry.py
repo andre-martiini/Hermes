@@ -2197,30 +2197,34 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     # `secretario_whatsapp.normalizar_orientacoes`, que so devolve `str`
     # ou `None` (nunca outro tipo) -- lida por completo.
     #
-    # ACHADO desta sub-entrega, RISCO ACEITO e NAO-BLOQUEANTE (mesma
-    # categoria do `ordem` de `consultar_lista_compras`, sub-entrega
-    # 10/N, e do `modelo_interacao` de `buscar_contato`, sub-entrega
-    # 9/N): `desativa_em` tem DOIS escritores. O caminho normal
+    # ACHADO da revisao do Codex nesta PR, CORRIGIDO: `desativa_em` tinha
+    # DOIS escritores com garantias de tipo diferentes. O caminho normal
     # (`secretario_whatsapp.ativar_modo_secretario`/
     # `desativar_modo_secretario`) so grava `limite.isoformat()` (string)
-    # ou `None`, garantia forte. Mas `main.py::updateAutomationSettings`
-    # (callable HTTP `whatsapp_secretario.desativa_em`, usado pelo
-    # frontend web) repassa `sec_updates["desativa_em"] = sec_cfg[
-    # "desativa_em"]` DIRETO do corpo da requisicao, sem coercao de tipo
-    # nem validacao de schema -- um cliente que mande um numero, lista ou
-    # dict nesse campo grava exatamente isso em `system/settings`, e
-    # `consultar_status_modo_secretario` devolveria esse valor sem
-    # normalizar. Nenhuma evidencia de que isso aconteca na pratica hoje
-    # (o unico chamador conhecido, o frontend web, sempre manda string
-    # ISO ou omite o campo -- `test_secretario_whatsapp.py::
-    # TestAutomationSettingsCallable` exercita esse caminho so com
-    # string), por isso o schema continua `["string", "null"]` em vez de
-    # afrouxar para "qualquer tipo" -- mas a garantia NAO e estrutural
-    # como as dos outros campos desta tool, ao contrario do que a forma
-    # unica-sem-oneOf poderia sugerir. Nao corrigido nesta fatia (validar
-    # tipo em `updateAutomationSettings` seria mudanca de COMPORTAMENTO
-    # de um endpoint HTTP fora do escopo MCP, nao so documentacao de
-    # contrato existente).
+    # ou `None`. Mas `main.py::updateAutomationSettings` (callable HTTP
+    # `whatsapp_secretario.desativa_em`, usado pelo frontend web) repassa
+    # `sec_updates["desativa_em"] = sec_cfg["desativa_em"]` DIRETO do corpo
+    # da requisicao, sem coercao de tipo nem validacao de schema -- um
+    # cliente que mande um numero, lista ou dict nesse campo gravaria
+    # exatamente isso em `system/settings`. A 1a rodada de revisao
+    # adversarial (Agent tool, sem contexto) confirmou o achado e, alem
+    # disso, que o frontend hoje NUNCA envia esse campo nesse endpoint
+    # (`src/components/modals/Modals.tsx`), tornando o caminho fraco
+    # puramente teorico na pratica -- mas o Codex apontou corretamente que
+    # "nenhuma evidencia hoje" nao e uma GARANTIA ESTRUTURAL, e um cliente
+    # MCP que valide `structuredContent` contra o `outputSchema` quebraria
+    # se algum dia um valor nao-string fosse gravado. CORRIGIDO
+    # normalizando na LEITURA (`secretario_whatsapp.obter_config_
+    # secretario`, nao no endpoint HTTP): `desativa_em` agora e sempre
+    # coagido para `str(...)` quando presente e nao-string, antes de
+    # qualquer uso (inclusive antes de `_esta_expirado`, que ja fazia
+    # `str()` internamente e tolerava qualquer tipo via `try/except`, sem
+    # mudanca de comportamento ali) -- escolhido em vez de validar/rejeitar
+    # em `updateAutomationSettings` porque normalizar na leitura fecha a
+    # lacuna para QUALQUER escritor presente ou futuro daquele campo, nao
+    # so o conhecido hoje, e nao muda o comportamento de um endpoint HTTP
+    # fora do escopo MCP. `desativa_em` agora tem a MESMA garantia
+    # estrutural dos demais campos desta tool.
     #
     # Investigacao completa desta sub-entrega: docs/autonomia/execucao.md,
     # sub-entrega 27/N.

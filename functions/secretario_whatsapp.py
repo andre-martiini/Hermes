@@ -171,12 +171,21 @@ def obter_config_secretario(db) -> dict:
     
     Aplica expiração passiva na leitura: se desativa_em estiver preenchido e já
     tiver expirado, trata enabled como False sem exigir cron job.
+
+    Normaliza `desativa_em` para `str | None` mesmo que o documento tenha um
+    valor de outro tipo -- `updateAutomationSettings` (main.py) grava esse
+    campo direto do corpo da requisição HTTP, sem validar tipo (achado da
+    revisão do Codex na PR de `consultar_status_modo_secretario`, P03
+    sub-entrega 27/N). Sem essa normalização, um valor não-string gravado por
+    ali vazaria cru até o outputSchema publicado (`string | null`).
     """
     try:
         snap = db.collection("system").document("settings").get()
         data = (snap.to_dict() or {}) if snap.exists else {}
         cfg = data.get("whatsapp_secretario") or {}
         desativa_em = cfg.get("desativa_em")
+        if desativa_em is not None and not isinstance(desativa_em, str):
+            desativa_em = str(desativa_em)
         enabled = bool(cfg.get("enabled", False))
         if enabled and desativa_em:
             if _esta_expirado(desativa_em):
