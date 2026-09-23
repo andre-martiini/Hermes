@@ -1677,6 +1677,147 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
             },
         ],
     },
+    # `listar_rascunhos_pendentes` (P03 sub-entrega 24/N) -- oitava tool com
+    # outputSchema. Handler (`tools/hermes_tools.py::listar_rascunhos_pendentes`)
+    # so repassa `limite` para `outbox_aprovacao.listar_rascunhos`, que tem
+    # UMA UNICA forma de retorno (sem `try/except` proprio, sem ramo de
+    # erro alternativo) -- diferente de `consultar_historico_acoes`/
+    # `obter_acao` (sub-entregas 14/N e 15/N), nao precisa de `oneOf`.
+    #
+    # `status` e enum de EXATAMENTE 2 valores pela MESMA garantia ja usada
+    # em `consultar_pedidos_agente` (sub-entrega 12/N): nao "escritor
+    # unico" (a colecao `whatsapp_outbox` tem VARIOS escritores -- ver
+    # abaixo), e sim o filtro da propria QUERY
+    # (`.where("status", "in", [STATUS_AGUARDANDO, STATUS_AGUARDANDO_JANELA])`
+    # em `outbox_aprovacao.listar_rascunhos`) -- nenhum documento com outro
+    # valor de `status` pode aparecer no resultado, independente de quantos
+    # escritores a colecao tiver.
+    #
+    # Investigacao dos escritores de `whatsapp_outbox` (busca exaustiva por
+    # `collection("whatsapp_outbox")`/`collection(COLLECTION)` no
+    # repositorio): dois pontos CRIAM documento (`.document()` + `.set()`),
+    # o resto so ATUALIZA (`.update()`) um documento existente, nunca muda
+    # `status` para um dos dois valores do filtro:
+    #   - `outbox_aprovacao.criar_rascunho` (chamada por `criar_rascunho_
+    #     whatsapp`) -- grava `status_inicial` como
+    #     `STATUS_AGUARDANDO_JANELA` (tipo promovido) ou `STATUS_AGUARDANDO`
+    #     (regular) SOMENTE no ramo `not envio_imediato`; no ramo
+    #     `envio_imediato` grava `STATUS_PENDING` ("pending"), que o filtro
+    #     desta query exclui. E o UNICO escritor que grava os dois valores
+    #     do enum.
+    #   - `tools/schedule_whatsapp_message.py::schedule_whatsapp_message`
+    #     (chamada por `schedule_whatsapp_message`, tool DIFERENTE) -- grava
+    #     SEMPRE `status: "pending"`, nunca aparece neste resultado.
+    #   - `mcp_server.py` (le por `document(job_id).get()`, nunca escreve),
+    #     `ai_notification_planner.py` (le por
+    #     `.where("status", "==", "pending")`, nunca escreve) e
+    #     `telegram_callbacks_confirmacoes.py` (dois `.update()`, um grava
+    #     `status: "canceled"`, outro `status: "sent"` -- nenhum dos dois
+    #     valores do filtro) sao os demais pontos encontrados.
+    #
+    # Os outros 13 campos do item vem de UM UNICO LITERAL de dict dentro de
+    # `listar_rascunhos` (`outbox_aprovacao.py`, sem chave condicional --
+    # todos os 13 sempre presentes, ao contrario de `truncado`
+    # (`consultar_lista_compras`) ou `status` no ramo de erro (`obter_acao`)):
+    #   - `id` (`doc.id`, garantido string pelo SDK do Firestore).
+    #   - `destinatario_nome`/`to_number`/`motivo`/`tipo` sao SEMPRE string
+    #     nao-vazia NO UNICO CAMINHO DE CRIACAO que gera os dois status do
+    #     filtro (`criar_rascunho`): `motivo`/`contact_number` sao validados
+    #     nao-vazios ANTES de montar o payload (`if not motivo: return
+    #     {"erro": ...}`, idem `contact_number`), e `tipo_limpo = str(tipo
+    #     or "outro").strip() or "outro"` nunca fica vazio. `destinatario_
+    #     nome` e `res_dest.get("nome") or contact_number` -- cai para
+    #     `contact_number` (sempre string nao-vazia) quando `nome` e
+    #     falsy; `to_number` e `res_dest.get("chat_id") or contact_number`,
+    #     mesma garantia. RISCO RESIDUAL aceito e nao-bloqueante, mesma
+    #     categoria das demais tools deste modulo: o parametro opcional
+    #     `destinatario_resolvido` (usado so por `secretario_whatsapp.py`,
+    #     um unico call site) repassa `chat_id`/`nome` do CHAMADOR sem
+    #     coercao de tipo -- se esse chamador algum dia passar um valor
+    #     truthy nao-string, ele vaza cru para `to_number`/`destinatario_
+    #     nome` (nao auditado at fundo aqui, mesmo espirito do caveat ja
+    #     aceito para `perfil_pessoas` em `buscar_contato`).
+    #   - `acao_id`/`item_atencao_id` sao `["string", "null"]` --
+    #     DELIBERADAMENTE nullable: `criar_rascunho` grava os dois SEMPRE
+    #     (nunca ausentes do documento), mas com valor `None` quando o
+    #     chamador nao informa (`str(acao_id).strip() if acao_id else
+    #     None`) -- nao e "campo ausente", e "campo presente com valor
+    #     null" por desenho (tarefa/item de atencao vinculado e opcional).
+    #   - `origem` e string solta (nao enum): sempre string nao-vazia
+    #     (`origem or "claude"`, tool `criar_rascunho_whatsapp` passa
+    #     `getattr(ctx, "session_id", None) or "claude"`), mas SEM
+    #     coercao de tipo explicita dentro de `criar_rascunho` -- mesma
+    #     categoria de risco residual do paragrafo anterior, nao um
+    #     terceiro valor fixo como `status`.
+    #   - `foi_editado` e SEMPRE `bool`, garantia mais forte que a do
+    #     documento gravado: `listar_rascunhos` aplica `bool(d.get(
+    #     "foi_editado", False))` na PROPRIA leitura (coercao local,
+    #     mesmo espirito de `trecho` abaixo), independente do que estiver
+    #     gravado no Firestore.
+    #   - `trecho` e SEMPRE `string`, mesma razao: `str(d.get("content")
+    #     or "")[:120]` na propria leitura, nunca o campo `content` cru.
+    #   - `envio_liberado_em`/`criado_em` sao `["string", "null"]`: passam
+    #     por `outbox_aprovacao._to_iso`, que devolve `None` so para
+    #     entrada `None`, `.isoformat()` para datetime/Timestamp, e
+    #     `str(val)` para QUALQUER outra coisa -- nunca um terceiro tipo.
+    #     `envio_liberado_em` so e gravado quando `is_promovido` (ausente
+    #     do documento no caminho regular; `d.get(...)` sem default vira
+    #     `None`, que `_to_iso` mantem `None`).
+    #   - `telegram_message_id` e `["integer", "null"]` -- ACHADO desta
+    #     sub-entrega: nao e string como o padrao `_to_iso` dos dois campos
+    #     de data faria supor. `criar_rascunho` so grava este campo
+    #     (`doc_ref.update({"telegram_message_id": telegram_msg_id})`)
+    #     QUANDO `telegram_msg_id` e truthy, e esse valor vem de
+    #     `telegram_utils._send_telegram_message_with_keyboard`, que
+    #     devolve `resp.json().get("result", {}).get("message_id")` --
+    #     `message_id` e um INTEIRO na API do Telegram, nunca string.
+    #     Confirmado tambem por `test_outbox_aprovacao.py` (fixture
+    #     `"telegram_message_id": 999`, literal inteiro). Campo AUSENTE
+    #     (nunca gravado) quando o envio ao Telegram falha ou nao ha
+    #     token/chat configurado -- por isso nullable, nunca outro tipo.
+    #
+    # Investigacao completa e as rodadas de revisao adversarial desta
+    # sub-entrega: docs/autonomia/execucao.md, sub-entrega 24/N.
+    "listar_rascunhos_pendentes": {
+        "type": "object",
+        "properties": {
+            "total": {"type": "integer"},
+            "rascunhos": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "status": {
+                            "type": "string",
+                            "enum": ["aguardando_aprovacao", "aguardando_janela"],
+                        },
+                        "destinatario_nome": {"type": "string"},
+                        "to_number": {"type": "string"},
+                        "motivo": {"type": "string"},
+                        "trecho": {"type": "string"},
+                        "acao_id": {"type": ["string", "null"]},
+                        "item_atencao_id": {"type": ["string", "null"]},
+                        "origem": {"type": "string"},
+                        "tipo": {"type": "string"},
+                        "foi_editado": {"type": "boolean"},
+                        "envio_liberado_em": {"type": ["string", "null"]},
+                        "criado_em": {"type": ["string", "null"]},
+                        "telegram_message_id": {"type": ["integer", "null"]},
+                    },
+                    "required": [
+                        "id", "status", "destinatario_nome", "to_number",
+                        "motivo", "trecho", "acao_id", "item_atencao_id",
+                        "origem", "tipo", "foi_editado", "envio_liberado_em",
+                        "criado_em", "telegram_message_id",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["total", "rascunhos"],
+        "additionalProperties": False,
+    },
 }
 
 
@@ -1687,9 +1828,9 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (99 das 106 tools
-    hoje, apos a setima entrada, `obter_acao`, sub-entrega 15/N),
-    deliberadamente:
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (98 das 106 tools
+    hoje, apos a oitava entrada, `listar_rascunhos_pendentes`, sub-entrega
+    24/N), deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
     (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).
