@@ -669,7 +669,20 @@ class TestConfirmarEnvioManual(unittest.TestCase):
         doc = self.outbox._docs["job-1"]
         self.assertEqual(doc["status"], oa.STATUS_SENT)
         self.assertEqual(doc["sent_at"], agora)
+        # Valor default do parâmetro -- ver test_confirma_com_sent_via_customizado
+        # para a passagem de verdade (senão um hardcode no lugar do parâmetro
+        # passaria despercebido, achado da 3ª rodada de revisão adversarial).
         self.assertEqual(doc["sent_via"], "telegram_confirmacao_manual")
+
+    def test_confirma_com_sent_via_customizado(self):
+        """Achado da 3ª rodada de revisão adversarial (22/09/2026): o teste
+        acima nunca passava um sent_via não-default, então um hardcode da
+        string no lugar do parâmetro em confirmar_envio_manual passaria
+        despercebido. Este cobre a passagem de verdade."""
+        self.outbox._docs["job-1b"] = {"status": oa.STATUS_NOTIFIED}
+        res = oa.confirmar_envio_manual(self.db, "job-1b", sent_via="worker_recuperacao")
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(self.outbox._docs["job-1b"]["sent_via"], "worker_recuperacao")
 
     def test_confirmar_ja_enviado_e_idempotente(self):
         self.outbox._docs["job-2"] = {"status": oa.STATUS_SENT, "sent_via": "worker"}
