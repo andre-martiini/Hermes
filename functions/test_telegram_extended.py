@@ -285,6 +285,18 @@ class TestPrepararEdicaoAcaoStatusConcluidaEExcluida(unittest.TestCase):
         self.assertTrue(r.startswith("ERRO|"), r)
         self.assertIn("excluída", r)
 
+    def test_excluida_reabrindo_com_sinonimo_e_permitido(self):
+        """Achado da 3ª rodada de revisão adversarial (23/09/2026): reabrir
+        (desfazer um "excluído" por engano) precisa funcionar aqui igual já
+        funcionava em editar_acoes_em_lote -- usando um SINÔNIMO ("reabrir",
+        não o literal "em andamento") para provar que a checagem normaliza
+        o valor recebido, não só compara a string exata."""
+        self.db.collection("tarefas").document("tarefa-2b").set({
+            "status": "excluído", "titulo": "Tarefa cancelada por engano",
+        })
+        r = self._preparar(task_id="tarefa-2b", status="reabrir")
+        self.assertFalse(r.startswith("ERRO|"), r)
+
     def test_em_andamento_continua_editavel_como_sempre(self):
         self.db.collection("tarefas").document("tarefa-3").set({
             "status": "em andamento", "titulo": "Em curso",

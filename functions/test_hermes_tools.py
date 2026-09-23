@@ -1469,6 +1469,17 @@ class TestEditarAcaoConcluidaPermitido(unittest.TestCase):
         corpo = self._corpo_da_funcao("preparar_edicao_acao")
         self.assertIn("já foi excluída", corpo)
 
+    def test_preparar_edicao_acao_tem_excecao_de_reabertura(self):
+        """Achado da 3ª rodada de revisão adversarial (23/09/2026): a
+        primeira versão do bloqueio de 'excluído' era incondicional, sem a
+        exceção de reabertura que confirmarEdicaoEmLote/
+        preparar_edicao_em_lote já tinham desde antes de qualquer uma
+        destas rodadas -- mesma tarefa, mesma edição, resultado diferente
+        entre o caminho de ação única e o de lote."""
+        corpo = self._corpo_da_funcao("preparar_edicao_acao")
+        self.assertIn("_normalizar_status_acao", corpo)
+        self.assertIn("'em andamento', 'stand-by'", corpo)
+
     def test_confirmar_edicao_acao_agora_recusa_excluida(self):
         """Achado MAIS GRAVE da 2ª rodada de revisão adversarial (23/09/2026):
         confirmarEdicaoAcao é a ÚNICA função que de fato grava para o par
@@ -1479,6 +1490,13 @@ class TestEditarAcaoConcluidaPermitido(unittest.TestCase):
         verdade) sem nenhum aviso, pulando o "propor"."""
         corpo = self._corpo_da_funcao("confirmarEdicaoAcao")
         self.assertIn("já foi excluída", corpo)
+
+    def test_confirmar_edicao_acao_tem_excecao_de_reabertura(self):
+        """Achado da 3ª rodada: mesma exceção de reabertura precisa existir
+        na função que de fato grava, não só nos passos de propor."""
+        corpo = self._corpo_da_funcao("confirmarEdicaoAcao")
+        self.assertIn("alteracoes.get('status')", corpo)
+        self.assertIn("'em andamento', 'stand-by'", corpo)
 
     def test_confirmar_edicao_em_lote_agora_recusa_excluida(self):
         """Mesmo achado, QUARTA cópia: confirmarEdicaoEmLote (a escrita real
@@ -1537,6 +1555,17 @@ class TestPrepararEdicaoEmLoteConcluidaEExcluida(unittest.TestCase):
         ctx = self._ctx_com_tarefa("excluído")
         r = hermes_tools.preparar_edicao_em_lote(
             ctx, {"itens": [{"task_id": "t1", "alteracoes": {"status": "em andamento"}}]})
+        self.assertFalse(r.startswith("ERRO|"), r)
+
+    def test_excluida_reabrindo_com_sinonimo_e_permitido(self):
+        """Achado da 3ª rodada de revisão adversarial (23/09/2026): esta
+        checagem comparava o valor CRU de alteracoes['status'] em vez do
+        normalizado -- um sinônimo válido como "reabrir" era recusado aqui
+        mesmo sendo aceito por confirmarEdicaoEmLote (main.py) para o
+        mesmo payload."""
+        ctx = self._ctx_com_tarefa("excluído")
+        r = hermes_tools.preparar_edicao_em_lote(
+            ctx, {"itens": [{"task_id": "t1", "alteracoes": {"status": "reabrir"}}]})
         self.assertFalse(r.startswith("ERRO|"), r)
 
 

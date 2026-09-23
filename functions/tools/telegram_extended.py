@@ -28,6 +28,31 @@ def _normalize_pop_text(text):
     return "".join(ch for ch in unicodedata.normalize("NFKD", (text or "").lower()) if not unicodedata.combining(ch)).strip()
 
 
+def _normalizar_status_acao(valor):
+    """Mesma normalização de tools/hermes_tools.py e das 3 cópias em main.py
+    (achado da 3ª rodada de revisão adversarial, 23/09/2026): usada aqui só
+    para reconhecer sinônimos de "reabrir" (ex.: "pendente", "aberto") na
+    exceção de reabertura do bloqueio de 'excluído' -- ver ramo
+    "preparar_edicao_acao" abaixo."""
+    if valor is None:
+        return valor
+    raw = str(valor).strip().lower()
+    raw = "".join(
+        c for c in unicodedata.normalize("NFD", raw) if unicodedata.category(c) != "Mn"
+    )
+    raw = " ".join(raw.replace("_", " ").replace("-", " ").split())
+    if raw in ("concluido", "concluida", "concluir", "finalizado", "finalizada", "completed", "done"):
+        return "concluído"
+    if raw in ("stand by", "standby", "pausado", "pausada", "pausar"):
+        return "stand-by"
+    if raw in ("em andamento", "andamento", "pendente", "aberto", "aberta", "reabrir"):
+        return "em andamento"
+    if raw in ("excluido", "excluir", "excluida", "cancelado", "cancelar", "cancelada",
+               "deletar", "deletado", "apagar", "remover"):
+        return "excluído"
+    return valor
+
+
 def execute(tool_name: str, slots: dict, db) -> str:
     if tool_name == "obter_contexto_tela":
         task_id = slots.get("task_id") or slots.get("id_tarefa")
@@ -517,7 +542,15 @@ def execute(tool_name: str, slots: dict, db) -> str:
         # main.py::preparar_edicao_acao (o caminho irmão do copiloto web) já
         # ficou bloqueado por esse mesmo motivo — sem isto os dois caminhos
         # MCP de duas chamadas divergiriam entre si.
-        if task_data.get("status") == "excluído":
+        #
+        # Exceção de reabertura (achado da 3ª rodada de revisão adversarial,
+        # 23/09/2026): sem isto, dava para desfazer um "excluído" por
+        # engano via editar_acoes_em_lote (que já tinha essa exceção desde
+        # antes de qualquer uma destas rodadas) mas não pelo par preparar/
+        # confirmar_edicao_acao, para a MESMA tarefa e a MESMA edição.
+        if task_data.get("status") == "excluído" and _normalizar_status_acao(
+            alteracoes.get("status")
+        ) not in ("em andamento", "stand-by"):
             return "ERRO|Esta ação já foi excluída (a exclusão real acontece na próxima sincronização) e não pode ser editada."
         alteracoes_diff = {}
         for campo, novo_valor in alteracoes.items():

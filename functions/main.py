@@ -9952,16 +9952,19 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 # já aceita.
                 #
                 # 'excluído' continua bloqueado aqui, DE PROPÓSITO (achado
-                # da revisão adversarial, 23/09/2026): confirmarEdicaoAcao
-                # nunca tratou 'excluído' como especial, mas esse status
-                # dispara exclusão real do documento e do evento do Google
-                # Calendar em sync_google_tasks_push (main.py) na próxima
-                # sincronização — editar uma ação que está prestes a ser
-                # apagada de verdade é, na melhor das hipóteses, inútil, e
-                # confuso na pior. Não era o que o dono pediu (ele falou em
-                # ação "concluída"); manter esse status bloqueado aqui evita
-                # estender esse risco pré-existente para um caminho novo.
-                if task_data.get('status') == 'excluído':
+                # da revisão adversarial, 23/09/2026), A MENOS que a própria
+                # edição esteja reabrindo (mesma exceção que
+                # confirmarEdicaoEmLote/preparar_edicao_em_lote já tinham
+                # desde antes de qualquer uma destas rodadas — achado da 3ª
+                # rodada: a versão anterior bloqueava reabertura aqui e não
+                # bloqueava no lote, para a MESMA tarefa e a MESMA edição).
+                # Esse status dispara exclusão real do documento e do evento
+                # do Google Calendar em sync_google_tasks_push (main.py) na
+                # próxima sincronização — editar outro campo sem reabrir é,
+                # na melhor das hipóteses, inútil, e confuso na pior.
+                if task_data.get('status') == 'excluído' and _normalizar_status_acao(
+                    (alteracoes or {}).get('status')
+                ) not in ('em andamento', 'stand-by'):
                     return "ERRO|Esta ação já foi excluída (a exclusão real acontece na próxima sincronização) e não pode ser editada."
 
                 # Monta o diff de campos (original vs. novo)
@@ -12035,22 +12038,6 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
 
         task_data = task_doc.to_dict()
 
-        # Achado da 2ª rodada de revisão adversarial (23/09/2026): esta é a
-        # ÚNICA função que de fato grava — editar_acao E confirmar_edicao_acao
-        # (o par de duas chamadas) chegam os dois aqui. Os bloqueios de
-        # 'excluído' em preparar_edicao_acao (main.py e
-        # tools/telegram_extended.py) são só do PASSO DE PROPOR: nunca
-        # protegiam de verdade, porque nenhum dos dois é chamado no caminho
-        # de escrita. Um cliente podia pular o "propor" e chamar
-        # confirmar_edicao_acao ou editar_acao direto para editar uma ação
-        # já excluída (que sync_google_tasks_push apaga de verdade, doc e
-        # evento do Calendar, na próxima sincronização) sem nenhum aviso.
-        # Bloqueio de verdade fica aqui, não só nos dois passos de propor.
-        if task_data.get('status') == 'excluído':
-            msg = 'Edição bloqueada: Esta ação já foi excluída (a exclusão real acontece na próxima sincronização).'
-            _set_card_status(db_ref, 'invalidated', msg)
-            return {'status': 'invalidated', 'message': msg}
-
         # Editar ação concluída é permitido (decisão do dono, 23/09/2026):
         # a única proteção contra edição de dado obsoleto é a Validação 2
         # (snapshot) logo abaixo — status concluído/excluído não bloqueia
@@ -12093,6 +12080,35 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
             if raw in ('excluido', 'excluir', 'excluida', 'cancelado', 'cancelar', 'cancelada', 'deletar', 'deletado', 'apagar', 'remover'):
                 return 'excluído'
             return valor
+
+        # Achado da 2ª rodada de revisão adversarial (23/09/2026): esta é a
+        # ÚNICA função que de fato grava — editar_acao E confirmar_edicao_acao
+        # (o par de duas chamadas) chegam os dois aqui. Os bloqueios de
+        # 'excluído' em preparar_edicao_acao (main.py e
+        # tools/telegram_extended.py) são só do PASSO DE PROPOR: nunca
+        # protegiam de verdade, porque nenhum dos dois é chamado no caminho
+        # de escrita. Um cliente podia pular o "propor" e chamar
+        # confirmar_edicao_acao ou editar_acao direto para editar uma ação
+        # já excluída (que sync_google_tasks_push apaga de verdade, doc e
+        # evento do Calendar, na próxima sincronização) sem nenhum aviso.
+        # Bloqueio de verdade fica aqui, não só nos dois passos de propor.
+        #
+        # Achado da 3ª rodada (23/09/2026): a primeira versão deste bloqueio
+        # era incondicional, sem a exceção de reabertura que
+        # confirmarEdicaoEmLote/preparar_edicao_em_lote já tinham desde
+        # antes de qualquer uma destas rodadas (comportamento original,
+        # não uma invenção nova) — resultado: dava para desfazer um
+        # "excluído" por engano via editar_acoes_em_lote, mas não via
+        # editar_acao para a MESMA tarefa e a MESMA edição. Normaliza igual
+        # ao lote, antes de montar `updates`, para não duplicar o mesmo
+        # bug em miniatura (achado da mesma rodada no lote: usar o valor
+        # cru em vez de normalizado rejeitaria sinônimos como "reabrir").
+        if task_data.get('status') == 'excluído' and _normalizar_status_acao(
+            alteracoes.get('status')
+        ) not in ('em andamento', 'stand-by'):
+            msg = 'Edição bloqueada: Esta ação já foi excluída (a exclusão real acontece na próxima sincronização).'
+            _set_card_status(db_ref, 'invalidated', msg)
+            return {'status': 'invalidated', 'message': msg}
 
         updates = {}
         for campo, novo_valor in alteracoes.items():

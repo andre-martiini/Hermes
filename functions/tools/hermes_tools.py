@@ -1344,8 +1344,12 @@ def preparar_edicao_em_lote(ctx: ToolContext, args: dict):
             # Calendar na próxima sincronização (sync_google_tasks_push,
             # main.py), então editar outro campo sem reabrir é inútil na
             # melhor das hipóteses.
-            if task_data.get("status") == "excluído" and alteracoes.get(
-                "status"
+            # Achado da 3ª rodada de revisão adversarial (23/09/2026): valor
+            # cru em vez de normalizado -- sinônimo válido como "reabrir"/
+            # "pendente"/"aberto" era recusado aqui mesmo sendo aceito por
+            # confirmarEdicaoEmLote (main.py) para o mesmo payload.
+            if task_data.get("status") == "excluído" and _normalizar_status_acao(
+                alteracoes.get("status")
             ) not in ("em andamento", "stand-by"):
                 return (f"ERRO|A acao '{task_data.get('titulo', tid)}' ja foi excluida "
                         f"e nao pode ser editada.")
