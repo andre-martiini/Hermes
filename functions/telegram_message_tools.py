@@ -513,15 +513,35 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
                 if not task_doc.exists:
                     continue
                 task_data = task_doc.to_dict() or {}
+
+                # Achado da 4ª rodada de revisão adversarial da correção de
+                # edição de ação concluída (23/09/2026): esta é uma QUINTA
+                # cópia da mesma validação -- um closure de function-calling
+                # do Gemini para o Telegram, vivo em produção, nunca tocado
+                # pelas rodadas 1-3 (que só cobriam os quatro caminhos do
+                # conector MCP/copiloto web). Não tinha bloqueio nenhum de
+                # 'excluído' (que dispara exclusão real do documento e do
+                # evento do Calendar na próxima sincronização,
+                # sync_google_tasks_push) -- e a normalização de status
+                # embutida logo abaixo já era um subconjunto capenga da
+                # canônica (sem "pendente"/"reabrir"/"pausar" etc., sem
+                # dobra de maiúsculas/acento), então trocada pela função de
+                # tools/hermes_tools.py em vez de corrigida no lugar.
+                from tools.hermes_tools import _normalizar_status_acao
+
+                if task_data.get('status') == 'excluído' and _normalizar_status_acao(
+                    alteracoes.get('status')
+                ) not in ('em andamento', 'stand-by'):
+                    continue
+
                 updates = {}
                 for campo, novo_valor in alteracoes.items():
                     if campo not in _ALLOWED:
                         continue
                     if campo == 'status':
-                        if novo_valor in ('concluido', 'concluida', 'finalizado'): novo_valor = 'concluído'
-                        elif novo_valor in ('stand by', 'standby'): novo_valor = 'stand-by'
-                        elif novo_valor in ('em andamento', 'andamento', 'aberto'): novo_valor = 'em andamento'
-                        elif novo_valor in ('excluido', 'excluir', 'cancelado', 'deletar'): novo_valor = 'excluído'
+                        novo_valor = _normalizar_status_acao(novo_valor)
+                        if novo_valor not in ('em andamento', 'stand-by', 'concluído', 'excluído'):
+                            continue
                     updates[campo] = novo_valor
 
                 if not updates:

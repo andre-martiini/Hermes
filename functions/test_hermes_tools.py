@@ -9,6 +9,7 @@ causa. A checagem e estatica (AST), sem rede e sem Firestore.
 
 import ast
 import contextlib
+import inspect
 import json
 import os
 import unittest
@@ -1425,15 +1426,23 @@ class TestEditarAcaoConcluidaPermitido(unittest.TestCase):
     """Decisão do dono (23/09/2026): editar uma ação com status concluído
     (ou excluído, no caminho do copiloto web) deixou de ser bloqueado.
 
-    `confirmarEdicaoAcao`/`preparar_edicao_acao` (main.py) não são
-    chamáveis em memória neste conjunto de testes — main.py define funções
-    `@https_fn.on_call` que esperam um `CallableRequest` real, e o próprio
-    `_via_callable` do conector so e exercitado mockando o bridge (ver
-    test_normalizador_resultados_legados.py), nunca o corpo da função em
-    si. Por isso esta checagem é estrutural, sobre o texto-fonte real das
-    duas funções (mesma técnica de `_whitelists_do_main` acima) — existe
-    para a restrição não voltar em silêncio numa reescrita futura, já que
-    não há teste comportamental capaz de pegar isso.
+    Checagem estrutural sobre o texto-fonte real das funções (mesma técnica
+    de `_whitelists_do_main` acima) — existe para a restrição não voltar em
+    silêncio numa reescrita futura sem depender só do teste comportamental.
+
+    CORREÇÃO (achado da 4ª rodada de revisão adversarial, 23/09/2026): a
+    premissa original desta classe -- que `confirmarEdicaoAcao`/
+    `preparar_edicao_acao` (main.py) não seriam chamáveis em memória por
+    serem `@https_fn.on_call` -- estava incorreta. `inspect.unwrap` atravessa
+    o(s) decorator(s) até a função real (mesmo truque já usado em main.py
+    para `askCopilotoHermes`, ver o comentário ao lado de
+    `_inspect.unwrap(askCopilotoHermes)`), e um `https_fn.CallableRequest`
+    construído à mão (com `raw_request=None`, já que o corpo de
+    `confirmarEdicaoAcao`/`confirmarEdicaoEmLote` nunca lê esse campo) chama
+    o corpo de verdade. Ver `TestConfirmarEdicaoAcaoComportamentalReal` e
+    `TestConfirmarEdicaoEmLoteComportamentalReal` abaixo para a cobertura
+    comportamental real que isso agora permite -- as checagens estruturais
+    aqui continuam valendo como rede extra, mais barata de rodar.
     """
 
     @staticmethod
@@ -1515,6 +1524,143 @@ class TestEditarAcaoConcluidaPermitido(unittest.TestCase):
     def test_confirmar_edicao_acao_ainda_recusa_acao_inexistente(self):
         corpo = self._corpo_da_funcao("confirmarEdicaoAcao")
         self.assertIn("não existe mais", corpo)
+
+
+class TestConfirmarEdicaoAcaoComportamentalReal(unittest.TestCase):
+    """Cobertura comportamental real de `main.py::confirmarEdicaoAcao` —
+    achado da 4ª rodada de revisão adversarial (23/09/2026): esta função
+    (a única que de fato grava para editar_acao/confirmar_edicao_acao) só
+    tinha checagem estrutural (AST/texto-fonte), que não pega uma condição
+    invertida ou removida por engano. `inspect.unwrap` + um
+    `CallableRequest` construído à mão chamam o corpo real -- ver docstring
+    de `TestEditarAcaoConcluidaPermitido` acima.
+    """
+
+    def setUp(self):
+        import main
+        self.main = main
+        self.fn = inspect.unwrap(main.confirmarEdicaoAcao)
+
+    def _chamar(self, task_data: dict, alteracoes: dict, snapshot_ts: str = ""):
+        from firebase_functions import https_fn
+
+        db = MagicMock()
+        doc = MagicMock(exists=True)
+        doc.to_dict.return_value = dict(task_data)
+        db.collection.return_value.document.return_value.get.return_value = doc
+        with patch.object(self.main, "get_db", return_value=db):
+            req = https_fn.CallableRequest(
+                data={"taskId": "t1", "alteracoes": alteracoes, "snapshotTs": snapshot_ts},
+                raw_request=None,
+            )
+            return self.fn(req)
+
+    def test_concluida_pode_ser_editada(self):
+        res = self._chamar({"status": "concluído", "titulo": "T"}, {"titulo": "T novo"})
+        self.assertEqual(res["status"], "completed")
+
+    def test_excluida_sem_reabrir_e_bloqueada(self):
+        res = self._chamar({"status": "excluído", "titulo": "T"}, {"titulo": "T novo"})
+        self.assertEqual(res["status"], "invalidated")
+        self.assertIn("excluída", res["message"])
+
+    def test_excluida_reabrindo_com_sinonimo_e_permitida(self):
+        res = self._chamar({"status": "excluído", "titulo": "T"}, {"status": "reabrir"})
+        self.assertEqual(res["status"], "completed")
+
+    def test_acao_inexistente_e_bloqueada(self):
+        from firebase_functions import https_fn
+        db = MagicMock()
+        db.collection.return_value.document.return_value.get.return_value = MagicMock(exists=False)
+        with patch.object(self.main, "get_db", return_value=db):
+            req = https_fn.CallableRequest(data={"taskId": "t1", "alteracoes": {"titulo": "x"}}, raw_request=None)
+            res = self.fn(req)
+        self.assertEqual(res["status"], "invalidated")
+
+    def test_snapshot_desatualizado_e_bloqueado(self):
+        res = self._chamar(
+            {"status": "em andamento", "titulo": "T", "data_atualizacao": "2026-09-23T10:00:00Z"},
+            {"titulo": "T novo"},
+            snapshot_ts="2026-09-23T09:00:00Z",
+        )
+        self.assertEqual(res["status"], "invalidated")
+        self.assertIn("modificada", res["message"])
+
+
+class TestConfirmarEdicaoEmLoteComportamentalReal(unittest.TestCase):
+    """Mesma cobertura comportamental real, para `confirmarEdicaoEmLote`
+    (a escrita real por trás de editar_acoes_em_lote/confirmar_edicao_em_lote)."""
+
+    def setUp(self):
+        import main
+        self.main = main
+        self.fn = inspect.unwrap(main.confirmarEdicaoEmLote)
+
+    def _chamar(self, tarefas: dict, items: list):
+        from firebase_functions import https_fn
+
+        db = MagicMock()
+
+        def doc_fn(tid):
+            d = MagicMock()
+            dados = tarefas.get(tid)
+            if dados is None:
+                d.get.return_value = MagicMock(exists=False)
+            else:
+                snap = MagicMock(exists=True)
+                snap.to_dict.return_value = dados
+                d.get.return_value = snap
+            return d
+
+        db.collection.return_value.document.side_effect = doc_fn
+        batch = MagicMock()
+        db.batch.return_value = batch
+        with patch.object(self.main, "get_db", return_value=db):
+            req = https_fn.CallableRequest(data={"items": items}, raw_request=None)
+            res = self.fn(req)
+        return res, batch
+
+    def test_concluida_pode_ser_editada(self):
+        res, batch = self._chamar(
+            {"t1": {"status": "concluído", "titulo": "T1"}},
+            [{"task_id": "t1", "alteracoes": {"titulo": "Novo"}}],
+        )
+        self.assertEqual(res["count"], 1)
+        batch.commit.assert_called_once()
+
+    def test_excluida_sem_reabrir_e_pulada(self):
+        """Único item do lote é pulado -> count fica 0 -> a função levanta
+        HttpsError (mesmo caminho de "nenhum campo válido"), em vez de
+        aplicar a edição num item excluído sem reabri-lo."""
+        from firebase_functions import https_fn
+        with self.assertRaises(https_fn.HttpsError):
+            self._chamar(
+                {"t1": {"status": "excluído", "titulo": "T1"}},
+                [{"task_id": "t1", "alteracoes": {"titulo": "Novo"}}],
+            )
+
+    def test_excluida_reabrindo_com_sinonimo_e_aplicada(self):
+        res, batch = self._chamar(
+            {"t1": {"status": "excluído", "titulo": "T1"}},
+            [{"task_id": "t1", "alteracoes": {"status": "reabrir"}}],
+        )
+        self.assertEqual(res["count"], 1)
+        payload = batch.update.call_args[0][1]
+        self.assertEqual(payload["status"], "em andamento")
+
+    def test_item_excluido_nao_impede_os_demais_do_lote(self):
+        res, batch = self._chamar(
+            {
+                "t1": {"status": "excluído", "titulo": "T1"},
+                "t2": {"status": "em andamento", "titulo": "T2"},
+            },
+            [
+                {"task_id": "t1", "alteracoes": {"titulo": "Novo"}},
+                {"task_id": "t2", "alteracoes": {"titulo": "Novo"}},
+            ],
+        )
+        self.assertEqual(res["count"], 1)
+        batch.commit.assert_called_once()
 
 
 class TestPrepararEdicaoEmLoteConcluidaEExcluida(unittest.TestCase):
