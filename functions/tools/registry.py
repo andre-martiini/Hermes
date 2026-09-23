@@ -2165,6 +2165,95 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
             },
         ],
     },
+    # `consultar_status_modo_secretario` (P03 sub-entrega 27/N) -- decima
+    # primeira tool com outputSchema, backed por
+    # `secretario_whatsapp.consultar_status_modo_secretario` (passthrough
+    # puro em `tools/hermes_tools.py::_consultar_status_modo_secretario`,
+    # sem args). PRIMEIRA tool do catalogo com UMA FORMA SO onde TODOS os
+    # campos sao sempre obrigatorios (ao contrario de `calculadora`/
+    # `buscar_contato`/`consultar_lista_compras`, que tambem tem forma
+    # unica mas com campos as vezes AUSENTES, ou de `consultar_historico_
+    # acoes` em diante, que usam `oneOf`): a funcao nunca levanta excecao
+    # (o corpo inteiro le config via `secretario_whatsapp.
+    # obter_config_secretario`, que tem seu proprio `try/except Exception`
+    # e sempre devolve um dict default em caso de erro; o loop que monta
+    # `contatos_detalhes` tambem tem `try/except Exception` em volta da
+    # UNICA chamada que pode falhar, o `.get()` do documento do chat) e
+    # sempre constroi as 8 chaves do dict de retorno sem nenhum `if` que
+    # pule uma delas -- lido por completo (`secretario_whatsapp.py`,
+    # `consultar_status_modo_secretario` e `obter_config_secretario`).
+    #
+    # `chats_allowlist` (nivel superior) e SEMPRE lista de string:
+    # `obter_config_secretario` forca `[str(x).strip() for x in (...) if
+    # str(x).strip()]` nos dois `return` (sucesso e except). `contatos_
+    # detalhes` e montado a mao, item a item, dentro da propria funcao --
+    # `chat_id` e sempre um elemento de `chats_allowlist` (ja garantido
+    # string), `nome` comeca como esse mesmo `chat_id` e so e sobrescrito
+    # por `str((doc.to_dict() or {}).get("chat_name") or cid)`, sempre
+    # string em ambos os casos.
+    #
+    # `orientacoes_em_vigor`/`orientacoes_padrao`/`orientacoes_sessao` sao
+    # sempre `string | null`: as tres vem, direta ou indiretamente, de
+    # `secretario_whatsapp.normalizar_orientacoes`, que so devolve `str`
+    # ou `None` (nunca outro tipo) -- lida por completo.
+    #
+    # ACHADO desta sub-entrega, RISCO ACEITO e NAO-BLOQUEANTE (mesma
+    # categoria do `ordem` de `consultar_lista_compras`, sub-entrega
+    # 10/N, e do `modelo_interacao` de `buscar_contato`, sub-entrega
+    # 9/N): `desativa_em` tem DOIS escritores. O caminho normal
+    # (`secretario_whatsapp.ativar_modo_secretario`/
+    # `desativar_modo_secretario`) so grava `limite.isoformat()` (string)
+    # ou `None`, garantia forte. Mas `main.py::updateAutomationSettings`
+    # (callable HTTP `whatsapp_secretario.desativa_em`, usado pelo
+    # frontend web) repassa `sec_updates["desativa_em"] = sec_cfg[
+    # "desativa_em"]` DIRETO do corpo da requisicao, sem coercao de tipo
+    # nem validacao de schema -- um cliente que mande um numero, lista ou
+    # dict nesse campo grava exatamente isso em `system/settings`, e
+    # `consultar_status_modo_secretario` devolveria esse valor sem
+    # normalizar. Nenhuma evidencia de que isso aconteca na pratica hoje
+    # (o unico chamador conhecido, o frontend web, sempre manda string
+    # ISO ou omite o campo -- `test_secretario_whatsapp.py::
+    # TestAutomationSettingsCallable` exercita esse caminho so com
+    # string), por isso o schema continua `["string", "null"]` em vez de
+    # afrouxar para "qualquer tipo" -- mas a garantia NAO e estrutural
+    # como as dos outros campos desta tool, ao contrario do que a forma
+    # unica-sem-oneOf poderia sugerir. Nao corrigido nesta fatia (validar
+    # tipo em `updateAutomationSettings` seria mudanca de COMPORTAMENTO
+    # de um endpoint HTTP fora do escopo MCP, nao so documentacao de
+    # contrato existente).
+    #
+    # Investigacao completa desta sub-entrega: docs/autonomia/execucao.md,
+    # sub-entrega 27/N.
+    "consultar_status_modo_secretario": {
+        "type": "object",
+        "properties": {
+            "enabled": {"type": "boolean"},
+            "desativa_em": {"type": ["string", "null"]},
+            "chats_allowlist": {"type": "array", "items": {"type": "string"}},
+            "contatos_detalhes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "chat_id": {"type": "string"},
+                        "nome": {"type": "string"},
+                    },
+                    "required": ["chat_id", "nome"],
+                    "additionalProperties": False,
+                },
+            },
+            "orientacoes_em_vigor": {"type": ["string", "null"]},
+            "orientacoes_padrao": {"type": ["string", "null"]},
+            "orientacoes_sessao": {"type": ["string", "null"]},
+            "mensagem": {"type": "string"},
+        },
+        "required": [
+            "enabled", "desativa_em", "chats_allowlist", "contatos_detalhes",
+            "orientacoes_em_vigor", "orientacoes_padrao", "orientacoes_sessao",
+            "mensagem",
+        ],
+        "additionalProperties": False,
+    },
 }
 
 
@@ -2175,11 +2264,11 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (98 das 108 tools
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (97 das 108 tools
     hoje -- `len(registry.list_tool_names())`, nao os "106" que este
     docstring citava ate a sub-entrega 24/N, contagem ja desatualizada
-    antes daquela fatia -- apos a decima entrada, `buscar_arquivos_acervo`,
-    sub-entrega 26/N), deliberadamente:
+    antes daquela fatia -- apos a decima primeira entrada, `consultar_
+    status_modo_secretario`, sub-entrega 27/N), deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
     (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).
