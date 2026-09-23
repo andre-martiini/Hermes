@@ -334,12 +334,19 @@ class TestScheduleWhatsappMessageNaoIdempotente(unittest.TestCase):
         from tools.schedule_whatsapp_message import schedule_whatsapp_message
 
         db = _FakeDb()
-        # Retry de rede DENTRO da mesma confirmacao MCP: protegido.
-        schedule_whatsapp_message(db, "5531999999999", "oi", "2026-09-24T10:00:00Z",
+        # Retry de rede DENTRO da mesma confirmacao MCP: protegido. A
+        # segunda chamada usa um `message` DIFERENTE de propósito -- se o
+        # guard `if not doc_ref.get().exists` (schedule_whatsapp_message.py)
+        # não existisse, `.set()` sobrescreveria o conteúdo gravado pela
+        # primeira chamada; o teste abaixo prova que o conteúdo ORIGINAL
+        # sobrevive, não só que o número de documentos não muda.
+        schedule_whatsapp_message(db, "5531999999999", "mensagem original", "2026-09-24T10:00:00Z",
                                    idempotency_key="confirmacao-1")
-        schedule_whatsapp_message(db, "5531999999999", "oi", "2026-09-24T10:00:00Z",
-                                   idempotency_key="confirmacao-1")
-        self.assertEqual(len(db._collections["whatsapp_outbox"]._docs), 1)
+        schedule_whatsapp_message(db, "5531999999999", "mensagem DIFERENTE (retry mal-formado)",
+                                   "2026-09-24T10:00:00Z", idempotency_key="confirmacao-1")
+        outbox = db._collections["whatsapp_outbox"]._docs
+        self.assertEqual(len(outbox), 1)
+        self.assertEqual(outbox["confirmacao-1"]["content"], "mensagem original")
 
         # Uma SEGUNDA confirmacao MCP (mcp_confirmation_id novo) para o
         # MESMO pedido logico enfileira uma SEGUNDA mensagem real -- exatamente
