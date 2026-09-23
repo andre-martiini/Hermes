@@ -9944,8 +9944,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
                 task_data = task_doc.to_dict()
 
-                if task_data.get('status') in ('concluído', 'excluído'):
-                    return "ERRO|Esta ação já foi concluída ou excluída e não pode ser editada."
+                # Editar ação concluída/excluída é permitido (decisão do
+                # dono, 23/09/2026) — mesma mudança em confirmarEdicaoAcao,
+                # que é quem de fato grava quando o usuário confirma o card
+                # que esta função prepara. Deixar só aqui bloqueado deixaria
+                # o copiloto web recusar propor uma edição que o conector
+                # MCP já aceita.
 
                 # Monta o diff de campos (original vs. novo)
                 alteracoes_diff = {}
@@ -12018,13 +12022,14 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
 
         task_data = task_doc.to_dict()
 
-        # Validação 2: ação já concluída?
-        if task_data.get('status') == 'concluído':
-            msg = 'Edição bloqueada: Esta ação já foi concluída.'
-            _set_card_status(db_ref, 'invalidated', msg)
-            return {'status': 'invalidated', 'message': msg}
+        # Editar ação concluída é permitido (decisão do dono, 23/09/2026):
+        # a única proteção contra edição de dado obsoleto é a Validação 2
+        # (snapshot) logo abaixo — status concluído/excluído não bloqueia
+        # mais. `editar_acoes_em_lote` (confirmarEdicaoEmLote) já não tinha
+        # essa restrição; isto alinha o caminho de ação única ao mesmo
+        # comportamento.
 
-        # Validação 3 (lazy): ação foi modificada desde a geração do card?
+        # Validação 2 (lazy): ação foi modificada desde a geração do card?
         current_ts = task_data.get('data_atualizacao') or task_data.get('data_criacao', '')
         if snapshot_ts and current_ts and str(current_ts) != str(snapshot_ts):
             msg = 'Edição bloqueada: Esta ação foi modificada após a geração deste card.'

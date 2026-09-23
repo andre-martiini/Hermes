@@ -1421,6 +1421,55 @@ class TestOQueSeAnunciaEditavelEDeFatoGravado(unittest.TestCase):
             self.assertIn("estrategia_objetivo_id", campos)
 
 
+class TestEditarAcaoConcluidaPermitido(unittest.TestCase):
+    """Decisão do dono (23/09/2026): editar uma ação com status concluído
+    (ou excluído, no caminho do copiloto web) deixou de ser bloqueado.
+
+    `confirmarEdicaoAcao`/`preparar_edicao_acao` (main.py) não são
+    chamáveis em memória neste conjunto de testes — main.py define funções
+    `@https_fn.on_call` que esperam um `CallableRequest` real, e o próprio
+    `_via_callable` do conector so e exercitado mockando o bridge (ver
+    test_normalizador_resultados_legados.py), nunca o corpo da função em
+    si. Por isso esta checagem é estrutural, sobre o texto-fonte real das
+    duas funções (mesma técnica de `_whitelists_do_main` acima) — existe
+    para a restrição não voltar em silêncio numa reescrita futura, já que
+    não há teste comportamental capaz de pegar isso.
+    """
+
+    @staticmethod
+    def _corpo_da_funcao(nome: str) -> str:
+        caminho = os.path.join(os.path.dirname(__file__), "main.py")
+        with open(caminho, encoding="utf-8") as f:
+            fonte = f.read()
+        arvore = ast.parse(fonte)
+        for node in ast.walk(arvore):
+            if isinstance(node, ast.FunctionDef) and node.name == nome:
+                return ast.get_source_segment(fonte, node) or ""
+        raise AssertionError(f"Função '{nome}' não encontrada em main.py")
+
+    def test_confirmar_edicao_acao_nao_bloqueia_mais_concluida(self):
+        corpo = self._corpo_da_funcao("confirmarEdicaoAcao")
+        self.assertNotIn("já foi concluída", corpo)
+        # Cuidado: `updates.get('status') == 'concluído'` continua existindo
+        # mais abaixo, de propósito (carimba data_conclusao) — não é a
+        # validação removida, então não checamos por essa substring.
+
+    def test_preparar_edicao_acao_nao_bloqueia_mais_concluida_ou_excluida(self):
+        corpo = self._corpo_da_funcao("preparar_edicao_acao")
+        self.assertNotIn("concluída ou excluída", corpo)
+        self.assertNotIn("in ('concluído', 'excluído')", corpo)
+
+    def test_confirmar_edicao_acao_ainda_recusa_snapshot_desatualizado(self):
+        """A restrição removida foi só a de status -- a de concorrência
+        otimista (snapshot) continua de pé; não pode ter sumido junto."""
+        corpo = self._corpo_da_funcao("confirmarEdicaoAcao")
+        self.assertIn("modificada após a geração deste card", corpo)
+
+    def test_confirmar_edicao_acao_ainda_recusa_acao_inexistente(self):
+        corpo = self._corpo_da_funcao("confirmarEdicaoAcao")
+        self.assertIn("não existe mais", corpo)
+
+
 class _CtxVazio:
     user_uid = "uid"
     session_id = None
