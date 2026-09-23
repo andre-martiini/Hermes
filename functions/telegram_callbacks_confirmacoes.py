@@ -256,7 +256,6 @@ def handle(db, token, query_id, chat_id, data, message, session, copilot_session
 
     elif data.startswith("wa_cancel:"):
         doc_id = data.split("wa_cancel:")[1].strip()
-        _answer_callback_query(token, query_id, "Agendamento cancelado.")
         # Corrigido ao construir cancelar_envio_whatsapp: isto era uma escrita
         # direta, sem transação nem revalidação de status -- uma corrida real
         # contra claimOutboxMessage (o worker também disputa o mesmo
@@ -266,14 +265,40 @@ def handle(db, token, query_id, chat_id, data, message, session, copilot_session
         # auditoria. Roteado pela mesma função transacional que
         # cancelar_envio_whatsapp usa -- perde a corrida de forma segura em
         # vez de escrever por cima às cegas.
+        #
+        # Achado da revisão adversarial (22/09/2026): a versão anterior
+        # respondia "cancelado" ao dono incondicionalmente, mesmo quando
+        # cancelar_envio recusava (já enviado, já em andamento...) -- o toque
+        # no botão parecia ter funcionado mesmo quando não funcionou. Agora o
+        # resultado real decide o texto.
+        resultado: dict = {}
         try:
             if doc_id:
                 from outbox_aprovacao import cancelar_envio
-                cancelar_envio(db, doc_id, cancelado_via="telegram")
+                resultado = cancelar_envio(db, doc_id, cancelado_via="telegram") or {}
         except Exception as exc:
             print(f"[TelegramCallback] Erro ao cancelar WhatsApp agendado {doc_id}: {exc}")
+            resultado = {"status": "erro_transacao", "erro": str(exc)}
 
-        response_text = "❌ <b>Envio de WhatsApp agendado foi cancelado.</b>"
+        status_resultado = resultado.get("status")
+        if status_resultado in ("ok", "already_canceled"):
+            toast = "Agendamento cancelado."
+            response_text = "❌ <b>Envio de WhatsApp agendado foi cancelado.</b>"
+        elif status_resultado == "nao_cancelavel":
+            status_atual = html.escape(str(resultado.get("status_atual") or "?"))
+            toast = "Não foi possível cancelar."
+            response_text = (
+                f"⚠️ <b>Não foi possível cancelar</b> — o envio já está em "
+                f"'{status_atual}'."
+            )
+        elif status_resultado == "not_found":
+            toast = "Não encontrado."
+            response_text = "⚠️ <b>Envio não encontrado</b> — talvez já tenha sido tratado."
+        else:
+            toast = "Falha ao cancelar."
+            response_text = "⚠️ <b>Falha ao tentar cancelar</b> — tente de novo em instantes."
+
+        _answer_callback_query(token, query_id, toast)
         _persist_callback_turn("Botão: cancelar WhatsApp agendado", response_text)
         _send_telegram_message(token, chat_id, response_text)
 

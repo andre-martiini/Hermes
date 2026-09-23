@@ -593,6 +593,63 @@ class TestCancelamento(unittest.TestCase):
         self.assertEqual(outbox._docs["job-8"]["status"], oa.STATUS_PENDING)
 
 
+class TestMarcarNotificado(unittest.TestCase):
+    """Achado da revisão adversarial de cancelar_envio (22/09/2026):
+    dispatch_scheduled_whatsapp_messages (ai_notification_planner.py) fazia
+    um `.update()` cru de pending->notified, sem revalidar -- um
+    cancelamento concorrente seria sobrescrito de volta para 'notified'.
+    marcar_notificado fecha essa lacuna com o mesmo padrão transacional."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.outbox = self.db.collection(oa.COLLECTION)
+
+    def test_marca_notificado_com_sucesso(self):
+        self.outbox._docs["job-1"] = {"status": oa.STATUS_PENDING}
+        agora = datetime.datetime.now(timezone.utc)
+        ok = oa.marcar_notificado(self.db, "job-1", notified_at=agora)
+        self.assertTrue(ok)
+        doc = self.outbox._docs["job-1"]
+        self.assertEqual(doc["status"], oa.STATUS_NOTIFIED)
+        self.assertEqual(doc["notified_at"], agora)
+        self.assertTrue(doc["telegram_sent"])
+
+    def test_recusa_quando_status_ja_mudou(self):
+        """O cenario real do achado: um cancelamento (ou o worker) mudou o
+        status entre a consulta de dispatch_scheduled_whatsapp_messages e
+        esta chamada -- não deve reescrever por cima."""
+        self.outbox._docs["job-2"] = {"status": oa.STATUS_CANCELED, "motivo_cancelamento": "x"}
+        ok = oa.marcar_notificado(self.db, "job-2")
+        self.assertFalse(ok)
+        doc = self.outbox._docs["job-2"]
+        self.assertEqual(doc["status"], oa.STATUS_CANCELED)
+        self.assertEqual(doc["motivo_cancelamento"], "x")
+
+    def test_recusa_quando_nao_encontrado(self):
+        ok = oa.marcar_notificado(self.db, "job-inexistente")
+        self.assertFalse(ok)
+
+    def test_recusa_sem_suporte_a_transacao(self):
+        real_db = _MockDb()
+        outbox = real_db.collection(oa.COLLECTION)
+        outbox._docs["job-3"] = {"status": oa.STATUS_PENDING}
+        db_sem_tx = _MockDbSemTransacao(real_db)
+
+        ok = oa.marcar_notificado(db_sem_tx, "job-3")
+        self.assertFalse(ok)
+        self.assertEqual(outbox._docs["job-3"]["status"], oa.STATUS_PENDING)
+
+    def test_recusa_com_falha_de_transacao(self):
+        outbox = _MockCollection(None, oa.COLLECTION)
+        outbox._docs["job-4"] = {"status": oa.STATUS_PENDING}
+        db_quebrado = _MockDbTransacaoQuebrada()
+        db_quebrado._cols[oa.COLLECTION] = outbox
+
+        ok = oa.marcar_notificado(db_quebrado, "job-4")
+        self.assertFalse(ok)
+        self.assertEqual(outbox._docs["job-4"]["status"], oa.STATUS_PENDING)
+
+
 class _BrokenMockTransaction(_MockTransaction):
     """Simula falha real de transação (ex.: Firestore indisponível ao iniciar
     a transação). Falha em ``_begin`` — antes de qualquer leitura/escrita —

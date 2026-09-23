@@ -928,6 +928,65 @@ def cancelar_envio(
     }
 
 
+def marcar_notificado(db, outbox_id: str, notified_at=None) -> bool:
+    """Transição transacional de `pending` para `notified` — o fallback que
+    `ai_notification_planner.py::dispatch_scheduled_whatsapp_messages` usa
+    quando o worker local não está confirmadamente online (manda um link
+    wa.me pelo Telegram em vez de enviar de verdade).
+
+    Achado real da revisão adversarial de `cancelar_envio` (22/09/2026):
+    aquela função só é transacional entre ELA e o worker
+    (`claimOutboxMessage`) — mas `dispatch_scheduled_whatsapp_messages`
+    consulta os `pending` uma vez no topo e, para cada um, grava
+    `status=notified` com um `.update()` cru, sem reler nem revalidar. Um
+    cancelamento acontecendo nesse intervalo (consulta -> update) seria
+    sobrescrito de volta para `notified` -- corrompendo o registro de
+    auditoria (o dono veria "cancelado" virar "notificado" sozinho) mesmo
+    sem reenviar nada de fato (o link wa.me exige toque humano no WhatsApp).
+
+    Revalida o status DENTRO da transação, mesmo padrão de `cancelar_envio`/
+    `claimOutboxMessage`. Retorna `True` só quando de fato transicionou (o
+    status ainda era `pending` dentro da transação) -- o chamador só deve
+    contar a notificação como entregue de verdade nesse caso; `False`
+    quando o documento já tinha mudado por um caminho concorrente
+    (cancelamento, ou o worker já reivindicou), e o chamador não deve
+    seguir como se tivesse notificado.
+    """
+    outbox_id = str(outbox_id or "").strip()
+    if not outbox_id:
+        return False
+    doc_ref = db.collection(COLLECTION).document(outbox_id)
+
+    if not hasattr(db, "transaction"):
+        print(
+            f"[OutboxAprovacao] Backend sem suporte a transação; não é seguro "
+            f"marcar {outbox_id} como notificado sem revalidar status."
+        )
+        return False
+
+    try:
+        transaction = db.transaction()
+
+        @firestore.transactional
+        def _exec_notificar(tx):
+            snap = doc_ref.get(transaction=tx)
+            if not snap.exists:
+                return False
+            if (snap.to_dict() or {}).get("status") != STATUS_PENDING:
+                return False
+            tx.update(doc_ref, {
+                "status": STATUS_NOTIFIED,
+                "notified_at": notified_at if notified_at is not None else firestore.SERVER_TIMESTAMP,
+                "telegram_sent": True,
+            })
+            return True
+
+        return bool(_exec_notificar(transaction))
+    except Exception as exc:
+        print(f"[OutboxAprovacao] Falha ao marcar {outbox_id} como notificado: {exc}")
+        return False
+
+
 def aplicar_edicao_rascunho(
     db,
     outbox_id: str,

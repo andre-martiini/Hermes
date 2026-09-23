@@ -14,14 +14,21 @@ bae25bc6-0729-4213-a24d-c37feea5d687 (entregue as 16:28, nunca marcado "sent"):
    e invisivel para o Hermes -- o job ficava preso em "notified" para sempre.
    `wa_confirm_sent:` fecha esse ciclo.
 
-Terceiro bug real, corrigido ao construir `cancelar_envio_whatsapp`
-(22/09/2026): `wa_cancel:` fazia um `.update()` direto, sem transacao nem
-revalidacao de status -- uma corrida contra `claimOutboxMessage` (o worker,
-que tambem disputa o mesmo documento numa transacao) podia sobrescrever
-silenciosamente um envio ja 'sending'/'sent' de volta para 'canceled'. Agora
-delega para `outbox_aprovacao.cancelar_envio` (mesma funcao transacional que
-a tool MCP usa) -- a garantia de exclusao mutua em si esta coberta em
-`TestCancelamento`, em test_outbox_aprovacao.py.
+Terceiro e quarto bugs reais, corrigidos ao construir `cancelar_envio_whatsapp`
+(22/09/2026):
+
+3. `wa_cancel:` fazia um `.update()` direto, sem transacao nem revalidacao de
+   status -- uma corrida contra `claimOutboxMessage` (o worker, que tambem
+   disputa o mesmo documento numa transacao) podia sobrescrever
+   silenciosamente um envio ja 'sending'/'sent' de volta para 'canceled'. Agora
+   delega para `outbox_aprovacao.cancelar_envio` (mesma funcao transacional que
+   a tool MCP usa) -- a garantia de exclusao mutua em si esta coberta em
+   `TestCancelamento`, em test_outbox_aprovacao.py.
+4. Achado da revisao adversarial da propria correcao (3): `wa_cancel:`
+   respondia "cancelado" ao dono incondicionalmente, mesmo quando
+   `cancelar_envio` recusava (ja enviado, ja em outro estado...) -- o toque no
+   botao parecia ter funcionado mesmo quando nao funcionou. Agora o resultado
+   real de `cancelar_envio` decide o toast e o texto mandado ao dono.
 """
 import unittest
 from unittest.mock import MagicMock, patch
@@ -45,6 +52,24 @@ class _CallbackTestBase(unittest.TestCase):
             )
         return tratado, db, doc_ref
 
+    def _chamar_com_mocks(self, data, doc_id="job123"):
+        """Como `_chamar`, mas devolve os mocks de `_answer_callback_query` e
+        `_send_telegram_message` para inspecionar o texto real mandado ao
+        dono -- necessário para testar que o resultado de `cancelar_envio`
+        (ok/erro) decide a mensagem, não um texto fixo."""
+        db = MagicMock()
+        doc_ref = MagicMock()
+        db.collection.return_value.document.return_value = doc_ref
+        with patch.object(tcc, "_answer_callback_query") as mock_answer, \
+             patch.object(tcc, "_send_telegram_message") as mock_send:
+            tratado = tcc.handle(
+                db, "fake-token", "q1", "chat1", f"{data}{doc_id}",
+                message={"message_id": 1}, session={}, copilot_session_id="cs1",
+                _persist_callback_turn=MagicMock(),
+                _pending_web_card=MagicMock(), _clear_pending_web_card=MagicMock(),
+            )
+        return tratado, mock_answer, mock_send
+
 
 class TestWaCancel(_CallbackTestBase):
     def test_delega_para_cancelar_envio_transacional_sem_escrita_direta(self):
@@ -60,17 +85,64 @@ class TestWaCancel(_CallbackTestBase):
         # em TestCancelamento).
         doc_ref.update.assert_not_called()
 
-    def test_falha_no_cancelamento_nao_estoura_o_callback(self):
-        """cancelar_envio pode devolver erro (ja enviado, ja cancelado, sem
-        suporte a transacao...) -- o callback do Telegram so precisa nao
-        quebrar; a mensagem ao dono continua "cancelado" hoje (nao muda o
-        texto de sucesso por resultado, so a chamada por baixo)."""
+    def test_sucesso_informa_cancelado(self):
+        with patch.object(outbox_aprovacao, "cancelar_envio", return_value={"status": "ok"}):
+            tratado, mock_answer, mock_send = self._chamar_com_mocks("wa_cancel:")
+        self.assertTrue(tratado)
+        mock_answer.assert_called_once_with("fake-token", "q1", "Agendamento cancelado.")
+        texto = mock_send.call_args[0][2]
+        self.assertIn("foi cancelado", texto)
+
+    def test_ja_cancelado_idempotente_tambem_informa_cancelado(self):
+        with patch.object(
+            outbox_aprovacao, "cancelar_envio", return_value={"status": "already_canceled"}
+        ):
+            tratado, _mock_answer, mock_send = self._chamar_com_mocks("wa_cancel:")
+        self.assertTrue(tratado)
+        self.assertIn("foi cancelado", mock_send.call_args[0][2])
+
+    def test_falha_no_cancelamento_informa_status_real_ao_dono(self):
+        """Achado da revisão adversarial (22/09/2026): antes desta correção,
+        o dono via "cancelado" mesmo quando cancelar_envio recusava (já
+        enviado, por exemplo) — o toque no botão parecia ter funcionado sem
+        ter funcionado. Agora o texto (e o toast) refletem o resultado real,
+        em vez de um texto de sucesso fixo."""
         with patch.object(
             outbox_aprovacao, "cancelar_envio",
-            return_value={"status": "nao_cancelavel", "erro": "já está 'sent'"},
+            return_value={
+                "status": "nao_cancelavel",
+                "erro": "não é possível cancelar: já está 'sent'",
+                "status_atual": "sent",
+            },
         ):
-            tratado, _db, _doc_ref = self._chamar("wa_cancel:")
+            tratado, mock_answer, mock_send = self._chamar_com_mocks("wa_cancel:")
         self.assertTrue(tratado)
+        toast = mock_answer.call_args[0][2]
+        self.assertIn("Não foi possível cancelar", toast)
+        texto = mock_send.call_args[0][2]
+        self.assertIn("sent", texto)
+        self.assertNotIn("foi cancelado", texto)
+
+    def test_nao_encontrado_informa_ao_dono(self):
+        with patch.object(outbox_aprovacao, "cancelar_envio", return_value={"status": "not_found"}):
+            tratado, _mock_answer, mock_send = self._chamar_com_mocks("wa_cancel:")
+        self.assertTrue(tratado)
+        self.assertIn("não encontrado", mock_send.call_args[0][2])
+
+    def test_erro_de_transacao_nao_estoura_e_informa_falha(self):
+        with patch.object(
+            outbox_aprovacao, "cancelar_envio",
+            return_value={"status": "erro_transacao", "erro": "boom"},
+        ):
+            tratado, _mock_answer, mock_send = self._chamar_com_mocks("wa_cancel:")
+        self.assertTrue(tratado)
+        self.assertIn("Falha ao tentar cancelar", mock_send.call_args[0][2])
+
+    def test_excecao_do_cancelar_envio_nao_estoura_e_informa_falha(self):
+        with patch.object(outbox_aprovacao, "cancelar_envio", side_effect=RuntimeError("boom")):
+            tratado, _mock_answer, mock_send = self._chamar_com_mocks("wa_cancel:")
+        self.assertTrue(tratado)
+        self.assertIn("Falha ao tentar cancelar", mock_send.call_args[0][2])
 
 
 class TestWaConfirmSent(_CallbackTestBase):
