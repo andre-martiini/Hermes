@@ -209,6 +209,18 @@ class TestSecretarioTelegramExecucao(unittest.TestCase):
         self.assertEqual(result["chats_allowlist"], ["teste@c.us"])
         self.assertIsNone(result["desativa_em"])
 
+    def test_ativar_repassa_escopo_contatos_e_janela_de_ativacao(self):
+        """A closure do Telegram só repassa argumentos para tools.hermes_tools.execute
+        -- este teste garante que os três parâmetros novos (escopo_contatos, ativa_em,
+        desativa_em) não ficam presos no meio do caminho."""
+        resultado = json.loads(self.tools["ativar_modo_secretario"](
+            None, None, None, False, "individuais", "2030-01-01T08:00:00-03:00", "2030-01-01T12:00:00-03:00",
+        ))
+        self.assertTrue(resultado["success"])
+        self.assertEqual(resultado["escopo_universal"], "individuais")
+        self.assertEqual(resultado["ativa_em"], "2030-01-01T08:00:00-03:00")
+        self.assertEqual(resultado["desativa_em"], "2030-01-01T12:00:00-03:00")
+
     def test_falha_do_handler_nao_vira_sucesso(self):
         with mock.patch("tools.hermes_tools.execute", side_effect=RuntimeError("falha de persistência")):
             with self.assertRaisesRegex(RuntimeError, "falha de persistência"):

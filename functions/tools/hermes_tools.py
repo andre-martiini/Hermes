@@ -2346,6 +2346,9 @@ def _ativar_modo_secretario(ctx: ToolContext, args: dict):
         ctx=ctx,
         orientacoes=args.get("orientacoes"),
         salvar_como_padrao=bool(args.get("salvar_como_padrao")),
+        escopo_contatos=args.get("escopo_contatos"),
+        ativa_em=args.get("ativa_em"),
+        desativa_em=args.get("desativa_em"),
     )
 
 

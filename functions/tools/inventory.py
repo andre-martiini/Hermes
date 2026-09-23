@@ -1023,7 +1023,11 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "`duracao_horas` é informado, `desativa_em` é recalculado a partir de 'agora' a cada chamada -- "
         "repetir a MESMA chamada mais tarde ESTENDE o prazo de desativação automática, um efeito real no "
         "ambiente, não só cosmético (quando `duracao_horas` é omitido o efeito converge, mas a classificação "
-        "cobre a tool como um todo, lado conservador). `orientacoes` (texto livre do dono, até 2000 caracteres) entra no prompt do secretário abaixo dos guardrails fixos e NUNCA os revoga; com `salvar_como_padrao` grava o padrão em `whatsapp_secretario.orientacoes`, senão só vale nesta ativação",
+        "cobre a tool como um todo, lado conservador). `orientacoes` (texto livre do dono, até 2000 caracteres) entra no prompt do secretário abaixo dos guardrails fixos e NUNCA os revoga; com `salvar_como_padrao` grava o padrão em `whatsapp_secretario.orientacoes`, senão só vale nesta ativação. "
+        "`escopo_contatos` ('individuais'/'grupos'/'todos'/'nenhum') liga um escopo universal aditivo à "
+        "`chats_allowlist` explícita (grupo continua exigindo menção ao André mesmo sob escopo); `ativa_em`/"
+        "`desativa_em` (ISO 8601 absolutos) definem uma janela com início e fim arbitrários, checada "
+        "passivamente na leitura (`obter_config_secretario`) igual ao `desativa_em` calculado por `duracao_horas` — sem cron novo.",
     ),
     "desativar_modo_secretario": ToolInventoryEntry(
         "whatsapp_secretario", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,

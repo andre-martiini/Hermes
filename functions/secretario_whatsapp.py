@@ -125,6 +125,53 @@ def chat_na_allowlist(chat_id: str, allowlist: set[str] | list[str] | None) -> b
     return False
 
 
+_ESCOPOS_UNIVERSAIS_VALIDOS = ("individuais", "grupos", "todos")
+
+
+def normalizar_escopo_contatos(valor) -> str | None:
+    """Normaliza o parâmetro `escopo_contatos` de `ativar_modo_secretario`.
+
+    Retorna None se `valor` for None/vazio (preserva o escopo já configurado),
+    "nenhum" se o pedido for para desligar o escopo universal (voltar a valer
+    só a chats_allowlist explícita), ou um de `_ESCOPOS_UNIVERSAIS_VALIDOS`.
+    Levanta ValueError para texto não reconhecido, para não silenciar um
+    escopo digitado errado como se fosse 'preservar o atual'.
+    """
+    if valor is None:
+        return None
+    raw = str(valor).strip().lower()
+    if not raw:
+        return None
+    try:
+        import unicodedata
+
+        raw = "".join(c for c in unicodedata.normalize("NFD", raw) if unicodedata.category(c) != "Mn")
+    except Exception:
+        pass
+    raw = " ".join(raw.replace("-", " ").replace("_", " ").split())
+    if raw in ("individuais", "individual", "individuo", "individuos", "pessoas", "privado", "privados", "so individuais", "apenas individuais"):
+        return "individuais"
+    if raw in ("grupos", "grupo", "so grupos", "apenas grupos"):
+        return "grupos"
+    if raw in ("todos", "todos os contatos", "todo mundo", "ambos", "tudo", "all", "everyone"):
+        return "todos"
+    if raw in ("nenhum", "nenhuma", "desativar", "desligar", "limpar", "none"):
+        return "nenhum"
+    raise ValueError(
+        f"escopo_contatos inválido: '{valor}'. Use 'individuais', 'grupos', 'todos' ou 'nenhum'."
+    )
+
+
+def _parse_horario_absoluto_sp(valor: str) -> datetime.datetime:
+    """Parseia um timestamp ISO 8601 (ex: '2026-09-23T08:00:00-03:00'). Sem
+    fuso explícito, assume horário de São Paulo (UTC-3), igual ao resto do
+    módulo (_agora_sp, _esta_expirado)."""
+    dt = datetime.datetime.fromisoformat(str(valor).strip())
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=-3)))
+    return dt
+
+
 def validar_regra_agenda(eventos_conflito: list[dict] | None) -> dict:
     """Aplica a regra pura de assimetria de agenda:
     - Ocupado: factual, pode informar.
@@ -177,13 +224,24 @@ def obter_config_secretario(db) -> dict:
         data = (snap.to_dict() or {}) if snap.exists else {}
         cfg = data.get("whatsapp_secretario") or {}
         desativa_em = cfg.get("desativa_em")
+        ativa_em = cfg.get("ativa_em")
         enabled = bool(cfg.get("enabled", False))
         if enabled and desativa_em:
             if _esta_expirado(desativa_em):
                 enabled = False
+        if enabled and ativa_em:
+            # Janela ainda não começou: gate passivo simétrico ao de desativa_em,
+            # sem exigir cron job (mesmo padrão de _esta_expirado).
+            if not _esta_expirado(ativa_em):
+                enabled = False
+        escopo_universal = cfg.get("escopo_universal")
+        if escopo_universal not in _ESCOPOS_UNIVERSAIS_VALIDOS:
+            escopo_universal = None
         return {
             "enabled": enabled,
             "desativa_em": desativa_em,
+            "ativa_em": ativa_em,
+            "escopo_universal": escopo_universal,
             "chats_allowlist": [str(x).strip() for x in (cfg.get("chats_allowlist") or []) if str(x).strip()],
             "max_trocas": int(cfg.get("max_trocas", DEFAULT_MAX_TROCAS)),
             "max_trocas_prioritario": int(cfg.get("max_trocas_prioritario", DEFAULT_MAX_TROCAS_PRIORITARIO)),
@@ -197,6 +255,8 @@ def obter_config_secretario(db) -> dict:
         return {
             "enabled": False,
             "desativa_em": None,
+            "ativa_em": None,
+            "escopo_universal": None,
             "chats_allowlist": [],
             "max_trocas": DEFAULT_MAX_TROCAS,
             "max_trocas_prioritario": DEFAULT_MAX_TROCAS_PRIORITARIO,
@@ -322,13 +382,30 @@ def ativar_modo_secretario(
     ctx=None,
     orientacoes: str | None = None,
     salvar_como_padrao: bool = False,
+    escopo_contatos: str | None = None,
+    ativa_em: str | None = None,
+    desativa_em: str | None = None,
 ) -> dict:
     """Ativa o Modo Secretário no WhatsApp em system/settings.
-    
+
     - contatos: Opcional. Lista de nomes, telefones ou JIDs. Se fornecido, substitui
       a chats_allowlist resolvendo cada entrada para chat_id. Se omitido, preserva a existente.
-    - duracao_horas: Opcional. Se informado, calcula e grava desativa_em (ISO).
-      A configuração expirará automaticamente na leitura. Se omitido, desativa_em é setado para None.
+      Combina-se com escopo_contatos (não é substituído por ele): a allowlist explícita
+      continua valendo mesmo com um escopo universal configurado.
+    - escopo_contatos: Opcional. 'individuais' libera TODOS os contatos individuais (sem
+      precisar listar), 'grupos' libera TODOS os grupos em que o André for mencionado, 'todos'
+      libera ambos. 'nenhum' desliga o escopo universal (volta a valer só a chats_allowlist).
+      Omitido preserva o escopo já configurado. Grupos sempre exigem menção ao André, mesmo
+      sob escopo 'grupos'/'todos' -- isso não muda.
+    - duracao_horas: Opcional. Duração da janela a partir de ativa_em (ou de agora, se
+      ativa_em for omitido). Ignorado se desativa_em for informado.
+    - ativa_em: Opcional. Timestamp ISO 8601 (ex: '2026-09-23T08:00:00-03:00') de quando a
+      ativação deve *começar* a valer. Omitido, começa imediatamente. Útil para agendar um
+      início futuro ('ative das 8h às 12h' com o pedido feito antes das 8h) -- expira/inicia
+      passivamente na leitura (obter_config_secretario), sem cron job.
+    - desativa_em: Opcional. Timestamp ISO 8601 de quando a ativação deve *terminar*. Tem
+      prioridade sobre duracao_horas quando ambos são informados. Omitido (e sem
+      duracao_horas), fica ativo por tempo indeterminado até desligamento manual.
     - orientacoes: Opcional. Texto livre do que o secretário pode responder e onde parar (até 2000
       caracteres). Vale só para esta ativação; com salvar_como_padrao=True vira o padrão salvo. Omitido,
       vale o padrão salvo (se houver). Texto vazio com salvar_como_padrao=True apaga o padrão. Nunca
@@ -352,13 +429,49 @@ def ativar_modo_secretario(
         normalizar_orientacoes(sec_cfg.get("orientacoes_sessao")) or normalizar_orientacoes(sec_cfg.get("orientacoes"))
     )
 
-    desativa_em = None
-    if duracao_horas is not None and float(duracao_horas) > 0:
-        limite = _agora_sp() + datetime.timedelta(hours=float(duracao_horas))
-        desativa_em = limite.isoformat()
-        sec_cfg["desativa_em"] = desativa_em
+    if escopo_contatos is not None:
+        try:
+            escopo_normalizado = normalizar_escopo_contatos(escopo_contatos)
+        except ValueError as exc:
+            return {"success": False, "erro": str(exc)}
+        # normalizar_escopo_contatos devolve None para string vazia/só espaço
+        # (mesmo contrato de "preservar o já configurado" que vale para None
+        # de entrada) -- só grava quando há de fato um valor novo (inclusive
+        # 'nenhum', que grava None de propósito para desligar o escopo).
+        if escopo_normalizado is not None:
+            sec_cfg["escopo_universal"] = None if escopo_normalizado == "nenhum" else escopo_normalizado
+
+    ativa_em_dt = None
+    if ativa_em:
+        try:
+            ativa_em_dt = _parse_horario_absoluto_sp(ativa_em)
+        except Exception as exc:
+            return {"success": False, "erro": f"ativa_em inválido (use ISO 8601, ex: '2026-09-23T08:00:00-03:00'): {exc}"}
+        sec_cfg["ativa_em"] = ativa_em_dt.isoformat()
     else:
-        sec_cfg["desativa_em"] = None
+        sec_cfg["ativa_em"] = None
+
+    inicio_referencia = ativa_em_dt or _agora_sp()
+
+    desativa_em_final = None
+    if desativa_em:
+        try:
+            desativa_em_dt = _parse_horario_absoluto_sp(desativa_em)
+        except Exception as exc:
+            return {"success": False, "erro": f"desativa_em inválido (use ISO 8601, ex: '2026-09-23T12:00:00-03:00'): {exc}"}
+        desativa_em_final = desativa_em_dt.isoformat()
+    elif duracao_horas is not None and float(duracao_horas) > 0:
+        limite = inicio_referencia + datetime.timedelta(hours=float(duracao_horas))
+        desativa_em_final = limite.isoformat()
+
+    if desativa_em_final and datetime.datetime.fromisoformat(desativa_em_final) <= inicio_referencia:
+        return {
+            "success": False,
+            "erro": "O horário de término (desativa_em ou duracao_horas) precisa ser depois do horário de início (ativa_em, ou agora se ativa_em for omitido).",
+        }
+
+    sec_cfg["desativa_em"] = desativa_em_final
+    desativa_em = desativa_em_final
 
     contatos_resolvidos = []
     if contatos is not None:
@@ -383,11 +496,22 @@ def ativar_modo_secretario(
     settings_ref.set({"whatsapp_secretario": sec_cfg}, merge=True)
 
     msg_partes = ["Modo Secretário ativado com sucesso."]
-    if desativa_em:
-        msg_partes.append(f"Ativo por {duracao_horas}h (até {desativa_em}).")
+    if ativa_em_dt:
+        inicio_txt = f"Início programado para {sec_cfg['ativa_em']}"
+        msg_partes.append(f"{inicio_txt}, até {desativa_em}." if desativa_em else f"{inicio_txt} (sem término automático).")
+    elif desativa_em:
+        msg_partes.append(f"Ativo agora até {desativa_em}.")
     else:
         msg_partes.append("Ativo por tempo indeterminado até desligamento manual.")
-    
+
+    escopo_atual = sec_cfg.get("escopo_universal")
+    if escopo_atual == "todos":
+        msg_partes.append("Escopo: TODOS os contatos e grupos (grupo só responde com menção ao André).")
+    elif escopo_atual == "individuais":
+        msg_partes.append("Escopo: TODOS os contatos individuais (grupos fora da allowlist não são atendidos).")
+    elif escopo_atual == "grupos":
+        msg_partes.append("Escopo: TODOS os grupos com menção ao André (contatos individuais fora da allowlist não são atendidos).")
+
     if contatos is not None:
         msg_partes.append(f"Allowlist configurada para {len(sec_cfg['chats_allowlist'])} contato(s).")
     else:
@@ -405,6 +529,8 @@ def ativar_modo_secretario(
         "success": True,
         "enabled": True,
         "desativa_em": desativa_em,
+        "ativa_em": sec_cfg.get("ativa_em"),
+        "escopo_universal": sec_cfg.get("escopo_universal"),
         "chats_allowlist": sec_cfg.get("chats_allowlist", []),
         "contatos_resolvidos": contatos_resolvidos,
         "orientacoes_em_vigor": orientacoes_em_vigor,
@@ -421,6 +547,7 @@ def desativar_modo_secretario(db) -> dict:
 
     sec_cfg["enabled"] = False
     sec_cfg["desativa_em"] = None
+    sec_cfg["ativa_em"] = None
     sec_cfg["orientacoes_sessao"] = None
 
     settings_ref.set({"whatsapp_secretario": sec_cfg}, merge=True)
@@ -429,6 +556,7 @@ def desativar_modo_secretario(db) -> dict:
         "success": True,
         "enabled": False,
         "desativa_em": None,
+        "ativa_em": None,
         "chats_allowlist": sec_cfg.get("chats_allowlist", []),
         "mensagem": "Modo Secretário desativado com sucesso.",
     }
@@ -439,6 +567,8 @@ def consultar_status_modo_secretario(db) -> dict:
     cfg = obter_config_secretario(db)
     enabled = cfg.get("enabled", False)
     desativa_em = cfg.get("desativa_em")
+    ativa_em = cfg.get("ativa_em")
+    escopo_universal = cfg.get("escopo_universal")
     allowlist = cfg.get("chats_allowlist", [])
     orientacoes = cfg.get("orientacoes")
 
@@ -462,13 +592,23 @@ def consultar_status_modo_secretario(db) -> dict:
             msg_partes.append("Sem expiração automática programada (ativo até desligamento manual).")
     else:
         msg_partes.append("O Modo Secretário está DESATIVADO no WhatsApp.")
-        if desativa_em and _esta_expirado(desativa_em):
+        if ativa_em and not _esta_expirado(ativa_em):
+            fim_txt = f", até {desativa_em}" if desativa_em else " (sem término automático)"
+            msg_partes.append(f"(Programado para ativar automaticamente em {ativa_em}{fim_txt}).")
+        elif desativa_em and _esta_expirado(desativa_em):
             msg_partes.append(f"(Expirou passivamente em {desativa_em}).")
+
+    if escopo_universal == "todos":
+        msg_partes.append("Escopo: TODOS os contatos e grupos (grupo só responde com menção ao André).")
+    elif escopo_universal == "individuais":
+        msg_partes.append("Escopo: TODOS os contatos individuais (grupos fora da allowlist não são atendidos).")
+    elif escopo_universal == "grupos":
+        msg_partes.append("Escopo: TODOS os grupos com menção ao André (contatos individuais fora da allowlist não são atendidos).")
 
     if allowlist:
         nomes = [c["nome"] for c in contatos_detalhes]
         msg_partes.append(f"Contatos/grupos autorizados ({len(allowlist)}): {', '.join(nomes)}.")
-    else:
+    elif not escopo_universal:
         msg_partes.append("Nenhum contato na allowlist configurada (vazio).")
     if enabled and orientacoes:
         msg_partes.append(f"Orientações em vigor: {orientacoes}")
@@ -476,6 +616,8 @@ def consultar_status_modo_secretario(db) -> dict:
     return {
         "enabled": enabled,
         "desativa_em": desativa_em,
+        "ativa_em": ativa_em,
+        "escopo_universal": escopo_universal,
         "chats_allowlist": allowlist,
         "contatos_detalhes": contatos_detalhes,
         "orientacoes_em_vigor": orientacoes if enabled else None,
@@ -1414,13 +1556,24 @@ def processar_mensagem_secretario(
     if not cfg.get("enabled"):
         return None
 
-    # Fast path 3: Verifica briefing ativo ou allowlist (tanto conversas diretas quanto grupos precisam de autorização)
+    # Fast path 3: Verifica briefing ativo, allowlist explícita, ou escopo universal
+    # (todos os contatos individuais e/ou todos os grupos, configurado via
+    # escopo_contatos em ativar_modo_secretario -- ver normalizar_escopo_contatos).
+    # É aditivo: a allowlist explícita continua valendo mesmo com um escopo configurado.
+    is_group = bool(mensagem.get("is_group"))
+    escopo_universal = cfg.get("escopo_universal")
+    permitido_por_escopo = escopo_universal == "todos" or (
+        escopo_universal == "individuais" and not is_group
+    ) or (
+        escopo_universal == "grupos" and is_group
+    )
     briefing = obter_briefing_ativo(db, chat_id)
-    if not briefing and not chat_na_allowlist(chat_id, cfg.get("chats_allowlist")):
+    if not briefing and not permitido_por_escopo and not chat_na_allowlist(chat_id, cfg.get("chats_allowlist")):
         return None
 
-    # Fast path 4: Em grupos autorizados, só responde na mensagem específica se o André for mencionado
-    if mensagem.get("is_group"):
+    # Fast path 4: Em grupos autorizados (por allowlist ou por escopo), só responde
+    # na mensagem específica se o André for mencionado -- isso não muda com o escopo.
+    if is_group:
         mentions = {str(x).strip() for x in (mensagem.get("mentioned_ids") or []) if str(x).strip()}
         andre_ids = _andre_ids(db)
         mentions_andre = bool(mensagem.get("mentions_andre") or (mentions & andre_ids))

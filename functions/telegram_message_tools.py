@@ -799,15 +799,29 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
         duracao_horas: float = None,
         orientacoes: str = None,
         salvar_como_padrao: bool = False,
+        escopo_contatos: str = None,
+        ativa_em: str = None,
+        desativa_em: str = None,
     ) -> str:
         """Ativa o atendimento autônomo no WhatsApp para contatos autorizados.
 
         Args:
-            contatos: Nomes, telefones ou JIDs. Omitir mantém a lista atual.
-            duracao_horas: Duração em horas; 0.5 equivale a 30 minutos.
-                Omitir mantém ativo até desligar manualmente.
-            orientacoes: Opcional. O que o secretário pode responder e onde parar
-                (até 2000 caracteres). Nunca afrouxa as regras fixas.
+            contatos: Nomes, telefones ou JIDs. Omitir mantém a lista atual. Soma-se a
+                escopo_contatos, não o substitui.
+            escopo_contatos: Opcional. 'individuais' libera TODOS os contatos individuais
+                sem precisar listar, 'grupos' libera TODOS os grupos em que o André for
+                mencionado, 'todos' libera ambos, 'nenhum' desliga o escopo universal
+                (volta a valer só a lista explícita de contatos). Omitir preserva o escopo
+                já configurado.
+            duracao_horas: Duração da janela a partir de ativa_em (ou de agora, se
+                ativa_em for omitido); 0.5 equivale a 30 minutos. Ignorado se desativa_em
+                for informado. Omitir os três mantém ativo até desligar manualmente.
+            ativa_em: Opcional. Timestamp ISO 8601 (ex: '2026-09-23T08:00:00-03:00') de
+                quando a ativação deve começar a valer. Omitir começa imediatamente. Use
+                para agendar um início futuro (ex: pedido feito antes das 8h para uma
+                janela que só deve começar às 8h).
+            desativa_em: Opcional. Timestamp ISO 8601 de quando a ativação deve terminar.
+                Tem prioridade sobre duracao_horas quando ambos são informados.
             salvar_como_padrao: True guarda as orientações como padrão das próximas ativações.
         """
         from tools.hermes_tools import execute
@@ -820,6 +834,9 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
                 "duracao_horas": duracao_horas,
                 "orientacoes": orientacoes,
                 "salvar_como_padrao": salvar_como_padrao,
+                "escopo_contatos": escopo_contatos,
+                "ativa_em": ativa_em,
+                "desativa_em": desativa_em,
             },
             ToolContext(_db=db, canal="telegram"),
         )
