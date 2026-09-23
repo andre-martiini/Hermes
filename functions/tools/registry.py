@@ -1726,16 +1726,33 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     # todos os 13 sempre presentes, ao contrario de `truncado`
     # (`consultar_lista_compras`) ou `status` no ramo de erro (`obter_acao`)):
     #   - `id` (`doc.id`, garantido string pelo SDK do Firestore).
-    #   - `destinatario_nome`/`to_number`/`motivo`/`tipo` sao SEMPRE string
-    #     nao-vazia NO UNICO CAMINHO DE CRIACAO que gera os dois status do
-    #     filtro (`criar_rascunho`): `motivo`/`contact_number` sao validados
-    #     nao-vazios ANTES de montar o payload (`if not motivo: return
-    #     {"erro": ...}`, idem `contact_number`), e `tipo_limpo = str(tipo
-    #     or "outro").strip() or "outro"` nunca fica vazio. `destinatario_
-    #     nome` e `res_dest.get("nome") or contact_number` -- cai para
-    #     `contact_number` (sempre string nao-vazia) quando `nome` e
-    #     falsy; `to_number` e `res_dest.get("chat_id") or contact_number`,
-    #     mesma garantia. O parametro opcional `destinatario_resolvido`
+    #   - `destinatario_nome`/`to_number`/`motivo`/`origem` sao
+    #     `["string", "null"]` -- CORRECAO da revisao Codex nesta PR (achado
+    #     real, nao um nit): a versao original desta nota provava que
+    #     `criar_rascunho` (o UNICO caminho de criacao que gera os dois
+    #     status do filtro) sempre PREENCHE estes quatro campos com string
+    #     nao-vazia (`motivo`/`contact_number` validados nao-vazios antes do
+    #     payload; `destinatario_nome`/`to_number` caem para `contact_number`
+    #     quando `nome`/`chat_id` sao falsy; `origem or "claude"`) -- mas
+    #     isso so cobre documentos criados PELA VERSAO ATUAL de
+    #     `criar_rascunho`. `listar_rascunhos` LE estes quatro campos com
+    #     `d.get(campo)` CRU, sem segundo argumento (ao contrario de `tipo`,
+    #     que tem `d.get("tipo", "outro")`) -- um documento que nao passe
+    #     por essa escrita exata (formato legado de antes deste payload,
+    #     edicao manual no Firestore, ou um escritor futuro que nao inclua
+    #     um desses campos) leria como `None`, nao como string vazia.
+    #     Nenhum caso assim foi OBSERVADO nesta investigacao (o unico
+    #     caminho de criacao ativo sempre preenche os quatro), mas a
+    #     garantia de tipo depende do ESCRITOR e nao do LEITOR (mesma
+    #     categoria de risco ja aceita para `acao_id`/`item_atencao_id`
+    #     abaixo, exceto que ali o `None` e por DESENHO, nao por ausencia de
+    #     coercao) -- por isso nullable, corrigindo o schema original que
+    #     os declarava como string obrigatoria sem `null`. `tipo` continua
+    #     `string` sem `null`: tem default (`"outro"`) no PROPRIO ponto de
+    #     leitura, garantia mais forte que a dos quatro campos acima.
+    #     `origem` continua sem enum (nao um terceiro valor fixo como
+    #     `status`), so ganhou `null` pelo mesmo motivo dos outros tres.
+    #     O parametro opcional `destinatario_resolvido`
     #     (usado so por `secretario_whatsapp.py::enviar_resposta_via_
     #     outbox`, um unico call site) repassa `chat_id`/`nome` do
     #     CHAMADOR sem coercao de tipo -- mas isso NAO e um risco residual
@@ -1756,12 +1773,6 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     #     chamador nao informa (`str(acao_id).strip() if acao_id else
     #     None`) -- nao e "campo ausente", e "campo presente com valor
     #     null" por desenho (tarefa/item de atencao vinculado e opcional).
-    #   - `origem` e string solta (nao enum): sempre string nao-vazia
-    #     (`origem or "claude"`, tool `criar_rascunho_whatsapp` passa
-    #     `getattr(ctx, "session_id", None) or "claude"`), mas SEM
-    #     coercao de tipo explicita dentro de `criar_rascunho` -- mesma
-    #     categoria de risco residual do paragrafo anterior, nao um
-    #     terceiro valor fixo como `status`.
     #   - `foi_editado` e SEMPRE `bool`, garantia mais forte que a do
     #     documento gravado: `listar_rascunhos` aplica `bool(d.get(
     #     "foi_editado", False))` na PROPRIA leitura (coercao local,
@@ -1805,13 +1816,13 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
                             "type": "string",
                             "enum": ["aguardando_aprovacao", "aguardando_janela"],
                         },
-                        "destinatario_nome": {"type": "string"},
-                        "to_number": {"type": "string"},
-                        "motivo": {"type": "string"},
+                        "destinatario_nome": {"type": ["string", "null"]},
+                        "to_number": {"type": ["string", "null"]},
+                        "motivo": {"type": ["string", "null"]},
                         "trecho": {"type": "string"},
                         "acao_id": {"type": ["string", "null"]},
                         "item_atencao_id": {"type": ["string", "null"]},
-                        "origem": {"type": "string"},
+                        "origem": {"type": ["string", "null"]},
                         "tipo": {"type": "string"},
                         "foi_editado": {"type": "boolean"},
                         "envio_liberado_em": {"type": ["string", "null"]},

@@ -516,6 +516,18 @@ class TestOutputSchema(unittest.TestCase):
         for campo in ("acao_id", "item_atencao_id"):
             with self.subTest(campo=campo):
                 self.assertEqual(item["properties"][campo]["type"], ["string", "null"])
+        # Achado de revisão Codex nesta PR: destinatario_nome/to_number/
+        # motivo/origem são lidos com d.get(campo) CRU em
+        # outbox_aprovacao.listar_rascunhos (sem segundo argumento, ao
+        # contrário de tipo -- d.get("tipo", "outro")) -- um documento sem
+        # esses campos (formato legado, edição manual) leria None. Por
+        # isso nullable, ao contrário de tipo/trecho/foi_editado, que têm
+        # garantia mais forte (default ou coerção no próprio ponto de
+        # leitura).
+        for campo in ("destinatario_nome", "to_number", "motivo", "origem"):
+            with self.subTest(campo=campo):
+                self.assertEqual(item["properties"][campo]["type"], ["string", "null"])
+        self.assertEqual(item["properties"]["tipo"], {"type": "string"})
 
     def test_paridade_oito_tools_tem_output_schema_hoje(self):
         # Não por amostragem: para TODA tool do catálogo real (106 hoje),

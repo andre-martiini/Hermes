@@ -1088,6 +1088,31 @@ class TestAguardandoJanelaEListarRascunhos(unittest.TestCase):
         self.assertEqual(item["acao_id"], None)
         self.assertEqual(item["item_atencao_id"], None)
 
+    def test_listar_rascunhos_documento_legado_sem_campos_le_como_none(self):
+        # Achado real de revisão Codex nesta PR: destinatario_nome/
+        # to_number/motivo/origem são lidos com d.get(campo) CRU em
+        # listar_rascunhos (sem segundo argumento) -- um documento que não
+        # tenha esses campos (formato legado de antes deste payload, ou
+        # uma edição manual no Firestore) lê como None, não como string
+        # vazia. Esta prova, contra o handler real, é o que justifica o
+        # outputSchema declarar esses 4 campos como ["string", "null"]
+        # em vez de "string" obrigatório.
+        agora = datetime.datetime(2026, 9, 23, 14, 0, tzinfo=timezone.utc)
+        self.outbox._docs["r_legado"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "content": "Documento legado sem destinatario_nome/to_number/motivo/origem",
+            "created_at": agora,
+        }
+        res = oa.listar_rascunhos(self.db, limite=20)
+        item = res["rascunhos"][0]
+        self.assertIsNone(item["destinatario_nome"])
+        self.assertIsNone(item["to_number"])
+        self.assertIsNone(item["motivo"])
+        self.assertIsNone(item["origem"])
+        # tipo tem default no ponto de leitura (d.get("tipo", "outro")) --
+        # continua "outro", nunca None, mesmo no documento legado.
+        self.assertEqual(item["tipo"], "outro")
+
     def test_listar_rascunhos_coage_foi_editado_e_trecho_mesmo_com_tipo_bruto_no_firestore(self):
         # Regressão da 1a rodada de revisão adversarial desta sub-entrega:
         # os testes anteriores só cobriam `foi_editado` com o default
