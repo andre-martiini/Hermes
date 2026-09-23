@@ -105,6 +105,25 @@ Copiloto) sao `["string", "null"]`, nao `"string"` puro -- o fallback de
 `titulo_doc = meta.get('titulo', real_file_name)` so dispara quando a
 CHAVE esta ausente do JSON do Gemini, nunca quando a chave existe com
 valor `null` explicito (`{"titulo": None}.get("titulo", "x")` e `None`).
+E `consultar_status_modo_secretario` (sub-entrega 27/N): decima primeira
+tool, backed por `secretario_whatsapp.consultar_status_modo_secretario`
+(passthrough puro em `tools/hermes_tools.py::
+_consultar_status_modo_secretario`, sem args) -- a PRIMEIRA com uma forma
+única onde TODOS os campos de nível superior são sempre obrigatórios
+(diferente de `calculadora`/`buscar_contato`/`consultar_lista_compras`,
+que também têm forma única mas com campos às vezes ausentes): a função
+nunca levanta exceção (lida por completo, incluindo
+`obter_config_secretario`, que tem seu próprio `try/except` e sempre
+devolve um dict default) e sempre monta as 8 chaves sem nenhum `if` que
+pule uma delas. ACHADO da revisão do Codex nesta PR, CORRIGIDO:
+`desativa_em` tinha um segundo escritor sem garantia de tipo
+(`main.py::updateAutomationSettings`, callable HTTP do frontend web, que
+repassa o campo direto do corpo da requisição sem coerção) — corrigido
+normalizando na LEITURA (`secretario_whatsapp.obter_config_secretario`
+agora coage para `str(...)` quando o valor presente não é string), não no
+endpoint HTTP — ver comentário de `_OUTPUT_SCHEMAS` em
+`tools/registry.py` e `test_secretario_whatsapp.py` para o levantamento
+completo e o teste de regressão.
 
 Cinco frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
@@ -112,18 +131,19 @@ Cinco frentes:
    `calculadora`, `buscar_contato`, `consultar_lista_compras`,
    `consultar_execucoes_agente`, `consultar_pedidos_agente`,
    `consultar_historico_acoes`, `obter_acao`,
-   `listar_rascunhos_pendentes`, `consultar_job` e `buscar_arquivos_acervo`
-   tem contrato publicado hoje.
+   `listar_rascunhos_pendentes`, `consultar_job`, `buscar_arquivos_acervo`
+   e `consultar_status_modo_secretario` tem contrato publicado hoje.
 2. `TestHandleToolsListOutputSchema` -- ponta a ponta via
    `mcp_server._handle_tools_list()`: `outputSchema` chega no catálogo
-   publicado só para essas dez tools.
+   publicado só para essas onze tools.
 3. `TestIntegracaoHandleToolsCallStructuredContent` -- ponta a ponta via
    `mcp_server._handle_tools_call`: `structuredContent` chega no envelope
    de `tools/call` para `calculadora` (execução real, pura) e para
    `buscar_contato`/`consultar_lista_compras`/`consultar_execucoes_agente`/
    `consultar_pedidos_agente`/`consultar_historico_acoes`/`obter_acao`/
-   `listar_rascunhos_pendentes`/`consultar_job`/`buscar_arquivos_acervo`
-   (executor mockado -- as nove dependem de Firestore, então o teste cobre
+   `listar_rascunhos_pendentes`/`consultar_job`/`buscar_arquivos_acervo`/
+   `consultar_status_modo_secretario`
+   (executor mockado -- as dez dependem de Firestore, então o teste cobre
    o MECANISMO, não a correção interna dos handlers, mesmo padrão já usado
    para `consultar_processo_sipac` abaixo), é sempre IGUAL ao dict que
    `content[0].text` serializa (mesma fonte, nunca diverge), bate com o
@@ -660,7 +680,47 @@ class TestOutputSchema(unittest.TestCase):
         self.assertEqual(erro["properties"]["resultados"], {"type": "array", "maxItems": 0})
         self.assertFalse(erro["additionalProperties"])
 
-    def test_paridade_dez_tools_tem_output_schema_hoje(self):
+    def test_consultar_status_modo_secretario_tem_schema_unica_forma_tudo_obrigatorio(self):
+        schema = registry.output_schema("consultar_status_modo_secretario")
+        self.assertIsNotNone(schema)
+        self.assertEqual(schema["type"], "object")
+        campos = {
+            "enabled", "desativa_em", "chats_allowlist", "contatos_detalhes",
+            "orientacoes_em_vigor", "orientacoes_padrao", "orientacoes_sessao",
+            "mensagem",
+        }
+        self.assertEqual(set(schema["properties"].keys()), campos)
+        # PRIMEIRA tool com forma única onde TODOS os campos são
+        # obrigatórios -- o handler nunca levanta exceção e nunca pula uma
+        # chave (ao contrário de calculadora/buscar_contato/
+        # consultar_lista_compras, que também têm forma única mas com
+        # campos às vezes ausentes).
+        self.assertEqual(set(schema["required"]), campos)
+        self.assertFalse(schema["additionalProperties"])
+
+        self.assertEqual(schema["properties"]["enabled"], {"type": "boolean"})
+        self.assertEqual(schema["properties"]["mensagem"], {"type": "string"})
+        # desativa_em: agora com a MESMA garantia estrutural dos demais
+        # campos, após a correção do achado do Codex nesta PR (coerção em
+        # obter_config_secretario) -- ver comentário de _OUTPUT_SCHEMAS e
+        # test_secretario_whatsapp.py para o teste de regressão.
+        self.assertEqual(schema["properties"]["desativa_em"], {"type": ["string", "null"]})
+        for campo in ("orientacoes_em_vigor", "orientacoes_padrao", "orientacoes_sessao"):
+            self.assertEqual(schema["properties"][campo], {"type": ["string", "null"]})
+
+        self.assertEqual(
+            schema["properties"]["chats_allowlist"],
+            {"type": "array", "items": {"type": "string"}},
+        )
+
+        item = schema["properties"]["contatos_detalhes"]["items"]
+        self.assertEqual(set(item["properties"].keys()), {"chat_id", "nome"})
+        self.assertEqual(set(item["required"]), {"chat_id", "nome"})
+        self.assertFalse(item["additionalProperties"])
+        self.assertEqual(item["properties"]["chat_id"], {"type": "string"})
+        self.assertEqual(item["properties"]["nome"], {"type": "string"})
+
+    def test_paridade_onze_tools_tem_output_schema_hoje(self):
         # Não por amostragem: para TODA tool do catálogo real (108 hoje --
         # `len(registry.list_tool_names())`; achado da revisão adversarial
         # da sub-entrega 25/N: "106" estava desatualizado desde antes
@@ -668,13 +728,15 @@ class TestOutputSchema(unittest.TestCase):
         # buscar_contato, consultar_lista_compras,
         # consultar_execucoes_agente, consultar_pedidos_agente,
         # consultar_historico_acoes, obter_acao, listar_rascunhos_pendentes,
-        # consultar_job e buscar_arquivos_acervo -- prova que a lista
-        # fechada não vazou para nenhuma outra tool por engano.
+        # consultar_job, buscar_arquivos_acervo e
+        # consultar_status_modo_secretario -- prova que a lista fechada não
+        # vazou para nenhuma outra tool por engano.
         com_schema = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
             "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
+            "consultar_status_modo_secretario",
         }
         for nome in registry.list_tool_names():
             with self.subTest(tool=nome):
@@ -768,12 +830,22 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
         self.assertIn("oneOf", self.catalogo["buscar_arquivos_acervo"]["outputSchema"])
         self.assertEqual(len(self.catalogo["buscar_arquivos_acervo"]["outputSchema"]["oneOf"]), 2)
 
+    def test_consultar_status_modo_secretario_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["consultar_status_modo_secretario"])
+        self.assertEqual(
+            self.catalogo["consultar_status_modo_secretario"]["outputSchema"],
+            registry.output_schema("consultar_status_modo_secretario"),
+        )
+        # Forma única, sem oneOf -- ao contrário das quatro tools anteriores.
+        self.assertNotIn("oneOf", self.catalogo["consultar_status_modo_secretario"]["outputSchema"])
+
     def test_nenhuma_outra_tool_publicada_tem_output_schema(self):
         esperadas = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
             "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
+            "consultar_status_modo_secretario",
         }
         com_schema = [
             nome for nome, tool in self.catalogo.items()
@@ -789,6 +861,7 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
             "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
+            "consultar_status_modo_secretario",
         ):
             with self.subTest(tool=nome):
                 tool = self.catalogo[nome]
@@ -1840,6 +1913,55 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
             )
         estruturado = resultado["structuredContent"]
         self.assertEqual(set(estruturado.keys()), set(erro_schema["properties"].keys()))
+
+    def test_consultar_status_modo_secretario_leva_structured_content_igual_ao_content(self):
+        # `consultar_status_modo_secretario` real depende de Firestore
+        # (system/settings + whatsapp_chats); o executor é mockado aqui com
+        # uma forma real que o handler produz (ver
+        # `secretario_whatsapp.consultar_status_modo_secretario`), mesmo
+        # padrão das tools acima -- testa o MECANISMO, não a leitura de
+        # config em si.
+        esperado = {
+            "enabled": True,
+            "desativa_em": "2030-01-01T12:00:00-03:00",
+            "chats_allowlist": ["5511999999999@c.us"],
+            "contatos_detalhes": [{"chat_id": "5511999999999@c.us", "nome": "Carlos Parceiro"}],
+            "orientacoes_em_vigor": "Só responda sobre agenda.",
+            "orientacoes_padrao": "Só responda sobre agenda.",
+            "orientacoes_sessao": None,
+            "mensagem": "O Modo Secretário está ATIVO no WhatsApp.",
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_status_modo_secretario", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_status_modo_secretario_structured_content_bate_com_o_output_schema_publicado(self):
+        # Forma única, sem oneOf -- paridade campo a campo direta contra o
+        # schema publicado, mais simples que as tools com oneOf acima.
+        schema = registry.output_schema("consultar_status_modo_secretario")
+
+        mock_resultado = {
+            "enabled": False,
+            "desativa_em": None,
+            "chats_allowlist": [],
+            "contatos_detalhes": [],
+            "orientacoes_em_vigor": None,
+            "orientacoes_padrao": None,
+            "orientacoes_sessao": None,
+            "mensagem": "O Modo Secretário está DESATIVADO no WhatsApp.",
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_resultado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_status_modo_secretario", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        self.assertEqual(set(estruturado.keys()), set(schema["properties"].keys()))
+        self.assertEqual(set(estruturado.keys()), set(schema["required"]))
 
     def test_tool_sem_output_schema_nunca_leva_structured_content_mesmo_com_dict(self):
         # `consultar_processo_sipac` não tem outputSchema publicado; mesmo
