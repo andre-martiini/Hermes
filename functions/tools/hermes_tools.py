@@ -1336,11 +1336,19 @@ def preparar_edicao_em_lote(ctx: ToolContext, args: dict):
                 return f"ERRO|Acao '{tid}' nao encontrada."
 
             task_data = task_doc.to_dict() or {}
-            if task_data.get("status") in ("concluído", "excluído") and alteracoes.get(
+            # Editar ação concluída é permitido (decisão do dono, 23/09/2026,
+            # já aplicada às cópias desta mesma checagem em main.py e
+            # tools/telegram_extended.py) -- só 'excluído' continua
+            # bloqueado, a menos que a própria edição a esteja reabrindo:
+            # esse status dispara exclusão real do documento e do evento do
+            # Calendar na próxima sincronização (sync_google_tasks_push,
+            # main.py), então editar outro campo sem reabrir é inútil na
+            # melhor das hipóteses.
+            if task_data.get("status") == "excluído" and alteracoes.get(
                 "status"
             ) not in ("em andamento", "stand-by"):
-                return (f"ERRO|A acao '{task_data.get('titulo', tid)}' ja foi concluida ou "
-                        f"excluida e nao pode ser editada.")
+                return (f"ERRO|A acao '{task_data.get('titulo', tid)}' ja foi excluida "
+                        f"e nao pode ser editada.")
 
             alteracoes_diff = {}
             for campo, novo_valor in alteracoes.items():
@@ -1738,9 +1746,17 @@ def _map_confirmar_reagendamento(ctx: ToolContext, args: dict):
 # entao o par vira duas chamadas para uma acao so.
 #
 # Estas versoes diretas nao afrouxam validacao nenhuma: elas chamam as mesmas
-# callables de gravacao, que revalidam tudo (acao existe, nao esta concluida,
-# campo permitido, status normalizado). O que some e so o passo intermediario.
-# As `preparar_*` continuam existindo para a web.
+# callables de gravacao, que revalidam tudo (acao existe, nao esta excluida,
+# campo permitido, status normalizado; editar acao concluida e permitido
+# desde 23/09/2026 -- deixou de ser uma validacao). O que some e so o passo
+# intermediario. As `preparar_*` continuam existindo para a web.
+#
+# Achado da 2a rodada de revisao adversarial (23/09/2026): esta frase
+# ("revalidam tudo") so ficou verdadeira depois de confirmarEdicaoAcao e
+# confirmarEdicaoEmLote ganharem a checagem de 'excluido' -- antes disso as
+# `preparar_*` bloqueavam na proposta mas a gravacao direta (editar_acao/
+# editar_acoes_em_lote/confirmar_edicao_acao/confirmar_edicao_em_lote) nao
+# revalidava nada, e o comentario dizia o contrario do codigo real.
 
 
 # Campos que uma acao aceita editar. Fora daqui, nada e gravado.

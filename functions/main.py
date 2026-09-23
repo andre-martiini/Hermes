@@ -12035,6 +12035,22 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
 
         task_data = task_doc.to_dict()
 
+        # Achado da 2ª rodada de revisão adversarial (23/09/2026): esta é a
+        # ÚNICA função que de fato grava — editar_acao E confirmar_edicao_acao
+        # (o par de duas chamadas) chegam os dois aqui. Os bloqueios de
+        # 'excluído' em preparar_edicao_acao (main.py e
+        # tools/telegram_extended.py) são só do PASSO DE PROPOR: nunca
+        # protegiam de verdade, porque nenhum dos dois é chamado no caminho
+        # de escrita. Um cliente podia pular o "propor" e chamar
+        # confirmar_edicao_acao ou editar_acao direto para editar uma ação
+        # já excluída (que sync_google_tasks_push apaga de verdade, doc e
+        # evento do Calendar, na próxima sincronização) sem nenhum aviso.
+        # Bloqueio de verdade fica aqui, não só nos dois passos de propor.
+        if task_data.get('status') == 'excluído':
+            msg = 'Edição bloqueada: Esta ação já foi excluída (a exclusão real acontece na próxima sincronização).'
+            _set_card_status(db_ref, 'invalidated', msg)
+            return {'status': 'invalidated', 'message': msg}
+
         # Editar ação concluída é permitido (decisão do dono, 23/09/2026):
         # a única proteção contra edição de dado obsoleto é a Validação 2
         # (snapshot) logo abaixo — status concluído/excluído não bloqueia
@@ -12327,6 +12343,28 @@ def confirmarEdicaoEmLote(req: https_fn.CallableRequest):
                 else:
                     alteracoes[k] = v
 
+            # Achado da 2ª rodada de revisão adversarial da correção de
+            # edição de ação concluída (23/09/2026): esta função nunca lia
+            # o status ATUAL da ação antes de escrever — o bloqueio de
+            # 'excluído' em preparar_edicao_em_lote (tools/hermes_tools.py)
+            # é só do passo de propor; editar_acoes_em_lote (aplicação
+            # direta) chega direto aqui sem passar por ele. 'excluído'
+            # dispara exclusão real do documento e do evento do Calendar na
+            # próxima sincronização (sync_google_tasks_push) — editar outro
+            # campo sem reabrir é inútil na melhor das hipóteses. Item
+            # inelegível é pulado (mesmo tratamento de task_id ausente ou
+            # ação inexistente, linhas acima) em vez de abortar o lote
+            # inteiro por causa de um item só.
+            task_ref = db_ref.collection('tarefas').document(task_id)
+            task_atual_snap = task_ref.get()
+            if not task_atual_snap.exists:
+                continue
+            status_atual = (task_atual_snap.to_dict() or {}).get('status')
+            if status_atual == 'excluído' and _normalizar_status_acao(
+                alteracoes.get('status')
+            ) not in ('em andamento', 'stand-by'):
+                continue
+
             updates = {}
             for campo, novo_valor in alteracoes.items():
                 if campo not in _ALLOWED:
@@ -12361,7 +12399,6 @@ def confirmarEdicaoEmLote(req: https_fn.CallableRequest):
                 'nota': f"[Copiloto Hermes] Ação editada em lote ({justificativa}). Campos alterados: {campos_desc}."
             }
 
-            task_ref = db_ref.collection('tarefas').document(task_id)
             batch.update(task_ref, {
                 **updates,
                 'acompanhamento': firestore.ArrayUnion([diary_entry])

@@ -1469,6 +1469,25 @@ class TestEditarAcaoConcluidaPermitido(unittest.TestCase):
         corpo = self._corpo_da_funcao("preparar_edicao_acao")
         self.assertIn("já foi excluída", corpo)
 
+    def test_confirmar_edicao_acao_agora_recusa_excluida(self):
+        """Achado MAIS GRAVE da 2ª rodada de revisão adversarial (23/09/2026):
+        confirmarEdicaoAcao é a ÚNICA função que de fato grava para o par
+        editar_acao/confirmar_edicao_acao -- os bloqueios de 'excluído' nas
+        duas cópias de preparar_edicao_acao eram só do passo de PROPOR,
+        nunca alcançavam quem chamasse a escrita direto. Sem esta checagem
+        aqui, dava para editar uma ação excluída (prestes a ser apagada de
+        verdade) sem nenhum aviso, pulando o "propor"."""
+        corpo = self._corpo_da_funcao("confirmarEdicaoAcao")
+        self.assertIn("já foi excluída", corpo)
+
+    def test_confirmar_edicao_em_lote_agora_recusa_excluida(self):
+        """Mesmo achado, QUARTA cópia: confirmarEdicaoEmLote (a escrita real
+        por trás de editar_acoes_em_lote) nunca lia o status atual antes de
+        gravar."""
+        corpo = self._corpo_da_funcao("confirmarEdicaoEmLote")
+        self.assertIn("excluído", corpo)
+        self.assertIn("status_atual", corpo)
+
     def test_confirmar_edicao_acao_ainda_recusa_snapshot_desatualizado(self):
         """A restrição removida foi só a de status -- a de concorrência
         otimista (snapshot) continua de pé; não pode ter sumido junto."""
@@ -1478,6 +1497,47 @@ class TestEditarAcaoConcluidaPermitido(unittest.TestCase):
     def test_confirmar_edicao_acao_ainda_recusa_acao_inexistente(self):
         corpo = self._corpo_da_funcao("confirmarEdicaoAcao")
         self.assertIn("não existe mais", corpo)
+
+
+class TestPrepararEdicaoEmLoteConcluidaEExcluida(unittest.TestCase):
+    """Achado da 2ª rodada de revisão adversarial (23/09/2026) da correção
+    de edição de ação concluída: esta era uma QUARTA cópia da mesma
+    validação (`preparar_edicao_em_lote`, o passo de propor do trio
+    preparar/confirmar/aplicar-direto em lote) e a única que ainda
+    bloqueava 'concluído' -- inconsistente com a decisão do dono já
+    aplicada aos outros três caminhos (editar_acao e as duas cópias de
+    preparar_edicao_acao)."""
+
+    def _ctx_com_tarefa(self, status):
+        from tools.tool_context import ToolContext
+        db = MagicMock()
+        doc = MagicMock()
+        doc.exists = True
+        doc.to_dict.return_value = {"titulo": "Tarefa", "status": status}
+        db.collection.return_value.document.return_value.get.return_value = doc
+        return ToolContext(_db=db)
+
+    def test_concluida_pode_ser_editada(self):
+        ctx = self._ctx_com_tarefa("concluído")
+        r = hermes_tools.preparar_edicao_em_lote(
+            ctx, {"itens": [{"task_id": "t1", "alteracoes": {"titulo": "Novo"}}]})
+        self.assertFalse(r.startswith("ERRO|"), r)
+
+    def test_excluida_continua_recusada(self):
+        """'excluído' dispara exclusão real do documento e do evento do
+        Calendar na próxima sincronização -- diferente de 'concluído',
+        continua bloqueado."""
+        ctx = self._ctx_com_tarefa("excluído")
+        r = hermes_tools.preparar_edicao_em_lote(
+            ctx, {"itens": [{"task_id": "t1", "alteracoes": {"titulo": "Novo"}}]})
+        self.assertTrue(r.startswith("ERRO|"), r)
+        self.assertIn("excluida", r)
+
+    def test_excluida_reabrindo_com_novo_status_e_permitido(self):
+        ctx = self._ctx_com_tarefa("excluído")
+        r = hermes_tools.preparar_edicao_em_lote(
+            ctx, {"itens": [{"task_id": "t1", "alteracoes": {"status": "em andamento"}}]})
+        self.assertFalse(r.startswith("ERRO|"), r)
 
 
 class _CtxVazio:
