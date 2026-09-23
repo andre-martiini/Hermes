@@ -1694,14 +1694,14 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     # escritores a colecao tiver.
     #
     # Investigacao dos escritores de `whatsapp_outbox` (busca exaustiva por
-    # `collection("whatsapp_outbox")`/`collection(COLLECTION)` no
-    # repositorio). CORRECAO da 1a rodada de revisao adversarial desta
-    # sub-entrega: a redacao original desta nota dizia que so
-    # `criar_rascunho` grava um dos dois valores do filtro e "o resto so
-    # atualiza, nunca muda status para um dos dois valores do filtro" --
-    # isso e FALSO, ha mais dois `.update()` que gravam `STATUS_AGUARDANDO`
-    # de volta (o enum continua correto, mas a lista abaixo estava
-    # incompleta):
+    # `whatsapp_outbox`/`COLLECTION`/`COL_OUTBOX` em TODO o repositorio,
+    # nao so em `functions/`). CORRIGIDA DUAS VEZES por duas rodadas de
+    # revisao adversarial desta sub-entrega -- a redacao original dizia
+    # que so `criar_rascunho` grava um dos dois valores do filtro e "o
+    # resto so atualiza, nunca muda status para um dos dois valores do
+    # filtro"; a 2a rodada achou que a lista ainda faltava dois escritores
+    # (nenhum dos dois muda o veredito do enum, so a completude da lista).
+    # Lista final:
     #   - `outbox_aprovacao.criar_rascunho` (chamada por `criar_rascunho_
     #     whatsapp`) -- grava `status_inicial` como
     #     `STATUS_AGUARDANDO_JANELA` (tipo promovido) ou `STATUS_AGUARDANDO`
@@ -1716,18 +1716,31 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     #     so disparam quando o documento JA esta em `STATUS_AGUARDANDO`/
     #     `STATUS_AGUARDANDO_JANELA` (gate de `validar_transicao_aprovacao`
     #     ou checagem equivalente antes do update), nunca introduzem um
-    #     TERCEIRO valor no conjunto -- o enum de 2 valores continua
-    #     correto, so a contagem de "pontos que escrevem um dos dois
-    #     valores" estava errada (3, nao 1).
+    #     TERCEIRO valor no conjunto.
     #   - `tools/schedule_whatsapp_message.py::schedule_whatsapp_message`
-    #     (chamada por `schedule_whatsapp_message`, tool DIFERENTE) -- grava
-    #     SEMPRE `status: "pending"`, nunca aparece neste resultado.
-    #   - `mcp_server.py` (le por `document(job_id).get()`, nunca escreve),
-    #     `ai_notification_planner.py`/`promocao_autonomia.py` (leem por
-    #     query, nunca escrevem) e `telegram_callbacks_confirmacoes.py`
-    #     (dois `.update()`, um grava `status: "canceled"`, outro
-    #     `status: "sent"` -- nenhum dos dois valores do filtro) sao os
-    #     demais pontos encontrados.
+    #     (chamada pela tool DIFERENTE `schedule_whatsapp_message`) e
+    #     `hermes-voice-bridge/tools.py` (subsistema separado do cliente de
+    #     voz, fora de `functions/`, com seu proprio `get_db()`) -- os dois
+    #     criam documento com `status: "pending"` SEMPRE, nunca aparecem
+    #     neste resultado.
+    #   - `ai_notification_planner.py::dispatch_scheduled_whatsapp_messages`
+    #     -- ACHADO da 2a rodada de revisao adversarial: este modulo NAO e
+    #     so-leitura como uma versao anterior desta nota afirmava; ele
+    #     consulta `status == "pending"` e, apos notificar com sucesso no
+    #     Telegram, grava `status: "notified"` de volta -- fora do enum do
+    #     filtro, mas um escritor de `status` real que a lista anterior
+    #     tinha omitido.
+    #   - `telegram_callbacks_confirmacoes.py` (dois `.update()`, um grava
+    #     `status: "canceled"`, outro `status: "sent"` -- nenhum dos dois
+    #     valores do filtro).
+    #   - So-leitura confirmados (nunca escrevem `status`, nem outro
+    #     campo, na colecao `whatsapp_outbox`): `mcp_server.py` (le por
+    #     `document(job_id).get()`), `promocao_autonomia.py` (le por
+    #     query), `tools/whatsapp_tools.py` (`COL_OUTBOX`, so `.get()`/
+    #     query). `scripts/reagendar_whatsapp_outbox_orfaos.py` (script de
+    #     manutencao manual, fora do deploy) so atualiza
+    #     `scheduled_for`/`updated_at` de jobs `pending` orfaos, nunca o
+    #     campo `status`.
     #
     # Os outros 13 campos do item vem de UM UNICO LITERAL de dict dentro de
     # `listar_rascunhos` (`outbox_aprovacao.py`, sem chave condicional --
