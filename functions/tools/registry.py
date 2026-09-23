@@ -630,18 +630,17 @@ def mcp_annotations(tool_name: str) -> dict:
     `tools/list` -- P03 passo 3 do plano de autonomia ("Adicionar
     outputSchema, structuredContent, annotations e envelope aos caminhos
     compativeis"). `readOnlyHint`/`destructiveHint` vieram da sub-entrega
-    6/N; `openWorldHint`, da sub-entrega 7/N; `idempotentHint`, PARCIAL, das
-    sub-entregas 16/N, 17/N, 18/N, 19/N, 20/N, 21/N e 22/N (48 das ~61 tools de
-    escrita/leitura_e_escrita investigadas ate agora -- ver `Idempotencia`
-    em `tools/inventory.py`; o universo elegivel cresceu de ~59 para ~61
-    entre a sub-entrega 19/N e a 20/N por causa de tools novas adicionadas
-    por PRs de funcionalidade fora deste plano, `atualizar_arquivo_drive` e
-    `sincronizar_conversas_whatsapp`, ja classificadas por quem as
-    implementou; nota de honestidade -- o diario da sub-entrega 20/N
-    registrou este numero como tendo mudado de 43 para 48, mas o texto
-    aqui continuou em 43 sem edicao correspondente; o valor real antes
-    desta sub-entrega 21/N era 43, e o incremento para 47 abaixo reflete
-    as 4 tools classificadas agora, nao os 48 que o diario alegava).
+    6/N; `openWorldHint`, da sub-entrega 7/N; `idempotentHint`, das
+    sub-entregas 16/N a 23/N (53 das ~61 tools de escrita/leitura_e_escrita
+    elegiveis ja classificadas -- ver `Idempotencia` em `tools/inventory.py`;
+    o universo elegivel cresceu de ~59 para ~61 entre a sub-entrega 19/N e a
+    20/N por causa de tools novas adicionadas por PRs de funcionalidade fora
+    deste plano, `atualizar_arquivo_drive` e `sincronizar_conversas_
+    whatsapp`, ja classificadas por quem as implementou). Das ~8 restantes,
+    NENHUMA ficou "nunca investigada" apos a sub-entrega 23/N -- todas as
+    tools de escrita/leitura_e_escrita elegiveis ja foram lidas pelo menos
+    uma vez; as que faltam ficaram deliberadamente SEM classificacao por
+    ambiguidade genuina (ver paragrafo abaixo).
     `outputSchema`/`structuredContent`/envelope seguem fora de escopo --
     exigem definir um contrato de dados por tool, ver docs/autonomia/execucao.md.
 
@@ -832,16 +831,34 @@ def mcp_annotations(tool_name: str) -> dict:
     mantida em NAO_IDEMPOTENTE (ver `nota` em `tools/inventory.py` e os
     testes em `test_confirmar_edicao_acao_nao_idempotente.py`).
 
-    As demais ~5 tools de escrita/leitura_e_escrita ainda não foram
-    investigadas (`idempotencia=None`, hint omitido) -- `acompanhar_
-    processo_sipac`, `consolidar_whatsapp`, `consultar_contatos_
-    prioritarios_secretario`, `registrar_inscricao_bolsa_publica` e
-    `schedule_whatsapp_message` -- mesmo padrao incremental ja usado para
-    `dominio_rede` (sub-entrega 7/N) e para `outputSchema` (sub-entregas
-    8/N em diante). Mais 8 tools (as listadas acima, entre a sub-entrega
-    19/N e as anteriores) foram investigadas e deliberadamente deixadas sem
-    classificação por ambiguidade genuína -- ver `nota` de cada uma em
-    `tools/inventory.py` para não repetir a investigação.
+    Mais 5 tools investigadas na sub-entrega 23/N, fechando a lista das
+    "nunca investigadas": `acompanhar_processo_sipac` (IDEMPOTENTE -- doc
+    `sipac_processos/{uid}_{numero}` com ID deterministico, `.set(merge=
+    True)` converge no mesmo `acompanhar`; achado real e nao-bloqueante
+    registrado na nota do inventario sobre `snapshot_hash` colidir com o
+    baseline do cron `scheduledSipacSync`, P05); `consolidar_whatsapp`
+    (NAO_IDEMPOTENTE -- ID automatico + `.set()` incondicional cria um
+    segundo job de consolidacao a cada repeticao); `consultar_contatos_
+    prioritarios_secretario` (IDEMPOTENTE -- mesmo desenho de `consultar_
+    autorizacao_argos`, expiracao guardada por status converge apos a
+    primeira chamada que encontra o item vencido); `registrar_inscricao_
+    bolsa_publica` (IDEMPOTENTE -- `vinculos_projeto` checado por
+    project_id+cpf antes de criar, segunda chamada devolve `alreadyLinked`
+    sem duplicar); `schedule_whatsapp_message` (NAO_IDEMPOTENTE -- o
+    `idempotency_key=ctx.mcp_confirmation_id` so protege retry dentro da
+    MESMA confirmacao MCP, mesmo caveat ja aceito para `pausar_conversa`,
+    que delega para a mesma funcao). Ver `nota` de cada entrada em
+    `tools/inventory.py` para a evidencia completa por handler e os testes
+    em `test_idempotencia_sub23.py`.
+
+    As ~8 tools restantes (`decidir_elevacao`, `decidir_promocao_
+    autonomia`, `confirmar_acao`, `mutar_portal_compras_publico`, `mutar_
+    lista_compras`, `revogar_promocao_autonomia`, `excluir_objetivo_
+    estrategico`, `gerenciar_item_estrategico`) foram investigadas e
+    deliberadamente deixadas sem classificação (`idempotencia=None`, hint
+    omitido) por ambiguidade genuína -- ver `nota` de cada uma em
+    `tools/inventory.py` para não repetir a investigação. Nenhuma tool
+    elegível ficou sem ao menos uma leitura direta do handler.
 
     Omitir hints nao investigados com confianca nao e regressao: a
     especificacao MCP ja define default conservador para quem nao declara
