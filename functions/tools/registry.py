@@ -1686,61 +1686,40 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     #
     # `status` e enum de EXATAMENTE 2 valores pela MESMA garantia ja usada
     # em `consultar_pedidos_agente` (sub-entrega 12/N): nao "escritor
-    # unico" (a colecao `whatsapp_outbox` tem VARIOS escritores -- ver
-    # abaixo), e sim o filtro da propria QUERY
+    # unico" -- a colecao `whatsapp_outbox` tem MUITOS escritores, em
+    # varios modulos Python (`outbox_aprovacao.py` tem pelo menos seis
+    # funcoes que escrevem `status`: `criar_rascunho`, `aprovar_rascunho`,
+    # `descartar_rascunho`, `aplicar_edicao_rascunho`,
+    # `expirar_rascunhos_pendentes`, `_degradar_rascunho_promovido_sem_
+    # mandato`; mais `tools/schedule_whatsapp_message.py`,
+    # `ai_notification_planner.py`, `telegram_callbacks_confirmacoes.py`)
+    # e tambem fora de Python (`services/whatsapp-capture/index.js`, o
+    # worker Node do WhatsApp, e `hermes-voice-bridge/tools.py`, o cliente
+    # de voz) -- e sim o filtro da propria QUERY
     # (`.where("status", "in", [STATUS_AGUARDANDO, STATUS_AGUARDANDO_JANELA])`
-    # em `outbox_aprovacao.listar_rascunhos`) -- nenhum documento com outro
-    # valor de `status` pode aparecer no resultado, independente de quantos
-    # escritores a colecao tiver.
+    # em `outbox_aprovacao.listar_rascunhos`): nenhum documento com outro
+    # valor de `status` pode aparecer no resultado, INDEPENDENTE de quantos
+    # escritores a colecao tiver ou do que cada um escreva -- essa e a
+    # garantia que importa para o contrato publicado, e nao depende de
+    # enumerar todo escritor.
     #
-    # Investigacao dos escritores de `whatsapp_outbox` (busca exaustiva por
-    # `whatsapp_outbox`/`COLLECTION`/`COL_OUTBOX` em TODO o repositorio,
-    # nao so em `functions/`). CORRIGIDA DUAS VEZES por duas rodadas de
-    # revisao adversarial desta sub-entrega -- a redacao original dizia
-    # que so `criar_rascunho` grava um dos dois valores do filtro e "o
-    # resto so atualiza, nunca muda status para um dos dois valores do
-    # filtro"; a 2a rodada achou que a lista ainda faltava dois escritores
-    # (nenhum dos dois muda o veredito do enum, so a completude da lista).
-    # Lista final:
-    #   - `outbox_aprovacao.criar_rascunho` (chamada por `criar_rascunho_
-    #     whatsapp`) -- grava `status_inicial` como
-    #     `STATUS_AGUARDANDO_JANELA` (tipo promovido) ou `STATUS_AGUARDANDO`
-    #     (regular) SOMENTE no ramo `not envio_imediato`; no ramo
-    #     `envio_imediato` grava `STATUS_PENDING` ("pending"), que o filtro
-    #     desta query exclui.
-    #   - `outbox_aprovacao.aplicar_edicao_rascunho` (chamada a partir de
-    #     `telegram_message_deterministic.py` e `atencao_whatsapp.py`) e
-    #     `outbox_aprovacao._degradar_rascunho_promovido_sem_mandato`
-    #     (chamada por `liberar_rascunhos_promovidos`) TAMBEM gravam
-    #     `"status": STATUS_AGUARDANDO` via `tx.update(...)` -- mas as duas
-    #     so disparam quando o documento JA esta em `STATUS_AGUARDANDO`/
-    #     `STATUS_AGUARDANDO_JANELA` (gate de `validar_transicao_aprovacao`
-    #     ou checagem equivalente antes do update), nunca introduzem um
-    #     TERCEIRO valor no conjunto.
-    #   - `tools/schedule_whatsapp_message.py::schedule_whatsapp_message`
-    #     (chamada pela tool DIFERENTE `schedule_whatsapp_message`) e
-    #     `hermes-voice-bridge/tools.py` (subsistema separado do cliente de
-    #     voz, fora de `functions/`, com seu proprio `get_db()`) -- os dois
-    #     criam documento com `status: "pending"` SEMPRE, nunca aparecem
-    #     neste resultado.
-    #   - `ai_notification_planner.py::dispatch_scheduled_whatsapp_messages`
-    #     -- ACHADO da 2a rodada de revisao adversarial: este modulo NAO e
-    #     so-leitura como uma versao anterior desta nota afirmava; ele
-    #     consulta `status == "pending"` e, apos notificar com sucesso no
-    #     Telegram, grava `status: "notified"` de volta -- fora do enum do
-    #     filtro, mas um escritor de `status` real que a lista anterior
-    #     tinha omitido.
-    #   - `telegram_callbacks_confirmacoes.py` (dois `.update()`, um grava
-    #     `status: "canceled"`, outro `status: "sent"` -- nenhum dos dois
-    #     valores do filtro).
-    #   - So-leitura confirmados (nunca escrevem `status`, nem outro
-    #     campo, na colecao `whatsapp_outbox`): `mcp_server.py` (le por
-    #     `document(job_id).get()`), `promocao_autonomia.py` (le por
-    #     query), `tools/whatsapp_tools.py` (`COL_OUTBOX`, so `.get()`/
-    #     query). `scripts/reagendar_whatsapp_outbox_orfaos.py` (script de
-    #     manutencao manual, fora do deploy) so atualiza
-    #     `scheduled_for`/`updated_at` de jobs `pending` orfaos, nunca o
-    #     campo `status`.
+    # NOTA DE PROCESSO (as tres rodadas de revisao adversarial desta
+    # sub-entrega): uma versao anterior deste comentario tentava listar
+    # TODOS os escritores da colecao e prova-los individualmente
+    # inofensivos ao enum -- cada rodada de revisao achou pelo menos um
+    # escritor real que a "lista exaustiva" anterior tinha omitido
+    # (`aplicar_edicao_rascunho`/`_degradar_rascunho_promovido_sem_mandato`
+    # na 1a rodada; `ai_notification_planner.py`/`hermes-voice-bridge/
+    # tools.py` na 2a; `aprovar_rascunho`/`descartar_rascunho`/
+    # `expirar_rascunhos_pendentes`/`services/whatsapp-capture/index.js`
+    # na 3a) -- nenhum deles jamais mudou o veredito do enum (nenhum
+    # escreve `aguardando_aprovacao`/`aguardando_janela` fora do gate que
+    # ja exige o documento estar num desses dois estados), mas a proposta
+    # de enumeracao exaustiva e um alvo que nao para de crescer numa
+    # colecao com escritores em multiplos runtimes. Por isso a redacao
+    # final abandona a enumeracao completa e fica só com a garantia
+    # estrutural (o filtro da query), que e a unica coisa de que o
+    # contrato publicado aqui depende.
     #
     # Os outros 13 campos do item vem de UM UNICO LITERAL de dict dentro de
     # `listar_rascunhos` (`outbox_aprovacao.py`, sem chave condicional --
