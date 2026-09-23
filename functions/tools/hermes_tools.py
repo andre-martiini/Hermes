@@ -664,6 +664,22 @@ def descartar_rascunho_whatsapp(ctx: ToolContext, args: dict):
     )
 
 
+def cancelar_envio_whatsapp(ctx: ToolContext, args: dict):
+    from outbox_aprovacao import cancelar_envio
+    job_id = str(args.get("job_id") or "").strip()
+    motivo = str(args.get("motivo") or "").strip()
+    if not job_id:
+        return {"erro": "job_id é obrigatório."}
+    if not motivo:
+        return {"erro": "motivo é obrigatório."}
+    return cancelar_envio(
+        ctx.db,
+        outbox_id=job_id,
+        motivo=motivo,
+        ctx=ctx,
+    )
+
+
 def solicitar_autorizacao_argos(ctx: ToolContext, args: dict):
     from argos_autorizacao import solicitar_autorizacao
     return solicitar_autorizacao(
@@ -2602,6 +2618,7 @@ _HANDLERS: dict = {
     "listar_rascunhos_pendentes": listar_rascunhos_pendentes,
     "aprovar_rascunho_whatsapp": aprovar_rascunho_whatsapp,
     "descartar_rascunho_whatsapp": descartar_rascunho_whatsapp,
+    "cancelar_envio_whatsapp": cancelar_envio_whatsapp,
     "solicitar_autorizacao_argos": solicitar_autorizacao_argos,
     "consultar_autorizacao_argos": consultar_autorizacao_argos,
     "consumir_autorizacao_argos": consumir_autorizacao_argos,

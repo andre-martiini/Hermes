@@ -257,16 +257,19 @@ def handle(db, token, query_id, chat_id, data, message, session, copilot_session
     elif data.startswith("wa_cancel:"):
         doc_id = data.split("wa_cancel:")[1].strip()
         _answer_callback_query(token, query_id, "Agendamento cancelado.")
+        # Corrigido ao construir cancelar_envio_whatsapp: isto era uma escrita
+        # direta, sem transação nem revalidação de status -- uma corrida real
+        # contra claimOutboxMessage (o worker também disputa o mesmo
+        # documento) podia sobrescrever silenciosamente um envio já
+        # 'sending'/'sent' de volta para 'canceled': não impede o envio (o
+        # worker já tinha reivindicado antes) e ainda corrompe o registro de
+        # auditoria. Roteado pela mesma função transacional que
+        # cancelar_envio_whatsapp usa -- perde a corrida de forma segura em
+        # vez de escrever por cima às cegas.
         try:
             if doc_id:
-                db.collection("whatsapp_outbox").document(doc_id).update({
-                    "status": "canceled",
-                    # Bug corrigido: "datetime" aqui e a CLASSE (from datetime import
-                    # datetime, timezone), nao o modulo -- "datetime.datetime.now(...)"
-                    # lancava AttributeError, engolido pelo except abaixo, entao o Firestore
-                    # nunca era atualizado mesmo o usuario recebendo "cancelado" na tela.
-                    "canceled_at": datetime.now(timezone.utc).isoformat()
-                })
+                from outbox_aprovacao import cancelar_envio
+                cancelar_envio(db, doc_id, cancelado_via="telegram")
         except Exception as exc:
             print(f"[TelegramCallback] Erro ao cancelar WhatsApp agendado {doc_id}: {exc}")
 

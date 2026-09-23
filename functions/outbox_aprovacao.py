@@ -24,6 +24,13 @@ STATUS_DESCARTADO = "descartado"
 STATUS_EXPIRADO = "expirado"
 STATUS_SENT = "sent"
 STATUS_FAILED = "failed"
+# `notified`: dispatch_scheduled_whatsapp_messages (ai_notification_planner.py)
+# preferiu avisar por Telegram em vez de confirmar o worker local online.
+STATUS_NOTIFIED = "notified"
+# Já era usado como string crua por telegram_callbacks_confirmacoes.py (botão
+# "❌ Cancelar" do card de `notified`) antes de existir uma função dedicada
+# para chegar até aqui -- ver cancelar_envio.
+STATUS_CANCELED = "canceled"
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +52,37 @@ def validar_transicao_descarte(status_atual: str | None) -> tuple[bool, str]:
         return True, ""
     if status_atual is None:
         return False, "Rascunho não encontrado."
+    if status_atual in (STATUS_PENDING, STATUS_NOTIFIED):
+        return False, (
+            f"já decidido (status atual: {status_atual}) — use cancelar_envio_whatsapp "
+            "para cancelar um envio já aprovado/agendado"
+        )
     return False, f"já decidido (status atual: {status_atual})"
+
+
+def validar_transicao_cancelamento(status_atual: str | None) -> tuple[str, str]:
+    """Classifica se um envio pode ser cancelado a partir do status atual.
+
+    Cancelamento cobre só os dois status "já decidido, ainda não entregue":
+    `pending` (aprovado/agendado, aguardando o worker) e `notified` (o Cloud
+    Function preferiu avisar por Telegram em vez de confirmar o worker
+    online). Rascunho (`aguardando_aprovacao`/`aguardando_janela`) continua
+    sendo domínio de `descartar_rascunho` — dois verbos para dois estágios do
+    mesmo documento, em vez de fundir tudo numa função só e arriscar quebrar
+    o contrato (status `descartado`, texto do card) que `descartar_rascunho`
+    já tem testado.
+
+    Devolve (resultado, mensagem): "ok" (pode cancelar), "already_canceled"
+    (idempotente — já estava cancelado, não é erro), "not_found", ou
+    "invalido" (qualquer outro status: sent, failed, aguardando_aprovacao...).
+    """
+    if status_atual in (STATUS_PENDING, STATUS_NOTIFIED):
+        return "ok", ""
+    if status_atual == STATUS_CANCELED:
+        return "already_canceled", "Já estava cancelado."
+    if status_atual is None:
+        return "not_found", "Envio não encontrado."
+    return "invalido", f"não é possível cancelar: já está '{status_atual}'"
 
 
 def montar_card_telegram(
@@ -725,6 +762,169 @@ def descartar_rascunho(
         "status": "ok",
         "outbox_id": outbox_id,
         "mensagem": "Rascunho descartado com sucesso.",
+    }
+
+
+def cancelar_envio(
+    db,
+    outbox_id: str,
+    motivo: str | None = None,
+    telegram_token: str | None = None,
+    chat_id: str | int | None = None,
+    cancelado_via: str = "cowork",
+    ctx=None,
+) -> dict:
+    """Cancela um envio de WhatsApp já aprovado/agendado (`pending`) ou já
+    notificado por fallback (`notified`), antes que ele saia de fato.
+
+    Diferente de `descartar_rascunho` (que apaga a decisão de enviar, antes
+    de qualquer aprovação), `cancelar_envio` desfaz uma decisão que já tinha
+    passado da aprovação. O documento nunca é apagado: status vira
+    `STATUS_CANCELED` para auditoria (o registro de que uma mensagem quase
+    saiu, e por quê foi barrada, é o que importa manter).
+
+    Transação atômica Firestore (mesmo padrão de `aprovar_rascunho`/
+    `descartar_rascunho`): o worker (`claimOutboxMessage`, em
+    `services/whatsapp-capture/index.js`) também lê o documento fresco
+    dentro de uma transação e só reivindica quando o status ainda é
+    `pending`. As duas transações disputando o MESMO documento é o que
+    garante que um cancelamento no minuto exato do envio nunca resulta em
+    mensagem enviada E cancelada ao mesmo tempo — uma das duas vence
+    (a que commitar primeiro), a outra vê o status já mudado e desiste sem
+    escrever por cima.
+
+    Idempotente: cancelar um job já `canceled` devolve status
+    `already_canceled` (sucesso, sem reescrever), nunca erro — pedir
+    cancelamento duas vezes (dois toques, ou uma nova chamada depois de um
+    timeout de rede sem saber se a primeira completou) não pode falhar nem
+    duplicar efeito.
+    """
+    outbox_id = str(outbox_id or "").strip()
+    if not outbox_id:
+        return {"erro": "outbox_id (job_id) é obrigatório."}
+    motivo_limpo = str(motivo or "").strip()
+
+    doc_ref = db.collection(COLLECTION).document(outbox_id)
+
+    # Mesmo raciocínio de aprovar_rascunho/descartar_rascunho (achado A04):
+    # sem transação real não há como garantir exclusão mútua com o worker —
+    # recusa em vez de arriscar uma escrita não protegida que poderia
+    # sobrescrever um `sent`/`sending` concorrente de volta para `canceled`.
+    if not hasattr(db, "transaction"):
+        return {
+            "status": "erro_configuracao",
+            "erro": "Backend Firestore sem suporte a transação; cancelamento recusado para evitar condição de corrida.",
+        }
+
+    try:
+        transaction = db.transaction()
+
+        @firestore.transactional
+        def _exec_cancel(tx):
+            snap = doc_ref.get(transaction=tx)
+            if not snap.exists:
+                return {"status": "not_found", "erro": f"Envio '{outbox_id}' não encontrado."}
+            data = snap.to_dict() or {}
+            resultado, msg = validar_transicao_cancelamento(data.get("status"))
+            if resultado == "already_canceled":
+                return {"status": "already_canceled", "mensagem": msg, "dados": data}
+            if resultado != "ok":
+                return {
+                    "status": "nao_cancelavel",
+                    "erro": msg,
+                    "status_atual": data.get("status"),
+                    "dados": data,
+                }
+
+            update_fields = {
+                "status": STATUS_CANCELED,
+                "canceled_at": firestore.SERVER_TIMESTAMP,
+                "cancelado_via": cancelado_via,
+            }
+            if motivo_limpo:
+                update_fields["motivo_cancelamento"] = motivo_limpo
+
+            tx.update(doc_ref, update_fields)
+            return {"status": "ok", "dados": data}
+
+        transaction_result = _exec_cancel(transaction)
+    except Exception as tx_err:
+        print(f"[OutboxAprovacao] Transação Firestore de cancelamento falhou: {tx_err}")
+        return {
+            "status": "erro_transacao",
+            "erro": f"Não foi possível cancelar de forma atômica: {tx_err}",
+        }
+
+    if transaction_result.get("status") == "already_canceled":
+        return {
+            "status": "already_canceled",
+            "outbox_id": outbox_id,
+            "mensagem": "Envio já estava cancelado — nenhuma escrita nova.",
+        }
+    if transaction_result.get("status") != "ok":
+        erro_resp = {k: v for k, v in transaction_result.items() if k != "dados"}
+        erro_resp["outbox_id"] = outbox_id
+        return erro_resp
+
+    data = transaction_result.get("dados") or {}
+
+    # Item da fila de atenção volta para aberto: se havia um resolvido com
+    # "mensagem aprovada e enviada para a fila" (aprovar_rascunho), o
+    # cancelamento desfaz essa premissa — o assunto continua em aberto.
+    item_atencao_id = data.get("item_atencao_id")
+    if item_atencao_id:
+        try:
+            db.collection("atencao").document(item_atencao_id).update({
+                "estado": "aberto",
+                "resolvido_em": None,
+                "desfecho": None,
+                "atualizado_em": firestore.SERVER_TIMESTAMP,
+            })
+        except Exception as at_err:
+            print(f"[OutboxAprovacao] Falha ao reabrir item de atenção {item_atencao_id}: {at_err}")
+
+    # Diário da ação vinculada, se houver (mesmo padrão de aprovar_rascunho
+    # para acao_id sem item_atencao_id).
+    acao_id = data.get("acao_id")
+    if acao_id and not item_atencao_id:
+        try:
+            from tools.hermes_tools import registrar_no_diario, ToolContext
+            dest_nome = data.get("destinatario_nome") or data.get("to_number") or ""
+            nota_diario = (
+                f"[WhatsApp: {dest_nome}] Envio cancelado antes de sair: "
+                f"{motivo_limpo or 'sem motivo informado'}"
+            )
+            if ctx is not None:
+                registrar_no_diario(ctx, {"task_id_alvo": acao_id, "nota": nota_diario})
+            else:
+                dummy_ctx = ToolContext(_db=db)
+                registrar_no_diario(dummy_ctx, {"task_id_alvo": acao_id, "nota": nota_diario})
+        except Exception as diary_err:
+            print(f"[OutboxAprovacao] Falha ao registrar diário na ação {acao_id}: {diary_err}")
+
+    # Edita mensagem no Telegram para "🚫 Cancelado", se houver
+    telegram_msg_id = data.get("telegram_message_id")
+    if telegram_msg_id:
+        try:
+            from core.telegram_api import edit_message
+            from hermes_core_logic import _get_telegram_token
+            from main import _resolve_default_telegram_chat_id
+
+            token = telegram_token or _get_telegram_token(db)
+            target_chat = chat_id or _resolve_default_telegram_chat_id(db)
+            if token and target_chat:
+                dest_nome = data.get("destinatario_nome") or data.get("to_number") or ""
+                novo_texto = f"🚫 <b>Envio cancelado</b>\nDestino: {html.escape(str(dest_nome))}"
+                if motivo_limpo:
+                    novo_texto += f"\nMotivo: {html.escape(motivo_limpo)}"
+                edit_message(token, target_chat, int(telegram_msg_id), novo_texto)
+        except Exception as edit_err:
+            print(f"[OutboxAprovacao] Falha ao editar mensagem Telegram {telegram_msg_id}: {edit_err}")
+
+    return {
+        "status": "ok",
+        "outbox_id": outbox_id,
+        "mensagem": "Envio cancelado com sucesso antes de sair.",
     }
 
 

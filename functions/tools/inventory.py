@@ -514,6 +514,19 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="destinatário e conteúdo de terceiro",
     ),
+    "cancelar_envio_whatsapp": ToolInventoryEntry(
+        "whatsapp", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "transação Firestore revalida status antes de escrever — a mesma disputa que "
+        "claimOutboxMessage (services/whatsapp-capture/index.js) resolve do lado do worker",
+        rede_servico="Telegram (edit_message condicional)",
+        dominio_rede=DominioRede.FECHADO,
+        dados_sensiveis_categoria="destinatário e conteúdo de terceiro",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="cancelar um job já 'canceled' devolve status 'already_canceled' sem nova escrita "
+        "(a transação lê o status atual e recusa antes do tx.update); só aceita a partir de "
+        "'pending' ou 'notified' (validar_transicao_cancelamento em outbox_aprovacao.py) — "
+        "qualquer outro status (sent, failed, aguardando_aprovacao, ...) é recusado com erro.",
+    ),
     "solicitar_autorizacao_argos": ToolInventoryEntry(
         "argos_autorizacao", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.COORDENACAO_LIMITADA,
         "nenhum — consultar_autorizacao_argos é chamado depois, manualmente",

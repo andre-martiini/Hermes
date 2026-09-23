@@ -487,6 +487,11 @@ def consultar_envio(ctx, args: dict) -> dict:
         if d.get("status") == "expirado":
             saida["expirado_em"] = _iso(d.get("expirado_em"))
             saida["message"] = "Expirado sem aprovação (mais de 48h)."
+        if d.get("status") == "canceled":
+            saida["cancelado_em"] = _iso(d.get("canceled_at"))
+            saida["cancelado_via"] = d.get("cancelado_via")
+            saida["motivo_cancelamento"] = d.get("motivo_cancelamento")
+            saida["message"] = "Cancelado antes de sair — não foi enviado."
         if d.get("status") == "notified":
             # Fallback do dispatch_scheduled_whatsapp_messages (Cloud Function): quando o
             # worker local nao esta confirmadamente online, ele notifica o dono no Telegram

@@ -13,10 +13,20 @@ bae25bc6-0729-4213-a24d-c37feea5d687 (entregue as 16:28, nunca marcado "sent"):
    botao "Sim, Enviar no WhatsApp" e um link wa.me, e o toque final de enviar
    e invisivel para o Hermes -- o job ficava preso em "notified" para sempre.
    `wa_confirm_sent:` fecha esse ciclo.
+
+Terceiro bug real, corrigido ao construir `cancelar_envio_whatsapp`
+(22/09/2026): `wa_cancel:` fazia um `.update()` direto, sem transacao nem
+revalidacao de status -- uma corrida contra `claimOutboxMessage` (o worker,
+que tambem disputa o mesmo documento numa transacao) podia sobrescrever
+silenciosamente um envio ja 'sending'/'sent' de volta para 'canceled'. Agora
+delega para `outbox_aprovacao.cancelar_envio` (mesma funcao transacional que
+a tool MCP usa) -- a garantia de exclusao mutua em si esta coberta em
+`TestCancelamento`, em test_outbox_aprovacao.py.
 """
 import unittest
 from unittest.mock import MagicMock, patch
 
+import outbox_aprovacao
 import telegram_callbacks_confirmacoes as tcc
 
 
@@ -37,13 +47,30 @@ class _CallbackTestBase(unittest.TestCase):
 
 
 class TestWaCancel(_CallbackTestBase):
-    def test_cancela_e_atualiza_firestore_sem_estourar(self):
-        tratado, db, doc_ref = self._chamar("wa_cancel:")
+    def test_delega_para_cancelar_envio_transacional_sem_escrita_direta(self):
+        with patch.object(
+            outbox_aprovacao, "cancelar_envio", return_value={"status": "ok"}
+        ) as mock_cancelar:
+            tratado, db, doc_ref = self._chamar("wa_cancel:")
+
         self.assertTrue(tratado)
-        doc_ref.update.assert_called_once()
-        payload = doc_ref.update.call_args[0][0]
-        self.assertEqual(payload["status"], "canceled")
-        self.assertIsInstance(payload["canceled_at"], str)
+        mock_cancelar.assert_called_once_with(db, "job123", cancelado_via="telegram")
+        # Sem escrita direta no doc_ref -- toda a escrita agora vive dentro
+        # da transacao de cancelar_envio (mockada aqui, testada de verdade
+        # em TestCancelamento).
+        doc_ref.update.assert_not_called()
+
+    def test_falha_no_cancelamento_nao_estoura_o_callback(self):
+        """cancelar_envio pode devolver erro (ja enviado, ja cancelado, sem
+        suporte a transacao...) -- o callback do Telegram so precisa nao
+        quebrar; a mensagem ao dono continua "cancelado" hoje (nao muda o
+        texto de sucesso por resultado, so a chamada por baixo)."""
+        with patch.object(
+            outbox_aprovacao, "cancelar_envio",
+            return_value={"status": "nao_cancelavel", "erro": "já está 'sent'"},
+        ):
+            tratado, _db, _doc_ref = self._chamar("wa_cancel:")
+        self.assertTrue(tratado)
 
 
 class TestWaConfirmSent(_CallbackTestBase):
