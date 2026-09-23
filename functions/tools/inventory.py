@@ -451,6 +451,22 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "bolsas_portal", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.COMPROMISSO_TERCEIROS,
         "nenhum — resultado nunca é reconferido",
         dados_sensiveis_categoria="CPF, RG, e-mail, telefone de terceiro",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="Idempotente (P03 sub-entrega 23/N): `tools/telegram_extended.py::execute` (ramo "
+        "`registrar_inscricao_bolsa_publica`) consulta `vinculos_projeto` por `project_id`+`cpf` ANTES de "
+        "criar -- se já existe, devolve `{success: True, alreadyLinked: True, person_id}` SEM criar um "
+        "segundo vínculo, mesmo espírito 'resposta muda mas efeito não' já aceito para `aprovar_rascunho_"
+        "whatsapp`/`consumir_autorizacao_argos` (ambas sub-entrega 20/N) -- ao contrário do caso ambíguo de "
+        "`excluir_objetivo_estrategico`/`revogar_promocao_autonomia`, a segunda chamada continua devolvendo "
+        "`success: True` (não um erro), então não há a mesma ambiguidade de interpretação. O perfil em "
+        "`perfil_pessoas` também converge: busca por `cpf` e faz `.set(merge=True)` no doc existente (ou "
+        "cria um novo se o cpf ainda não tinha perfil) -- `updated_at` é reescrito a cada chamada, mesmo "
+        "padrão bookkeeping-mutável já aceito para `mcp_checked_at` em `registrar_saude`. Caveat (mesma "
+        "classe já aceita para `consultar_autorizacao_argos`/`consultar_investimentos`): as duas consultas "
+        "(`perfil_pessoas` por cpf, `vinculos_projeto` por project_id+cpf) são consulta-depois-escreve, sem "
+        "transação -- duas chamadas genuinamente CONCORRENTES (não um retry sequencial) poderiam, em "
+        "teoria, ambas passarem pela checagem de `vinculos_projeto` antes de qualquer uma criar, "
+        "duplicando o vínculo. Não corrigido nesta fatia, só documentado.",
     ),
     "consultar_financas_v2": ToolInventoryEntry(
         "financas_pessoais", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
@@ -474,8 +490,18 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.COMPROMISSO_TERCEIROS,
         "nenhum aqui — consultar_envio_whatsapp seria o verificador real da entrega",
         dados_sensiveis_categoria="destinatário e conteúdo de terceiro",
+        idempotencia=_I.NAO_IDEMPOTENTE,
         nota="classificação COMPROMISSO_TERCEIROS já existe em autonomy/policy.py::CLASSE_EFEITO_PISO; "
-        "só enfileira em whatsapp_outbox — quem entrega é um worker separado, não esta chamada",
+        "só enfileira em whatsapp_outbox — quem entrega é um worker separado, não esta chamada. Não "
+        "idempotente (P03 sub-entrega 23/N): `tools/hermes_tools.py::_schedule_whatsapp_message` chama "
+        "`tools/schedule_whatsapp_message.py::schedule_whatsapp_message` com `idempotency_key=ctx."
+        "mcp_confirmation_id`; QUANDO um `mcp_confirmation_id` está disponível, o doc de outbox usa esse "
+        "valor como ID determinístico e uma segunda chamada com o MESMO id não duplica -- mas isso só "
+        "protege reenvio dentro da MESMA confirmação MCP (retry de rede), não uma segunda chamada da tool "
+        "com os MESMOS argumentos: cada nova confirmação (`mcp_confirmation_id` novo) gera um doc novo com "
+        "ID automático, enfileirando uma SEGUNDA mensagem real para o destinatário -- mesmo caveat já "
+        "aceito para `pausar_conversa` (sub-entrega 17/N), que delega para a MESMA função. Classificação "
+        "conservadora mantida em NAO_IDEMPOTENTE (efeito real sobre terceiro, não apenas interno).",
     ),
     "criar_rascunho_whatsapp": ToolInventoryEntry(
         "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, True, True, _C.COMPROMISSO_TERCEIROS,
@@ -769,7 +795,29 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "sipac", _L.LEITURA_E_ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum", rede_servico="mesmo scraper SIPAC",
         dados_sensiveis_categoria="nomes de interessados do processo",
-        nota="liga/desliga flag de monitoramento; chamar de novo com acompanhar=False desfaz",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="liga/desliga flag de monitoramento; chamar de novo com acompanhar=False desfaz. "
+        "Idempotente (P03 sub-entrega 23/N): `tools/hermes_tools.py::acompanhar_processo_sipac` grava em "
+        "`sipac_processos/{uid}_{numero}` (ID DETERMINÍSTICO por usuário+processo) via `.set(merge=True)` "
+        "-- repetir a MESMA chamada (mesmo `numero_processo`, mesmo `acompanhar`) converge no MESMO valor "
+        "de `acompanhar`, o efeito que o chamador pediu. `ultimaConsulta` e os campos do scrape (`**res`) "
+        "são reescritos a cada chamada, mesmo padrão bookkeeping-mutável já aceito para `mcp_checked_at` "
+        "em `registrar_saude` (sub-entrega 17/N) -- não bloqueia a classificação. ACHADO REAL (mais sério "
+        "que o de `registrar_saude`, não corrigido nesta fatia, registrado para P05): ao contrário de "
+        "`mcp_checked_at` (confirmadamente nunca lido por nenhuma rotina), o campo `snapshot_hash` dentro "
+        "de `res` (`functions_node/sipacService.js::generateSnapshotHash`) É lido por "
+        "`functions_node/index.js::scheduledSipacSync` (cron a cada 2h) para decidir se o processo mudou "
+        "e disparar notificação -- o cron só atualiza `snapshot_hash`/dispara notificação quando o hash "
+        "novo diverge do gravado. Como esta tool sobrescreve incondicionalmente o MESMO campo com o hash "
+        "do scrape feito NA HORA da chamada manual, uma única chamada (não precisa repetir) pode adiantar "
+        "silenciosamente o baseline que o cron usa -- se o processo mudou de verdade entre a última "
+        "sincronização do cron e esta chamada manual, o cron seguinte compara contra um hash já "
+        "atualizado por esta tool e NÃO detecta a mudança como nova, suprimindo a notificação que o dono "
+        "esperaria receber. Não é uma questão de REPETIR a chamada (o efeito de sobrescrever o hash "
+        "acontece já na primeira), por isso não muda o veredito de idempotência -- mas é o mesmo tipo de "
+        "risco que a seção A09/P05 do plano já nomeia ('suprimir loops causados por atualização de "
+        "resumo/telemetria pelo próprio agente'). Sem transação/exclusão mútua entre esta tool e o cron "
+        "(mesma classe de caveat não-atômico já aceita para `registrar_saude`/`consultar_investimentos`).",
     ),
     "confirmar_edicao_acao": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
@@ -993,7 +1041,16 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         rede_servico="Groq/Whisper (áudio) e Gemini (vídeo + síntese), via trigger assíncrono disparado pelo handler",
         dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="conteúdo de conversas de terceiros",
-        nota="handler síncrono só grava doc 'queued'; sem tool para desfazer uma consolidação",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="handler síncrono só grava doc 'queued'; sem tool para desfazer uma consolidação. Não "
+        "idempotente (P03 sub-entrega 23/N): `tools/whatsapp_tools.py::consolidar` usa "
+        "`db.collection(COL_CONSOLIDACOES).document()` (ID automático do Firestore) + `.set()` "
+        "incondicional, sem nenhuma checagem de dedup por `chat_id`/`message_ids` -- repetir a MESMA "
+        "chamada (mesmo recorte de mensagens) cria um SEGUNDO job de consolidação, que "
+        "`on_whatsapp_consolidacao_created` processa de novo do zero (transcrição de áudio/vídeo e síntese "
+        "reais, com custo de Groq/Gemini), produzindo um segundo resultado independente em vez de devolver "
+        "o existente -- mesmo padrão já aceito para `criar_rascunho_whatsapp`/`solicitar_autorizacao_argos` "
+        "(sub-entregas 19/N e 20/N).",
     ),
     "ler_consolidacao_whatsapp": ToolInventoryEntry(
         "whatsapp", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",
@@ -1105,8 +1162,17 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "whatsapp_secretario", _L.LEITURA_E_ESCRITA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
         "expiração por validade é o único mecanismo automático, aplicado na própria leitura",
         dados_sensiveis_categoria="dados de contato prioritário",
+        idempotencia=_I.IDEMPOTENTE,
         nota="escrita é efeito colateral passivo (expira item já vencido durante a leitura), não o "
-        "propósito da tool — por isso nao_aplica em vez de reversivel/irreversivel",
+        "propósito da tool — por isso nao_aplica em vez de reversivel/irreversivel. Idempotente (P03 "
+        "sub-entrega 23/N): `secretario_whatsapp.py::consultar_contatos_prioritarios` só escreve quando "
+        "`status == ATIVO` E o prazo (`valido_ate`) já passou -- a própria escrita muda o status para "
+        "EXPIRADO, então qualquer chamada seguinte encontra a guarda (`status != ATIVO`) e não escreve de "
+        "novo, mesmo desenho e mesma evidência de `consultar_autorizacao_argos` (sub-entrega 20/N). Mesmo "
+        "caveat de não-atomicidade também já aceito lá: a checagem é `stream()` + `update()` individual "
+        "por documento, sem transação -- duas chamadas verdadeiramente concorrentes poderiam, em teoria, "
+        "passar as duas pela guarda antes de qualquer uma escrever, mas gravariam o MESMO valor final "
+        "(EXPIRADO) sem efeito colateral externo adicional (sem card de Telegram, sem documento novo).",
     ),
     "cancelar_contato_prioritario_secretario": ToolInventoryEntry(
         "whatsapp_secretario", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,
