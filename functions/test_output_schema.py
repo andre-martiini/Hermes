@@ -581,6 +581,14 @@ class TestOutputSchema(unittest.TestCase):
             error["properties"]["erro_tipo"]["enum"],
             ["politica", "resultado_tool", "excecao", "erro_configuracao"],
         )
+        # reason_code SEM null -- achado da 1a rodada de revisão
+        # adversarial: `PolicyDecision.reason_code` é tipado `str` (nunca
+        # `str | None`) e os 4 pontos de construção em `autonomy/policy.py`
+        # sempre passam literal de string.
+        self.assertEqual(
+            error["properties"]["bloqueio_politica"]["properties"]["reason_code"],
+            {"type": "string"},
+        )
         self.assertFalse(error["additionalProperties"])
 
         self.assertEqual(processing["required"], ["job_id", "tool", "status", "mensagem"])
@@ -588,7 +596,9 @@ class TestOutputSchema(unittest.TestCase):
         self.assertFalse(processing["additionalProperties"])
 
     def test_paridade_nove_tools_tem_output_schema_hoje(self):
-        # Não por amostragem: para TODA tool do catálogo real (106 hoje),
+        # Não por amostragem: para TODA tool do catálogo real (108 hoje --
+        # `len(registry.list_tool_names())`; achado da revisão adversarial
+        # desta sub-entrega: "106" estava desatualizado desde antes dela),
         # output_schema devolve algo só para calculadora, buscar_contato,
         # consultar_lista_compras, consultar_execucoes_agente,
         # consultar_pedidos_agente, consultar_historico_acoes, obter_acao,

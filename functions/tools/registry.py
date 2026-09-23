@@ -1938,10 +1938,15 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     # (`truncado` em `consultar_lista_compras`, `status` no ramo de erro de
     # `obter_acao`). `bloqueio_politica` e opcional pelo mesmo motivo, so
     # presente quando `erro_tipo == "politica"`: `{"decision": string,
-    # "reason_code": string|null}`, forma fixa gravada a mao em
+    # "reason_code": string}`, forma fixa gravada a mao em
     # `on_mcp_job_created` (`decisao.decision.value` sempre string do enum
-    # `Decisao`; `decisao.reason_code` pode ser `None`, ver `autonomy/
-    # policy.py`).
+    # `Decisao`). `reason_code` SEM `null` -- CORRECAO da 1a rodada de
+    # revisao adversarial desta sub-entrega, que apontou a redacao anterior
+    # ("pode ser None") como nao verificada: `autonomy/contracts.py::
+    # PolicyDecision.reason_code` e tipado `str` (nao `str | None`), e os 4
+    # pontos de construcao de `PolicyDecision` em `autonomy/policy.py`
+    # (incluindo `_decisao_padrao_por_classe`, tipada `-> tuple[Decisao,
+    # str, bool]`) sempre passam um literal de string, nunca `None`.
     #
     # `mensagem` (ramo 5, unico `status` alcancavel hoje: `"processing"`) e
     # uma string literal fixa no proprio `ler_job`, nunca dado do Firestore
@@ -1986,7 +1991,7 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
                         "type": "object",
                         "properties": {
                             "decision": {"type": "string"},
-                            "reason_code": {"type": ["string", "null"]},
+                            "reason_code": {"type": "string"},
                         },
                         "required": ["decision", "reason_code"],
                         "additionalProperties": False,
@@ -2018,9 +2023,11 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (97 das 106 tools
-    hoje, apos a nona entrada, `consultar_job`, sub-entrega 25/N),
-    deliberadamente:
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (99 das 108 tools
+    hoje -- `len(registry.list_tool_names())`, nao os "106" que este
+    docstring citava ate a sub-entrega 24/N, contagem ja desatualizada
+    antes desta fatia e corrigida aqui por tocar esta mesma linha -- apos
+    a nona entrada, `consultar_job`, sub-entrega 25/N), deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
     (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).
