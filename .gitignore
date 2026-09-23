@@ -44,6 +44,7 @@ scripts/dados_cadastrais_seed.json
 __pycache__/
 *.pyc
 functions/venv/
+functions/.venv/
 
 functions_node/.cache/
 
