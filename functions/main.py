@@ -9944,12 +9944,25 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
                 task_data = task_doc.to_dict()
 
-                # Editar ação concluída/excluída é permitido (decisão do
-                # dono, 23/09/2026) — mesma mudança em confirmarEdicaoAcao,
-                # que é quem de fato grava quando o usuário confirma o card
-                # que esta função prepara. Deixar só aqui bloqueado deixaria
-                # o copiloto web recusar propor uma edição que o conector
-                # MCP já aceita.
+                # Editar ação concluída é permitido (decisão do dono,
+                # 23/09/2026) — mesma mudança em confirmarEdicaoAcao, que é
+                # quem de fato grava quando o usuário confirma o card que
+                # esta função prepara. Deixar só aqui bloqueado deixaria o
+                # copiloto web recusar propor uma edição que o conector MCP
+                # já aceita.
+                #
+                # 'excluído' continua bloqueado aqui, DE PROPÓSITO (achado
+                # da revisão adversarial, 23/09/2026): confirmarEdicaoAcao
+                # nunca tratou 'excluído' como especial, mas esse status
+                # dispara exclusão real do documento e do evento do Google
+                # Calendar em sync_google_tasks_push (main.py) na próxima
+                # sincronização — editar uma ação que está prestes a ser
+                # apagada de verdade é, na melhor das hipóteses, inútil, e
+                # confuso na pior. Não era o que o dono pediu (ele falou em
+                # ação "concluída"); manter esse status bloqueado aqui evita
+                # estender esse risco pré-existente para um caminho novo.
+                if task_data.get('status') == 'excluído':
+                    return "ERRO|Esta ação já foi excluída (a exclusão real acontece na próxima sincronização) e não pode ser editada."
 
                 # Monta o diff de campos (original vs. novo)
                 alteracoes_diff = {}

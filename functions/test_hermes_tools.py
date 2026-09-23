@@ -1454,10 +1454,20 @@ class TestEditarAcaoConcluidaPermitido(unittest.TestCase):
         # mais abaixo, de propósito (carimba data_conclusao) — não é a
         # validação removida, então não checamos por essa substring.
 
-    def test_preparar_edicao_acao_nao_bloqueia_mais_concluida_ou_excluida(self):
+    def test_preparar_edicao_acao_nao_bloqueia_mais_concluida(self):
         corpo = self._corpo_da_funcao("preparar_edicao_acao")
         self.assertNotIn("concluída ou excluída", corpo)
         self.assertNotIn("in ('concluído', 'excluído')", corpo)
+
+    def test_preparar_edicao_acao_ainda_recusa_excluida(self):
+        """Achado da revisão adversarial (23/09/2026): 'excluído' dispara
+        exclusão real do documento/evento do Calendar na próxima
+        sincronização (sync_google_tasks_push, main.py) -- diferente de
+        'concluído', continua bloqueado aqui de propósito. Teste
+        comportamental de verdade em test_telegram_extended.py cobre a
+        TERCEIRA cópia desta mesma validação, em tools/telegram_extended.py."""
+        corpo = self._corpo_da_funcao("preparar_edicao_acao")
+        self.assertIn("já foi excluída", corpo)
 
     def test_confirmar_edicao_acao_ainda_recusa_snapshot_desatualizado(self):
         """A restrição removida foi só a de status -- a de concorrência

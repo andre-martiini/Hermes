@@ -500,8 +500,25 @@ def execute(tool_name: str, slots: dict, db) -> str:
         if not task_doc.exists:
             return f"ERRO|Ação '{task_id}' não encontrada."
         task_data = task_doc.to_dict() or {}
-        if task_data.get("status") == "concluído":
-            return "ERRO|Esta ação já foi concluída e não pode ser editada."
+        # Editar ação concluída é permitido (decisão do dono, 23/09/2026) —
+        # mesma mudança em main.py::confirmarEdicaoAcao/preparar_edicao_acao.
+        # Esta é uma TERCEIRA cópia da mesma validação, num tool MCP separado
+        # (preparar_edicao_acao + confirmar_edicao_acao, o par de duas
+        # chamadas — diferente do editar_acao de uma chamada só), achada só
+        # na revisão adversarial da primeira correção; sem isto o conector
+        # continuava com dois caminhos MCP divergentes.
+        #
+        # 'excluído' é bloqueado aqui de propósito (achado da mesma revisão
+        # adversarial): esta cópia nunca tinha essa checagem — diferente de
+        # confirmarEdicaoAcao, que também nunca teve. Mas 'excluído' dispara
+        # exclusão real do documento e do evento do Google Calendar na
+        # próxima sincronização (sync_google_tasks_push, main.py); editar
+        # algo prestes a ser apagado de verdade não é o que foi pedido, e
+        # main.py::preparar_edicao_acao (o caminho irmão do copiloto web) já
+        # ficou bloqueado por esse mesmo motivo — sem isto os dois caminhos
+        # MCP de duas chamadas divergiriam entre si.
+        if task_data.get("status") == "excluído":
+            return "ERRO|Esta ação já foi excluída (a exclusão real acontece na próxima sincronização) e não pode ser editada."
         alteracoes_diff = {}
         for campo, novo_valor in alteracoes.items():
             if campo not in allowed_fields:
