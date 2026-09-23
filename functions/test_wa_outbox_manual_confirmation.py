@@ -146,15 +146,75 @@ class TestWaCancel(_CallbackTestBase):
 
 
 class TestWaConfirmSent(_CallbackTestBase):
-    def test_confirma_envio_manual_e_marca_sent(self):
+    """Achado da 2ª rodada de revisão adversarial (22/09/2026): este handler
+    fazia a MESMA escrita crua, sem transação nem revalidação, que
+    wa_cancel: fazia antes de ser corrigido -- os dois botões vêm juntos no
+    mesmo cartão. Agora delega para outbox_aprovacao.confirmar_envio_manual
+    (transacional) e reflete o resultado real, mesmo padrão de TestWaCancel.
+    """
+
+    def test_delega_para_confirmar_envio_manual_sem_escrita_direta(self):
         import datetime
-        tratado, db, doc_ref = self._chamar("wa_confirm_sent:")
+        with patch.object(
+            outbox_aprovacao, "confirmar_envio_manual", return_value={"status": "ok"}
+        ) as mock_confirmar:
+            tratado, db, doc_ref = self._chamar("wa_confirm_sent:")
+
         self.assertTrue(tratado)
-        doc_ref.update.assert_called_once()
-        payload = doc_ref.update.call_args[0][0]
-        self.assertEqual(payload["status"], "sent")
-        self.assertEqual(payload["sent_via"], "telegram_confirmacao_manual")
-        self.assertIsInstance(payload["sent_at"], datetime.datetime)
+        self.assertEqual(mock_confirmar.call_args[0][:2], (db, "job123"))
+        self.assertIsInstance(mock_confirmar.call_args[1]["sent_at"], datetime.datetime)
+        doc_ref.update.assert_not_called()
+
+    def test_sucesso_informa_confirmado(self):
+        with patch.object(outbox_aprovacao, "confirmar_envio_manual", return_value={"status": "ok"}):
+            tratado, mock_answer, mock_send = self._chamar_com_mocks("wa_confirm_sent:")
+        self.assertTrue(tratado)
+        mock_answer.assert_called_once_with("fake-token", "q1", "Marcado como enviado.")
+        self.assertIn("confirmado como feito", mock_send.call_args[0][2])
+
+    def test_ja_enviado_idempotente_tambem_informa_confirmado(self):
+        with patch.object(
+            outbox_aprovacao, "confirmar_envio_manual", return_value={"status": "already_sent"}
+        ):
+            tratado, _mock_answer, mock_send = self._chamar_com_mocks("wa_confirm_sent:")
+        self.assertTrue(tratado)
+        self.assertIn("confirmado como feito", mock_send.call_args[0][2])
+
+    def test_confirmar_apos_ja_cancelado_recusa_em_vez_de_reviver(self):
+        """O cenário concreto do achado: '❌ Cancelar' já transacionou o
+        documento para 'canceled' (mesmo cartão); um toque duplicado/
+        reentregue de '☑️ Já enviei' não pode reviver isso como 'sent'."""
+        with patch.object(
+            outbox_aprovacao, "confirmar_envio_manual",
+            return_value={
+                "status": "nao_confirmavel",
+                "erro": "não é possível confirmar: já está 'canceled'",
+                "status_atual": "canceled",
+            },
+        ):
+            tratado, mock_answer, mock_send = self._chamar_com_mocks("wa_confirm_sent:")
+        self.assertTrue(tratado)
+        toast = mock_answer.call_args[0][2]
+        self.assertIn("Não foi possível confirmar", toast)
+        texto = mock_send.call_args[0][2]
+        self.assertIn("canceled", texto)
+        self.assertNotIn("confirmado como feito", texto)
+
+    def test_nao_encontrado_informa_ao_dono(self):
+        with patch.object(
+            outbox_aprovacao, "confirmar_envio_manual", return_value={"status": "not_found"}
+        ):
+            tratado, _mock_answer, mock_send = self._chamar_com_mocks("wa_confirm_sent:")
+        self.assertTrue(tratado)
+        self.assertIn("não encontrado", mock_send.call_args[0][2])
+
+    def test_excecao_nao_estoura_e_informa_falha(self):
+        with patch.object(
+            outbox_aprovacao, "confirmar_envio_manual", side_effect=RuntimeError("boom")
+        ):
+            tratado, _mock_answer, mock_send = self._chamar_com_mocks("wa_confirm_sent:")
+        self.assertTrue(tratado)
+        self.assertIn("Falha ao tentar confirmar", mock_send.call_args[0][2])
 
 
 if __name__ == "__main__":

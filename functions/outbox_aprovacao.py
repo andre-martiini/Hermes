@@ -987,6 +987,73 @@ def marcar_notificado(db, outbox_id: str, notified_at=None) -> bool:
         return False
 
 
+def confirmar_envio_manual(db, outbox_id: str, sent_at=None, sent_via: str = "telegram_confirmacao_manual") -> dict:
+    """Confirma que uma mensagem notificada pelo fallback manual (`notified`
+    -- ver `marcar_notificado`) foi de fato enviada pelo dono via wa.me.
+    Fecha o ciclo do botão "☑️ Já enviei" no Telegram (`wa_confirm_sent:`).
+
+    Achado real da 2ª rodada de revisão adversarial de `cancelar_envio`
+    (22/09/2026): o handler `wa_confirm_sent:` fazia um `.update()` cru,
+    igual ao que `wa_cancel:` fazia antes de ser corrigido -- as duas
+    aparecem juntas no MESMO cartão do Telegram ("☑️ Já enviei" e
+    "❌ Cancelar"), então um toque duplicado/reentregue (webhook do Telegram
+    é conhecido por reenviar `callback_query` em timeout) podia disparar
+    "Já enviei" depois de "Cancelar" já ter transacionado o documento para
+    `canceled`, sobrescrevendo silenciosamente de volta para `sent` --
+    revivendo um envio cancelado e corrompendo o mesmo registro de auditoria
+    que `cancelar_envio`/`marcar_notificado` protegem.
+
+    Transacional e revalida o status: só aceita a partir de `notified` (o
+    único status em que este botão existe). Idempotente: confirmar de novo
+    um job já `sent` devolve status `already_sent`, sem reescrever. Qualquer
+    outro status (`canceled`, `pending`, `failed`, ...) é recusado com
+    `nao_confirmavel`, nunca sobrescrito.
+    """
+    outbox_id = str(outbox_id or "").strip()
+    if not outbox_id:
+        return {"erro": "outbox_id (job_id) é obrigatório."}
+    doc_ref = db.collection(COLLECTION).document(outbox_id)
+
+    if not hasattr(db, "transaction"):
+        return {
+            "status": "erro_configuracao",
+            "erro": "Backend Firestore sem suporte a transação; confirmação recusada para evitar condição de corrida.",
+        }
+
+    try:
+        transaction = db.transaction()
+
+        @firestore.transactional
+        def _exec_confirmar(tx):
+            snap = doc_ref.get(transaction=tx)
+            if not snap.exists:
+                return {"status": "not_found", "erro": f"Envio '{outbox_id}' não encontrado."}
+            status_atual = (snap.to_dict() or {}).get("status")
+            if status_atual == STATUS_SENT:
+                return {"status": "already_sent"}
+            if status_atual != STATUS_NOTIFIED:
+                return {
+                    "status": "nao_confirmavel",
+                    "erro": f"não é possível confirmar: já está '{status_atual}'",
+                    "status_atual": status_atual,
+                }
+
+            tx.update(doc_ref, {
+                "status": STATUS_SENT,
+                "sent_at": sent_at if sent_at is not None else firestore.SERVER_TIMESTAMP,
+                "sent_via": sent_via,
+            })
+            return {"status": "ok"}
+
+        resultado = _exec_confirmar(transaction)
+    except Exception as exc:
+        print(f"[OutboxAprovacao] Falha ao confirmar envio manual {outbox_id}: {exc}")
+        return {"status": "erro_transacao", "erro": f"Não foi possível confirmar de forma atômica: {exc}"}
+
+    resultado["outbox_id"] = outbox_id
+    return resultado
+
+
 def aplicar_edicao_rascunho(
     db,
     outbox_id: str,

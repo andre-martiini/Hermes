@@ -650,6 +650,82 @@ class TestMarcarNotificado(unittest.TestCase):
         self.assertEqual(outbox._docs["job-4"]["status"], oa.STATUS_PENDING)
 
 
+class TestConfirmarEnvioManual(unittest.TestCase):
+    """Achado da 2ª rodada de revisão adversarial de cancelar_envio
+    (22/09/2026): wa_confirm_sent: (o botão "☑️ Já enviei", que vem no MESMO
+    cartão do Telegram que "❌ Cancelar") fazia a mesma escrita crua que
+    wa_cancel: fazia antes de ser corrigido. confirmar_envio_manual fecha
+    essa lacuna com o mesmo padrão transacional."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.outbox = self.db.collection(oa.COLLECTION)
+
+    def test_confirma_com_sucesso_a_partir_de_notified(self):
+        self.outbox._docs["job-1"] = {"status": oa.STATUS_NOTIFIED}
+        agora = datetime.datetime.now(timezone.utc)
+        res = oa.confirmar_envio_manual(self.db, "job-1", sent_at=agora)
+        self.assertEqual(res["status"], "ok")
+        doc = self.outbox._docs["job-1"]
+        self.assertEqual(doc["status"], oa.STATUS_SENT)
+        self.assertEqual(doc["sent_at"], agora)
+        self.assertEqual(doc["sent_via"], "telegram_confirmacao_manual")
+
+    def test_confirmar_ja_enviado_e_idempotente(self):
+        self.outbox._docs["job-2"] = {"status": oa.STATUS_SENT, "sent_via": "worker"}
+        res = oa.confirmar_envio_manual(self.db, "job-2")
+        self.assertEqual(res["status"], "already_sent")
+        # Não reescreve por cima de um sent_via já registrado por outro caminho.
+        self.assertEqual(self.outbox._docs["job-2"]["sent_via"], "worker")
+
+    def test_confirmar_apos_cancelado_recusa_em_vez_de_reviver(self):
+        """O cenário real do achado: '❌ Cancelar' já transacionou para
+        'canceled' -- um '☑️ Já enviei' duplicado/reentregue no mesmo
+        cartão não pode reviver isso como 'sent'."""
+        self.outbox._docs["job-3"] = {
+            "status": oa.STATUS_CANCELED,
+            "motivo_cancelamento": "confirmado por outro canal",
+        }
+        res = oa.confirmar_envio_manual(self.db, "job-3")
+        self.assertEqual(res["status"], "nao_confirmavel")
+        self.assertIn("canceled", res["erro"])
+        doc = self.outbox._docs["job-3"]
+        self.assertEqual(doc["status"], oa.STATUS_CANCELED)
+        self.assertEqual(doc["motivo_cancelamento"], "confirmado por outro canal")
+
+    def test_confirmar_pending_recusa(self):
+        """Só o status 'notified' tem esse botão -- 'pending' é domínio do
+        worker/cancelar_envio, não deste."""
+        self.outbox._docs["job-4"] = {"status": oa.STATUS_PENDING}
+        res = oa.confirmar_envio_manual(self.db, "job-4")
+        self.assertEqual(res["status"], "nao_confirmavel")
+        self.assertEqual(self.outbox._docs["job-4"]["status"], oa.STATUS_PENDING)
+
+    def test_confirmar_nao_encontrado(self):
+        res = oa.confirmar_envio_manual(self.db, "job-inexistente")
+        self.assertEqual(res["status"], "not_found")
+
+    def test_confirmar_sem_suporte_a_transacao_recusa_sem_escrever(self):
+        real_db = _MockDb()
+        outbox = real_db.collection(oa.COLLECTION)
+        outbox._docs["job-5"] = {"status": oa.STATUS_NOTIFIED}
+        db_sem_tx = _MockDbSemTransacao(real_db)
+
+        res = oa.confirmar_envio_manual(db_sem_tx, "job-5")
+        self.assertEqual(res["status"], "erro_configuracao")
+        self.assertEqual(outbox._docs["job-5"]["status"], oa.STATUS_NOTIFIED)
+
+    def test_confirmar_com_falha_de_transacao_retorna_erro_sem_escrever(self):
+        outbox = _MockCollection(None, oa.COLLECTION)
+        outbox._docs["job-6"] = {"status": oa.STATUS_NOTIFIED}
+        db_quebrado = _MockDbTransacaoQuebrada()
+        db_quebrado._cols[oa.COLLECTION] = outbox
+
+        res = oa.confirmar_envio_manual(db_quebrado, "job-6")
+        self.assertEqual(res["status"], "erro_transacao")
+        self.assertEqual(outbox._docs["job-6"]["status"], oa.STATUS_NOTIFIED)
+
+
 class _BrokenMockTransaction(_MockTransaction):
     """Simula falha real de transação (ex.: Firestore indisponível ao iniciar
     a transação). Falha em ``_begin`` — antes de qualquer leitura/escrita —
