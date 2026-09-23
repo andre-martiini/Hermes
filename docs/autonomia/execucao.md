@@ -245,7 +245,7 @@ testes:
     - "python3 -m unittest test_secretario_whatsapp test_output_schema -v (isolado, apos o fix do achado do Codex)"
   resultados:
     - "Baseline (origin/main, commit d97e869): 2164/2164, 0 falhas, 0 erros."
-    - "Apos a implementacao inicial do outputSchema + 6 testes novos: 2168/2168, 0 falhas -- confirmado por mim e, de forma independente, pela 1a rodada de revisao adversarial."
+    - "Apos a implementacao inicial do outputSchema + 4 testes novos: 2168/2168, 0 falhas -- confirmado por mim e, de forma independente, pela 1a rodada de revisao adversarial."
     - "test_output_schema.py isolado (apos implementacao inicial): 84/84 OK."
     - "Apos o fix do achado do Codex (coercao de desativa_em + 1 teste de regressao novo): test_secretario_whatsapp + test_output_schema isolados: 168/168 OK. Suite completa: 2169/2169, sem regressao -- confirmado por mim e, de forma independente, pela 2a rodada de revisao adversarial."
 evidencias:
