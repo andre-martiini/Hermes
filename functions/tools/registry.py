@@ -2040,19 +2040,33 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     #     default string do proprio `.get()` para documentos vindos desses
     #     2 escritores. O terceiro escritor (anexo do Copiloto, `main.py`,
     #     ~linha 11291) grava os 4 com esses nomes exatos, mas os valores
-    #     (`titulo_doc`/`resumo_doc`/`natureza_doc`) vem de `meta.get(...)`,
-    #     onde `meta = json.loads(extraction_text)` e a RESPOSTA LIVRE de um
-    #     modelo Gemini (sem `response_schema` nem validacao de tipo) --
-    #     `titulo_doc` tem fallback para `real_file_name` (string), mas o
-    #     campo do JSON, se presente, pode teoricamente vir de outro tipo
-    #     sem que nada rejeite -- risco aceito e nao-bloqueante, mesma
-    #     categoria ja registrada para campos de origem LLM em
-    #     `_buscar_contato` (sub-entrega 9/N, `modelo_interacao`): o
-    #     CONTRATO PRETENDIDO e string, sem garantia estrutural mais forte
-    #     disponivel sem mudar comportamento de producao. `url_drive` so e
-    #     gravado por este 3o escritor -- os outros 2 usam a chave `url`
-    #     (nunca lida por `buscar_acervo`), entao esse campo cai no default
-    #     `""` para qualquer documento fora deste 3o escritor.
+    #     de 3 deles (`titulo_doc`/`resumo_doc`/`natureza_doc`, -> `titulo`/
+    #     `trecho`/`fonte`) vem de `meta.get(...)`, onde `meta =
+    #     json.loads(extraction_text)` e a RESPOSTA LIVRE de um modelo
+    #     Gemini (sem `response_schema` nem validacao de tipo). ACHADO da
+    #     revisao do Codex nesta PR, CORRIGIDO: `titulo_doc = meta.get(
+    #     'titulo', real_file_name)` so aplica o fallback quando a CHAVE
+    #     esta AUSENTE do JSON -- se o modelo devolver `{"titulo": null,
+    #     ...}` (chave presente, valor `null`), `dict.get` devolve `None`
+    #     DIRETO, ignorando o fallback (confirmado: `{"titulo": None}.get(
+    #     "titulo", "x")` e `None`, nao `"x"`). O mesmo vale para `resumo`/
+    #     `natureza` (`trecho`/`fonte`), que nem tem fallback nenhum
+    #     (default `''` so no `.get()` de `busca_acervo`, nunca acionado
+    #     quando a chave existe com `null`). Por isso os 3 campos sao
+    #     `["string", "null"]`, nao `"string"` puro -- refletindo o tipo
+    #     REALMENTE alcancavel por este caminho, nao so o pretendido pelo
+    #     prompt. Um valor de outro tipo (numero, lista, dict) continua
+    #     residual e nao-bloqueante, mesma categoria ja aceita para campos
+    #     de origem LLM em `_buscar_contato` (sub-entrega 9/N,
+    #     `modelo_interacao`): normalizar tudo exigiria mudar o
+    #     comportamento de producao do escritor, fora do escopo desta
+    #     fatia. `url_drive` e DIFERENTE -- construido deterministicamente
+    #     via f-string (`main.py`, linha do `drive_link`), nunca vem do
+    #     JSON do Gemini -- por isso continua `string` pura, sem `null`.
+    #     `url_drive` so e gravado por este 3o escritor -- os outros 2 usam
+    #     a chave `url` (nunca lida por `buscar_acervo`), entao esse campo
+    #     cai no default `""` para qualquer documento fora deste 3o
+    #     escritor.
     #   - `task_id`: `data.get("task_id")`, SEM default -- vira `None`
     #     quando a chave nao existe. Os 3 escritores: `knowledge_graph`
     #     grava a chave so quando o parametro e truthy (`if task_id:
@@ -2121,9 +2135,9 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
                             "type": "object",
                             "properties": {
                                 "id": {"type": "string"},
-                                "titulo": {"type": "string"},
-                                "trecho": {"type": "string"},
-                                "fonte": {"type": "string"},
+                                "titulo": {"type": ["string", "null"]},
+                                "trecho": {"type": ["string", "null"]},
+                                "fonte": {"type": ["string", "null"]},
                                 "url_drive": {"type": "string"},
                                 "task_id": {"type": ["string", "null"]},
                                 "origem": {"type": ["string", "object"]},

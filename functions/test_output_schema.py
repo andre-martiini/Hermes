@@ -99,7 +99,12 @@ Copiloto, `main.py`) grava um DICT, nao string, entao o schema declara
 esse atributo) -- ver comentario de `_OUTPUT_SCHEMAS` em
 `tools/registry.py` para o levantamento completo dos 3 escritores e por
 que nenhum teste dedicado existia para esta tool antes desta sub-entrega
-(lacuna fechada em `test_hermes_tools.py`).
+(lacuna fechada em `test_hermes_tools.py`). CORRECAO apos revisao do
+Codex na PR desta sub-entrega: `titulo`/`trecho`/`fonte` (escritor do
+Copiloto) sao `["string", "null"]`, nao `"string"` puro -- o fallback de
+`titulo_doc = meta.get('titulo', real_file_name)` so dispara quando a
+CHAVE esta ausente do JSON do Gemini, nunca quando a chave existe com
+valor `null` explicito (`{"titulo": None}.get("titulo", "x")` e `None`).
 
 Cinco frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
@@ -629,6 +634,19 @@ class TestOutputSchema(unittest.TestCase):
         # task_id pode faltar no documento (`data.get("task_id")` sem
         # default) -- nullable.
         self.assertEqual(item["properties"]["task_id"], {"type": ["string", "null"]})
+        # ACHADO da revisão do Codex nesta PR, CORRIGIDO: titulo/trecho/
+        # fonte (escritor do Copiloto) vêm de `meta.get(...)` sobre uma
+        # resposta livre do Gemini -- se o modelo devolver a chave presente
+        # com valor `null` explícito, o fallback (`titulo_doc = meta.get(
+        # 'titulo', real_file_name)`) NUNCA é acionado (só dispara quando a
+        # chave está AUSENTE), então `None` passa direto. Por isso
+        # `["string", "null"]`, não `"string"` puro.
+        self.assertEqual(item["properties"]["titulo"], {"type": ["string", "null"]})
+        self.assertEqual(item["properties"]["trecho"], {"type": ["string", "null"]})
+        self.assertEqual(item["properties"]["fonte"], {"type": ["string", "null"]})
+        # url_drive é diferente: construído deterministicamente via
+        # f-string, nunca vem do JSON do Gemini -- continua string pura.
+        self.assertEqual(item["properties"]["url_drive"], {"type": "string"})
         # ACHADO desta sub-entrega: um dos 3 escritores de `indice_
         # artefatos` (anexo do Copiloto) grava `origem` como dict, não
         # string -- ver comentário de `_OUTPUT_SCHEMAS`.

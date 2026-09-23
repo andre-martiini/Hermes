@@ -185,6 +185,25 @@ class TestExecucao(unittest.TestCase):
             hermes_tools._buscar_arquivos_acervo(type("Ctx", (), {})(), {})
         mock_busca.assert_called_once_with("")
 
+    def test_buscar_arquivos_acervo_nao_coage_titulo_null_do_gemini(self):
+        # Achado da revisão do Codex na PR desta sub-entrega: se o escritor
+        # de anexo do Copiloto (main.py) gravar `titulo`/`trecho`/`fonte`
+        # como `None` (a resposta livre do Gemini incluiu a chave com valor
+        # `null` explícito -- `meta.get('titulo', real_file_name)` só usa o
+        # fallback quando a CHAVE está ausente, nunca quando está presente
+        # com `null`), o wrapper não deve inventar um valor nem mascarar o
+        # `None` -- ele repassa exatamente o que `buscar_acervo` devolveu.
+        item_com_null = {
+            "id": "art-2", "titulo": None, "trecho": None, "fonte": None,
+            "url_drive": "https://drive.google.com/y", "task_id": None,
+            "origem": {"modulo": "copiloto", "id_origem": "sessao-2"}, "distancia": None,
+        }
+        with patch("tools.busca_acervo.buscar_acervo", return_value={"resultados": [item_com_null], "erro": None}):
+            resultado = hermes_tools._buscar_arquivos_acervo(type("Ctx", (), {})(), {"query": "x"})
+        self.assertIsNone(resultado["resultados"][0]["titulo"])
+        self.assertIsNone(resultado["resultados"][0]["trecho"])
+        self.assertIsNone(resultado["resultados"][0]["fonte"])
+
     def test_tool_desconhecida_levanta(self):
         from tools.tool_context import ToolContext
 
