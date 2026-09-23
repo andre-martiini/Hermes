@@ -1088,6 +1088,37 @@ class TestAguardandoJanelaEListarRascunhos(unittest.TestCase):
         self.assertEqual(item["acao_id"], None)
         self.assertEqual(item["item_atencao_id"], None)
 
+    def test_listar_rascunhos_coage_foi_editado_e_trecho_mesmo_com_tipo_bruto_no_firestore(self):
+        # Regressão da 1a rodada de revisão adversarial desta sub-entrega:
+        # os testes anteriores só cobriam `foi_editado` com o default
+        # `False` (que já é bool mesmo SEM a coerção `bool(...)`, porque
+        # `dict.get(chave, False)` devolve o literal Python `False` quando
+        # a chave está ausente) -- por isso não provavam a coerção de
+        # verdade (confirmado por mutação: remover `bool(...)` de
+        # `outbox_aprovacao.listar_rascunhos` não fazia NENHUM teste
+        # falhar). Este teste grava `foi_editado`/`content` com tipos
+        # BRUTOS que só a coerção na leitura (`bool(...)`/`str(...)`)
+        # normaliza -- sem ela, `item["foi_editado"]` seria a string
+        # `"sim"` (truthy, mas não `bool`) e `item["trecho"]` seria um
+        # `int`, não `str`.
+        agora = datetime.datetime(2026, 9, 23, 14, 0, tzinfo=timezone.utc)
+        self.outbox._docs["r_tipo_bruto"] = {
+            "status": oa.STATUS_AGUARDANDO,
+            "to_number": "5511999999999@c.us",
+            "content": 12345,
+            "motivo": "Motivo",
+            "destinatario_nome": "Fulano",
+            "tipo": "outro",
+            "foi_editado": "sim",
+            "created_at": agora,
+        }
+        res = oa.listar_rascunhos(self.db, limite=20)
+        item = res["rascunhos"][0]
+        self.assertIs(item["foi_editado"], True)
+        self.assertIsInstance(item["foi_editado"], bool)
+        self.assertEqual(item["trecho"], "12345")
+        self.assertIsInstance(item["trecho"], str)
+
     def test_listar_rascunhos_telegram_message_id_e_inteiro_quando_presente(self):
         # Achado desta sub-entrega: `telegram_message_id` vem da API do
         # Telegram (`message_id`, sempre inteiro) -- não passa por

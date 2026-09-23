@@ -1695,25 +1695,39 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     #
     # Investigacao dos escritores de `whatsapp_outbox` (busca exaustiva por
     # `collection("whatsapp_outbox")`/`collection(COLLECTION)` no
-    # repositorio): dois pontos CRIAM documento (`.document()` + `.set()`),
-    # o resto so ATUALIZA (`.update()`) um documento existente, nunca muda
-    # `status` para um dos dois valores do filtro:
+    # repositorio). CORRECAO da 1a rodada de revisao adversarial desta
+    # sub-entrega: a redacao original desta nota dizia que so
+    # `criar_rascunho` grava um dos dois valores do filtro e "o resto so
+    # atualiza, nunca muda status para um dos dois valores do filtro" --
+    # isso e FALSO, ha mais dois `.update()` que gravam `STATUS_AGUARDANDO`
+    # de volta (o enum continua correto, mas a lista abaixo estava
+    # incompleta):
     #   - `outbox_aprovacao.criar_rascunho` (chamada por `criar_rascunho_
     #     whatsapp`) -- grava `status_inicial` como
     #     `STATUS_AGUARDANDO_JANELA` (tipo promovido) ou `STATUS_AGUARDANDO`
     #     (regular) SOMENTE no ramo `not envio_imediato`; no ramo
     #     `envio_imediato` grava `STATUS_PENDING` ("pending"), que o filtro
-    #     desta query exclui. E o UNICO escritor que grava os dois valores
-    #     do enum.
+    #     desta query exclui.
+    #   - `outbox_aprovacao.aplicar_edicao_rascunho` (chamada a partir de
+    #     `telegram_message_deterministic.py` e `atencao_whatsapp.py`) e
+    #     `outbox_aprovacao._degradar_rascunho_promovido_sem_mandato`
+    #     (chamada por `liberar_rascunhos_promovidos`) TAMBEM gravam
+    #     `"status": STATUS_AGUARDANDO` via `tx.update(...)` -- mas as duas
+    #     so disparam quando o documento JA esta em `STATUS_AGUARDANDO`/
+    #     `STATUS_AGUARDANDO_JANELA` (gate de `validar_transicao_aprovacao`
+    #     ou checagem equivalente antes do update), nunca introduzem um
+    #     TERCEIRO valor no conjunto -- o enum de 2 valores continua
+    #     correto, so a contagem de "pontos que escrevem um dos dois
+    #     valores" estava errada (3, nao 1).
     #   - `tools/schedule_whatsapp_message.py::schedule_whatsapp_message`
     #     (chamada por `schedule_whatsapp_message`, tool DIFERENTE) -- grava
     #     SEMPRE `status: "pending"`, nunca aparece neste resultado.
     #   - `mcp_server.py` (le por `document(job_id).get()`, nunca escreve),
-    #     `ai_notification_planner.py` (le por
-    #     `.where("status", "==", "pending")`, nunca escreve) e
-    #     `telegram_callbacks_confirmacoes.py` (dois `.update()`, um grava
-    #     `status: "canceled"`, outro `status: "sent"` -- nenhum dos dois
-    #     valores do filtro) sao os demais pontos encontrados.
+    #     `ai_notification_planner.py`/`promocao_autonomia.py` (leem por
+    #     query, nunca escrevem) e `telegram_callbacks_confirmacoes.py`
+    #     (dois `.update()`, um grava `status: "canceled"`, outro
+    #     `status: "sent"` -- nenhum dos dois valores do filtro) sao os
+    #     demais pontos encontrados.
     #
     # Os outros 13 campos do item vem de UM UNICO LITERAL de dict dentro de
     # `listar_rascunhos` (`outbox_aprovacao.py`, sem chave condicional --
@@ -1729,14 +1743,21 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     #     nome` e `res_dest.get("nome") or contact_number` -- cai para
     #     `contact_number` (sempre string nao-vazia) quando `nome` e
     #     falsy; `to_number` e `res_dest.get("chat_id") or contact_number`,
-    #     mesma garantia. RISCO RESIDUAL aceito e nao-bloqueante, mesma
-    #     categoria das demais tools deste modulo: o parametro opcional
-    #     `destinatario_resolvido` (usado so por `secretario_whatsapp.py`,
-    #     um unico call site) repassa `chat_id`/`nome` do CHAMADOR sem
-    #     coercao de tipo -- se esse chamador algum dia passar um valor
-    #     truthy nao-string, ele vaza cru para `to_number`/`destinatario_
-    #     nome` (nao auditado at fundo aqui, mesmo espirito do caveat ja
-    #     aceito para `perfil_pessoas` em `buscar_contato`).
+    #     mesma garantia. O parametro opcional `destinatario_resolvido`
+    #     (usado so por `secretario_whatsapp.py::enviar_resposta_via_
+    #     outbox`, um unico call site) repassa `chat_id`/`nome` do
+    #     CHAMADOR sem coercao de tipo -- mas isso NAO e um risco residual
+    #     para ESTA tool (CORRECAO da 1a rodada de revisao adversarial
+    #     desta sub-entrega, que apontou a nota original como
+    #     mal-atribuida): esse unico call site sempre passa
+    #     `envio_imediato=True`, que forca `status_inicial = STATUS_PENDING`
+    #     incondicionalmente em `criar_rascunho` -- um documento criado por
+    #     esse caminho NUNCA pode aparecer no resultado de
+    #     `listar_rascunhos` (o filtro da query exclui `STATUS_PENDING`).
+    #     Continua sendo um risco residual real para `criar_rascunho`
+    #     (a funcao) e para o campo publicado por `criar_rascunho_
+    #     whatsapp` caso essa tool algum dia ganhe outputSchema propria,
+    #     so nao se aplica ao contrato desta tool especifica.
     #   - `acao_id`/`item_atencao_id` sao `["string", "null"]` --
     #     DELIBERADAMENTE nullable: `criar_rascunho` grava os dois SEMPRE
     #     (nunca ausentes do documento), mas com valor `None` quando o
