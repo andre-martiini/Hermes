@@ -1842,6 +1842,177 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
         "required": ["total", "rascunhos"],
         "additionalProperties": False,
     },
+    # `consultar_job` (P03 sub-entrega 25/N) -- nona tool com outputSchema.
+    # Handler real: `tools/hermes_tools.py::_consultar_job` e um passthrough
+    # puro para `mcp_jobs.ler_job(ctx.user_uid, job_id)` -- lido por
+    # completo. Escritor: `mcp_jobs.py` e o UNICO arquivo do repositorio que
+    # grava na colecao `mcp_jobs` (confirmado por busca -- so
+    # `mcp_jobs.criar_job`/`on_mcp_job_created`/`_reivindicar_job` tocam essa
+    # colecao; nenhum outro modulo, ao contrario de `whatsapp_outbox`,
+    # sub-entrega 24/N). Enumeracao completa dos 4 pontos de escrita de
+    # `status` confirma que so 3 valores sao gravados: `"processing"`
+    # (`criar_job`, unico valor inicial) e, so pelo trigger
+    # `on_mcp_job_created`, `"done"` ou `"error"` -- nenhum quarto valor em
+    # nenhum dos 4 `ref.update(...)` do arquivo.
+    #
+    # `ler_job` tem 5 `return` distintos, a MAIOR contagem de ramos deste
+    # catalogo ate agora (mais que os 3 de `obter_acao`, sub-entrega 15/N):
+    #   1. sem `job_id`: `{"erro": "job_id obrigatorio."}` -- SEM `status`,
+    #      SEM `job_id`/`tool` (a checagem `if not job_id` acontece antes de
+    #      qualquer leitura ao Firestore).
+    #   2. job inexistente OU `dados.get("uid") != uid`: `{"erro": ...,
+    #      "status": "not_found"}` -- a MESMA resposta para os dois casos,
+    #      deliberado (comentario do proprio handler: "confirmar que o id
+    #      existe ja vazaria informacao para quem esta tentando adivinhar").
+    #   3. `status == "done"`: `{"job_id", "tool", "status": "done",
+    #      "resultado"}`.
+    #   4. `status == "error"`: `{"job_id", "tool", "status": "error",
+    #      "erro", "erro_tipo"?, "bloqueio_politica"?}`.
+    #   5. qualquer outro `status` (so `"processing"` e alcancavel hoje, ver
+    #      enumeracao acima): `{"job_id", "tool", "status", "mensagem"}`.
+    # Os ramos 1 e 2 sao a MESMA forma de erro que `obter_acao` ja usa
+    # (campo `status` opcional, so muda a PRESENCA dele) -- por isso um unico
+    # branch de erro aqui tambem, `status` fora de `required`, e NAO um
+    # terceiro ramo de `oneOf` so para essa diferenca. Os ramos 3/4/5
+    # compartilham `job_id`/`tool`/`status` mas tem o RESTO dos campos
+    # obrigatorios DISJUNTO (`resultado` xor `erro`+opcionais xor
+    # `mensagem`) -- por isso 3 branches sao genuinamente necessarios, alem
+    # do branch de erro-sem-job -- 4 branches de `oneOf` no total, o maior
+    # numero deste catalogo ate agora.
+    #
+    # `job_id`/`tool` (ramos 3/4/5): `job_id` e sempre o PARAMETRO de
+    # entrada (nao `dados.get("job_id")`), garantido nao-vazio pelo `if not
+    # job_id` do ramo 1 -- sempre `string`. `tool` e `dados.get("tool")`,
+    # sempre presente e nao-vazio: o UNICO escritor (`criar_job`) grava
+    # `"tool": tool` incondicionalmente, com `tool` vindo de `name` (que
+    # `mcp_server._handle_tools_call` so despacha para `criar_job` quando
+    # `name in _TOOLS_LONGAS`, nunca vazio) -- por isso `string` sem `null`.
+    #
+    # `resultado` (ramo 3, `status == "done"`): documentado como `string`
+    # HOJE, mas e um contrato de SNAPSHOT, nao uma garantia estrutural como
+    # o enum de `listar_rascunhos_pendentes` -- registrado explicitamente
+    # para nao repetir o erro de redacao corrigido na sub-entrega 24/N.
+    # `_TOOLS_LONGAS` (`mcp_server.py`) tem hoje EXATAMENTE 3 tools:
+    # `gerar_relatorio`, `ler_documento_na_integra`, `buscar_e_analisar_
+    # email` -- as 3 unicas que podem produzir um job com `status == "done"`.
+    # Lidos os 3 handlers por completo (`tools/telegram_extended.py`, ramos
+    # `gerar_relatorio`/`ler_documento_na_integra`; `tools/buscar_e_
+    # analisar_email.py`): TODO `return` das 3 e uma `string` (Markdown/
+    # texto simples num caso de sucesso; `json.dumps(...)`/`f"⚠️ ..."` nos
+    # outros) -- nenhum dict, nenhuma lista. `mcp_jobs._preparar_resultado`
+    # confirma que uma `string` passa DIRETO para o campo `resultado`
+    # gravado (so um valor NAO-string passaria por `json.dumps` e ficaria
+    # ESTRUTURADO no Firestore -- caminho hoje inalcancavel pelas 3 tools
+    # atuais, mas o mecanismo em si e generico: `execute()` e o MESMO
+    # dispatcher usado por qualquer tool do catalogo, entao uma QUARTA tool
+    # futura em `_TOOLS_LONGAS` que devolva dict/lista quebraria esta
+    # garantia sem tocar nenhuma linha deste comentario). Por isso `string`
+    # sem `null` aqui, mas com este caveat: revisar este campo sempre que
+    # `_TOOLS_LONGAS` ganhar uma nova entrada.
+    #
+    # ACHADO desta sub-entrega, NAO corrigido (fora do escopo de uma fatia
+    # so-schema): o campo `truncado` (bool, gravado pelo mesmo `ref.update`
+    # que grava `resultado` em `on_mcp_job_created`, sinaliza quando
+    # `_MAX_RESULTADO_CHARS` cortou o texto) e lido de volta por `ler_job`
+    # -- so `resultado`/`job_id`/`tool`/`status` sao copiados para `saida`.
+    # Um consumidor de `consultar_job` nao tem como saber, pela resposta,
+    # que um `resultado` longo foi cortado no meio, apesar do dado existir
+    # no Firestore. Nao endereçado aqui: mudar o que `ler_job` devolve e uma
+    # mudanca de COMPORTAMENTO do handler, nao so de documentacao do
+    # contrato existente -- registrado em pendencias para uma fatia futura
+    # (`ler_job`/P03 passo 4, ou P05).
+    #
+    # `erro`/`erro_tipo`/`bloqueio_politica` (ramo 4, `status == "error"`):
+    # `erro` e sempre `dados.get("erro")`, e as 4 escritas de `status:
+    # "error"` em `on_mcp_job_created` SEMPRE incluem `erro` (string,
+    # `str(exc)` ou mensagem construida) -- por isso obrigatorio, sem
+    # `null`. `erro_tipo` e um dos 4 valores fechados de `mcp_jobs.py`
+    # (`ERRO_TIPO_POLITICA`/`ERRO_TIPO_RESULTADO`/`ERRO_TIPO_EXCECAO`/
+    # `ERRO_TIPO_CONFIGURACAO`) -- as 4 escritas de erro SEMPRE gravam um
+    # destes hoje, mas `ler_job` mantem a checagem `if dados.get(
+    # "erro_tipo") is not None` (comentario do proprio handler: campo
+    # "ausente so em jobs gravados antes desta sub-entrega [anterior,
+    # P01]") -- por isso OPCIONAL aqui, nao obrigatorio, seguindo o que o
+    # LEITOR realmente garante (nao o que todo escritor atual grava) --
+    # mesmo criterio ja usado para campos opcionais desta familia
+    # (`truncado` em `consultar_lista_compras`, `status` no ramo de erro de
+    # `obter_acao`). `bloqueio_politica` e opcional pelo mesmo motivo, so
+    # presente quando `erro_tipo == "politica"`: `{"decision": string,
+    # "reason_code": string}`, forma fixa gravada a mao em
+    # `on_mcp_job_created` (`decisao.decision.value` sempre string do enum
+    # `Decisao`). `reason_code` SEM `null` -- CORRECAO da 1a rodada de
+    # revisao adversarial desta sub-entrega, que apontou a redacao anterior
+    # ("pode ser None") como nao verificada: `autonomy/contracts.py::
+    # PolicyDecision.reason_code` e tipado `str` (nao `str | None`), e os 4
+    # pontos de construcao de `PolicyDecision` em `autonomy/policy.py`
+    # (incluindo `_decisao_padrao_por_classe`, tipada `-> tuple[Decisao,
+    # str, bool]`) sempre passam um literal de string, nunca `None`.
+    #
+    # `mensagem` (ramo 5, unico `status` alcancavel hoje: `"processing"`) e
+    # uma string literal fixa no proprio `ler_job`, nunca dado do Firestore
+    # -- garantia mais forte que qualquer outro campo desta tool.
+    #
+    # Investigacao completa desta sub-entrega: docs/autonomia/execucao.md,
+    # sub-entrega 25/N.
+    "consultar_job": {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "erro": {"type": "string"},
+                    "status": {"const": "not_found"},
+                },
+                "required": ["erro"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string"},
+                    "tool": {"type": "string"},
+                    "status": {"const": "done"},
+                    "resultado": {"type": "string"},
+                },
+                "required": ["job_id", "tool", "status", "resultado"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string"},
+                    "tool": {"type": "string"},
+                    "status": {"const": "error"},
+                    "erro": {"type": "string"},
+                    "erro_tipo": {
+                        "type": "string",
+                        "enum": ["politica", "resultado_tool", "excecao", "erro_configuracao"],
+                    },
+                    "bloqueio_politica": {
+                        "type": "object",
+                        "properties": {
+                            "decision": {"type": "string"},
+                            "reason_code": {"type": "string"},
+                        },
+                        "required": ["decision", "reason_code"],
+                        "additionalProperties": False,
+                    },
+                },
+                "required": ["job_id", "tool", "status", "erro"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string"},
+                    "tool": {"type": "string"},
+                    "status": {"const": "processing"},
+                    "mensagem": {"type": "string"},
+                },
+                "required": ["job_id", "tool", "status", "mensagem"],
+                "additionalProperties": False,
+            },
+        ],
+    },
 }
 
 
@@ -1852,9 +2023,11 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (98 das 106 tools
-    hoje, apos a oitava entrada, `listar_rascunhos_pendentes`, sub-entrega
-    24/N), deliberadamente:
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (99 das 108 tools
+    hoje -- `len(registry.list_tool_names())`, nao os "106" que este
+    docstring citava ate a sub-entrega 24/N, contagem ja desatualizada
+    antes desta fatia e corrigida aqui por tocar esta mesma linha -- apos
+    a nona entrada, `consultar_job`, sub-entrega 25/N), deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
     (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).

@@ -72,31 +72,45 @@ vem de `message_id` da API do Telegram (sempre inteiro), confirmado
 tambem pela fixture `"telegram_message_id": 999` ja existente em
 `test_outbox_aprovacao.py` -- ver comentario de `_OUTPUT_SCHEMAS` em
 `tools/registry.py` para o levantamento completo dos pontos de criacao e
-atualizacao de documento investigados.
+atualizacao de documento investigados -- e `consultar_job`
+(sub-entrega 25/N): nona tool, backed por `mcp_jobs.ler_job` (passthrough
+puro de `tools/hermes_tools.py::_consultar_job`), e a com MAIS branches de
+`oneOf` ate agora (4, contra 2 de `consultar_historico_acoes`/`obter_acao`)
+-- `mcp_jobs.py` e o UNICO escritor da colecao `mcp_jobs` em todo o
+repositorio (ao contrario de `whatsapp_outbox`, sub-entrega 24/N), o que
+tornou viavel enumerar os 4 pontos de escrita de `status` por completo (so
+`"processing"`/`"done"`/`"error"` sao gravados). Achado desta sub-entrega,
+nao corrigido: o campo `truncado` (gravado pelo trigger
+`on_mcp_job_created` junto com `resultado`) nunca e copiado de volta por
+`ler_job` -- ver comentario de `_OUTPUT_SCHEMAS` em `tools/registry.py`
+para o levantamento completo, incluindo por que `resultado` (branch
+"done") e documentado como `string` HOJE como um contrato de SNAPSHOT
+sobre as 3 tools atuais de `_TOOLS_LONGAS`, nao uma garantia estrutural.
 
-Quatro frentes:
+Cinco frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
    paridade com TODO o catálogo real (não amostra): nenhuma tool além de
    `calculadora`, `buscar_contato`, `consultar_lista_compras`,
    `consultar_execucoes_agente`, `consultar_pedidos_agente`,
-   `consultar_historico_acoes`, `obter_acao` e
-   `listar_rascunhos_pendentes` tem contrato publicado hoje.
+   `consultar_historico_acoes`, `obter_acao`,
+   `listar_rascunhos_pendentes` e `consultar_job` tem contrato publicado
+   hoje.
 2. `TestHandleToolsListOutputSchema` -- ponta a ponta via
    `mcp_server._handle_tools_list()`: `outputSchema` chega no catálogo
-   publicado só para essas oito tools.
+   publicado só para essas nove tools.
 3. `TestIntegracaoHandleToolsCallStructuredContent` -- ponta a ponta via
    `mcp_server._handle_tools_call`: `structuredContent` chega no envelope
    de `tools/call` para `calculadora` (execução real, pura) e para
    `buscar_contato`/`consultar_lista_compras`/`consultar_execucoes_agente`/
    `consultar_pedidos_agente`/`consultar_historico_acoes`/`obter_acao`/
-   `listar_rascunhos_pendentes`
-   (executor mockado -- as sete dependem de Firestore, então o teste cobre
+   `listar_rascunhos_pendentes`/`consultar_job`
+   (executor mockado -- as oito dependem de Firestore, então o teste cobre
    o MECANISMO, não a correção interna dos handlers, mesmo padrão já usado
    para `consultar_processo_sipac` abaixo), é sempre IGUAL ao dict que
    `content[0].text` serializa (mesma fonte, nunca diverge), bate com o
-   `outputSchema` publicado campo a campo (para `consultar_historico_acoes`
-   e `obter_acao`, contra o branch `oneOf` correspondente à forma
-   retornada), e nunca aparece para uma tool sem contrato publicado -- nem
+   `outputSchema` publicado campo a campo (para `consultar_historico_acoes`,
+   `obter_acao` e `consultar_job`, contra o branch `oneOf` correspondente à
+   forma retornada), e nunca aparece para uma tool sem contrato publicado -- nem
    quando o resultado real também é um dict, nem quando o executor levanta
    uma exceção não tratada por ele mesmo, nem quando o handler devolve uma
    string crua de erro (caminho real de `consultar_lista_compras` para
@@ -529,18 +543,72 @@ class TestOutputSchema(unittest.TestCase):
                 self.assertEqual(item["properties"][campo]["type"], ["string", "null"])
         self.assertEqual(item["properties"]["tipo"], {"type": "string"})
 
-    def test_paridade_oito_tools_tem_output_schema_hoje(self):
-        # Não por amostragem: para TODA tool do catálogo real (106 hoje),
+    def test_consultar_job_tem_schema_com_quatro_branches(self):
+        schema = registry.output_schema("consultar_job")
+        self.assertIsNotNone(schema)
+        self.assertEqual(set(schema.keys()), {"oneOf"})
+        # 4 branches: o maior número deste catálogo até agora (mais que os
+        # 2 de consultar_historico_acoes/obter_acao) -- `ler_job` tem 5
+        # `return`, mas os dois primeiros (sem job_id / não encontrado)
+        # colapsam num único branch de erro com `status` opcional, mesmo
+        # padrão de `obter_acao`.
+        self.assertEqual(len(schema["oneOf"]), 4)
+        erro, done, error, processing = schema["oneOf"]
+
+        self.assertEqual(erro["type"], "object")
+        self.assertEqual(erro["required"], ["erro"])
+        self.assertEqual(set(erro["properties"].keys()), {"erro", "status"})
+        self.assertEqual(erro["properties"]["status"], {"const": "not_found"})
+        self.assertFalse(erro["additionalProperties"])
+
+        self.assertEqual(done["required"], ["job_id", "tool", "status", "resultado"])
+        self.assertEqual(done["properties"]["status"], {"const": "done"})
+        # resultado é contrato de SNAPSHOT (as 3 tools de _TOOLS_LONGAS
+        # hoje sempre devolvem string) -- ver comentário de
+        # _OUTPUT_SCHEMAS para o caveat completo.
+        self.assertEqual(done["properties"]["resultado"], {"type": "string"})
+        self.assertFalse(done["additionalProperties"])
+
+        self.assertEqual(error["required"], ["job_id", "tool", "status", "erro"])
+        self.assertEqual(error["properties"]["status"], {"const": "error"})
+        # erro_tipo/bloqueio_politica ficam FORA de required -- ler_job só
+        # copia quando presentes no documento (achado: hoje as 4 escritas
+        # de status=error sempre gravam erro_tipo, mas o leitor não
+        # garante isso para jobs antigos).
+        self.assertNotIn("erro_tipo", error["required"])
+        self.assertNotIn("bloqueio_politica", error["required"])
+        self.assertEqual(
+            error["properties"]["erro_tipo"]["enum"],
+            ["politica", "resultado_tool", "excecao", "erro_configuracao"],
+        )
+        # reason_code SEM null -- achado da 1a rodada de revisão
+        # adversarial: `PolicyDecision.reason_code` é tipado `str` (nunca
+        # `str | None`) e os 4 pontos de construção em `autonomy/policy.py`
+        # sempre passam literal de string.
+        self.assertEqual(
+            error["properties"]["bloqueio_politica"]["properties"]["reason_code"],
+            {"type": "string"},
+        )
+        self.assertFalse(error["additionalProperties"])
+
+        self.assertEqual(processing["required"], ["job_id", "tool", "status", "mensagem"])
+        self.assertEqual(processing["properties"]["status"], {"const": "processing"})
+        self.assertFalse(processing["additionalProperties"])
+
+    def test_paridade_nove_tools_tem_output_schema_hoje(self):
+        # Não por amostragem: para TODA tool do catálogo real (108 hoje --
+        # `len(registry.list_tool_names())`; achado da revisão adversarial
+        # desta sub-entrega: "106" estava desatualizado desde antes dela),
         # output_schema devolve algo só para calculadora, buscar_contato,
         # consultar_lista_compras, consultar_execucoes_agente,
-        # consultar_pedidos_agente, consultar_historico_acoes, obter_acao
-        # e listar_rascunhos_pendentes -- prova que a lista fechada não
-        # vazou para nenhuma outra tool por engano.
+        # consultar_pedidos_agente, consultar_historico_acoes, obter_acao,
+        # listar_rascunhos_pendentes e consultar_job -- prova que a lista
+        # fechada não vazou para nenhuma outra tool por engano.
         com_schema = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
-            "listar_rascunhos_pendentes",
+            "listar_rascunhos_pendentes", "consultar_job",
         }
         for nome in registry.list_tool_names():
             with self.subTest(tool=nome):
@@ -614,12 +682,23 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             registry.output_schema("listar_rascunhos_pendentes"),
         )
 
+    def test_consultar_job_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["consultar_job"])
+        self.assertEqual(
+            self.catalogo["consultar_job"]["outputSchema"],
+            registry.output_schema("consultar_job"),
+        )
+        # oneOf chega intacto no catálogo publicado, não achatado nem
+        # reduzido a uma das quatro formas.
+        self.assertIn("oneOf", self.catalogo["consultar_job"]["outputSchema"])
+        self.assertEqual(len(self.catalogo["consultar_job"]["outputSchema"]["oneOf"]), 4)
+
     def test_nenhuma_outra_tool_publicada_tem_output_schema(self):
         esperadas = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
-            "listar_rascunhos_pendentes",
+            "listar_rascunhos_pendentes", "consultar_job",
         }
         com_schema = [
             nome for nome, tool in self.catalogo.items()
@@ -634,7 +713,7 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
-            "listar_rascunhos_pendentes",
+            "listar_rascunhos_pendentes", "consultar_job",
         ):
             with self.subTest(tool=nome):
                 tool = self.catalogo[nome]
@@ -1450,6 +1529,137 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
         for rascunho in estruturado["rascunhos"]:
             for campo in rascunho:
                 self.assertIn(campo, item_props, f"campo '{campo}' fora do item declarado")
+
+    def test_consultar_job_sem_job_id_leva_structured_content(self):
+        # `mcp_jobs.ler_job`, ramo 1: sem `job_id`, checagem antes de
+        # qualquer leitura ao Firestore -- só `erro`, sem `status`.
+        esperado = {"erro": "job_id obrigatorio."}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_job", "arguments": {"job_id": ""}}, ctx=_ctx()
+            )
+        self.assertTrue(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertNotIn("status", resultado["structuredContent"])
+
+    def test_consultar_job_nao_encontrado_leva_structured_content(self):
+        # Ramo 2: job inexistente OU uid divergente -- MESMA resposta para
+        # os dois casos (deliberado, ver comentário de `_OUTPUT_SCHEMAS`).
+        esperado = {"erro": "Job 'mcpjob-xyz' nao encontrado.", "status": "not_found"}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_job", "arguments": {"job_id": "mcpjob-xyz"}}, ctx=_ctx()
+            )
+        self.assertTrue(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_consultar_job_done_leva_structured_content_igual_ao_content(self):
+        # Ramo 3: `status == "done"`. `resultado` string -- as 3 únicas
+        # tools de `_TOOLS_LONGAS` hoje sempre devolvem string (ver
+        # comentário de `_OUTPUT_SCHEMAS`).
+        esperado = {
+            "job_id": "mcpjob-abc123",
+            "tool": "gerar_relatorio",
+            "status": "done",
+            "resultado": '{"report_id": "r1", "titulo": "X", "secoes": ["A"], "status": "gerado"}',
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_job", "arguments": {"job_id": "mcpjob-abc123"}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_job_error_leva_structured_content(self):
+        # Ramo 4: `status == "error"`, com os dois campos opcionais
+        # (`erro_tipo`/`bloqueio_politica`) presentes -- caso do bloqueio
+        # pela política de autonomia, único caminho que grava
+        # `bloqueio_politica`.
+        esperado = {
+            "job_id": "mcpjob-blocked",
+            "tool": "buscar_e_analisar_email",
+            "status": "error",
+            "erro": "Ação bloqueada pela política de autonomia vigente.",
+            "erro_tipo": "politica",
+            "bloqueio_politica": {"decision": "deny", "reason_code": "fora_do_escopo"},
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_job", "arguments": {"job_id": "mcpjob-blocked"}}, ctx=_ctx()
+            )
+        self.assertTrue(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_consultar_job_processing_leva_structured_content(self):
+        # Ramo 5 (único `status` alcançável fora de done/error/not_found):
+        # `"processing"`, com `mensagem` literal fixa do próprio `ler_job`.
+        esperado = {
+            "job_id": "mcpjob-ongoing",
+            "tool": "ler_documento_na_integra",
+            "status": "processing",
+            "mensagem": "Ainda processando. Consulte de novo em alguns segundos com o mesmo job_id.",
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_job", "arguments": {"job_id": "mcpjob-ongoing"}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_consultar_job_structured_content_bate_com_o_output_schema_publicado(self):
+        # Paridade campo a campo contra o branch `oneOf` correspondente à
+        # forma efetivamente devolvida, mesmo padrão de
+        # `consultar_historico_acoes`/`obter_acao` acima -- aqui com 4
+        # branches em vez de 2, então localiza o branch pelo valor de
+        # `status` (ou a ausência dele, para o ramo sem `job_id`).
+        schema = registry.output_schema("consultar_job")
+        branches_por_status = {}
+        for branch in schema["oneOf"]:
+            status_prop = branch["properties"].get("status")
+            # O branch de erro tem `status` OPCIONAL (mesmo padrão de
+            # `obter_acao`): serve tanto para "not_found" quanto para o
+            # ramo sem `job_id`, que não tem `status` nenhum -- registra
+            # o mesmo branch sob as duas chaves quando `status` não é
+            # `required` nele.
+            if status_prop and "status" not in branch.get("required", []):
+                branches_por_status[status_prop["const"]] = branch
+                branches_por_status[None] = branch
+            elif status_prop:
+                branches_por_status[status_prop["const"]] = branch
+            else:
+                branches_por_status[None] = branch
+
+        casos = [
+            {"erro": "job_id obrigatorio."},
+            {"erro": "Job 'x' nao encontrado.", "status": "not_found"},
+            {"job_id": "j1", "tool": "gerar_relatorio", "status": "done", "resultado": "texto"},
+            {
+                "job_id": "j2", "tool": "gerar_relatorio", "status": "error",
+                "erro": "falhou", "erro_tipo": "excecao",
+            },
+            {"job_id": "j3", "tool": "gerar_relatorio", "status": "processing", "mensagem": "..."},
+        ]
+        for mock_retorno in casos:
+            with self.subTest(status=mock_retorno.get("status")):
+                with patch.object(mcp_server, "execute_tool", return_value=mock_retorno):
+                    resultado = mcp_server._handle_tools_call(
+                        {"name": "consultar_job", "arguments": {"job_id": "x"}}, ctx=_ctx()
+                    )
+                estruturado = resultado["structuredContent"]
+                branch = branches_por_status[mock_retorno.get("status")]
+                for campo in branch["required"]:
+                    self.assertIn(campo, estruturado)
+                for campo in estruturado:
+                    self.assertIn(
+                        campo, branch["properties"],
+                        f"campo '{campo}' fora do branch de status={mock_retorno.get('status')!r}",
+                    )
 
     def test_tool_sem_output_schema_nunca_leva_structured_content_mesmo_com_dict(self):
         # `consultar_processo_sipac` não tem outputSchema publicado; mesmo
