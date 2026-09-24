@@ -2530,6 +2530,173 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
             },
         ],
     },
+    # `obter_fila_atencao` (P03 sub-entrega 30/N) -- decima quarta tool com
+    # outputSchema. Forma UNICA, sem oneOf: `atencao.coletar_fila_atencao`
+    # nao tem nenhum `try/except` que devolva um ramo de erro alternativo --
+    # sempre `{"total": int, "itens": [...]}`, mesma categoria de
+    # `consultar_lista_compras`/`consultar_status_modo_secretario`.
+    #
+    # `total` e sempre `len(itens)` calculado ANTES do corte por `limite`
+    # (`atencao.py:902-906`: `itens.sort(...)`, depois `"total": len(itens),
+    # "itens": itens[:limite_ajustado]` -- `itens` nunca e reatribuido, so
+    # fatiado na resposta) -- MESMO comportamento de
+    # `consultar_promocoes_autonomia_sugeridas` (achado da 1a rodada de
+    # revisao adversarial desta sub-entrega: a redacao original desta
+    # mesma linha, antes da correcao, tinha essa relacao invertida --
+    # dizia "apos o corte" e "diferente de"). Confirmado empiricamente com
+    # `MockDb` (5 docs, `limite=2`): `total == 5`, `len(itens) == 2`. Nao
+    # e uma garantia do outputSchema (`total` e so `{"type": "integer"}`,
+    # sem relacao formal com `len(itens)` no schema) -- so uma nota de
+    # comportamento real, para quem for consumir a tool. Cada item e
+    # RECONSTRUIDO campo a campo com
+    # `d.get(chave)` (nunca `doc.to_dict()` cru) -- mesma garantia de forma
+    # de `consultar_promocoes_autonomia_sugeridas`, independente de quantos
+    # escritores a colecao `atencao` tenha.
+    #
+    # Escritores da colecao (busca exaustiva, grep por `atencao.COLLECTION`/
+    # `collection("atencao")` no repositorio inteiro, todos lidos por
+    # completo): `atencao.py::_persistir_itens_atencao` (usada por
+    # `avaliar_etapas`/`detectar_atencao_financeiro`/
+    # `avaliar_rotinas_saude`/`detectar_emails_nao_entregues`),
+    # `atencao_whatsapp.py::vencer_promessas` e `_processar_audio`, e
+    # `secretario_whatsapp.py::registrar_investigacao_concluida_atencao` e
+    # `escalar_para_atencao`. Nenhum outro ponto do repositorio cria
+    # documento nessa colecao (`outbox_aprovacao.py:693` so faz `.update()`
+    # de `estado`/`resolvido_em`/`desfecho`, nunca toca `tipo`/`origem`/
+    # `prioridade`).
+    #
+    # `tipo` e enum FECHADO de 10 valores -- o unico campo desta tool que
+    # aceita um parametro livre (`tipo_atencao: str` em
+    # `secretario_whatsapp.escalar_para_atencao`) tem exatamente 2 call
+    # sites em todo o repositorio (`secretario_whatsapp.py`, dentro do
+    # proprio modulo), e os dois so passam constantes ja cobertas pelo
+    # enum (`TIPO_ATENCAO_INSISTENCIA`, `TIPO_ATENCAO_ASSUNTO_SENSIVEL` ou
+    # `TIPO_ATENCAO_DECISAO_FORCADA`) -- nunca uma string arbitraria. As
+    # constantes `TIPO_ATENCAO_*` de `secretario_whatsapp.py` e as
+    # `TIPO_SECRETARIO_*` equivalentes de `atencao.py` tem o MESMO valor
+    # string (ex.: as duas resolvem para `"secretario_insistencia"`) --
+    # alias, nao um par de valores divergentes.
+    #
+    # `origem` e enum de 8 valores, o MESMO conjunto ja validado no
+    # `inputSchema` desta tool (`tools/schemas/obter_fila_atencao.json`) --
+    # mas so 6 sao de fato escritos hoje (`acao`, `financeiro`, `saude`,
+    # `email`, `whatsapp`, `secretario_whatsapp`; `agenda`/`repo` nao tem
+    # nenhum escritor implementado ainda). Mantido nos 8 do inputSchema
+    # (nao reduzido aos 6 observados) para nao criar um contrato mais
+    # estreito que o proprio filtro que a tool ja aceita -- se um escritor
+    # futuro usar `agenda`/`repo` (o inputSchema ja antecipa os dois), o
+    # outputSchema nao ficaria desatualizado no mesmo instante. Mesmo
+    # raciocinio aplicado a `prioridade` (enum de 3 -- `alta`/`media`/
+    # `baixa`, as 3 constantes de `atencao.PRIORIDADE_*` -- ainda que
+    # `baixa` nao tenha escritor hoje; usada em `_PRIORITY_ORDER` como
+    # parte do modelo de dados). `estado` e o mesmo enum de 5 valores ja
+    # no inputSchema (`aberto`/`delegado_ao_agente`/`aguardando_andre`/
+    # `resolvido`/`descartado`), confirmado contra as constantes
+    # `atencao.ESTADOS`.
+    #
+    # `acao_id`/`etapa_id`/`pessoa`/`sugestao` sao sempre chaves presentes
+    # (todo escritor inclui a chave, `None` quando nao aplicavel). `prazo`/
+    # `criado_em`/`atualizado_em`/`resolvido_em` passam por
+    # `atencao._to_iso` na leitura -- sempre string ISO ou `None`, nunca
+    # outro tipo (mesma funcao/mesma garantia de `agent_runs.py`/
+    # `agent_requests.py`, ja usada em tools anteriores). `resolvido_em`/
+    # `desfecho` so ganham valor quando `resolver_item` fecha o item
+    # (`novo_estado` em `ESTADOS_FECHADOS`) -- e podem voltar a `None`
+    # explicitamente (`outbox_aprovacao.py:693-697`, quando um descarte e
+    # desfeito) -- por isso nullable, nunca ausentes como chave.
+    # `evidencia` e sempre um dict (nunca `None`, `d.get("evidencia") or
+    # {}` na leitura) mas o formato interno varia por tipo de item --
+    # schema deliberadamente raso (`type: object`, sem `properties`),
+    # mesma escolha ja usada para campos de forma variavel noutras tools
+    # deste catalogo.
+    #
+    # CORRECAO (achado da revisao do Codex na PR desta sub-entrega, apos a
+    # revisao adversarial propria): `origem`/`tipo`/`prioridade`/`titulo`/
+    # `resumo`/`sugestao`/`estado` sao `d.get(chave)` SEM nenhum default --
+    # ao contrario do que a redacao original deste comentario assumia
+    # (\"sempre string\"/\"nunca None\", com base so nos escritores REAIS
+    # de hoje), `coletar_fila_atencao` le QUALQUER documento da colecao de
+    # forma generica, sem exigir nenhum desses campos -- um documento
+    # esparso (sem `titulo`/`resumo`/etc, cenario ja exercitado por
+    # `test_atencao.py::TestFilaAtencaoTools.test_coletar_fila_atencao_
+    # ordenacao`, que grava `item-1`/`item-2`/`item-3` só com `estado`/
+    # `prioridade`/`prazo`/`criado_em`) devolve `None` para todos os
+    # outros campos. `id` (`doc.id`, garantido pelo SDK),
+    # `chave_dedupe` (`d.get(...) or doc.id`) e `evidencia` (`d.get(...)
+    # or {}`) continuam nao-nulos por terem fallback explicito -- so esses
+    # 3 seguem `required` sem `null`. Os 7 campos acima (incluindo os 4
+    # com enum) agora sao `["string", "null"]`, com `null` tambem
+    # explicito em cada lista `enum` (JSON Schema nao trata `type` e
+    # `enum` como equivalentes -- `null` so valida contra `enum` se
+    # estiver LITERALMENTE na lista, mesmo com `"type": ["string",
+    # "null"]` declarado ao lado).
+    "obter_fila_atencao": {
+        "type": "object",
+        "properties": {
+            "total": {"type": "integer"},
+            "itens": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "origem": {
+                            "type": ["string", "null"],
+                            "enum": [
+                                "acao", "whatsapp", "email", "agenda",
+                                "repo", "financeiro", "saude", "secretario_whatsapp",
+                                None,
+                            ],
+                        },
+                        "tipo": {
+                            "type": ["string", "null"],
+                            "enum": [
+                                "aguardando_terceiro_vencido", "conta_vencendo",
+                                "rotina_saude_ausente", "email_nao_entregue",
+                                "promessa_sem_retorno", "audio_relevante",
+                                "secretario_investigacao_concluida",
+                                "secretario_insistencia", "secretario_assunto_sensivel",
+                                "secretario_decisao_forcada",
+                                None,
+                            ],
+                        },
+                        "prioridade": {
+                            "type": ["string", "null"], "enum": ["alta", "media", "baixa", None],
+                        },
+                        "titulo": {"type": ["string", "null"]},
+                        "resumo": {"type": ["string", "null"]},
+                        "acao_id": {"type": ["string", "null"]},
+                        "etapa_id": {"type": ["string", "null"]},
+                        "pessoa": {"type": ["string", "null"]},
+                        "prazo": {"type": ["string", "null"]},
+                        "evidencia": {"type": "object"},
+                        "sugestao": {"type": ["string", "null"]},
+                        "estado": {
+                            "type": ["string", "null"],
+                            "enum": [
+                                "aberto", "delegado_ao_agente", "aguardando_andre",
+                                "resolvido", "descartado", None,
+                            ],
+                        },
+                        "chave_dedupe": {"type": "string"},
+                        "criado_em": {"type": ["string", "null"]},
+                        "atualizado_em": {"type": ["string", "null"]},
+                        "resolvido_em": {"type": ["string", "null"]},
+                        "desfecho": {"type": ["string", "null"]},
+                    },
+                    "required": [
+                        "id", "origem", "tipo", "prioridade", "titulo", "resumo",
+                        "acao_id", "etapa_id", "pessoa", "prazo", "evidencia",
+                        "sugestao", "estado", "chave_dedupe", "criado_em",
+                        "atualizado_em", "resolvido_em", "desfecho",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["total", "itens"],
+        "additionalProperties": False,
+    },
 }
 
 
@@ -2540,11 +2707,11 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (95 das 108 tools
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (94 das 108 tools
     hoje -- `len(registry.list_tool_names())`, nao os "106" que este
     docstring citava ate a sub-entrega 24/N, contagem ja desatualizada
-    antes daquela fatia -- apos a decima terceira entrada, `consultar_
-    promocoes_autonomia_sugeridas`, sub-entrega 29/N), deliberadamente:
+    antes daquela fatia -- apos a decima quarta entrada, `obter_fila_
+    atencao`, sub-entrega 30/N), deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
     (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).
