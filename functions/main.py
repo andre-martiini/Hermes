@@ -3132,7 +3132,11 @@ def _executar_sync_gmail_com_lock(db, gs, trigger: str) -> dict:
         release_sync_lock(db, run_id, lock_doc_id=GMAIL_SYNC_LOCK_DOC_ID)
 
 
-@pubsub_fn.on_message_published(topic=GMAIL_WATCH_TOPIC_NAME)
+# timeout_sec/memory iguais aos de gmail_sync_safety_net: é o MESMO sync_gmail_work, que leva ~3 min
+# (sync_pix_emails refaz uma chamada messages.modify por e-mail de Pix desde fev/2026). Com o padrão
+# de 60 s/256 MB a rodada era cortada no meio -- achado na verificação de ponta a ponta de
+# 24/09/2026: gmail_sync preso em 'processing' e lock preso até SYNC_LOCK_STALE_SECONDS (15 min).
+@pubsub_fn.on_message_published(topic=GMAIL_WATCH_TOPIC_NAME, timeout_sec=540, memory=options.MemoryOption.GB_1)
 def on_gmail_watch_notification(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedData]) -> None:
     """Disparado pelo Google a cada mudança na caixa postal (ver renovar_gmail_watch). V1:
     dispara o mesmo sync_gmail_work de sempre (já idempotente/dedupe por conta própria) em vez
