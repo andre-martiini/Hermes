@@ -197,6 +197,37 @@ devolve `None`. Ver comentário de `_OUTPUT_SCHEMAS` em
 `tools/registry.py` para o levantamento completo, incluindo a lista
 exaustiva de escritores da coleção `atencao`.
 
+`consultar_elevacoes_sugeridas` (sub-entrega 31/N): décima quinta tool,
+backed por `deteccao_subproduto.listar_pendentes`, com `oneOf` de 2
+branches (sucesso/erro) -- penúltima candidata da lista original de 5 da
+sub-entrega 27/N a ser resolvida (`obter_fila_atencao` já na 30/N;
+`listar_conversas_whatsapp` continua a ÚNICA candidata NÃO investigada
+dessa lista original, ver comentário de `_OUTPUT_SCHEMAS` em
+`tools/registry.py`). Descartada na sub-entrega 11/N pelo MESMO motivo
+que tinha bloqueado
+`consultar_promocoes_autonomia_sugeridas` (decidir a forma do `oneOf`),
+retomada agora pela mesma razão. A coleção `elevacoes_sugeridas` tem um
+único ponto de criação de documento em todo o repositório
+(`deteccao_subproduto.registrar_sugestao`, chamado por um único call
+site, `_ferramenta_propor`), mas -- diferente do que a redação original
+desta sub-entrega assumia -- a própria função de leitura NÃO reconstrói
+o item com defaults: `listar_pendentes` lê `dados.get(chave)` sem
+default para `acao`/`objetivo`/`motivo_escassez`/`resumo`/`criada_em`,
+então um documento esparso (sem escritor real rastreado, mas cenário já
+exercitado por `test_deteccao_subproduto.py::
+TestOContadorNaoRecomecaDoZero::
+test_a_rodada_leva_a_contagem_do_historico_como_piso`) devolve `None`
+para esses 5 campos -- achado da revisão do Codex na PR desta
+sub-entrega, mesma categoria do achado já registrado para
+`obter_fila_atencao` na sub-entrega 30/N (e o MESMO erro de análise:
+rastrear só o escritor real de hoje, sem considerar a garantia real da
+função de leitura). `motivo_escassez` é enum fechado de 3 valores
+(`MOTIVOS_ESCASSEZ`) quando presente, garantido por `validar_proposta`
+antes de qualquer gravação, mas nullable pelo mesmo motivo acima.
+`sugestao_id` (`d.id`) e `antigo` (`bool(...)`) continuam os únicos
+campos sempre não-nulos do item. Ver comentário de `_OUTPUT_SCHEMAS` em
+`tools/registry.py` para o levantamento completo.
+
 Cinco frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
    paridade com TODO o catálogo real (não amostra): nenhuma tool além de
@@ -206,11 +237,11 @@ Cinco frentes:
    `listar_rascunhos_pendentes`, `consultar_job`, `buscar_arquivos_acervo`,
    `consultar_status_modo_secretario`,
    `consultar_contatos_prioritarios_secretario`,
-   `consultar_promocoes_autonomia_sugeridas` e `obter_fila_atencao` tem
-   contrato publicado hoje.
+   `consultar_promocoes_autonomia_sugeridas`, `obter_fila_atencao` e
+   `consultar_elevacoes_sugeridas` tem contrato publicado hoje.
 2. `TestHandleToolsListOutputSchema` -- ponta a ponta via
    `mcp_server._handle_tools_list()`: `outputSchema` chega no catálogo
-   publicado só para essas quatorze tools.
+   publicado só para essas quinze tools.
 3. `TestIntegracaoHandleToolsCallStructuredContent` -- ponta a ponta via
    `mcp_server._handle_tools_call`: `structuredContent` chega no envelope
    de `tools/call` para `calculadora` (execução real, pura) e para
@@ -219,14 +250,16 @@ Cinco frentes:
    `listar_rascunhos_pendentes`/`consultar_job`/`buscar_arquivos_acervo`/
    `consultar_status_modo_secretario`/
    `consultar_contatos_prioritarios_secretario`/
-   `consultar_promocoes_autonomia_sugeridas`/`obter_fila_atencao`
-   (executor mockado -- as treze dependem de Firestore, então o teste cobre
-   o MECANISMO, não a correção interna dos handlers, mesmo padrão já usado
-   para `consultar_processo_sipac` abaixo), é sempre IGUAL ao dict que
-   `content[0].text` serializa (mesma fonte, nunca diverge), bate com o
-   `outputSchema` publicado campo a campo (para `consultar_historico_acoes`,
-   `obter_acao`, `consultar_job`, `buscar_arquivos_acervo`, `consultar_
-   contatos_prioritarios_secretario` e `consultar_promocoes_autonomia_
+   `consultar_promocoes_autonomia_sugeridas`/`obter_fila_atencao`/
+   `consultar_elevacoes_sugeridas`
+   (executor mockado -- as quatorze dependem de Firestore, então o teste
+   cobre o MECANISMO, não a correção interna dos handlers, mesmo padrão já
+   usado para `consultar_processo_sipac` abaixo), é sempre IGUAL ao dict
+   que `content[0].text` serializa (mesma fonte, nunca diverge), bate com
+   o `outputSchema` publicado campo a campo (para `consultar_historico_
+   acoes`, `obter_acao`, `consultar_job`, `buscar_arquivos_acervo`,
+   `consultar_contatos_prioritarios_secretario`,
+   `consultar_promocoes_autonomia_sugeridas` e `consultar_elevacoes_
    sugeridas`, contra o branch `oneOf`
    correspondente à forma retornada), e nunca aparece para
    uma tool sem contrato publicado -- nem
@@ -956,7 +989,62 @@ class TestOutputSchema(unittest.TestCase):
             self.assertEqual(item["properties"][campo], {"type": ["string", "null"]})
         self.assertEqual(item["properties"]["evidencia"], {"type": "object"})
 
-    def test_paridade_quatorze_tools_tem_output_schema_hoje(self):
+    def test_consultar_elevacoes_sugeridas_tem_schema_oneof_sucesso_e_erro(self):
+        schema = registry.output_schema("consultar_elevacoes_sugeridas")
+        self.assertIsNotNone(schema)
+        self.assertEqual(len(schema["oneOf"]), 2)
+        sucesso, erro = schema["oneOf"]
+
+        self.assertEqual(set(sucesso["properties"].keys()), {"total", "sugestoes"})
+        self.assertEqual(set(sucesso["required"]), {"total", "sugestoes"})
+        self.assertFalse(sucesso["additionalProperties"])
+        self.assertEqual(sucesso["properties"]["total"], {"type": "integer"})
+
+        item = sucesso["properties"]["sugestoes"]["items"]
+        campos_item = {
+            "sugestao_id", "acao", "objetivo", "motivo_escassez",
+            "resumo", "criada_em", "concluida_em", "antigo",
+        }
+        self.assertEqual(set(item["properties"].keys()), campos_item)
+        self.assertEqual(set(item["required"]), campos_item)
+        self.assertFalse(item["additionalProperties"])
+        self.assertEqual(item["properties"]["sugestao_id"], {"type": "string"})
+        # `acao`/`objetivo`/`motivo_escassez`/`resumo`/`criada_em` são
+        # `dados.get(chave)` SEM default em `listar_pendentes` -- achado da
+        # revisão do Codex na PR desta sub-entrega, mesma categoria do
+        # achado já registrado para `obter_fila_atencao` (sub-entrega
+        # 30/N): um documento esparso na coleção (cenário já exercitado
+        # por `test_deteccao_subproduto.py::TestOContadorNaoRecomecaDoZero
+        # ::test_a_rodada_leva_a_contagem_do_historico_como_piso`, que
+        # grava `status=pendente` só com `task_id`/`criada_em`) devolve
+        # `None` para os demais. Nullable, portanto -- só `sugestao_id`
+        # (`d.id`, garantido pelo SDK) e `antigo` (`bool(...)`, nunca
+        # `None`) continuam não-nulos.
+        self.assertEqual(item["properties"]["acao"], {"type": ["string", "null"]})
+        self.assertEqual(item["properties"]["objetivo"], {"type": ["string", "null"]})
+        # `motivo_escassez` é enum fechado de 3 valores quando presente
+        # (garantido por `validar_proposta` antes de qualquer gravação),
+        # mas nullable pelo mesmo motivo acima -- `null` também explícito
+        # na própria lista `enum` (exigência do JSON Schema).
+        self.assertEqual(
+            item["properties"]["motivo_escassez"],
+            {"type": ["string", "null"], "enum": ["repetivel", "raro", "ja_escrito", None]},
+        )
+        self.assertEqual(item["properties"]["resumo"], {"type": ["string", "null"]})
+        self.assertEqual(item["properties"]["criada_em"], {"type": ["string", "null"]})
+        # `concluida_em` já era nullable antes desta correção --
+        # `concluida_em or None` no payload gravado (ver
+        # `deteccao_subproduto.registrar_sugestao`), sem mudança.
+        self.assertEqual(item["properties"]["concluida_em"], {"type": ["string", "null"]})
+        self.assertEqual(item["properties"]["antigo"], {"type": "boolean"})
+
+        self.assertEqual(set(erro["properties"].keys()), {"erro", "total", "sugestoes"})
+        self.assertEqual(set(erro["required"]), {"erro", "total", "sugestoes"})
+        self.assertFalse(erro["additionalProperties"])
+        self.assertEqual(erro["properties"]["sugestoes"], {"type": "array", "maxItems": 0})
+        self.assertEqual(erro["properties"]["total"], {"type": "integer"})
+
+    def test_paridade_quinze_tools_tem_output_schema_hoje(self):
         # Não por amostragem: para TODA tool do catálogo real (108 hoje --
         # `len(registry.list_tool_names())`; achado da revisão adversarial
         # da sub-entrega 25/N: "106" estava desatualizado desde antes
@@ -967,8 +1055,9 @@ class TestOutputSchema(unittest.TestCase):
         # consultar_job, buscar_arquivos_acervo,
         # consultar_status_modo_secretario, consultar_contatos_
         # prioritarios_secretario, consultar_promocoes_autonomia_
-        # sugeridas e obter_fila_atencao -- prova que a lista fechada não
-        # vazou para nenhuma outra tool por engano.
+        # sugeridas, obter_fila_atencao e consultar_elevacoes_sugeridas --
+        # prova que a lista fechada não vazou para nenhuma outra tool por
+        # engano.
         com_schema = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
@@ -976,6 +1065,7 @@ class TestOutputSchema(unittest.TestCase):
             "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
             "consultar_status_modo_secretario", "consultar_contatos_prioritarios_secretario",
             "consultar_promocoes_autonomia_sugeridas", "obter_fila_atencao",
+            "consultar_elevacoes_sugeridas",
         }
         for nome in registry.list_tool_names():
             with self.subTest(tool=nome):
@@ -1109,6 +1199,17 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
         # Forma única, sem oneOf -- igual a `consultar_status_modo_secretario`.
         self.assertNotIn("oneOf", self.catalogo["obter_fila_atencao"]["outputSchema"])
 
+    def test_consultar_elevacoes_sugeridas_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["consultar_elevacoes_sugeridas"])
+        self.assertEqual(
+            self.catalogo["consultar_elevacoes_sugeridas"]["outputSchema"],
+            registry.output_schema("consultar_elevacoes_sugeridas"),
+        )
+        self.assertIn("oneOf", self.catalogo["consultar_elevacoes_sugeridas"]["outputSchema"])
+        self.assertEqual(
+            len(self.catalogo["consultar_elevacoes_sugeridas"]["outputSchema"]["oneOf"]), 2
+        )
+
     def test_nenhuma_outra_tool_publicada_tem_output_schema(self):
         esperadas = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
@@ -1117,6 +1218,7 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
             "consultar_status_modo_secretario", "consultar_contatos_prioritarios_secretario",
             "consultar_promocoes_autonomia_sugeridas", "obter_fila_atencao",
+            "consultar_elevacoes_sugeridas",
         }
         com_schema = [
             nome for nome, tool in self.catalogo.items()
@@ -2597,6 +2699,168 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
         estruturado = resultado["structuredContent"]
         self.assertEqual(estruturado, mock_resultado)
         item = estruturado["itens"][0]
+        for campo, valor in item.items():
+            if valor is None:
+                tipo_declarado = item_props[campo]["type"]
+                self.assertIn(
+                    "null", tipo_declarado,
+                    f"campo '{campo}' veio None mas o outputSchema não declara null",
+                )
+                if "enum" in item_props[campo]:
+                    self.assertIn(
+                        None, item_props[campo]["enum"],
+                        f"campo '{campo}' veio None mas null não está no enum publicado",
+                    )
+
+    def test_consultar_elevacoes_sugeridas_sucesso_leva_structured_content_igual_ao_content(self):
+        # `deteccao_subproduto.listar_pendentes` real depende de Firestore;
+        # o executor é mockado aqui com uma forma real que a função produz
+        # (ver `deteccao_subproduto.py`), mesmo padrão de `consultar_
+        # promocoes_autonomia_sugeridas` acima.
+        esperado = {
+            "total": 1,
+            "sugestoes": [
+                {
+                    "sugestao_id": "2026-09-elevacao-tarefa-1",
+                    "acao": "Escrever POP de onboarding",
+                    "objetivo": "Documentar processos internos",
+                    "motivo_escassez": "ja_escrito",
+                    "resumo": 'Elevacao sugerida — acao "Escrever POP de onboarding"\n...',
+                    "criada_em": "2026-09-24",
+                    "concluida_em": "2026-09-20",
+                    "antigo": False,
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_elevacoes_sugeridas", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_elevacoes_sugeridas_lista_vazia_tambem_leva_structured_content(self):
+        esperado = {"total": 0, "sugestoes": []}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_elevacoes_sugeridas", "arguments": {"limite": 5}},
+                ctx=_ctx(),
+            )
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_consultar_elevacoes_sugeridas_erro_tambem_leva_structured_content(self):
+        # Caminho real de erro: `.stream()` da query levanta exceção,
+        # capturada dentro da própria `listar_pendentes` -- `total`/
+        # `sugestoes` ficam fixos em `0`/`[]`, `erro` é `str(exc)`.
+        esperado = {
+            "erro": "503 Firestore indisponível",
+            "total": 0,
+            "sugestoes": [],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_elevacoes_sugeridas", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertTrue(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_elevacoes_sugeridas_structured_content_bate_com_o_output_schema_publicado(self):
+        # Paridade campo a campo contra o branch `oneOf` correspondente à
+        # forma efetivamente devolvida, mesmo padrão de `consultar_
+        # promocoes_autonomia_sugeridas` acima. Inclui `concluida_em=None`,
+        # o único campo nullable do item, para provar que o schema aceita
+        # essa forma também.
+        schema = registry.output_schema("consultar_elevacoes_sugeridas")
+        sucesso_schema, erro_schema = schema["oneOf"]
+
+        mock_sucesso = {
+            "total": 1,
+            "sugestoes": [
+                {
+                    "sugestao_id": "2026-09-elevacao-tarefa-2",
+                    "acao": "Minuta de parecer reaproveitavel",
+                    "objetivo": "Padronizar pareceres",
+                    "motivo_escassez": "repetivel",
+                    "resumo": "Elevacao sugerida — ...",
+                    "criada_em": "2026-09-24",
+                    "concluida_em": None,
+                    "antigo": True,
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_sucesso):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_elevacoes_sugeridas", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        item_props = sucesso_schema["properties"]["sugestoes"]["items"]["properties"]
+        for campo in sucesso_schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(
+                campo, sucesso_schema["properties"],
+                f"campo '{campo}' fora do branch de sucesso do outputSchema",
+            )
+        for item in estruturado["sugestoes"]:
+            for campo in item:
+                self.assertIn(campo, item_props, f"campo '{campo}' fora do item declarado")
+
+        mock_erro = {"erro": "falhou", "total": 0, "sugestoes": []}
+        with patch.object(mcp_server, "execute_tool", return_value=mock_erro):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_elevacoes_sugeridas", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        for campo in erro_schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(
+                campo, erro_schema["properties"],
+                f"campo '{campo}' fora do branch de erro do outputSchema",
+            )
+
+    def test_consultar_elevacoes_sugeridas_item_esparso_tambem_bate_com_o_output_schema(self):
+        # Regressão do achado da revisão do Codex na PR desta sub-entrega:
+        # `listar_pendentes` lê `dados.get(chave)` sem default para
+        # `acao`/`objetivo`/`motivo_escassez`/`resumo`/`criada_em` -- um
+        # documento esparso na coleção (cenário já exercitado por
+        # `test_deteccao_subproduto.py::TestOContadorNaoRecomecaDoZero::
+        # test_a_rodada_leva_a_contagem_do_historico_como_piso`, que grava
+        # `status=pendente` só com `task_id`/`criada_em`) devolve `None`
+        # para os demais. Este teste prova que o outputSchema publicado
+        # ACEITA esse item real (nulo nesses 5 campos), não só o item
+        # "cheio" dos testes anteriores.
+        schema = registry.output_schema("consultar_elevacoes_sugeridas")
+        sucesso_schema = schema["oneOf"][0]
+        item_props = sucesso_schema["properties"]["sugestoes"]["items"]["properties"]
+
+        mock_resultado = {
+            "total": 1,
+            "sugestoes": [
+                {
+                    "sugestao_id": "s-esparso",
+                    "acao": None,
+                    "objetivo": None,
+                    "motivo_escassez": None,
+                    "resumo": None,
+                    "criada_em": None,
+                    "concluida_em": None,
+                    "antigo": False,
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_resultado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_elevacoes_sugeridas", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        self.assertEqual(estruturado, mock_resultado)
+        item = estruturado["sugestoes"][0]
         for campo, valor in item.items():
             if valor is None:
                 tipo_declarado = item_props[campo]["type"]
