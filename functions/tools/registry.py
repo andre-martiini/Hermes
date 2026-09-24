@@ -2536,10 +2536,19 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     # sempre `{"total": int, "itens": [...]}`, mesma categoria de
     # `consultar_lista_compras`/`consultar_status_modo_secretario`.
     #
-    # `total` e sempre `len(itens)` (contagem apos o corte por `limite`,
-    # diferente de `consultar_promocoes_autonomia_sugeridas` onde `total`
-    # conta ANTES do corte -- nao investigado aqui, achado registrado so
-    # naquela tool). Cada item e RECONSTRUIDO campo a campo com
+    # `total` e sempre `len(itens)` calculado ANTES do corte por `limite`
+    # (`atencao.py:902-906`: `itens.sort(...)`, depois `"total": len(itens),
+    # "itens": itens[:limite_ajustado]` -- `itens` nunca e reatribuido, so
+    # fatiado na resposta) -- MESMO comportamento de
+    # `consultar_promocoes_autonomia_sugeridas` (achado da 1a rodada de
+    # revisao adversarial desta sub-entrega: a redacao original desta
+    # mesma linha, antes da correcao, tinha essa relacao invertida --
+    # dizia "apos o corte" e "diferente de"). Confirmado empiricamente com
+    # `MockDb` (5 docs, `limite=2`): `total == 5`, `len(itens) == 2`. Nao
+    # e uma garantia do outputSchema (`total` e so `{"type": "integer"}`,
+    # sem relacao formal com `len(itens)` no schema) -- so uma nota de
+    # comportamento real, para quem for consumir a tool. Cada item e
+    # RECONSTRUIDO campo a campo com
     # `d.get(chave)` (nunca `doc.to_dict()` cru) -- mesma garantia de forma
     # de `consultar_promocoes_autonomia_sugeridas`, independente de quantos
     # escritores a colecao `atencao` tenha.
