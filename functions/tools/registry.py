@@ -632,10 +632,17 @@ def mcp_annotations(tool_name: str) -> dict:
     `tools/list` -- P03 passo 3 do plano de autonomia ("Adicionar
     outputSchema, structuredContent, annotations e envelope aos caminhos
     compativeis"). `readOnlyHint`/`destructiveHint` vieram da sub-entrega
-    6/N; `openWorldHint`, da sub-entrega 7/N; `idempotentHint`, PARCIAL, das
-    sub-entregas 16/N, 17/N, 18/N e 19/N (36 das ~59 tools de escrita/
-    leitura_e_escrita investigadas ate agora -- ver `Idempotencia` em
-    `tools/inventory.py`).
+    6/N; `openWorldHint`, da sub-entrega 7/N; `idempotentHint`, das
+    sub-entregas 16/N a 23/N (53 das ~61 tools de escrita/leitura_e_escrita
+    elegiveis ja classificadas -- ver `Idempotencia` em `tools/inventory.py`;
+    o universo elegivel cresceu de ~59 para ~61 entre a sub-entrega 19/N e a
+    20/N por causa de tools novas adicionadas por PRs de funcionalidade fora
+    deste plano, `atualizar_arquivo_drive` e `sincronizar_conversas_
+    whatsapp`, ja classificadas por quem as implementou). Das ~8 restantes,
+    NENHUMA ficou "nunca investigada" apos a sub-entrega 23/N -- todas as
+    tools de escrita/leitura_e_escrita elegiveis ja foram lidas pelo menos
+    uma vez; as que faltam ficaram deliberadamente SEM classificacao por
+    ambiguidade genuina (ver paragrafo abaixo).
     `outputSchema`/`structuredContent`/envelope seguem fora de escopo --
     exigem definir um contrato de dados por tool, ver docs/autonomia/execucao.md.
 
@@ -768,14 +775,92 @@ def mcp_annotations(tool_name: str) -> dict:
     interno, com pelo menos um ramo — um toggle de verdade — violando
     idempotência por definição).
 
-    As demais ~15 tools de escrita/leitura_e_escrita ainda não foram
-    investigadas (`idempotencia=None`, hint omitido) -- candidatas a
-    fatias futuras, mesmo padrao incremental ja usado para `dominio_rede`
-    (sub-entrega 7/N) e para `outputSchema` (sub-entregas 8/N em diante).
-    Mais 8 tools (as listadas acima, entre esta sub-entrega e as
-    anteriores) foram investigadas e deliberadamente deixadas sem
-    classificação por ambiguidade genuína -- ver `nota` de cada uma em
-    `tools/inventory.py` para não repetir a investigação.
+    Mais 5 tools investigadas na sub-entrega 20/N, o grupo coeso de
+    aprovação/descarte de rascunho + autorização Argos já identificado como
+    próxima fatia natural pela sub-entrega 19/N: `aprovar_rascunho_
+    whatsapp`, `descartar_rascunho_whatsapp`, `consultar_autorizacao_argos`
+    e `consumir_autorizacao_argos` são IDEMPOTENTE (as quatro convergem
+    para um status terminal gracioso -- `already_decided`/`already_used` --
+    dentro de uma transação Firestore que revalida o status atual antes de
+    escrever, ou, no caso de `consultar_autorizacao_argos`, porque a
+    escrita passiva de expiração só acontece enquanto o status ainda é
+    `aguardando_decisao`; ver `nota` de cada uma). `solicitar_autorizacao_
+    argos` é NAO_IDEMPOTENTE (`db.collection(COLLECTION).document()` sem
+    argumento gera um ID novo do Firestore e dispara um novo card no
+    Telegram a cada chamada, sem nenhuma checagem de dedup por
+    tipo/sistema_id/demanda_id -- mesmo padrão já aceito para `criar_
+    objetivo_estrategico`/`criar_rascunho_whatsapp`).
+
+    Mais 4 tools investigadas na sub-entrega 21/N, o grupo coeso de edição/
+    reagendamento em lote de ações já identificado como próxima fatia
+    natural pela sub-entrega 20/N: `confirmar_edicao_em_lote`, `editar_
+    acoes_em_lote`, `confirmar_reagendamento_em_lote` e `reagendar_acoes_
+    em_lote` são as quatro NAO_IDEMPOTENTE -- `confirmar_edicao_em_lote` e
+    `editar_acoes_em_lote` são dois wrappers finos sobre a MESMA callable
+    (`main.py::confirmarEdicaoEmLote`), e `confirmar_reagendamento_em_lote`
+    e `reagendar_acoes_em_lote` sobre `main.py::confirmarReagendamentoEmLote`
+    -- ambas as callables fazem `batch.update(..., 'acompanhamento':
+    firestore.ArrayUnion([diary_entry]))` por item, com um `diary_entry`
+    novo (timestamp novo) a cada chamada bem-sucedida, incondicionalmente;
+    repetir a MESMA chamada com os MESMOS `items` não diverge no valor
+    final dos campos editados, mas acrescenta uma nota nova ao diário de
+    cada ação a cada vez -- mesmo padrão já usado em `editar_acao` (sub-
+    entrega 16/N). `reagendar_acoes_em_lote` acumula um segundo motivo,
+    documentado em `nota`: o passo de preparação (`preparar_reagendamento_
+    em_lote`) é refeito a cada chamada e, quando a seleção é por
+    `filtro_data`, filtra exatamente pelo campo (`data_limite`) que a
+    confirmação acabou de mudar -- repetir tende a não encontrar mais nada
+    e falhar cedo, uma auto-limitação parcial e dependente dos dados, não
+    uma proteção estrutural (ver `nota` de cada uma em `tools/inventory.py`
+    para a evidência por handler e os testes que provam o crescimento do
+    diário em `test_confirmar_lote_nao_idempotente.py`).
+
+    Mais 1 tool investigada na sub-entrega 22/N, a versão singular do par
+    edição/edição-em-lote coberto na sub-entrega 21/N: `confirmar_edicao_
+    acao` é NAO_IDEMPOTENTE -- chama a MESMA callable `main.py::
+    confirmarEdicaoAcao` que `editar_acao` (sub-entrega 16/N), com a mesma
+    raiz (`ArrayUnion` incondicional a cada chamada bem-sucedida). Diferença
+    real: ao contrário de `editar_acao`, esta tool repassa `snapshot_ts`
+    (parâmetro opcional do schema, devolvido por `preparar_edicao_acao`) à
+    callable, que recusa a gravação com `status: 'invalidated'` se o valor
+    não bater com `data_atualizacao` atual -- como a própria gravação já
+    reescreve esse campo, uma SEGUNDA chamada idêntica com o MESMO
+    `snapshot_ts` falha em vez de duplicar a nota, uma auto-limitação real
+    que o grupo em lote da sub-entrega 21/N não tem. Não é idempotência de
+    verdade (a segunda chamada devolve erro, não o mesmo sucesso) e só se
+    aplica quando o chamador de fato envia `snapshot_ts` -- sem ele, mesmo
+    comportamento sem proteção de `editar_acao`. Classificação conservadora
+    mantida em NAO_IDEMPOTENTE (ver `nota` em `tools/inventory.py` e os
+    testes em `test_confirmar_edicao_acao_nao_idempotente.py`).
+
+    Mais 5 tools investigadas na sub-entrega 23/N, fechando a lista das
+    "nunca investigadas": `acompanhar_processo_sipac` (IDEMPOTENTE -- doc
+    `sipac_processos/{uid}_{numero}` com ID deterministico, `.set(merge=
+    True)` converge no mesmo `acompanhar`; achado real e nao-bloqueante
+    registrado na nota do inventario sobre `snapshot_hash` colidir com o
+    baseline do cron `scheduledSipacSync`, P05); `consolidar_whatsapp`
+    (NAO_IDEMPOTENTE -- ID automatico + `.set()` incondicional cria um
+    segundo job de consolidacao a cada repeticao); `consultar_contatos_
+    prioritarios_secretario` (IDEMPOTENTE -- mesmo desenho de `consultar_
+    autorizacao_argos`, expiracao guardada por status converge apos a
+    primeira chamada que encontra o item vencido); `registrar_inscricao_
+    bolsa_publica` (IDEMPOTENTE -- `vinculos_projeto` checado por
+    project_id+cpf antes de criar, segunda chamada devolve `alreadyLinked`
+    sem duplicar); `schedule_whatsapp_message` (NAO_IDEMPOTENTE -- o
+    `idempotency_key=ctx.mcp_confirmation_id` so protege retry dentro da
+    MESMA confirmacao MCP, mesmo caveat ja aceito para `pausar_conversa`,
+    que delega para a mesma funcao). Ver `nota` de cada entrada em
+    `tools/inventory.py` para a evidencia completa por handler e os testes
+    em `test_idempotencia_sub23.py`.
+
+    As ~8 tools restantes (`decidir_elevacao`, `decidir_promocao_
+    autonomia`, `confirmar_acao`, `mutar_portal_compras_publico`, `mutar_
+    lista_compras`, `revogar_promocao_autonomia`, `excluir_objetivo_
+    estrategico`, `gerenciar_item_estrategico`) foram investigadas e
+    deliberadamente deixadas sem classificação (`idempotencia=None`, hint
+    omitido) por ambiguidade genuína -- ver `nota` de cada uma em
+    `tools/inventory.py` para não repetir a investigação. Nenhuma tool
+    elegível ficou sem ao menos uma leitura direta do handler.
 
     Omitir hints nao investigados com confianca nao e regressao: a
     especificacao MCP ja define default conservador para quem nao declara
@@ -1019,6 +1104,12 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     # "erro": str(exc)}`) quando a consulta ao Firestore falha -- modelar
     # outputSchema pra elas exigiria decidir se o contrato cobre as duas
     # formas possiveis ou so a normal, investigacao maior que esta fatia;
+    # ATUALIZACAO (sub-entrega 29/N): essa objecao nao se aplica mais a
+    # `consultar_promocoes_autonomia_sugeridas` -- o padrao `oneOf`
+    # (estabelecido na sub-entrega 14/N para `consultar_historico_acoes`,
+    # reusado desde entao) resolve exatamente essa decisao; ver a entrada
+    # propria dela no fim deste dict. `consultar_elevacoes_sugeridas`
+    # continua descartada, nao reinvestigada nesta sub-entrega.
     # `agent_runs.listar_recentes` nao tem esse formato alternativo (uma
     # falha de consulta propaga como excecao nao tratada, fora do escopo de
     # outputSchema, mesmo tratamento generico de qualquer handler sem
@@ -1594,6 +1685,853 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
             },
         ],
     },
+    # `listar_rascunhos_pendentes` (P03 sub-entrega 24/N) -- oitava tool com
+    # outputSchema. Handler (`tools/hermes_tools.py::listar_rascunhos_pendentes`)
+    # so repassa `limite` para `outbox_aprovacao.listar_rascunhos`, que tem
+    # UMA UNICA forma de retorno (sem `try/except` proprio, sem ramo de
+    # erro alternativo) -- diferente de `consultar_historico_acoes`/
+    # `obter_acao` (sub-entregas 14/N e 15/N), nao precisa de `oneOf`.
+    #
+    # `status` e enum de EXATAMENTE 2 valores pela MESMA garantia ja usada
+    # em `consultar_pedidos_agente` (sub-entrega 12/N): nao "escritor
+    # unico" -- a colecao `whatsapp_outbox` tem MUITOS escritores, em
+    # varios modulos Python (`outbox_aprovacao.py` tem pelo menos seis
+    # funcoes que escrevem `status`: `criar_rascunho`, `aprovar_rascunho`,
+    # `descartar_rascunho`, `aplicar_edicao_rascunho`,
+    # `expirar_rascunhos_pendentes`, `_degradar_rascunho_promovido_sem_
+    # mandato`; mais `tools/schedule_whatsapp_message.py`,
+    # `ai_notification_planner.py`, `telegram_callbacks_confirmacoes.py`)
+    # e tambem fora de Python (`services/whatsapp-capture/index.js`, o
+    # worker Node do WhatsApp, e `hermes-voice-bridge/tools.py`, o cliente
+    # de voz) -- e sim o filtro da propria QUERY
+    # (`.where("status", "in", [STATUS_AGUARDANDO, STATUS_AGUARDANDO_JANELA])`
+    # em `outbox_aprovacao.listar_rascunhos`): nenhum documento com outro
+    # valor de `status` pode aparecer no resultado, INDEPENDENTE de quantos
+    # escritores a colecao tiver ou do que cada um escreva -- essa e a
+    # garantia que importa para o contrato publicado, e nao depende de
+    # enumerar todo escritor.
+    #
+    # NOTA DE PROCESSO (as tres rodadas de revisao adversarial desta
+    # sub-entrega): uma versao anterior deste comentario tentava listar
+    # TODOS os escritores da colecao e prova-los individualmente
+    # inofensivos ao enum -- cada rodada de revisao achou pelo menos um
+    # escritor real que a "lista exaustiva" anterior tinha omitido
+    # (`aplicar_edicao_rascunho`/`_degradar_rascunho_promovido_sem_mandato`
+    # na 1a rodada; `ai_notification_planner.py`/`hermes-voice-bridge/
+    # tools.py` na 2a; `aprovar_rascunho`/`descartar_rascunho`/
+    # `expirar_rascunhos_pendentes`/`services/whatsapp-capture/index.js`
+    # na 3a) -- nenhum deles jamais mudou o veredito do enum (nenhum
+    # escreve `aguardando_aprovacao`/`aguardando_janela` fora do gate que
+    # ja exige o documento estar num desses dois estados), mas a proposta
+    # de enumeracao exaustiva e um alvo que nao para de crescer numa
+    # colecao com escritores em multiplos runtimes. Por isso a redacao
+    # final abandona a enumeracao completa e fica só com a garantia
+    # estrutural (o filtro da query), que e a unica coisa de que o
+    # contrato publicado aqui depende.
+    #
+    # Os outros 13 campos do item vem de UM UNICO LITERAL de dict dentro de
+    # `listar_rascunhos` (`outbox_aprovacao.py`, sem chave condicional --
+    # todos os 13 sempre presentes, ao contrario de `truncado`
+    # (`consultar_lista_compras`) ou `status` no ramo de erro (`obter_acao`)):
+    #   - `id` (`doc.id`, garantido string pelo SDK do Firestore).
+    #   - `destinatario_nome`/`to_number`/`motivo`/`origem` sao
+    #     `["string", "null"]` -- CORRECAO da revisao Codex nesta PR (achado
+    #     real, nao um nit): a versao original desta nota provava que
+    #     `criar_rascunho` (o UNICO caminho de criacao que gera os dois
+    #     status do filtro) sempre PREENCHE estes quatro campos com string
+    #     nao-vazia (`motivo`/`contact_number` validados nao-vazios antes do
+    #     payload; `destinatario_nome`/`to_number` caem para `contact_number`
+    #     quando `nome`/`chat_id` sao falsy; `origem or "claude"`) -- mas
+    #     isso so cobre documentos criados PELA VERSAO ATUAL de
+    #     `criar_rascunho`. `listar_rascunhos` LE estes quatro campos com
+    #     `d.get(campo)` CRU, sem segundo argumento (ao contrario de `tipo`,
+    #     que tem `d.get("tipo", "outro")`) -- um documento que nao passe
+    #     por essa escrita exata (formato legado de antes deste payload,
+    #     edicao manual no Firestore, ou um escritor futuro que nao inclua
+    #     um desses campos) leria como `None`, nao como string vazia.
+    #     Nenhum caso assim foi OBSERVADO nesta investigacao (o unico
+    #     caminho de criacao ativo sempre preenche os quatro), mas a
+    #     garantia de tipo depende do ESCRITOR e nao do LEITOR (mesma
+    #     categoria de risco ja aceita para `acao_id`/`item_atencao_id`
+    #     abaixo, exceto que ali o `None` e por DESENHO, nao por ausencia de
+    #     coercao) -- por isso nullable, corrigindo o schema original que
+    #     os declarava como string obrigatoria sem `null`. `tipo` continua
+    #     `string` sem `null`: tem default (`"outro"`) no PROPRIO ponto de
+    #     leitura, garantia mais forte que a dos quatro campos acima.
+    #     `origem` continua sem enum (nao um terceiro valor fixo como
+    #     `status`), so ganhou `null` pelo mesmo motivo dos outros tres.
+    #     O parametro opcional `destinatario_resolvido`
+    #     (usado so por `secretario_whatsapp.py::enviar_resposta_via_
+    #     outbox`, um unico call site) repassa `chat_id`/`nome` do
+    #     CHAMADOR sem coercao de tipo -- mas isso NAO e um risco residual
+    #     para ESTA tool (CORRECAO da 1a rodada de revisao adversarial
+    #     desta sub-entrega, que apontou a nota original como
+    #     mal-atribuida): esse unico call site sempre passa
+    #     `envio_imediato=True`, que forca `status_inicial = STATUS_PENDING`
+    #     incondicionalmente em `criar_rascunho` -- um documento criado por
+    #     esse caminho NUNCA pode aparecer no resultado de
+    #     `listar_rascunhos` (o filtro da query exclui `STATUS_PENDING`).
+    #     Continua sendo um risco residual real para `criar_rascunho`
+    #     (a funcao) e para o campo publicado por `criar_rascunho_
+    #     whatsapp` caso essa tool algum dia ganhe outputSchema propria,
+    #     so nao se aplica ao contrato desta tool especifica.
+    #   - `acao_id`/`item_atencao_id` sao `["string", "null"]` --
+    #     DELIBERADAMENTE nullable: `criar_rascunho` grava os dois SEMPRE
+    #     (nunca ausentes do documento), mas com valor `None` quando o
+    #     chamador nao informa (`str(acao_id).strip() if acao_id else
+    #     None`) -- nao e "campo ausente", e "campo presente com valor
+    #     null" por desenho (tarefa/item de atencao vinculado e opcional).
+    #   - `foi_editado` e SEMPRE `bool`, garantia mais forte que a do
+    #     documento gravado: `listar_rascunhos` aplica `bool(d.get(
+    #     "foi_editado", False))` na PROPRIA leitura (coercao local,
+    #     mesmo espirito de `trecho` abaixo), independente do que estiver
+    #     gravado no Firestore.
+    #   - `trecho` e SEMPRE `string`, mesma razao: `str(d.get("content")
+    #     or "")[:120]` na propria leitura, nunca o campo `content` cru.
+    #   - `envio_liberado_em`/`criado_em` sao `["string", "null"]`: passam
+    #     por `outbox_aprovacao._to_iso`, que devolve `None` so para
+    #     entrada `None`, `.isoformat()` para datetime/Timestamp, e
+    #     `str(val)` para QUALQUER outra coisa -- nunca um terceiro tipo.
+    #     `envio_liberado_em` so e gravado quando `is_promovido` (ausente
+    #     do documento no caminho regular; `d.get(...)` sem default vira
+    #     `None`, que `_to_iso` mantem `None`).
+    #   - `telegram_message_id` e `["integer", "null"]` -- ACHADO desta
+    #     sub-entrega: nao e string como o padrao `_to_iso` dos dois campos
+    #     de data faria supor. `criar_rascunho` so grava este campo
+    #     (`doc_ref.update({"telegram_message_id": telegram_msg_id})`)
+    #     QUANDO `telegram_msg_id` e truthy, e esse valor vem de
+    #     `telegram_utils._send_telegram_message_with_keyboard`, que
+    #     devolve `resp.json().get("result", {}).get("message_id")` --
+    #     `message_id` e um INTEIRO na API do Telegram, nunca string.
+    #     Confirmado tambem por `test_outbox_aprovacao.py` (fixture
+    #     `"telegram_message_id": 999`, literal inteiro). Campo AUSENTE
+    #     (nunca gravado) quando o envio ao Telegram falha ou nao ha
+    #     token/chat configurado -- por isso nullable, nunca outro tipo.
+    #
+    # Investigacao completa e as rodadas de revisao adversarial desta
+    # sub-entrega: docs/autonomia/execucao.md, sub-entrega 24/N.
+    "listar_rascunhos_pendentes": {
+        "type": "object",
+        "properties": {
+            "total": {"type": "integer"},
+            "rascunhos": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "status": {
+                            "type": "string",
+                            "enum": ["aguardando_aprovacao", "aguardando_janela"],
+                        },
+                        "destinatario_nome": {"type": ["string", "null"]},
+                        "to_number": {"type": ["string", "null"]},
+                        "motivo": {"type": ["string", "null"]},
+                        "trecho": {"type": "string"},
+                        "acao_id": {"type": ["string", "null"]},
+                        "item_atencao_id": {"type": ["string", "null"]},
+                        "origem": {"type": ["string", "null"]},
+                        "tipo": {"type": "string"},
+                        "foi_editado": {"type": "boolean"},
+                        "envio_liberado_em": {"type": ["string", "null"]},
+                        "criado_em": {"type": ["string", "null"]},
+                        "telegram_message_id": {"type": ["integer", "null"]},
+                    },
+                    "required": [
+                        "id", "status", "destinatario_nome", "to_number",
+                        "motivo", "trecho", "acao_id", "item_atencao_id",
+                        "origem", "tipo", "foi_editado", "envio_liberado_em",
+                        "criado_em", "telegram_message_id",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["total", "rascunhos"],
+        "additionalProperties": False,
+    },
+    # `consultar_job` (P03 sub-entrega 25/N) -- nona tool com outputSchema.
+    # Handler real: `tools/hermes_tools.py::_consultar_job` e um passthrough
+    # puro para `mcp_jobs.ler_job(ctx.user_uid, job_id)` -- lido por
+    # completo. Escritor: `mcp_jobs.py` e o UNICO arquivo do repositorio que
+    # grava na colecao `mcp_jobs` (confirmado por busca -- so
+    # `mcp_jobs.criar_job`/`on_mcp_job_created`/`_reivindicar_job` tocam essa
+    # colecao; nenhum outro modulo, ao contrario de `whatsapp_outbox`,
+    # sub-entrega 24/N). Enumeracao completa dos 4 pontos de escrita de
+    # `status` confirma que so 3 valores sao gravados: `"processing"`
+    # (`criar_job`, unico valor inicial) e, so pelo trigger
+    # `on_mcp_job_created`, `"done"` ou `"error"` -- nenhum quarto valor em
+    # nenhum dos 4 `ref.update(...)` do arquivo.
+    #
+    # `ler_job` tem 5 `return` distintos, a MAIOR contagem de ramos deste
+    # catalogo ate agora (mais que os 3 de `obter_acao`, sub-entrega 15/N):
+    #   1. sem `job_id`: `{"erro": "job_id obrigatorio."}` -- SEM `status`,
+    #      SEM `job_id`/`tool` (a checagem `if not job_id` acontece antes de
+    #      qualquer leitura ao Firestore).
+    #   2. job inexistente OU `dados.get("uid") != uid`: `{"erro": ...,
+    #      "status": "not_found"}` -- a MESMA resposta para os dois casos,
+    #      deliberado (comentario do proprio handler: "confirmar que o id
+    #      existe ja vazaria informacao para quem esta tentando adivinhar").
+    #   3. `status == "done"`: `{"job_id", "tool", "status": "done",
+    #      "resultado"}`.
+    #   4. `status == "error"`: `{"job_id", "tool", "status": "error",
+    #      "erro", "erro_tipo"?, "bloqueio_politica"?}`.
+    #   5. qualquer outro `status` (so `"processing"` e alcancavel hoje, ver
+    #      enumeracao acima): `{"job_id", "tool", "status", "mensagem"}`.
+    # Os ramos 1 e 2 sao a MESMA forma de erro que `obter_acao` ja usa
+    # (campo `status` opcional, so muda a PRESENCA dele) -- por isso um unico
+    # branch de erro aqui tambem, `status` fora de `required`, e NAO um
+    # terceiro ramo de `oneOf` so para essa diferenca. Os ramos 3/4/5
+    # compartilham `job_id`/`tool`/`status` mas tem o RESTO dos campos
+    # obrigatorios DISJUNTO (`resultado` xor `erro`+opcionais xor
+    # `mensagem`) -- por isso 3 branches sao genuinamente necessarios, alem
+    # do branch de erro-sem-job -- 4 branches de `oneOf` no total, o maior
+    # numero deste catalogo ate agora.
+    #
+    # `job_id`/`tool` (ramos 3/4/5): `job_id` e sempre o PARAMETRO de
+    # entrada (nao `dados.get("job_id")`), garantido nao-vazio pelo `if not
+    # job_id` do ramo 1 -- sempre `string`. `tool` e `dados.get("tool")`,
+    # sempre presente e nao-vazio: o UNICO escritor (`criar_job`) grava
+    # `"tool": tool` incondicionalmente, com `tool` vindo de `name` (que
+    # `mcp_server._handle_tools_call` so despacha para `criar_job` quando
+    # `name in _TOOLS_LONGAS`, nunca vazio) -- por isso `string` sem `null`.
+    #
+    # `resultado` (ramo 3, `status == "done"`): documentado como `string`
+    # HOJE, mas e um contrato de SNAPSHOT, nao uma garantia estrutural como
+    # o enum de `listar_rascunhos_pendentes` -- registrado explicitamente
+    # para nao repetir o erro de redacao corrigido na sub-entrega 24/N.
+    # `_TOOLS_LONGAS` (`mcp_server.py`) tem hoje EXATAMENTE 3 tools:
+    # `gerar_relatorio`, `ler_documento_na_integra`, `buscar_e_analisar_
+    # email` -- as 3 unicas que podem produzir um job com `status == "done"`.
+    # Lidos os 3 handlers por completo (`tools/telegram_extended.py`, ramos
+    # `gerar_relatorio`/`ler_documento_na_integra`; `tools/buscar_e_
+    # analisar_email.py`): TODO `return` das 3 e uma `string` (Markdown/
+    # texto simples num caso de sucesso; `json.dumps(...)`/`f"⚠️ ..."` nos
+    # outros) -- nenhum dict, nenhuma lista. `mcp_jobs._preparar_resultado`
+    # confirma que uma `string` passa DIRETO para o campo `resultado`
+    # gravado (so um valor NAO-string passaria por `json.dumps` e ficaria
+    # ESTRUTURADO no Firestore -- caminho hoje inalcancavel pelas 3 tools
+    # atuais, mas o mecanismo em si e generico: `execute()` e o MESMO
+    # dispatcher usado por qualquer tool do catalogo, entao uma QUARTA tool
+    # futura em `_TOOLS_LONGAS` que devolva dict/lista quebraria esta
+    # garantia sem tocar nenhuma linha deste comentario). Por isso `string`
+    # sem `null` aqui, mas com este caveat: revisar este campo sempre que
+    # `_TOOLS_LONGAS` ganhar uma nova entrada.
+    #
+    # ACHADO desta sub-entrega, NAO corrigido (fora do escopo de uma fatia
+    # so-schema): o campo `truncado` (bool, gravado pelo mesmo `ref.update`
+    # que grava `resultado` em `on_mcp_job_created`, sinaliza quando
+    # `_MAX_RESULTADO_CHARS` cortou o texto) e lido de volta por `ler_job`
+    # -- so `resultado`/`job_id`/`tool`/`status` sao copiados para `saida`.
+    # Um consumidor de `consultar_job` nao tem como saber, pela resposta,
+    # que um `resultado` longo foi cortado no meio, apesar do dado existir
+    # no Firestore. Nao endereçado aqui: mudar o que `ler_job` devolve e uma
+    # mudanca de COMPORTAMENTO do handler, nao so de documentacao do
+    # contrato existente -- registrado em pendencias para uma fatia futura
+    # (`ler_job`/P03 passo 4, ou P05).
+    #
+    # `erro`/`erro_tipo`/`bloqueio_politica` (ramo 4, `status == "error"`):
+    # `erro` e sempre `dados.get("erro")`, e as 4 escritas de `status:
+    # "error"` em `on_mcp_job_created` SEMPRE incluem `erro` (string,
+    # `str(exc)` ou mensagem construida) -- por isso obrigatorio, sem
+    # `null`. `erro_tipo` e um dos 4 valores fechados de `mcp_jobs.py`
+    # (`ERRO_TIPO_POLITICA`/`ERRO_TIPO_RESULTADO`/`ERRO_TIPO_EXCECAO`/
+    # `ERRO_TIPO_CONFIGURACAO`) -- as 4 escritas de erro SEMPRE gravam um
+    # destes hoje, mas `ler_job` mantem a checagem `if dados.get(
+    # "erro_tipo") is not None` (comentario do proprio handler: campo
+    # "ausente so em jobs gravados antes desta sub-entrega [anterior,
+    # P01]") -- por isso OPCIONAL aqui, nao obrigatorio, seguindo o que o
+    # LEITOR realmente garante (nao o que todo escritor atual grava) --
+    # mesmo criterio ja usado para campos opcionais desta familia
+    # (`truncado` em `consultar_lista_compras`, `status` no ramo de erro de
+    # `obter_acao`). `bloqueio_politica` e opcional pelo mesmo motivo, so
+    # presente quando `erro_tipo == "politica"`: `{"decision": string,
+    # "reason_code": string}`, forma fixa gravada a mao em
+    # `on_mcp_job_created` (`decisao.decision.value` sempre string do enum
+    # `Decisao`). `reason_code` SEM `null` -- CORRECAO da 1a rodada de
+    # revisao adversarial desta sub-entrega, que apontou a redacao anterior
+    # ("pode ser None") como nao verificada: `autonomy/contracts.py::
+    # PolicyDecision.reason_code` e tipado `str` (nao `str | None`), e os 4
+    # pontos de construcao de `PolicyDecision` em `autonomy/policy.py`
+    # (incluindo `_decisao_padrao_por_classe`, tipada `-> tuple[Decisao,
+    # str, bool]`) sempre passam um literal de string, nunca `None`.
+    #
+    # `mensagem` (ramo 5, unico `status` alcancavel hoje: `"processing"`) e
+    # uma string literal fixa no proprio `ler_job`, nunca dado do Firestore
+    # -- garantia mais forte que qualquer outro campo desta tool.
+    #
+    # Investigacao completa desta sub-entrega: docs/autonomia/execucao.md,
+    # sub-entrega 25/N.
+    "consultar_job": {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "erro": {"type": "string"},
+                    "status": {"const": "not_found"},
+                },
+                "required": ["erro"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string"},
+                    "tool": {"type": "string"},
+                    "status": {"const": "done"},
+                    "resultado": {"type": "string"},
+                },
+                "required": ["job_id", "tool", "status", "resultado"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string"},
+                    "tool": {"type": "string"},
+                    "status": {"const": "error"},
+                    "erro": {"type": "string"},
+                    "erro_tipo": {
+                        "type": "string",
+                        "enum": ["politica", "resultado_tool", "excecao", "erro_configuracao"],
+                    },
+                    "bloqueio_politica": {
+                        "type": "object",
+                        "properties": {
+                            "decision": {"type": "string"},
+                            "reason_code": {"type": "string"},
+                        },
+                        "required": ["decision", "reason_code"],
+                        "additionalProperties": False,
+                    },
+                },
+                "required": ["job_id", "tool", "status", "erro"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string"},
+                    "tool": {"type": "string"},
+                    "status": {"const": "processing"},
+                    "mensagem": {"type": "string"},
+                },
+                "required": ["job_id", "tool", "status", "mensagem"],
+                "additionalProperties": False,
+            },
+        ],
+    },
+    # `buscar_arquivos_acervo` (P03 sub-entrega 26/N) -- decima tool com
+    # outputSchema. Handler (`tools/hermes_tools.py::_buscar_arquivos_acervo`)
+    # e um wrapper fino sobre `tools/busca_acervo.py::buscar_acervo`, lido
+    # por completo: SEMPRE devolve exatamente 2 chaves (`resultados`: list,
+    # `erro`: str ou None) -- nunca uma terceira forma, nunca as duas
+    # simultaneamente truthy de outro jeito. O wrapper colapsa isso em 2
+    # branches de oneOf pela mesma checagem `if res.get("erro")`:
+    #   1. erro: `{"erro": <str>, "resultados": []}` -- `resultados` sempre
+    #      lista vazia (o proprio wrapper substitui por `[]` literal, nao
+    #      repassa o que `buscar_acervo` devolveu no ramo de excecao, que
+    #      tambem e sempre `[]`).
+    #   2. sucesso: `{"total_retornado": <int, len()>, "resultados": [...]}`.
+    #
+    # Item de `resultados` (forma de sucesso) tem 8 chaves fixas, montadas a
+    # mao em `busca_acervo.buscar_acervo` (nenhuma vem direto de
+    # `doc.to_dict()` sem passar por `.get(campo, default)`):
+    #   - `id`: sempre `doc.id` -- string garantida pelo SDK do Firestore.
+    #   - `titulo`/`trecho`/`fonte`/`url_drive`: `data.get(campo, "<default
+    #     string>")`. Os 3 escritores conhecidos da colecao `indice_
+    #     artefatos` (unico backing da query, `ACERVO_COLLECTION`) foram
+    #     lidos por completo: `knowledge_graph._write_to_indice_artefatos` e
+    #     o writer de anexo SIPAC (`main.py`, ~linha 8835) NUNCA gravam
+    #     `titulo`/`trecho`/`fonte`/`url_drive` (usam `nome`/`resumo_
+    #     semantico`/`url` em vez disso) -- por isso esses 4 campos caem no
+    #     default string do proprio `.get()` para documentos vindos desses
+    #     2 escritores. O terceiro escritor (anexo do Copiloto, `main.py`,
+    #     ~linha 11291) grava os 4 com esses nomes exatos, mas os valores
+    #     de 3 deles (`titulo_doc`/`resumo_doc`/`natureza_doc`, -> `titulo`/
+    #     `trecho`/`fonte`) vem de `meta.get(...)`, onde `meta =
+    #     json.loads(extraction_text)` e a RESPOSTA LIVRE de um modelo
+    #     Gemini (sem `response_schema` nem validacao de tipo). ACHADO da
+    #     revisao do Codex nesta PR, CORRIGIDO: `titulo_doc = meta.get(
+    #     'titulo', real_file_name)` so aplica o fallback quando a CHAVE
+    #     esta AUSENTE do JSON -- se o modelo devolver `{"titulo": null,
+    #     ...}` (chave presente, valor `null`), `dict.get` devolve `None`
+    #     DIRETO, ignorando o fallback (confirmado: `{"titulo": None}.get(
+    #     "titulo", "x")` e `None`, nao `"x"`). O mesmo vale para `resumo`/
+    #     `natureza` (`trecho`/`fonte`), que nem tem fallback nenhum
+    #     (default `''` so no `.get()` de `busca_acervo`, nunca acionado
+    #     quando a chave existe com `null`). Por isso os 3 campos sao
+    #     `["string", "null"]`, nao `"string"` puro -- refletindo o tipo
+    #     REALMENTE alcancavel por este caminho, nao so o pretendido pelo
+    #     prompt. Um valor de outro tipo (numero, lista, dict) continua
+    #     residual e nao-bloqueante, mesma categoria ja aceita para campos
+    #     de origem LLM em `_buscar_contato` (sub-entrega 9/N,
+    #     `modelo_interacao`): normalizar tudo exigiria mudar o
+    #     comportamento de producao do escritor, fora do escopo desta
+    #     fatia. `url_drive` e DIFERENTE -- construido deterministicamente
+    #     via f-string (`main.py`, linha do `drive_link`), nunca vem do
+    #     JSON do Gemini -- por isso continua `string` pura, sem `null`.
+    #     `url_drive` so e gravado por este 3o escritor -- os outros 2 usam
+    #     a chave `url` (nunca lida por `buscar_acervo`), entao esse campo
+    #     cai no default `""` para qualquer documento fora deste 3o
+    #     escritor.
+    #   - `task_id`: `data.get("task_id")`, SEM default -- vira `None`
+    #     quando a chave nao existe. Os 3 escritores: `knowledge_graph`
+    #     grava a chave so quando o parametro e truthy (`if task_id:
+    #     entry["task_id"] = task_id`); o writer SIPAC sempre grava
+    #     `"task_id": target_task_id` (string, o id da acao vinculada); o
+    #     writer do Copiloto grava `'task_id': task_id or None` (string ou
+    #     `None` explicito). Em todos os casos, `string` ou `None` -- nunca
+    #     um terceiro tipo -- por isso `["string", "null"]`.
+    #   - `origem`: `data.get("origem", "acervo")` -- ACHADO desta
+    #     sub-entrega: NAO e sempre string. Os 2 primeiros escritores gravam
+    #     `origem` como STRING (`knowledge_graph`: parametro `origem: str`;
+    #     writer SIPAC: literal `"tarefa"`); mas o 3o escritor (Copiloto,
+    #     `main.py` ~linhas 11286-11302) grava um DICT (`{"modulo":
+    #     "tarefa"|"copiloto", "id_origem": ..., "session_id": ...}`
+    #     conforme `task_id` esteja ativo) -- `buscar_acervo` repassa esse
+    #     valor sem normalizar. Documentado como `["string", "object"]`, sem
+    #     `properties` aninhadas (o formato do dict varia por ramo do 3o
+    #     escritor) -- nao corrigido aqui: normalizar o tipo mudaria o dado
+    #     devolvido hoje, fora do escopo de uma fatia so-schema.
+    #   - `distancia`: `getattr(doc, "distance", None)` -- GARANTIA
+    #     ESTRUTURAL, nao so observacao de hoje: `busca_acervo.py` chama
+    #     `find_nearest(...)` SEM passar `distance_result_field` (o unico
+    #     parametro que faria o servidor anexar uma distancia ao resultado
+    #     -- confirmado lendo a assinatura de `find_nearest` em
+    #     `google.cloud.firestore_v1.base_collection`, versao 2.28.0 fixada
+    #     em `requirements.txt`); e `DocumentSnapshot` (`base_document.py`/
+    #     `document.py` da mesma biblioteca) NUNCA define um atributo
+    #     `distance` em nenhum caminho de codigo, com ou sem esse
+    #     parametro. Ou seja, `getattr(doc, "distance", None)` sempre cai no
+    #     default `None` -- confirmado inspecionando a biblioteca instalada,
+    #     nao so lendo a chamada. Documentado como `{"type": "null"}` (nao
+    #     `["number", "null"]`): campo sempre presente, sempre `null`, nao
+    #     um valor as vezes ausente as vezes numerico.
+    #
+    # `resultados` (ramo de erro) e sempre `[]` -- mesma convencao de
+    # `maxItems: 0` ja usada em `consultar_historico_acoes` (sub-entrega
+    # 14/N).
+    #
+    # Colecao `indice_artefatos` tem 3 escritores em 2 arquivos diferentes
+    # (`knowledge_graph.py`, `main.py` x2) -- MAIS de um, mas TODOS os 3
+    # foram lidos e enumerados por completo aqui (nao a mesma situacao de
+    # `whatsapp_outbox`, sub-entrega 24/N, onde a lista de escritores
+    # continuava crescendo a cada rodada de revisao) -- os 3 pontos de
+    # escrita foram encontrados por busca direta (`grep -rn
+    # "indice_artefatos"`) e nenhuma rodada de revisao adversarial desta
+    # sub-entrega encontrou um 4o.
+    #
+    # `buscar_arquivos_acervo` nao tinha NENHUM teste dedicado antes desta
+    # sub-entrega (nem do handler, nem de `busca_acervo.buscar_acervo`) --
+    # lacuna fechada aqui com testes novos em `test_hermes_tools.py`
+    # (`TestExecucao`, mockando `tools.busca_acervo.buscar_acervo`
+    # diretamente), alem dos testes de contrato/`structuredContent` deste
+    # arquivo.
+    #
+    # Investigacao completa desta sub-entrega: docs/autonomia/execucao.md,
+    # sub-entrega 26/N.
+    "buscar_arquivos_acervo": {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "total_retornado": {"type": "integer"},
+                    "resultados": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "titulo": {"type": ["string", "null"]},
+                                "trecho": {"type": ["string", "null"]},
+                                "fonte": {"type": ["string", "null"]},
+                                "url_drive": {"type": "string"},
+                                "task_id": {"type": ["string", "null"]},
+                                "origem": {"type": ["string", "object"]},
+                                "distancia": {"type": "null"},
+                            },
+                            "required": [
+                                "id", "titulo", "trecho", "fonte", "url_drive",
+                                "task_id", "origem", "distancia",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["total_retornado", "resultados"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "erro": {"type": "string"},
+                    "resultados": {"type": "array", "maxItems": 0},
+                },
+                "required": ["erro", "resultados"],
+                "additionalProperties": False,
+            },
+        ],
+    },
+    # `consultar_status_modo_secretario` (P03 sub-entrega 27/N) -- decima
+    # primeira tool com outputSchema, backed por
+    # `secretario_whatsapp.consultar_status_modo_secretario` (passthrough
+    # puro em `tools/hermes_tools.py::_consultar_status_modo_secretario`,
+    # sem args). PRIMEIRA tool do catalogo com UMA FORMA SO onde TODOS os
+    # campos sao sempre obrigatorios (ao contrario de `calculadora`/
+    # `buscar_contato`/`consultar_lista_compras`, que tambem tem forma
+    # unica mas com campos as vezes AUSENTES, ou de `consultar_historico_
+    # acoes` em diante, que usam `oneOf`): a funcao nunca levanta excecao
+    # (o corpo inteiro le config via `secretario_whatsapp.
+    # obter_config_secretario`, que tem seu proprio `try/except Exception`
+    # e sempre devolve um dict default em caso de erro; o loop que monta
+    # `contatos_detalhes` tambem tem `try/except Exception` em volta da
+    # UNICA chamada que pode falhar, o `.get()` do documento do chat) e
+    # sempre constroi as 8 chaves do dict de retorno sem nenhum `if` que
+    # pule uma delas -- lido por completo (`secretario_whatsapp.py`,
+    # `consultar_status_modo_secretario` e `obter_config_secretario`).
+    #
+    # `chats_allowlist` (nivel superior) e SEMPRE lista de string:
+    # `obter_config_secretario` forca `[str(x).strip() for x in (...) if
+    # str(x).strip()]` nos dois `return` (sucesso e except). `contatos_
+    # detalhes` e montado a mao, item a item, dentro da propria funcao --
+    # `chat_id` e sempre um elemento de `chats_allowlist` (ja garantido
+    # string), `nome` comeca como esse mesmo `chat_id` e so e sobrescrito
+    # por `str((doc.to_dict() or {}).get("chat_name") or cid)`, sempre
+    # string em ambos os casos.
+    #
+    # `orientacoes_em_vigor`/`orientacoes_padrao`/`orientacoes_sessao` sao
+    # sempre `string | null`: as tres vem, direta ou indiretamente, de
+    # `secretario_whatsapp.normalizar_orientacoes`, que so devolve `str`
+    # ou `None` (nunca outro tipo) -- lida por completo.
+    #
+    # ACHADO da revisao do Codex nesta PR, CORRIGIDO: `desativa_em` tinha
+    # DOIS escritores com garantias de tipo diferentes. O caminho normal
+    # (`secretario_whatsapp.ativar_modo_secretario`/
+    # `desativar_modo_secretario`) so grava `limite.isoformat()` (string)
+    # ou `None`. Mas `main.py::updateAutomationSettings` (callable HTTP
+    # `whatsapp_secretario.desativa_em`, usado pelo frontend web) repassa
+    # `sec_updates["desativa_em"] = sec_cfg["desativa_em"]` DIRETO do corpo
+    # da requisicao, sem coercao de tipo nem validacao de schema -- um
+    # cliente que mande um numero, lista ou dict nesse campo gravaria
+    # exatamente isso em `system/settings`. A 1a rodada de revisao
+    # adversarial (Agent tool, sem contexto) confirmou o achado e, alem
+    # disso, que o frontend hoje NUNCA envia esse campo nesse endpoint
+    # (`src/components/modals/Modals.tsx`), tornando o caminho fraco
+    # puramente teorico na pratica -- mas o Codex apontou corretamente que
+    # "nenhuma evidencia hoje" nao e uma GARANTIA ESTRUTURAL, e um cliente
+    # MCP que valide `structuredContent` contra o `outputSchema` quebraria
+    # se algum dia um valor nao-string fosse gravado. CORRIGIDO
+    # normalizando na LEITURA (`secretario_whatsapp.obter_config_
+    # secretario`, nao no endpoint HTTP): `desativa_em` agora e sempre
+    # coagido para `str(...)` quando presente e nao-string, antes de
+    # qualquer uso (inclusive antes de `_esta_expirado`, que ja fazia
+    # `str()` internamente e tolerava qualquer tipo via `try/except`, sem
+    # mudanca de comportamento ali) -- escolhido em vez de validar/rejeitar
+    # em `updateAutomationSettings` porque normalizar na leitura fecha a
+    # lacuna para QUALQUER escritor presente ou futuro daquele campo, nao
+    # so o conhecido hoje, e nao muda o comportamento de um endpoint HTTP
+    # fora do escopo MCP. `desativa_em` agora tem a MESMA garantia
+    # estrutural dos demais campos desta tool.
+    #
+    # Investigacao completa desta sub-entrega: docs/autonomia/execucao.md,
+    # sub-entrega 27/N.
+    "consultar_status_modo_secretario": {
+        "type": "object",
+        "properties": {
+            "enabled": {"type": "boolean"},
+            "desativa_em": {"type": ["string", "null"]},
+            "chats_allowlist": {"type": "array", "items": {"type": "string"}},
+            "contatos_detalhes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "chat_id": {"type": "string"},
+                        "nome": {"type": "string"},
+                    },
+                    "required": ["chat_id", "nome"],
+                    "additionalProperties": False,
+                },
+            },
+            "orientacoes_em_vigor": {"type": ["string", "null"]},
+            "orientacoes_padrao": {"type": ["string", "null"]},
+            "orientacoes_sessao": {"type": ["string", "null"]},
+            "mensagem": {"type": "string"},
+        },
+        "required": [
+            "enabled", "desativa_em", "chats_allowlist", "contatos_detalhes",
+            "orientacoes_em_vigor", "orientacoes_padrao", "orientacoes_sessao",
+            "mensagem",
+        ],
+        "additionalProperties": False,
+    },
+    # `consultar_contatos_prioritarios_secretario` (P03 sub-entrega 28/N) --
+    # decima segunda tool com outputSchema, backed por
+    # `secretario_whatsapp.consultar_contatos_prioritarios` (passthrough
+    # puro em `tools/hermes_tools.py::
+    # _consultar_contatos_prioritarios_secretario`, que so resolve o
+    # default/None de `apenas_ativos` antes de repassar). `oneOf` de 2
+    # branches, mesma forma de `buscar_arquivos_acervo`/`consultar_
+    # historico_acoes`: a funcao tem UM `try/except Exception` cobrindo o
+    # loop inteiro de leitura -- qualquer excecao (ex.: Firestore fora do
+    # ar) cai direto no branch de erro, sem meio-termo.
+    #   1. erro: `{"erro": <str>, "contatos_prioritarios": []}` -- SEM
+    #      `total`/`apenas_ativos`, ao contrario do branch de sucesso (o
+    #      `return` de erro so tem essas 2 chaves, lido por completo).
+    #   2. sucesso: `{"total": <int, len()>, "apenas_ativos": <bool,
+    #      repassado>, "contatos_prioritarios": [...]}`.
+    #
+    # `secretario_contatos_prioritarios` (colecao lida) tem UM UNICO ponto
+    # de CRIACAO de documento em todo o repositorio --
+    # `secretario_whatsapp.preparar_contato_prioritario` (confirmado por
+    # `grep -rn "COLLECTION_PRIORITARIOS"`: so 2 arquivos usam essa
+    # constante, `secretario_whatsapp.py`, e nenhum outro modulo referencia
+    # a string literal da colecao) -- mesma categoria de garantia de
+    # `consultar_execucoes_agente` (sub-entrega 11/N) e `consultar_pedidos_
+    # agente` (sub-entrega 12/N). Diferente de `busca_acervo`/`lista_
+    # compras`, a propria `consultar_contatos_prioritarios` NAO reconstroi
+    # o item campo a campo com `.get(chave, default)` -- devolve `doc.
+    # to_dict()` quase cru (so acrescenta `id` e pode reescrever `status`
+    # para o expirado na propria leitura, ver `tools/inventory.py`), entao
+    # a garantia de forma do item vem inteira do UNICO escritor, nao da
+    # funcao de leitura:
+    #   - `id`: sempre `doc.id` -- string garantida pelo SDK do Firestore.
+    #   - `chat_id`/`chat_name`: `preparar_contato_prioritario` sempre grava
+    #     as 2 chaves como string -- `chat_id` vem de `resolver_
+    #     identificador_contato`, que SEMPRE devolve `(str, str)` (o
+    #     segundo elemento nunca fica vazio: cai no proprio identificador
+    #     de entrada como ultimo fallback em todo caminho lido) -- lido por
+    #     completo.
+    #   - `assunto`/`o_que_precisa_saber`: sempre string NAO-VAZIA --
+    #     `preparar_contato_prioritario` valida e devolve erro ANTES de
+    #     gravar se qualquer um vier vazio (`if not assunto_limpo: return
+    #     {"erro": ...}`), entao nenhum documento gravado tem esses campos
+    #     ausentes ou vazios.
+    #   - `status`: enum FECHADO de 4 valores (`ativo`/`concluido`/
+    #     `expirado`/`cancelado`) -- os 4 unicos `STATUS_PRIORITARIO_*`
+    #     definidos no modulo; toda escrita de `status` usa uma dessas
+    #     constantes, nunca uma string livre -- os 6 pontos de escrita da
+    #     colecao (1 criacao + 5 `.update()`: expiracao automatica DENTRO
+    #     da propria `consultar_contatos_prioritarios`, uma SEGUNDA
+    #     expiracao automatica independente em `obter_briefing_ativo`
+    #     [achado da revisao adversarial desta sub-entrega -- nao e o
+    #     mesmo ponto, e uma funcao separada que tambem le esta colecao],
+    #     cancelamento, e os 2 pontos de conclusao) foram encontrados por
+    #     `grep -rn "COLLECTION_PRIORITARIOS"` e lidos por completo.
+    #   - `valido_ate`: sempre string ISO, nunca `None` -- gravado por
+    #     `_calcular_validade_iso`, que SEMPRE devolve `.isoformat()` (se
+    #     `validade_horas` for omitido, usa o fim do dia corrente em vez de
+    #     devolver `None`) -- lida por completo.
+    #   - `resumo_estruturado`/`informacao_obtida`: `None`/`None` na
+    #     criacao, viram `str`/`bool` nos 2 pontos de conclusao (limite de
+    #     trocas atingido e investigacao concluida pela LLM) -- a CHAVE
+    #     sempre existe (gravada explicitamente como `None` na criacao),
+    #     so o VALOR muda -- por isso `["string", "null"]`/`["boolean",
+    #     "null"]` em vez de campo as vezes ausente.
+    #   - `criado_em`/`atualizado_em`: `firestore.SERVER_TIMESTAMP` na
+    #     criacao e em toda atualizacao -- sempre presentes. O executor
+    #     MCP serializa o dict via `json.dumps(..., default=str)`
+    #     (`mcp_server._handle_tools_call`) antes do round-trip que vira
+    #     `structuredContent`; `default=str` sobre um `DatetimeWithNanoseconds`
+    #     (subclasse de `datetime.datetime`) cai no `datetime.__str__`
+    #     herdado, sempre uma string -- por isso `string`, nao um tipo
+    #     custom nem `object`.
+    #   - `concluido_em`: gravado nos mesmos 2 pontos de `resumo_
+    #     estruturado`/`informacao_obtida` acima -- fica FORA de `required`
+    #     no item, mesma convencao de `truncado` (`listar_rascunhos_
+    #     pendentes`, sub-entrega 24/N) e `ordem` (`consultar_lista_
+    #     compras`, sub-entrega 10/N). Quando presente, mesma garantia de
+    #     tipo string de `criado_em`/`atualizado_em` (mesmo mecanismo de
+    #     serializacao). ACHADO da revisao adversarial desta sub-entrega,
+    #     nao-bloqueante: a chave NAO implica de volta que o documento
+    #     esteja concluido -- `preparar_contato_prioritario` grava com
+    #     `doc_ref.set(doc_data, merge=True)` (linha ~741) e `doc_data` NAO
+    #     inclui `concluido_em`, entao um `merge=True` sobre um documento
+    #     ja concluido (reregistrar o MESMO `chat_id` como prioritario de
+    #     novo, sem guarda contra isso) reseta `status` para `ativo` e
+    #     `resumo_estruturado`/`informacao_obtida` para `None` (ambos
+    #     explicitos em `doc_data`), mas preserva o `concluido_em` do ciclo
+    #     anterior -- semantica padrao de merge do Firestore, so mescla as
+    #     chaves passadas. Documentado aqui como risco aceito: o campo
+    #     continua sempre `string` quando presente (nao quebra o schema),
+    #     so a leitura "presente implica concluido" e falsa nesse cenario
+    #     -- nenhum teste cobre esse reregistro hoje.
+    #
+    # `contatos_prioritarios` (ramo de erro) e sempre `[]` -- mesma
+    # convencao de `maxItems: 0` ja usada em `consultar_historico_acoes`/
+    # `buscar_arquivos_acervo`.
+    #
+    # Handler (`_consultar_contatos_prioritarios_secretario`) nao tinha
+    # NENHUM teste dedicado antes desta sub-entrega (a logica de default/
+    # None de `apenas_ativos` e exclusiva do wrapper, nao coberta pelos
+    # testes existentes de `secretario_whatsapp.consultar_contatos_
+    # prioritarios` em `test_secretario_whatsapp.py`) -- lacuna fechada em
+    # `test_hermes_tools.py`.
+    #
+    # Investigacao completa desta sub-entrega: docs/autonomia/execucao.md,
+    # sub-entrega 28/N.
+    "consultar_contatos_prioritarios_secretario": {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "total": {"type": "integer"},
+                    "apenas_ativos": {"type": "boolean"},
+                    "contatos_prioritarios": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "chat_id": {"type": "string"},
+                                "chat_name": {"type": "string"},
+                                "assunto": {"type": "string"},
+                                "o_que_precisa_saber": {"type": "string"},
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["ativo", "concluido", "expirado", "cancelado"],
+                                },
+                                "valido_ate": {"type": "string"},
+                                "resumo_estruturado": {"type": ["string", "null"]},
+                                "informacao_obtida": {"type": ["boolean", "null"]},
+                                "criado_em": {"type": "string"},
+                                "atualizado_em": {"type": "string"},
+                                "concluido_em": {"type": "string"},
+                            },
+                            "required": [
+                                "id", "chat_id", "chat_name", "assunto",
+                                "o_que_precisa_saber", "status", "valido_ate",
+                                "resumo_estruturado", "informacao_obtida",
+                                "criado_em", "atualizado_em",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["total", "apenas_ativos", "contatos_prioritarios"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "erro": {"type": "string"},
+                    "contatos_prioritarios": {"type": "array", "maxItems": 0},
+                },
+                "required": ["erro", "contatos_prioritarios"],
+                "additionalProperties": False,
+            },
+        ],
+    },
+    # `consultar_promocoes_autonomia_sugeridas` (P03 sub-entrega 29/N) --
+    # decima terceira tool com contrato publicado. Retomada da candidata
+    # descartada na sub-entrega 11/N (ver o comentario de
+    # `consultar_execucoes_agente` acima) -- a objecao de entao ("modelar
+    # outputSchema exigiria decidir se o contrato cobre as duas formas
+    # possiveis ou so a normal, investigacao maior que aquela fatia") ja
+    # nao se sustenta: o padrao `oneOf` com as duas formas COMPLETAS e
+    # DISJUNTAS (sucesso/erro), usado desde `consultar_historico_acoes`
+    # (sub-entrega 14/N) e mais recentemente em
+    # `consultar_contatos_prioritarios_secretario` (sub-entrega 28/N,
+    # entrada acima), e exatamente a decisao que faltava tomar.
+    #
+    # Handler (`tools/hermes_tools.py::_consultar_promocoes_autonomia_
+    # sugeridas`) e passthrough puro: so resolve o default de `limite`
+    # (`int(args.get("limite") or 20)`) antes de repassar a
+    # `promocao_autonomia.listar_promocoes_pendentes`, que tem exatamente
+    # DUAS formas de retorno, nunca uma terceira:
+    #   - sucesso: `{"total": int, "promocoes": [...]}` (a consulta ao
+    #     Firestore correu bem, mesmo que sem nenhum resultado)
+    #   - erro: `{"total": 0, "promocoes": [], "erro": str(exc)}` -- so
+    #     quando o `.stream()` da query levanta excecao (`try/except`
+    #     dentro da propria funcao); `total`/`promocoes` ficam FIXOS em
+    #     `0`/`[]` nesse ramo (hardcoded no `return` do `except`, nao
+    #     ecoados de nenhum calculo), mesma convencao de
+    #     `consultar_historico_acoes`/`buscar_arquivos_acervo`
+    #     (`resultados`/`contatos_prioritarios` sempre `[]` no ramo de
+    #     erro).
+    #
+    # Escritor da colecao `promocoes_autonomia_sugeridas`
+    # (`promocao_autonomia.COL_PROMOCOES`): busca exaustiva no repositorio
+    # (grep por `collection(COL_PROMOCOES)`) encontra 3 pontos de escrita,
+    # mas UM UNICO ponto de CRIACAO de documento com `status="pendente"`
+    # -- `registrar_sugestao_promocao` (linha ~130), chamada por sua vez de
+    # UM UNICO call site em todo o repositorio (`retro_agente.py`, dentro
+    # da retro semanal). Os outros 2 pontos (`decidir_promocao_autonomia`,
+    # `revogar_promocao_autonomia`) so fazem `transaction.update`/`.update`
+    # sobre um documento MOVENDO `status` PARA FORA de `pendente`
+    # (`aceita`/`adiada`/`nunca`) ou gravando `revogado_em`/
+    # `motivo_revogacao` -- nenhum dos dois grava `status="pendente"` nem
+    # toca `tipo`/`amostra`/`aprovados_sem_edicao`/`taxa_sem_edicao`/
+    # `sugerida_em`. Combinado com o filtro da propria QUERY de leitura
+    # (`listar_promocoes_pendentes` faz `.where("status", "==",
+    # STATUS_PENDENTE)`), `status` e enum fechado de UM valor
+    # (`["pendente"]`) por garantia DUPLA -- da query e do unico escritor
+    # de criacao -- mesma categoria ja usada para `consultar_pedidos_
+    # agente` (sub-entrega 12/N).
+    #
+    # `amostra`/`aprovados_sem_edicao`/`taxa_sem_edicao` sao sempre os
+    # valores devolvidos por `outbox_aprovacao.metricas_por_tipo` (unica
+    # origem do argumento `metricas` de `registrar_sugestao_promocao`,
+    # lido por completo): `amostra` e sempre `len(amostra_docs)` (int),
+    # `aprovados_sem_edicao` e sempre `sum(1 for ... in amostra_docs)`
+    # (int), `taxa_sem_edicao` e sempre uma DIVISAO (`sem_edicao / amostra`,
+    # float) ou o literal `0.0` -- nunca outro tipo, mesmo quando o
+    # documento nao tem a chave (`d.get(campo, 0)`/`d.get(campo, 0.0)` na
+    # leitura cobre so o caso hipotetico de documento legado sem o campo,
+    # nunca observado no unico escritor atual). `tipo` e sempre string --
+    # `d.get("tipo") or doc.id`, e `doc.id` e garantido string pelo SDK do
+    # Firestore quando `tipo` estiver ausente. `sugerida_em` passa pela
+    # `_to_iso` PROPRIA deste modulo (mesmo corpo de
+    # `agent_runs.py`/`agent_requests.py`, mas uma DUPLICATA independente,
+    # mesma categoria de achado ja registrado para `consultar_pedidos_
+    # agente`) -- sempre string ou `None`, nunca outro tipo.
+    #
+    # `erro` (ramo de erro) e `str(exc)` sobre a excecao real capturada --
+    # sempre string, nunca vazio (uma excecao Python sempre tem alguma
+    # representacao textual, mesmo que vazia a mensagem em si `str(exc)`
+    # nunca levanta).
+    "consultar_promocoes_autonomia_sugeridas": {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "total": {"type": "integer"},
+                    "promocoes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "tipo": {"type": "string"},
+                                "status": {"type": "string", "enum": ["pendente"]},
+                                "amostra": {"type": "integer"},
+                                "aprovados_sem_edicao": {"type": "integer"},
+                                "taxa_sem_edicao": {"type": "number"},
+                                "sugerida_em": {"type": ["string", "null"]},
+                            },
+                            "required": [
+                                "tipo", "status", "amostra",
+                                "aprovados_sem_edicao", "taxa_sem_edicao", "sugerida_em",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["total", "promocoes"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "erro": {"type": "string"},
+                    "total": {"type": "integer"},
+                    "promocoes": {"type": "array", "maxItems": 0},
+                },
+                "required": ["erro", "total", "promocoes"],
+                "additionalProperties": False,
+            },
+        ],
+    },
 }
 
 
@@ -1604,9 +2542,11 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (99 das 106 tools
-    hoje, apos a setima entrada, `obter_acao`, sub-entrega 15/N),
-    deliberadamente:
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (95 das 108 tools
+    hoje -- `len(registry.list_tool_names())`, nao os "106" que este
+    docstring citava ate a sub-entrega 24/N, contagem ja desatualizada
+    antes daquela fatia -- apos a decima terceira entrada, `consultar_
+    promocoes_autonomia_sugeridas`, sub-entrega 29/N), deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
     (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).

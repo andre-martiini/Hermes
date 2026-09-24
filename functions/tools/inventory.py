@@ -451,6 +451,22 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "bolsas_portal", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.COMPROMISSO_TERCEIROS,
         "nenhum — resultado nunca é reconferido",
         dados_sensiveis_categoria="CPF, RG, e-mail, telefone de terceiro",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="Idempotente (P03 sub-entrega 23/N): `tools/telegram_extended.py::execute` (ramo "
+        "`registrar_inscricao_bolsa_publica`) consulta `vinculos_projeto` por `project_id`+`cpf` ANTES de "
+        "criar -- se já existe, devolve `{success: True, alreadyLinked: True, person_id}` SEM criar um "
+        "segundo vínculo, mesmo espírito 'resposta muda mas efeito não' já aceito para `aprovar_rascunho_"
+        "whatsapp`/`consumir_autorizacao_argos` (ambas sub-entrega 20/N) -- ao contrário do caso ambíguo de "
+        "`excluir_objetivo_estrategico`/`revogar_promocao_autonomia`, a segunda chamada continua devolvendo "
+        "`success: True` (não um erro), então não há a mesma ambiguidade de interpretação. O perfil em "
+        "`perfil_pessoas` também converge: busca por `cpf` e faz `.set(merge=True)` no doc existente (ou "
+        "cria um novo se o cpf ainda não tinha perfil) -- `updated_at` é reescrito a cada chamada, mesmo "
+        "padrão bookkeeping-mutável já aceito para `mcp_checked_at` em `registrar_saude`. Caveat (mesma "
+        "classe já aceita para `consultar_autorizacao_argos`/`consultar_investimentos`): as duas consultas "
+        "(`perfil_pessoas` por cpf, `vinculos_projeto` por project_id+cpf) são consulta-depois-escreve, sem "
+        "transação -- duas chamadas genuinamente CONCORRENTES (não um retry sequencial) poderiam, em "
+        "teoria, ambas passarem pela checagem de `vinculos_projeto` antes de qualquer uma criar, "
+        "duplicando o vínculo. Não corrigido nesta fatia, só documentado.",
     ),
     "consultar_financas_v2": ToolInventoryEntry(
         "financas_pessoais", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
@@ -474,8 +490,18 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, False, True, _C.COMPROMISSO_TERCEIROS,
         "nenhum aqui — consultar_envio_whatsapp seria o verificador real da entrega",
         dados_sensiveis_categoria="destinatário e conteúdo de terceiro",
+        idempotencia=_I.NAO_IDEMPOTENTE,
         nota="classificação COMPROMISSO_TERCEIROS já existe em autonomy/policy.py::CLASSE_EFEITO_PISO; "
-        "só enfileira em whatsapp_outbox — quem entrega é um worker separado, não esta chamada",
+        "só enfileira em whatsapp_outbox — quem entrega é um worker separado, não esta chamada. Não "
+        "idempotente (P03 sub-entrega 23/N): `tools/hermes_tools.py::_schedule_whatsapp_message` chama "
+        "`tools/schedule_whatsapp_message.py::schedule_whatsapp_message` com `idempotency_key=ctx."
+        "mcp_confirmation_id`; QUANDO um `mcp_confirmation_id` está disponível, o doc de outbox usa esse "
+        "valor como ID determinístico e uma segunda chamada com o MESMO id não duplica -- mas isso só "
+        "protege reenvio dentro da MESMA confirmação MCP (retry de rede), não uma segunda chamada da tool "
+        "com os MESMOS argumentos: cada nova confirmação (`mcp_confirmation_id` novo) gera um doc novo com "
+        "ID automático, enfileirando uma SEGUNDA mensagem real para o destinatário -- mesmo caveat já "
+        "aceito para `pausar_conversa` (sub-entrega 17/N), que delega para a MESMA função. Classificação "
+        "conservadora mantida em NAO_IDEMPOTENTE (efeito real sobre terceiro, não apenas interno).",
     ),
     "criar_rascunho_whatsapp": ToolInventoryEntry(
         "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, True, True, _C.COMPROMISSO_TERCEIROS,
@@ -503,16 +529,30 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "aprovar_rascunho_whatsapp": ToolInventoryEntry(
         "whatsapp", _L.ESCRITA, _R.IRREVERSIVEL, True, True, _C.COMPROMISSO_TERCEIROS,
         "transação Firestore garante exclusão mútua com liberação automática; não verifica entrega",
+        idempotencia=_I.IDEMPOTENTE,
         rede_servico="Telegram (edit_message do card)",
         dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="destinatário e conteúdo de terceiro",
+        nota="Idempotente (P03 sub-entrega 20/N): outbox_aprovacao.aprovar_rascunho roda dentro de uma "
+        "transação Firestore que revalida validar_transicao_aprovacao(status_atual) antes de escrever -- só "
+        "aguardando_aprovacao/aguardando_janela transicionam para pending. Repetir a chamada depois da "
+        "primeira aprovação encontra o status já mudado e devolve status=already_decided sem tocar o "
+        "documento nem reenviar nada -- mesmo padrão já aceito para concluir_pedido_agente (reversibilidade "
+        "e idempotência são perguntas independentes: a tool é IRREVERSIVEL e IDEMPOTENTE ao mesmo tempo).",
     ),
     "descartar_rascunho_whatsapp": ToolInventoryEntry(
         "whatsapp", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "transação Firestore revalida status antes de escrever",
+        idempotencia=_I.IDEMPOTENTE,
         rede_servico="Telegram (edit_message condicional)",
         dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="destinatário e conteúdo de terceiro",
+        nota="Idempotente (P03 sub-entrega 20/N): mesmo desenho de aprovar_rascunho_whatsapp -- "
+        "validar_transicao_descarte dentro da mesma transação Firestore só permite a transição a partir de "
+        "aguardando_aprovacao/aguardando_janela; repetir a chamada devolve status=already_decided antes de "
+        "qualquer escrita. Os efeitos colaterais (reabrir item de atenção, editar mensagem no Telegram) só "
+        "rodam no ramo transaction_result['status'] == 'ok', que só acontece na primeira chamada bem-"
+        "sucedida -- não são reexecutados na repetição.",
     ),
     "cancelar_envio_whatsapp": ToolInventoryEntry(
         "whatsapp", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
@@ -530,19 +570,56 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "solicitar_autorizacao_argos": ToolInventoryEntry(
         "argos_autorizacao", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.COORDENACAO_LIMITADA,
         "nenhum — consultar_autorizacao_argos é chamado depois, manualmente",
-        rede_servico="Telegram Bot API", nota="sem tool de cancelamento; só expira sozinha por tempo",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        rede_servico="Telegram Bot API",
         dominio_rede=DominioRede.FECHADO,
+        nota="sem tool de cancelamento; só expira sozinha por tempo. Não idempotente (P03 sub-entrega "
+        "20/N): argos_autorizacao.solicitar_autorizacao usa doc_ref = db.collection(COLLECTION).document() "
+        "(ID automático do Firestore) e faz .set() incondicional a cada chamada, sem nenhuma checagem de "
+        "dedup por tipo/sistema_id/demanda_id -- repetir a MESMA solicitação cria um SEGUNDO card de "
+        "aprovação distinto no Telegram, mesmo padrão já aceito para criar_objetivo_estrategico/"
+        "criar_rascunho_whatsapp/preparar_upload.",
     ),
     "consultar_autorizacao_argos": ToolInventoryEntry(
         "argos_autorizacao", _L.LEITURA_E_ESCRITA, _R.NAO_APLICA, False, False, _C.OBSERVACAO_AUTORIZADA,
         "ela própria é o verificador informal que outra tool deveria chamar antes de agir no Argos",
+        idempotencia=_I.IDEMPOTENTE,
         nota="escrita é efeito colateral passivo (expira item já vencido durante a leitura), não o "
-        "propósito da tool — por isso nao_aplica em vez de reversivel/irreversivel",
+        "propósito da tool — por isso nao_aplica em vez de reversivel/irreversivel. Idempotente (P03 "
+        "sub-entrega 20/N): _expirar_se_vencida só escreve quando status_atual == aguardando_decisao E o "
+        "prazo já passou; a própria escrita muda o status para expirado, então qualquer chamada seguinte "
+        "encontra a guarda (status != aguardando_decisao) e não escreve de novo -- converge após a primeira "
+        "chamada que encontra o item vencido. Achado da revisão adversarial desta sub-entrega: ao contrário "
+        "das outras 4 tools desta fatia, esta escrita NÃO roda dentro de uma transação Firestore (é um "
+        "get() simples seguido de update() condicionado só por dado já lido em Python) -- duas chamadas "
+        "verdadeiramente simultâneas poderiam, em teoria, passar as duas pela guarda antes de qualquer "
+        "escrever. Não muda o veredito de idempotência porque as duas escritas concorrentes gravariam o "
+        "MESMO valor final sem efeito colateral externo adicional (sem card de Telegram, sem documento "
+        "novo) -- diferente de solicitar_autorizacao_argos, onde a mesma corrida criaria dois recursos "
+        "distintos. Mesma classe de caveat já documentada (não corrigida) para registrar_saude/"
+        "consultar_investimentos na sub-entrega 17/N. Achado ADICIONAL da 2a rodada de revisão "
+        "adversarial desta sub-entrega, mais sério que o anterior: a escrita de "
+        "_expirar_se_vencida não é só não-atômica ENTRE duas chamadas desta mesma tool -- ela "
+        "também pode colidir com decidir_autorizacao/consumir_autorizacao (ambas "
+        "@firestore.transactional, então protegidas uma contra a outra, mas não contra esta). Se "
+        "uma dessas duas commitar uma decisão real (aprovado/recusado/usado) no intervalo entre o "
+        "get() e o update() desta consulta, o update() incondicional desta tool sobrescreveria "
+        "silenciosamente esse status de volta para expirado -- um lost update de verdade entre "
+        "TOOLS DIFERENTES, não só entre duas chamadas repetidas da mesma tool. Não muda o veredito "
+        "de idempotência desta classificação (idempotência é sobre repetir a MESMA chamada, não "
+        "sobre interação entre tools diferentes), mas é um achado de correção que vai além do "
+        "caveat original -- registrado aqui para P04/hardening futuro, não corrigido nesta fatia "
+        "(mesmo critério de escopo já usado para os caveats de sub-entrega 17/N).",
     ),
     "consumir_autorizacao_argos": ToolInventoryEntry(
         "argos_autorizacao", _L.ESCRITA, _R.IRREVERSIVEL, False, False, _C.COORDENACAO_LIMITADA,
         "nenhum — falta o 'recibo do Argos correlacionado' que o próprio plano (seção 4.6) já aponta como lacuna",
-        nota="uso único por desenho — nunca autoriza duas vezes",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="uso único por desenho — nunca autoriza duas vezes. Idempotente (P03 sub-entrega 20/N): a "
+        "transação Firestore recheca status_atual antes de escrever -- só aprovado transiciona para usado; "
+        "repetir com o mesmo solicitacao_id encontra status==usado e devolve status=already_used sem tocar "
+        "o documento de novo, confirmado por leitura direta do handler (não só pela docstring da própria "
+        "tool, que já descrevia esse comportamento).",
     ),
     "confirmar_acao": ToolInventoryEntry(
         "confirmacao_mcp", _L.LEITURA_E_ESCRITA, _R.IRREVERSIVEL, True, True,
@@ -731,20 +808,86 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "sipac", _L.LEITURA_E_ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum", rede_servico="mesmo scraper SIPAC",
         dados_sensiveis_categoria="nomes de interessados do processo",
-        nota="liga/desliga flag de monitoramento; chamar de novo com acompanhar=False desfaz",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="liga/desliga flag de monitoramento; chamar de novo com acompanhar=False desfaz. "
+        "Idempotente (P03 sub-entrega 23/N): `tools/hermes_tools.py::acompanhar_processo_sipac` grava em "
+        "`sipac_processos/{uid}_{numero}` (ID DETERMINÍSTICO por usuário+processo) via `.set(merge=True)` "
+        "-- repetir a MESMA chamada (mesmo `numero_processo`, mesmo `acompanhar`) converge no MESMO valor "
+        "de `acompanhar`, o efeito que o chamador pediu. `ultimaConsulta` e os campos do scrape (`**res`) "
+        "são reescritos a cada chamada, mesmo padrão bookkeeping-mutável já aceito para `mcp_checked_at` "
+        "em `registrar_saude` (sub-entrega 17/N) -- não bloqueia a classificação. ACHADO REAL (mais sério "
+        "que o de `registrar_saude`, não corrigido nesta fatia, registrado para P05): ao contrário de "
+        "`mcp_checked_at` (confirmadamente nunca lido por nenhuma rotina), o campo `snapshot_hash` dentro "
+        "de `res` (`functions_node/sipacService.js::generateSnapshotHash`) É lido por "
+        "`functions_node/index.js::scheduledSipacSync` (cron a cada 2h) para decidir se o processo mudou "
+        "e disparar notificação -- o cron só atualiza `snapshot_hash`/dispara notificação quando o hash "
+        "novo diverge do gravado. Como esta tool sobrescreve incondicionalmente o MESMO campo com o hash "
+        "do scrape feito NA HORA da chamada manual, uma única chamada (não precisa repetir) pode adiantar "
+        "silenciosamente o baseline que o cron usa -- se o processo mudou de verdade entre a última "
+        "sincronização do cron e esta chamada manual, o cron seguinte compara contra um hash já "
+        "atualizado por esta tool e NÃO detecta a mudança como nova, suprimindo a notificação que o dono "
+        "esperaria receber. Não é uma questão de REPETIR a chamada (o efeito de sobrescrever o hash "
+        "acontece já na primeira), por isso não muda o veredito de idempotência -- mas é o mesmo tipo de "
+        "risco que a seção A09/P05 do plano já nomeia ('suprimir loops causados por atualização de "
+        "resumo/telemetria pelo próprio agente'). Sem transação/exclusão mútua entre esta tool e o cron "
+        "(mesma classe de caveat não-atômico já aceita para `registrar_saude`/`consultar_investimentos`).",
     ),
     "confirmar_edicao_acao": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "devolve campos_alterados com o que de fato foi gravado (pode divergir do pedido) — verificador "
         "real, raro neste inventário",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="chama a MESMA callable `main.py::confirmarEdicaoAcao` que `editar_acao` (ver a entrada "
+        "dela, sub-entrega 16/N) — mesma raiz do problema: `task_ref.update({**updates, "
+        "'acompanhamento': firestore.ArrayUnion([diary_entry])})` incondicional a cada chamada "
+        "bem-sucedida, com `diary_entry`/`data_atualizacao` novos (timestamp novo) a cada vez. "
+        "Repetir a MESMA chamada com os MESMOS `alteracoes` converge no valor final dos campos, mas "
+        "acrescenta uma nova nota ao diário e reescreve `data_atualizacao` a cada repetição — efeito "
+        "adicional, NAO_IDEMPOTENTE. Diferença real da entrada `editar_acao`: esta tool (a "
+        "contraparte de `preparar_edicao_acao`, ao contrário de `editar_acao`, que é a via direta sem "
+        "o par preparar/confirmar) recebe `snapshot_ts` como parâmetro OPCIONAL do schema "
+        "(`confirmar_edicao_acao.json`) e o repassa para a callable (`_map_confirmar_edicao_acao`, "
+        "diferente de `editar_acao`, que nunca envia `snapshotTs`). Quando o chamador usa o fluxo "
+        "normal (passa o `snapshot_ts` devolvido por `preparar_edicao_acao`), a callable compara "
+        "contra `data_atualizacao`/`data_criacao` ANTES de gravar e recusa com `status: 'invalidated'` "
+        "se divergir — como a própria gravação bem-sucedida já reescreveu `data_atualizacao`, uma "
+        "SEGUNDA chamada idêntica com o MESMO `snapshot_ts` (agora desatualizado) falha em vez de "
+        "duplicar a nota, uma auto-limitação real que `confirmar_edicao_em_lote`/`confirmar_"
+        "reagendamento_em_lote` não têm (sub-entrega 21/N). Não é idempotência de verdade — a segunda "
+        "chamada devolve um resultado DIFERENTE da primeira (erro em vez de sucesso), e a proteção só "
+        "existe quando o chamador de fato envia `snapshot_ts`, campo opcional que um cliente MCP pode "
+        "omitir (nesse caso, mesmo comportamento sem proteção de `editar_acao`). Classificação "
+        "conservadora mantida em NAO_IDEMPOTENTE — mesmo critério de 'hint errado é pior que omissão' "
+        "já usado neste inventário: o caso sem `snapshot_ts` não converge, e a proteção com "
+        "`snapshot_ts` não produz o mesmo efeito observável, só bloqueia a repetição com um erro.",
     ),
     "confirmar_edicao_em_lote": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "mais fraco que a versão singular — devolve só count, não os campos aplicados por item",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="wrapper fino sobre `main.py::confirmarEdicaoEmLote` (mesma callable usada por "
+        "`editar_acoes_em_lote`, ver a entrada dela). NAO_IDEMPOTENTE (P03 sub-entrega 21/N): o "
+        "`set` por item dentro de `alteracoes` é idempotente isoladamente (mesmo valor produz o "
+        "mesmo estado do campo), mas a callable monta UM `now_iso`/`diary_entry` por chamada e faz "
+        "`batch.update(..., 'acompanhamento': firestore.ArrayUnion([diary_entry]))` para cada item, "
+        "incondicionalmente, a cada sucesso — repetir a MESMA chamada com os MESMOS `items` "
+        "acrescenta uma segunda nota ao diário de cada ação e reescreve `data_atualizacao`/"
+        "`data_conclusao`, mesmo padrão já usado em `editar_acao` (main.py::confirmarEdicaoAcao). "
+        "Diferente da versão singular, não há checagem de `snapshot_ts` aqui — nada bloqueia a "
+        "repetição mesmo que nada tenha mudado desde a primeira chamada.",
     ),
     "confirmar_reagendamento_em_lote": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "mesmo padrão fraco — só count, sem confirmação por item das novas datas aplicadas",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="wrapper fino sobre `main.py::confirmarReagendamentoEmLote` (mesma callable usada por "
+        "`reagendar_acoes_em_lote`, ver a entrada dela). NAO_IDEMPOTENTE (P03 sub-entrega 21/N): "
+        "mesmo padrão de `confirmar_edicao_em_lote` — um `now_iso`/`diary_entry` novo por chamada, "
+        "`batch.update(..., 'acompanhamento': firestore.ArrayUnion([diary_entry]))` incondicional "
+        "por item a cada sucesso. Repetir a MESMA chamada com os MESMOS `items` grava a MESMA "
+        "`nova_data_limite`/horário (sem divergência no valor final dos campos), mas acrescenta uma "
+        "segunda nota ao diário de cada ação e reescreve `data_atualizacao` — efeito adicional, sem "
+        "checagem de estado prévio.",
     ),
     "consultar_job": ToolInventoryEntry(
         "utilitario", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
@@ -773,10 +916,34 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
     "editar_acoes_em_lote": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum automático",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="`tools/hermes_tools.py::editar_acoes_em_lote` é outro wrapper fino sobre a MESMA "
+        "callable `main.py::confirmarEdicaoEmLote` que `confirmar_edicao_em_lote` usa — só muda o "
+        "nome do parâmetro de entrada aceito (`itens` em vez de `items`), o efeito colateral é "
+        "idêntico. NAO_IDEMPOTENTE pelo mesmo motivo (P03 sub-entrega 21/N): ver a nota de "
+        "`confirmar_edicao_em_lote` para a evidência por handler (ArrayUnion incondicional com "
+        "`now_iso` novo a cada chamada bem-sucedida).",
     ),
     "reagendar_acoes_em_lote": ToolInventoryEntry(
         "acoes_tarefas", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "nenhum automático — devolve contagem, sem reconferência",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="NAO_IDEMPOTENTE (P03 sub-entrega 21/N), e por DOIS motivos independentes. (1) O passo "
+        "final chama `main.py::confirmarReagendamentoEmLote` (mesma callable de "
+        "`confirmar_reagendamento_em_lote`, ver a nota dela) — ArrayUnion incondicional de um novo "
+        "`diary_entry` por item a cada chamada bem-sucedida, mesmo quando a data final gravada é "
+        "idêntica à da chamada anterior. (2) O passo de preparação NÃO é descartado aqui (só a "
+        "ida-e-volta ao cliente é) — `preparar_reagendamento_em_lote` é chamado de novo a cada "
+        "invocação e recalcula a distribuição contra o estado ATUAL das ações; com `task_ids` "
+        "explícito, o conjunto e a ordem tendem a se repetir (ordenação por `data_criacao`/`titulo`/ "
+        "`tipo_acao`, campos que a confirmação não altera), então uma repetição volta a aplicar a "
+        "MESMA distribuição — mas com `filtro_data` (o outro modo de seleção, via "
+        "`_coletar_tarefas_lote`), a consulta filtra por `data_limite == filtro_data`, EXATAMENTE o "
+        "campo que a confirmação acabou de mudar: repetir a MESMA chamada depois de um sucesso tende "
+        "a não encontrar mais nenhuma ação com aquele `filtro_data` e a preparação devolve "
+        "`ERRO|Nenhuma acao encontrada...` sem chegar a confirmar de novo — uma auto-limitação "
+        "parcial e dependente dos dados, não uma proteção estrutural (não é garantida se alguma ação "
+        "calhar de cair de volta no mesmo `filtro_data`, e não existe de todo no modo `task_ids`).",
     ),
     "obter_estado_atual": ToolInventoryEntry(
         "utilitario", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
@@ -887,7 +1054,16 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         rede_servico="Groq/Whisper (áudio) e Gemini (vídeo + síntese), via trigger assíncrono disparado pelo handler",
         dominio_rede=DominioRede.FECHADO,
         dados_sensiveis_categoria="conteúdo de conversas de terceiros",
-        nota="handler síncrono só grava doc 'queued'; sem tool para desfazer uma consolidação",
+        idempotencia=_I.NAO_IDEMPOTENTE,
+        nota="handler síncrono só grava doc 'queued'; sem tool para desfazer uma consolidação. Não "
+        "idempotente (P03 sub-entrega 23/N): `tools/whatsapp_tools.py::consolidar` usa "
+        "`db.collection(COL_CONSOLIDACOES).document()` (ID automático do Firestore) + `.set()` "
+        "incondicional, sem nenhuma checagem de dedup por `chat_id`/`message_ids` -- repetir a MESMA "
+        "chamada (mesmo recorte de mensagens) cria um SEGUNDO job de consolidação, que "
+        "`on_whatsapp_consolidacao_created` processa de novo do zero (transcrição de áudio/vídeo e síntese "
+        "reais, com custo de Groq/Gemini), produzindo um segundo resultado independente em vez de devolver "
+        "o existente -- mesmo padrão já aceito para `criar_rascunho_whatsapp`/`solicitar_autorizacao_argos` "
+        "(sub-entregas 19/N e 20/N).",
     ),
     "ler_consolidacao_whatsapp": ToolInventoryEntry(
         "whatsapp", _L.LEITURA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA, "nenhum",
@@ -999,8 +1175,17 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "whatsapp_secretario", _L.LEITURA_E_ESCRITA, _R.NAO_APLICA, False, True, _C.OBSERVACAO_AUTORIZADA,
         "expiração por validade é o único mecanismo automático, aplicado na própria leitura",
         dados_sensiveis_categoria="dados de contato prioritário",
+        idempotencia=_I.IDEMPOTENTE,
         nota="escrita é efeito colateral passivo (expira item já vencido durante a leitura), não o "
-        "propósito da tool — por isso nao_aplica em vez de reversivel/irreversivel",
+        "propósito da tool — por isso nao_aplica em vez de reversivel/irreversivel. Idempotente (P03 "
+        "sub-entrega 23/N): `secretario_whatsapp.py::consultar_contatos_prioritarios` só escreve quando "
+        "`status == ATIVO` E o prazo (`valido_ate`) já passou -- a própria escrita muda o status para "
+        "EXPIRADO, então qualquer chamada seguinte encontra a guarda (`status != ATIVO`) e não escreve de "
+        "novo, mesmo desenho e mesma evidência de `consultar_autorizacao_argos` (sub-entrega 20/N). Mesmo "
+        "caveat de não-atomicidade também já aceito lá: a checagem é `stream()` + `update()` individual "
+        "por documento, sem transação -- duas chamadas verdadeiramente concorrentes poderiam, em teoria, "
+        "passar as duas pela guarda antes de qualquer uma escrever, mas gravariam o MESMO valor final "
+        "(EXPIRADO) sem efeito colateral externo adicional (sem card de Telegram, sem documento novo).",
     ),
     "cancelar_contato_prioritario_secretario": ToolInventoryEntry(
         "whatsapp_secretario", _L.ESCRITA, _R.REVERSIVEL, False, True, _C.ESCRITA_INTERNA_REVERSIVEL,

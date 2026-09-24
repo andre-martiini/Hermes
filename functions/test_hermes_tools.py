@@ -153,6 +153,132 @@ class TestExecucao(unittest.TestCase):
         self.assertEqual(resultado["candidatos"][0]["nome"], "Flávia Nascimento Ribeiro")
         db.collection.return_value.limit.assert_not_called()
 
+    def test_buscar_arquivos_acervo_sucesso_conta_total_retornado(self):
+        # `_buscar_arquivos_acervo` não tinha nenhum teste dedicado antes
+        # desta sub-entrega (P03 26/N, outputSchema) -- nem do handler, nem
+        # de `busca_acervo.buscar_acervo`. `buscar_acervo` é chamado via
+        # `from tools.busca_acervo import buscar_acervo` dentro da própria
+        # função, então o patch precisa mirar o atributo do módulo de
+        # origem (resolvido no momento da chamada), não uma referência já
+        # importada em `hermes_tools`.
+        item = {
+            "id": "art-1", "titulo": "Manual", "trecho": "resumo",
+            "fonte": "Drive", "url_drive": "https://drive.google.com/x",
+            "task_id": None, "origem": "acervo", "distancia": None,
+        }
+        with patch("tools.busca_acervo.buscar_acervo", return_value={"resultados": [item], "erro": None}) as mock_busca:
+            resultado = hermes_tools._buscar_arquivos_acervo(
+                type("Ctx", (), {})(), {"query": "manual de onboarding"}
+            )
+        mock_busca.assert_called_once_with("manual de onboarding")
+        self.assertEqual(resultado, {"total_retornado": 1, "resultados": [item]})
+
+    def test_buscar_arquivos_acervo_erro_devolve_resultados_vazio(self):
+        erro = "[ERRO TÉCNICO FindNearest] ValueError: falhou"
+        with patch("tools.busca_acervo.buscar_acervo", return_value={"resultados": [], "erro": erro}):
+            resultado = hermes_tools._buscar_arquivos_acervo(type("Ctx", (), {})(), {"query": "x"})
+        self.assertEqual(resultado, {"erro": erro, "resultados": []})
+
+    def test_buscar_arquivos_acervo_query_ausente_vira_string_vazia(self):
+        # `str(args.get("query") or "")` -- ausência de `query` não levanta,
+        # chama `buscar_acervo("")`.
+        with patch("tools.busca_acervo.buscar_acervo", return_value={"resultados": [], "erro": None}) as mock_busca:
+            hermes_tools._buscar_arquivos_acervo(type("Ctx", (), {})(), {})
+        mock_busca.assert_called_once_with("")
+
+    def test_buscar_arquivos_acervo_nao_coage_titulo_null_do_gemini(self):
+        # Achado da revisão do Codex na PR desta sub-entrega: se o escritor
+        # de anexo do Copiloto (main.py) gravar `titulo`/`trecho`/`fonte`
+        # como `None` (a resposta livre do Gemini incluiu a chave com valor
+        # `null` explícito -- `meta.get('titulo', real_file_name)` só usa o
+        # fallback quando a CHAVE está ausente, nunca quando está presente
+        # com `null`), o wrapper não deve inventar um valor nem mascarar o
+        # `None` -- ele repassa exatamente o que `buscar_acervo` devolveu.
+        item_com_null = {
+            "id": "art-2", "titulo": None, "trecho": None, "fonte": None,
+            "url_drive": "https://drive.google.com/y", "task_id": None,
+            "origem": {"modulo": "copiloto", "id_origem": "sessao-2"}, "distancia": None,
+        }
+        with patch("tools.busca_acervo.buscar_acervo", return_value={"resultados": [item_com_null], "erro": None}):
+            resultado = hermes_tools._buscar_arquivos_acervo(type("Ctx", (), {})(), {"query": "x"})
+        self.assertIsNone(resultado["resultados"][0]["titulo"])
+        self.assertIsNone(resultado["resultados"][0]["trecho"])
+        self.assertIsNone(resultado["resultados"][0]["fonte"])
+
+    def test_consultar_contatos_prioritarios_secretario_default_apenas_ativos_true(self):
+        # `_consultar_contatos_prioritarios_secretario` não tinha nenhum
+        # teste dedicado antes desta sub-entrega (P03 28/N, outputSchema) --
+        # a lógica de default/None de `apenas_ativos` é exclusiva do
+        # wrapper (não coberta pelos testes de
+        # `secretario_whatsapp.consultar_contatos_prioritarios` em
+        # `test_secretario_whatsapp.py`, que chamam a função de baixo nível
+        # direto). Ausência do argumento -> `True` (o default do
+        # `args.get`).
+        with patch("secretario_whatsapp.consultar_contatos_prioritarios") as mock_consulta:
+            mock_consulta.return_value = {"total": 0, "apenas_ativos": True, "contatos_prioritarios": []}
+            hermes_tools._consultar_contatos_prioritarios_secretario(type("Ctx", (), {"db": None})(), {})
+        mock_consulta.assert_called_once_with(db=None, apenas_ativos=True)
+
+    def test_consultar_contatos_prioritarios_secretario_none_explicito_vira_true(self):
+        # Achado ao ler o handler: `args.get("apenas_ativos", True)` só usa
+        # o default quando a CHAVE está ausente -- um cliente MCP que mande
+        # `{"apenas_ativos": null}` explicitamente receberia `None` do
+        # `.get()` (chave presente, valor `null`), não o default `True`. O
+        # handler tem uma checagem explícita pra isso (`if apenas_ativos is
+        # None: apenas_ativos = True`) -- este teste cobre exatamente esse
+        # branch.
+        with patch("secretario_whatsapp.consultar_contatos_prioritarios") as mock_consulta:
+            mock_consulta.return_value = {"total": 0, "apenas_ativos": True, "contatos_prioritarios": []}
+            hermes_tools._consultar_contatos_prioritarios_secretario(
+                type("Ctx", (), {"db": None})(), {"apenas_ativos": None}
+            )
+        mock_consulta.assert_called_once_with(db=None, apenas_ativos=True)
+
+    def test_consultar_contatos_prioritarios_secretario_repassa_falso(self):
+        with patch("secretario_whatsapp.consultar_contatos_prioritarios") as mock_consulta:
+            mock_consulta.return_value = {"total": 2, "apenas_ativos": False, "contatos_prioritarios": []}
+            resultado = hermes_tools._consultar_contatos_prioritarios_secretario(
+                type("Ctx", (), {"db": None})(), {"apenas_ativos": False}
+            )
+        mock_consulta.assert_called_once_with(db=None, apenas_ativos=False)
+        self.assertEqual(resultado["apenas_ativos"], False)
+
+    def test_consultar_promocoes_autonomia_sugeridas_default_limite_20(self):
+        # `_consultar_promocoes_autonomia_sugeridas` não tinha nenhum teste
+        # dedicado antes desta sub-entrega (P03 29/N, outputSchema) -- a
+        # lógica de default de `limite` é exclusiva do wrapper (os testes
+        # de `promocao_autonomia.listar_promocoes_pendentes` em
+        # `test_promocao_autonomia.py` chamam a função de baixo nível
+        # direto, sempre com `limite` explícito). Ausência do argumento ->
+        # `20` (o default do `or`).
+        with patch("promocao_autonomia.listar_promocoes_pendentes") as mock_listar:
+            mock_listar.return_value = {"total": 0, "promocoes": []}
+            hermes_tools._consultar_promocoes_autonomia_sugeridas(type("Ctx", (), {"db": None})(), {})
+        mock_listar.assert_called_once_with(None, limite=20)
+
+    def test_consultar_promocoes_autonomia_sugeridas_zero_explicito_vira_20(self):
+        # Achado ao ler o handler: `int(args.get("limite") or 20)` usa o
+        # `or`, não `.get(chave, default)` -- um `limite` explicitamente
+        # `0` (ou `None`) também vira `20`, não `0`, porque `0`/`None` são
+        # ambos falsy em Python. Diferente de `apenas_ativos` (que tem uma
+        # checagem explícita só para `None`), aqui a mesma expressão cobre
+        # ausência, `None` e `0` de uma vez -- este teste cobre o caso `0`,
+        # o mais fácil de confundir com "repassar 0 de verdade".
+        with patch("promocao_autonomia.listar_promocoes_pendentes") as mock_listar:
+            mock_listar.return_value = {"total": 0, "promocoes": []}
+            hermes_tools._consultar_promocoes_autonomia_sugeridas(
+                type("Ctx", (), {"db": None})(), {"limite": 0}
+            )
+        mock_listar.assert_called_once_with(None, limite=20)
+
+    def test_consultar_promocoes_autonomia_sugeridas_repassa_limite_explicito(self):
+        with patch("promocao_autonomia.listar_promocoes_pendentes") as mock_listar:
+            mock_listar.return_value = {"total": 0, "promocoes": []}
+            hermes_tools._consultar_promocoes_autonomia_sugeridas(
+                type("Ctx", (), {"db": None})(), {"limite": 5}
+            )
+        mock_listar.assert_called_once_with(None, limite=5)
+
     def test_tool_desconhecida_levanta(self):
         from tools.tool_context import ToolContext
 

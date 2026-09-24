@@ -7,6 +7,14 @@ real e sem depender de emulador. Cobre:
 - Proteção contra toque duplo no callback do Telegram (already_decided)
 - Proteção contra uso duplo da autorização no lado do Argos (already_used)
 - Expiração preguiçosa de solicitação vencida sem decisão
+- P03 sub-entrega 20/N (idempotentHint por handler): `solicitar_autorizacao`
+  cria uma solicitação NOVA e distinta a cada chamada, mesmo com os mesmos
+  argumentos (sem dedup) -- NAO_IDEMPOTENTE; `consultar_autorizacao` só
+  escreve (expiração passiva) na primeira chamada que encontra o item
+  vencido, a segunda chamada não escreve de novo -- IDEMPOTENTE;
+  `consumir_autorizacao` já tinha teste de `already_used` acima, reafirmado
+  como a evidência de handler para IDEMPOTENTE (ver
+  tools/inventory.py::Idempotencia e docs/autonomia/execucao.md).
 """
 
 import datetime
@@ -198,6 +206,21 @@ class TestSolicitarAutorizacao(unittest.TestCase):
         self.assertEqual(doc["status"], aa.STATUS_AGUARDANDO)
         self.assertEqual(doc["tipo"], "merge-pr")
 
+    def test_repetir_mesma_solicitacao_cria_duas_distintas(self):
+        # P03 sub-entrega 20/N: NAO_IDEMPOTENTE -- doc_ref =
+        # db.collection(COLLECTION).document() sem argumento gera um ID novo
+        # do Firestore a cada chamada, sem nenhuma checagem de dedup por
+        # tipo/sistema_id/demanda_id. Repetir a MESMA solicitação cria um
+        # SEGUNDO card de aprovação distinto no Telegram.
+        with mock.patch("hermes_core_logic._send_telegram_message_with_keyboard", side_effect=[111, 222]) as mock_send, \
+             mock.patch("hermes_core_logic._get_telegram_token", return_value="tok"), \
+             mock.patch("main._resolve_default_telegram_chat_id", return_value="123"):
+            res1 = aa.solicitar_autorizacao(self.db, "approve-plan", "sistema-x", "DEV-1", "Resumo do que muda")
+            res2 = aa.solicitar_autorizacao(self.db, "approve-plan", "sistema-x", "DEV-1", "Resumo do que muda")
+        self.assertNotEqual(res1["solicitacao_id"], res2["solicitacao_id"])
+        self.assertEqual(mock_send.call_count, 2)
+        self.assertEqual(len(self.db.collection(aa.COLLECTION)._docs), 2)
+
 
 # --------------------------------------------------------------------------
 # decidir_autorizacao (callback do Telegram)
@@ -297,6 +320,26 @@ class TestConsultarAutorizacao(unittest.TestCase):
         self.col._docs["sol-3"] = {"status": aa.STATUS_AGUARDANDO, "expira_em": futuro}
         res = aa.consultar_autorizacao(self.db, "sol-3")
         self.assertEqual(res["status"], aa.STATUS_AGUARDANDO)
+
+    def test_segunda_consulta_apos_expirar_nao_escreve_de_novo(self):
+        # P03 sub-entrega 20/N: IDEMPOTENTE -- _expirar_se_vencida só escreve
+        # quando status_atual == AGUARDANDO_DECISAO e o prazo já passou; a
+        # própria escrita muda o status para EXPIRADO, então uma segunda
+        # consulta encontra a guarda (status != AGUARDANDO) e não escreve de
+        # novo. Prova empírica: intercepta .update() para estourar se for
+        # chamado de novo na segunda consulta.
+        vencida_em = datetime.datetime.now(timezone.utc) - timedelta(minutes=1)
+        self.col._docs["sol-4"] = {"status": aa.STATUS_AGUARDANDO, "expira_em": vencida_em}
+        res1 = aa.consultar_autorizacao(self.db, "sol-4")
+        self.assertEqual(res1["status"], aa.STATUS_EXPIRADO)
+        self.assertEqual(self.col._docs["sol-4"]["status"], aa.STATUS_EXPIRADO)
+
+        with mock.patch.object(
+            type(self.col.document("sol-4")), "update",
+            side_effect=AssertionError("não deveria escrever de novo na segunda consulta"),
+        ):
+            res2 = aa.consultar_autorizacao(self.db, "sol-4")
+        self.assertEqual(res2["status"], aa.STATUS_EXPIRADO)
 
 
 # --------------------------------------------------------------------------

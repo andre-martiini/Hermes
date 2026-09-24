@@ -61,29 +61,151 @@ campo `status` (sempre `"not_found"` quando aparece), então os dois
 colapsam num único branch de erro com `status` fora de `required` -- ver
 comentário de `_OUTPUT_SCHEMAS` em `tools/registry.py` para o
 levantamento completo, incluindo as 8 fontes de escrita de `plano_acao` e
-os 4 escritores de `pool_dados`/anexo investigados nesta sub-entrega.
+os 4 escritores de `pool_dados`/anexo investigados nesta sub-entrega -- e
+`listar_rascunhos_pendentes` (sub-entrega 24/N): oitava tool, backed por
+`outbox_aprovacao.listar_rascunhos`, com uma forma so (sem `oneOf`) e
+`status` enum de 2 valores pela MESMA garantia de
+`consultar_pedidos_agente` (filtro da propria query, nao "escritor
+unico" -- a colecao `whatsapp_outbox` tem varios). Achado desta
+sub-entrega: `telegram_message_id` e `["integer", "null"]`, nao string --
+vem de `message_id` da API do Telegram (sempre inteiro), confirmado
+tambem pela fixture `"telegram_message_id": 999` ja existente em
+`test_outbox_aprovacao.py` -- ver comentario de `_OUTPUT_SCHEMAS` em
+`tools/registry.py` para o levantamento completo dos pontos de criacao e
+atualizacao de documento investigados -- e `consultar_job`
+(sub-entrega 25/N): nona tool, backed por `mcp_jobs.ler_job` (passthrough
+puro de `tools/hermes_tools.py::_consultar_job`), e a com MAIS branches de
+`oneOf` ate agora (4, contra 2 de `consultar_historico_acoes`/`obter_acao`)
+-- `mcp_jobs.py` e o UNICO escritor da colecao `mcp_jobs` em todo o
+repositorio (ao contrario de `whatsapp_outbox`, sub-entrega 24/N), o que
+tornou viavel enumerar os 4 pontos de escrita de `status` por completo (so
+`"processing"`/`"done"`/`"error"` sao gravados). Achado desta sub-entrega,
+nao corrigido: o campo `truncado` (gravado pelo trigger
+`on_mcp_job_created` junto com `resultado`) nunca e copiado de volta por
+`ler_job` -- ver comentario de `_OUTPUT_SCHEMAS` em `tools/registry.py`
+para o levantamento completo, incluindo por que `resultado` (branch
+"done") e documentado como `string` HOJE como um contrato de SNAPSHOT
+sobre as 3 tools atuais de `_TOOLS_LONGAS`, nao uma garantia estrutural --
+e `buscar_arquivos_acervo` (sub-entrega 26/N): decima tool, backed por
+`tools/busca_acervo.py::buscar_acervo` (wrapper fino em
+`tools/hermes_tools.py::_buscar_arquivos_acervo`), com `oneOf` de 2
+branches (erro/sucesso) pela mesma forma de `consultar_historico_acoes`.
+ACHADO desta sub-entrega: o campo `origem` de cada item NAO e sempre
+string -- um dos 3 escritores da colecao `indice_artefatos` (anexo do
+Copiloto, `main.py`) grava um DICT, nao string, entao o schema declara
+`["string", "object"]`; e o campo `distancia` e uma GARANTIA ESTRUTURAL de
+`null` sempre (`find_nearest` nunca recebe `distance_result_field`, e
+`DocumentSnapshot` da biblioteca `google-cloud-firestore` 2.28.0 nunca tem
+esse atributo) -- ver comentario de `_OUTPUT_SCHEMAS` em
+`tools/registry.py` para o levantamento completo dos 3 escritores e por
+que nenhum teste dedicado existia para esta tool antes desta sub-entrega
+(lacuna fechada em `test_hermes_tools.py`). CORRECAO apos revisao do
+Codex na PR desta sub-entrega: `titulo`/`trecho`/`fonte` (escritor do
+Copiloto) sao `["string", "null"]`, nao `"string"` puro -- o fallback de
+`titulo_doc = meta.get('titulo', real_file_name)` so dispara quando a
+CHAVE esta ausente do JSON do Gemini, nunca quando a chave existe com
+valor `null` explicito (`{"titulo": None}.get("titulo", "x")` e `None`).
+E `consultar_status_modo_secretario` (sub-entrega 27/N): decima primeira
+tool, backed por `secretario_whatsapp.consultar_status_modo_secretario`
+(passthrough puro em `tools/hermes_tools.py::
+_consultar_status_modo_secretario`, sem args) -- a PRIMEIRA com uma forma
+única onde TODOS os campos de nível superior são sempre obrigatórios
+(diferente de `calculadora`/`buscar_contato`/`consultar_lista_compras`,
+que também têm forma única mas com campos às vezes ausentes): a função
+nunca levanta exceção (lida por completo, incluindo
+`obter_config_secretario`, que tem seu próprio `try/except` e sempre
+devolve um dict default) e sempre monta as 8 chaves sem nenhum `if` que
+pule uma delas. ACHADO da revisão do Codex nesta PR, CORRIGIDO:
+`desativa_em` tinha um segundo escritor sem garantia de tipo
+(`main.py::updateAutomationSettings`, callable HTTP do frontend web, que
+repassa o campo direto do corpo da requisição sem coerção) — corrigido
+normalizando na LEITURA (`secretario_whatsapp.obter_config_secretario`
+agora coage para `str(...)` quando o valor presente não é string), não no
+endpoint HTTP — ver comentário de `_OUTPUT_SCHEMAS` em
+`tools/registry.py` e `test_secretario_whatsapp.py` para o levantamento
+completo e o teste de regressão — e
+`consultar_contatos_prioritarios_secretario` (sub-entrega 28/N): décima
+segunda tool, backed por `secretario_whatsapp.consultar_contatos_
+prioritarios` (passthrough puro em `tools/hermes_tools.py::
+_consultar_contatos_prioritarios_secretario`, que só resolve o default/
+None de `apenas_ativos` antes de repassar), com `oneOf` de 2 branches
+(erro/sucesso) pela mesma forma de `buscar_arquivos_acervo`. Diferente de
+`busca_acervo`/`lista_compras`, a própria função de leitura NÃO
+reconstrói o item campo a campo -- devolve `doc.to_dict()` quase cru --
+então a garantia de forma do item vem inteira do ÚNICO ponto de criação
+de documento em todo o repositório (`secretario_whatsapp.preparar_
+contato_prioritario`, confirmado por grep na constante da coleção), lido
+por completo junto com os outros 5 pontos de escrita de `status`
+(conclusão x2, cancelamento, e DUAS expirações automáticas
+independentes -- uma dentro da própria `consultar_contatos_
+prioritarios`, outra em `obter_briefing_ativo`, achado da revisão
+adversarial desta sub-entrega). `resumo_estruturado`/`informacao_obtida`
+são `None`/`None` na criação e viram `str`/`bool` na conclusão -- a
+CHAVE sempre existe, por isso `["string", "null"]`/`["boolean", "null"]`
+em vez de campo às vezes ausente; `concluido_em` fica fora de `required`
+no item por um motivo diferente -- ACHADO da revisão adversarial: a
+chave não é removida por um reregistro (`preparar_contato_prioritario`
+usa `set(..., merge=True)`, que nunca apaga campo não mencionado), então
+sua presença não implica de volta que o documento esteja concluído (risco
+aceito, documentado em `tools/registry.py`, não muda o tipo declarado).
+`criado_em`/`atualizado_em`/`concluido_em` são
+timestamps do Firestore (`SERVER_TIMESTAMP`) que chegam a
+`structuredContent` como `string` via `json.dumps(..., default=str)`
+(`mcp_server._handle_tools_call`), não como objeto -- ver comentário de
+`_OUTPUT_SCHEMAS` em `tools/registry.py` para o levantamento completo.
+Handler não tinha nenhum teste dedicado antes desta sub-entrega -- lacuna
+fechada em `test_hermes_tools.py`.
 
-Quatro frentes:
+`consultar_promocoes_autonomia_sugeridas` (sub-entrega 29/N): décima
+terceira tool, backed por `promocao_autonomia.listar_promocoes_
+pendentes`, com `oneOf` de 2 branches (sucesso/erro). Candidata descartada
+na sub-entrega 11/N por exigir decidir se o contrato cobre as duas formas
+possíveis -- decisão que o próprio `oneOf` (estabelecido depois, na
+sub-entrega 14/N) resolve, retomada agora. Diferente de
+`consultar_contatos_prioritarios_secretario`, a própria função de leitura
+RECONSTRÓI o item campo a campo (`.get(chave, default)`), então a garantia
+de forma não depende só do escritor -- mas o escritor também é único:
+`promocao_autonomia.registrar_sugestao_promocao`, chamado por um único
+call site (`retro_agente.py`). `status` é enum fechado de um valor
+(`["pendente"]`) por garantia dupla: o filtro da própria query
+(`.where("status", "==", STATUS_PENDENTE)`) e o único escritor de criação.
+`amostra`/`aprovados_sem_edicao`/`taxa_sem_edicao` vêm sempre de
+`outbox_aprovacao.metricas_por_tipo` (int/int/float, nunca outro tipo).
+Ver comentário de `_OUTPUT_SCHEMAS` em `tools/registry.py` para o
+levantamento completo.
+
+Cinco frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
    paridade com TODO o catálogo real (não amostra): nenhuma tool além de
    `calculadora`, `buscar_contato`, `consultar_lista_compras`,
    `consultar_execucoes_agente`, `consultar_pedidos_agente`,
-   `consultar_historico_acoes` e `obter_acao` tem contrato publicado hoje.
+   `consultar_historico_acoes`, `obter_acao`,
+   `listar_rascunhos_pendentes`, `consultar_job`, `buscar_arquivos_acervo`,
+   `consultar_status_modo_secretario`,
+   `consultar_contatos_prioritarios_secretario` e
+   `consultar_promocoes_autonomia_sugeridas` tem contrato publicado hoje.
 2. `TestHandleToolsListOutputSchema` -- ponta a ponta via
    `mcp_server._handle_tools_list()`: `outputSchema` chega no catálogo
-   publicado só para essas sete tools.
+   publicado só para essas treze tools.
 3. `TestIntegracaoHandleToolsCallStructuredContent` -- ponta a ponta via
    `mcp_server._handle_tools_call`: `structuredContent` chega no envelope
    de `tools/call` para `calculadora` (execução real, pura) e para
    `buscar_contato`/`consultar_lista_compras`/`consultar_execucoes_agente`/
-   `consultar_pedidos_agente`/`consultar_historico_acoes`/`obter_acao`
-   (executor mockado -- as seis dependem de Firestore, então o teste cobre
+   `consultar_pedidos_agente`/`consultar_historico_acoes`/`obter_acao`/
+   `listar_rascunhos_pendentes`/`consultar_job`/`buscar_arquivos_acervo`/
+   `consultar_status_modo_secretario`/
+   `consultar_contatos_prioritarios_secretario`/
+   `consultar_promocoes_autonomia_sugeridas`
+   (executor mockado -- as doze dependem de Firestore, então o teste cobre
    o MECANISMO, não a correção interna dos handlers, mesmo padrão já usado
    para `consultar_processo_sipac` abaixo), é sempre IGUAL ao dict que
    `content[0].text` serializa (mesma fonte, nunca diverge), bate com o
-   `outputSchema` publicado campo a campo (para `consultar_historico_acoes`
-   e `obter_acao`, contra o branch `oneOf` correspondente à forma
-   retornada), e nunca aparece para uma tool sem contrato publicado -- nem
+   `outputSchema` publicado campo a campo (para `consultar_historico_acoes`,
+   `obter_acao`, `consultar_job`, `buscar_arquivos_acervo`, `consultar_
+   contatos_prioritarios_secretario` e `consultar_promocoes_autonomia_
+   sugeridas`, contra o branch `oneOf`
+   correspondente à forma retornada), e nunca aparece para
+   uma tool sem contrato publicado -- nem
    quando o resultado real também é um dict, nem quando o executor levanta
    uma exceção não tratada por ele mesmo, nem quando o handler devolve uma
    string crua de erro (caminho real de `consultar_lista_compras` para
@@ -461,17 +583,292 @@ class TestOutputSchema(unittest.TestCase):
         self.assertEqual(erro["properties"]["erro"], {"type": "string"})
         self.assertEqual(erro["properties"]["status"], {"type": "string", "enum": ["not_found"]})
 
-    def test_paridade_sete_tools_tem_output_schema_hoje(self):
-        # Não por amostragem: para TODA tool do catálogo real (106 hoje),
-        # output_schema devolve algo só para calculadora, buscar_contato,
-        # consultar_lista_compras, consultar_execucoes_agente,
-        # consultar_pedidos_agente, consultar_historico_acoes e obter_acao
-        # -- prova que a lista fechada não vazou para nenhuma outra tool
-        # por engano.
+    def test_listar_rascunhos_pendentes_tem_schema_com_campos_obrigatorios(self):
+        schema = registry.output_schema("listar_rascunhos_pendentes")
+        self.assertIsNotNone(schema)
+        self.assertEqual(schema["type"], "object")
+        self.assertEqual(schema["required"], ["total", "rascunhos"])
+        self.assertEqual(set(schema["properties"].keys()), {"total", "rascunhos"})
+        self.assertFalse(schema["additionalProperties"])
+
+        item = schema["properties"]["rascunhos"]["items"]
+        campos_item = {
+            "id", "status", "destinatario_nome", "to_number", "motivo",
+            "trecho", "acao_id", "item_atencao_id", "origem", "tipo",
+            "foi_editado", "envio_liberado_em", "criado_em",
+            "telegram_message_id",
+        }
+        # Os 14 campos são sempre chaves presentes no dict construído por
+        # `outbox_aprovacao.listar_rascunhos` (literal único, sem chave
+        # condicional).
+        self.assertEqual(set(item["properties"].keys()), campos_item)
+        self.assertEqual(set(item["required"]), campos_item)
+        self.assertFalse(item["additionalProperties"])
+        # status é enum de 2 valores pelo filtro da própria query
+        # (`.where("status", "in", [...])`), não por "escritor único" --
+        # a coleção whatsapp_outbox tem vários escritores.
+        self.assertEqual(
+            item["properties"]["status"]["enum"],
+            ["aguardando_aprovacao", "aguardando_janela"],
+        )
+        # foi_editado/trecho são coagidos na PRÓPRIA leitura
+        # (bool(...)/str(...)[:120]), garantia mais forte que "sem tipo
+        # cru vazando" -- por isso sem null.
+        self.assertEqual(item["properties"]["foi_editado"], {"type": "boolean"})
+        self.assertEqual(item["properties"]["trecho"], {"type": "string"})
+        # telegram_message_id é o achado desta sub-entrega: inteiro (id do
+        # Telegram), não string como os dois campos de data abaixo.
+        self.assertEqual(item["properties"]["telegram_message_id"]["type"], ["integer", "null"])
+        for campo in ("envio_liberado_em", "criado_em"):
+            with self.subTest(campo=campo):
+                self.assertEqual(item["properties"][campo]["type"], ["string", "null"])
+        for campo in ("acao_id", "item_atencao_id"):
+            with self.subTest(campo=campo):
+                self.assertEqual(item["properties"][campo]["type"], ["string", "null"])
+        # Achado de revisão Codex nesta PR: destinatario_nome/to_number/
+        # motivo/origem são lidos com d.get(campo) CRU em
+        # outbox_aprovacao.listar_rascunhos (sem segundo argumento, ao
+        # contrário de tipo -- d.get("tipo", "outro")) -- um documento sem
+        # esses campos (formato legado, edição manual) leria None. Por
+        # isso nullable, ao contrário de tipo/trecho/foi_editado, que têm
+        # garantia mais forte (default ou coerção no próprio ponto de
+        # leitura).
+        for campo in ("destinatario_nome", "to_number", "motivo", "origem"):
+            with self.subTest(campo=campo):
+                self.assertEqual(item["properties"][campo]["type"], ["string", "null"])
+        self.assertEqual(item["properties"]["tipo"], {"type": "string"})
+
+    def test_consultar_job_tem_schema_com_quatro_branches(self):
+        schema = registry.output_schema("consultar_job")
+        self.assertIsNotNone(schema)
+        self.assertEqual(set(schema.keys()), {"oneOf"})
+        # 4 branches: o maior número deste catálogo até agora (mais que os
+        # 2 de consultar_historico_acoes/obter_acao) -- `ler_job` tem 5
+        # `return`, mas os dois primeiros (sem job_id / não encontrado)
+        # colapsam num único branch de erro com `status` opcional, mesmo
+        # padrão de `obter_acao`.
+        self.assertEqual(len(schema["oneOf"]), 4)
+        erro, done, error, processing = schema["oneOf"]
+
+        self.assertEqual(erro["type"], "object")
+        self.assertEqual(erro["required"], ["erro"])
+        self.assertEqual(set(erro["properties"].keys()), {"erro", "status"})
+        self.assertEqual(erro["properties"]["status"], {"const": "not_found"})
+        self.assertFalse(erro["additionalProperties"])
+
+        self.assertEqual(done["required"], ["job_id", "tool", "status", "resultado"])
+        self.assertEqual(done["properties"]["status"], {"const": "done"})
+        # resultado é contrato de SNAPSHOT (as 3 tools de _TOOLS_LONGAS
+        # hoje sempre devolvem string) -- ver comentário de
+        # _OUTPUT_SCHEMAS para o caveat completo.
+        self.assertEqual(done["properties"]["resultado"], {"type": "string"})
+        self.assertFalse(done["additionalProperties"])
+
+        self.assertEqual(error["required"], ["job_id", "tool", "status", "erro"])
+        self.assertEqual(error["properties"]["status"], {"const": "error"})
+        # erro_tipo/bloqueio_politica ficam FORA de required -- ler_job só
+        # copia quando presentes no documento (achado: hoje as 4 escritas
+        # de status=error sempre gravam erro_tipo, mas o leitor não
+        # garante isso para jobs antigos).
+        self.assertNotIn("erro_tipo", error["required"])
+        self.assertNotIn("bloqueio_politica", error["required"])
+        self.assertEqual(
+            error["properties"]["erro_tipo"]["enum"],
+            ["politica", "resultado_tool", "excecao", "erro_configuracao"],
+        )
+        # reason_code SEM null -- achado da 1a rodada de revisão
+        # adversarial: `PolicyDecision.reason_code` é tipado `str` (nunca
+        # `str | None`) e os 4 pontos de construção em `autonomy/policy.py`
+        # sempre passam literal de string.
+        self.assertEqual(
+            error["properties"]["bloqueio_politica"]["properties"]["reason_code"],
+            {"type": "string"},
+        )
+        self.assertFalse(error["additionalProperties"])
+
+        self.assertEqual(processing["required"], ["job_id", "tool", "status", "mensagem"])
+        self.assertEqual(processing["properties"]["status"], {"const": "processing"})
+        self.assertFalse(processing["additionalProperties"])
+
+    def test_buscar_arquivos_acervo_tem_schema_oneof_sucesso_e_erro(self):
+        schema = registry.output_schema("buscar_arquivos_acervo")
+        self.assertIsNotNone(schema)
+        self.assertEqual(set(schema.keys()), {"oneOf"})
+        self.assertEqual(len(schema["oneOf"]), 2)
+        sucesso, erro = schema["oneOf"]
+
+        self.assertEqual(sucesso["required"], ["total_retornado", "resultados"])
+        self.assertFalse(sucesso["additionalProperties"])
+        item = sucesso["properties"]["resultados"]["items"]
+        self.assertEqual(
+            set(item["properties"].keys()),
+            {"id", "titulo", "trecho", "fonte", "url_drive", "task_id", "origem", "distancia"},
+        )
+        self.assertEqual(item["required"], list(item["properties"].keys()))
+        self.assertFalse(item["additionalProperties"])
+        # task_id pode faltar no documento (`data.get("task_id")` sem
+        # default) -- nullable.
+        self.assertEqual(item["properties"]["task_id"], {"type": ["string", "null"]})
+        # ACHADO da revisão do Codex nesta PR, CORRIGIDO: titulo/trecho/
+        # fonte (escritor do Copiloto) vêm de `meta.get(...)` sobre uma
+        # resposta livre do Gemini -- se o modelo devolver a chave presente
+        # com valor `null` explícito, o fallback (`titulo_doc = meta.get(
+        # 'titulo', real_file_name)`) NUNCA é acionado (só dispara quando a
+        # chave está AUSENTE), então `None` passa direto. Por isso
+        # `["string", "null"]`, não `"string"` puro.
+        self.assertEqual(item["properties"]["titulo"], {"type": ["string", "null"]})
+        self.assertEqual(item["properties"]["trecho"], {"type": ["string", "null"]})
+        self.assertEqual(item["properties"]["fonte"], {"type": ["string", "null"]})
+        # url_drive é diferente: construído deterministicamente via
+        # f-string, nunca vem do JSON do Gemini -- continua string pura.
+        self.assertEqual(item["properties"]["url_drive"], {"type": "string"})
+        # ACHADO desta sub-entrega: um dos 3 escritores de `indice_
+        # artefatos` (anexo do Copiloto) grava `origem` como dict, não
+        # string -- ver comentário de `_OUTPUT_SCHEMAS`.
+        self.assertEqual(item["properties"]["origem"], {"type": ["string", "object"]})
+        # distancia é garantia ESTRUTURAL de null: `find_nearest` nunca
+        # recebe `distance_result_field` neste código, e `DocumentSnapshot`
+        # nunca tem esse atributo na biblioteca instalada.
+        self.assertEqual(item["properties"]["distancia"], {"type": "null"})
+
+        self.assertEqual(erro["required"], ["erro", "resultados"])
+        self.assertEqual(erro["properties"]["resultados"], {"type": "array", "maxItems": 0})
+        self.assertFalse(erro["additionalProperties"])
+
+    def test_consultar_status_modo_secretario_tem_schema_unica_forma_tudo_obrigatorio(self):
+        schema = registry.output_schema("consultar_status_modo_secretario")
+        self.assertIsNotNone(schema)
+        self.assertEqual(schema["type"], "object")
+        campos = {
+            "enabled", "desativa_em", "chats_allowlist", "contatos_detalhes",
+            "orientacoes_em_vigor", "orientacoes_padrao", "orientacoes_sessao",
+            "mensagem",
+        }
+        self.assertEqual(set(schema["properties"].keys()), campos)
+        # PRIMEIRA tool com forma única onde TODOS os campos são
+        # obrigatórios -- o handler nunca levanta exceção e nunca pula uma
+        # chave (ao contrário de calculadora/buscar_contato/
+        # consultar_lista_compras, que também têm forma única mas com
+        # campos às vezes ausentes).
+        self.assertEqual(set(schema["required"]), campos)
+        self.assertFalse(schema["additionalProperties"])
+
+        self.assertEqual(schema["properties"]["enabled"], {"type": "boolean"})
+        self.assertEqual(schema["properties"]["mensagem"], {"type": "string"})
+        # desativa_em: agora com a MESMA garantia estrutural dos demais
+        # campos, após a correção do achado do Codex nesta PR (coerção em
+        # obter_config_secretario) -- ver comentário de _OUTPUT_SCHEMAS e
+        # test_secretario_whatsapp.py para o teste de regressão.
+        self.assertEqual(schema["properties"]["desativa_em"], {"type": ["string", "null"]})
+        for campo in ("orientacoes_em_vigor", "orientacoes_padrao", "orientacoes_sessao"):
+            self.assertEqual(schema["properties"][campo], {"type": ["string", "null"]})
+
+        self.assertEqual(
+            schema["properties"]["chats_allowlist"],
+            {"type": "array", "items": {"type": "string"}},
+        )
+
+        item = schema["properties"]["contatos_detalhes"]["items"]
+        self.assertEqual(set(item["properties"].keys()), {"chat_id", "nome"})
+        self.assertEqual(set(item["required"]), {"chat_id", "nome"})
+        self.assertFalse(item["additionalProperties"])
+        self.assertEqual(item["properties"]["chat_id"], {"type": "string"})
+        self.assertEqual(item["properties"]["nome"], {"type": "string"})
+
+    def test_consultar_contatos_prioritarios_secretario_tem_schema_oneof_sucesso_e_erro(self):
+        schema = registry.output_schema("consultar_contatos_prioritarios_secretario")
+        self.assertIsNotNone(schema)
+        self.assertEqual(len(schema["oneOf"]), 2)
+        sucesso, erro = schema["oneOf"]
+
+        self.assertEqual(set(sucesso["properties"].keys()), {"total", "apenas_ativos", "contatos_prioritarios"})
+        self.assertEqual(set(sucesso["required"]), {"total", "apenas_ativos", "contatos_prioritarios"})
+        self.assertFalse(sucesso["additionalProperties"])
+        self.assertEqual(sucesso["properties"]["total"], {"type": "integer"})
+        self.assertEqual(sucesso["properties"]["apenas_ativos"], {"type": "boolean"})
+
+        item = sucesso["properties"]["contatos_prioritarios"]["items"]
+        campos_item = {
+            "id", "chat_id", "chat_name", "assunto", "o_que_precisa_saber",
+            "status", "valido_ate", "resumo_estruturado", "informacao_obtida",
+            "criado_em", "atualizado_em", "concluido_em",
+        }
+        self.assertEqual(set(item["properties"].keys()), campos_item)
+        # `concluido_em` é o ÚNICO campo do item fora de `required` -- só
+        # existe como chave depois que o briefing é concluído (ver
+        # comentário de `_OUTPUT_SCHEMAS` em `tools/registry.py`).
+        self.assertEqual(set(item["required"]), campos_item - {"concluido_em"})
+        self.assertFalse(item["additionalProperties"])
+        self.assertEqual(
+            item["properties"]["status"],
+            {"type": "string", "enum": ["ativo", "concluido", "expirado", "cancelado"]},
+        )
+        self.assertEqual(item["properties"]["resumo_estruturado"], {"type": ["string", "null"]})
+        self.assertEqual(item["properties"]["informacao_obtida"], {"type": ["boolean", "null"]})
+        for campo in ("id", "chat_id", "chat_name", "assunto", "o_que_precisa_saber",
+                      "valido_ate", "criado_em", "atualizado_em", "concluido_em"):
+            self.assertEqual(item["properties"][campo], {"type": "string"})
+
+        self.assertEqual(set(erro["properties"].keys()), {"erro", "contatos_prioritarios"})
+        self.assertEqual(set(erro["required"]), {"erro", "contatos_prioritarios"})
+        self.assertFalse(erro["additionalProperties"])
+        self.assertEqual(erro["properties"]["contatos_prioritarios"], {"type": "array", "maxItems": 0})
+
+    def test_consultar_promocoes_autonomia_sugeridas_tem_schema_oneof_sucesso_e_erro(self):
+        schema = registry.output_schema("consultar_promocoes_autonomia_sugeridas")
+        self.assertIsNotNone(schema)
+        self.assertEqual(len(schema["oneOf"]), 2)
+        sucesso, erro = schema["oneOf"]
+
+        self.assertEqual(set(sucesso["properties"].keys()), {"total", "promocoes"})
+        self.assertEqual(set(sucesso["required"]), {"total", "promocoes"})
+        self.assertFalse(sucesso["additionalProperties"])
+        self.assertEqual(sucesso["properties"]["total"], {"type": "integer"})
+
+        item = sucesso["properties"]["promocoes"]["items"]
+        campos_item = {
+            "tipo", "status", "amostra", "aprovados_sem_edicao",
+            "taxa_sem_edicao", "sugerida_em",
+        }
+        self.assertEqual(set(item["properties"].keys()), campos_item)
+        self.assertEqual(set(item["required"]), campos_item)
+        self.assertFalse(item["additionalProperties"])
+        self.assertEqual(item["properties"]["tipo"], {"type": "string"})
+        # `status` é enum de UM valor só -- garantia dupla: o filtro da
+        # própria query (`.where("status", "==", STATUS_PENDENTE)`) e o
+        # único escritor de criação (ver comentário de `_OUTPUT_SCHEMAS`).
+        self.assertEqual(item["properties"]["status"], {"type": "string", "enum": ["pendente"]})
+        self.assertEqual(item["properties"]["amostra"], {"type": "integer"})
+        self.assertEqual(item["properties"]["aprovados_sem_edicao"], {"type": "integer"})
+        self.assertEqual(item["properties"]["taxa_sem_edicao"], {"type": "number"})
+        self.assertEqual(item["properties"]["sugerida_em"], {"type": ["string", "null"]})
+
+        self.assertEqual(set(erro["properties"].keys()), {"erro", "total", "promocoes"})
+        self.assertEqual(set(erro["required"]), {"erro", "total", "promocoes"})
+        self.assertFalse(erro["additionalProperties"])
+        self.assertEqual(erro["properties"]["promocoes"], {"type": "array", "maxItems": 0})
+        self.assertEqual(erro["properties"]["total"], {"type": "integer"})
+
+    def test_paridade_treze_tools_tem_output_schema_hoje(self):
+        # Não por amostragem: para TODA tool do catálogo real (108 hoje --
+        # `len(registry.list_tool_names())`; achado da revisão adversarial
+        # da sub-entrega 25/N: "106" estava desatualizado desde antes
+        # dela), output_schema devolve algo só para calculadora,
+        # buscar_contato, consultar_lista_compras,
+        # consultar_execucoes_agente, consultar_pedidos_agente,
+        # consultar_historico_acoes, obter_acao, listar_rascunhos_pendentes,
+        # consultar_job, buscar_arquivos_acervo,
+        # consultar_status_modo_secretario, consultar_contatos_
+        # prioritarios_secretario e consultar_promocoes_autonomia_
+        # sugeridas -- prova que a lista fechada não vazou para nenhuma
+        # outra tool por engano.
         com_schema = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
+            "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
+            "consultar_status_modo_secretario", "consultar_contatos_prioritarios_secretario",
+            "consultar_promocoes_autonomia_sugeridas",
         }
         for nome in registry.list_tool_names():
             with self.subTest(tool=nome):
@@ -538,11 +935,72 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
         # reduzido a uma das duas formas.
         self.assertIn("oneOf", self.catalogo["obter_acao"]["outputSchema"])
 
+    def test_listar_rascunhos_pendentes_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["listar_rascunhos_pendentes"])
+        self.assertEqual(
+            self.catalogo["listar_rascunhos_pendentes"]["outputSchema"],
+            registry.output_schema("listar_rascunhos_pendentes"),
+        )
+
+    def test_consultar_job_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["consultar_job"])
+        self.assertEqual(
+            self.catalogo["consultar_job"]["outputSchema"],
+            registry.output_schema("consultar_job"),
+        )
+        # oneOf chega intacto no catálogo publicado, não achatado nem
+        # reduzido a uma das quatro formas.
+        self.assertIn("oneOf", self.catalogo["consultar_job"]["outputSchema"])
+        self.assertEqual(len(self.catalogo["consultar_job"]["outputSchema"]["oneOf"]), 4)
+
+    def test_buscar_arquivos_acervo_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["buscar_arquivos_acervo"])
+        self.assertEqual(
+            self.catalogo["buscar_arquivos_acervo"]["outputSchema"],
+            registry.output_schema("buscar_arquivos_acervo"),
+        )
+        self.assertIn("oneOf", self.catalogo["buscar_arquivos_acervo"]["outputSchema"])
+        self.assertEqual(len(self.catalogo["buscar_arquivos_acervo"]["outputSchema"]["oneOf"]), 2)
+
+    def test_consultar_contatos_prioritarios_secretario_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["consultar_contatos_prioritarios_secretario"])
+        self.assertEqual(
+            self.catalogo["consultar_contatos_prioritarios_secretario"]["outputSchema"],
+            registry.output_schema("consultar_contatos_prioritarios_secretario"),
+        )
+        self.assertIn("oneOf", self.catalogo["consultar_contatos_prioritarios_secretario"]["outputSchema"])
+        self.assertEqual(
+            len(self.catalogo["consultar_contatos_prioritarios_secretario"]["outputSchema"]["oneOf"]), 2
+        )
+
+    def test_consultar_status_modo_secretario_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["consultar_status_modo_secretario"])
+        self.assertEqual(
+            self.catalogo["consultar_status_modo_secretario"]["outputSchema"],
+            registry.output_schema("consultar_status_modo_secretario"),
+        )
+        # Forma única, sem oneOf -- ao contrário das quatro tools anteriores.
+        self.assertNotIn("oneOf", self.catalogo["consultar_status_modo_secretario"]["outputSchema"])
+
+    def test_consultar_promocoes_autonomia_sugeridas_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["consultar_promocoes_autonomia_sugeridas"])
+        self.assertEqual(
+            self.catalogo["consultar_promocoes_autonomia_sugeridas"]["outputSchema"],
+            registry.output_schema("consultar_promocoes_autonomia_sugeridas"),
+        )
+        self.assertIn("oneOf", self.catalogo["consultar_promocoes_autonomia_sugeridas"]["outputSchema"])
+        self.assertEqual(
+            len(self.catalogo["consultar_promocoes_autonomia_sugeridas"]["outputSchema"]["oneOf"]), 2
+        )
+
     def test_nenhuma_outra_tool_publicada_tem_output_schema(self):
         esperadas = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
+            "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
+            "consultar_status_modo_secretario", "consultar_contatos_prioritarios_secretario",
+            "consultar_promocoes_autonomia_sugeridas",
         }
         com_schema = [
             nome for nome, tool in self.catalogo.items()
@@ -557,6 +1015,9 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
+            "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
+            "consultar_status_modo_secretario", "consultar_contatos_prioritarios_secretario",
+            "consultar_promocoes_autonomia_sugeridas",
         ):
             with self.subTest(tool=nome):
                 tool = self.catalogo[nome]
@@ -1276,6 +1737,599 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
         with patch.object(mcp_server, "execute_tool", return_value=mock_erro):
             resultado = mcp_server._handle_tools_call(
                 {"name": "obter_acao", "arguments": {"task_id": "x"}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        for campo in erro_schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(
+                campo, erro_schema["properties"],
+                f"campo '{campo}' fora do branch de erro do outputSchema",
+            )
+
+    def test_listar_rascunhos_pendentes_sucesso_leva_structured_content_igual_ao_content(self):
+        # `outbox_aprovacao.listar_rascunhos` real depende de Firestore
+        # (`ctx.db.collection("whatsapp_outbox")...`); o executor é
+        # mockado aqui com uma forma real que a função produz (ver
+        # `outbox_aprovacao.py`), mesmo padrão das demais tools acima --
+        # testa o MECANISMO, não a lógica de consulta em si.
+        esperado = {
+            "total": 1,
+            "rascunhos": [
+                {
+                    "id": "r_promovido",
+                    "status": "aguardando_janela",
+                    "destinatario_nome": "Carla",
+                    "to_number": "5511999999999@c.us",
+                    "motivo": "Confirmação de reunião",
+                    "trecho": "Olá Carla, confirma a reunião de amanhã?",
+                    "acao_id": None,
+                    "item_atencao_id": None,
+                    "origem": "claude",
+                    "tipo": "confirmacao_reuniao",
+                    "foi_editado": False,
+                    "envio_liberado_em": "2026-09-23T14:08:00+00:00",
+                    "criado_em": "2026-09-23T14:00:00+00:00",
+                    "telegram_message_id": 4242,
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "listar_rascunhos_pendentes", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_listar_rascunhos_pendentes_lista_vazia_tambem_leva_structured_content(self):
+        esperado = {"total": 0, "rascunhos": []}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "listar_rascunhos_pendentes", "arguments": {"limite": 5}},
+                ctx=_ctx(),
+            )
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_listar_rascunhos_pendentes_structured_content_bate_com_o_output_schema_publicado(self):
+        schema = registry.output_schema("listar_rascunhos_pendentes")
+        propriedades = schema["properties"]
+        item_props = propriedades["rascunhos"]["items"]["properties"]
+        # telegram_message_id ausente (envio ao Telegram falhou ou não
+        # havia token/chat configurado) -- vira `None` no dict, não some
+        # da resposta (mesmo padrão de acao_id/item_atencao_id ausentes).
+        mock_retorno = {
+            "total": 1,
+            "rascunhos": [
+                {
+                    "id": "r_regular",
+                    "status": "aguardando_aprovacao",
+                    "destinatario_nome": "Pedro",
+                    "to_number": "5511988888888@c.us",
+                    "motivo": "Aviso urgente",
+                    "trecho": "Mensagem regular sem promoção",
+                    "acao_id": "acao-9",
+                    "item_atencao_id": "item-2",
+                    "origem": "atencao_whatsapp",
+                    "tipo": "outro",
+                    "foi_editado": True,
+                    "envio_liberado_em": None,
+                    "criado_em": "2026-09-23T13:00:00+00:00",
+                    "telegram_message_id": None,
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_retorno):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "listar_rascunhos_pendentes", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        for campo in schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(campo, propriedades, f"campo '{campo}' fora do outputSchema")
+        for rascunho in estruturado["rascunhos"]:
+            for campo in rascunho:
+                self.assertIn(campo, item_props, f"campo '{campo}' fora do item declarado")
+
+    def test_consultar_job_sem_job_id_leva_structured_content(self):
+        # `mcp_jobs.ler_job`, ramo 1: sem `job_id`, checagem antes de
+        # qualquer leitura ao Firestore -- só `erro`, sem `status`.
+        esperado = {"erro": "job_id obrigatorio."}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_job", "arguments": {"job_id": ""}}, ctx=_ctx()
+            )
+        self.assertTrue(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertNotIn("status", resultado["structuredContent"])
+
+    def test_consultar_job_nao_encontrado_leva_structured_content(self):
+        # Ramo 2: job inexistente OU uid divergente -- MESMA resposta para
+        # os dois casos (deliberado, ver comentário de `_OUTPUT_SCHEMAS`).
+        esperado = {"erro": "Job 'mcpjob-xyz' nao encontrado.", "status": "not_found"}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_job", "arguments": {"job_id": "mcpjob-xyz"}}, ctx=_ctx()
+            )
+        self.assertTrue(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_consultar_job_done_leva_structured_content_igual_ao_content(self):
+        # Ramo 3: `status == "done"`. `resultado` string -- as 3 únicas
+        # tools de `_TOOLS_LONGAS` hoje sempre devolvem string (ver
+        # comentário de `_OUTPUT_SCHEMAS`).
+        esperado = {
+            "job_id": "mcpjob-abc123",
+            "tool": "gerar_relatorio",
+            "status": "done",
+            "resultado": '{"report_id": "r1", "titulo": "X", "secoes": ["A"], "status": "gerado"}',
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_job", "arguments": {"job_id": "mcpjob-abc123"}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_job_error_leva_structured_content(self):
+        # Ramo 4: `status == "error"`, com os dois campos opcionais
+        # (`erro_tipo`/`bloqueio_politica`) presentes -- caso do bloqueio
+        # pela política de autonomia, único caminho que grava
+        # `bloqueio_politica`.
+        esperado = {
+            "job_id": "mcpjob-blocked",
+            "tool": "buscar_e_analisar_email",
+            "status": "error",
+            "erro": "Ação bloqueada pela política de autonomia vigente.",
+            "erro_tipo": "politica",
+            "bloqueio_politica": {"decision": "deny", "reason_code": "fora_do_escopo"},
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_job", "arguments": {"job_id": "mcpjob-blocked"}}, ctx=_ctx()
+            )
+        self.assertTrue(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_consultar_job_processing_leva_structured_content(self):
+        # Ramo 5 (único `status` alcançável fora de done/error/not_found):
+        # `"processing"`, com `mensagem` literal fixa do próprio `ler_job`.
+        esperado = {
+            "job_id": "mcpjob-ongoing",
+            "tool": "ler_documento_na_integra",
+            "status": "processing",
+            "mensagem": "Ainda processando. Consulte de novo em alguns segundos com o mesmo job_id.",
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_job", "arguments": {"job_id": "mcpjob-ongoing"}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_consultar_job_structured_content_bate_com_o_output_schema_publicado(self):
+        # Paridade campo a campo contra o branch `oneOf` correspondente à
+        # forma efetivamente devolvida, mesmo padrão de
+        # `consultar_historico_acoes`/`obter_acao` acima -- aqui com 4
+        # branches em vez de 2, então localiza o branch pelo valor de
+        # `status` (ou a ausência dele, para o ramo sem `job_id`).
+        schema = registry.output_schema("consultar_job")
+        branches_por_status = {}
+        for branch in schema["oneOf"]:
+            status_prop = branch["properties"].get("status")
+            # O branch de erro tem `status` OPCIONAL (mesmo padrão de
+            # `obter_acao`): serve tanto para "not_found" quanto para o
+            # ramo sem `job_id`, que não tem `status` nenhum -- registra
+            # o mesmo branch sob as duas chaves quando `status` não é
+            # `required` nele.
+            if status_prop and "status" not in branch.get("required", []):
+                branches_por_status[status_prop["const"]] = branch
+                branches_por_status[None] = branch
+            elif status_prop:
+                branches_por_status[status_prop["const"]] = branch
+            else:
+                branches_por_status[None] = branch
+
+        casos = [
+            {"erro": "job_id obrigatorio."},
+            {"erro": "Job 'x' nao encontrado.", "status": "not_found"},
+            {"job_id": "j1", "tool": "gerar_relatorio", "status": "done", "resultado": "texto"},
+            {
+                "job_id": "j2", "tool": "gerar_relatorio", "status": "error",
+                "erro": "falhou", "erro_tipo": "excecao",
+            },
+            {"job_id": "j3", "tool": "gerar_relatorio", "status": "processing", "mensagem": "..."},
+        ]
+        for mock_retorno in casos:
+            with self.subTest(status=mock_retorno.get("status")):
+                with patch.object(mcp_server, "execute_tool", return_value=mock_retorno):
+                    resultado = mcp_server._handle_tools_call(
+                        {"name": "consultar_job", "arguments": {"job_id": "x"}}, ctx=_ctx()
+                    )
+                estruturado = resultado["structuredContent"]
+                branch = branches_por_status[mock_retorno.get("status")]
+                for campo in branch["required"]:
+                    self.assertIn(campo, estruturado)
+                for campo in estruturado:
+                    self.assertIn(
+                        campo, branch["properties"],
+                        f"campo '{campo}' fora do branch de status={mock_retorno.get('status')!r}",
+                    )
+
+    def test_buscar_arquivos_acervo_sucesso_leva_structured_content_igual_ao_content(self):
+        # `buscar_arquivos_acervo` real depende de embedding (Gemini) e
+        # Firestore (`find_nearest`); o executor é mockado aqui com uma
+        # forma real que o handler produz (ver
+        # `tools/hermes_tools.py::_buscar_arquivos_acervo`), mesmo padrão
+        # das tools acima -- testa o MECANISMO, não a busca vetorial em si.
+        esperado = {
+            "total_retornado": 1,
+            "resultados": [{
+                "id": "art-1",
+                "titulo": "Manual de Onboarding",
+                "trecho": "Resumo executivo do manual.",
+                "fonte": "Drive",
+                "url_drive": "https://drive.google.com/file/d/abc/view",
+                "task_id": "acao-9",
+                "origem": "acervo",
+                "distancia": None,
+            }],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "buscar_arquivos_acervo", "arguments": {"query": "onboarding"}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_buscar_arquivos_acervo_com_origem_dict_leva_structured_content(self):
+        # ACHADO desta sub-entrega: um dos 3 escritores de `indice_
+        # artefatos` (anexo do Copiloto) grava `origem` como dict -- o
+        # envelope não normaliza nem rejeita, repassa como veio.
+        esperado = {
+            "total_retornado": 1,
+            "resultados": [{
+                "id": "art-2",
+                "titulo": "sem título",
+                "trecho": "",
+                "fonte": "",
+                "url_drive": "",
+                "task_id": None,
+                "origem": {"modulo": "copiloto", "id_origem": "sessao-1"},
+                "distancia": None,
+            }],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "buscar_arquivos_acervo", "arguments": {"query": "x"}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertIsInstance(resultado["structuredContent"]["resultados"][0]["origem"], dict)
+
+    def test_buscar_arquivos_acervo_erro_tambem_leva_structured_content(self):
+        esperado = {
+            "erro": "[ERRO TÉCNICO FindNearest] ValueError: falhou",
+            "resultados": [],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "buscar_arquivos_acervo", "arguments": {"query": "x"}}, ctx=_ctx()
+            )
+        self.assertTrue(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_buscar_arquivos_acervo_structured_content_bate_com_o_output_schema_publicado(self):
+        # Paridade campo a campo contra o branch `oneOf` correspondente à
+        # forma efetivamente devolvida, mesmo padrão de
+        # `consultar_historico_acoes`/`obter_acao` acima.
+        schema = registry.output_schema("buscar_arquivos_acervo")
+        sucesso_schema, erro_schema = schema["oneOf"]
+
+        mock_sucesso = {
+            "total_retornado": 1,
+            "resultados": [{
+                "id": "art-3",
+                "titulo": "T",
+                "trecho": "R",
+                "fonte": "F",
+                "url_drive": "",
+                "task_id": None,
+                "origem": "acervo",
+                "distancia": None,
+            }],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_sucesso):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "buscar_arquivos_acervo", "arguments": {"query": "x"}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        self.assertEqual(set(estruturado.keys()), set(sucesso_schema["properties"].keys()))
+        item_schema = sucesso_schema["properties"]["resultados"]["items"]
+        self.assertEqual(
+            set(estruturado["resultados"][0].keys()), set(item_schema["properties"].keys()),
+        )
+
+        mock_erro = {"erro": "falhou", "resultados": []}
+        with patch.object(mcp_server, "execute_tool", return_value=mock_erro):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "buscar_arquivos_acervo", "arguments": {"query": "x"}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        self.assertEqual(set(estruturado.keys()), set(erro_schema["properties"].keys()))
+
+    def test_consultar_status_modo_secretario_leva_structured_content_igual_ao_content(self):
+        # `consultar_status_modo_secretario` real depende de Firestore
+        # (system/settings + whatsapp_chats); o executor é mockado aqui com
+        # uma forma real que o handler produz (ver
+        # `secretario_whatsapp.consultar_status_modo_secretario`), mesmo
+        # padrão das tools acima -- testa o MECANISMO, não a leitura de
+        # config em si.
+        esperado = {
+            "enabled": True,
+            "desativa_em": "2030-01-01T12:00:00-03:00",
+            "chats_allowlist": ["5511999999999@c.us"],
+            "contatos_detalhes": [{"chat_id": "5511999999999@c.us", "nome": "Carlos Parceiro"}],
+            "orientacoes_em_vigor": "Só responda sobre agenda.",
+            "orientacoes_padrao": "Só responda sobre agenda.",
+            "orientacoes_sessao": None,
+            "mensagem": "O Modo Secretário está ATIVO no WhatsApp.",
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_status_modo_secretario", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_status_modo_secretario_structured_content_bate_com_o_output_schema_publicado(self):
+        # Forma única, sem oneOf -- paridade campo a campo direta contra o
+        # schema publicado, mais simples que as tools com oneOf acima.
+        schema = registry.output_schema("consultar_status_modo_secretario")
+
+        mock_resultado = {
+            "enabled": False,
+            "desativa_em": None,
+            "chats_allowlist": [],
+            "contatos_detalhes": [],
+            "orientacoes_em_vigor": None,
+            "orientacoes_padrao": None,
+            "orientacoes_sessao": None,
+            "mensagem": "O Modo Secretário está DESATIVADO no WhatsApp.",
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_resultado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_status_modo_secretario", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        self.assertEqual(set(estruturado.keys()), set(schema["properties"].keys()))
+        self.assertEqual(set(estruturado.keys()), set(schema["required"]))
+
+    def test_consultar_contatos_prioritarios_secretario_ativo_leva_structured_content(self):
+        # `consultar_contatos_prioritarios_secretario` real depende de
+        # Firestore (`secretario_contatos_prioritarios`); o executor é
+        # mockado aqui com uma forma real que o handler produz (briefing
+        # recém-criado, ainda sem `concluido_em`), mesmo padrão das tools
+        # acima -- testa o MECANISMO, não a leitura em si.
+        esperado = {
+            "total": 1,
+            "apenas_ativos": True,
+            "contatos_prioritarios": [{
+                "id": "5511999999999@c.us",
+                "chat_id": "5511999999999@c.us",
+                "chat_name": "Carlos Parceiro",
+                "assunto": "Exames de rotina",
+                "o_que_precisa_saber": "Saber se os exames ficaram prontos",
+                "status": "ativo",
+                "valido_ate": "2026-09-24T23:59:59.999999-03:00",
+                "resumo_estruturado": None,
+                "informacao_obtida": None,
+                "criado_em": "2026-09-24 10:00:00+00:00",
+                "atualizado_em": "2026-09-24 10:00:00+00:00",
+            }],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_contatos_prioritarios_secretario", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_contatos_prioritarios_secretario_concluido_leva_concluido_em(self):
+        # Briefing já concluído: `resumo_estruturado`/`informacao_obtida`
+        # deixam de ser `None`, e a chave `concluido_em` (ausente no teste
+        # acima) passa a existir.
+        esperado = {
+            "total": 1,
+            "apenas_ativos": False,
+            "contatos_prioritarios": [{
+                "id": "5511999999999@c.us",
+                "chat_id": "5511999999999@c.us",
+                "chat_name": "Carlos Parceiro",
+                "assunto": "Exames de rotina",
+                "o_que_precisa_saber": "Saber se os exames ficaram prontos",
+                "status": "concluido",
+                "valido_ate": "2026-09-24T23:59:59.999999-03:00",
+                "resumo_estruturado": "Exames já ficaram prontos, retirados na sexta.",
+                "informacao_obtida": True,
+                "criado_em": "2026-09-24 10:00:00+00:00",
+                "atualizado_em": "2026-09-24 12:00:00+00:00",
+                "concluido_em": "2026-09-24 12:00:00+00:00",
+            }],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {
+                    "name": "consultar_contatos_prioritarios_secretario",
+                    "arguments": {"apenas_ativos": False},
+                },
+                ctx=_ctx(),
+            )
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertIn("concluido_em", resultado["structuredContent"]["contatos_prioritarios"][0])
+
+    def test_consultar_contatos_prioritarios_secretario_erro_tambem_leva_structured_content(self):
+        esperado = {"erro": "Your default credentials were not found.", "contatos_prioritarios": []}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_contatos_prioritarios_secretario", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertTrue(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_consultar_contatos_prioritarios_secretario_structured_content_bate_com_o_output_schema_publicado(self):
+        # Paridade campo a campo contra o branch `oneOf` correspondente à
+        # forma efetivamente devolvida, mesmo padrão de
+        # `buscar_arquivos_acervo` acima.
+        schema = registry.output_schema("consultar_contatos_prioritarios_secretario")
+        sucesso_schema, erro_schema = schema["oneOf"]
+
+        mock_sucesso = {
+            "total": 1,
+            "apenas_ativos": True,
+            "contatos_prioritarios": [{
+                "id": "x@c.us", "chat_id": "x@c.us", "chat_name": "X",
+                "assunto": "A", "o_que_precisa_saber": "O",
+                "status": "ativo", "valido_ate": "2026-09-24T23:59:59-03:00",
+                "resumo_estruturado": None, "informacao_obtida": None,
+                "criado_em": "2026-09-24 10:00:00+00:00", "atualizado_em": "2026-09-24 10:00:00+00:00",
+            }],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_sucesso):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_contatos_prioritarios_secretario", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        self.assertEqual(set(estruturado.keys()), set(sucesso_schema["properties"].keys()))
+        item_schema = sucesso_schema["properties"]["contatos_prioritarios"]["items"]
+        # Item sem `concluido_em` -- confere contra `required` (subconjunto
+        # de `properties`), não contra `properties` inteiro.
+        self.assertEqual(
+            set(estruturado["contatos_prioritarios"][0].keys()), set(item_schema["required"]),
+        )
+
+        mock_erro = {"erro": "falhou", "contatos_prioritarios": []}
+        with patch.object(mcp_server, "execute_tool", return_value=mock_erro):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_contatos_prioritarios_secretario", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        self.assertEqual(set(estruturado.keys()), set(erro_schema["properties"].keys()))
+
+    def test_consultar_promocoes_autonomia_sugeridas_sucesso_leva_structured_content_igual_ao_content(self):
+        # `promocao_autonomia.listar_promocoes_pendentes` real depende de
+        # Firestore; o executor é mockado aqui com uma forma real que a
+        # função produz (ver `promocao_autonomia.py`), mesmo padrão de
+        # `consultar_pedidos_agente`/`consultar_execucoes_agente` acima.
+        esperado = {
+            "total": 1,
+            "promocoes": [
+                {
+                    "tipo": "outbox_secretario",
+                    "status": "pendente",
+                    "amostra": 12,
+                    "aprovados_sem_edicao": 11,
+                    "taxa_sem_edicao": 11 / 12,
+                    "sugerida_em": "2026-09-04T10:00:00+00:00",
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_promocoes_autonomia_sugeridas", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_promocoes_autonomia_sugeridas_lista_vazia_tambem_leva_structured_content(self):
+        esperado = {"total": 0, "promocoes": []}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_promocoes_autonomia_sugeridas", "arguments": {"limite": 5}},
+                ctx=_ctx(),
+            )
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_consultar_promocoes_autonomia_sugeridas_erro_tambem_leva_structured_content(self):
+        # Caminho real de erro: `.stream()` da query levanta excecao,
+        # capturada dentro da própria `listar_promocoes_pendentes` --
+        # `total`/`promocoes` ficam fixos em `0`/`[]`, `erro` é `str(exc)`.
+        esperado = {
+            "erro": "503 Firestore indisponível",
+            "total": 0,
+            "promocoes": [],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_promocoes_autonomia_sugeridas", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertTrue(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_promocoes_autonomia_sugeridas_structured_content_bate_com_o_output_schema_publicado(self):
+        # Paridade campo a campo contra o branch `oneOf` correspondente à
+        # forma efetivamente devolvida, mesmo padrão de
+        # `consultar_historico_acoes`/`consultar_contatos_prioritarios_
+        # secretario` acima.
+        schema = registry.output_schema("consultar_promocoes_autonomia_sugeridas")
+        sucesso_schema, erro_schema = schema["oneOf"]
+
+        mock_sucesso = {
+            "total": 1,
+            "promocoes": [
+                {
+                    "tipo": "outbox_secretario",
+                    "status": "pendente",
+                    "amostra": 10,
+                    "aprovados_sem_edicao": 9,
+                    "taxa_sem_edicao": 0.9,
+                    "sugerida_em": None,
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_sucesso):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_promocoes_autonomia_sugeridas", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        item_props = sucesso_schema["properties"]["promocoes"]["items"]["properties"]
+        for campo in sucesso_schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(
+                campo, sucesso_schema["properties"],
+                f"campo '{campo}' fora do branch de sucesso do outputSchema",
+            )
+        for item in estruturado["promocoes"]:
+            for campo in item:
+                self.assertIn(campo, item_props, f"campo '{campo}' fora do item declarado")
+
+        mock_erro = {"erro": "falhou", "total": 0, "promocoes": []}
+        with patch.object(mcp_server, "execute_tool", return_value=mock_erro):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_promocoes_autonomia_sugeridas", "arguments": {}}, ctx=_ctx()
             )
         estruturado = resultado["structuredContent"]
         for campo in erro_schema["required"]:
