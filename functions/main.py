@@ -137,6 +137,14 @@ DEFAULT_GOOGLE_CALENDAR_ID = 'cf4953b9512ee2e85a7e064f9d5ce4eaf6e3634564c91e5c7e
 SYNC_LOCK_DOC_ID = 'sync_lock'
 SYNC_LOCK_STALE_SECONDS = 15 * 60
 MAX_SYNC_PASSES = 3
+# Sincronização de Gmail (Pix, boletos, vínculo e-mail-ação) via webhook (Pub/Sub) em vez de
+# polling a cada 60min dentro de run_full_sync (achado de custo de 16/09/2026, ação
+# e7fe01f4-6b7b-4789-8: run_full_sync respondia por 65-82% de TODAS as escritas do sistema).
+# Lock próprio (nunca o SYNC_LOCK_DOC_ID do run_full_sync): uma rodada geral de até 15min não
+# pode travar a reação a um e-mail novo, nem vice-versa.
+GMAIL_SYNC_LOCK_DOC_ID = 'gmail_sync_lock'
+GMAIL_WATCH_DOC_ID = 'gmail_watch'
+GMAIL_WATCH_TOPIC_NAME = 'gmail-push-hermes'
 # Sincronização Google Tasks <-> Ações (coleção 'tarefas') desativada a pedido do usuário (2026-06-02).
 # As duas direções estão desligadas: criar tarefa no Google não cria ação no Hermes e vice-versa,
 # e itens já vinculados também deixam de ser sincronizados. A integração com o Google Calendar
@@ -716,9 +724,9 @@ def queue_sync_request(db, reason=None):
     db.collection('system').document('sync').set(payload, merge=True)
 
 
-def acquire_sync_lock(db, owner_id):
+def acquire_sync_lock(db, owner_id, lock_doc_id=SYNC_LOCK_DOC_ID):
 
-    lock_ref = db.collection('system').document(SYNC_LOCK_DOC_ID)
+    lock_ref = db.collection('system').document(lock_doc_id)
     now = datetime.now(timezone.utc)
     lock_payload = {
         'owner_id': owner_id,
@@ -759,9 +767,9 @@ def acquire_sync_lock(db, owner_id):
         return False
 
 
-def release_sync_lock(db, owner_id):
+def release_sync_lock(db, owner_id, lock_doc_id=SYNC_LOCK_DOC_ID):
 
-    lock_ref = db.collection('system').document(SYNC_LOCK_DOC_ID)
+    lock_ref = db.collection('system').document(lock_doc_id)
 
     try:
 
@@ -3001,6 +3009,183 @@ def importAllcarePortalBill(req: https_fn.CallableRequest) -> dict:
         "invoice_id": str(safe_bill.get("num_fatura") or ""),
     }
 
+
+def _mensagem_erro_sync(db, e) -> str:
+    """Mensagem de erro padrão de um ciclo de sync, marcando system/google_credentials como
+    precisando de reautenticação quando o erro for de credencial Google revogada/inválida.
+    Extraído de run_full_sync (24/09/2026) para ser reaproveitado por _executar_sync_gmail_com_lock
+    -- mesma checagem, evita duas cópias divergindo."""
+    if isinstance(e, GoogleAuthRevokedError) or is_google_invalid_grant_error(e):
+        try:
+            db.collection('system').document('google_credentials').set({
+                'auth_status': 'reauth_required',
+                'auth_error': 'invalid_grant',
+                'auth_error_message': GOOGLE_REAUTH_MESSAGE,
+                'updated_at': firestore.SERVER_TIMESTAMP
+            }, merge=True)
+        except Exception as auth_status_err:
+            print(f"Falha ao marcar reautenticacao Google: {auth_status_err}")
+        return f"ERRO GOOGLE AUTH: {GOOGLE_REAUTH_MESSAGE}"
+    return f"ERRO na sincronização: {str(e)}"
+
+
+def sync_gmail_work(db, gs, sync_ref, logs):
+    """E-mails de Pix, boletos e vínculo e-mail-ação: todo o trabalho de sync que depende do
+    Gmail. Extraído de run_full_sync em 24/09/2026 (ação e7fe01f4-6b7b-4789-8) para poder ser
+    disparado tanto pelo webhook (on_gmail_watch_notification) quanto pela rede de segurança de
+    baixa frequência (gmail_sync_safety_net), sem precisar rodar Calendar/Tasks/Contacts/Drive/
+    Allcare junto a cada e-mail novo."""
+    sync_pix_emails(gs, sync_ref, logs)
+    sync_boletos_gmail(gs, sync_ref, logs)
+    try:
+        from email_action_linker import link_emails_to_actions
+        link_emails_to_actions(db, gs, sync_ref, logs)
+    except Exception as e_link:
+        log_to_firestore(sync_ref, logs, f"[EMAIL-LINK][ERRO] Falha inesperada no vínculo e-mail-ação: {e_link}", True)
+
+
+def gmail_watch_habilitado(db) -> bool:
+    """Lê system/settings.gmail_watch.enabled (padrão desligado, mesmo padrão de
+    whatsapp_secretario/resposta_esperada) -- só liga depois do passo manual único no GCP
+    (criar o tópico Pub/Sub GMAIL_WATCH_TOPIC_NAME e conceder papel de publicador nele à conta
+    gmail-api-push@system.gserviceaccount.com; ver docs/okf/log.md de 24/09/2026)."""
+    doc = db.collection('system').document('settings').get()
+    settings = doc.to_dict() if doc.exists else {}
+    cfg = ((settings or {}).get('gmail_watch') or {})
+    return bool(cfg.get('enabled', False))
+
+
+def renovar_gmail_watch(db, gs) -> dict:
+    """Registra/renova o users.watch() do Gmail: o Google passa a publicar em
+    GMAIL_WATCH_TOPIC_NAME sempre que a caixa postal mudar. A inscrição expira em ~7 dias
+    (limite da API do Gmail, não nosso) -- por isso precisa ser renovada periodicamente
+    (ver renovar_gmail_watch_diario). Sem efeito enquanto gmail_watch_habilitado for False."""
+    if not gmail_watch_habilitado(db):
+        return {"habilitado": False, "renovado": False}
+
+    watch_ref = db.collection('system').document(GMAIL_WATCH_DOC_ID)
+    project_id = os.environ.get('GCLOUD_PROJECT') or 'gestao-hermes'
+    topic_name = f"projects/{project_id}/topics/{GMAIL_WATCH_TOPIC_NAME}"
+    agora = datetime.now(timezone.utc)
+    try:
+        resultado = gs.users().watch(userId='me', body={
+            'topicName': topic_name,
+            'labelIds': ['INBOX'],
+            'labelFilterAction': 'include',
+        }).execute()
+        watch_ref.set({
+            'topic_name': topic_name,
+            'history_id': str(resultado.get('historyId') or ''),
+            'expiration': resultado.get('expiration'),
+            'watch_active': True,
+            'last_renewed_at': agora.isoformat(),
+        }, merge=True)
+        return {"habilitado": True, "renovado": True, "expiration": resultado.get('expiration')}
+    except Exception as exc:
+        try:
+            watch_ref.set({
+                'watch_active': False,
+                'last_erro': str(exc),
+                'last_erro_em': agora.isoformat(),
+            }, merge=True)
+        except Exception:
+            pass
+        print(f"[GMAIL-WATCH] Falha ao renovar watch: {exc}")
+        return {"habilitado": True, "renovado": False, "erro": str(exc)}
+
+
+def _executar_sync_gmail_com_lock(db, gs, trigger: str) -> dict:
+    """Roda sync_gmail_work sob o lock dedicado GMAIL_SYNC_LOCK_DOC_ID (nunca o lock geral do
+    run_full_sync). Compartilhada por on_gmail_watch_notification (evento real, quando o
+    webhook está habilitado) e gmail_sync_safety_net (polling de baixa frequência, sempre
+    ativo -- não depende do webhook estar ligado)."""
+    sync_ref = db.collection('system').document('gmail_sync')
+    logs = []
+    run_id = uuid.uuid4().hex
+    if not acquire_sync_lock(db, run_id, lock_doc_id=GMAIL_SYNC_LOCK_DOC_ID):
+        print(f"[GMAIL-SYNC] Sincronização de Gmail já em andamento; rodada ({trigger}) será coberta pela próxima.")
+        return {"executado": False, "motivo": "lock_ocupado"}
+    try:
+        sync_ref.set({
+            'status': 'processing',
+            'trigger': trigger,
+            'started_at': datetime.now(timezone.utc).isoformat(),
+            'logs': logs,
+        }, merge=True)
+        sync_gmail_work(db, gs, sync_ref, logs)
+        sync_ref.set({
+            'status': 'completed',
+            'last_success': datetime.now(timezone.utc).isoformat(),
+            'logs': logs,
+        }, merge=True)
+        if trigger == 'webhook':
+            db.collection('system').document(GMAIL_WATCH_DOC_ID).set(
+                {'last_notification_at': datetime.now(timezone.utc).isoformat()}, merge=True
+            )
+        return {"executado": True}
+    except Exception as exc:
+        error_msg = _mensagem_erro_sync(db, exc)
+        log_to_firestore(sync_ref, logs, error_msg, True)
+        sync_ref.set({'status': 'error', 'error_message': error_msg, 'logs': logs}, merge=True)
+        return {"executado": True, "erro": error_msg}
+    finally:
+        release_sync_lock(db, run_id, lock_doc_id=GMAIL_SYNC_LOCK_DOC_ID)
+
+
+@pubsub_fn.on_message_published(topic=GMAIL_WATCH_TOPIC_NAME)
+def on_gmail_watch_notification(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedData]) -> None:
+    """Disparado pelo Google a cada mudança na caixa postal (ver renovar_gmail_watch). V1:
+    dispara o mesmo sync_gmail_work de sempre (já idempotente/dedupe por conta própria) em vez
+    de andar pelo users().history().list() e processar só o delta -- isso exigiria decompor
+    sync_pix_emails/sync_boletos_gmail/link_emails_to_actions para trabalhar a partir de uma
+    lista de message_id (hoje cada um faz sua própria busca por query), escopo maior que o
+    ganho: o valor real do webhook aqui é reagir na hora, não economizar a query em si."""
+    db = get_db()
+    if not gmail_watch_habilitado(db):
+        return
+    # get_gmail_service() precisa estar dentro do try: senão uma credencial Google revogada
+    # (GoogleAuthRevokedError, achado da 1ª rodada de revisão adversarial, 24/09/2026) levanta
+    # ANTES de _executar_sync_gmail_com_lock começar, sem lock pra liberar mas também sem o
+    # status de erro gracioso -- vira crash cru da função na plataforma, não um status 'error'
+    # em system/gmail_sync (mesmo cuidado que run_full_sync já tinha desde sempre).
+    try:
+        gs = get_gmail_service()
+    except Exception as exc:
+        print(f"[GMAIL-WATCH] {_mensagem_erro_sync(db, exc)}")
+        return
+    _executar_sync_gmail_com_lock(db, gs, trigger='webhook')
+
+
+@scheduler_fn.on_schedule(schedule="every 4 hours", timeout_sec=540, memory=options.MemoryOption.GB_1)
+def gmail_sync_safety_net(event: scheduler_fn.ScheduledEvent) -> None:
+    """Rede de segurança do sync de Gmail, SEMPRE ativa independente do webhook (ação
+    e7fe01f4-6b7b-4789-8: renovação de watch pode falhar em silêncio, então isso nunca deve
+    ser eliminado). Antes esse trabalho rodava junto com Calendar/Tasks/Contacts/Drive/Allcare
+    dentro de run_full_sync a cada 60min (48x/dia); agora roda sozinho a cada 4h (6x/dia) --
+    corte real de chamadas ao Gmail mesmo sem o webhook nunca ser ligado."""
+    db = get_db()
+    try:
+        gs = get_gmail_service()
+    except Exception as exc:
+        print(f"[GMAIL-SYNC] {_mensagem_erro_sync(db, exc)}")
+        return
+    _executar_sync_gmail_com_lock(db, gs, trigger='safety_net')
+
+
+@scheduler_fn.on_schedule(schedule="every 24 hours", timeout_sec=60, memory=options.MemoryOption.MB_256)
+def renovar_gmail_watch_diario(event: scheduler_fn.ScheduledEvent) -> None:
+    """Renova o users.watch() do Gmail 1x/dia. A API expira em ~7 dias; renovar todo dia dá
+    folga generosa mesmo se um dia falhar (token expirado, API fora do ar etc.). Sem efeito
+    enquanto system/settings.gmail_watch.enabled for False."""
+    db = get_db()
+    try:
+        gs = get_gmail_service()
+    except Exception as exc:
+        print(f"[GMAIL-WATCH] {_mensagem_erro_sync(db, exc)}")
+        return
+    renovar_gmail_watch(db, gs)
+
+
 def run_full_sync(trigger_reason='unspecified'):
     """Executa o processo completo de sincronização"""
     db = get_db()
@@ -3067,26 +3252,21 @@ def run_full_sync(trigger_reason='unspecified'):
             sync_google_tasks_push(ts, cs, sync_ref, logs, tarefas_atualizadas=tarefas_atualizadas)
             sync_google_tasks_pull(ts, sync_ref, logs)
 
-            sync_pix_emails(gs, sync_ref, logs)
-            
             # Sincronização de Contatos do Google People API
             sync_google_contacts_internal(db, sync_ref, logs)
-            
+
             # Ingestão de Documentos (Acervo Global)
             log_to_firestore(sync_ref, logs, "[SYNC] Verificando novos documentos na Pasta de Deságue (Acervo Global)...", True)
             executar_monitoramento_acervo_global()
 
-
-            sync_boletos_gmail(gs, sync_ref, logs)
             sync_allcare_portal_bills(gs, sync_ref, logs)
 
-            # Vínculo automático de e-mails a ações em andamento/stand-by (via IA + confirmação Telegram).
-            # Protegido por try/except próprio: uma falha aqui nunca deve derrubar o sync financeiro/agenda.
-            try:
-                from email_action_linker import link_emails_to_actions
-                link_emails_to_actions(db, gs, sync_ref, logs)
-            except Exception as e_link:
-                log_to_firestore(sync_ref, logs, f"[EMAIL-LINK][ERRO] Falha inesperada no vínculo e-mail-ação: {e_link}", True)
+            # E-mails de Pix/boletos e vínculo e-mail-ação (sync_gmail_work): extraídos daqui em
+            # 24/09/2026 (ação e7fe01f4-6b7b-4789-8) -- agora rodam por conta própria via
+            # on_gmail_watch_notification (webhook Pub/Sub, quando system/settings.gmail_watch.enabled)
+            # e gmail_sync_safety_net (polling de baixa frequência, sempre ativo como rede de
+            # segurança). Rodar aqui também duplicaria o trabalho sem necessidade: run_full_sync
+            # já não toca Gmail.
 
             # Vínculo automático de reuniões encerradas a ações (matching determinístico por
             # google_calendar_id, sem IA). Mesma proteção: nunca derruba o restante do sync.
@@ -3123,21 +3303,7 @@ def run_full_sync(trigger_reason='unspecified'):
         return True
 
     except Exception as e:
-
-        if isinstance(e, GoogleAuthRevokedError) or is_google_invalid_grant_error(e):
-            error_msg = f"ERRO GOOGLE AUTH: {GOOGLE_REAUTH_MESSAGE}"
-            try:
-                db.collection('system').document('google_credentials').set({
-                    'auth_status': 'reauth_required',
-                    'auth_error': 'invalid_grant',
-                    'auth_error_message': GOOGLE_REAUTH_MESSAGE,
-                    'updated_at': firestore.SERVER_TIMESTAMP
-                }, merge=True)
-            except Exception as auth_status_err:
-                print(f"Falha ao marcar reautenticacao Google: {auth_status_err}")
-        else:
-            error_msg = f"ERRO na sincronização: {str(e)}"
-
+        error_msg = _mensagem_erro_sync(db, e)
         print(error_msg)
 
         sync_ref.set({
