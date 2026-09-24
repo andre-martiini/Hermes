@@ -206,17 +206,27 @@ dessa lista original, ver comentário de `_OUTPUT_SCHEMAS` em
 `tools/registry.py`). Descartada na sub-entrega 11/N pelo MESMO motivo
 que tinha bloqueado
 `consultar_promocoes_autonomia_sugeridas` (decidir a forma do `oneOf`),
-retomada agora pela mesma razão. A própria função de leitura RECONSTRÓI
-o item campo a campo (`dados.get(chave)`, sem `doc.to_dict()` cru), e a
-coleção `elevacoes_sugeridas` tem um único ponto de criação de documento
-em todo o repositório (`deteccao_subproduto.registrar_sugestao`, chamado
-por um único call site, `_ferramenta_propor`). `motivo_escassez` é enum
-fechado de 3 valores (`MOTIVOS_ESCASSEZ`), garantido por
-`validar_proposta` antes de qualquer gravação. `concluida_em` é o único
-campo nullable do item (`concluida_em or None` no payload); os demais
-(`sugestao_id`, `acao`, `objetivo`, `resumo`, `criada_em`, `antigo`) são
-sempre não-nulos no único escritor. Ver comentário de `_OUTPUT_SCHEMAS`
-em `tools/registry.py` para o levantamento completo.
+retomada agora pela mesma razão. A coleção `elevacoes_sugeridas` tem um
+único ponto de criação de documento em todo o repositório
+(`deteccao_subproduto.registrar_sugestao`, chamado por um único call
+site, `_ferramenta_propor`), mas -- diferente do que a redação original
+desta sub-entrega assumia -- a própria função de leitura NÃO reconstrói
+o item com defaults: `listar_pendentes` lê `dados.get(chave)` sem
+default para `acao`/`objetivo`/`motivo_escassez`/`resumo`/`criada_em`,
+então um documento esparso (sem escritor real rastreado, mas cenário já
+exercitado por `test_deteccao_subproduto.py::
+TestOContadorNaoRecomecaDoZero::
+test_a_rodada_leva_a_contagem_do_historico_como_piso`) devolve `None`
+para esses 5 campos -- achado da revisão do Codex na PR desta
+sub-entrega, mesma categoria do achado já registrado para
+`obter_fila_atencao` na sub-entrega 30/N (e o MESMO erro de análise:
+rastrear só o escritor real de hoje, sem considerar a garantia real da
+função de leitura). `motivo_escassez` é enum fechado de 3 valores
+(`MOTIVOS_ESCASSEZ`) quando presente, garantido por `validar_proposta`
+antes de qualquer gravação, mas nullable pelo mesmo motivo acima.
+`sugestao_id` (`d.id`) e `antigo` (`bool(...)`) continuam os únicos
+campos sempre não-nulos do item. Ver comentário de `_OUTPUT_SCHEMAS` em
+`tools/registry.py` para o levantamento completo.
 
 Cinco frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
@@ -999,19 +1009,32 @@ class TestOutputSchema(unittest.TestCase):
         self.assertEqual(set(item["required"]), campos_item)
         self.assertFalse(item["additionalProperties"])
         self.assertEqual(item["properties"]["sugestao_id"], {"type": "string"})
-        self.assertEqual(item["properties"]["acao"], {"type": "string"})
-        self.assertEqual(item["properties"]["objetivo"], {"type": "string"})
-        # `motivo_escassez` é enum fechado de 3 valores -- garantido por
-        # `validar_proposta` antes de qualquer gravação (ver comentário de
-        # `_OUTPUT_SCHEMAS`).
+        # `acao`/`objetivo`/`motivo_escassez`/`resumo`/`criada_em` são
+        # `dados.get(chave)` SEM default em `listar_pendentes` -- achado da
+        # revisão do Codex na PR desta sub-entrega, mesma categoria do
+        # achado já registrado para `obter_fila_atencao` (sub-entrega
+        # 30/N): um documento esparso na coleção (cenário já exercitado
+        # por `test_deteccao_subproduto.py::TestOContadorNaoRecomecaDoZero
+        # ::test_a_rodada_leva_a_contagem_do_historico_como_piso`, que
+        # grava `status=pendente` só com `task_id`/`criada_em`) devolve
+        # `None` para os demais. Nullable, portanto -- só `sugestao_id`
+        # (`d.id`, garantido pelo SDK) e `antigo` (`bool(...)`, nunca
+        # `None`) continuam não-nulos.
+        self.assertEqual(item["properties"]["acao"], {"type": ["string", "null"]})
+        self.assertEqual(item["properties"]["objetivo"], {"type": ["string", "null"]})
+        # `motivo_escassez` é enum fechado de 3 valores quando presente
+        # (garantido por `validar_proposta` antes de qualquer gravação),
+        # mas nullable pelo mesmo motivo acima -- `null` também explícito
+        # na própria lista `enum` (exigência do JSON Schema).
         self.assertEqual(
             item["properties"]["motivo_escassez"],
-            {"type": "string", "enum": ["repetivel", "raro", "ja_escrito"]},
+            {"type": ["string", "null"], "enum": ["repetivel", "raro", "ja_escrito", None]},
         )
-        self.assertEqual(item["properties"]["resumo"], {"type": "string"})
-        self.assertEqual(item["properties"]["criada_em"], {"type": "string"})
-        # Único campo nullable do item -- `concluida_em or None` no payload
-        # gravado (ver `deteccao_subproduto.registrar_sugestao`).
+        self.assertEqual(item["properties"]["resumo"], {"type": ["string", "null"]})
+        self.assertEqual(item["properties"]["criada_em"], {"type": ["string", "null"]})
+        # `concluida_em` já era nullable antes desta correção --
+        # `concluida_em or None` no payload gravado (ver
+        # `deteccao_subproduto.registrar_sugestao`), sem mudança.
         self.assertEqual(item["properties"]["concluida_em"], {"type": ["string", "null"]})
         self.assertEqual(item["properties"]["antigo"], {"type": "boolean"})
 
@@ -2800,6 +2823,56 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
                 campo, erro_schema["properties"],
                 f"campo '{campo}' fora do branch de erro do outputSchema",
             )
+
+    def test_consultar_elevacoes_sugeridas_item_esparso_tambem_bate_com_o_output_schema(self):
+        # Regressão do achado da revisão do Codex na PR desta sub-entrega:
+        # `listar_pendentes` lê `dados.get(chave)` sem default para
+        # `acao`/`objetivo`/`motivo_escassez`/`resumo`/`criada_em` -- um
+        # documento esparso na coleção (cenário já exercitado por
+        # `test_deteccao_subproduto.py::TestOContadorNaoRecomecaDoZero::
+        # test_a_rodada_leva_a_contagem_do_historico_como_piso`, que grava
+        # `status=pendente` só com `task_id`/`criada_em`) devolve `None`
+        # para os demais. Este teste prova que o outputSchema publicado
+        # ACEITA esse item real (nulo nesses 5 campos), não só o item
+        # "cheio" dos testes anteriores.
+        schema = registry.output_schema("consultar_elevacoes_sugeridas")
+        sucesso_schema = schema["oneOf"][0]
+        item_props = sucesso_schema["properties"]["sugestoes"]["items"]["properties"]
+
+        mock_resultado = {
+            "total": 1,
+            "sugestoes": [
+                {
+                    "sugestao_id": "s-esparso",
+                    "acao": None,
+                    "objetivo": None,
+                    "motivo_escassez": None,
+                    "resumo": None,
+                    "criada_em": None,
+                    "concluida_em": None,
+                    "antigo": False,
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_resultado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_elevacoes_sugeridas", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        self.assertEqual(estruturado, mock_resultado)
+        item = estruturado["sugestoes"][0]
+        for campo, valor in item.items():
+            if valor is None:
+                tipo_declarado = item_props[campo]["type"]
+                self.assertIn(
+                    "null", tipo_declarado,
+                    f"campo '{campo}' veio None mas o outputSchema não declara null",
+                )
+                if "enum" in item_props[campo]:
+                    self.assertIn(
+                        None, item_props[campo]["enum"],
+                        f"campo '{campo}' veio None mas null não está no enum publicado",
+                    )
 
     def test_tool_sem_output_schema_nunca_leva_structured_content_mesmo_com_dict(self):
         # `consultar_processo_sipac` não tem outputSchema publicado; mesmo

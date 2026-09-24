@@ -2770,23 +2770,46 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     # filtro da leitura.
     #
     # `sugestao_id` e sempre `d.id` -- garantido string pelo SDK do
-    # Firestore. `acao` (`titulo_acao`) e `objetivo` (`nome_objetivo`) sao
-    # sempre `str(...)` no unico escritor (`titulos[...]` em
-    # `_ferramenta_propor` e `str(c["tarefa"].get("titulo") or "")`;
-    # `nome_objetivo` e `str(objetivo.get("objetivoMacro") or "")`) --
-    # SEMPRE string, mesmo que vazia, nunca `None`. `motivo_escassez` vem
-    # de `sugestao["motivo_escassez"]` (spread `**sugestao` no payload
-    # gravado), e `sugestao` e sempre o dict devolvido por
-    # `validar_proposta`, que so aceita valores dentro de
-    # `MOTIVOS_ESCASSEZ = ("repetivel", "raro", "ja_escrito")` (checagem
-    # `if motivo not in MOTIVOS_ESCASSEZ: return None` antes de gravar
-    # qualquer coisa) -- enum fechado de 3 valores, nunca ausente nem
-    # fora do conjunto. `resumo` e sempre o retorno de
-    # `resumo_para_o_usuario` (f-string, sempre string, nunca `None`).
-    # `criada_em` e sempre o parametro `hoje` (string) passado por quem
-    # chama -- nunca `None`. `concluida_em` e `concluida_em or None` no
-    # payload gravado -- string ou `None`, nullable. `antigo` e sempre
-    # `bool(antigo)` -- nunca `None`, nunca outro tipo.
+    # Firestore, mesmo para um documento esparso. `antigo` e sempre
+    # `bool(dados.get("antigo"))` -- `bool(None)` e `False`, nunca `None`,
+    # nunca outro tipo, mesmo se a chave estiver ausente.
+    #
+    # CORRECAO (achado da revisao do Codex na PR desta sub-entrega, mesma
+    # categoria do achado ja registrado para `obter_fila_atencao` na
+    # sub-entrega 30/N -- e o MESMO erro de analise: rastrear so o
+    # escritor REAL de hoje, sem considerar que a funcao de LEITURA nao
+    # exige nada do documento): a redacao original deste comentario
+    # afirmava que `acao`/`objetivo`/`motivo_escassez`/`resumo`/
+    # `criada_em` eram SEMPRE string/nunca `None`, com base so no unico
+    # escritor de criacao rastreado (`registrar_sugestao`, via
+    # `titulo_acao`/`nome_objetivo` sempre `str(...)`, `motivo_escassez`
+    # validado por `validar_proposta` contra `MOTIVOS_ESCASSEZ`, `resumo`
+    # sempre o retorno em f-string de `resumo_para_o_usuario`, `criada_em`
+    # sempre o parametro `hoje`). Isso e verdade PARA ESSE escritor, mas
+    # `listar_pendentes` (`deteccao_subproduto.py:1523-1554`) le QUALQUER
+    # documento com `status == STATUS_PENDENTE` de forma generica --
+    # `dados.get(chave)` SEM default para todos os 5 campos acima --
+    # entao um documento esparso na colecao (cenario ja exercitado por
+    # `test_deteccao_subproduto.py::TestOContadorNaoRecomecaDoZero::
+    # test_a_rodada_leva_a_contagem_do_historico_como_piso`, que grava
+    # `status=pendente` so com `task_id`/`criada_em`, sem nenhum dos
+    # outros campos) devolve `None` para os campos ausentes. Corrigido
+    # para `["string", "null"]` nos 5 campos (`motivo_escassez` com `null`
+    # tambem explicito na propria lista `enum`, exigencia do JSON Schema),
+    # com teste de regressao dedicado. `concluida_em` ja era nullable
+    # (`concluida_em or None` no payload de `registrar_sugestao`) -- sem
+    # mudanca. `sugestao_id`/`antigo` continuam nao-nulos (ver acima).
+    #
+    # RISCO ACEITO, nao corrigido (mesma categoria ja aceita para
+    # `obter_fila_atencao`/`consultar_lista_compras`): a correcao acima
+    # fecha so o caso "campo ausente" (`None`). `listar_pendentes` nao
+    # valida nem normaliza NADA do que le -- um documento com um valor
+    # PRESENTE mas fora do conjunto esperado (ex.: `motivo_escassez`
+    # gravado fora do enum por um escritor futuro ou por edicao manual)
+    # violaria este outputSchema. Corrigir exigiria normalizar/validar
+    # dentro de `listar_pendentes` (mudanca de COMPORTAMENTO, fora do
+    # escopo desta fatia) ou validacao de outputSchema em tempo de
+    # execucao (inexistente hoje para as 15 tools deste catalogo).
     #
     # `erro` (ramo de erro) e `str(exc)` sobre a excecao real capturada --
     # sempre string, mesma garantia ja usada nas tools anteriores com
@@ -2822,14 +2845,14 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
                             "type": "object",
                             "properties": {
                                 "sugestao_id": {"type": "string"},
-                                "acao": {"type": "string"},
-                                "objetivo": {"type": "string"},
+                                "acao": {"type": ["string", "null"]},
+                                "objetivo": {"type": ["string", "null"]},
                                 "motivo_escassez": {
-                                    "type": "string",
-                                    "enum": ["repetivel", "raro", "ja_escrito"],
+                                    "type": ["string", "null"],
+                                    "enum": ["repetivel", "raro", "ja_escrito", None],
                                 },
-                                "resumo": {"type": "string"},
-                                "criada_em": {"type": "string"},
+                                "resumo": {"type": ["string", "null"]},
+                                "criada_em": {"type": ["string", "null"]},
                                 "concluida_em": {"type": ["string", "null"]},
                                 "antigo": {"type": "boolean"},
                             },
