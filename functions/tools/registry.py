@@ -2721,6 +2721,141 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
         "required": ["total", "itens"],
         "additionalProperties": False,
     },
+    # `consultar_elevacoes_sugeridas` (P03 sub-entrega 31/N) -- decima
+    # quinta tool com outputSchema. Candidata que restava da lista original
+    # de 5 da sub-entrega 27/N (junto com `listar_conversas_whatsapp`),
+    # descartada na sub-entrega 11/N pelo MESMO motivo que ja tinha
+    # bloqueado `consultar_promocoes_autonomia_sugeridas` -- decidir se o
+    # contrato cobre sucesso e erro, investigacao maior que aquela fatia.
+    # Mesma retomada da sub-entrega 29/N: o padrao `oneOf` de duas formas
+    # DISJUNTAS (sucesso/erro) ja esta estabelecido desde `consultar_
+    # historico_acoes` (sub-entrega 14/N) e reusado repetidamente desde
+    # entao (mais recente: `consultar_promocoes_autonomia_sugeridas`,
+    # 29/N).
+    #
+    # Handler (`tools/hermes_tools.py::_consultar_elevacoes_sugeridas`) e
+    # passthrough puro: so resolve o default de `limite`
+    # (`int(args.get("limite") or 20)`, mesma expressao/mesmo `or` de
+    # `consultar_promocoes_autonomia_sugeridas`/`obter_fila_atencao` --
+    # `limite=0` explicito tambem vira `20`) antes de repassar a
+    # `deteccao_subproduto.listar_pendentes`, que tem exatamente DUAS
+    # formas de retorno, nunca uma terceira:
+    #   - sucesso: `{"total": int, "sugestoes": [...]}` (a consulta ao
+    #     Firestore correu bem, mesmo sem nenhum resultado)
+    #   - erro: `{"total": 0, "sugestoes": [], "erro": str(exc)}` -- so
+    #     quando o `.stream()` da query levanta excecao (`try/except`
+    #     dentro da propria funcao); `total`/`sugestoes` ficam FIXOS em
+    #     `0`/`[]` nesse ramo (hardcoded no `return` do `except`, nao
+    #     ecoados de nenhum calculo), mesma convencao ja usada em
+    #     `consultar_promocoes_autonomia_sugeridas`/`consultar_historico_
+    #     acoes`/`buscar_arquivos_acervo`.
+    #
+    # Escritor da colecao `elevacoes_sugeridas`
+    # (`deteccao_subproduto.COL_ELEVACOES`): busca exaustiva no
+    # repositorio (grep por `collection(COL_ELEVACOES)`/`COL_ELEVACOES`)
+    # encontra 1 UNICO ponto de CRIACAO de documento --
+    # `registrar_sugestao` (linha ~693), chamada por sua vez de UM UNICO
+    # call site em todo o repositorio (`_ferramenta_propor`, dentro da
+    # rodada de deteccao de subproduto). Os outros usos de `COL_ELEVACOES`
+    # (`decidir`/`_aplicar_decisao`) so fazem `transaction.update`/
+    # `.update` sobre um documento ja existente, MOVENDO `status` PARA
+    # FORA de `pendente` (`aceita`/`adiada`/`nunca`) -- nunca gravam
+    # `status="pendente"` nem tocam `titulo_acao`/`nome_objetivo`/
+    # `motivo_escassez`/`resumo`/`criada_em`/`concluida_em`/`antigo`.
+    # Combinado com o filtro da propria QUERY de leitura
+    # (`listar_pendentes` faz `.where("status", "==", STATUS_PENDENTE)`),
+    # `status` NAO aparece no item lido (`listar_pendentes` nem devolve
+    # esse campo por item -- so usa o filtro para selecionar os
+    # documentos), entao nao ha campo `status` no schema do item, so no
+    # filtro da leitura.
+    #
+    # `sugestao_id` e sempre `d.id` -- garantido string pelo SDK do
+    # Firestore. `acao` (`titulo_acao`) e `objetivo` (`nome_objetivo`) sao
+    # sempre `str(...)` no unico escritor (`titulos[...]` em
+    # `_ferramenta_propor` e `str(c["tarefa"].get("titulo") or "")`;
+    # `nome_objetivo` e `str(objetivo.get("objetivoMacro") or "")`) --
+    # SEMPRE string, mesmo que vazia, nunca `None`. `motivo_escassez` vem
+    # de `sugestao["motivo_escassez"]` (spread `**sugestao` no payload
+    # gravado), e `sugestao` e sempre o dict devolvido por
+    # `validar_proposta`, que so aceita valores dentro de
+    # `MOTIVOS_ESCASSEZ = ("repetivel", "raro", "ja_escrito")` (checagem
+    # `if motivo not in MOTIVOS_ESCASSEZ: return None` antes de gravar
+    # qualquer coisa) -- enum fechado de 3 valores, nunca ausente nem
+    # fora do conjunto. `resumo` e sempre o retorno de
+    # `resumo_para_o_usuario` (f-string, sempre string, nunca `None`).
+    # `criada_em` e sempre o parametro `hoje` (string) passado por quem
+    # chama -- nunca `None`. `concluida_em` e `concluida_em or None` no
+    # payload gravado -- string ou `None`, nullable. `antigo` e sempre
+    # `bool(antigo)` -- nunca `None`, nunca outro tipo.
+    #
+    # `erro` (ramo de erro) e `str(exc)` sobre a excecao real capturada --
+    # sempre string, mesma garantia ja usada nas tools anteriores com
+    # ramo de erro.
+    #
+    # ACHADO da revisao adversarial desta sub-entrega, nao corrigido aqui
+    # (comportamento pre-existente de `listar_pendentes`, nao introduzido
+    # por este outputSchema): `total` e `len(pendentes)` calculado sobre a
+    # lista JA LIMITADA pela propria query Firestore (`.limit(200)`,
+    # `deteccao_subproduto.py:1537`) e ANTES do corte por `limite`
+    # (`pendentes[:limite]` no `return`, `pendentes` nunca reatribuido) --
+    # mesma relacao total-antes-do-corte ja documentada para `obter_fila_
+    # atencao`/`consultar_promocoes_autonomia_sugeridas`. A diferenca aqui:
+    # se houver MAIS de 200 sugestoes pendentes na seleco (`status ==
+    # STATUS_PENDENTE`), `total` fica silenciosamente TETADO em 200 (nunca
+    # reflete a contagem real acima disso) -- nao e uma garantia do
+    # outputSchema (`total` e so `{"type": "integer"}`, sem relacao formal
+    # com `len(sugestoes)` ou com a contagem real no Firestore), so uma
+    # nota de comportamento real para quem for consumir a tool. Nao
+    # corrigido nesta fatia -- mudar a query e o corte e mudanca de
+    # COMPORTAMENTO de `listar_pendentes`, fora do escopo de uma fatia
+    # so-schema (mesmo criterio ja aplicado ao risco residual aceito de
+    # `obter_fila_atencao`, sub-entrega 30/N).
+    "consultar_elevacoes_sugeridas": {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "total": {"type": "integer"},
+                    "sugestoes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "sugestao_id": {"type": "string"},
+                                "acao": {"type": "string"},
+                                "objetivo": {"type": "string"},
+                                "motivo_escassez": {
+                                    "type": "string",
+                                    "enum": ["repetivel", "raro", "ja_escrito"],
+                                },
+                                "resumo": {"type": "string"},
+                                "criada_em": {"type": "string"},
+                                "concluida_em": {"type": ["string", "null"]},
+                                "antigo": {"type": "boolean"},
+                            },
+                            "required": [
+                                "sugestao_id", "acao", "objetivo", "motivo_escassez",
+                                "resumo", "criada_em", "concluida_em", "antigo",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["total", "sugestoes"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "erro": {"type": "string"},
+                    "total": {"type": "integer"},
+                    "sugestoes": {"type": "array", "maxItems": 0},
+                },
+                "required": ["erro", "total", "sugestoes"],
+                "additionalProperties": False,
+            },
+        ],
+    },
 }
 
 
@@ -2731,11 +2866,11 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (94 das 108 tools
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (93 das 108 tools
     hoje -- `len(registry.list_tool_names())`, nao os "106" que este
     docstring citava ate a sub-entrega 24/N, contagem ja desatualizada
-    antes daquela fatia -- apos a decima quarta entrada, `obter_fila_
-    atencao`, sub-entrega 30/N), deliberadamente:
+    antes daquela fatia -- apos a decima quinta entrada, `consultar_
+    elevacoes_sugeridas`, sub-entrega 31/N), deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
     (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).

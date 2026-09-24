@@ -328,6 +328,39 @@ class TestExecucao(unittest.TestCase):
             hermes_tools.obter_fila_atencao(type("Ctx", (), {"db": None})(), {"limite": 0})
         mock_coletar.assert_called_once_with(None, estado="aberto", origem=None, limite=20)
 
+    def test_consultar_elevacoes_sugeridas_default_limite_20(self):
+        # `_consultar_elevacoes_sugeridas` não tinha nenhum teste dedicado
+        # antes desta sub-entrega (P03 31/N, outputSchema) -- a lógica de
+        # default de `limite` é exclusiva do wrapper (os testes de
+        # `deteccao_subproduto.listar_pendentes` em
+        # `test_deteccao_subproduto.py` chamam a função de baixo nível
+        # direto, sempre com `limite` explícito). Ausência do argumento ->
+        # `20` (o default do `or`).
+        with patch("deteccao_subproduto.listar_pendentes") as mock_listar:
+            mock_listar.return_value = {"total": 0, "sugestoes": []}
+            hermes_tools._consultar_elevacoes_sugeridas(type("Ctx", (), {"db": None})(), {})
+        mock_listar.assert_called_once_with(None, limite=20)
+
+    def test_consultar_elevacoes_sugeridas_zero_explicito_vira_20(self):
+        # Mesmo padrão de `_consultar_promocoes_autonomia_sugeridas`/
+        # `obter_fila_atencao`: `int(args.get("limite") or 20)` usa `or`,
+        # não `.get(chave, default)` -- `limite=0` explícito também vira
+        # `20`, não `0`.
+        with patch("deteccao_subproduto.listar_pendentes") as mock_listar:
+            mock_listar.return_value = {"total": 0, "sugestoes": []}
+            hermes_tools._consultar_elevacoes_sugeridas(
+                type("Ctx", (), {"db": None})(), {"limite": 0}
+            )
+        mock_listar.assert_called_once_with(None, limite=20)
+
+    def test_consultar_elevacoes_sugeridas_repassa_limite_explicito(self):
+        with patch("deteccao_subproduto.listar_pendentes") as mock_listar:
+            mock_listar.return_value = {"total": 0, "sugestoes": []}
+            hermes_tools._consultar_elevacoes_sugeridas(
+                type("Ctx", (), {"db": None})(), {"limite": 5}
+            )
+        mock_listar.assert_called_once_with(None, limite=5)
+
     def test_obter_fila_atencao_repassa_limite_explicito(self):
         with patch("atencao.coletar_fila_atencao") as mock_coletar:
             mock_coletar.return_value = {"total": 0, "itens": []}
