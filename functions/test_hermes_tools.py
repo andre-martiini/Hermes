@@ -278,6 +278,61 @@ class TestExecucao(unittest.TestCase):
             )
         mock_listar.assert_called_once_with(None, limite=5)
 
+    def test_obter_fila_atencao_default_estado_aberto(self):
+        # `obter_fila_atencao` não tinha nenhum teste dedicado antes desta
+        # sub-entrega (P03 30/N, outputSchema) -- a lógica de default de
+        # `estado`/`limite` é exclusiva do wrapper (os testes de
+        # `atencao.coletar_fila_atencao` em test_atencao.py chamam a
+        # função de baixo nível direto, sempre com os argumentos já
+        # resolvidos). Ausência do argumento -> `"aberto"` (o default do
+        # `if estado is None`).
+        with patch("atencao.coletar_fila_atencao") as mock_coletar:
+            mock_coletar.return_value = {"total": 0, "itens": []}
+            hermes_tools.obter_fila_atencao(type("Ctx", (), {"db": None})(), {})
+        mock_coletar.assert_called_once_with(None, estado="aberto", origem=None, limite=20)
+
+    def test_obter_fila_atencao_estado_none_explicito_tambem_vira_aberto(self):
+        # Diferente de `apenas_ativos` em `_consultar_contatos_prioritarios_
+        # secretario` (que precisa de DOIS branches -- ausência cai no
+        # default do `.get()`, `None` explícito exige checagem própria --
+        # `estado`/`args.get("estado")` já devolve `None` nos dois casos
+        # (chave ausente ou valor `null`), e o `if estado is None` do
+        # handler cobre os dois com uma checagem só. Este teste confirma
+        # que o caso `None` explícito realmente cai no mesmo caminho.
+        with patch("atencao.coletar_fila_atencao") as mock_coletar:
+            mock_coletar.return_value = {"total": 0, "itens": []}
+            hermes_tools.obter_fila_atencao(type("Ctx", (), {"db": None})(), {"estado": None})
+        mock_coletar.assert_called_once_with(None, estado="aberto", origem=None, limite=20)
+
+    def test_obter_fila_atencao_repassa_estado_e_origem_explicitos(self):
+        with patch("atencao.coletar_fila_atencao") as mock_coletar:
+            mock_coletar.return_value = {"total": 0, "itens": []}
+            hermes_tools.obter_fila_atencao(
+                type("Ctx", (), {"db": None})(), {"estado": "resolvido", "origem": "whatsapp"}
+            )
+        mock_coletar.assert_called_once_with(None, estado="resolvido", origem="whatsapp", limite=20)
+
+    def test_obter_fila_atencao_default_limite_20(self):
+        with patch("atencao.coletar_fila_atencao") as mock_coletar:
+            mock_coletar.return_value = {"total": 0, "itens": []}
+            hermes_tools.obter_fila_atencao(type("Ctx", (), {"db": None})(), {})
+        mock_coletar.assert_called_once_with(None, estado="aberto", origem=None, limite=20)
+
+    def test_obter_fila_atencao_zero_explicito_vira_20(self):
+        # Mesmo padrão de `_consultar_promocoes_autonomia_sugeridas`:
+        # `int(args.get("limite") or 20)` usa `or`, não `.get(chave,
+        # default)` -- `limite=0` explícito também vira `20`, não `0`.
+        with patch("atencao.coletar_fila_atencao") as mock_coletar:
+            mock_coletar.return_value = {"total": 0, "itens": []}
+            hermes_tools.obter_fila_atencao(type("Ctx", (), {"db": None})(), {"limite": 0})
+        mock_coletar.assert_called_once_with(None, estado="aberto", origem=None, limite=20)
+
+    def test_obter_fila_atencao_repassa_limite_explicito(self):
+        with patch("atencao.coletar_fila_atencao") as mock_coletar:
+            mock_coletar.return_value = {"total": 0, "itens": []}
+            hermes_tools.obter_fila_atencao(type("Ctx", (), {"db": None})(), {"limite": 5})
+        mock_coletar.assert_called_once_with(None, estado="aberto", origem=None, limite=5)
+
     def test_tool_desconhecida_levanta(self):
         from tools.tool_context import ToolContext
 

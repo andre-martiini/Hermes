@@ -2530,6 +2530,143 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
             },
         ],
     },
+    # `obter_fila_atencao` (P03 sub-entrega 30/N) -- decima quarta tool com
+    # outputSchema. Forma UNICA, sem oneOf: `atencao.coletar_fila_atencao`
+    # nao tem nenhum `try/except` que devolva um ramo de erro alternativo --
+    # sempre `{"total": int, "itens": [...]}`, mesma categoria de
+    # `consultar_lista_compras`/`consultar_status_modo_secretario`.
+    #
+    # `total` e sempre `len(itens)` (contagem apos o corte por `limite`,
+    # diferente de `consultar_promocoes_autonomia_sugeridas` onde `total`
+    # conta ANTES do corte -- nao investigado aqui, achado registrado so
+    # naquela tool). Cada item e RECONSTRUIDO campo a campo com
+    # `d.get(chave)` (nunca `doc.to_dict()` cru) -- mesma garantia de forma
+    # de `consultar_promocoes_autonomia_sugeridas`, independente de quantos
+    # escritores a colecao `atencao` tenha.
+    #
+    # Escritores da colecao (busca exaustiva, grep por `atencao.COLLECTION`/
+    # `collection("atencao")` no repositorio inteiro, todos lidos por
+    # completo): `atencao.py::_persistir_itens_atencao` (usada por
+    # `avaliar_etapas`/`detectar_atencao_financeiro`/
+    # `avaliar_rotinas_saude`/`detectar_emails_nao_entregues`),
+    # `atencao_whatsapp.py::vencer_promessas` e `_processar_audio`, e
+    # `secretario_whatsapp.py::registrar_investigacao_concluida_atencao` e
+    # `escalar_para_atencao`. Nenhum outro ponto do repositorio cria
+    # documento nessa colecao (`outbox_aprovacao.py:693` so faz `.update()`
+    # de `estado`/`resolvido_em`/`desfecho`, nunca toca `tipo`/`origem`/
+    # `prioridade`).
+    #
+    # `tipo` e enum FECHADO de 10 valores -- o unico campo desta tool que
+    # aceita um parametro livre (`tipo_atencao: str` em
+    # `secretario_whatsapp.escalar_para_atencao`) tem exatamente 2 call
+    # sites em todo o repositorio (`secretario_whatsapp.py`, dentro do
+    # proprio modulo), e os dois so passam constantes ja cobertas pelo
+    # enum (`TIPO_ATENCAO_INSISTENCIA`, `TIPO_ATENCAO_ASSUNTO_SENSIVEL` ou
+    # `TIPO_ATENCAO_DECISAO_FORCADA`) -- nunca uma string arbitraria. As
+    # constantes `TIPO_ATENCAO_*` de `secretario_whatsapp.py` e as
+    # `TIPO_SECRETARIO_*` equivalentes de `atencao.py` tem o MESMO valor
+    # string (ex.: as duas resolvem para `"secretario_insistencia"`) --
+    # alias, nao um par de valores divergentes.
+    #
+    # `origem` e enum de 8 valores, o MESMO conjunto ja validado no
+    # `inputSchema` desta tool (`tools/schemas/obter_fila_atencao.json`) --
+    # mas so 6 sao de fato escritos hoje (`acao`, `financeiro`, `saude`,
+    # `email`, `whatsapp`, `secretario_whatsapp`; `agenda`/`repo` nao tem
+    # nenhum escritor implementado ainda). Mantido nos 8 do inputSchema
+    # (nao reduzido aos 6 observados) para nao criar um contrato mais
+    # estreito que o proprio filtro que a tool ja aceita -- se um escritor
+    # futuro usar `agenda`/`repo` (o inputSchema ja antecipa os dois), o
+    # outputSchema nao ficaria desatualizado no mesmo instante. Mesmo
+    # raciocinio aplicado a `prioridade` (enum de 3 -- `alta`/`media`/
+    # `baixa`, as 3 constantes de `atencao.PRIORIDADE_*` -- ainda que
+    # `baixa` nao tenha escritor hoje; usada em `_PRIORITY_ORDER` como
+    # parte do modelo de dados). `estado` e o mesmo enum de 5 valores ja
+    # no inputSchema (`aberto`/`delegado_ao_agente`/`aguardando_andre`/
+    # `resolvido`/`descartado`), confirmado contra as constantes
+    # `atencao.ESTADOS`.
+    #
+    # `acao_id`/`etapa_id`/`pessoa`/`sugestao` sao sempre chaves presentes
+    # (todo escritor inclui a chave, `None` quando nao aplicavel) --
+    # `sugestao` e sempre string no valor de fato gravado por TODOS os 8
+    # pontos de criacao (nunca `None`; o unico fallback `or ""` em
+    # `_persistir_itens_atencao` nunca dispara na pratica, ja que os 4
+    # chamadores sempre passam uma string nao vazia -- mas mantem o campo
+    # como string de qualquer forma). `prazo`/`criado_em`/`atualizado_em`/
+    # `resolvido_em` passam por `atencao._to_iso` na leitura -- sempre
+    # string ISO ou `None`, nunca outro tipo (mesma funcao/mesma garantia
+    # de `agent_runs.py`/`agent_requests.py`, ja usada em tools
+    # anteriores). `resolvido_em`/`desfecho` so ganham valor quando
+    # `resolver_item` fecha o item (`novo_estado` em `ESTADOS_FECHADOS`) --
+    # e podem voltar a `None` explicitamente (`outbox_aprovacao.py:693-697`,
+    # quando um descarte e desfeito) -- por isso nullable, nunca ausentes
+    # como chave. `evidencia` e sempre um dict (nunca `None`,
+    # `d.get("evidencia") or {}` na leitura) mas o formato interno varia
+    # por tipo de item -- schema deliberadamente raso (`type: object`, sem
+    # `properties`), mesma escolha ja usada para campos de forma variavel
+    # noutras tools deste catalogo.
+    "obter_fila_atencao": {
+        "type": "object",
+        "properties": {
+            "total": {"type": "integer"},
+            "itens": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "origem": {
+                            "type": "string",
+                            "enum": [
+                                "acao", "whatsapp", "email", "agenda",
+                                "repo", "financeiro", "saude", "secretario_whatsapp",
+                            ],
+                        },
+                        "tipo": {
+                            "type": "string",
+                            "enum": [
+                                "aguardando_terceiro_vencido", "conta_vencendo",
+                                "rotina_saude_ausente", "email_nao_entregue",
+                                "promessa_sem_retorno", "audio_relevante",
+                                "secretario_investigacao_concluida",
+                                "secretario_insistencia", "secretario_assunto_sensivel",
+                                "secretario_decisao_forcada",
+                            ],
+                        },
+                        "prioridade": {"type": "string", "enum": ["alta", "media", "baixa"]},
+                        "titulo": {"type": "string"},
+                        "resumo": {"type": "string"},
+                        "acao_id": {"type": ["string", "null"]},
+                        "etapa_id": {"type": ["string", "null"]},
+                        "pessoa": {"type": ["string", "null"]},
+                        "prazo": {"type": ["string", "null"]},
+                        "evidencia": {"type": "object"},
+                        "sugestao": {"type": "string"},
+                        "estado": {
+                            "type": "string",
+                            "enum": [
+                                "aberto", "delegado_ao_agente", "aguardando_andre",
+                                "resolvido", "descartado",
+                            ],
+                        },
+                        "chave_dedupe": {"type": "string"},
+                        "criado_em": {"type": ["string", "null"]},
+                        "atualizado_em": {"type": ["string", "null"]},
+                        "resolvido_em": {"type": ["string", "null"]},
+                        "desfecho": {"type": ["string", "null"]},
+                    },
+                    "required": [
+                        "id", "origem", "tipo", "prioridade", "titulo", "resumo",
+                        "acao_id", "etapa_id", "pessoa", "prazo", "evidencia",
+                        "sugestao", "estado", "chave_dedupe", "criado_em",
+                        "atualizado_em", "resolvido_em", "desfecho",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["total", "itens"],
+        "additionalProperties": False,
+    },
 }
 
 
@@ -2540,11 +2677,11 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (95 das 108 tools
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (94 das 108 tools
     hoje -- `len(registry.list_tool_names())`, nao os "106" que este
     docstring citava ate a sub-entrega 24/N, contagem ja desatualizada
-    antes daquela fatia -- apos a decima terceira entrada, `consultar_
-    promocoes_autonomia_sugeridas`, sub-entrega 29/N), deliberadamente:
+    antes daquela fatia -- apos a decima quarta entrada, `obter_fila_
+    atencao`, sub-entrega 30/N), deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
     (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).

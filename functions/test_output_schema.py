@@ -174,6 +174,22 @@ call site (`retro_agente.py`). `status` é enum fechado de um valor
 Ver comentário de `_OUTPUT_SCHEMAS` em `tools/registry.py` para o
 levantamento completo.
 
+`obter_fila_atencao` (sub-entrega 30/N): décima quarta tool, e a
+PRIMEIRA sem `oneOf` desde `consultar_status_modo_secretario` (forma
+única -- `atencao.coletar_fila_atencao` não tem ramo de erro). Candidata
+deixada em aberto desde a sub-entrega 27/N por causa do campo `tipo`, que
+não tinha enum fechado auditável: a busca exaustiva desta sub-entrega
+encontrou o conjunto fechado de 10 valores (8 constantes `TIPO_*` usadas
+diretamente, mais os 2 únicos call sites de
+`secretario_whatsapp.escalar_para_atencao`, cujo parâmetro `tipo_atencao`
+só recebe constantes já cobertas). `origem`/`prioridade`/`estado` também
+são enum fechado -- os dois primeiros incluem valores declarados
+(`inputSchema`/constantes `PRIORIDADE_*`) mas ainda sem escritor real
+(`agenda`/`repo`/`baixa`), deliberado para não ficar mais estreito que o
+próprio contrato de entrada. Ver comentário de `_OUTPUT_SCHEMAS` em
+`tools/registry.py` para o levantamento completo, incluindo a lista
+exaustiva de escritores da coleção `atencao`.
+
 Cinco frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
    paridade com TODO o catálogo real (não amostra): nenhuma tool além de
@@ -182,11 +198,12 @@ Cinco frentes:
    `consultar_historico_acoes`, `obter_acao`,
    `listar_rascunhos_pendentes`, `consultar_job`, `buscar_arquivos_acervo`,
    `consultar_status_modo_secretario`,
-   `consultar_contatos_prioritarios_secretario` e
-   `consultar_promocoes_autonomia_sugeridas` tem contrato publicado hoje.
+   `consultar_contatos_prioritarios_secretario`,
+   `consultar_promocoes_autonomia_sugeridas` e `obter_fila_atencao` tem
+   contrato publicado hoje.
 2. `TestHandleToolsListOutputSchema` -- ponta a ponta via
    `mcp_server._handle_tools_list()`: `outputSchema` chega no catálogo
-   publicado só para essas treze tools.
+   publicado só para essas quatorze tools.
 3. `TestIntegracaoHandleToolsCallStructuredContent` -- ponta a ponta via
    `mcp_server._handle_tools_call`: `structuredContent` chega no envelope
    de `tools/call` para `calculadora` (execução real, pura) e para
@@ -195,8 +212,8 @@ Cinco frentes:
    `listar_rascunhos_pendentes`/`consultar_job`/`buscar_arquivos_acervo`/
    `consultar_status_modo_secretario`/
    `consultar_contatos_prioritarios_secretario`/
-   `consultar_promocoes_autonomia_sugeridas`
-   (executor mockado -- as doze dependem de Firestore, então o teste cobre
+   `consultar_promocoes_autonomia_sugeridas`/`obter_fila_atencao`
+   (executor mockado -- as treze dependem de Firestore, então o teste cobre
    o MECANISMO, não a correção interna dos handlers, mesmo padrão já usado
    para `consultar_processo_sipac` abaixo), é sempre IGUAL ao dict que
    `content[0].text` serializa (mesma fonte, nunca diverge), bate com o
@@ -849,7 +866,77 @@ class TestOutputSchema(unittest.TestCase):
         self.assertEqual(erro["properties"]["promocoes"], {"type": "array", "maxItems": 0})
         self.assertEqual(erro["properties"]["total"], {"type": "integer"})
 
-    def test_paridade_treze_tools_tem_output_schema_hoje(self):
+    def test_obter_fila_atencao_tem_schema_forma_unica(self):
+        schema = registry.output_schema("obter_fila_atencao")
+        self.assertIsNotNone(schema)
+        self.assertNotIn("oneOf", schema)
+
+        self.assertEqual(set(schema["properties"].keys()), {"total", "itens"})
+        self.assertEqual(set(schema["required"]), {"total", "itens"})
+        self.assertFalse(schema["additionalProperties"])
+        self.assertEqual(schema["properties"]["total"], {"type": "integer"})
+
+        item = schema["properties"]["itens"]["items"]
+        campos_item = {
+            "id", "origem", "tipo", "prioridade", "titulo", "resumo",
+            "acao_id", "etapa_id", "pessoa", "prazo", "evidencia",
+            "sugestao", "estado", "chave_dedupe", "criado_em",
+            "atualizado_em", "resolvido_em", "desfecho",
+        }
+        self.assertEqual(set(item["properties"].keys()), campos_item)
+        # Todo campo e chave sempre presente (nenhum opcional) -- diferente
+        # de `concluido_em` em `consultar_contatos_prioritarios_secretario`.
+        self.assertEqual(set(item["required"]), campos_item)
+        self.assertFalse(item["additionalProperties"])
+
+        self.assertEqual(item["properties"]["id"], {"type": "string"})
+        self.assertEqual(
+            item["properties"]["origem"],
+            {
+                "type": "string",
+                "enum": [
+                    "acao", "whatsapp", "email", "agenda",
+                    "repo", "financeiro", "saude", "secretario_whatsapp",
+                ],
+            },
+        )
+        self.assertEqual(
+            item["properties"]["tipo"],
+            {
+                "type": "string",
+                "enum": [
+                    "aguardando_terceiro_vencido", "conta_vencendo",
+                    "rotina_saude_ausente", "email_nao_entregue",
+                    "promessa_sem_retorno", "audio_relevante",
+                    "secretario_investigacao_concluida",
+                    "secretario_insistencia", "secretario_assunto_sensivel",
+                    "secretario_decisao_forcada",
+                ],
+            },
+        )
+        self.assertEqual(
+            item["properties"]["prioridade"], {"type": "string", "enum": ["alta", "media", "baixa"]}
+        )
+        self.assertEqual(
+            item["properties"]["estado"],
+            {
+                "type": "string",
+                "enum": [
+                    "aberto", "delegado_ao_agente", "aguardando_andre",
+                    "resolvido", "descartado",
+                ],
+            },
+        )
+        for campo in ("titulo", "resumo", "sugestao", "chave_dedupe"):
+            self.assertEqual(item["properties"][campo], {"type": "string"})
+        for campo in (
+            "acao_id", "etapa_id", "pessoa", "prazo",
+            "criado_em", "atualizado_em", "resolvido_em", "desfecho",
+        ):
+            self.assertEqual(item["properties"][campo], {"type": ["string", "null"]})
+        self.assertEqual(item["properties"]["evidencia"], {"type": "object"})
+
+    def test_paridade_quatorze_tools_tem_output_schema_hoje(self):
         # Não por amostragem: para TODA tool do catálogo real (108 hoje --
         # `len(registry.list_tool_names())`; achado da revisão adversarial
         # da sub-entrega 25/N: "106" estava desatualizado desde antes
@@ -859,16 +946,16 @@ class TestOutputSchema(unittest.TestCase):
         # consultar_historico_acoes, obter_acao, listar_rascunhos_pendentes,
         # consultar_job, buscar_arquivos_acervo,
         # consultar_status_modo_secretario, consultar_contatos_
-        # prioritarios_secretario e consultar_promocoes_autonomia_
-        # sugeridas -- prova que a lista fechada não vazou para nenhuma
-        # outra tool por engano.
+        # prioritarios_secretario, consultar_promocoes_autonomia_
+        # sugeridas e obter_fila_atencao -- prova que a lista fechada não
+        # vazou para nenhuma outra tool por engano.
         com_schema = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
             "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
             "consultar_status_modo_secretario", "consultar_contatos_prioritarios_secretario",
-            "consultar_promocoes_autonomia_sugeridas",
+            "consultar_promocoes_autonomia_sugeridas", "obter_fila_atencao",
         }
         for nome in registry.list_tool_names():
             with self.subTest(tool=nome):
@@ -993,6 +1080,15 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             len(self.catalogo["consultar_promocoes_autonomia_sugeridas"]["outputSchema"]["oneOf"]), 2
         )
 
+    def test_obter_fila_atencao_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["obter_fila_atencao"])
+        self.assertEqual(
+            self.catalogo["obter_fila_atencao"]["outputSchema"],
+            registry.output_schema("obter_fila_atencao"),
+        )
+        # Forma única, sem oneOf -- igual a `consultar_status_modo_secretario`.
+        self.assertNotIn("oneOf", self.catalogo["obter_fila_atencao"]["outputSchema"])
+
     def test_nenhuma_outra_tool_publicada_tem_output_schema(self):
         esperadas = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
@@ -1000,7 +1096,7 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             "consultar_historico_acoes", "obter_acao",
             "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
             "consultar_status_modo_secretario", "consultar_contatos_prioritarios_secretario",
-            "consultar_promocoes_autonomia_sugeridas",
+            "consultar_promocoes_autonomia_sugeridas", "obter_fila_atencao",
         }
         com_schema = [
             nome for nome, tool in self.catalogo.items()
@@ -1017,7 +1113,7 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             "consultar_historico_acoes", "obter_acao",
             "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
             "consultar_status_modo_secretario", "consultar_contatos_prioritarios_secretario",
-            "consultar_promocoes_autonomia_sugeridas",
+            "consultar_promocoes_autonomia_sugeridas", "obter_fila_atencao",
         ):
             with self.subTest(tool=nome):
                 tool = self.catalogo[nome]
@@ -2339,6 +2435,101 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
                 campo, erro_schema["properties"],
                 f"campo '{campo}' fora do branch de erro do outputSchema",
             )
+
+    def test_obter_fila_atencao_sucesso_leva_structured_content_igual_ao_content(self):
+        # `atencao.coletar_fila_atencao` real depende de Firestore; o
+        # executor é mockado aqui com uma forma real que a função produz
+        # (ver `atencao.py::coletar_fila_atencao`), mesmo padrão das tools
+        # anteriores.
+        esperado = {
+            "total": 1,
+            "itens": [
+                {
+                    "id": "aguardando_terceiro_vencido:acao-1:1",
+                    "origem": "acao",
+                    "tipo": "aguardando_terceiro_vencido",
+                    "prioridade": "alta",
+                    "titulo": "Fulano deveria ter respondido sobre: etapa X",
+                    "resumo": "Ação 'Y': etapa 'etapa X' aguarda retorno de Fulano desde 2026-09-01.",
+                    "acao_id": "acao-1",
+                    "etapa_id": "1",
+                    "pessoa": "Fulano",
+                    "prazo": "2026-09-01",
+                    "evidencia": {"acao_id": "acao-1", "etapa_id": "1", "chat_id": None, "mensagem_ids": []},
+                    "sugestao": "Cobrar Fulano ou reagendar a etapa",
+                    "estado": "aberto",
+                    "chave_dedupe": "aguardando_terceiro_vencido:acao-1:1",
+                    "criado_em": "2026-09-20T10:00:00+00:00",
+                    "atualizado_em": "2026-09-20T10:00:00+00:00",
+                    "resolvido_em": None,
+                    "desfecho": None,
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "obter_fila_atencao", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_obter_fila_atencao_lista_vazia_tambem_leva_structured_content(self):
+        esperado = {"total": 0, "itens": []}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "obter_fila_atencao", "arguments": {"estado": "resolvido"}}, ctx=_ctx()
+            )
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_obter_fila_atencao_structured_content_bate_com_o_output_schema_publicado(self):
+        schema = registry.output_schema("obter_fila_atencao")
+        item_props = schema["properties"]["itens"]["items"]["properties"]
+
+        mock_resultado = {
+            "total": 1,
+            "itens": [
+                {
+                    "id": "secretario:chat-1:msg-1",
+                    "origem": "secretario_whatsapp",
+                    "tipo": "secretario_insistencia",
+                    "prioridade": "alta",
+                    "titulo": "WhatsApp (Contato): Limite de trocas atingido",
+                    "resumo": "Contato enviou algo.",
+                    "acao_id": None,
+                    "etapa_id": None,
+                    "pessoa": "Contato",
+                    "prazo": None,
+                    "evidencia": {"chat_id": "chat-1", "wa_message_id": "msg-1"},
+                    "sugestao": "Avaliar o recado e responder diretamente no WhatsApp.",
+                    "estado": "resolvido",
+                    "chave_dedupe": "secretario:chat-1:msg-1",
+                    "criado_em": "2026-09-20T10:00:00+00:00",
+                    "atualizado_em": "2026-09-21T09:00:00+00:00",
+                    "resolvido_em": "2026-09-21T09:00:00+00:00",
+                    "desfecho": "Respondido diretamente.",
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_resultado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "obter_fila_atencao", "arguments": {"estado": "resolvido"}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        for campo in schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(
+                campo, schema["properties"],
+                f"campo '{campo}' fora do outputSchema publicado",
+            )
+        for item in estruturado["itens"]:
+            for campo in item_props:
+                self.assertIn(campo, item, f"campo obrigatorio '{campo}' ausente do item")
+            for campo in item:
+                self.assertIn(campo, item_props, f"campo '{campo}' fora do item declarado")
 
     def test_tool_sem_output_schema_nunca_leva_structured_content_mesmo_com_dict(self):
         # `consultar_processo_sipac` não tem outputSchema publicado; mesmo
