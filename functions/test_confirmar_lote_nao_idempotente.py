@@ -16,10 +16,13 @@ emulador/deploy) -- `inspect.unwrap()` tira a decoração e chega na função
 real, mesma técnica já usada em
 test_secretario_whatsapp.py::TestAutomationSettingsCallable.
 
-Estratégia: um FakeDB mínimo (só `collection().document()` e `batch()`,
-nenhuma leitura -- as duas callables aqui são grava-cega, sem `.get()` antes
-de escrever) que grava cada `batch.update(ref, data)` numa lista, para poder
-inspecionar quantas vezes e com que `acompanhamento` cada chamada gravou.
+Estratégia: um FakeDB mínimo (só `collection().document()`, `.get()` do
+documento e `batch()`) que grava cada `batch.update(ref, data)` numa lista,
+para poder inspecionar quantas vezes e com que `acompanhamento` cada chamada
+gravou. O `.get()` existe só porque `confirmarEdicaoEmLote` lê o status ATUAL
+da ação antes de escrever, para pular item 'excluído' sem pedido de reabertura
+(bloqueio que só o passo de propor tinha); o fake devolve uma ação existente e
+ativa, para não alterar o caminho que este arquivo quer provar.
 """
 
 from __future__ import annotations
@@ -30,9 +33,19 @@ from unittest.mock import patch
 from tools import hermes_tools
 
 
+class _FakeSnapshot:
+    exists = True
+
+    def to_dict(self):
+        return {"status": "em andamento"}
+
+
 class _FakeDocRef:
     def __init__(self, task_id):
         self.id = task_id
+
+    def get(self):
+        return _FakeSnapshot()
 
 
 class _FakeCollection:
@@ -52,7 +65,7 @@ class _FakeBatch:
 
 
 class _FakeDB:
-    """Só o suficiente para as duas callables -- nenhuma faz `.get()`."""
+    """Só o suficiente para as duas callables (ver docstring do módulo)."""
 
     def __init__(self):
         self.last_batch: _FakeBatch | None = None
