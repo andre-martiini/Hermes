@@ -186,7 +186,14 @@ só recebe constantes já cobertas). `origem`/`prioridade`/`estado` também
 são enum fechado -- os dois primeiros incluem valores declarados
 (`inputSchema`/constantes `PRIORIDADE_*`) mas ainda sem escritor real
 (`agenda`/`repo`/`baixa`), deliberado para não ficar mais estreito que o
-próprio contrato de entrada. Ver comentário de `_OUTPUT_SCHEMAS` em
+próprio contrato de entrada. `origem`/`tipo`/`prioridade`/`titulo`/
+`resumo`/`sugestao`/`estado` são `["string", "null"]` (os 4 com enum
+incluem `null` explícito na própria lista `enum`, exigência do JSON
+Schema) -- achado da revisão do Codex na PR desta sub-entrega:
+`coletar_fila_atencao` lê `d.get(chave)` sem default para esses campos,
+então um documento esparso (sem escritor real hoje, mas cenário já
+exercitado por `test_atencao.py::test_coletar_fila_atencao_ordenacao`)
+devolve `None`. Ver comentário de `_OUTPUT_SCHEMAS` em
 `tools/registry.py` para o levantamento completo, incluindo a lista
 exaustiva de escritores da coleção `atencao`.
 
@@ -889,21 +896,31 @@ class TestOutputSchema(unittest.TestCase):
         self.assertEqual(set(item["required"]), campos_item)
         self.assertFalse(item["additionalProperties"])
 
+        # `origem`/`tipo`/`prioridade`/`titulo`/`resumo`/`sugestao`/`estado`
+        # são `d.get(chave)` sem default em `coletar_fila_atencao` -- um
+        # documento esparso na coleção (sem escritor real hoje, mas
+        # cenário já exercitado por
+        # `test_atencao.py::test_coletar_fila_atencao_ordenacao`) devolve
+        # `None` para todos eles. Nullable, portanto -- achado da revisão
+        # do Codex na PR desta sub-entrega. `id`/`chave_dedupe`/`evidencia`
+        # continuam não-nulos (fallback explícito no handler: `doc.id`,
+        # `d.get(...) or doc.id`, `d.get(...) or {}`).
         self.assertEqual(item["properties"]["id"], {"type": "string"})
         self.assertEqual(
             item["properties"]["origem"],
             {
-                "type": "string",
+                "type": ["string", "null"],
                 "enum": [
                     "acao", "whatsapp", "email", "agenda",
                     "repo", "financeiro", "saude", "secretario_whatsapp",
+                    None,
                 ],
             },
         )
         self.assertEqual(
             item["properties"]["tipo"],
             {
-                "type": "string",
+                "type": ["string", "null"],
                 "enum": [
                     "aguardando_terceiro_vencido", "conta_vencendo",
                     "rotina_saude_ausente", "email_nao_entregue",
@@ -911,24 +928,27 @@ class TestOutputSchema(unittest.TestCase):
                     "secretario_investigacao_concluida",
                     "secretario_insistencia", "secretario_assunto_sensivel",
                     "secretario_decisao_forcada",
+                    None,
                 ],
             },
         )
         self.assertEqual(
-            item["properties"]["prioridade"], {"type": "string", "enum": ["alta", "media", "baixa"]}
+            item["properties"]["prioridade"],
+            {"type": ["string", "null"], "enum": ["alta", "media", "baixa", None]},
         )
         self.assertEqual(
             item["properties"]["estado"],
             {
-                "type": "string",
+                "type": ["string", "null"],
                 "enum": [
                     "aberto", "delegado_ao_agente", "aguardando_andre",
-                    "resolvido", "descartado",
+                    "resolvido", "descartado", None,
                 ],
             },
         )
-        for campo in ("titulo", "resumo", "sugestao", "chave_dedupe"):
-            self.assertEqual(item["properties"][campo], {"type": "string"})
+        for campo in ("titulo", "resumo", "sugestao"):
+            self.assertEqual(item["properties"][campo], {"type": ["string", "null"]})
+        self.assertEqual(item["properties"]["chave_dedupe"], {"type": "string"})
         for campo in (
             "acao_id", "etapa_id", "pessoa", "prazo",
             "criado_em", "atualizado_em", "resolvido_em", "desfecho",
@@ -2530,6 +2550,65 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
                 self.assertIn(campo, item, f"campo obrigatorio '{campo}' ausente do item")
             for campo in item:
                 self.assertIn(campo, item_props, f"campo '{campo}' fora do item declarado")
+
+    def test_obter_fila_atencao_item_esparso_tambem_bate_com_o_output_schema(self):
+        # Regressão do achado da revisão do Codex na PR desta sub-entrega:
+        # `coletar_fila_atencao` lê `d.get(chave)` sem default para
+        # `origem`/`tipo`/`prioridade`/`titulo`/`resumo`/`sugestao`/
+        # `estado` -- um documento esparso na coleção (cenário já
+        # exercitado por
+        # `test_atencao.py::test_coletar_fila_atencao_ordenacao`, que
+        # grava itens só com `estado`/`prioridade`/`prazo`/`criado_em`)
+        # devolve `None` para os demais. Este teste prova que o
+        # outputSchema publicado ACEITA esse item real (nulo nesses 7
+        # campos), não só o item "cheio" do teste anterior.
+        schema = registry.output_schema("obter_fila_atencao")
+        item_props = schema["properties"]["itens"]["items"]["properties"]
+
+        mock_resultado = {
+            "total": 1,
+            "itens": [
+                {
+                    "id": "item-esparso",
+                    "origem": None,
+                    "tipo": None,
+                    "prioridade": None,
+                    "titulo": None,
+                    "resumo": None,
+                    "acao_id": None,
+                    "etapa_id": None,
+                    "pessoa": None,
+                    "prazo": None,
+                    "evidencia": {},
+                    "sugestao": None,
+                    "estado": None,
+                    "chave_dedupe": "item-esparso",
+                    "criado_em": None,
+                    "atualizado_em": None,
+                    "resolvido_em": None,
+                    "desfecho": None,
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_resultado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "obter_fila_atencao", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        self.assertEqual(estruturado, mock_resultado)
+        item = estruturado["itens"][0]
+        for campo, valor in item.items():
+            if valor is None:
+                tipo_declarado = item_props[campo]["type"]
+                self.assertIn(
+                    "null", tipo_declarado,
+                    f"campo '{campo}' veio None mas o outputSchema não declara null",
+                )
+                if "enum" in item_props[campo]:
+                    self.assertIn(
+                        None, item_props[campo]["enum"],
+                        f"campo '{campo}' veio None mas null não está no enum publicado",
+                    )
 
     def test_tool_sem_output_schema_nunca_leva_structured_content_mesmo_com_dict(self):
         # `consultar_processo_sipac` não tem outputSchema publicado; mesmo

@@ -2595,24 +2595,41 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     # `atencao.ESTADOS`.
     #
     # `acao_id`/`etapa_id`/`pessoa`/`sugestao` sao sempre chaves presentes
-    # (todo escritor inclui a chave, `None` quando nao aplicavel) --
-    # `sugestao` e sempre string no valor de fato gravado por TODOS os 8
-    # pontos de criacao (nunca `None`; o unico fallback `or ""` em
-    # `_persistir_itens_atencao` nunca dispara na pratica, ja que os 4
-    # chamadores sempre passam uma string nao vazia -- mas mantem o campo
-    # como string de qualquer forma). `prazo`/`criado_em`/`atualizado_em`/
-    # `resolvido_em` passam por `atencao._to_iso` na leitura -- sempre
-    # string ISO ou `None`, nunca outro tipo (mesma funcao/mesma garantia
-    # de `agent_runs.py`/`agent_requests.py`, ja usada em tools
-    # anteriores). `resolvido_em`/`desfecho` so ganham valor quando
-    # `resolver_item` fecha o item (`novo_estado` em `ESTADOS_FECHADOS`) --
-    # e podem voltar a `None` explicitamente (`outbox_aprovacao.py:693-697`,
-    # quando um descarte e desfeito) -- por isso nullable, nunca ausentes
-    # como chave. `evidencia` e sempre um dict (nunca `None`,
-    # `d.get("evidencia") or {}` na leitura) mas o formato interno varia
-    # por tipo de item -- schema deliberadamente raso (`type: object`, sem
-    # `properties`), mesma escolha ja usada para campos de forma variavel
-    # noutras tools deste catalogo.
+    # (todo escritor inclui a chave, `None` quando nao aplicavel). `prazo`/
+    # `criado_em`/`atualizado_em`/`resolvido_em` passam por
+    # `atencao._to_iso` na leitura -- sempre string ISO ou `None`, nunca
+    # outro tipo (mesma funcao/mesma garantia de `agent_runs.py`/
+    # `agent_requests.py`, ja usada em tools anteriores). `resolvido_em`/
+    # `desfecho` so ganham valor quando `resolver_item` fecha o item
+    # (`novo_estado` em `ESTADOS_FECHADOS`) -- e podem voltar a `None`
+    # explicitamente (`outbox_aprovacao.py:693-697`, quando um descarte e
+    # desfeito) -- por isso nullable, nunca ausentes como chave.
+    # `evidencia` e sempre um dict (nunca `None`, `d.get("evidencia") or
+    # {}` na leitura) mas o formato interno varia por tipo de item --
+    # schema deliberadamente raso (`type: object`, sem `properties`),
+    # mesma escolha ja usada para campos de forma variavel noutras tools
+    # deste catalogo.
+    #
+    # CORRECAO (achado da revisao do Codex na PR desta sub-entrega, apos a
+    # revisao adversarial propria): `origem`/`tipo`/`prioridade`/`titulo`/
+    # `resumo`/`sugestao`/`estado` sao `d.get(chave)` SEM nenhum default --
+    # ao contrario do que a redacao original deste comentario assumia
+    # (\"sempre string\"/\"nunca None\", com base so nos escritores REAIS
+    # de hoje), `coletar_fila_atencao` le QUALQUER documento da colecao de
+    # forma generica, sem exigir nenhum desses campos -- um documento
+    # esparso (sem `titulo`/`resumo`/etc, cenario ja exercitado por
+    # `test_atencao.py::TestFilaAtencaoTools.test_coletar_fila_atencao_
+    # ordenacao`, que grava `item-1`/`item-2`/`item-3` só com `estado`/
+    # `prioridade`/`prazo`/`criado_em`) devolve `None` para todos os
+    # outros campos. `id` (`doc.id`, garantido pelo SDK),
+    # `chave_dedupe` (`d.get(...) or doc.id`) e `evidencia` (`d.get(...)
+    # or {}`) continuam nao-nulos por terem fallback explicito -- so esses
+    # 3 seguem `required` sem `null`. Os 7 campos acima (incluindo os 4
+    # com enum) agora sao `["string", "null"]`, com `null` tambem
+    # explicito em cada lista `enum` (JSON Schema nao trata `type` e
+    # `enum` como equivalentes -- `null` so valida contra `enum` se
+    # estiver LITERALMENTE na lista, mesmo com `"type": ["string",
+    # "null"]` declarado ao lado).
     "obter_fila_atencao": {
         "type": "object",
         "properties": {
@@ -2624,14 +2641,15 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
                     "properties": {
                         "id": {"type": "string"},
                         "origem": {
-                            "type": "string",
+                            "type": ["string", "null"],
                             "enum": [
                                 "acao", "whatsapp", "email", "agenda",
                                 "repo", "financeiro", "saude", "secretario_whatsapp",
+                                None,
                             ],
                         },
                         "tipo": {
-                            "type": "string",
+                            "type": ["string", "null"],
                             "enum": [
                                 "aguardando_terceiro_vencido", "conta_vencendo",
                                 "rotina_saude_ausente", "email_nao_entregue",
@@ -2639,22 +2657,25 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
                                 "secretario_investigacao_concluida",
                                 "secretario_insistencia", "secretario_assunto_sensivel",
                                 "secretario_decisao_forcada",
+                                None,
                             ],
                         },
-                        "prioridade": {"type": "string", "enum": ["alta", "media", "baixa"]},
-                        "titulo": {"type": "string"},
-                        "resumo": {"type": "string"},
+                        "prioridade": {
+                            "type": ["string", "null"], "enum": ["alta", "media", "baixa", None],
+                        },
+                        "titulo": {"type": ["string", "null"]},
+                        "resumo": {"type": ["string", "null"]},
                         "acao_id": {"type": ["string", "null"]},
                         "etapa_id": {"type": ["string", "null"]},
                         "pessoa": {"type": ["string", "null"]},
                         "prazo": {"type": ["string", "null"]},
                         "evidencia": {"type": "object"},
-                        "sugestao": {"type": "string"},
+                        "sugestao": {"type": ["string", "null"]},
                         "estado": {
-                            "type": "string",
+                            "type": ["string", "null"],
                             "enum": [
                                 "aberto", "delegado_ao_agente", "aguardando_andre",
-                                "resolvido", "descartado",
+                                "resolvido", "descartado", None,
                             ],
                         },
                         "chave_dedupe": {"type": "string"},
