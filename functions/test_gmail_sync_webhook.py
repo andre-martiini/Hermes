@@ -323,6 +323,29 @@ class TestDisparadoresFinos(unittest.TestCase):
         )
 
 
+class TestRecursosDoWebhookIguaisAoSafetyNet(unittest.TestCase):
+    """Os dois disparadores rodam o MESMO sync_gmail_work (~3 min: sync_pix_emails refaz uma
+    chamada messages.modify por e-mail de Pix desde fev/2026). O webhook foi ao ar sem
+    timeout_sec/memory (padrão de 60 s/256 MB) e a invocação foi cortada em 59,993 s: gmail_sync
+    ficou preso em 'processing' e o lock preso até SYNC_LOCK_STALE_SECONDS (achado da
+    verificação de ponta a ponta em produção, 24/09/2026). Lê o endpoint que o Firebase publica
+    (__firebase_endpoint__), o mesmo objeto que o deploy usa -- não o decorador por texto."""
+
+    def test_webhook_tem_o_mesmo_timeout_e_memoria_do_safety_net(self):
+        webhook = main.on_gmail_watch_notification.__firebase_endpoint__
+        safety_net = main.gmail_sync_safety_net.__firebase_endpoint__
+        self.assertEqual(webhook.timeoutSeconds, safety_net.timeoutSeconds)
+        self.assertEqual(webhook.availableMemoryMb, safety_net.availableMemoryMb)
+
+    def test_webhook_nao_cai_no_padrao_de_60s(self):
+        webhook = main.on_gmail_watch_notification.__firebase_endpoint__
+        # Sem timeout_sec o Firebase deixa um Sentinel (não None) no lugar do número.
+        self.assertIsInstance(
+            webhook.timeoutSeconds, int, "timeout_sec não definido: cai no padrão de 60 s"
+        )
+        self.assertGreater(webhook.timeoutSeconds, 60)
+
+
 class TestRunFullSyncNaoTocaGmail(unittest.TestCase):
     """run_full_sync não deve mais chamar sync_pix_emails/sync_boletos_gmail/
     link_emails_to_actions (extraídos para sync_gmail_work, 24/09/2026) -- mas continua
