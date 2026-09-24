@@ -2258,6 +2258,163 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
         ],
         "additionalProperties": False,
     },
+    # `consultar_contatos_prioritarios_secretario` (P03 sub-entrega 28/N) --
+    # decima segunda tool com outputSchema, backed por
+    # `secretario_whatsapp.consultar_contatos_prioritarios` (passthrough
+    # puro em `tools/hermes_tools.py::
+    # _consultar_contatos_prioritarios_secretario`, que so resolve o
+    # default/None de `apenas_ativos` antes de repassar). `oneOf` de 2
+    # branches, mesma forma de `buscar_arquivos_acervo`/`consultar_
+    # historico_acoes`: a funcao tem UM `try/except Exception` cobrindo o
+    # loop inteiro de leitura -- qualquer excecao (ex.: Firestore fora do
+    # ar) cai direto no branch de erro, sem meio-termo.
+    #   1. erro: `{"erro": <str>, "contatos_prioritarios": []}` -- SEM
+    #      `total`/`apenas_ativos`, ao contrario do branch de sucesso (o
+    #      `return` de erro so tem essas 2 chaves, lido por completo).
+    #   2. sucesso: `{"total": <int, len()>, "apenas_ativos": <bool,
+    #      repassado>, "contatos_prioritarios": [...]}`.
+    #
+    # `secretario_contatos_prioritarios` (colecao lida) tem UM UNICO ponto
+    # de CRIACAO de documento em todo o repositorio --
+    # `secretario_whatsapp.preparar_contato_prioritario` (confirmado por
+    # `grep -rn "COLLECTION_PRIORITARIOS"`: so 2 arquivos usam essa
+    # constante, `secretario_whatsapp.py`, e nenhum outro modulo referencia
+    # a string literal da colecao) -- mesma categoria de garantia de
+    # `consultar_execucoes_agente` (sub-entrega 11/N) e `consultar_pedidos_
+    # agente` (sub-entrega 12/N). Diferente de `busca_acervo`/`lista_
+    # compras`, a propria `consultar_contatos_prioritarios` NAO reconstroi
+    # o item campo a campo com `.get(chave, default)` -- devolve `doc.
+    # to_dict()` quase cru (so acrescenta `id` e pode reescrever `status`
+    # para o expirado na propria leitura, ver `tools/inventory.py`), entao
+    # a garantia de forma do item vem inteira do UNICO escritor, nao da
+    # funcao de leitura:
+    #   - `id`: sempre `doc.id` -- string garantida pelo SDK do Firestore.
+    #   - `chat_id`/`chat_name`: `preparar_contato_prioritario` sempre grava
+    #     as 2 chaves como string -- `chat_id` vem de `resolver_
+    #     identificador_contato`, que SEMPRE devolve `(str, str)` (o
+    #     segundo elemento nunca fica vazio: cai no proprio identificador
+    #     de entrada como ultimo fallback em todo caminho lido) -- lido por
+    #     completo.
+    #   - `assunto`/`o_que_precisa_saber`: sempre string NAO-VAZIA --
+    #     `preparar_contato_prioritario` valida e devolve erro ANTES de
+    #     gravar se qualquer um vier vazio (`if not assunto_limpo: return
+    #     {"erro": ...}`), entao nenhum documento gravado tem esses campos
+    #     ausentes ou vazios.
+    #   - `status`: enum FECHADO de 4 valores (`ativo`/`concluido`/
+    #     `expirado`/`cancelado`) -- os 4 unicos `STATUS_PRIORITARIO_*`
+    #     definidos no modulo; toda escrita de `status` usa uma dessas
+    #     constantes, nunca uma string livre -- os 6 pontos de escrita da
+    #     colecao (1 criacao + 5 `.update()`: expiracao automatica DENTRO
+    #     da propria `consultar_contatos_prioritarios`, uma SEGUNDA
+    #     expiracao automatica independente em `obter_briefing_ativo`
+    #     [achado da revisao adversarial desta sub-entrega -- nao e o
+    #     mesmo ponto, e uma funcao separada que tambem le esta colecao],
+    #     cancelamento, e os 2 pontos de conclusao) foram encontrados por
+    #     `grep -rn "COLLECTION_PRIORITARIOS"` e lidos por completo.
+    #   - `valido_ate`: sempre string ISO, nunca `None` -- gravado por
+    #     `_calcular_validade_iso`, que SEMPRE devolve `.isoformat()` (se
+    #     `validade_horas` for omitido, usa o fim do dia corrente em vez de
+    #     devolver `None`) -- lida por completo.
+    #   - `resumo_estruturado`/`informacao_obtida`: `None`/`None` na
+    #     criacao, viram `str`/`bool` nos 2 pontos de conclusao (limite de
+    #     trocas atingido e investigacao concluida pela LLM) -- a CHAVE
+    #     sempre existe (gravada explicitamente como `None` na criacao),
+    #     so o VALOR muda -- por isso `["string", "null"]`/`["boolean",
+    #     "null"]` em vez de campo as vezes ausente.
+    #   - `criado_em`/`atualizado_em`: `firestore.SERVER_TIMESTAMP` na
+    #     criacao e em toda atualizacao -- sempre presentes. O executor
+    #     MCP serializa o dict via `json.dumps(..., default=str)`
+    #     (`mcp_server._handle_tools_call`) antes do round-trip que vira
+    #     `structuredContent`; `default=str` sobre um `DatetimeWithNanoseconds`
+    #     (subclasse de `datetime.datetime`) cai no `datetime.__str__`
+    #     herdado, sempre uma string -- por isso `string`, nao um tipo
+    #     custom nem `object`.
+    #   - `concluido_em`: gravado nos mesmos 2 pontos de `resumo_
+    #     estruturado`/`informacao_obtida` acima -- fica FORA de `required`
+    #     no item, mesma convencao de `truncado` (`listar_rascunhos_
+    #     pendentes`, sub-entrega 24/N) e `ordem` (`consultar_lista_
+    #     compras`, sub-entrega 10/N). Quando presente, mesma garantia de
+    #     tipo string de `criado_em`/`atualizado_em` (mesmo mecanismo de
+    #     serializacao). ACHADO da revisao adversarial desta sub-entrega,
+    #     nao-bloqueante: a chave NAO implica de volta que o documento
+    #     esteja concluido -- `preparar_contato_prioritario` grava com
+    #     `doc_ref.set(doc_data, merge=True)` (linha ~741) e `doc_data` NAO
+    #     inclui `concluido_em`, entao um `merge=True` sobre um documento
+    #     ja concluido (reregistrar o MESMO `chat_id` como prioritario de
+    #     novo, sem guarda contra isso) reseta `status` para `ativo` e
+    #     `resumo_estruturado`/`informacao_obtida` para `None` (ambos
+    #     explicitos em `doc_data`), mas preserva o `concluido_em` do ciclo
+    #     anterior -- semantica padrao de merge do Firestore, so mescla as
+    #     chaves passadas. Documentado aqui como risco aceito: o campo
+    #     continua sempre `string` quando presente (nao quebra o schema),
+    #     so a leitura "presente implica concluido" e falsa nesse cenario
+    #     -- nenhum teste cobre esse reregistro hoje.
+    #
+    # `contatos_prioritarios` (ramo de erro) e sempre `[]` -- mesma
+    # convencao de `maxItems: 0` ja usada em `consultar_historico_acoes`/
+    # `buscar_arquivos_acervo`.
+    #
+    # Handler (`_consultar_contatos_prioritarios_secretario`) nao tinha
+    # NENHUM teste dedicado antes desta sub-entrega (a logica de default/
+    # None de `apenas_ativos` e exclusiva do wrapper, nao coberta pelos
+    # testes existentes de `secretario_whatsapp.consultar_contatos_
+    # prioritarios` em `test_secretario_whatsapp.py`) -- lacuna fechada em
+    # `test_hermes_tools.py`.
+    #
+    # Investigacao completa desta sub-entrega: docs/autonomia/execucao.md,
+    # sub-entrega 28/N.
+    "consultar_contatos_prioritarios_secretario": {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "total": {"type": "integer"},
+                    "apenas_ativos": {"type": "boolean"},
+                    "contatos_prioritarios": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "chat_id": {"type": "string"},
+                                "chat_name": {"type": "string"},
+                                "assunto": {"type": "string"},
+                                "o_que_precisa_saber": {"type": "string"},
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["ativo", "concluido", "expirado", "cancelado"],
+                                },
+                                "valido_ate": {"type": "string"},
+                                "resumo_estruturado": {"type": ["string", "null"]},
+                                "informacao_obtida": {"type": ["boolean", "null"]},
+                                "criado_em": {"type": "string"},
+                                "atualizado_em": {"type": "string"},
+                                "concluido_em": {"type": "string"},
+                            },
+                            "required": [
+                                "id", "chat_id", "chat_name", "assunto",
+                                "o_que_precisa_saber", "status", "valido_ate",
+                                "resumo_estruturado", "informacao_obtida",
+                                "criado_em", "atualizado_em",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["total", "apenas_ativos", "contatos_prioritarios"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "erro": {"type": "string"},
+                    "contatos_prioritarios": {"type": "array", "maxItems": 0},
+                },
+                "required": ["erro", "contatos_prioritarios"],
+                "additionalProperties": False,
+            },
+        ],
+    },
 }
 
 
@@ -2268,11 +2425,11 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (97 das 108 tools
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (96 das 108 tools
     hoje -- `len(registry.list_tool_names())`, nao os "106" que este
     docstring citava ate a sub-entrega 24/N, contagem ja desatualizada
-    antes daquela fatia -- apos a decima primeira entrada, `consultar_
-    status_modo_secretario`, sub-entrega 27/N), deliberadamente:
+    antes daquela fatia -- apos a decima segunda entrada, `consultar_
+    contatos_prioritarios_secretario`, sub-entrega 28/N), deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
     (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).

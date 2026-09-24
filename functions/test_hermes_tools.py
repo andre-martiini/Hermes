@@ -204,6 +204,44 @@ class TestExecucao(unittest.TestCase):
         self.assertIsNone(resultado["resultados"][0]["trecho"])
         self.assertIsNone(resultado["resultados"][0]["fonte"])
 
+    def test_consultar_contatos_prioritarios_secretario_default_apenas_ativos_true(self):
+        # `_consultar_contatos_prioritarios_secretario` não tinha nenhum
+        # teste dedicado antes desta sub-entrega (P03 28/N, outputSchema) --
+        # a lógica de default/None de `apenas_ativos` é exclusiva do
+        # wrapper (não coberta pelos testes de
+        # `secretario_whatsapp.consultar_contatos_prioritarios` em
+        # `test_secretario_whatsapp.py`, que chamam a função de baixo nível
+        # direto). Ausência do argumento -> `True` (o default do
+        # `args.get`).
+        with patch("secretario_whatsapp.consultar_contatos_prioritarios") as mock_consulta:
+            mock_consulta.return_value = {"total": 0, "apenas_ativos": True, "contatos_prioritarios": []}
+            hermes_tools._consultar_contatos_prioritarios_secretario(type("Ctx", (), {"db": None})(), {})
+        mock_consulta.assert_called_once_with(db=None, apenas_ativos=True)
+
+    def test_consultar_contatos_prioritarios_secretario_none_explicito_vira_true(self):
+        # Achado ao ler o handler: `args.get("apenas_ativos", True)` só usa
+        # o default quando a CHAVE está ausente -- um cliente MCP que mande
+        # `{"apenas_ativos": null}` explicitamente receberia `None` do
+        # `.get()` (chave presente, valor `null`), não o default `True`. O
+        # handler tem uma checagem explícita pra isso (`if apenas_ativos is
+        # None: apenas_ativos = True`) -- este teste cobre exatamente esse
+        # branch.
+        with patch("secretario_whatsapp.consultar_contatos_prioritarios") as mock_consulta:
+            mock_consulta.return_value = {"total": 0, "apenas_ativos": True, "contatos_prioritarios": []}
+            hermes_tools._consultar_contatos_prioritarios_secretario(
+                type("Ctx", (), {"db": None})(), {"apenas_ativos": None}
+            )
+        mock_consulta.assert_called_once_with(db=None, apenas_ativos=True)
+
+    def test_consultar_contatos_prioritarios_secretario_repassa_falso(self):
+        with patch("secretario_whatsapp.consultar_contatos_prioritarios") as mock_consulta:
+            mock_consulta.return_value = {"total": 2, "apenas_ativos": False, "contatos_prioritarios": []}
+            resultado = hermes_tools._consultar_contatos_prioritarios_secretario(
+                type("Ctx", (), {"db": None})(), {"apenas_ativos": False}
+            )
+        mock_consulta.assert_called_once_with(db=None, apenas_ativos=False)
+        self.assertEqual(resultado["apenas_ativos"], False)
+
     def test_tool_desconhecida_levanta(self):
         from tools.tool_context import ToolContext
 
