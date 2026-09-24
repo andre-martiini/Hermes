@@ -2630,6 +2630,28 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     # `enum` como equivalentes -- `null` so valida contra `enum` se
     # estiver LITERALMENTE na lista, mesmo com `"type": ["string",
     # "null"]` declarado ao lado).
+    #
+    # RISCO ACEITO, nao corrigido (SEGUNDO achado do Codex, desta vez na
+    # PR do diario desta sub-entrega): a correcao acima fecha so o caso
+    # "campo ausente" (`None`). `coletar_fila_atencao` nao valida nem
+    # normaliza NADA do que le -- um documento com um valor PRESENTE mas
+    # fora do conjunto esperado (ex.: `tipo=\"legado\"`, fora dos 10 do
+    # enum; `evidencia=\"texto\"`, nao um dict -- `d.get(\"evidencia\") or
+    # {}` so cai no fallback `{}` para valor FALSY, um valor truthy
+    # nao-dict passa direto) violaria este outputSchema. Este schema
+    # descreve a forma GARANTIDA pelos escritores rastreados hoje (busca
+    # exaustiva), nao uma invariante reforcada em tempo de leitura -- um
+    # documento fora desses caminhos (edicao manual no Firestore, dado
+    # legado anterior a esta decisao, fixture de seed, ou bug futuro em
+    # algum escritor) quebraria o contrato. Corrigir exigiria normalizar/
+    # validar dentro de `coletar_fila_atencao` (mudanca de COMPORTAMENTO,
+    # fora do escopo de uma fatia so-schema) ou validacao de outputSchema
+    # em tempo de execucao em `mcp_server.py` (inexistente hoje para
+    # NENHUMA das 14 tools deste catalogo -- limitacao estrutural do
+    # catalogo inteiro, nao especifica desta tool). Mesma categoria de
+    # risco ja aceita para outras tools (ex.: `consultar_lista_compras`/
+    # `shopping_items`, tambem escrita por caminhos fora de
+    # `tools/lista_compras.py`, ver comentario acima).
     "obter_fila_atencao": {
         "type": "object",
         "properties": {
