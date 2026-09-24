@@ -62,6 +62,7 @@ _CATALOG: dict[str, str] = {
     "listar_rascunhos_pendentes": "Lista rascunhos de mensagens de WhatsApp aguardando aprovação no Telegram",
     "aprovar_rascunho_whatsapp": "Aprova um rascunho de WhatsApp pendente no outbox (via Cowork) para entrega imediata",
     "descartar_rascunho_whatsapp": "Descarta um rascunho de WhatsApp pendente no outbox (via Cowork)",
+    "cancelar_envio_whatsapp": "Cancela um envio de WhatsApp já aprovado/agendado (pending/notified) antes de o worker entregá-lo",
     # Portao humano via Telegram para o conector Claude-Argos: aprovar plano,
     # enfileirar execucao e mesclar PR sao "ato humano" por desenho no Argos;
     # este trio faz o Andre decidir pelo Telegram antes de qualquer uma delas
@@ -151,7 +152,7 @@ _CATALOG: dict[str, str] = {
     "consultar_contatos_prioritarios_secretario": "Lista os briefings prioritários cadastrados para o Modo Secretário no WhatsApp",
     "cancelar_contato_prioritario_secretario": "Cancela ou encerra antecipadamente o briefing prioritário de um contato no Modo Secretário",
     # Modo Secretário no WhatsApp (ativação self-service)
-    "ativar_modo_secretario": "Ativa o Modo Secretário no WhatsApp com contatos autorizados, duração e orientações opcionais",
+    "ativar_modo_secretario": "Ativa o Modo Secretário no WhatsApp com contatos autorizados (ou escopo universal de todos os individuais/grupos), janela de ativação (início e fim arbitrários) e orientações opcionais",
     "desativar_modo_secretario": "Desativa imediatamente o Modo Secretário no WhatsApp",
     "consultar_status_modo_secretario": "Consulta o status atual do Modo Secretário (ativo, contatos na allowlist e expiração)",
     # Motor de política de autonomia (P02 passo 7, autonomy/policy.py) — leitura
@@ -222,9 +223,10 @@ _NEEDS_CONFIRMATION: set[str] = {
     # Modo Secretário no WhatsApp (mutam system/settings)
     "ativar_modo_secretario",
     "desativar_modo_secretario",
-    # Aprovação e descarte de rascunhos de WhatsApp via Cowork
+    # Aprovação, descarte e cancelamento de rascunhos/envios de WhatsApp via Cowork
     "aprovar_rascunho_whatsapp",
     "descartar_rascunho_whatsapp",
+    "cancelar_envio_whatsapp",
     # Portao de autorizacao Telegram para o conector Claude-Argos: as duas que
     # mutam estado (pedir e consumir); consultar e so leitura, fica de fora.
     "solicitar_autorizacao_argos",

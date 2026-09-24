@@ -701,6 +701,19 @@ class TestConsultarEnvio(unittest.TestCase):
         self.assertEqual(r["destino_real"], "5527998754054@c.us")
         self.assertEqual(r["wa_message_id"], "ABC")
 
+    def test_cancelado_traz_carimbo_e_motivo(self):
+        ctx = self._ctx({"j-canc": {
+            "status": "canceled", "to_number": "+5527998754054", "content": "oi",
+            "canceled_at": "2026-09-23T09:17:00+00:00",
+            "cancelado_via": "cowork",
+            "motivo_cancelamento": "já resolvido por outro canal",
+        }})
+        r = wa.consultar_envio(ctx, {"job_id": "j-canc"})
+        self.assertEqual(r["status"], "canceled")
+        self.assertEqual(r["cancelado_via"], "cowork")
+        self.assertEqual(r["motivo_cancelamento"], "já resolvido por outro canal")
+        self.assertIn("não foi enviado", r["message"])
+
     def test_falha_traz_o_motivo(self):
         ctx = self._ctx({"j2": {"status": "failed", "to_number": "+5527998754054",
                                 "error_message": "o numero nao esta no WhatsApp",

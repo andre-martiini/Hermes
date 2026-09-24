@@ -507,11 +507,16 @@ def dispatch_scheduled_whatsapp_messages(db, now) -> None:
 
         sent = _send_telegram_message_raw_with_keyboard(db, chat_id, text, keyboard)
         if sent:
-            doc_snap.reference.update({
-                "status": "notified",
-                # Timestamp real (nao string) para que consultar_envio_whatsapp consiga
-                # medir ha quanto tempo esta parado, igual ja faz com scheduled_for.
-                "notified_at": now,
-                "telegram_sent": True
-            })
-            print(f"[WhatsAppOutbox] Agendamento {doc_snap.id} notificado via Telegram com sucesso.")
+            # Transacional e revalida o status (achado da revisão adversarial
+            # de cancelar_envio_whatsapp, 22/09/2026): um `.update()` cru aqui
+            # podia sobrescrever um cancelamento concorrente de volta para
+            # 'notified' -- ver outbox_aprovacao.marcar_notificado.
+            from outbox_aprovacao import marcar_notificado
+            if marcar_notificado(db, doc_snap.id, notified_at=now):
+                print(f"[WhatsAppOutbox] Agendamento {doc_snap.id} notificado via Telegram com sucesso.")
+            else:
+                print(
+                    f"[WhatsAppOutbox] Agendamento {doc_snap.id} mudou de status "
+                    "(provavelmente cancelado) entre a consulta e a notificação; "
+                    "card do Telegram já enviado, mas status não foi sobrescrito."
+                )

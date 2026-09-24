@@ -554,6 +554,19 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "rodam no ramo transaction_result['status'] == 'ok', que só acontece na primeira chamada bem-"
         "sucedida -- não são reexecutados na repetição.",
     ),
+    "cancelar_envio_whatsapp": ToolInventoryEntry(
+        "whatsapp", _L.ESCRITA, _R.REVERSIVEL, True, True, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "transação Firestore revalida status antes de escrever — a mesma disputa que "
+        "claimOutboxMessage (services/whatsapp-capture/index.js) resolve do lado do worker",
+        rede_servico="Telegram (edit_message condicional)",
+        dominio_rede=DominioRede.FECHADO,
+        dados_sensiveis_categoria="destinatário e conteúdo de terceiro",
+        idempotencia=_I.IDEMPOTENTE,
+        nota="cancelar um job já 'canceled' devolve status 'already_canceled' sem nova escrita "
+        "(a transação lê o status atual e recusa antes do tx.update); só aceita a partir de "
+        "'pending' ou 'notified' (validar_transicao_cancelamento em outbox_aprovacao.py) — "
+        "qualquer outro status (sent, failed, aguardando_aprovacao, ...) é recusado com erro.",
+    ),
     "solicitar_autorizacao_argos": ToolInventoryEntry(
         "argos_autorizacao", _L.ESCRITA, _R.IRREVERSIVEL, True, False, _C.COORDENACAO_LIMITADA,
         "nenhum — consultar_autorizacao_argos é chamado depois, manualmente",
@@ -1195,7 +1208,11 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "`duracao_horas` é informado, `desativa_em` é recalculado a partir de 'agora' a cada chamada -- "
         "repetir a MESMA chamada mais tarde ESTENDE o prazo de desativação automática, um efeito real no "
         "ambiente, não só cosmético (quando `duracao_horas` é omitido o efeito converge, mas a classificação "
-        "cobre a tool como um todo, lado conservador). `orientacoes` (texto livre do dono, até 2000 caracteres) entra no prompt do secretário abaixo dos guardrails fixos e NUNCA os revoga; com `salvar_como_padrao` grava o padrão em `whatsapp_secretario.orientacoes`, senão só vale nesta ativação",
+        "cobre a tool como um todo, lado conservador). `orientacoes` (texto livre do dono, até 2000 caracteres) entra no prompt do secretário abaixo dos guardrails fixos e NUNCA os revoga; com `salvar_como_padrao` grava o padrão em `whatsapp_secretario.orientacoes`, senão só vale nesta ativação. "
+        "`escopo_contatos` ('individuais'/'grupos'/'todos'/'nenhum') liga um escopo universal aditivo à "
+        "`chats_allowlist` explícita (grupo continua exigindo menção ao André mesmo sob escopo); `ativa_em`/"
+        "`desativa_em` (ISO 8601 absolutos) definem uma janela com início e fim arbitrários, checada "
+        "passivamente na leitura (`obter_config_secretario`) igual ao `desativa_em` calculado por `duracao_horas` — sem cron novo.",
     ),
     "desativar_modo_secretario": ToolInventoryEntry(
         "whatsapp_secretario", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,

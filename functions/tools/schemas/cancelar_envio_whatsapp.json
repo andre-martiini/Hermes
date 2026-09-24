@@ -1,0 +1,18 @@
+{
+  "name": "cancelar_envio_whatsapp",
+  "description": "Cancela uma mensagem de WhatsApp já agendada/aprovada (status pending ou notified) no outbox, antes de o worker entregá-la. Não apaga o documento: grava status=canceled para auditoria. Idempotente — cancelar de novo devolve 'já cancelado' em vez de erro. Não cancela um envio já 'sent'/'failed', nem um rascunho ainda aguardando aprovação (use descartar_rascunho_whatsapp para esse caso).",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "job_id": {
+        "type": "string",
+        "description": "ID do documento em whatsapp_outbox, devolvido por schedule_whatsapp_message, aprovar_rascunho_whatsapp ou consultar_envio_whatsapp."
+      },
+      "motivo": {
+        "type": "string",
+        "description": "Motivo do cancelamento, para auditoria/histórico."
+      }
+    },
+    "required": ["job_id", "motivo"]
+  }
+}

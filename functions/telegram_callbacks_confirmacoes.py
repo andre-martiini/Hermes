@@ -256,21 +256,49 @@ def handle(db, token, query_id, chat_id, data, message, session, copilot_session
 
     elif data.startswith("wa_cancel:"):
         doc_id = data.split("wa_cancel:")[1].strip()
-        _answer_callback_query(token, query_id, "Agendamento cancelado.")
+        # Corrigido ao construir cancelar_envio_whatsapp: isto era uma escrita
+        # direta, sem transação nem revalidação de status -- uma corrida real
+        # contra claimOutboxMessage (o worker também disputa o mesmo
+        # documento) podia sobrescrever silenciosamente um envio já
+        # 'sending'/'sent' de volta para 'canceled': não impede o envio (o
+        # worker já tinha reivindicado antes) e ainda corrompe o registro de
+        # auditoria. Roteado pela mesma função transacional que
+        # cancelar_envio_whatsapp usa -- perde a corrida de forma segura em
+        # vez de escrever por cima às cegas.
+        #
+        # Achado da revisão adversarial (22/09/2026): a versão anterior
+        # respondia "cancelado" ao dono incondicionalmente, mesmo quando
+        # cancelar_envio recusava (já enviado, já em andamento...) -- o toque
+        # no botão parecia ter funcionado mesmo quando não funcionou. Agora o
+        # resultado real decide o texto.
+        resultado: dict = {}
         try:
             if doc_id:
-                db.collection("whatsapp_outbox").document(doc_id).update({
-                    "status": "canceled",
-                    # Bug corrigido: "datetime" aqui e a CLASSE (from datetime import
-                    # datetime, timezone), nao o modulo -- "datetime.datetime.now(...)"
-                    # lancava AttributeError, engolido pelo except abaixo, entao o Firestore
-                    # nunca era atualizado mesmo o usuario recebendo "cancelado" na tela.
-                    "canceled_at": datetime.now(timezone.utc).isoformat()
-                })
+                from outbox_aprovacao import cancelar_envio
+                resultado = cancelar_envio(db, doc_id, cancelado_via="telegram") or {}
         except Exception as exc:
             print(f"[TelegramCallback] Erro ao cancelar WhatsApp agendado {doc_id}: {exc}")
+            resultado = {"status": "erro_transacao", "erro": str(exc)}
 
-        response_text = "❌ <b>Envio de WhatsApp agendado foi cancelado.</b>"
+        status_resultado = resultado.get("status")
+        if status_resultado in ("ok", "already_canceled"):
+            toast = "Agendamento cancelado."
+            response_text = "❌ <b>Envio de WhatsApp agendado foi cancelado.</b>"
+        elif status_resultado == "nao_cancelavel":
+            status_atual = html.escape(str(resultado.get("status_atual") or "?"))
+            toast = "Não foi possível cancelar."
+            response_text = (
+                f"⚠️ <b>Não foi possível cancelar</b> — o envio já está em "
+                f"'{status_atual}'."
+            )
+        elif status_resultado == "not_found":
+            toast = "Não encontrado."
+            response_text = "⚠️ <b>Envio não encontrado</b> — talvez já tenha sido tratado."
+        else:
+            toast = "Falha ao cancelar."
+            response_text = "⚠️ <b>Falha ao tentar cancelar</b> — tente de novo em instantes."
+
+        _answer_callback_query(token, query_id, toast)
         _persist_callback_turn("Botão: cancelar WhatsApp agendado", response_text)
         _send_telegram_message(token, chat_id, response_text)
 
@@ -281,19 +309,46 @@ def handle(db, token, query_id, chat_id, data, message, session, copilot_session
         # Sem este handler, o doc ficava para sempre em status "notified"/tentativas=0,
         # mesmo apos a entrega real (caso relatado por Andre em 16/09/2026, job
         # bae25bc6-0729-4213-a24d-c37feea5d687, entregue as 16:28 e nunca marcado "sent").
+        # Achado da 2ª rodada de revisão adversarial de cancelar_envio_whatsapp
+        # (22/09/2026): isto fazia a MESMA escrita crua, sem transação nem
+        # revalidação, que wa_cancel: fazia antes de ser corrigido -- os dois
+        # botões vêm juntos no mesmo cartão do Telegram, então um toque
+        # duplicado/reentregue (o webhook do Telegram reenvia callback_query
+        # em timeout) podia confirmar como "sent" um envio que "❌ Cancelar"
+        # já tinha transacionado para "canceled" no mesmo cartão. Roteado
+        # pela mesma disciplina transacional de cancelar_envio/
+        # marcar_notificado.
         doc_id = data.split("wa_confirm_sent:")[1].strip()
-        _answer_callback_query(token, query_id, "Marcado como enviado.")
+        resultado: dict = {}
         try:
             if doc_id:
-                db.collection("whatsapp_outbox").document(doc_id).update({
-                    "status": "sent",
-                    "sent_at": datetime.now(timezone.utc),
-                    "sent_via": "telegram_confirmacao_manual",
-                })
+                from outbox_aprovacao import confirmar_envio_manual
+                resultado = confirmar_envio_manual(
+                    db, doc_id, sent_at=datetime.now(timezone.utc)
+                ) or {}
         except Exception as exc:
             print(f"[TelegramCallback] Erro ao confirmar envio manual de WhatsApp {doc_id}: {exc}")
+            resultado = {"status": "erro_transacao", "erro": str(exc)}
 
-        response_text = "☑️ <b>Envio de WhatsApp confirmado como feito.</b>"
+        status_resultado = resultado.get("status")
+        if status_resultado in ("ok", "already_sent"):
+            toast = "Marcado como enviado."
+            response_text = "☑️ <b>Envio de WhatsApp confirmado como feito.</b>"
+        elif status_resultado == "nao_confirmavel":
+            status_atual = html.escape(str(resultado.get("status_atual") or "?"))
+            toast = "Não foi possível confirmar."
+            response_text = (
+                f"⚠️ <b>Não foi possível confirmar</b> — o envio já está em "
+                f"'{status_atual}'."
+            )
+        elif status_resultado == "not_found":
+            toast = "Não encontrado."
+            response_text = "⚠️ <b>Envio não encontrado</b> — talvez já tenha sido tratado."
+        else:
+            toast = "Falha ao confirmar."
+            response_text = "⚠️ <b>Falha ao tentar confirmar</b> — tente de novo em instantes."
+
+        _answer_callback_query(token, query_id, toast)
         _persist_callback_turn("Botão: confirmar envio manual de WhatsApp", response_text)
         _send_telegram_message(token, chat_id, response_text)
 

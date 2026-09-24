@@ -245,6 +245,66 @@ class TestEditarPlanoAcaoNaoIdempotente(unittest.TestCase):
         )
 
 
+class TestPrepararEdicaoAcaoStatusConcluidaEExcluida(unittest.TestCase):
+    """Achado da revisão adversarial (23/09/2026) da mudança que passou a
+    permitir editar ação concluída pelo conector MCP: esta é uma TERCEIRA
+    cópia da mesma validação de status, num tool MCP separado
+    (`preparar_edicao_acao` + `confirmar_edicao_acao`, o par de duas
+    chamadas -- diferente do `editar_acao` de uma chamada só), que a
+    primeira correção (em `main.py`) não alcançou porque vive aqui, em
+    `tools/telegram_extended.py::execute`. Comportamental de verdade (não
+    AST/texto-fonte): este módulo é chamável em memória, diferente de
+    `main.py`."""
+
+    def setUp(self):
+        self.db = _MockDb()
+
+    def _preparar(self, task_id="tarefa-1", **alteracoes):
+        return telegram_extended.execute(
+            "preparar_edicao_acao",
+            {"task_id": task_id, "alteracoes": alteracoes, "justificativa": "teste"},
+            self.db,
+        )
+
+    def test_concluida_pode_ser_editada(self):
+        self.db.collection("tarefas").document("tarefa-1").set({
+            "status": "concluído", "titulo": "Organizar evento",
+        })
+        r = self._preparar(titulo="Organizar evento (revisado)")
+        self.assertFalse(r.startswith("ERRO|"), r)
+
+    def test_excluida_continua_recusada(self):
+        """Ao contrário de 'concluído', 'excluído' dispara exclusão real do
+        documento e do evento do Calendar na próxima sincronização
+        (sync_google_tasks_push, main.py) -- editar algo prestes a ser
+        apagado de verdade não é o que foi pedido, e continua bloqueado."""
+        self.db.collection("tarefas").document("tarefa-2").set({
+            "status": "excluído", "titulo": "Tarefa cancelada",
+        })
+        r = self._preparar(task_id="tarefa-2", titulo="Tarefa cancelada (editada)")
+        self.assertTrue(r.startswith("ERRO|"), r)
+        self.assertIn("excluída", r)
+
+    def test_excluida_reabrindo_com_sinonimo_e_permitido(self):
+        """Achado da 3ª rodada de revisão adversarial (23/09/2026): reabrir
+        (desfazer um "excluído" por engano) precisa funcionar aqui igual já
+        funcionava em editar_acoes_em_lote -- usando um SINÔNIMO ("reabrir",
+        não o literal "em andamento") para provar que a checagem normaliza
+        o valor recebido, não só compara a string exata."""
+        self.db.collection("tarefas").document("tarefa-2b").set({
+            "status": "excluído", "titulo": "Tarefa cancelada por engano",
+        })
+        r = self._preparar(task_id="tarefa-2b", status="reabrir")
+        self.assertFalse(r.startswith("ERRO|"), r)
+
+    def test_em_andamento_continua_editavel_como_sempre(self):
+        self.db.collection("tarefas").document("tarefa-3").set({
+            "status": "em andamento", "titulo": "Em curso",
+        })
+        r = self._preparar(task_id="tarefa-3", titulo="Em curso (editado)")
+        self.assertFalse(r.startswith("ERRO|"), r)
+
+
 class TestGerarRelatorioNaoIdempotente(unittest.TestCase):
     """`gerar_relatorio` (P03 sub-entrega 19/N): `report_id = uuid4()[:16]`
     e `.set()` incondicional em `relatorios/{report_id}`, sem dedup por

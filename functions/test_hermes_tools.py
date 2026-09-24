@@ -9,6 +9,7 @@ causa. A checagem e estatica (AST), sem rede e sem Firestore.
 
 import ast
 import contextlib
+import inspect
 import json
 import os
 import unittest
@@ -1600,6 +1601,299 @@ class TestOQueSeAnunciaEditavelEDeFatoGravado(unittest.TestCase):
         self.assertIn("estrategia_objetivo_id", hermes_tools._CAMPOS_EDITAVEIS)
         for campos in self._whitelists_do_main().values():
             self.assertIn("estrategia_objetivo_id", campos)
+
+
+class TestEditarAcaoConcluidaPermitido(unittest.TestCase):
+    """Decisão do dono (23/09/2026): editar uma ação com status concluído
+    (ou excluído, no caminho do copiloto web) deixou de ser bloqueado.
+
+    Checagem estrutural sobre o texto-fonte real das funções (mesma técnica
+    de `_whitelists_do_main` acima) — existe para a restrição não voltar em
+    silêncio numa reescrita futura sem depender só do teste comportamental.
+
+    CORREÇÃO (achado da 4ª rodada de revisão adversarial, 23/09/2026): a
+    premissa original desta classe -- que `confirmarEdicaoAcao`/
+    `preparar_edicao_acao` (main.py) não seriam chamáveis em memória por
+    serem `@https_fn.on_call` -- estava incorreta. `inspect.unwrap` atravessa
+    o(s) decorator(s) até a função real (mesmo truque já usado em main.py
+    para `askCopilotoHermes`, ver o comentário ao lado de
+    `_inspect.unwrap(askCopilotoHermes)`), e um `https_fn.CallableRequest`
+    construído à mão (com `raw_request=None`, já que o corpo de
+    `confirmarEdicaoAcao`/`confirmarEdicaoEmLote` nunca lê esse campo) chama
+    o corpo de verdade. Ver `TestConfirmarEdicaoAcaoComportamentalReal` e
+    `TestConfirmarEdicaoEmLoteComportamentalReal` abaixo para a cobertura
+    comportamental real que isso agora permite -- as checagens estruturais
+    aqui continuam valendo como rede extra, mais barata de rodar.
+    """
+
+    @staticmethod
+    def _corpo_da_funcao(nome: str) -> str:
+        caminho = os.path.join(os.path.dirname(__file__), "main.py")
+        with open(caminho, encoding="utf-8") as f:
+            fonte = f.read()
+        arvore = ast.parse(fonte)
+        for node in ast.walk(arvore):
+            if isinstance(node, ast.FunctionDef) and node.name == nome:
+                return ast.get_source_segment(fonte, node) or ""
+        raise AssertionError(f"Função '{nome}' não encontrada em main.py")
+
+    def test_confirmar_edicao_acao_nao_bloqueia_mais_concluida(self):
+        corpo = self._corpo_da_funcao("confirmarEdicaoAcao")
+        self.assertNotIn("já foi concluída", corpo)
+        # Cuidado: `updates.get('status') == 'concluído'` continua existindo
+        # mais abaixo, de propósito (carimba data_conclusao) — não é a
+        # validação removida, então não checamos por essa substring.
+
+    def test_preparar_edicao_acao_nao_bloqueia_mais_concluida(self):
+        corpo = self._corpo_da_funcao("preparar_edicao_acao")
+        self.assertNotIn("concluída ou excluída", corpo)
+        self.assertNotIn("in ('concluído', 'excluído')", corpo)
+
+    def test_preparar_edicao_acao_ainda_recusa_excluida(self):
+        """Achado da revisão adversarial (23/09/2026): 'excluído' dispara
+        exclusão real do documento/evento do Calendar na próxima
+        sincronização (sync_google_tasks_push, main.py) -- diferente de
+        'concluído', continua bloqueado aqui de propósito. Teste
+        comportamental de verdade em test_telegram_extended.py cobre a
+        TERCEIRA cópia desta mesma validação, em tools/telegram_extended.py."""
+        corpo = self._corpo_da_funcao("preparar_edicao_acao")
+        self.assertIn("já foi excluída", corpo)
+
+    def test_preparar_edicao_acao_tem_excecao_de_reabertura(self):
+        """Achado da 3ª rodada de revisão adversarial (23/09/2026): a
+        primeira versão do bloqueio de 'excluído' era incondicional, sem a
+        exceção de reabertura que confirmarEdicaoEmLote/
+        preparar_edicao_em_lote já tinham desde antes de qualquer uma
+        destas rodadas -- mesma tarefa, mesma edição, resultado diferente
+        entre o caminho de ação única e o de lote."""
+        corpo = self._corpo_da_funcao("preparar_edicao_acao")
+        self.assertIn("_normalizar_status_acao", corpo)
+        self.assertIn("'em andamento', 'stand-by'", corpo)
+
+    def test_confirmar_edicao_acao_agora_recusa_excluida(self):
+        """Achado MAIS GRAVE da 2ª rodada de revisão adversarial (23/09/2026):
+        confirmarEdicaoAcao é a ÚNICA função que de fato grava para o par
+        editar_acao/confirmar_edicao_acao -- os bloqueios de 'excluído' nas
+        duas cópias de preparar_edicao_acao eram só do passo de PROPOR,
+        nunca alcançavam quem chamasse a escrita direto. Sem esta checagem
+        aqui, dava para editar uma ação excluída (prestes a ser apagada de
+        verdade) sem nenhum aviso, pulando o "propor"."""
+        corpo = self._corpo_da_funcao("confirmarEdicaoAcao")
+        self.assertIn("já foi excluída", corpo)
+
+    def test_confirmar_edicao_acao_tem_excecao_de_reabertura(self):
+        """Achado da 3ª rodada: mesma exceção de reabertura precisa existir
+        na função que de fato grava, não só nos passos de propor."""
+        corpo = self._corpo_da_funcao("confirmarEdicaoAcao")
+        self.assertIn("alteracoes.get('status')", corpo)
+        self.assertIn("'em andamento', 'stand-by'", corpo)
+
+    def test_confirmar_edicao_em_lote_agora_recusa_excluida(self):
+        """Mesmo achado, QUARTA cópia: confirmarEdicaoEmLote (a escrita real
+        por trás de editar_acoes_em_lote) nunca lia o status atual antes de
+        gravar."""
+        corpo = self._corpo_da_funcao("confirmarEdicaoEmLote")
+        self.assertIn("excluído", corpo)
+        self.assertIn("status_atual", corpo)
+
+    def test_confirmar_edicao_acao_ainda_recusa_snapshot_desatualizado(self):
+        """A restrição removida foi só a de status -- a de concorrência
+        otimista (snapshot) continua de pé; não pode ter sumido junto."""
+        corpo = self._corpo_da_funcao("confirmarEdicaoAcao")
+        self.assertIn("modificada após a geração deste card", corpo)
+
+    def test_confirmar_edicao_acao_ainda_recusa_acao_inexistente(self):
+        corpo = self._corpo_da_funcao("confirmarEdicaoAcao")
+        self.assertIn("não existe mais", corpo)
+
+
+class TestConfirmarEdicaoAcaoComportamentalReal(unittest.TestCase):
+    """Cobertura comportamental real de `main.py::confirmarEdicaoAcao` —
+    achado da 4ª rodada de revisão adversarial (23/09/2026): esta função
+    (a única que de fato grava para editar_acao/confirmar_edicao_acao) só
+    tinha checagem estrutural (AST/texto-fonte), que não pega uma condição
+    invertida ou removida por engano. `inspect.unwrap` + um
+    `CallableRequest` construído à mão chamam o corpo real -- ver docstring
+    de `TestEditarAcaoConcluidaPermitido` acima.
+    """
+
+    def setUp(self):
+        import main
+        self.main = main
+        self.fn = inspect.unwrap(main.confirmarEdicaoAcao)
+
+    def _chamar(self, task_data: dict, alteracoes: dict, snapshot_ts: str = ""):
+        from firebase_functions import https_fn
+
+        db = MagicMock()
+        doc = MagicMock(exists=True)
+        doc.to_dict.return_value = dict(task_data)
+        db.collection.return_value.document.return_value.get.return_value = doc
+        with patch.object(self.main, "get_db", return_value=db):
+            req = https_fn.CallableRequest(
+                data={"taskId": "t1", "alteracoes": alteracoes, "snapshotTs": snapshot_ts},
+                raw_request=None,
+            )
+            return self.fn(req)
+
+    def test_concluida_pode_ser_editada(self):
+        res = self._chamar({"status": "concluído", "titulo": "T"}, {"titulo": "T novo"})
+        self.assertEqual(res["status"], "completed")
+
+    def test_excluida_sem_reabrir_e_bloqueada(self):
+        res = self._chamar({"status": "excluído", "titulo": "T"}, {"titulo": "T novo"})
+        self.assertEqual(res["status"], "invalidated")
+        self.assertIn("excluída", res["message"])
+
+    def test_excluida_reabrindo_com_sinonimo_e_permitida(self):
+        res = self._chamar({"status": "excluído", "titulo": "T"}, {"status": "reabrir"})
+        self.assertEqual(res["status"], "completed")
+
+    def test_acao_inexistente_e_bloqueada(self):
+        from firebase_functions import https_fn
+        db = MagicMock()
+        db.collection.return_value.document.return_value.get.return_value = MagicMock(exists=False)
+        with patch.object(self.main, "get_db", return_value=db):
+            req = https_fn.CallableRequest(data={"taskId": "t1", "alteracoes": {"titulo": "x"}}, raw_request=None)
+            res = self.fn(req)
+        self.assertEqual(res["status"], "invalidated")
+
+    def test_snapshot_desatualizado_e_bloqueado(self):
+        res = self._chamar(
+            {"status": "em andamento", "titulo": "T", "data_atualizacao": "2026-09-23T10:00:00Z"},
+            {"titulo": "T novo"},
+            snapshot_ts="2026-09-23T09:00:00Z",
+        )
+        self.assertEqual(res["status"], "invalidated")
+        self.assertIn("modificada", res["message"])
+
+
+class TestConfirmarEdicaoEmLoteComportamentalReal(unittest.TestCase):
+    """Mesma cobertura comportamental real, para `confirmarEdicaoEmLote`
+    (a escrita real por trás de editar_acoes_em_lote/confirmar_edicao_em_lote)."""
+
+    def setUp(self):
+        import main
+        self.main = main
+        self.fn = inspect.unwrap(main.confirmarEdicaoEmLote)
+
+    def _chamar(self, tarefas: dict, items: list):
+        from firebase_functions import https_fn
+
+        db = MagicMock()
+
+        def doc_fn(tid):
+            d = MagicMock()
+            dados = tarefas.get(tid)
+            if dados is None:
+                d.get.return_value = MagicMock(exists=False)
+            else:
+                snap = MagicMock(exists=True)
+                snap.to_dict.return_value = dados
+                d.get.return_value = snap
+            return d
+
+        db.collection.return_value.document.side_effect = doc_fn
+        batch = MagicMock()
+        db.batch.return_value = batch
+        with patch.object(self.main, "get_db", return_value=db):
+            req = https_fn.CallableRequest(data={"items": items}, raw_request=None)
+            res = self.fn(req)
+        return res, batch
+
+    def test_concluida_pode_ser_editada(self):
+        res, batch = self._chamar(
+            {"t1": {"status": "concluído", "titulo": "T1"}},
+            [{"task_id": "t1", "alteracoes": {"titulo": "Novo"}}],
+        )
+        self.assertEqual(res["count"], 1)
+        batch.commit.assert_called_once()
+
+    def test_excluida_sem_reabrir_e_pulada(self):
+        """Único item do lote é pulado -> count fica 0 -> a função levanta
+        HttpsError (mesmo caminho de "nenhum campo válido"), em vez de
+        aplicar a edição num item excluído sem reabri-lo."""
+        from firebase_functions import https_fn
+        with self.assertRaises(https_fn.HttpsError):
+            self._chamar(
+                {"t1": {"status": "excluído", "titulo": "T1"}},
+                [{"task_id": "t1", "alteracoes": {"titulo": "Novo"}}],
+            )
+
+    def test_excluida_reabrindo_com_sinonimo_e_aplicada(self):
+        res, batch = self._chamar(
+            {"t1": {"status": "excluído", "titulo": "T1"}},
+            [{"task_id": "t1", "alteracoes": {"status": "reabrir"}}],
+        )
+        self.assertEqual(res["count"], 1)
+        payload = batch.update.call_args[0][1]
+        self.assertEqual(payload["status"], "em andamento")
+
+    def test_item_excluido_nao_impede_os_demais_do_lote(self):
+        res, batch = self._chamar(
+            {
+                "t1": {"status": "excluído", "titulo": "T1"},
+                "t2": {"status": "em andamento", "titulo": "T2"},
+            },
+            [
+                {"task_id": "t1", "alteracoes": {"titulo": "Novo"}},
+                {"task_id": "t2", "alteracoes": {"titulo": "Novo"}},
+            ],
+        )
+        self.assertEqual(res["count"], 1)
+        batch.commit.assert_called_once()
+
+
+class TestPrepararEdicaoEmLoteConcluidaEExcluida(unittest.TestCase):
+    """Achado da 2ª rodada de revisão adversarial (23/09/2026) da correção
+    de edição de ação concluída: esta era uma QUARTA cópia da mesma
+    validação (`preparar_edicao_em_lote`, o passo de propor do trio
+    preparar/confirmar/aplicar-direto em lote) e a única que ainda
+    bloqueava 'concluído' -- inconsistente com a decisão do dono já
+    aplicada aos outros três caminhos (editar_acao e as duas cópias de
+    preparar_edicao_acao)."""
+
+    def _ctx_com_tarefa(self, status):
+        from tools.tool_context import ToolContext
+        db = MagicMock()
+        doc = MagicMock()
+        doc.exists = True
+        doc.to_dict.return_value = {"titulo": "Tarefa", "status": status}
+        db.collection.return_value.document.return_value.get.return_value = doc
+        return ToolContext(_db=db)
+
+    def test_concluida_pode_ser_editada(self):
+        ctx = self._ctx_com_tarefa("concluído")
+        r = hermes_tools.preparar_edicao_em_lote(
+            ctx, {"itens": [{"task_id": "t1", "alteracoes": {"titulo": "Novo"}}]})
+        self.assertFalse(r.startswith("ERRO|"), r)
+
+    def test_excluida_continua_recusada(self):
+        """'excluído' dispara exclusão real do documento e do evento do
+        Calendar na próxima sincronização -- diferente de 'concluído',
+        continua bloqueado."""
+        ctx = self._ctx_com_tarefa("excluído")
+        r = hermes_tools.preparar_edicao_em_lote(
+            ctx, {"itens": [{"task_id": "t1", "alteracoes": {"titulo": "Novo"}}]})
+        self.assertTrue(r.startswith("ERRO|"), r)
+        self.assertIn("excluida", r)
+
+    def test_excluida_reabrindo_com_novo_status_e_permitido(self):
+        ctx = self._ctx_com_tarefa("excluído")
+        r = hermes_tools.preparar_edicao_em_lote(
+            ctx, {"itens": [{"task_id": "t1", "alteracoes": {"status": "em andamento"}}]})
+        self.assertFalse(r.startswith("ERRO|"), r)
+
+    def test_excluida_reabrindo_com_sinonimo_e_permitido(self):
+        """Achado da 3ª rodada de revisão adversarial (23/09/2026): esta
+        checagem comparava o valor CRU de alteracoes['status'] em vez do
+        normalizado -- um sinônimo válido como "reabrir" era recusado aqui
+        mesmo sendo aceito por confirmarEdicaoEmLote (main.py) para o
+        mesmo payload."""
+        ctx = self._ctx_com_tarefa("excluído")
+        r = hermes_tools.preparar_edicao_em_lote(
+            ctx, {"itens": [{"task_id": "t1", "alteracoes": {"status": "reabrir"}}]})
+        self.assertFalse(r.startswith("ERRO|"), r)
 
 
 class _CtxVazio:

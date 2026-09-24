@@ -99,8 +99,12 @@ _access_cache: dict[str, object] | None = None
 # em tudo so adiciona atrito sem adicionar um humano ao circuito.
 #
 # O envio de WhatsApp fica de fora por decisao explicita do dono do sistema
-# (2026-08-25): manda mensagem em nome dele para terceiros, e o unico efeito que
-# nao da para desfazer de dentro do Hermes.
+# (2026-08-25): manda mensagem em nome dele para terceiros, e um efeito que,
+# uma vez REALMENTE entregue (status `sent`), nao da para desfazer de dentro
+# do Hermes. Ha uma janela de cancelamento antes disso (status `pending`/
+# `notified`, ate o worker local entregar) via `cancelar_envio_whatsapp` —
+# mas ela nao muda a exigencia de confirmacao aqui: agendar continua sendo a
+# decisao que precisa do "sim" do usuario antes de existir um job na fila.
 #
 # Configuravel sem deploy: `system/mcp_access.confirm_tools` (lista de nomes)
 # acrescenta tools ao gate. Estes dois efeitos externos, contudo, nunca podem
@@ -210,9 +214,11 @@ _INSTRUCTIONS = (
     "resultado com `consultar_job`.\n"
     "- `schedule_whatsapp_message` manda mensagem para terceiros em nome "
     "do usuario. Mostre o destinatario e o texto exato e espere ele "
-    "concordar antes de chamar — e o unico efeito que nao da para "
-    "desfazer de dentro do Hermes. Se o servidor responder pedindo "
-    "confirmacao, chame `confirmar_acao` com o `confirmation_id` devolvido.\n"
+    "concordar antes de chamar. Se o servidor responder pedindo "
+    "confirmacao, chame `confirmar_acao` com o `confirmation_id` devolvido. "
+    "Enquanto o envio ainda estiver `pending` ou `notified` (confira com "
+    "`consultar_envio_whatsapp`), `cancelar_envio_whatsapp(job_id, motivo)` "
+    "desfaz antes da entrega; depois de `sent` nao ha mais volta.\n"
     "- Para anexar arquivo, a ordem de preferencia e: `drive_file_id` "
     "(arquivo que ja esta no Drive — peca ao usuario para joga-lo la pelo "
     "celular se ainda nao estiver), `gmail_message_id`, `url`, e por fim "

@@ -513,15 +513,35 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
                 if not task_doc.exists:
                     continue
                 task_data = task_doc.to_dict() or {}
+
+                # Achado da 4ª rodada de revisão adversarial da correção de
+                # edição de ação concluída (23/09/2026): esta é uma QUINTA
+                # cópia da mesma validação -- um closure de function-calling
+                # do Gemini para o Telegram, vivo em produção, nunca tocado
+                # pelas rodadas 1-3 (que só cobriam os quatro caminhos do
+                # conector MCP/copiloto web). Não tinha bloqueio nenhum de
+                # 'excluído' (que dispara exclusão real do documento e do
+                # evento do Calendar na próxima sincronização,
+                # sync_google_tasks_push) -- e a normalização de status
+                # embutida logo abaixo já era um subconjunto capenga da
+                # canônica (sem "pendente"/"reabrir"/"pausar" etc., sem
+                # dobra de maiúsculas/acento), então trocada pela função de
+                # tools/hermes_tools.py em vez de corrigida no lugar.
+                from tools.hermes_tools import _normalizar_status_acao
+
+                if task_data.get('status') == 'excluído' and _normalizar_status_acao(
+                    alteracoes.get('status')
+                ) not in ('em andamento', 'stand-by'):
+                    continue
+
                 updates = {}
                 for campo, novo_valor in alteracoes.items():
                     if campo not in _ALLOWED:
                         continue
                     if campo == 'status':
-                        if novo_valor in ('concluido', 'concluida', 'finalizado'): novo_valor = 'concluído'
-                        elif novo_valor in ('stand by', 'standby'): novo_valor = 'stand-by'
-                        elif novo_valor in ('em andamento', 'andamento', 'aberto'): novo_valor = 'em andamento'
-                        elif novo_valor in ('excluido', 'excluir', 'cancelado', 'deletar'): novo_valor = 'excluído'
+                        novo_valor = _normalizar_status_acao(novo_valor)
+                        if novo_valor not in ('em andamento', 'stand-by', 'concluído', 'excluído'):
+                            continue
                     updates[campo] = novo_valor
 
                 if not updates:
@@ -779,15 +799,29 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
         duracao_horas: float = None,
         orientacoes: str = None,
         salvar_como_padrao: bool = False,
+        escopo_contatos: str = None,
+        ativa_em: str = None,
+        desativa_em: str = None,
     ) -> str:
         """Ativa o atendimento autônomo no WhatsApp para contatos autorizados.
 
         Args:
-            contatos: Nomes, telefones ou JIDs. Omitir mantém a lista atual.
-            duracao_horas: Duração em horas; 0.5 equivale a 30 minutos.
-                Omitir mantém ativo até desligar manualmente.
-            orientacoes: Opcional. O que o secretário pode responder e onde parar
-                (até 2000 caracteres). Nunca afrouxa as regras fixas.
+            contatos: Nomes, telefones ou JIDs. Omitir mantém a lista atual. Soma-se a
+                escopo_contatos, não o substitui.
+            escopo_contatos: Opcional. 'individuais' libera TODOS os contatos individuais
+                sem precisar listar, 'grupos' libera TODOS os grupos em que o André for
+                mencionado, 'todos' libera ambos, 'nenhum' desliga o escopo universal
+                (volta a valer só a lista explícita de contatos). Omitir preserva o escopo
+                já configurado.
+            duracao_horas: Duração da janela a partir de ativa_em (ou de agora, se
+                ativa_em for omitido); 0.5 equivale a 30 minutos. Ignorado se desativa_em
+                for informado. Omitir os três mantém ativo até desligar manualmente.
+            ativa_em: Opcional. Timestamp ISO 8601 (ex: '2026-09-23T08:00:00-03:00') de
+                quando a ativação deve começar a valer. Omitir começa imediatamente. Use
+                para agendar um início futuro (ex: pedido feito antes das 8h para uma
+                janela que só deve começar às 8h).
+            desativa_em: Opcional. Timestamp ISO 8601 de quando a ativação deve terminar.
+                Tem prioridade sobre duracao_horas quando ambos são informados.
             salvar_como_padrao: True guarda as orientações como padrão das próximas ativações.
         """
         from tools.hermes_tools import execute
@@ -800,6 +834,9 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
                 "duracao_horas": duracao_horas,
                 "orientacoes": orientacoes,
                 "salvar_como_padrao": salvar_como_padrao,
+                "escopo_contatos": escopo_contatos,
+                "ativa_em": ativa_em,
+                "desativa_em": desativa_em,
             },
             ToolContext(_db=db, canal="telegram"),
         )

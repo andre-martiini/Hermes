@@ -664,6 +664,22 @@ def descartar_rascunho_whatsapp(ctx: ToolContext, args: dict):
     )
 
 
+def cancelar_envio_whatsapp(ctx: ToolContext, args: dict):
+    from outbox_aprovacao import cancelar_envio
+    job_id = str(args.get("job_id") or "").strip()
+    motivo = str(args.get("motivo") or "").strip()
+    if not job_id:
+        return {"erro": "job_id é obrigatório."}
+    if not motivo:
+        return {"erro": "motivo é obrigatório."}
+    return cancelar_envio(
+        ctx.db,
+        outbox_id=job_id,
+        motivo=motivo,
+        ctx=ctx,
+    )
+
+
 def solicitar_autorizacao_argos(ctx: ToolContext, args: dict):
     from argos_autorizacao import solicitar_autorizacao
     return solicitar_autorizacao(
@@ -1320,11 +1336,23 @@ def preparar_edicao_em_lote(ctx: ToolContext, args: dict):
                 return f"ERRO|Acao '{tid}' nao encontrada."
 
             task_data = task_doc.to_dict() or {}
-            if task_data.get("status") in ("concluído", "excluído") and alteracoes.get(
-                "status"
+            # Editar ação concluída é permitido (decisão do dono, 23/09/2026,
+            # já aplicada às cópias desta mesma checagem em main.py e
+            # tools/telegram_extended.py) -- só 'excluído' continua
+            # bloqueado, a menos que a própria edição a esteja reabrindo:
+            # esse status dispara exclusão real do documento e do evento do
+            # Calendar na próxima sincronização (sync_google_tasks_push,
+            # main.py), então editar outro campo sem reabrir é inútil na
+            # melhor das hipóteses.
+            # Achado da 3ª rodada de revisão adversarial (23/09/2026): valor
+            # cru em vez de normalizado -- sinônimo válido como "reabrir"/
+            # "pendente"/"aberto" era recusado aqui mesmo sendo aceito por
+            # confirmarEdicaoEmLote (main.py) para o mesmo payload.
+            if task_data.get("status") == "excluído" and _normalizar_status_acao(
+                alteracoes.get("status")
             ) not in ("em andamento", "stand-by"):
-                return (f"ERRO|A acao '{task_data.get('titulo', tid)}' ja foi concluida ou "
-                        f"excluida e nao pode ser editada.")
+                return (f"ERRO|A acao '{task_data.get('titulo', tid)}' ja foi excluida "
+                        f"e nao pode ser editada.")
 
             alteracoes_diff = {}
             for campo, novo_valor in alteracoes.items():
@@ -1722,9 +1750,17 @@ def _map_confirmar_reagendamento(ctx: ToolContext, args: dict):
 # entao o par vira duas chamadas para uma acao so.
 #
 # Estas versoes diretas nao afrouxam validacao nenhuma: elas chamam as mesmas
-# callables de gravacao, que revalidam tudo (acao existe, nao esta concluida,
-# campo permitido, status normalizado). O que some e so o passo intermediario.
-# As `preparar_*` continuam existindo para a web.
+# callables de gravacao, que revalidam tudo (acao existe, nao esta excluida,
+# campo permitido, status normalizado; editar acao concluida e permitido
+# desde 23/09/2026 -- deixou de ser uma validacao). O que some e so o passo
+# intermediario. As `preparar_*` continuam existindo para a web.
+#
+# Achado da 2a rodada de revisao adversarial (23/09/2026): esta frase
+# ("revalidam tudo") so ficou verdadeira depois de confirmarEdicaoAcao e
+# confirmarEdicaoEmLote ganharem a checagem de 'excluido' -- antes disso as
+# `preparar_*` bloqueavam na proposta mas a gravacao direta (editar_acao/
+# editar_acoes_em_lote/confirmar_edicao_acao/confirmar_edicao_em_lote) nao
+# revalidava nada, e o comentario dizia o contrario do codigo real.
 
 
 # Campos que uma acao aceita editar. Fora daqui, nada e gravado.
@@ -2310,6 +2346,9 @@ def _ativar_modo_secretario(ctx: ToolContext, args: dict):
         ctx=ctx,
         orientacoes=args.get("orientacoes"),
         salvar_como_padrao=bool(args.get("salvar_como_padrao")),
+        escopo_contatos=args.get("escopo_contatos"),
+        ativa_em=args.get("ativa_em"),
+        desativa_em=args.get("desativa_em"),
     )
 
 
@@ -2602,6 +2641,7 @@ _HANDLERS: dict = {
     "listar_rascunhos_pendentes": listar_rascunhos_pendentes,
     "aprovar_rascunho_whatsapp": aprovar_rascunho_whatsapp,
     "descartar_rascunho_whatsapp": descartar_rascunho_whatsapp,
+    "cancelar_envio_whatsapp": cancelar_envio_whatsapp,
     "solicitar_autorizacao_argos": solicitar_autorizacao_argos,
     "consultar_autorizacao_argos": consultar_autorizacao_argos,
     "consumir_autorizacao_argos": consumir_autorizacao_argos,

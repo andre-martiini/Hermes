@@ -143,6 +143,24 @@ class TestSecretarioRegrasPuras(unittest.TestCase):
         self.assertFalse(res_livre["pode_informar_conflito"])
         self.assertIn("NUNCA confirmar disponibilidade", res_livre["motivo"])
 
+    def test_normalizar_escopo_contatos_reconhece_sinonimos(self):
+        self.assertIsNone(sec.normalizar_escopo_contatos(None))
+        self.assertIsNone(sec.normalizar_escopo_contatos(""))
+        self.assertEqual(sec.normalizar_escopo_contatos("individuais"), "individuais")
+        self.assertEqual(sec.normalizar_escopo_contatos("Individual"), "individuais")
+        self.assertEqual(sec.normalizar_escopo_contatos("  SÓ INDIVIDUAIS  "), "individuais")
+        self.assertEqual(sec.normalizar_escopo_contatos("grupos"), "grupos")
+        self.assertEqual(sec.normalizar_escopo_contatos("apenas grupos"), "grupos")
+        self.assertEqual(sec.normalizar_escopo_contatos("todos"), "todos")
+        self.assertEqual(sec.normalizar_escopo_contatos("todo mundo"), "todos")
+        self.assertEqual(sec.normalizar_escopo_contatos("ambos"), "todos")
+        self.assertEqual(sec.normalizar_escopo_contatos("nenhum"), "nenhum")
+        self.assertEqual(sec.normalizar_escopo_contatos("desligar"), "nenhum")
+
+    def test_normalizar_escopo_contatos_rejeita_valor_invalido(self):
+        with self.assertRaises(ValueError):
+            sec.normalizar_escopo_contatos("qualquer-coisa-nao-reconhecida")
+
 
 class TestSecretarioFluxoIntegrado(unittest.TestCase):
     def setUp(self):
@@ -542,6 +560,121 @@ class TestSecretarioFluxoIntegrado(unittest.TestCase):
         self.assertIsNone(res)
 
 
+class TestEscopoUniversalDeContatos(unittest.TestCase):
+    """Escopo universal (`escopo_universal` em system/settings.whatsapp_secretario,
+    ligado por `ativar_modo_secretario(escopo_contatos=...)`) é aditivo à
+    chats_allowlist explícita: qualquer contato individual e/ou grupo passa a ser
+    atendido sem precisar estar listado, mas grupo continua exigindo menção ao
+    André -- essa parte do guardrail não muda com o escopo."""
+
+    def setUp(self):
+        self.db = _MockDb()
+
+    def _configurar(self, escopo_universal=None, chats_allowlist=None):
+        self.db.collection("system").document("settings").set({
+            "whatsapp_secretario": {
+                "enabled": True,
+                "chats_allowlist": chats_allowlist or [],
+                "escopo_universal": escopo_universal,
+            }
+        })
+
+    def _llm_padrao(self, **kwargs):
+        return {
+            "resposta_para_contato": "Anotei, vou repassar ao André.",
+            "resumo_recado": "recado",
+            "forcou_decisao": False,
+            "assunto_sensivel": False,
+        }
+
+    def test_escopo_individuais_atende_contato_fora_da_allowlist(self):
+        self._configurar(escopo_universal="individuais")
+        msg = {
+            "chat_id": "5511222222222@c.us", "chat_name": "Desconhecido", "from_me": False,
+            "content": "Oi André, tudo bem?", "wa_message_id": "m1",
+        }
+        res = sec.processar_mensagem_secretario(self.db, msg, llm_runner=self._llm_padrao)
+        self.assertIsNotNone(res)
+        self.assertEqual(res["status"], "ok")
+
+    def test_escopo_individuais_nao_atende_grupo(self):
+        self._configurar(escopo_universal="individuais")
+        msg = {
+            "chat_id": "12036300000@g.us", "from_me": False, "is_group": True,
+            "content": "@André precisamos de você", "mentions_andre": True, "wa_message_id": "m2",
+        }
+        res = sec.processar_mensagem_secretario(self.db, msg, llm_runner=self._llm_padrao)
+        self.assertIsNone(res)
+
+    def test_escopo_grupos_atende_grupo_fora_da_allowlist_so_com_mencao(self):
+        self._configurar(escopo_universal="grupos")
+        chat_id = "12036300000@g.us"
+        sem_mencao = {
+            "chat_id": chat_id, "from_me": False, "is_group": True,
+            "content": "Bom dia pessoal", "mentions_andre": False, "wa_message_id": "m3",
+        }
+        self.assertIsNone(sec.processar_mensagem_secretario(self.db, sem_mencao, llm_runner=self._llm_padrao))
+
+        com_mencao = {
+            "chat_id": chat_id, "from_me": False, "is_group": True,
+            "content": "@André precisamos de você", "mentions_andre": True, "wa_message_id": "m4",
+        }
+        res = sec.processar_mensagem_secretario(self.db, com_mencao, llm_runner=self._llm_padrao)
+        self.assertIsNotNone(res)
+        self.assertEqual(res["status"], "ok")
+
+    def test_escopo_grupos_nao_atende_contato_individual_fora_da_allowlist(self):
+        self._configurar(escopo_universal="grupos")
+        msg = {
+            "chat_id": "5511222222222@c.us", "from_me": False,
+            "content": "Oi André", "wa_message_id": "m5",
+        }
+        res = sec.processar_mensagem_secretario(self.db, msg, llm_runner=self._llm_padrao)
+        self.assertIsNone(res)
+
+    def test_escopo_todos_atende_individual_e_grupo_com_mencao(self):
+        self._configurar(escopo_universal="todos")
+        individual = {
+            "chat_id": "5511222222222@c.us", "from_me": False,
+            "content": "Oi André", "wa_message_id": "m6",
+        }
+        self.assertIsNotNone(sec.processar_mensagem_secretario(self.db, individual, llm_runner=self._llm_padrao))
+
+        grupo = {
+            "chat_id": "12036300000@g.us", "from_me": False, "is_group": True,
+            "content": "@André precisamos de você", "mentions_andre": True, "wa_message_id": "m7",
+        }
+        self.assertIsNotNone(sec.processar_mensagem_secretario(self.db, grupo, llm_runner=self._llm_padrao))
+
+    def test_sem_escopo_universal_allowlist_explicita_continua_funcionando(self):
+        """Regressão: nenhum escopo configurado não pode quebrar o comportamento
+        original (só allowlist explícita, sem escopo)."""
+        self._configurar(escopo_universal=None, chats_allowlist=["5511999999999@c.us"])
+        na_allowlist = {
+            "chat_id": "5511999999999@c.us", "from_me": False,
+            "content": "Oi André", "wa_message_id": "m8",
+        }
+        self.assertIsNotNone(sec.processar_mensagem_secretario(self.db, na_allowlist, llm_runner=self._llm_padrao))
+
+        fora_da_allowlist = {
+            "chat_id": "5511222222222@c.us", "from_me": False,
+            "content": "Oi André", "wa_message_id": "m9",
+        }
+        self.assertIsNone(sec.processar_mensagem_secretario(self.db, fora_da_allowlist, llm_runner=self._llm_padrao))
+
+    def test_escopo_universal_e_allowlist_sao_aditivos(self):
+        """Um contato explicitamente listado continua atendido mesmo quando o
+        escopo universal configurado (ex: 'grupos') não o cobriria sozinho."""
+        self._configurar(escopo_universal="grupos", chats_allowlist=["5511999999999@c.us"])
+        msg = {
+            "chat_id": "5511999999999@c.us", "from_me": False,
+            "content": "Oi André", "wa_message_id": "m10",
+        }
+        res = sec.processar_mensagem_secretario(self.db, msg, llm_runner=self._llm_padrao)
+        self.assertIsNotNone(res)
+        self.assertEqual(res["status"], "ok")
+
+
 class TestSecretarioSelfService(unittest.TestCase):
     def setUp(self):
         self.db = _MockDb()
@@ -624,6 +757,107 @@ class TestSecretarioSelfService(unittest.TestCase):
         self.assertFalse(cfg["enabled"])
         self.assertEqual(cfg["desativa_em"], desativa_passado)
 
+    def test_obter_config_ainda_nao_iniciado_quando_ativa_em_e_futuro(self):
+        """Janela agendada para começar no futuro: `enabled` fica False até
+        `ativa_em` passar -- gate passivo simétrico ao de `desativa_em`, sem
+        cron novo (mesmo padrão de `_esta_expirado`)."""
+        ativa_futuro = "2030-01-01T08:00:00-03:00"
+        self.db.collection("system").document("settings").set({
+            "whatsapp_secretario": {
+                "enabled": True,
+                "ativa_em": ativa_futuro,
+                "chats_allowlist": ["5511999999999@c.us"],
+            }
+        })
+        cfg = sec.obter_config_secretario(self.db)
+        self.assertFalse(cfg["enabled"])
+        self.assertEqual(cfg["ativa_em"], ativa_futuro)
+
+    def test_obter_config_fica_ativo_apos_ativa_em_passar(self):
+        ativa_passado = "2020-01-01T08:00:00-03:00"
+        self.db.collection("system").document("settings").set({
+            "whatsapp_secretario": {
+                "enabled": True,
+                "ativa_em": ativa_passado,
+                "desativa_em": "2030-01-01T12:00:00-03:00",
+                "chats_allowlist": ["5511999999999@c.us"],
+            }
+        })
+        cfg = sec.obter_config_secretario(self.db)
+        self.assertTrue(cfg["enabled"])
+
+    def test_ativar_com_ativa_em_futuro_fica_desabilitado_ate_a_janela_comecar(self):
+        with mock.patch("secretario_whatsapp._agora_sp", return_value=datetime(2026, 9, 23, 7, 0, tzinfo=timezone(timedelta(hours=-3)))):
+            res = sec.ativar_modo_secretario(
+                self.db, ativa_em="2026-09-23T08:00:00-03:00", desativa_em="2026-09-23T12:00:00-03:00",
+            )
+        self.assertTrue(res["success"])
+        self.assertEqual(res["ativa_em"], "2026-09-23T08:00:00-03:00")
+        self.assertEqual(res["desativa_em"], "2026-09-23T12:00:00-03:00")
+
+        with mock.patch("secretario_whatsapp._agora_sp", return_value=datetime(2026, 9, 23, 7, 30, tzinfo=timezone(timedelta(hours=-3)))):
+            self.assertFalse(sec.obter_config_secretario(self.db)["enabled"])
+        with mock.patch("secretario_whatsapp._agora_sp", return_value=datetime(2026, 9, 23, 9, 0, tzinfo=timezone(timedelta(hours=-3)))):
+            self.assertTrue(sec.obter_config_secretario(self.db)["enabled"])
+        with mock.patch("secretario_whatsapp._agora_sp", return_value=datetime(2026, 9, 23, 12, 30, tzinfo=timezone(timedelta(hours=-3)))):
+            self.assertFalse(sec.obter_config_secretario(self.db)["enabled"])
+
+    def test_ativar_desativa_em_absoluto_tem_prioridade_sobre_duracao_horas(self):
+        res = sec.ativar_modo_secretario(
+            self.db, duracao_horas=1.0, desativa_em="2030-06-15T18:00:00-03:00",
+        )
+        self.assertEqual(res["desativa_em"], "2030-06-15T18:00:00-03:00")
+
+    def test_ativar_rejeita_janela_com_fim_antes_ou_igual_ao_inicio(self):
+        res = sec.ativar_modo_secretario(
+            self.db, ativa_em="2030-01-01T12:00:00-03:00", desativa_em="2030-01-01T10:00:00-03:00",
+        )
+        self.assertFalse(res["success"])
+        self.assertIn("erro", res)
+
+    def test_ativar_ativa_em_invalido_devolve_erro_sem_gravar(self):
+        res = sec.ativar_modo_secretario(self.db, ativa_em="isso-nao-e-uma-data")
+        self.assertFalse(res["success"])
+        cfg = sec.obter_config_secretario(self.db)
+        self.assertFalse(cfg["enabled"])
+
+    def test_ativar_com_escopo_contatos_grava_escopo_universal(self):
+        res = sec.ativar_modo_secretario(self.db, escopo_contatos="individuais")
+        self.assertTrue(res["success"])
+        self.assertEqual(res["escopo_universal"], "individuais")
+        self.assertIn("Escopo", res["mensagem"])
+
+        cfg = sec.obter_config_secretario(self.db)
+        self.assertEqual(cfg["escopo_universal"], "individuais")
+
+    def test_ativar_escopo_nenhum_desliga_escopo_universal_anterior(self):
+        sec.ativar_modo_secretario(self.db, escopo_contatos="todos")
+        res = sec.ativar_modo_secretario(self.db, escopo_contatos="nenhum")
+        self.assertIsNone(res["escopo_universal"])
+        self.assertIsNone(sec.obter_config_secretario(self.db)["escopo_universal"])
+
+    def test_ativar_omitir_escopo_contatos_preserva_o_anterior(self):
+        sec.ativar_modo_secretario(self.db, escopo_contatos="grupos")
+        res = sec.ativar_modo_secretario(self.db, contatos=["5511999999999@c.us"])
+        self.assertEqual(res["escopo_universal"], "grupos")
+
+    def test_ativar_escopo_contatos_string_vazia_tambem_preserva_o_anterior(self):
+        """Achado da 1ª rodada de revisão adversarial (23/09/2026): `escopo_contatos=""`
+        entrava no bloco (`is not None`), `normalizar_escopo_contatos` devolvia None
+        (documentado como "preservar"), mas o código gravava esse None mesmo assim --
+        apagando silenciosamente um escopo 'todos'/'grupos'/'individuais' já configurado.
+        Cenário real: um closure de function-calling (Gemini/Telegram) manda "" em vez de
+        omitir a chave para um parâmetro opcional não usado nesta chamada."""
+        sec.ativar_modo_secretario(self.db, escopo_contatos="todos")
+        res = sec.ativar_modo_secretario(self.db, escopo_contatos="")
+        self.assertEqual(res["escopo_universal"], "todos")
+        self.assertEqual(sec.obter_config_secretario(self.db)["escopo_universal"], "todos")
+
+    def test_ativar_escopo_contatos_invalido_devolve_erro(self):
+        res = sec.ativar_modo_secretario(self.db, escopo_contatos="planetas")
+        self.assertFalse(res["success"])
+        self.assertIn("erro", res)
+
     def test_desativar_modo_secretario(self):
         self.db.collection("system").document("settings").set({
             "whatsapp_secretario": {
@@ -640,6 +874,18 @@ class TestSecretarioSelfService(unittest.TestCase):
         cfg = sec.obter_config_secretario(self.db)
         self.assertFalse(cfg["enabled"])
         self.assertIsNone(cfg["desativa_em"])
+
+    def test_desativar_modo_secretario_limpa_ativa_em(self):
+        self.db.collection("system").document("settings").set({
+            "whatsapp_secretario": {
+                "enabled": True,
+                "ativa_em": "2030-01-01T08:00:00-03:00",
+                "chats_allowlist": ["5511999999999@c.us"],
+            }
+        })
+        res = sec.desativar_modo_secretario(self.db)
+        self.assertIsNone(res["ativa_em"])
+        self.assertIsNone(sec.obter_config_secretario(self.db)["ativa_em"])
 
     def test_consultar_status_modo_secretario(self):
         self.db.collection("system").document("settings").set({
@@ -659,6 +905,26 @@ class TestSecretarioSelfService(unittest.TestCase):
         self.assertEqual(len(st["contatos_detalhes"]), 1)
         self.assertEqual(st["contatos_detalhes"][0]["nome"], "Carlos Parceiro")
         self.assertIn("Carlos Parceiro", st["mensagem"])
+
+    def test_consultar_status_com_escopo_universal_e_janela_programada(self):
+        self.db.collection("system").document("settings").set({
+            "whatsapp_secretario": {
+                "enabled": False,
+                "ativa_em": "2030-01-01T08:00:00-03:00",
+                "desativa_em": "2030-01-01T12:00:00-03:00",
+                "escopo_universal": "individuais",
+                "chats_allowlist": [],
+            }
+        })
+        st = sec.consultar_status_modo_secretario(self.db)
+        self.assertFalse(st["enabled"])
+        self.assertEqual(st["escopo_universal"], "individuais")
+        self.assertEqual(st["ativa_em"], "2030-01-01T08:00:00-03:00")
+        self.assertIn("Escopo", st["mensagem"])
+        self.assertIn("2030-01-01T08:00:00-03:00", st["mensagem"])
+        # Escopo universal ativo não deve reclamar de allowlist vazia como se
+        # o secretário estivesse sem nenhum contato liberado.
+        self.assertNotIn("Nenhum contato na allowlist", st["mensagem"])
 
     def test_consultar_status_modo_secretario_normaliza_desativa_em_nao_string(self):
         # Regressão do achado do Codex na PR de consultar_status_modo_
@@ -699,6 +965,29 @@ class TestSecretarioSelfService(unittest.TestCase):
         res_desativar = hermes_tools.execute("desativar_modo_secretario", {}, ctx)
         self.assertTrue(res_desativar["success"])
         self.assertFalse(res_desativar["enabled"])
+
+    def test_mcp_tool_repassa_escopo_contatos_e_janela_de_ativacao(self):
+        """Achado desta rodada: o handler MCP (`_ativar_modo_secretario` em
+        tools/hermes_tools.py) precisa repassar os três parâmetros novos --
+        sem isso a tool exposta pelo conector ficaria capenga mesmo com a
+        lógica real em secretario_whatsapp.py já pronta."""
+        from tools import hermes_tools
+        from tools.tool_context import ToolContext
+
+        ctx = ToolContext("system", _db=self.db)
+        res = hermes_tools.execute(
+            "ativar_modo_secretario",
+            {
+                "escopo_contatos": "individuais",
+                "ativa_em": "2030-01-01T08:00:00-03:00",
+                "desativa_em": "2030-01-01T12:00:00-03:00",
+            },
+            ctx,
+        )
+        self.assertTrue(res["success"])
+        self.assertEqual(res["escopo_universal"], "individuais")
+        self.assertEqual(res["ativa_em"], "2030-01-01T08:00:00-03:00")
+        self.assertEqual(res["desativa_em"], "2030-01-01T12:00:00-03:00")
 
 
 class TestAutomationSettingsCallable(unittest.TestCase):
