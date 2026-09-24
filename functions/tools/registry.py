@@ -1102,6 +1102,12 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     # "erro": str(exc)}`) quando a consulta ao Firestore falha -- modelar
     # outputSchema pra elas exigiria decidir se o contrato cobre as duas
     # formas possiveis ou so a normal, investigacao maior que esta fatia;
+    # ATUALIZACAO (sub-entrega 29/N): essa objecao nao se aplica mais a
+    # `consultar_promocoes_autonomia_sugeridas` -- o padrao `oneOf`
+    # (estabelecido na sub-entrega 14/N para `consultar_historico_acoes`,
+    # reusado desde entao) resolve exatamente essa decisao; ver a entrada
+    # propria dela no fim deste dict. `consultar_elevacoes_sugeridas`
+    # continua descartada, nao reinvestigada nesta sub-entrega.
     # `agent_runs.listar_recentes` nao tem esse formato alternativo (uma
     # falha de consulta propaga como excecao nao tratada, fora do escopo de
     # outputSchema, mesmo tratamento generico de qualquer handler sem
@@ -2415,6 +2421,115 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
             },
         ],
     },
+    # `consultar_promocoes_autonomia_sugeridas` (P03 sub-entrega 29/N) --
+    # decima terceira tool com contrato publicado. Retomada da candidata
+    # descartada na sub-entrega 11/N (ver o comentario de
+    # `consultar_execucoes_agente` acima) -- a objecao de entao ("modelar
+    # outputSchema exigiria decidir se o contrato cobre as duas formas
+    # possiveis ou so a normal, investigacao maior que aquela fatia") ja
+    # nao se sustenta: o padrao `oneOf` com as duas formas COMPLETAS e
+    # DISJUNTAS (sucesso/erro), usado desde `consultar_historico_acoes`
+    # (sub-entrega 14/N) e mais recentemente em
+    # `consultar_contatos_prioritarios_secretario` (sub-entrega 28/N,
+    # entrada acima), e exatamente a decisao que faltava tomar.
+    #
+    # Handler (`tools/hermes_tools.py::_consultar_promocoes_autonomia_
+    # sugeridas`) e passthrough puro: so resolve o default de `limite`
+    # (`int(args.get("limite") or 20)`) antes de repassar a
+    # `promocao_autonomia.listar_promocoes_pendentes`, que tem exatamente
+    # DUAS formas de retorno, nunca uma terceira:
+    #   - sucesso: `{"total": int, "promocoes": [...]}` (a consulta ao
+    #     Firestore correu bem, mesmo que sem nenhum resultado)
+    #   - erro: `{"total": 0, "promocoes": [], "erro": str(exc)}` -- so
+    #     quando o `.stream()` da query levanta excecao (`try/except`
+    #     dentro da propria funcao); `total`/`promocoes` ficam FIXOS em
+    #     `0`/`[]` nesse ramo (hardcoded no `return` do `except`, nao
+    #     ecoados de nenhum calculo), mesma convencao de
+    #     `consultar_historico_acoes`/`buscar_arquivos_acervo`
+    #     (`resultados`/`contatos_prioritarios` sempre `[]` no ramo de
+    #     erro).
+    #
+    # Escritor da colecao `promocoes_autonomia_sugeridas`
+    # (`promocao_autonomia.COL_PROMOCOES`): busca exaustiva no repositorio
+    # (grep por `collection(COL_PROMOCOES)`) encontra 3 pontos de escrita,
+    # mas UM UNICO ponto de CRIACAO de documento com `status="pendente"`
+    # -- `registrar_sugestao_promocao` (linha ~130), chamada por sua vez de
+    # UM UNICO call site em todo o repositorio (`retro_agente.py`, dentro
+    # da retro semanal). Os outros 2 pontos (`decidir_promocao_autonomia`,
+    # `revogar_promocao_autonomia`) so fazem `transaction.update`/`.update`
+    # sobre um documento MOVENDO `status` PARA FORA de `pendente`
+    # (`aceita`/`adiada`/`nunca`) ou gravando `revogado_em`/
+    # `motivo_revogacao` -- nenhum dos dois grava `status="pendente"` nem
+    # toca `tipo`/`amostra`/`aprovados_sem_edicao`/`taxa_sem_edicao`/
+    # `sugerida_em`. Combinado com o filtro da propria QUERY de leitura
+    # (`listar_promocoes_pendentes` faz `.where("status", "==",
+    # STATUS_PENDENTE)`), `status` e enum fechado de UM valor
+    # (`["pendente"]`) por garantia DUPLA -- da query e do unico escritor
+    # de criacao -- mesma categoria ja usada para `consultar_pedidos_
+    # agente` (sub-entrega 12/N).
+    #
+    # `amostra`/`aprovados_sem_edicao`/`taxa_sem_edicao` sao sempre os
+    # valores devolvidos por `outbox_aprovacao.metricas_por_tipo` (unica
+    # origem do argumento `metricas` de `registrar_sugestao_promocao`,
+    # lido por completo): `amostra` e sempre `len(amostra_docs)` (int),
+    # `aprovados_sem_edicao` e sempre `sum(1 for ... in amostra_docs)`
+    # (int), `taxa_sem_edicao` e sempre uma DIVISAO (`sem_edicao / amostra`,
+    # float) ou o literal `0.0` -- nunca outro tipo, mesmo quando o
+    # documento nao tem a chave (`d.get(campo, 0)`/`d.get(campo, 0.0)` na
+    # leitura cobre so o caso hipotetico de documento legado sem o campo,
+    # nunca observado no unico escritor atual). `tipo` e sempre string --
+    # `d.get("tipo") or doc.id`, e `doc.id` e garantido string pelo SDK do
+    # Firestore quando `tipo` estiver ausente. `sugerida_em` passa pela
+    # `_to_iso` PROPRIA deste modulo (mesmo corpo de
+    # `agent_runs.py`/`agent_requests.py`, mas uma DUPLICATA independente,
+    # mesma categoria de achado ja registrado para `consultar_pedidos_
+    # agente`) -- sempre string ou `None`, nunca outro tipo.
+    #
+    # `erro` (ramo de erro) e `str(exc)` sobre a excecao real capturada --
+    # sempre string, nunca vazio (uma excecao Python sempre tem alguma
+    # representacao textual, mesmo que vazia a mensagem em si `str(exc)`
+    # nunca levanta).
+    "consultar_promocoes_autonomia_sugeridas": {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "total": {"type": "integer"},
+                    "promocoes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "tipo": {"type": "string"},
+                                "status": {"type": "string", "enum": ["pendente"]},
+                                "amostra": {"type": "integer"},
+                                "aprovados_sem_edicao": {"type": "integer"},
+                                "taxa_sem_edicao": {"type": "number"},
+                                "sugerida_em": {"type": ["string", "null"]},
+                            },
+                            "required": [
+                                "tipo", "status", "amostra",
+                                "aprovados_sem_edicao", "taxa_sem_edicao", "sugerida_em",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["total", "promocoes"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "erro": {"type": "string"},
+                    "total": {"type": "integer"},
+                    "promocoes": {"type": "array", "maxItems": 0},
+                },
+                "required": ["erro", "total", "promocoes"],
+                "additionalProperties": False,
+            },
+        ],
+    },
 }
 
 
@@ -2425,11 +2540,11 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (96 das 108 tools
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (95 das 108 tools
     hoje -- `len(registry.list_tool_names())`, nao os "106" que este
     docstring citava ate a sub-entrega 24/N, contagem ja desatualizada
-    antes daquela fatia -- apos a decima segunda entrada, `consultar_
-    contatos_prioritarios_secretario`, sub-entrega 28/N), deliberadamente:
+    antes daquela fatia -- apos a decima terceira entrada, `consultar_
+    promocoes_autonomia_sugeridas`, sub-entrega 29/N), deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
     (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).

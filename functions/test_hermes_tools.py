@@ -242,6 +242,42 @@ class TestExecucao(unittest.TestCase):
         mock_consulta.assert_called_once_with(db=None, apenas_ativos=False)
         self.assertEqual(resultado["apenas_ativos"], False)
 
+    def test_consultar_promocoes_autonomia_sugeridas_default_limite_20(self):
+        # `_consultar_promocoes_autonomia_sugeridas` não tinha nenhum teste
+        # dedicado antes desta sub-entrega (P03 29/N, outputSchema) -- a
+        # lógica de default de `limite` é exclusiva do wrapper (os testes
+        # de `promocao_autonomia.listar_promocoes_pendentes` em
+        # `test_promocao_autonomia.py` chamam a função de baixo nível
+        # direto, sempre com `limite` explícito). Ausência do argumento ->
+        # `20` (o default do `or`).
+        with patch("promocao_autonomia.listar_promocoes_pendentes") as mock_listar:
+            mock_listar.return_value = {"total": 0, "promocoes": []}
+            hermes_tools._consultar_promocoes_autonomia_sugeridas(type("Ctx", (), {"db": None})(), {})
+        mock_listar.assert_called_once_with(None, limite=20)
+
+    def test_consultar_promocoes_autonomia_sugeridas_zero_explicito_vira_20(self):
+        # Achado ao ler o handler: `int(args.get("limite") or 20)` usa o
+        # `or`, não `.get(chave, default)` -- um `limite` explicitamente
+        # `0` (ou `None`) também vira `20`, não `0`, porque `0`/`None` são
+        # ambos falsy em Python. Diferente de `apenas_ativos` (que tem uma
+        # checagem explícita só para `None`), aqui a mesma expressão cobre
+        # ausência, `None` e `0` de uma vez -- este teste cobre o caso `0`,
+        # o mais fácil de confundir com "repassar 0 de verdade".
+        with patch("promocao_autonomia.listar_promocoes_pendentes") as mock_listar:
+            mock_listar.return_value = {"total": 0, "promocoes": []}
+            hermes_tools._consultar_promocoes_autonomia_sugeridas(
+                type("Ctx", (), {"db": None})(), {"limite": 0}
+            )
+        mock_listar.assert_called_once_with(None, limite=20)
+
+    def test_consultar_promocoes_autonomia_sugeridas_repassa_limite_explicito(self):
+        with patch("promocao_autonomia.listar_promocoes_pendentes") as mock_listar:
+            mock_listar.return_value = {"total": 0, "promocoes": []}
+            hermes_tools._consultar_promocoes_autonomia_sugeridas(
+                type("Ctx", (), {"db": None})(), {"limite": 5}
+            )
+        mock_listar.assert_called_once_with(None, limite=5)
+
     def test_tool_desconhecida_levanta(self):
         from tools.tool_context import ToolContext
 

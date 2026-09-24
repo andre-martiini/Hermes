@@ -156,6 +156,24 @@ timestamps do Firestore (`SERVER_TIMESTAMP`) que chegam a
 Handler não tinha nenhum teste dedicado antes desta sub-entrega -- lacuna
 fechada em `test_hermes_tools.py`.
 
+`consultar_promocoes_autonomia_sugeridas` (sub-entrega 29/N): décima
+terceira tool, backed por `promocao_autonomia.listar_promocoes_
+pendentes`, com `oneOf` de 2 branches (sucesso/erro). Candidata descartada
+na sub-entrega 11/N por exigir decidir se o contrato cobre as duas formas
+possíveis -- decisão que o próprio `oneOf` (estabelecido depois, na
+sub-entrega 14/N) resolve, retomada agora. Diferente de
+`consultar_contatos_prioritarios_secretario`, a própria função de leitura
+RECONSTRÓI o item campo a campo (`.get(chave, default)`), então a garantia
+de forma não depende só do escritor -- mas o escritor também é único:
+`promocao_autonomia.registrar_sugestao_promocao`, chamado por um único
+call site (`retro_agente.py`). `status` é enum fechado de um valor
+(`["pendente"]`) por garantia dupla: o filtro da própria query
+(`.where("status", "==", STATUS_PENDENTE)`) e o único escritor de criação.
+`amostra`/`aprovados_sem_edicao`/`taxa_sem_edicao` vêm sempre de
+`outbox_aprovacao.metricas_por_tipo` (int/int/float, nunca outro tipo).
+Ver comentário de `_OUTPUT_SCHEMAS` em `tools/registry.py` para o
+levantamento completo.
+
 Cinco frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
    paridade com TODO o catálogo real (não amostra): nenhuma tool além de
@@ -163,11 +181,12 @@ Cinco frentes:
    `consultar_execucoes_agente`, `consultar_pedidos_agente`,
    `consultar_historico_acoes`, `obter_acao`,
    `listar_rascunhos_pendentes`, `consultar_job`, `buscar_arquivos_acervo`,
-   `consultar_status_modo_secretario` e
-   `consultar_contatos_prioritarios_secretario` tem contrato publicado hoje.
+   `consultar_status_modo_secretario`,
+   `consultar_contatos_prioritarios_secretario` e
+   `consultar_promocoes_autonomia_sugeridas` tem contrato publicado hoje.
 2. `TestHandleToolsListOutputSchema` -- ponta a ponta via
    `mcp_server._handle_tools_list()`: `outputSchema` chega no catálogo
-   publicado só para essas doze tools.
+   publicado só para essas treze tools.
 3. `TestIntegracaoHandleToolsCallStructuredContent` -- ponta a ponta via
    `mcp_server._handle_tools_call`: `structuredContent` chega no envelope
    de `tools/call` para `calculadora` (execução real, pura) e para
@@ -175,14 +194,16 @@ Cinco frentes:
    `consultar_pedidos_agente`/`consultar_historico_acoes`/`obter_acao`/
    `listar_rascunhos_pendentes`/`consultar_job`/`buscar_arquivos_acervo`/
    `consultar_status_modo_secretario`/
-   `consultar_contatos_prioritarios_secretario`
-   (executor mockado -- as onze dependem de Firestore, então o teste cobre
+   `consultar_contatos_prioritarios_secretario`/
+   `consultar_promocoes_autonomia_sugeridas`
+   (executor mockado -- as doze dependem de Firestore, então o teste cobre
    o MECANISMO, não a correção interna dos handlers, mesmo padrão já usado
    para `consultar_processo_sipac` abaixo), é sempre IGUAL ao dict que
    `content[0].text` serializa (mesma fonte, nunca diverge), bate com o
    `outputSchema` publicado campo a campo (para `consultar_historico_acoes`,
-   `obter_acao`, `consultar_job`, `buscar_arquivos_acervo` e `consultar_
-   contatos_prioritarios_secretario`, contra o branch `oneOf`
+   `obter_acao`, `consultar_job`, `buscar_arquivos_acervo`, `consultar_
+   contatos_prioritarios_secretario` e `consultar_promocoes_autonomia_
+   sugeridas`, contra o branch `oneOf`
    correspondente à forma retornada), e nunca aparece para
    uma tool sem contrato publicado -- nem
    quando o resultado real também é um dict, nem quando o executor levanta
@@ -793,7 +814,42 @@ class TestOutputSchema(unittest.TestCase):
         self.assertFalse(erro["additionalProperties"])
         self.assertEqual(erro["properties"]["contatos_prioritarios"], {"type": "array", "maxItems": 0})
 
-    def test_paridade_doze_tools_tem_output_schema_hoje(self):
+    def test_consultar_promocoes_autonomia_sugeridas_tem_schema_oneof_sucesso_e_erro(self):
+        schema = registry.output_schema("consultar_promocoes_autonomia_sugeridas")
+        self.assertIsNotNone(schema)
+        self.assertEqual(len(schema["oneOf"]), 2)
+        sucesso, erro = schema["oneOf"]
+
+        self.assertEqual(set(sucesso["properties"].keys()), {"total", "promocoes"})
+        self.assertEqual(set(sucesso["required"]), {"total", "promocoes"})
+        self.assertFalse(sucesso["additionalProperties"])
+        self.assertEqual(sucesso["properties"]["total"], {"type": "integer"})
+
+        item = sucesso["properties"]["promocoes"]["items"]
+        campos_item = {
+            "tipo", "status", "amostra", "aprovados_sem_edicao",
+            "taxa_sem_edicao", "sugerida_em",
+        }
+        self.assertEqual(set(item["properties"].keys()), campos_item)
+        self.assertEqual(set(item["required"]), campos_item)
+        self.assertFalse(item["additionalProperties"])
+        self.assertEqual(item["properties"]["tipo"], {"type": "string"})
+        # `status` é enum de UM valor só -- garantia dupla: o filtro da
+        # própria query (`.where("status", "==", STATUS_PENDENTE)`) e o
+        # único escritor de criação (ver comentário de `_OUTPUT_SCHEMAS`).
+        self.assertEqual(item["properties"]["status"], {"type": "string", "enum": ["pendente"]})
+        self.assertEqual(item["properties"]["amostra"], {"type": "integer"})
+        self.assertEqual(item["properties"]["aprovados_sem_edicao"], {"type": "integer"})
+        self.assertEqual(item["properties"]["taxa_sem_edicao"], {"type": "number"})
+        self.assertEqual(item["properties"]["sugerida_em"], {"type": ["string", "null"]})
+
+        self.assertEqual(set(erro["properties"].keys()), {"erro", "total", "promocoes"})
+        self.assertEqual(set(erro["required"]), {"erro", "total", "promocoes"})
+        self.assertFalse(erro["additionalProperties"])
+        self.assertEqual(erro["properties"]["promocoes"], {"type": "array", "maxItems": 0})
+        self.assertEqual(erro["properties"]["total"], {"type": "integer"})
+
+    def test_paridade_treze_tools_tem_output_schema_hoje(self):
         # Não por amostragem: para TODA tool do catálogo real (108 hoje --
         # `len(registry.list_tool_names())`; achado da revisão adversarial
         # da sub-entrega 25/N: "106" estava desatualizado desde antes
@@ -802,15 +858,17 @@ class TestOutputSchema(unittest.TestCase):
         # consultar_execucoes_agente, consultar_pedidos_agente,
         # consultar_historico_acoes, obter_acao, listar_rascunhos_pendentes,
         # consultar_job, buscar_arquivos_acervo,
-        # consultar_status_modo_secretario e
-        # consultar_contatos_prioritarios_secretario -- prova que a lista
-        # fechada não vazou para nenhuma outra tool por engano.
+        # consultar_status_modo_secretario, consultar_contatos_
+        # prioritarios_secretario e consultar_promocoes_autonomia_
+        # sugeridas -- prova que a lista fechada não vazou para nenhuma
+        # outra tool por engano.
         com_schema = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
             "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
             "consultar_status_modo_secretario", "consultar_contatos_prioritarios_secretario",
+            "consultar_promocoes_autonomia_sugeridas",
         }
         for nome in registry.list_tool_names():
             with self.subTest(tool=nome):
@@ -924,6 +982,17 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
         # Forma única, sem oneOf -- ao contrário das quatro tools anteriores.
         self.assertNotIn("oneOf", self.catalogo["consultar_status_modo_secretario"]["outputSchema"])
 
+    def test_consultar_promocoes_autonomia_sugeridas_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["consultar_promocoes_autonomia_sugeridas"])
+        self.assertEqual(
+            self.catalogo["consultar_promocoes_autonomia_sugeridas"]["outputSchema"],
+            registry.output_schema("consultar_promocoes_autonomia_sugeridas"),
+        )
+        self.assertIn("oneOf", self.catalogo["consultar_promocoes_autonomia_sugeridas"]["outputSchema"])
+        self.assertEqual(
+            len(self.catalogo["consultar_promocoes_autonomia_sugeridas"]["outputSchema"]["oneOf"]), 2
+        )
+
     def test_nenhuma_outra_tool_publicada_tem_output_schema(self):
         esperadas = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
@@ -931,6 +1000,7 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             "consultar_historico_acoes", "obter_acao",
             "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
             "consultar_status_modo_secretario", "consultar_contatos_prioritarios_secretario",
+            "consultar_promocoes_autonomia_sugeridas",
         }
         com_schema = [
             nome for nome, tool in self.catalogo.items()
@@ -947,6 +1017,7 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             "consultar_historico_acoes", "obter_acao",
             "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
             "consultar_status_modo_secretario", "consultar_contatos_prioritarios_secretario",
+            "consultar_promocoes_autonomia_sugeridas",
         ):
             with self.subTest(tool=nome):
                 tool = self.catalogo[nome]
@@ -2161,6 +2232,113 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
             )
         estruturado = resultado["structuredContent"]
         self.assertEqual(set(estruturado.keys()), set(erro_schema["properties"].keys()))
+
+    def test_consultar_promocoes_autonomia_sugeridas_sucesso_leva_structured_content_igual_ao_content(self):
+        # `promocao_autonomia.listar_promocoes_pendentes` real depende de
+        # Firestore; o executor é mockado aqui com uma forma real que a
+        # função produz (ver `promocao_autonomia.py`), mesmo padrão de
+        # `consultar_pedidos_agente`/`consultar_execucoes_agente` acima.
+        esperado = {
+            "total": 1,
+            "promocoes": [
+                {
+                    "tipo": "outbox_secretario",
+                    "status": "pendente",
+                    "amostra": 12,
+                    "aprovados_sem_edicao": 11,
+                    "taxa_sem_edicao": 11 / 12,
+                    "sugerida_em": "2026-09-04T10:00:00+00:00",
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_promocoes_autonomia_sugeridas", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_promocoes_autonomia_sugeridas_lista_vazia_tambem_leva_structured_content(self):
+        esperado = {"total": 0, "promocoes": []}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_promocoes_autonomia_sugeridas", "arguments": {"limite": 5}},
+                ctx=_ctx(),
+            )
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_consultar_promocoes_autonomia_sugeridas_erro_tambem_leva_structured_content(self):
+        # Caminho real de erro: `.stream()` da query levanta excecao,
+        # capturada dentro da própria `listar_promocoes_pendentes` --
+        # `total`/`promocoes` ficam fixos em `0`/`[]`, `erro` é `str(exc)`.
+        esperado = {
+            "erro": "503 Firestore indisponível",
+            "total": 0,
+            "promocoes": [],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_promocoes_autonomia_sugeridas", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertTrue(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_promocoes_autonomia_sugeridas_structured_content_bate_com_o_output_schema_publicado(self):
+        # Paridade campo a campo contra o branch `oneOf` correspondente à
+        # forma efetivamente devolvida, mesmo padrão de
+        # `consultar_historico_acoes`/`consultar_contatos_prioritarios_
+        # secretario` acima.
+        schema = registry.output_schema("consultar_promocoes_autonomia_sugeridas")
+        sucesso_schema, erro_schema = schema["oneOf"]
+
+        mock_sucesso = {
+            "total": 1,
+            "promocoes": [
+                {
+                    "tipo": "outbox_secretario",
+                    "status": "pendente",
+                    "amostra": 10,
+                    "aprovados_sem_edicao": 9,
+                    "taxa_sem_edicao": 0.9,
+                    "sugerida_em": None,
+                },
+            ],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_sucesso):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_promocoes_autonomia_sugeridas", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        item_props = sucesso_schema["properties"]["promocoes"]["items"]["properties"]
+        for campo in sucesso_schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(
+                campo, sucesso_schema["properties"],
+                f"campo '{campo}' fora do branch de sucesso do outputSchema",
+            )
+        for item in estruturado["promocoes"]:
+            for campo in item:
+                self.assertIn(campo, item_props, f"campo '{campo}' fora do item declarado")
+
+        mock_erro = {"erro": "falhou", "total": 0, "promocoes": []}
+        with patch.object(mcp_server, "execute_tool", return_value=mock_erro):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_promocoes_autonomia_sugeridas", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        for campo in erro_schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(
+                campo, erro_schema["properties"],
+                f"campo '{campo}' fora do branch de erro do outputSchema",
+            )
 
     def test_tool_sem_output_schema_nunca_leva_structured_content_mesmo_com_dict(self):
         # `consultar_processo_sipac` não tem outputSchema publicado; mesmo
