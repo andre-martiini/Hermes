@@ -135,13 +135,20 @@ reconstrói o item campo a campo -- devolve `doc.to_dict()` quase cru --
 então a garantia de forma do item vem inteira do ÚNICO ponto de criação
 de documento em todo o repositório (`secretario_whatsapp.preparar_
 contato_prioritario`, confirmado por grep na constante da coleção), lido
-por completo junto com os outros 4 pontos de escrita de `status`
-(conclusão x2, expiração automática, cancelamento). `resumo_estruturado`/
-`informacao_obtida` são `None`/`None` na criação e viram `str`/`bool` na
-conclusão -- a CHAVE sempre existe, por isso `["string", "null"]`/
-`["boolean", "null"]` em vez de campo às vezes ausente; `concluido_em` é
-o oposto -- só existe como chave após a conclusão, por isso fica fora de
-`required` no item. `criado_em`/`atualizado_em`/`concluido_em` são
+por completo junto com os outros 5 pontos de escrita de `status`
+(conclusão x2, cancelamento, e DUAS expirações automáticas
+independentes -- uma dentro da própria `consultar_contatos_
+prioritarios`, outra em `obter_briefing_ativo`, achado da revisão
+adversarial desta sub-entrega). `resumo_estruturado`/`informacao_obtida`
+são `None`/`None` na criação e viram `str`/`bool` na conclusão -- a
+CHAVE sempre existe, por isso `["string", "null"]`/`["boolean", "null"]`
+em vez de campo às vezes ausente; `concluido_em` fica fora de `required`
+no item por um motivo diferente -- ACHADO da revisão adversarial: a
+chave não é removida por um reregistro (`preparar_contato_prioritario`
+usa `set(..., merge=True)`, que nunca apaga campo não mencionado), então
+sua presença não implica de volta que o documento esteja concluído (risco
+aceito, documentado em `tools/registry.py`, não muda o tipo declarado).
+`criado_em`/`atualizado_em`/`concluido_em` são
 timestamps do Firestore (`SERVER_TIMESTAMP`) que chegam a
 `structuredContent` como `string` via `json.dumps(..., default=str)`
 (`mcp_server._handle_tools_call`), não como objeto -- ver comentário de
