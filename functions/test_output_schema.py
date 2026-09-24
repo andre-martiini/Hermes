@@ -123,7 +123,31 @@ normalizando na LEITURA (`secretario_whatsapp.obter_config_secretario`
 agora coage para `str(...)` quando o valor presente não é string), não no
 endpoint HTTP — ver comentário de `_OUTPUT_SCHEMAS` em
 `tools/registry.py` e `test_secretario_whatsapp.py` para o levantamento
-completo e o teste de regressão.
+completo e o teste de regressão — e
+`consultar_contatos_prioritarios_secretario` (sub-entrega 28/N): décima
+segunda tool, backed por `secretario_whatsapp.consultar_contatos_
+prioritarios` (passthrough puro em `tools/hermes_tools.py::
+_consultar_contatos_prioritarios_secretario`, que só resolve o default/
+None de `apenas_ativos` antes de repassar), com `oneOf` de 2 branches
+(erro/sucesso) pela mesma forma de `buscar_arquivos_acervo`. Diferente de
+`busca_acervo`/`lista_compras`, a própria função de leitura NÃO
+reconstrói o item campo a campo -- devolve `doc.to_dict()` quase cru --
+então a garantia de forma do item vem inteira do ÚNICO ponto de criação
+de documento em todo o repositório (`secretario_whatsapp.preparar_
+contato_prioritario`, confirmado por grep na constante da coleção), lido
+por completo junto com os outros 4 pontos de escrita de `status`
+(conclusão x2, expiração automática, cancelamento). `resumo_estruturado`/
+`informacao_obtida` são `None`/`None` na criação e viram `str`/`bool` na
+conclusão -- a CHAVE sempre existe, por isso `["string", "null"]`/
+`["boolean", "null"]` em vez de campo às vezes ausente; `concluido_em` é
+o oposto -- só existe como chave após a conclusão, por isso fica fora de
+`required` no item. `criado_em`/`atualizado_em`/`concluido_em` são
+timestamps do Firestore (`SERVER_TIMESTAMP`) que chegam a
+`structuredContent` como `string` via `json.dumps(..., default=str)`
+(`mcp_server._handle_tools_call`), não como objeto -- ver comentário de
+`_OUTPUT_SCHEMAS` em `tools/registry.py` para o levantamento completo.
+Handler não tinha nenhum teste dedicado antes desta sub-entrega -- lacuna
+fechada em `test_hermes_tools.py`.
 
 Cinco frentes:
 1. `TestOutputSchema` -- a função pura em `tools/registry.py`, incluindo
@@ -131,25 +155,28 @@ Cinco frentes:
    `calculadora`, `buscar_contato`, `consultar_lista_compras`,
    `consultar_execucoes_agente`, `consultar_pedidos_agente`,
    `consultar_historico_acoes`, `obter_acao`,
-   `listar_rascunhos_pendentes`, `consultar_job`, `buscar_arquivos_acervo`
-   e `consultar_status_modo_secretario` tem contrato publicado hoje.
+   `listar_rascunhos_pendentes`, `consultar_job`, `buscar_arquivos_acervo`,
+   `consultar_status_modo_secretario` e
+   `consultar_contatos_prioritarios_secretario` tem contrato publicado hoje.
 2. `TestHandleToolsListOutputSchema` -- ponta a ponta via
    `mcp_server._handle_tools_list()`: `outputSchema` chega no catálogo
-   publicado só para essas onze tools.
+   publicado só para essas doze tools.
 3. `TestIntegracaoHandleToolsCallStructuredContent` -- ponta a ponta via
    `mcp_server._handle_tools_call`: `structuredContent` chega no envelope
    de `tools/call` para `calculadora` (execução real, pura) e para
    `buscar_contato`/`consultar_lista_compras`/`consultar_execucoes_agente`/
    `consultar_pedidos_agente`/`consultar_historico_acoes`/`obter_acao`/
    `listar_rascunhos_pendentes`/`consultar_job`/`buscar_arquivos_acervo`/
-   `consultar_status_modo_secretario`
-   (executor mockado -- as dez dependem de Firestore, então o teste cobre
+   `consultar_status_modo_secretario`/
+   `consultar_contatos_prioritarios_secretario`
+   (executor mockado -- as onze dependem de Firestore, então o teste cobre
    o MECANISMO, não a correção interna dos handlers, mesmo padrão já usado
    para `consultar_processo_sipac` abaixo), é sempre IGUAL ao dict que
    `content[0].text` serializa (mesma fonte, nunca diverge), bate com o
    `outputSchema` publicado campo a campo (para `consultar_historico_acoes`,
-   `obter_acao`, `consultar_job` e `buscar_arquivos_acervo`, contra o
-   branch `oneOf` correspondente à forma retornada), e nunca aparece para
+   `obter_acao`, `consultar_job`, `buscar_arquivos_acervo` e `consultar_
+   contatos_prioritarios_secretario`, contra o branch `oneOf`
+   correspondente à forma retornada), e nunca aparece para
    uma tool sem contrato publicado -- nem
    quando o resultado real também é um dict, nem quando o executor levanta
    uma exceção não tratada por ele mesmo, nem quando o handler devolve uma
@@ -720,7 +747,46 @@ class TestOutputSchema(unittest.TestCase):
         self.assertEqual(item["properties"]["chat_id"], {"type": "string"})
         self.assertEqual(item["properties"]["nome"], {"type": "string"})
 
-    def test_paridade_onze_tools_tem_output_schema_hoje(self):
+    def test_consultar_contatos_prioritarios_secretario_tem_schema_oneof_sucesso_e_erro(self):
+        schema = registry.output_schema("consultar_contatos_prioritarios_secretario")
+        self.assertIsNotNone(schema)
+        self.assertEqual(len(schema["oneOf"]), 2)
+        sucesso, erro = schema["oneOf"]
+
+        self.assertEqual(set(sucesso["properties"].keys()), {"total", "apenas_ativos", "contatos_prioritarios"})
+        self.assertEqual(set(sucesso["required"]), {"total", "apenas_ativos", "contatos_prioritarios"})
+        self.assertFalse(sucesso["additionalProperties"])
+        self.assertEqual(sucesso["properties"]["total"], {"type": "integer"})
+        self.assertEqual(sucesso["properties"]["apenas_ativos"], {"type": "boolean"})
+
+        item = sucesso["properties"]["contatos_prioritarios"]["items"]
+        campos_item = {
+            "id", "chat_id", "chat_name", "assunto", "o_que_precisa_saber",
+            "status", "valido_ate", "resumo_estruturado", "informacao_obtida",
+            "criado_em", "atualizado_em", "concluido_em",
+        }
+        self.assertEqual(set(item["properties"].keys()), campos_item)
+        # `concluido_em` é o ÚNICO campo do item fora de `required` -- só
+        # existe como chave depois que o briefing é concluído (ver
+        # comentário de `_OUTPUT_SCHEMAS` em `tools/registry.py`).
+        self.assertEqual(set(item["required"]), campos_item - {"concluido_em"})
+        self.assertFalse(item["additionalProperties"])
+        self.assertEqual(
+            item["properties"]["status"],
+            {"type": "string", "enum": ["ativo", "concluido", "expirado", "cancelado"]},
+        )
+        self.assertEqual(item["properties"]["resumo_estruturado"], {"type": ["string", "null"]})
+        self.assertEqual(item["properties"]["informacao_obtida"], {"type": ["boolean", "null"]})
+        for campo in ("id", "chat_id", "chat_name", "assunto", "o_que_precisa_saber",
+                      "valido_ate", "criado_em", "atualizado_em", "concluido_em"):
+            self.assertEqual(item["properties"][campo], {"type": "string"})
+
+        self.assertEqual(set(erro["properties"].keys()), {"erro", "contatos_prioritarios"})
+        self.assertEqual(set(erro["required"]), {"erro", "contatos_prioritarios"})
+        self.assertFalse(erro["additionalProperties"])
+        self.assertEqual(erro["properties"]["contatos_prioritarios"], {"type": "array", "maxItems": 0})
+
+    def test_paridade_doze_tools_tem_output_schema_hoje(self):
         # Não por amostragem: para TODA tool do catálogo real (108 hoje --
         # `len(registry.list_tool_names())`; achado da revisão adversarial
         # da sub-entrega 25/N: "106" estava desatualizado desde antes
@@ -728,15 +794,16 @@ class TestOutputSchema(unittest.TestCase):
         # buscar_contato, consultar_lista_compras,
         # consultar_execucoes_agente, consultar_pedidos_agente,
         # consultar_historico_acoes, obter_acao, listar_rascunhos_pendentes,
-        # consultar_job, buscar_arquivos_acervo e
-        # consultar_status_modo_secretario -- prova que a lista fechada não
-        # vazou para nenhuma outra tool por engano.
+        # consultar_job, buscar_arquivos_acervo,
+        # consultar_status_modo_secretario e
+        # consultar_contatos_prioritarios_secretario -- prova que a lista
+        # fechada não vazou para nenhuma outra tool por engano.
         com_schema = {
             "calculadora", "buscar_contato", "consultar_lista_compras",
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
             "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
-            "consultar_status_modo_secretario",
+            "consultar_status_modo_secretario", "consultar_contatos_prioritarios_secretario",
         }
         for nome in registry.list_tool_names():
             with self.subTest(tool=nome):
@@ -830,6 +897,17 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
         self.assertIn("oneOf", self.catalogo["buscar_arquivos_acervo"]["outputSchema"])
         self.assertEqual(len(self.catalogo["buscar_arquivos_acervo"]["outputSchema"]["oneOf"]), 2)
 
+    def test_consultar_contatos_prioritarios_secretario_publica_output_schema(self):
+        self.assertIn("outputSchema", self.catalogo["consultar_contatos_prioritarios_secretario"])
+        self.assertEqual(
+            self.catalogo["consultar_contatos_prioritarios_secretario"]["outputSchema"],
+            registry.output_schema("consultar_contatos_prioritarios_secretario"),
+        )
+        self.assertIn("oneOf", self.catalogo["consultar_contatos_prioritarios_secretario"]["outputSchema"])
+        self.assertEqual(
+            len(self.catalogo["consultar_contatos_prioritarios_secretario"]["outputSchema"]["oneOf"]), 2
+        )
+
     def test_consultar_status_modo_secretario_publica_output_schema(self):
         self.assertIn("outputSchema", self.catalogo["consultar_status_modo_secretario"])
         self.assertEqual(
@@ -845,7 +923,7 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
             "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
-            "consultar_status_modo_secretario",
+            "consultar_status_modo_secretario", "consultar_contatos_prioritarios_secretario",
         }
         com_schema = [
             nome for nome, tool in self.catalogo.items()
@@ -861,7 +939,7 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             "consultar_execucoes_agente", "consultar_pedidos_agente",
             "consultar_historico_acoes", "obter_acao",
             "listar_rascunhos_pendentes", "consultar_job", "buscar_arquivos_acervo",
-            "consultar_status_modo_secretario",
+            "consultar_status_modo_secretario", "consultar_contatos_prioritarios_secretario",
         ):
             with self.subTest(tool=nome):
                 tool = self.catalogo[nome]
@@ -1962,6 +2040,120 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
         estruturado = resultado["structuredContent"]
         self.assertEqual(set(estruturado.keys()), set(schema["properties"].keys()))
         self.assertEqual(set(estruturado.keys()), set(schema["required"]))
+
+    def test_consultar_contatos_prioritarios_secretario_ativo_leva_structured_content(self):
+        # `consultar_contatos_prioritarios_secretario` real depende de
+        # Firestore (`secretario_contatos_prioritarios`); o executor é
+        # mockado aqui com uma forma real que o handler produz (briefing
+        # recém-criado, ainda sem `concluido_em`), mesmo padrão das tools
+        # acima -- testa o MECANISMO, não a leitura em si.
+        esperado = {
+            "total": 1,
+            "apenas_ativos": True,
+            "contatos_prioritarios": [{
+                "id": "5511999999999@c.us",
+                "chat_id": "5511999999999@c.us",
+                "chat_name": "Carlos Parceiro",
+                "assunto": "Exames de rotina",
+                "o_que_precisa_saber": "Saber se os exames ficaram prontos",
+                "status": "ativo",
+                "valido_ate": "2026-09-24T23:59:59.999999-03:00",
+                "resumo_estruturado": None,
+                "informacao_obtida": None,
+                "criado_em": "2026-09-24 10:00:00+00:00",
+                "atualizado_em": "2026-09-24 10:00:00+00:00",
+            }],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_contatos_prioritarios_secretario", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertFalse(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_consultar_contatos_prioritarios_secretario_concluido_leva_concluido_em(self):
+        # Briefing já concluído: `resumo_estruturado`/`informacao_obtida`
+        # deixam de ser `None`, e a chave `concluido_em` (ausente no teste
+        # acima) passa a existir.
+        esperado = {
+            "total": 1,
+            "apenas_ativos": False,
+            "contatos_prioritarios": [{
+                "id": "5511999999999@c.us",
+                "chat_id": "5511999999999@c.us",
+                "chat_name": "Carlos Parceiro",
+                "assunto": "Exames de rotina",
+                "o_que_precisa_saber": "Saber se os exames ficaram prontos",
+                "status": "concluido",
+                "valido_ate": "2026-09-24T23:59:59.999999-03:00",
+                "resumo_estruturado": "Exames já ficaram prontos, retirados na sexta.",
+                "informacao_obtida": True,
+                "criado_em": "2026-09-24 10:00:00+00:00",
+                "atualizado_em": "2026-09-24 12:00:00+00:00",
+                "concluido_em": "2026-09-24 12:00:00+00:00",
+            }],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {
+                    "name": "consultar_contatos_prioritarios_secretario",
+                    "arguments": {"apenas_ativos": False},
+                },
+                ctx=_ctx(),
+            )
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertIn("concluido_em", resultado["structuredContent"]["contatos_prioritarios"][0])
+
+    def test_consultar_contatos_prioritarios_secretario_erro_tambem_leva_structured_content(self):
+        esperado = {"erro": "Your default credentials were not found.", "contatos_prioritarios": []}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_contatos_prioritarios_secretario", "arguments": {}}, ctx=_ctx()
+            )
+        self.assertTrue(resultado["isError"])
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+
+    def test_consultar_contatos_prioritarios_secretario_structured_content_bate_com_o_output_schema_publicado(self):
+        # Paridade campo a campo contra o branch `oneOf` correspondente à
+        # forma efetivamente devolvida, mesmo padrão de
+        # `buscar_arquivos_acervo` acima.
+        schema = registry.output_schema("consultar_contatos_prioritarios_secretario")
+        sucesso_schema, erro_schema = schema["oneOf"]
+
+        mock_sucesso = {
+            "total": 1,
+            "apenas_ativos": True,
+            "contatos_prioritarios": [{
+                "id": "x@c.us", "chat_id": "x@c.us", "chat_name": "X",
+                "assunto": "A", "o_que_precisa_saber": "O",
+                "status": "ativo", "valido_ate": "2026-09-24T23:59:59-03:00",
+                "resumo_estruturado": None, "informacao_obtida": None,
+                "criado_em": "2026-09-24 10:00:00+00:00", "atualizado_em": "2026-09-24 10:00:00+00:00",
+            }],
+        }
+        with patch.object(mcp_server, "execute_tool", return_value=mock_sucesso):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_contatos_prioritarios_secretario", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        self.assertEqual(set(estruturado.keys()), set(sucesso_schema["properties"].keys()))
+        item_schema = sucesso_schema["properties"]["contatos_prioritarios"]["items"]
+        # Item sem `concluido_em` -- confere contra `required` (subconjunto
+        # de `properties`), não contra `properties` inteiro.
+        self.assertEqual(
+            set(estruturado["contatos_prioritarios"][0].keys()), set(item_schema["required"]),
+        )
+
+        mock_erro = {"erro": "falhou", "contatos_prioritarios": []}
+        with patch.object(mcp_server, "execute_tool", return_value=mock_erro):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "consultar_contatos_prioritarios_secretario", "arguments": {}}, ctx=_ctx()
+            )
+        estruturado = resultado["structuredContent"]
+        self.assertEqual(set(estruturado.keys()), set(erro_schema["properties"].keys()))
 
     def test_tool_sem_output_schema_nunca_leva_structured_content_mesmo_com_dict(self):
         # `consultar_processo_sipac` não tem outputSchema publicado; mesmo
