@@ -309,10 +309,31 @@ class TestLeaseValidaParaAcaoInputsAdversariais(unittest.TestCase):
         ok, _ = lease_valida_para_acao(self.lease, "token-real", None, agora=self.agora)
         self.assertFalse(ok)
 
-    def test_generation_float_com_fracao_e_invalida_sem_lancar(self):
+    def test_generation_string_com_fracao_e_invalida_sem_lancar(self):
         # int("3.5") levanta ValueError -- mesmo tratamento dos demais
         # valores não inteiros, nunca deve escapar como exceção.
         ok, motivo = lease_valida_para_acao(self.lease, "token-real", "3.5", agora=self.agora)
+        self.assertFalse(ok)
+        self.assertIn("geração", motivo)
+
+    def test_generation_infinito_positivo_nao_lanca_excecao(self):
+        # Achado da 2a rodada de revisão adversarial: int(float("inf"))
+        # levanta OverflowError, não TypeError/ValueError -- json.loads
+        # aceita "Infinity" como extensão por padrão, então um consumidor
+        # podia mandar isso num payload e crashar esta função.
+        ok, motivo = lease_valida_para_acao(self.lease, "token-real", float("inf"), agora=self.agora)
+        self.assertFalse(ok)
+        self.assertIn("geração", motivo)
+
+    def test_generation_infinito_negativo_nao_lanca_excecao(self):
+        ok, motivo = lease_valida_para_acao(self.lease, "token-real", float("-inf"), agora=self.agora)
+        self.assertFalse(ok)
+        self.assertIn("geração", motivo)
+
+    def test_generation_decimal_infinito_nao_lanca_excecao(self):
+        from decimal import Decimal
+
+        ok, motivo = lease_valida_para_acao(self.lease, "token-real", Decimal("Infinity"), agora=self.agora)
         self.assertFalse(ok)
         self.assertIn("geração", motivo)
 

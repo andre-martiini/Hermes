@@ -296,7 +296,14 @@ def lease_valida_para_acao(
         return False, "lease expirada"
     try:
         generation_normalizada = int(generation_apresentada)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError (2a rodada de revisão adversarial, P04 sub-entrega
+        # 1/N): int() de um float/Decimal infinito (`float("inf")`,
+        # `Decimal("Infinity")`) levanta OverflowError, não ValueError --
+        # `json.loads` aceita "Infinity"/"-Infinity" como extensão por
+        # padrão, então um consumidor podia enviar isso num payload e
+        # crashar esta função exatamente do jeito que o fix anterior
+        # deveria ter fechado.
         return False, "geração apresentada não é um inteiro válido"
     if lease_atual.generation != generation_normalizada:
         return False, "geração não confere (reserva perdida para outro executor)"
