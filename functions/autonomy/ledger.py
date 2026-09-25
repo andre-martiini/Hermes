@@ -31,9 +31,11 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+from types import MappingProxyType
 from typing import Any
 
 from .requests import _exigir_tz_aware
@@ -165,8 +167,16 @@ def _canonicalizar_chaves(valor: Any) -> Any:
     `hash_canonico`/`_mesmo_valor_canonico`, não dentro do mesmo dict)
     continuam sendo tratadas como equivalentes -- esse caso é intencional
     (ver `test_chave_int_e_chave_str_equivalente_colidem_apos_normalizacao`),
-    só a perda de dado DENTRO do mesmo dict é um bug."""
-    if isinstance(valor, dict):
+    só a perda de dado DENTRO do mesmo dict é um bug.
+
+    Checa `Mapping` (não só `dict`): `Checkpoint.dados`/`LedgerEntry.resultado`
+    já frozen por `_congelar_profundamente` (armazenados como
+    `MappingProxyType`, não `dict`) passam por esta função de novo sempre
+    que `_serializar_canonico` roda sobre eles (ex.: numa comparação de
+    reentrega) -- `MappingProxyType` não é subclasse de `dict`, então checar
+    só `dict` faria essas chamadas caírem no branch `else` e quebrar em
+    `json.dumps`."""
+    if isinstance(valor, Mapping):
         canonicalizado: dict[str, Any] = {}
         for chave, item in valor.items():
             chave_str = _chave_no_espirito_json(chave)
@@ -240,30 +250,79 @@ def hash_canonico(payload: dict[str, Any]) -> str:
     return hashlib.sha256(_serializar_canonico(payload).encode("utf-8")).hexdigest()
 
 
-def _snapshot_json(valor: Any) -> Any:
-    """Devolve uma cópia independente de `valor`, livre de qualquer
-    referência ao objeto original -- achado do Codex (P2) na PR #328: sem
-    isto, `Checkpoint.dados`/`LedgerEntry.resultado` guardavam o objeto
-    MUTÁVEL do chamador por referência (ex.: um `dict`); mutar esse dict
-    original DEPOIS de guardado mudava o conteúdo do checkpoint/resultado
-    "imutável" sem passar por `adicionar_checkpoint`/`registrar_resultado`
-    nem por nenhuma validação -- quebra a garantia de nunca sobrescrever
-    (item 10) na prática, apesar do dataclass ser `frozen`. `frozen` só
-    impede reatribuir o ATRIBUTO; não protege o CONTEÚDO de um atributo
-    mutável.
+def _congelar_profundamente(valor: Any) -> Any:
+    """Converte um valor já passado por `json.loads` (só contém `dict`,
+    `list`, `str`, `int`, `float`, `bool`, `None`) numa estrutura
+    RECURSIVAMENTE imutável: `dict` vira `MappingProxyType` (view
+    somente-leitura, recursiva) e `list` vira `tuple` (também recursiva).
 
-    Implementado como round-trip por `_serializar_canonico`/`json.loads`:
-    além de produzir uma cópia profunda genuína (sem nenhum objeto
-    compartilhado com `valor`), isto valida serializabilidade JSON e aplica
-    a MESMA canonicalização de chave (`_chave_no_espirito_json`) usada em
-    todo o resto do módulo -- consequência deliberada, não efeito colateral
-    acidental: também fecha o achado do Codex (P2) de que um `resultado`
-    não-serializável (ex.: `datetime`) era aceito silenciosamente na
-    PRIMEIRA chamada de `registrar_resultado` (que não serializava nada) e
-    só quebrava com `TypeError` numa REENTREGA (quando a comparação via
+    Achado de uma rodada de revisão em cima do fix anterior (`_snapshot_json`
+    fazendo só uma cópia INDEPENDENTE, ainda mutável): copiar o dict do
+    chamador resolve mutar o ORIGINAL depois de guardado, mas não impede
+    mutar a cópia JÁ GUARDADA através da própria referência devolvida por
+    `entrada.resultado`/`checkpoint.dados` -- `frozen=True` no dataclass só
+    impede reatribuir o ATRIBUTO (`entrada.resultado = outra_coisa` levanta
+    `FrozenInstanceError`), nunca protegeu o CONTEÚDO mutável apontado por
+    ele (`entrada.resultado["x"] = ...` sempre funcionou, mesmo com o
+    snapshot). `MappingProxyType`/`tuple` fecham essa segunda porta: não há
+    operação pública em nenhum dos dois tipos que mute o conteúdo.
+
+    Efeito colateral desejado (não seria suficiente sozinho, mas reforça):
+    também neutraliza `copy.copy()` num `Checkpoint`/`LedgerEntry` (que
+    contorna `__post_init__` e compartilharia o mesmo objeto `dados`/
+    `resultado` com o original) -- como esse objeto compartilhado agora é
+    imutável, mesmo um `copy.copy` não abre uma via de mutação.
+
+    RISCO ACEITO, documentado (não corrigido -- mesma família do risco já
+    aceito para `int`/`float` em `hash_canonico`): como `list` E `tuple`
+    convergem para `tuple` aqui (JSON não distingue os dois -- é sempre um
+    "array"), um `resultado`/`dados` reenviado com `[10, 20]` (list) depois
+    de já ter sido registrado como `(10, 20)` (tuple), ou vice-versa, é
+    tratado como o MESMO valor por `_mesmo_valor_canonico` -- não é uma
+    regressão desta função: `hash_canonico`/`_mesmo_valor_canonico` já
+    tratavam list e tuple como equivalentes para fins de comparação desde a
+    1a rodada de revisão (`_canonicalizar_chaves` sempre convertia os dois
+    para o mesmo formato antes de comparar); esta função só faz o valor
+    GUARDADO também refletir essa mesma canonicalização, em vez de manter o
+    tipo Python original do chamador -- e um `array` JSON de verdade
+    (Firestore incluído) não distingue os dois de qualquer forma."""
+    if isinstance(valor, dict):
+        return MappingProxyType(
+            {chave: _congelar_profundamente(item) for chave, item in valor.items()}
+        )
+    if isinstance(valor, list):
+        return tuple(_congelar_profundamente(item) for item in valor)
+    return valor
+
+
+def _snapshot_json(valor: Any) -> Any:
+    """Devolve uma cópia RECURSIVAMENTE IMUTÁVEL de `valor`, livre de
+    qualquer referência mutável compartilhada com o objeto original --
+    achado do Codex (P2) na PR #328: sem isto, `Checkpoint.dados`/
+    `LedgerEntry.resultado` guardavam o objeto MUTÁVEL do chamador por
+    referência (ex.: um `dict`); mutar esse dict original DEPOIS de
+    guardado mudava o conteúdo do checkpoint/resultado "imutável" sem
+    passar por `adicionar_checkpoint`/`registrar_resultado` nem por nenhuma
+    validação -- quebra a garantia de nunca sobrescrever (item 10) na
+    prática, apesar do dataclass ser `frozen`. `frozen` só impede reatribuir
+    o ATRIBUTO; não protege o CONTEÚDO de um atributo mutável -- por isso o
+    resultado desta função é congelado recursivamente (`_congelar_profundamente`),
+    não só copiado: uma cópia mutável ainda deixaria `entrada.resultado["x"]
+    = ...` funcionar direto na própria entrada já guardada.
+
+    Implementado como round-trip por `_serializar_canonico`/`json.loads`
+    seguido de `_congelar_profundamente`: além de produzir uma cópia
+    profunda genuína (sem nenhum objeto compartilhado com `valor`), isto
+    valida serializabilidade JSON e aplica a MESMA canonicalização de chave
+    (`_chave_no_espirito_json`) usada em todo o resto do módulo --
+    consequência deliberada, não efeito colateral acidental: também fecha o
+    achado do Codex (P2) de que um `resultado` não-serializável (ex.:
+    `datetime`) era aceito silenciosamente na PRIMEIRA chamada de
+    `registrar_resultado` (que não serializava nada) e só quebrava com
+    `TypeError` numa REENTREGA (quando a comparação via
     `_serializar_canonico` rodava pela primeira vez) -- agora falha
     imediatamente na primeira chamada, consistente com o resto do módulo."""
-    return json.loads(_serializar_canonico(valor))
+    return _congelar_profundamente(json.loads(_serializar_canonico(valor)))
 
 
 def _normalizar_idempotency_key(idempotency_key: str) -> str:
@@ -283,7 +342,17 @@ class Checkpoint:
     antigos serem descartados por `MAX_CHECKPOINTS_POR_OPERACAO` -- assim um
     executor que retoma sempre sabe se está vendo o checkpoint mais recente
     de verdade, e não um buraco na numeração é confundido com progresso
-    perdido."""
+    perdido.
+
+    `dados` aceita um `dict` na construção, mas `__post_init__` substitui o
+    valor guardado por uma versão RECURSIVAMENTE imutável
+    (`MappingProxyType`/`tuple` -- ver `_snapshot_json`/`_congelar_profundamente`):
+    `Checkpoint(...).dados` nunca é o mesmo objeto `dict` passado pelo
+    chamador, e não pode ser mutado depois (`TypeError` numa tentativa de
+    `dados["x"] = ...`). Compara igual a um `dict`/`list` equivalente
+    (`MappingProxyType`/`tuple` implementam `__eq__` contra o tipo mutável
+    correspondente), então testes que comparam `checkpoint.dados ==
+    {"algo": 1}` continuam funcionando normalmente."""
 
     sequencia: int
     dados: dict[str, Any]
@@ -293,14 +362,17 @@ class Checkpoint:
         _exigir_tz_aware(self.criado_em, "criado_em")
         if self.sequencia < 1:
             raise ValueError("sequencia de checkpoint deve ser >= 1 (1-indexada).")
-        # Snapshot ANTES de medir o tamanho -- assim o tamanho medido é o da
-        # forma canônica de verdade que fica retida (object.__setattr__
-        # porque a dataclass é frozen; ver docstring de `_snapshot_json`).
+        # Snapshot (congelado -- ver docstring de `_snapshot_json`) ANTES de
+        # medir o tamanho, para que o tamanho medido seja o da forma
+        # canônica de verdade que fica retida (object.__setattr__ porque a
+        # dataclass é frozen). `_serializar_canonico`, não `json.dumps` cru
+        # -- `dados_snapshot` pode conter `MappingProxyType`/`tuple`
+        # (resultado do congelamento), que `json.dumps` não serializa
+        # diretamente; `_serializar_canonico` trata `Mapping` de forma
+        # genérica (ver docstring de `_canonicalizar_chaves`).
         dados_snapshot = _snapshot_json(self.dados)
         object.__setattr__(self, "dados", dados_snapshot)
-        tamanho_bytes = len(
-            json.dumps(dados_snapshot, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        )
+        tamanho_bytes = len(_serializar_canonico(dados_snapshot).encode("utf-8"))
         if tamanho_bytes > MAX_CHECKPOINT_BYTES:
             raise CheckpointMuitoGrande(tamanho_bytes, MAX_CHECKPOINT_BYTES)
 
@@ -317,7 +389,11 @@ class LedgerEntry:
     `resultado_registrado_em` é o indicador de "já tem resultado observado"
     (item 9), não `resultado is not None` -- um resultado observado
     legítimo pode ser `None` (ex.: operação que não produz valor de
-    retorno), então usar o próprio valor como sentinela seria ambíguo."""
+    retorno), então usar o próprio valor como sentinela seria ambíguo.
+
+    `resultado`, se for um `dict`/`list`, também vira RECURSIVAMENTE
+    imutável depois de `__post_init__` (mesmo mecanismo de `Checkpoint.dados`
+    -- ver sua docstring)."""
 
     idempotency_key: str
     payload_hash: str
@@ -496,9 +572,11 @@ def adicionar_checkpoint(
 
 
 def _tamanho_serializado_bytes(dados: dict[str, Any]) -> int:
-    return len(
-        json.dumps(dados, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    )
+    # `_serializar_canonico`, não `json.dumps` cru -- `dados` aqui é sempre
+    # `Checkpoint.dados` já congelado (`MappingProxyType`/`tuple`), que
+    # `json.dumps` não sabe serializar diretamente (ver docstring de
+    # `_canonicalizar_chaves`).
+    return len(_serializar_canonico(dados).encode("utf-8"))
 
 
 def _aplicar_orcamento_cumulativo(

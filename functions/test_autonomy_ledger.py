@@ -2,6 +2,7 @@
 do pacote: "criar ledger de operações e checkpoints com limites de
 tamanho", seção 4.5, itens 6, 9 e 10 do plano de autonomia)."""
 
+import copy
 import dataclasses
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -564,6 +565,43 @@ class TestCheckpointDataclass(unittest.TestCase):
         with self.assertRaises(TypeError):
             Checkpoint(sequencia=1, dados={"x": object()}, criado_em=AGORA)
 
+    def test_dados_guardado_e_recursivamente_imutavel(self):
+        # Achado de uma rodada de revisão em cima do fix do Codex: o
+        # snapshot original só protegia o dict ORIGINAL do chamador de ser
+        # mutado -- a própria referência devolvida por `checkpoint.dados`
+        # continuava mutável. `MappingProxyType`/`tuple` fecham essa porta.
+        cp = Checkpoint(sequencia=1, dados={"a": {"b": 1}}, criado_em=AGORA)
+        with self.assertRaises(TypeError):
+            cp.dados["a"] = "outra coisa"
+        with self.assertRaises(TypeError):
+            cp.dados["a"]["b"] = 999
+
+    def test_dados_guardado_continua_igual_a_um_dict_sem_lista_aninhada(self):
+        cp = Checkpoint(sequencia=1, dados={"a": 1, "b": "x"}, criado_em=AGORA)
+        self.assertEqual(cp.dados, {"a": 1, "b": "x"})
+
+    def test_dados_guardado_com_lista_aninhada_vira_tupla(self):
+        # Consequência documentada de _congelar_profundamente (RISCO
+        # ACEITO): list aninhada vira tuple no valor guardado, então uma
+        # comparação direta contra o dict original (com list) não bate --
+        # precisa comparar contra a forma canônica (tuple) ou usar
+        # _mesmo_valor_canonico/registrar_resultado, que já leva isso em
+        # conta.
+        cp = Checkpoint(sequencia=1, dados={"a": 1, "b": [1, 2]}, criado_em=AGORA)
+        self.assertEqual(cp.dados, {"a": 1, "b": (1, 2)})
+
+    def test_copy_copy_nao_abre_via_de_mutacao(self):
+        # Achado de uma rodada de revisão: copy.copy() contorna
+        # __post_init__ e compartilharia o MESMO objeto `dados` com o
+        # original -- inofensivo aqui porque esse objeto compartilhado já é
+        # imutável (MappingProxyType), então nem copy.copy consegue abrir
+        # uma via de mutação que vaze para o Checkpoint original.
+        cp = Checkpoint(sequencia=1, dados={"a": 1}, criado_em=AGORA)
+        cp2 = copy.copy(cp)
+        with self.assertRaises(TypeError):
+            cp2.dados["a"] = 999
+        self.assertEqual(cp.dados, {"a": 1})
+
 
 class TestLedgerEntryDataclass(unittest.TestCase):
     def test_criado_em_naive_levanta_valueerror(self):
@@ -587,6 +625,37 @@ class TestLedgerEntryDataclass(unittest.TestCase):
         entrada = criar_entrada("k1", {}, agora=AGORA)
         with self.assertRaises(dataclasses.FrozenInstanceError):
             entrada.idempotency_key = "outra"
+
+    def test_resultado_guardado_e_recursivamente_imutavel(self):
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        entrada = registrar_resultado(entrada, {"a": {"b": 1}}, agora=AGORA)
+        with self.assertRaises(TypeError):
+            entrada.resultado["a"] = "outra coisa"
+        with self.assertRaises(TypeError):
+            entrada.resultado["a"]["b"] = 999
+
+    def test_resultado_guardado_continua_igual_a_um_dict_sem_lista_aninhada(self):
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        entrada = registrar_resultado(entrada, {"a": 1, "b": "x"}, agora=AGORA)
+        self.assertEqual(entrada.resultado, {"a": 1, "b": "x"})
+
+    def test_resultado_guardado_com_lista_aninhada_vira_tupla(self):
+        # Ver test_dados_guardado_com_lista_aninhada_vira_tupla -- mesmo
+        # comportamento documentado, aplicado a resultado.
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        entrada = registrar_resultado(entrada, {"a": 1, "b": [1, 2]}, agora=AGORA)
+        self.assertEqual(entrada.resultado, {"a": 1, "b": (1, 2)})
+
+    def test_lista_e_tupla_equivalente_sao_tratadas_como_mesmo_resultado(self):
+        # RISCO ACEITO documentado em _congelar_profundamente: list e tuple
+        # convergem para tuple no valor guardado (JSON não distingue os
+        # dois) -- mesmo comportamento de comparação que hash_canonico já
+        # tinha desde a 1a rodada, agora também refletido no valor
+        # guardado, não só na comparação.
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        entrada = registrar_resultado(entrada, {"coords": (10, 20)}, agora=AGORA)
+        entrada2 = registrar_resultado(entrada, {"coords": [10, 20]}, agora=AGORA)
+        self.assertIs(entrada2, entrada)
 
 
 if __name__ == "__main__":
