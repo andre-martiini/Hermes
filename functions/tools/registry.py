@@ -2879,6 +2879,86 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
             },
         ],
     },
+    # `listar_conversas_whatsapp` (P03 sub-entrega 32/N) -- decima sexta
+    # tool com outputSchema, e a ULTIMA candidata da lista original de 5
+    # da sub-entrega 27/N (as outras 4 ja resolvidas: `consultar_
+    # contatos_prioritarios_secretario` 28/N, `consultar_promocoes_
+    # autonomia_sugeridas` 29/N, `obter_fila_atencao` 30/N, `consultar_
+    # elevacoes_sugeridas` 31/N). Forma UNICA, sem oneOf --
+    # `whatsapp_tools.listar_conversas` nao tem nenhum `try/except` nem
+    # ramo de erro alternativo (o handler que a expoe,
+    # `tools/hermes_tools.py::_whatsapp`, so intercepta
+    # `WhatsAppNaoMonitorado`/`ValueError`, e nenhum dos dois e levantado
+    # por `listar_conversas` -- busca no corpo da funcao e das 3 helpers
+    # que ela chama, `_allowlist`/`_captura_total`/`_leitura_total`,
+    # confirma que so leem `system/settings.whatsapp_ingest` via
+    # `_config_ingest`, sem nenhum `raise`). Mesma categoria de
+    # `obter_fila_atencao`/`consultar_status_modo_secretario`.
+    #
+    # `total` (`len(conversas)`) e `monitoradas` (`sum(1 for c in
+    # conversas if c["monitorada"])`) sao sempre inteiros, calculados
+    # sobre a lista COMPLETA de conversas -- ao contrario de
+    # `obter_fila_atencao`/`consultar_elevacoes_sugeridas`, aqui NAO ha
+    # corte por `.limit(N)` na query Firestore (`whatsapp_tools.py:144-148`
+    # documenta explicitamente a decisao de nao limitar a leitura antes de
+    # ordenar); `limite` so corta a lista `conversas` na resposta
+    # (`conversas[:limite]`), nunca `total`/`monitoradas`, que sempre
+    # refletem a contagem real. `observacao` e sempre string -- a cadeia
+    # de expressoes ternarias em `listar_conversas` (linhas 173-182)
+    # sempre resolve para um texto, nunca `None`.
+    #
+    # Cada item de `conversas` e RECONSTRUIDO campo a campo (nao
+    # `snap.to_dict()` cru): `chat_id` e sempre `str(dados.get("chat_id")
+    # or snap.id)` -- `snap.id` e garantido pelo SDK do Firestore, entao
+    # `chat_id` nunca e vazio nem `None`. `chat_name` e sempre
+    # `dados.get("chat_name") or chat_id` -- como `chat_id` ja e garantido
+    # nao-vazio, `chat_name` tambem e sempre string nao-vazia (nunca cai
+    # no `None`/string vazia do `dados.get`). `grupo`
+    # (`bool(dados.get("is_group"))`), `monitorada` e `capturada` sao
+    # sempre `bool`, nunca `None` (nenhum dos tres usa `dados.get` sem
+    # `bool(...)`/expressao booleana em volta). `ultima_atividade` e o
+    # UNICO campo nullable do item -- `_iso(dados.get("last_activity_ts"))`
+    # devolve `None` explicitamente quando o valor bruto e `None`
+    # (`_iso`, linha 120-123).
+    #
+    # Escritor da colecao `whatsapp_chats` (`COL_CHATS`): fora do escopo
+    # desta fatia detalhar (e o worker WhatsApp em Node,
+    # `services/whatsapp-capture/`, nao o codigo Python deste repositorio)
+    # -- mas nao importa QUEM escreve, porque `listar_conversas` nunca
+    # confia em nenhum campo do documento sem passar por um `.get(chave)
+    # or default`/`bool(...)`/`_iso(...)` explicito antes de devolver.
+    # Igual ao padrao ja usado para `consultar_lista_compras`/
+    # `evidencia` em `obter_fila_atencao`: a garantia de forma vem da
+    # FUNCAO DE LEITURA, nao do(s) escritor(es).
+    "listar_conversas_whatsapp": {
+        "type": "object",
+        "properties": {
+            "total": {"type": "integer"},
+            "monitoradas": {"type": "integer"},
+            "conversas": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "chat_id": {"type": "string"},
+                        "chat_name": {"type": "string"},
+                        "grupo": {"type": "boolean"},
+                        "monitorada": {"type": "boolean"},
+                        "capturada": {"type": "boolean"},
+                        "ultima_atividade": {"type": ["string", "null"]},
+                    },
+                    "required": [
+                        "chat_id", "chat_name", "grupo",
+                        "monitorada", "capturada", "ultima_atividade",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+            "observacao": {"type": "string"},
+        },
+        "required": ["total", "monitoradas", "conversas", "observacao"],
+        "additionalProperties": False,
+    },
 }
 
 
@@ -2889,11 +2969,12 @@ def output_schema(tool_name: str) -> dict | None:
     annotations e envelope aos caminhos compativeis; manter content
     legado"), a fatia que faltava depois de `annotations` (sub-entregas
     6/N e 7/N, ver `mcp_annotations` acima). `None` para qualquer tool sem
-    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (93 das 108 tools
+    entrada em `_OUTPUT_SCHEMAS` -- a MAIORIA do catalogo (92 das 108 tools
     hoje -- `len(registry.list_tool_names())`, nao os "106" que este
     docstring citava ate a sub-entrega 24/N, contagem ja desatualizada
-    antes daquela fatia -- apos a decima quinta entrada, `consultar_
-    elevacoes_sugeridas`, sub-entrega 31/N), deliberadamente:
+    antes daquela fatia -- apos a decima sexta entrada, `listar_
+    conversas_whatsapp`, sub-entrega 32/N, que esgota a lista original de
+    5 candidatas da sub-entrega 27/N), deliberadamente:
     cada tool exige investigar a forma real do retorno do handler antes de
     publicar um contrato, mesma disciplina das outras funcoes deste modulo
     (nunca uma derivacao automatica ou heuristica sobre o dict de retorno).
