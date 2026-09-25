@@ -33,6 +33,7 @@ uma citação literal do plano.
 
 from __future__ import annotations
 
+import dataclasses
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -261,6 +262,30 @@ def nova_lease(
         generation=int(generation_anterior) + 1,
         executor_id=executor_id_limpo,
         expires_at=agora_utc + timedelta(seconds=duracao_segundos),
+    )
+
+
+def renovar_lease(
+    lease: Lease,
+    agora: datetime | None = None,
+    duracao_segundos: float = DEFAULT_LEASE_SEGUNDOS,
+) -> Lease:
+    """Estende `expires_at` de uma lease já válida -- seção 4.5, item 4:
+    "início, heartbeat, checkpoint e conclusão exigem o mesmo token/geração
+    ainda válidos." Ao contrário de `nova_lease`, NÃO incrementa `generation`
+    nem sorteia `lease_token` novo: renovação é heartbeat da MESMA reserva,
+    não uma reserva nova (isso ficaria com `nova_lease`, chamada só quando
+    um pedido é assumido/reassumido). Quem chama é responsável por já ter
+    validado o fencing (`lease_valida_para_acao`) antes -- esta função não
+    verifica token/geração apresentados, só estende o vencimento da lease
+    que já foi confirmada como a correta."""
+    if duracao_segundos <= 0:
+        raise ValueError("duracao_segundos deve ser positivo.")
+    if agora is not None:
+        _exigir_tz_aware(agora, "agora")
+    agora_resolvido = (agora or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    return dataclasses.replace(
+        lease, expires_at=agora_resolvido + timedelta(seconds=duracao_segundos)
     )
 
 
