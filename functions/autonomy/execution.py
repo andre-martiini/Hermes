@@ -44,6 +44,7 @@ from autonomy.requests import (
     ESTADOS_TERMINAIS,
     Lease,
     RequestStatus,
+    lease_expirada,
     lease_valida_para_acao,
     nova_lease,
     renovar_lease,
@@ -159,14 +160,26 @@ def assumir_pedido(
     Só aceita pedidos em estado que permite ir para `RESERVADO`
     (`PENDENTE` ou `RETENTATIVA_AGENDADA`, hoje -- ver
     `autonomy.requests._TRANSICOES_PERMITIDAS`); `validar_transicao`
-    decide isso, não esta função. Um pedido já `RESERVADO`/`EM_ANDAMENTO`
-    por OUTRO executor não pode ser assumido de novo por aqui -- é
-    responsabilidade de quem persiste o pedido nunca chamar esta função
-    para um documento cuja lease ainda não expirou (a checagem de
-    "lease alheia ainda válida" não é uma transição de `RequestStatus`, é
-    uma invariante de armazenamento que só o wiring real, com leitura
-    consistente do documento, pode garantir)."""
+    decide isso, não esta função.
+
+    Além disso, se `pedido.lease` já existir (reassumindo depois de
+    `RETENTATIVA_AGENDADA`, por exemplo), ela precisa estar EXPIRADA --
+    levanta `LeaseInvalida` caso contrário. Achado de revisão adversarial
+    (P04 sub-entrega 3/N): sem esta checagem, um segundo executor podia
+    "assumir" um pedido cuja lease anterior ainda tinha minutos de validade
+    sempre que o `status` permitisse a transição para `RESERVADO`, tornando
+    o token/geração do executor original silenciosamente inúteis mesmo
+    antes de expirar -- exatamente o cenário que o fencing por geração
+    (seção 4.5, item 5) existe para impedir. Esta função tem toda a
+    informação necessária (`pedido.lease.expires_at`, `agora`) para
+    recusar isso sozinha, sem depender só do wiring de armazenamento."""
     _transicionar(pedido, RequestStatus.RESERVADO)
+    if pedido.lease is not None and not lease_expirada(pedido.lease, agora=agora):
+        raise LeaseInvalida(
+            f"lease anterior de '{pedido.lease.executor_id}' ainda válida "
+            f"(expira em {pedido.lease.expires_at.isoformat()}) -- não é possível "
+            "reassumir antes de expirar."
+        )
     generation_anterior = pedido.lease.generation if pedido.lease is not None else 0
     lease_nova = nova_lease(executor_id, generation_anterior, agora=agora, duracao_segundos=duracao_segundos)
     return dataclasses.replace(pedido, status=RequestStatus.RESERVADO, lease=lease_nova)
@@ -187,8 +200,23 @@ def renovar_pedido(
     que já detém a lease continua sendo o mesmo executor, não uma disputa
     nova). Não muda `status`: renovar é só heartbeat, seção 4.5 item 4
     ("início, heartbeat, checkpoint e conclusão exigem o mesmo
-    token/geração ainda válidos")."""
+    token/geração ainda válidos").
+
+    Rejeita renovar um pedido em estado TERMINAL (`ESTADOS_TERMINAIS`) --
+    achado de revisão adversarial (P04 sub-entrega 3/N): nenhuma função
+    deste módulo limpa `pedido.lease` ao transicionar para um terminal
+    (`registrar_resultado_observado` só troca `status`/`ledger_entry`), e
+    `_validar_fencing` sozinha não olha `status` -- sem esta checagem, uma
+    lease emitida antes de o pedido concluir continuava "renovável" até seu
+    próprio `expires_at` original, mesmo com o pedido já `CONCLUIDO`/
+    `FALHA_FINAL`/`CANCELADO`, produzindo um estado internamente
+    contraditório (terminal, mas com lease "ativa")."""
     _validar_fencing(pedido, lease_token, generation, agora)
+    if not pedido_esta_ativo(pedido):
+        raise ValueError(
+            f"pedido '{pedido.request_id}' está em estado terminal "
+            f"('{pedido.status.value}') -- não há lease a renovar."
+        )
     assert pedido.lease is not None  # garantido por _validar_fencing (motivo != "nenhuma reserva ativa")
     lease_renovada = renovar_lease(pedido.lease, agora=agora, duracao_segundos=duracao_segundos)
     return dataclasses.replace(pedido, lease=lease_renovada)
@@ -243,14 +271,33 @@ def registrar_resultado_observado(
 
     Esta função NÃO valida a evidência em si (isso é `autonomy/verifiers.py`,
     passo 8 do pacote, ainda não implementado) -- só garante o que já é
-    responsabilidade desta camada: fencing válido, ledger aberto (não dá
+    responsabilidade desta camada: fencing válido e ledger aberto (não dá
     para registrar resultado de uma operação que nunca teve
     `registrar_progresso` chamado -- `pedido.ledger_entry is None` levanta
-    `ValueError`), e que `novo_status` seja um destino permitido a partir do
-    estado atual (`validar_transicao` decide isso -- normalmente
-    `CONCLUIDO`, `FALHA_FINAL`, `RESULTADO_DESCONHECIDO` ou
-    `RETENTATIVA_AGENDADA`, mas esta função não restringe o conjunto além
-    do que a máquina de estados já permite, para não duplicar a política).
+    `ValueError`).
+
+    `novo_status` só aceita um estado TERMINAL do pedido
+    (`autonomy.requests.ESTADOS_TERMINAIS` -- hoje `CONCLUIDO`,
+    `FALHA_FINAL` ou `CANCELADO`; `ERRO_LEGADO` nunca é alcançável por
+    `validar_transicao`). `autonomy.ledger.registrar_resultado` sela a
+    entrada do ledger PERMANENTEMENTE (item 10: nunca sobrescreve) e
+    `adicionar_checkpoint` recusa checkpoint novo numa entrada selada --
+    aceitar aqui um `novo_status` não-terminal (`RETENTATIVA_AGENDADA`,
+    `RESULTADO_DESCONHECIDO`, `AGUARDANDO_APROVACAO`,
+    `AGUARDANDO_EXTERNO`) seria um beco sem saída: o pedido continuaria
+    "ativo" (`pedido_esta_ativo` verdadeiro) mas nunca mais poderia chamar
+    `registrar_progresso` de novo -- nem reusando o mesmo
+    `idempotency_key` (ledger já selado) nem usando um novo (a entrada
+    existente pertence à chave antiga, `criar_ou_reusar_entrada` rejeita
+    trocar de chave). Esses estados intermediários -- retentativa
+    agendada, aguardando aprovação/terceiro, resultado ainda desconhecido
+    -- não representam um resultado definitivo desta OPERAÇÃO e ficam para
+    outro mecanismo (o sweep do passo 7 do pacote, ou uma função de
+    transição de status que não toque o ledger), fora do escopo desta
+    fatia. Achado de revisão adversarial (P04 sub-entrega 3/N): reproduzido
+    concretamente com `RETENTATIVA_AGENDADA` selando o ledger e travando
+    toda tentativa seguinte, mesma classe de problema para os demais
+    estados não-terminais listados.
 
     Reentrega do MESMO resultado é idempotente (herdado de
     `autonomy.ledger.registrar_resultado`); resultado DIFERENTE para uma
@@ -261,6 +308,14 @@ def registrar_resultado_observado(
             f"pedido '{pedido.request_id}' não tem operação aberta no ledger -- "
             "chame registrar_progresso ao menos uma vez antes de registrar um "
             "resultado observado."
+        )
+    if novo_status not in ESTADOS_TERMINAIS:
+        raise ValueError(
+            f"registrar_resultado_observado só aceita um estado terminal do "
+            f"pedido como novo_status ({sorted(s.value for s in ESTADOS_TERMINAIS)}) "
+            f"-- '{novo_status.value}' não é terminal e seria um beco sem saída "
+            "(o ledger da operação ficaria selado para sempre, mas o pedido "
+            "continuaria esperando retomar a MESMA operação)."
         )
     _transicionar_para_resultado(pedido, novo_status)
     entrada = _ledger_registrar_resultado(pedido.ledger_entry, resultado, agora=agora)

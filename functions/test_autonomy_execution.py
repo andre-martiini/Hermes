@@ -80,6 +80,20 @@ class TestAssumirPedido(unittest.TestCase):
         # Token antigo não serve mais para nada (fencing por geração).
         self.assertNotEqual(reassumido.lease.lease_token, primeiro.lease.lease_token)
 
+    def test_assumir_com_lease_anterior_ainda_valida_falha(self):
+        # Achado de revisão adversarial: reassumir não pode "roubar" uma
+        # lease que ainda não expirou, mesmo que o status permita a
+        # transição para RESERVADO (ex.: RETENTATIVA_AGENDADA).
+        primeiro = assumir_pedido(_pedido_pendente(), "executor-a", agora=T0)
+        de_novo = PedidoDuravel(
+            request_id=primeiro.request_id,
+            status=RequestStatus.RETENTATIVA_AGENDADA,
+            lease=primeiro.lease,
+        )
+        with self.assertRaises(LeaseInvalida):
+            # Lease de 5 minutos emitida em T0; ainda válida 1 minuto depois.
+            assumir_pedido(de_novo, "executor-b", agora=T0 + timedelta(minutes=1))
+
 
 class TestRenovarPedido(unittest.TestCase):
     def test_renova_mantendo_token_e_geracao(self):
@@ -125,6 +139,26 @@ class TestRenovarPedido(unittest.TestCase):
             renovar_pedido(
                 pedido, pedido.lease.lease_token, pedido.lease.generation,
                 agora=T0 + timedelta(minutes=5),
+            )
+
+    def test_renovar_pedido_terminal_falha_mesmo_com_lease_ainda_valida(self):
+        # Achado de revisão adversarial: nenhuma função limpa `lease` ao
+        # concluir um pedido -- sem checar `pedido_esta_ativo`, a lease
+        # emitida antes da conclusão continuava "renovável" até seu
+        # próprio expires_at original, mesmo com o pedido já CONCLUIDO.
+        pedido = assumir_pedido(_pedido_pendente(), "executor-a", agora=T0)
+        pedido = registrar_progresso(
+            pedido, pedido.lease.lease_token, pedido.lease.generation,
+            "op-1", {"acao": "x"}, {"passo": 1}, agora=T0,
+        )
+        concluido = registrar_resultado_observado(
+            pedido, pedido.lease.lease_token, pedido.lease.generation,
+            {"ok": True}, RequestStatus.CONCLUIDO, agora=T0 + timedelta(seconds=5),
+        )
+        with self.assertRaises(ValueError):
+            renovar_pedido(
+                concluido, concluido.lease.lease_token, concluido.lease.generation,
+                agora=T0 + timedelta(seconds=10),
             )
 
 
@@ -275,6 +309,67 @@ class TestRegistrarResultadoObservado(unittest.TestCase):
                 {"ok": True}, RequestStatus.CONCLUIDO, agora=T0,
             )
         self.assertIsNone(pedido.ledger_entry.resultado_registrado_em)
+
+    def test_status_nao_terminal_e_rejeitado_sem_selar_o_ledger(self):
+        # Achado de revisão adversarial (o mais grave desta sub-entrega):
+        # aceitar RETENTATIVA_AGENDADA aqui selava o ledger permanentemente
+        # (autonomy.ledger.registrar_resultado nunca sobrescreve), mas o
+        # pedido continuava "ativo" e precisaria chamar registrar_progresso
+        # de novo na mesma operação para a retentativa -- o que nunca mais
+        # seria possível (ledger selado recusa checkpoint novo). Reproduz o
+        # cenário exato do achado: RETENTATIVA_AGENDADA precisa ser
+        # rejeitado ANTES de tocar o ledger, e um reassumir+retomar
+        # subsequente precisa continuar funcionando.
+        for status_nao_terminal in (
+            RequestStatus.RETENTATIVA_AGENDADA,
+            RequestStatus.RESULTADO_DESCONHECIDO,
+            RequestStatus.AGUARDANDO_APROVACAO,
+            RequestStatus.AGUARDANDO_EXTERNO,
+        ):
+            with self.subTest(status_nao_terminal=status_nao_terminal):
+                pedido = self._pedido_em_andamento()
+                with self.assertRaises(ValueError):
+                    registrar_resultado_observado(
+                        pedido, pedido.lease.lease_token, pedido.lease.generation,
+                        {"motivo": "timeout"}, status_nao_terminal, agora=T0,
+                    )
+                # Ledger não foi tocado -- continua aberto e utilizável.
+                self.assertIsNone(pedido.ledger_entry.resultado_registrado_em)
+
+    def test_apos_rejeicao_de_status_nao_terminal_retentativa_ainda_funciona(self):
+        # Confirma de ponta a ponta que o fix não deixou o pedido preso: a
+        # tentativa de selar com RETENTATIVA_AGENDADA falha SEM tocar o
+        # ledger, então o fluxo real de retentativa (fora do escopo desta
+        # fatia -- nenhuma função daqui produz RETENTATIVA_AGENDADA ainda,
+        # ver docstring de registrar_resultado_observado) continua possível
+        # depois que outro mecanismo decidir agendar a retentativa: reassumir
+        # após a lease expirar e continuar registrando progresso na MESMA
+        # operação (mesmo idempotency_key, ledger_entry preservado).
+        pedido = self._pedido_em_andamento()
+        with self.assertRaises(ValueError):
+            registrar_resultado_observado(
+                pedido, pedido.lease.lease_token, pedido.lease.generation,
+                {"motivo": "timeout"}, RequestStatus.RETENTATIVA_AGENDADA, agora=T0,
+            )
+        agendado_para_retentativa = PedidoDuravel(
+            request_id=pedido.request_id,
+            status=RequestStatus.RETENTATIVA_AGENDADA,
+            lease=pedido.lease,
+            ledger_entry=pedido.ledger_entry,
+        )
+        reassumido = assumir_pedido(
+            agendado_para_retentativa, "executor-b", agora=T0 + timedelta(minutes=10)
+        )
+        retomado = registrar_progresso(
+            reassumido, reassumido.lease.lease_token, reassumido.lease.generation,
+            "op-1", {"acao": "x"}, {"passo": 2}, agora=T0 + timedelta(minutes=10),
+        )
+        self.assertEqual(len(retomado.ledger_entry.checkpoints), 2)
+        concluido = registrar_resultado_observado(
+            retomado, retomado.lease.lease_token, retomado.lease.generation,
+            {"ok": True}, RequestStatus.CONCLUIDO, agora=T0 + timedelta(minutes=11),
+        )
+        self.assertEqual(concluido.status, RequestStatus.CONCLUIDO)
 
 
 class TestPedidoEstaAtivo(unittest.TestCase):
