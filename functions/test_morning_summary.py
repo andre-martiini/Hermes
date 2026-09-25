@@ -285,6 +285,26 @@ class TestColetaDeAcoes(unittest.TestCase):
         self.assertEqual([p["titulo"] for p in acoes["prazos_duros"]], ["Escondida"])
         self.assertEqual(acoes["contadores"]["hoje"], 0)
 
+    def test_stand_by_com_data_nao_entra_no_dia(self):
+        """A web apaga a data ao pausar; MCP, Telegram e copiloto não. Com data,
+        a ação em stand-by aparecia no dia com etapa do dia (caso de 25/09/2026)."""
+        acoes = _acoes({
+            "pausada_hoje": _tarefa(titulo="Pausada hoje", status="stand-by",
+                                    plano_acao=[{"id": "e1", "text": "Etapa", "data_prevista": HOJE}]),
+            "pausada_atrasada": _tarefa(titulo="Pausada atrasada", status="stand-by",
+                                        data_limite="2026-08-17"),
+            "ativa": _tarefa(titulo="Ativa"),
+        })
+        no_dia = [t["titulo"] for lane in acoes["por_lane"].values() for t in lane]
+        self.assertEqual(no_dia, ["Ativa"])
+        self.assertEqual(acoes["atrasadas"], [])
+        self.assertEqual(acoes["contadores"]["hoje"], 1)
+
+    def test_stand_by_continua_no_prazo_final(self):
+        acoes = _acoes({"p": _tarefa(titulo="Pausada com prazo", status="stand-by",
+                                     prazo_final="2026-08-22")})
+        self.assertEqual([p["titulo"] for p in acoes["prazos_duros"]], ["Pausada com prazo"])
+
     def test_concluidas_ficam_de_fora(self):
         acoes = _acoes({
             "feita": _tarefa(titulo="Feita", status="concluido"),

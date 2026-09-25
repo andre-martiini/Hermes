@@ -270,6 +270,12 @@ def _coletar_acoes(db, hoje: str) -> dict:
                 "dias": _dias_entre(hoje, prazo_final),
             })
 
+        # Stand-by não entra no dia, nem com data: a web apaga a data ao pausar,
+        # mas MCP, Telegram e copiloto gravam o status e deixam a data. O prazo
+        # final acima continua valendo.
+        if data.get("status") == "stand-by":
+            continue
+
         # Só o que cai hoje (ou ficou para trás) entra no corpo do resumo — o resto
         # da semana aparece agregado em `carga_semana`.
         e_de_hoje = data_limite == hoje
