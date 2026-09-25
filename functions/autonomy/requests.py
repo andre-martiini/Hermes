@@ -305,6 +305,16 @@ def lease_valida_para_acao(
         # crashar esta função exatamente do jeito que o fix anterior
         # deveria ter fechado.
         return False, "geração apresentada não é um inteiro válido"
+    # RISCO ACEITO (3a rodada de revisão adversarial, P04 sub-entrega 1/N):
+    # int() trunca silenciosamente uma fração NUMÉRICA (int(3.9) == 3,
+    # int(Decimal("3.9")) == 3) mas rejeita uma fração em STRING ("3.5" ->
+    # ValueError, já coberto por teste). bool também é aceito como inteiro
+    # (int(True) == 1) por ser subclasse de int em Python. Nenhum dos dois
+    # enfraquece o fencing em si (quem já sabe a geração/token corretos não
+    # ganha nada enviando 3.9 em vez de 3), só aceita um formato levemente
+    # malformado como se fosse o inteiro exato -- não corrigido por ser
+    # mudança de comportamento (round-trip de igualdade) fora do escopo
+    # desta fatia só de fencing.
     if lease_atual.generation != generation_normalizada:
         return False, "geração não confere (reserva perdida para outro executor)"
     try:
