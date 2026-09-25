@@ -90,6 +90,21 @@ class TestHashCanonico(unittest.TestCase):
         # JSON não distinguir tipo numérico na leitura.
         self.assertNotEqual(hash_canonico({"n": 1}), hash_canonico({"n": 1.0}))
 
+    def test_chaves_colidentes_no_mesmo_dict_levantam_valueerror(self):
+        # Achado da 2a rodada de revisão adversarial: sem esta checagem, um
+        # dict com chave int 1 e chave str "1" (valores DIFERENTES) perdia
+        # uma das duas entradas silenciosamente na normalização -- dois
+        # payloads objetivamente diferentes produziam o MESMO hash.
+        with self.assertRaises(ValueError):
+            hash_canonico({"grupo": {1: "from_int_key", "1": "from_str_key"}})
+
+    def test_chaves_colidentes_com_mesmo_valor_tambem_levantam_valueerror(self):
+        # Mesmo quando o valor colidido é igual, a colisão em si (não o
+        # valor) é o que deve ser rejeitada -- não corrigir para o caso
+        # "sortudo" de valores iguais e deixar passar seria inconsistente.
+        with self.assertRaises(ValueError):
+            hash_canonico({"grupo": {1: "a", "1": "a"}})
+
 
 class TestCriarEntrada(unittest.TestCase):
     def test_cria_com_hash_do_payload(self):
@@ -172,6 +187,31 @@ class TestCriarOuReusarEntrada(unittest.TestCase):
         original = criar_entrada("k1", {"a": 1}, agora=AGORA)
         reusada = criar_ou_reusar_entrada("  k1  ", {"a": 1}, original)
         self.assertIs(reusada, original)
+
+    def test_agora_naive_levanta_valueerror_no_branch_de_reuso(self):
+        # Achado da 2a rodada de revisão adversarial: só o branch
+        # "entrada_existente is None" validava agora (via criar_entrada);
+        # o branch de reuso aceitava um agora naive silenciosamente.
+        original = criar_entrada("k1", {"a": 1}, agora=AGORA)
+        with self.assertRaises(ValueError):
+            criar_ou_reusar_entrada(
+                "k1", {"a": 1}, original, agora=datetime(2026, 9, 25, 12, 0, 0)
+            )
+
+    def test_agora_naive_levanta_valueerror_no_branch_de_conflito(self):
+        original = criar_entrada("k1", {"a": 1}, agora=AGORA)
+        with self.assertRaises(ValueError):
+            criar_ou_reusar_entrada(
+                "k1", {"a": 2}, original, agora=datetime(2026, 9, 25, 12, 0, 0)
+            )
+
+    def test_agora_naive_e_validado_antes_de_qualquer_branch(self):
+        # A validação roda ANTES de checar entrada_existente/hash -- um
+        # agora naive é rejeitado mesmo quando entrada_existente é None.
+        with self.assertRaises(ValueError):
+            criar_ou_reusar_entrada(
+                "k1", {"a": 1}, None, agora=datetime(2026, 9, 25, 12, 0, 0)
+            )
 
 
 class TestConsultarReentrega(unittest.TestCase):

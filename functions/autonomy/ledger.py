@@ -102,9 +102,36 @@ def _canonicalizar_chaves(valor: Any) -> Any:
     montou o payload errado". Converter ANTES de ordenar evita a colisão de
     tipos na comparação; JSON de verdade só tem chave string mesmo, então
     isto só antecipa uma normalização que já aconteceria no round-trip pela
-    rede."""
+    rede.
+
+    Levanta `ValueError` se DUAS chaves DISTINTAS do MESMO dict colidirem
+    depois de stringificadas (ex.: `{1: "x", "1": "y"}`) -- achado da 2a
+    rodada de revisão adversarial (P04 sub-entrega 2/N): sem esta checagem,
+    um dict comprehension simples faz "o último valor escrito vence" e
+    descarta silenciosamente a outra entrada, encolhendo o payload sem
+    aviso -- pior que o `TypeError` original, porque dois payloads
+    OBJETIVAMENTE diferentes (um com a chave colidida, outro sem) passavam
+    a produzir o MESMO hash, e `criar_ou_reusar_entrada` tratava um pedido
+    que perdeu dado como reuso legítimo de uma entrada com o dado
+    completo. Duas chaves de dicts DIFERENTES que colidem (comparadas em
+    `hash_canonico`/`_mesmo_valor_canonico`, não dentro do mesmo dict)
+    continuam sendo tratadas como equivalentes -- esse caso é intencional
+    (ver `test_chave_int_e_chave_str_equivalente_colidem_apos_normalizacao`),
+    só a perda de dado DENTRO do mesmo dict é um bug."""
     if isinstance(valor, dict):
-        return {str(chave): _canonicalizar_chaves(item) for chave, item in valor.items()}
+        canonicalizado: dict[str, Any] = {}
+        for chave, item in valor.items():
+            chave_str = str(chave)
+            if chave_str in canonicalizado:
+                raise ValueError(
+                    f"payload tem chaves distintas que colidem após normalização "
+                    f"para string: {chave_str!r} (ex.: uma chave int e uma chave "
+                    "str equivalentes no mesmo dict) -- normalizar perderia dado "
+                    "silenciosamente; normalize as chaves antes de chamar este "
+                    "módulo."
+                )
+            canonicalizado[chave_str] = _canonicalizar_chaves(item)
+        return canonicalizado
     if isinstance(valor, (list, tuple)):
         return [_canonicalizar_chaves(item) for item in valor]
     return valor
@@ -267,7 +294,18 @@ def criar_ou_reusar_entrada(
     `entrada_existente.idempotency_key` que não bate com `idempotency_key`
     é erro de programação de quem chama (leu a entrada errada do
     armazenamento) -- levanta `ValueError`, não é tratado como conflito de
-    payload."""
+    payload.
+
+    `agora`, se fornecido, é validado (tz-aware) logo no início, ANTES de
+    qualquer branch -- achado da 2a rodada de revisão adversarial (P04
+    sub-entrega 2/N): antes desta checagem, só o branch
+    `entrada_existente is None` validava `agora` (delegando para
+    `criar_entrada`); os branches de reuso e de conflito aceitavam um
+    `agora` naive silenciosamente, a mesma classe de bug que a 1a rodada já
+    havia corrigido em `registrar_resultado`, só que nesta função irmã de
+    forma idêntica."""
+    if agora is not None:
+        _exigir_tz_aware(agora, "agora")
     chave_limpa = _normalizar_idempotency_key(idempotency_key)
     if entrada_existente is None:
         return criar_entrada(chave_limpa, payload, agora=agora)
