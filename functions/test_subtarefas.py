@@ -128,6 +128,119 @@ class TestMesclarPreservaOQueNaoConhece(unittest.TestCase):
         self.assertEqual([f["text"] for f in final], ["a"])
 
 
+class TestMesclarApagaDataEEspera(unittest.TestCase):
+    """`null` ou "" em `data_prevista`/`aguardando_de` apagam; ausente preserva.
+
+    Até 25/09/2026 os dois eram lidos como "não enviado": a etapa 0f1cdcee da
+    ação 7e88d802 respondia OK e continuava com a data de 25/09."""
+
+    def _atual(self):
+        return [_etapa("Revisar o edital", data_prevista="2026-09-25",
+                       estado="aguardando_terceiro", aguardando_de="Pró-reitoria")]
+
+    def _mesclar(self, **campos):
+        return st.mesclar_plano(self._atual(), [{"id": "Revisa", "text": "Revisar o edital", **campos}])[0]
+
+    def test_null_apaga_data_prevista(self):
+        self.assertNotIn("data_prevista", self._mesclar(data_prevista=None))
+
+    def test_vazio_apaga_data_prevista(self):
+        for vazio in ("", "   "):
+            with self.subTest(vazio=vazio):
+                self.assertNotIn("data_prevista", self._mesclar(data_prevista=vazio))
+
+    def test_ausente_preserva_data_prevista(self):
+        self.assertEqual(self._mesclar()["data_prevista"], "2026-09-25")
+
+    def test_null_apaga_aguardando_de(self):
+        self.assertNotIn("aguardando_de", self._mesclar(aguardando_de=None))
+
+    def test_vazio_apaga_aguardando_de(self):
+        self.assertNotIn("aguardando_de", self._mesclar(aguardando_de=""))
+
+    def test_ausente_preserva_aguardando_de(self):
+        self.assertEqual(self._mesclar()["aguardando_de"], "Pró-reitoria")
+
+    def test_apagar_um_campo_nao_mexe_nos_outros(self):
+        etapa = self._mesclar(data_prevista=None)
+        self.assertEqual(etapa["aguardando_de"], "Pró-reitoria")
+        self.assertEqual(etapa["estado"], "aguardando_terceiro")
+        self.assertEqual(etapa["id"], "Revisa")
+
+    def test_null_em_estado_continua_preservando(self):
+        """Só data e espera são apagáveis: etapa sem estado não faz sentido."""
+        self.assertEqual(self._mesclar(estado=None)["estado"], "aguardando_terceiro")
+
+    def test_match_por_texto_tambem_apaga(self):
+        etapa = st.mesclar_plano(self._atual(), [{"text": "Revisar o edital", "data_prevista": None}])[0]
+        self.assertNotIn("data_prevista", etapa)
+        self.assertEqual(etapa["id"], "Revisa")
+
+    def test_etapa_nova_com_null_entra_sem_os_campos(self):
+        etapa = st.mesclar_plano([], [{"text": "Nova", "data_prevista": None, "aguardando_de": ""}])[0]
+        self.assertNotIn("data_prevista", etapa)
+        self.assertNotIn("aguardando_de", etapa)
+
+    def test_data_apagada_em_plano_misto_vai_para_o_fim_da_fila(self):
+        atual = [_etapa("Primeira", data_prevista="2026-09-25"),
+                 _etapa("Segunda", data_prevista="2026-10-02")]
+        final = st.mesclar_plano(atual, [
+            {"id": "Primei", "text": "Primeira", "data_prevista": None},
+            {"id": "Segund", "text": "Segunda"},
+        ])
+        self.assertEqual(st.subtarefa_corrente(final, "2026-09-25")["text"], "Segunda")
+
+    def test_data_apagada_em_plano_sem_datas_herda_a_da_acao(self):
+        final = st.mesclar_plano([_etapa("Unica", data_prevista="2026-09-25")],
+                                 [{"id": "Unica", "text": "Unica", "data_prevista": None}])
+        self.assertEqual(st.data_prevista_de(final[0], "2026-11-16", final), "2026-11-16")
+
+
+class TestDiferencas(unittest.TestCase):
+    """O retorno de `editar_plano_acao`: o que de fato mudou, por etapa."""
+
+    def test_campo_apagado_aparece_com_antes_e_depois(self):
+        atual = [_etapa("Revisar o edital", data_prevista="2026-09-25", estado="pendente")]
+        final = st.mesclar_plano(atual, [{"id": "Revisa", "text": "Revisar o edital",
+                                          "data_prevista": None}])
+        self.assertEqual(st.diferencas(atual, final),
+                         {"alteradas": {"Revisa": {"data_prevista": ["2026-09-25", None]}}})
+
+    def test_sem_mudanca_devolve_vazio(self):
+        atual = [_etapa("a", estado="pendente", data_prevista="2026-09-25")]
+        final = st.mesclar_plano(atual, [{"id": "a", "text": "a", "data_prevista": "2026-09-25"}])
+        self.assertEqual(st.diferencas(atual, final), {})
+
+    def test_etapa_no_formato_antigo_nao_conta_como_alterada(self):
+        """{id, text, completed} ganha `estado` ao ser normalizada — não é edição."""
+        atual = [{"id": "a", "text": "a", "completed": True}]
+        final = st.mesclar_plano(atual, [{"id": "a", "text": "a"}])
+        self.assertEqual(st.diferencas(atual, final), {})
+
+    def test_adicionada_removida_e_reordenada(self):
+        atual = [_etapa("a"), _etapa("b"), _etapa("c")]
+        final = st.mesclar_plano(atual, [{"id": "c", "text": "c"}, {"id": "a", "text": "a"},
+                                         {"text": "coisa totalmente nova"}])
+        d = st.diferencas(atual, final)
+        self.assertEqual(d["removidas"], ["b"])
+        self.assertEqual(d["adicionadas"], [final[2]["id"]])
+        self.assertTrue(d["ordem_alterada"])
+        self.assertNotIn("alteradas", d)
+
+    def test_so_reordenar_nao_e_nenhuma_mudanca(self):
+        atual = [_etapa("a"), _etapa("b")]
+        final = st.mesclar_plano(atual, [{"id": "b", "text": "b"}, {"id": "a", "text": "a"}])
+        self.assertEqual(st.diferencas(atual, final), {"ordem_alterada": True})
+
+    def test_estado_muda_sem_citar_completed_e_texto_longo_e_resumido(self):
+        atual = [_etapa("a", estado="pendente")]
+        final = st.mesclar_plano(atual, [{"id": "a", "text": "x" * 200, "estado": "feito"}])
+        d = st.diferencas(atual, final)["alteradas"]["a"]
+        self.assertEqual(d["estado"], ["pendente", "feito"])
+        self.assertNotIn("completed", d)
+        self.assertEqual(len(d["text"][1]), 80)
+
+
 class TestSubtarefaCorrente(unittest.TestCase):
 
     def test_escolhe_pela_menor_data_prevista(self):

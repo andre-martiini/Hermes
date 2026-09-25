@@ -229,8 +229,8 @@ class TestEditarPlanoAcaoNaoIdempotente(unittest.TestCase):
         doc_apos_2 = dict(self.db.collection("tarefas")._docs["tarefa-1"])
         acompanhamento_2 = doc_apos_2["acompanhamento"]
 
-        self.assertEqual(r1, "OK")
-        self.assertEqual(r2, "OK")
+        self.assertTrue(r1.startswith('OK|{"adicionadas"'), r1)
+        self.assertEqual(r2, "OK|Nenhuma etapa mudou: os valores enviados já eram os atuais.")
         self.assertIsInstance(acompanhamento_1, firestore.ArrayUnion)
         self.assertIsInstance(acompanhamento_2, firestore.ArrayUnion)
         # Cada chamada monta o SEU PRÓPRIO ArrayUnion com uma entrada nova
@@ -243,6 +243,63 @@ class TestEditarPlanoAcaoNaoIdempotente(unittest.TestCase):
             [item["text"] for item in doc_apos_1["plano_acao"]],
             [item["text"] for item in doc_apos_2["plano_acao"]],
         )
+
+
+class TestEditarPlanoAcaoApagaCampos(unittest.TestCase):
+    """Relato de 25/09/2026: `data_prevista: ""` e `null` respondiam OK e a
+    etapa 0f1cdcee continuava com a data. O retorno passou a dizer o que mudou."""
+
+    def setUp(self):
+        self.db = _MockDb()
+        self.db.collection("tarefas").document("7e88d802").set({
+            "titulo": "Ação",
+            "plano_acao": [
+                {"id": "0f1cdcee", "text": "Etapa com data", "completed": False,
+                 "estado": "aguardando_terceiro", "aguardando_de": "Fulano",
+                 "data_prevista": "2026-09-25"},
+                {"id": "b2", "text": "Outra etapa", "completed": False, "estado": "pendente",
+                 "data_prevista": "2026-10-01"},
+            ],
+        })
+
+    def _editar(self, **campos):
+        return telegram_extended.execute(
+            "editar_plano_acao",
+            {
+                "task_id": "7e88d802",
+                "novo_plano": [
+                    {"id": "0f1cdcee", "text": "Etapa com data", **campos},
+                    {"id": "b2", "text": "Outra etapa"},
+                ],
+                "justificativa_diario": "teste",
+            },
+            self.db,
+        )
+
+    def _etapa(self, eid):
+        plano = self.db.collection("tarefas")._docs["7e88d802"]["plano_acao"]
+        return next(p for p in plano if p["id"] == eid)
+
+    def test_null_apaga_a_data_e_o_retorno_diz_o_que_mudou(self):
+        r = self._editar(data_prevista=None)
+        self.assertEqual(r, 'OK|{"alteradas": {"0f1cdcee": {"data_prevista": ["2026-09-25", null]}}}')
+        self.assertNotIn("data_prevista", self._etapa("0f1cdcee"))
+        self.assertEqual(self._etapa("b2")["data_prevista"], "2026-10-01")
+
+    def test_vazio_apaga_a_data(self):
+        r = self._editar(data_prevista="")
+        self.assertIn('"data_prevista": ["2026-09-25", null]', r)
+        self.assertNotIn("data_prevista", self._etapa("0f1cdcee"))
+
+    def test_null_apaga_aguardando_de(self):
+        r = self._editar(aguardando_de=None, estado="pendente")
+        self.assertIn('"aguardando_de": ["Fulano", null]', r)
+        self.assertNotIn("aguardando_de", self._etapa("0f1cdcee"))
+
+    def test_edicao_sem_efeito_nao_responde_como_sucesso(self):
+        r = self._editar(data_prevista="2026-09-25")
+        self.assertEqual(r, "OK|Nenhuma etapa mudou: os valores enviados já eram os atuais.")
+        self.assertEqual(self._etapa("0f1cdcee")["data_prevista"], "2026-09-25")
 
 
 class TestPrepararEdicaoAcaoStatusConcluidaEExcluida(unittest.TestCase):

@@ -49,6 +49,11 @@ _CAMPOS_CONHECIDOS = frozenset(
      "data_prevista", "degradation_count"}
 )
 
+# Campos que quem edita pode APAGAR mandando `null` ou "". Nos outros, vazio
+# continua significando "nao mexa": sem data nem espera a etapa ainda faz
+# sentido, sem texto ou estado nao.
+_CAMPOS_APAGAVEIS = frozenset({"data_prevista", "aguardando_de"})
+
 
 # ---------------------------------------------------------------------------
 # Leitura
@@ -283,7 +288,8 @@ def mesclar_plano(plano_atual, novo_plano) -> list[dict]:
     reescrevesse o texto de um passo.
 
     Campos vindos no item novo tem precedencia sobre os herdados: quem edita
-    esta dizendo o que quer.
+    esta dizendo o que quer. Campo ausente preserva o herdado; `data_prevista`
+    ou `aguardando_de` presentes com `null` ou "" apagam o herdado.
     """
     novo_plano = normalizar_entrada_plano(novo_plano)
     atual = [p for p in (plano_atual or []) if isinstance(p, dict)]
@@ -319,12 +325,65 @@ def mesclar_plano(plano_atual, novo_plano) -> list[dict]:
         for chave, valor in item.items():
             if chave == "id":
                 continue
-            if valor is not None and valor != "":
+            if chave in _CAMPOS_APAGAVEIS and valor in (None, ""):
+                mesclado.pop(chave, None)
+            elif valor is not None and valor != "":
                 mesclado[chave] = valor
         mesclado["text"] = texto_novo
         final.append(normalizar(mesclado, id_existente=original.get("id") or item_id or None))
 
     return [f for f in final if f]
+
+
+def _resumo_valor(valor):
+    if isinstance(valor, str) and len(valor) > 80:
+        return valor[:77] + "..."
+    return valor
+
+
+def diferencas(plano_antes, plano_depois) -> dict:
+    """O que de fato mudou entre dois planos, por etapa.
+
+    Existe para o retorno de quem edita: sem ele, um campo que o merge ignorou
+    respondia o mesmo "OK" de uma edicao que gravou. `completed` fica de fora
+    por espelhar `estado`; estado e texto sao comparados pela leitura canonica,
+    para que etapa antiga normalizada nao apareca como alterada.
+    """
+    antes = {p["id"]: p for p in (plano_antes or []) if isinstance(p, dict) and p.get("id")}
+    depois = {p["id"]: p for p in (plano_depois or []) if isinstance(p, dict) and p.get("id")}
+
+    alteradas = {}
+    for eid, novo in depois.items():
+        velho = antes.get(eid)
+        if velho is None:
+            continue
+        campos = {}
+        for chave in sorted((set(velho) | set(novo)) - {"id", "completed", "texto"}):
+            if chave == "text":
+                a, b = texto_de(velho), texto_de(novo)
+            elif chave == "estado":
+                a, b = estado_de(velho), estado_de(novo)
+            else:
+                a, b = velho.get(chave), novo.get(chave)
+            if a != b:
+                campos[chave] = [_resumo_valor(a), _resumo_valor(b)]
+        if campos:
+            alteradas[eid] = campos
+
+    saida = {}
+    if alteradas:
+        saida["alteradas"] = alteradas
+    adicionadas = [eid for eid in depois if eid not in antes]
+    if adicionadas:
+        saida["adicionadas"] = adicionadas
+    removidas = [eid for eid in antes if eid not in depois]
+    if removidas:
+        saida["removidas"] = removidas
+    comuns_antes = [eid for eid in antes if eid in depois]
+    comuns_depois = [eid for eid in depois if eid in antes]
+    if comuns_antes != comuns_depois:
+        saida["ordem_alterada"] = True
+    return saida
 
 
 def aplicar_degradacao(plano, data_limite_acao: str | None) -> tuple[list[dict], dict | None, bool]:
