@@ -246,11 +246,21 @@ def nova_lease(
         _exigir_tz_aware(agora, "agora")
 
     agora_resolvido = agora or datetime.now(timezone.utc)
+    # Normalizar para UTC ANTES de somar a duração (achado do Codex, PR #326,
+    # P2): `datetime + timedelta` num fuso com DST (zoneinfo/pytz não-UTC)
+    # faz aritmética de "relógio de parede", não de tempo decorrido -- perto
+    # de uma transição de DST, uma lease de 5 minutos podia efetivamente
+    # durar mais de uma hora (ex.: America/New_York, 01:58 antes do
+    # fallback + 300s -> 02:03 do MESMO lado do fallback, 3900s reais
+    # depois, não 300s). UTC não observa DST, então a soma em UTC é sempre
+    # aritmética de tempo decorrido de verdade, qualquer que seja o fuso de
+    # `agora` recebido.
+    agora_utc = agora_resolvido.astimezone(timezone.utc)
     return Lease(
         lease_token=gerar_lease_token(),
         generation=int(generation_anterior) + 1,
         executor_id=executor_id_limpo,
-        expires_at=agora_resolvido + timedelta(seconds=duracao_segundos),
+        expires_at=agora_utc + timedelta(seconds=duracao_segundos),
     )
 
 

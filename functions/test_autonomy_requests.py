@@ -223,6 +223,43 @@ class TestNovaLease(unittest.TestCase):
         depois = datetime.now(timezone.utc)
         self.assertTrue(antes <= lease.expires_at - timedelta(seconds=DEFAULT_LEASE_SEGUNDOS) <= depois)
 
+    def test_expires_at_e_sempre_utc(self):
+        # Achado do Codex (PR #326, P2) -- expires_at precisa estar em UTC
+        # (não só "tz-aware") para a aritmética de duração ser segura contra
+        # DST. Ver os dois testes seguintes para o cenário completo.
+        agora = datetime(2026, 1, 1, tzinfo=timezone(timedelta(hours=3)))
+        lease = nova_lease("executor-h", generation_anterior=0, agora=agora)
+        self.assertEqual(lease.expires_at.tzinfo, timezone.utc)
+
+    def test_expires_at_atravessa_fallback_de_dst_sem_erro_de_relogio_de_parede(self):
+        # Achado do Codex (PR #326, P2): datetime + timedelta num fuso com
+        # DST (zoneinfo, não UTC) faz aritmética de "relógio de parede", não
+        # de tempo decorrido. Reproduzido antes do fix: uma lease de 300s
+        # criada às 01:58 America/New_York (antes do fallback de
+        # 2026-11-01) "expirava" às 02:03 do lado de cá do fallback -- 3900s
+        # reais depois (mais de 1h), não 300s. nova_lease normaliza para
+        # UTC antes de somar a duração, então o delta absoluto tem que ser
+        # exatamente a duração pedida, não importa o fuso de entrada.
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo("America/New_York")
+        agora_local = datetime(2026, 11, 1, 1, 58, tzinfo=tz)
+        lease = nova_lease("executor-i", generation_anterior=0, agora=agora_local, duracao_segundos=300)
+        delta_absoluto = lease.expires_at - agora_local.astimezone(timezone.utc)
+        self.assertEqual(delta_absoluto, timedelta(seconds=300))
+
+    def test_expires_at_atravessa_avanco_de_dst_sem_erro_de_relogio_de_parede(self):
+        # Mesmo cenário, mas no avanço de DST (março, "spring forward") --
+        # direção oposta do erro (relógio de parede anda MENOS que o tempo
+        # real decorrido nessa transição).
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo("America/New_York")
+        agora_local = datetime(2026, 3, 8, 1, 58, tzinfo=tz)
+        lease = nova_lease("executor-j", generation_anterior=0, agora=agora_local, duracao_segundos=300)
+        delta_absoluto = lease.expires_at - agora_local.astimezone(timezone.utc)
+        self.assertEqual(delta_absoluto, timedelta(seconds=300))
+
 
 class TestLeaseExpirada(unittest.TestCase):
     def test_antes_do_vencimento_nao_expirada(self):
