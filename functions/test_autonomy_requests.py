@@ -53,6 +53,85 @@ class TestTransicoesPermitidas(unittest.TestCase):
             transicoes_permitidas(RequestStatus.RESULTADO_DESCONHECIDO),
         )
 
+    def test_reservado_nao_pula_para_concluido(self):
+        # Achado da 1a rodada de revisão adversarial: só PENDENTE tinha o
+        # conjunto exato coberto por teste; nada impedia silenciosamente
+        # alguém adicionar um atalho para CONCLUIDO nos demais estados sem
+        # quebrar teste nenhum.
+        self.assertNotIn(RequestStatus.CONCLUIDO, transicoes_permitidas(RequestStatus.RESERVADO))
+
+    def test_em_andamento_nao_pula_para_concluido(self):
+        self.assertNotIn(RequestStatus.CONCLUIDO, transicoes_permitidas(RequestStatus.EM_ANDAMENTO))
+
+    def test_reservado_transicoes_exatas(self):
+        self.assertEqual(
+            transicoes_permitidas(RequestStatus.RESERVADO),
+            frozenset({RequestStatus.EM_ANDAMENTO, RequestStatus.PENDENTE, RequestStatus.CANCELADO}),
+        )
+
+    def test_em_andamento_transicoes_exatas(self):
+        self.assertEqual(
+            transicoes_permitidas(RequestStatus.EM_ANDAMENTO),
+            frozenset({
+                RequestStatus.VERIFICANDO,
+                RequestStatus.AGUARDANDO_APROVACAO,
+                RequestStatus.AGUARDANDO_EXTERNO,
+                RequestStatus.RETENTATIVA_AGENDADA,
+                RequestStatus.RESULTADO_DESCONHECIDO,
+                RequestStatus.FALHA_FINAL,
+                RequestStatus.CANCELADO,
+            }),
+        )
+
+    def test_verificando_transicoes_exatas(self):
+        self.assertEqual(
+            transicoes_permitidas(RequestStatus.VERIFICANDO),
+            frozenset({
+                RequestStatus.CONCLUIDO,
+                RequestStatus.RETENTATIVA_AGENDADA,
+                RequestStatus.FALHA_FINAL,
+                RequestStatus.RESULTADO_DESCONHECIDO,
+            }),
+        )
+
+    def test_aguardando_aprovacao_transicoes_exatas(self):
+        self.assertEqual(
+            transicoes_permitidas(RequestStatus.AGUARDANDO_APROVACAO),
+            frozenset({RequestStatus.EM_ANDAMENTO, RequestStatus.CANCELADO}),
+        )
+
+    def test_aguardando_externo_transicoes_exatas(self):
+        self.assertEqual(
+            transicoes_permitidas(RequestStatus.AGUARDANDO_EXTERNO),
+            frozenset({
+                RequestStatus.EM_ANDAMENTO,
+                RequestStatus.VERIFICANDO,
+                RequestStatus.RESULTADO_DESCONHECIDO,
+                RequestStatus.CANCELADO,
+            }),
+        )
+
+    def test_retentativa_agendada_transicoes_exatas(self):
+        self.assertEqual(
+            transicoes_permitidas(RequestStatus.RETENTATIVA_AGENDADA),
+            frozenset({
+                RequestStatus.RESERVADO,
+                RequestStatus.PENDENTE,
+                RequestStatus.FALHA_FINAL,
+                RequestStatus.CANCELADO,
+            }),
+        )
+
+    def test_resultado_desconhecido_transicoes_exatas(self):
+        self.assertEqual(
+            transicoes_permitidas(RequestStatus.RESULTADO_DESCONHECIDO),
+            frozenset({
+                RequestStatus.VERIFICANDO,
+                RequestStatus.RETENTATIVA_AGENDADA,
+                RequestStatus.FALHA_FINAL,
+            }),
+        )
+
 
 class TestValidarTransicao(unittest.TestCase):
     def test_transicao_permitida_e_valida(self):
@@ -203,6 +282,66 @@ class TestLeaseValidaParaAcao(unittest.TestCase):
         self.assertFalse(ok)
 
 
+class TestLeaseValidaParaAcaoInputsAdversariais(unittest.TestCase):
+    """Achados da 1a rodada de revisão adversarial (P04 sub-entrega 1/N):
+    `token_apresentado`/`generation_apresentada` vêm de um consumidor
+    externo -- entrada malformada/adversarial nunca deve escapar como
+    exceção não tratada, só como "não confere"."""
+
+    def setUp(self):
+        self.expira = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+        self.lease = Lease("token-real", 3, "executor-a", self.expira)
+        self.agora = self.expira - timedelta(seconds=1)
+
+    def test_token_nao_ascii_nao_lanca_excecao(self):
+        # secrets.compare_digest levanta TypeError para strings não-ASCII;
+        # sem tratamento, isto vazava como um crash em vez de reprovar.
+        ok, motivo = lease_valida_para_acao(self.lease, "token-ção-não-confere", 3, agora=self.agora)
+        self.assertFalse(ok)
+        self.assertIn("token de reserva não confere", motivo)
+
+    def test_generation_nao_numerica_nao_lanca_excecao(self):
+        ok, motivo = lease_valida_para_acao(self.lease, "token-real", "nao-numero", agora=self.agora)
+        self.assertFalse(ok)
+        self.assertIn("geração", motivo)
+
+    def test_generation_none_nao_lanca_excecao(self):
+        ok, _ = lease_valida_para_acao(self.lease, "token-real", None, agora=self.agora)
+        self.assertFalse(ok)
+
+    def test_generation_float_com_fracao_e_invalida_sem_lancar(self):
+        # int("3.5") levanta ValueError -- mesmo tratamento dos demais
+        # valores não inteiros, nunca deve escapar como exceção.
+        ok, motivo = lease_valida_para_acao(self.lease, "token-real", "3.5", agora=self.agora)
+        self.assertFalse(ok)
+        self.assertIn("geração", motivo)
+
+
+class TestTzAware(unittest.TestCase):
+    """Achado da 1a rodada de revisão adversarial (P04 sub-entrega 1/N): um
+    datetime "naive" (sem timezone) em `agora`/`expires_at` deve falhar cedo
+    e com mensagem clara, não como TypeError de comparação distante da causa
+    raiz."""
+
+    def test_nova_lease_agora_naive_e_erro(self):
+        with self.assertRaises(ValueError):
+            nova_lease("executor-a", generation_anterior=0, agora=datetime(2026, 1, 1))
+
+    def test_lease_expirada_agora_naive_e_erro(self):
+        lease = Lease("tok", 1, "executor-a", datetime(2026, 1, 1, tzinfo=timezone.utc))
+        with self.assertRaises(ValueError):
+            lease_expirada(lease, agora=datetime(2026, 1, 1))
+
+    def test_lease_valida_para_acao_agora_naive_e_erro(self):
+        lease = Lease("tok", 1, "executor-a", datetime(2026, 1, 1, tzinfo=timezone.utc))
+        with self.assertRaises(ValueError):
+            lease_valida_para_acao(lease, "tok", 1, agora=datetime(2026, 1, 1))
+
+    def test_lease_construida_com_expires_at_naive_e_erro(self):
+        with self.assertRaises(ValueError):
+            Lease("tok", 1, "executor-a", datetime(2026, 1, 1))
+
+
 class _RngFixo:
     """Fake mínimo de `random.Random` para teste determinístico do jitter."""
 
@@ -235,11 +374,22 @@ class TestCalcularBackoffSegundos(unittest.TestCase):
         self.assertEqual(segundos, BACKOFF_BASE_SEGUNDOS[0] * 1.2)
 
     def test_jitter_negativo_no_patamar_minimo_nao_fica_abaixo_do_piso(self):
-        # -20% de 60s = 48s, bem acima do piso de 1s -- mas o piso existe
-        # para qualquer patamar futuro menor que 1.25s; confirma que o
-        # max(1.0, ...) não quebra o caso normal.
+        # -20% de 60s = 48s, bem acima do piso de 1s -- não exercita o
+        # max(1.0, ...) de verdade, só confirma o caso normal do jitter
+        # dentro da faixa esperada. O piso em si é exercitado pelo teste
+        # seguinte.
         segundos = calcular_backoff_segundos(1, rng=_RngFixo(-0.2))
         self.assertEqual(segundos, BACKOFF_BASE_SEGUNDOS[0] * 0.8)
+
+    def test_jitter_extremo_negativo_atinge_o_piso_de_1_segundo(self):
+        # Achado da 1a rodada de revisão adversarial (P04 sub-entrega 1/N):
+        # nenhum teste chamava calcular_backoff_segundos com um `rng` que
+        # realmente disparasse o max(1.0, ...) -- com JITTER_FRACAO=0.2 e
+        # rng real (uniform(-0.2, 0.2)) o piso é inatingível na prática; um
+        # rng fake fora da faixa normal (-1.0) prova que o piso funciona se
+        # algum dia for chamado com jitter maior.
+        segundos = calcular_backoff_segundos(1, rng=_RngFixo(-1.0))
+        self.assertEqual(segundos, 1.0)
 
     def test_tentativa_zero_e_erro(self):
         with self.assertRaises(ValueError):

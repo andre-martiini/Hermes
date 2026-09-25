@@ -197,6 +197,24 @@ class Lease:
     executor_id: str
     expires_at: datetime
 
+    def __post_init__(self) -> None:
+        _exigir_tz_aware(self.expires_at, "expires_at")
+
+
+def _exigir_tz_aware(dt: datetime, nome_param: str) -> None:
+    """Falha cedo e com mensagem clara quando um datetime "naive" (sem
+    timezone) chega onde um instante absoluto é esperado -- achado da 1a
+    rodada de revisão adversarial (P04 sub-entrega 1/N): sem esta checagem,
+    `lease_expirada`/`lease_valida_para_acao` levantavam
+    `TypeError: can't compare offset-naive and offset-aware datetimes` numa
+    comparação distante da causa raiz (o `agora`/`expires_at` naive
+    construído bem antes), em vez de um erro claro no ponto de entrada."""
+    if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+        raise ValueError(
+            f"{nome_param} deve ser timezone-aware (ex.: datetime.now(timezone.utc)); "
+            f"recebido: {dt!r}"
+        )
+
 
 def gerar_lease_token() -> str:
     """Token de reserva opaco e imprevisível. `secrets.token_urlsafe`, não
@@ -224,6 +242,8 @@ def nova_lease(
         raise ValueError("duracao_segundos deve ser positivo.")
     if generation_anterior < 0:
         raise ValueError("generation_anterior não pode ser negativa.")
+    if agora is not None:
+        _exigir_tz_aware(agora, "agora")
 
     agora_resolvido = agora or datetime.now(timezone.utc)
     return Lease(
@@ -237,6 +257,8 @@ def nova_lease(
 def lease_expirada(lease: Lease, agora: datetime | None = None) -> bool:
     """`agora >= expires_at` conta como expirada (limite inclusivo -- o
     instante exato de expiração já não cobre mais o executor)."""
+    if agora is not None:
+        _exigir_tz_aware(agora, "agora")
     agora_resolvido = agora or datetime.now(timezone.utc)
     return agora_resolvido >= lease.expires_at
 
@@ -252,14 +274,43 @@ def lease_valida_para_acao(
 
     Compara o token com `secrets.compare_digest` (tempo constante -- mesmo
     padrão já esperado de qualquer comparação de segredo/token neste
-    projeto, evita side-channel por tempo de resposta)."""
+    projeto, evita side-channel por tempo de resposta).
+
+    `token_apresentado`/`generation_apresentada` vêm de um CONSUMIDOR (seção
+    4.5, item 1: "capacidades declaradas" no pedido) -- entrada não confiável
+    por definição, então esta função nunca deve deixar escapar uma exceção
+    por causa de um valor malformado apresentado por ele; um valor
+    inválido/malformado é só mais um jeito de "não confere", nunca um erro
+    de programação do chamador (ao contrário de `agora`/`generation_anterior`
+    em `nova_lease`, que são responsabilidade de quem chama esta função, não
+    do consumidor externo, e por isso continuam levantando ValueError).
+    Achado da 1a rodada de revisão adversarial (P04 sub-entrega 1/N): sem
+    isto, `generation_apresentada` não-numérica levantava `ValueError` e
+    `token_apresentado` não-ASCII levantava `TypeError` de dentro de
+    `secrets.compare_digest`, em vez de reprovar a ação normalmente."""
     if lease_atual is None:
         return False, "nenhuma reserva ativa para este pedido"
+    if agora is not None:
+        _exigir_tz_aware(agora, "agora")
     if lease_expirada(lease_atual, agora=agora):
         return False, "lease expirada"
-    if lease_atual.generation != int(generation_apresentada):
+    try:
+        generation_normalizada = int(generation_apresentada)
+    except (TypeError, ValueError):
+        return False, "geração apresentada não é um inteiro válido"
+    if lease_atual.generation != generation_normalizada:
         return False, "geração não confere (reserva perdida para outro executor)"
-    if not secrets.compare_digest(lease_atual.lease_token, str(token_apresentado or "")):
+    try:
+        token_confere = secrets.compare_digest(
+            lease_atual.lease_token, str(token_apresentado or "")
+        )
+    except TypeError:
+        # secrets.compare_digest recusa comparar strings não-ASCII -- um
+        # token de consumidor com esse formato nunca poderia mesmo assim
+        # coincidir com o token real (gerado por secrets.token_urlsafe,
+        # sempre ASCII), então é só mais um "não confere".
+        token_confere = False
+    if not token_confere:
         return False, "token de reserva não confere"
     return True, ""
 
