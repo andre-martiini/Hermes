@@ -52,7 +52,7 @@ def briefing_matinal_acoes(event: scheduler_fn.ScheduledEvent):
         docs = (
             db.collection("tarefas")
             .where("data_limite", "==", today_str)
-            .where("status", "in", ["em andamento", "stand-by"])
+            .where("status", "==", "em andamento")
             .get()
         )
         tarefas_hoje = [d.to_dict() for d in docs]

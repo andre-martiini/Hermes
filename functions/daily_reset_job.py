@@ -24,9 +24,11 @@ def daily_wip_reset_and_degradation(event: scheduler_fn.ScheduledEvent):
 
     print(f"[Midnight Reset] Running for {today_str}.")
 
+    # Só "em andamento": arrastar a data de uma ação em stand-by para hoje a
+    # punha no resumo e no briefing do dia como se estivesse ativa.
     tasks_ref = db.collection("tarefas")
     active_tasks = tasks_ref.where(
-        filter=firestore.FieldFilter("status", "in", ["em andamento", "stand-by"])
+        filter=firestore.FieldFilter("status", "==", "em andamento")
     ).get()
 
     batch = db.batch()
