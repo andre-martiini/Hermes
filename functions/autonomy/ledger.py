@@ -88,19 +88,81 @@ class CheckpointMuitoGrande(Exception):
         )
 
 
+def _canonicalizar_chaves(valor: Any) -> Any:
+    """Converte toda chave de `dict` (em qualquer nível de aninhamento) para
+    `str` antes da serialização -- achado da 1a rodada de revisão
+    adversarial (P04 sub-entrega 2/N): `json.dumps(..., sort_keys=True)`
+    levanta `TypeError` ao tentar ORDENAR um dict com chaves de tipos
+    mistos (`{1: "a", "b": "c"}`), mesmo esse dict sendo perfeitamente
+    serializável em JSON sem `sort_keys` (`json.dumps` já converte chave
+    não-string para string silenciosamente nesse caso). Sem esta
+    normalização prévia, um payload aninhado plausível (ex.: agrupado por
+    ID numérico junto de uma chave-sentinela string) quebrava a
+    canonicalização mesmo sendo um payload legítimo -- não um caso de "quem
+    montou o payload errado". Converter ANTES de ordenar evita a colisão de
+    tipos na comparação; JSON de verdade só tem chave string mesmo, então
+    isto só antecipa uma normalização que já aconteceria no round-trip pela
+    rede."""
+    if isinstance(valor, dict):
+        return {str(chave): _canonicalizar_chaves(item) for chave, item in valor.items()}
+    if isinstance(valor, (list, tuple)):
+        return [_canonicalizar_chaves(item) for item in valor]
+    return valor
+
+
+def _serializar_canonico(valor: Any) -> str:
+    """Serialização JSON canônica de qualquer valor (não só `dict` no
+    nível mais alto) -- base compartilhada de `hash_canonico` e
+    `_mesmo_valor_canonico`. Chaves ordenadas recursivamente em todos os
+    níveis de aninhamento (após `_canonicalizar_chaves`), sem espaços
+    supérfluos (`separators=(",", ":")`), para que o MESMO conteúdo lógico
+    sempre produza a MESMA serialização independentemente da ordem de
+    inserção das chaves em memória. Valor não-serializável em JSON (ex.:
+    contém um objeto arbitrário) levanta `TypeError` -- isso é
+    responsabilidade de quem monta o valor (código interno), não um caso a
+    normalizar aqui."""
+    return json.dumps(
+        _canonicalizar_chaves(valor), sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    )
+
+
+def _mesmo_valor_canonico(a: Any, b: Any) -> bool:
+    """Igualdade "mesmo valor observável por quem consome o resultado",
+    usada para decidir se uma reentrega repete EXATAMENTE o valor anterior
+    -- não `a == b` do Python. Duas diferenças deliberadas em relação a
+    `==`, ambas achados da 1a rodada de revisão adversarial (P04 sub-entrega
+    2/N):
+
+    1. `float("nan") == float("nan")` é `False` em Python (semântica IEEE
+       754), então comparar resultado por `==` fazia uma reentrega
+       IDÊNTICA (mesmo NaN reenviado) ser tratada como conflito, ao invés
+       do no-op idempotente que o item 9 promete -- exatamente o cenário
+       que este módulo existe para cobrir. Comparar pela serialização
+       (`"NaN"` == `"NaN"` como string) resolve isso.
+    2. `True == 1` é `True` em Python (bool é subclasse de int), mas
+       `hash_canonico` já trata bool e int como payloads DIFERENTES (ver
+       testes) -- usar `==` aqui criaria duas regras de "mesmo valor"
+       incompatíveis dentro do mesmo módulo para o mesmo tipo de decisão.
+       Comparar pela serialização (`"true"` != `"1"`) mantém a mesma regra
+       nos dois lugares."""
+    return _serializar_canonico(a) == _serializar_canonico(b)
+
+
 def hash_canonico(payload: dict[str, Any]) -> str:
     """Hash SHA-256 determinístico de `payload` -- seção 4.5, item 6:
-    "chave única e hash canônico."
+    "chave única e hash canônico." Ver `_serializar_canonico` para a
+    canonicalização usada.
 
-    Serialização canônica via `json.dumps(..., sort_keys=True)`: chaves
-    ordenadas recursivamente em todos os níveis de aninhamento, sem espaços
-    supérfluos (`separators=(",", ":")`), para que o MESMO conteúdo lógico
-    sempre produza o MESMO hash independentemente da ordem de inserção das
-    chaves em memória. `payload` não-serializável em JSON (ex.: contém um
-    objeto arbitrário) levanta `TypeError` -- isso é responsabilidade de
-    quem monta o payload (código interno), não um caso a normalizar aqui."""
-    serializado = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    return hashlib.sha256(serializado.encode("utf-8")).hexdigest()
+    RISCO ACEITO, documentado (não corrigido -- comportamento inerente a
+    JSON, não um bug deste módulo): `1` (int) e `1.0` (float) produzem
+    hashes DIFERENTES (`json.dumps` serializa como `"1"` e `"1.0"`), então
+    um cliente que reenviar o "mesmo" pedido lógico trocando o tipo
+    numérico (ex.: um proxy que sempre serializa número como float) recebe
+    `ConflitoIdempotencia` em vez de reuso. Normalizar tipo numérico
+    exigiria decidir uma política de coerção que o plano não especifica;
+    quem fizer o wiring deve estar ciente e, se necessário, normalizar o
+    payload ANTES de chamar este módulo."""
+    return hashlib.sha256(_serializar_canonico(payload).encode("utf-8")).hexdigest()
 
 
 def _normalizar_idempotency_key(idempotency_key: str) -> str:
@@ -271,6 +333,20 @@ def adicionar_checkpoint(
     original não é alterada nesse caso (a construção do `Checkpoint` falha
     antes de qualquer `dataclasses.replace`).
 
+    Reentrega do MESMO checkpoint (achado da 1a rodada de revisão
+    adversarial, P04 sub-entrega 2/N): se `dados` for igual (por
+    `_mesmo_valor_canonico`) ao checkpoint mais recente já registrado, esta
+    função é um no-op e devolve `entrada` sem alteração -- sem isso, um
+    heartbeat que reenvia defensivamente o último checkpoint (cenário normal
+    de reentrega, o mesmo que o item 9 existe para cobrir) consumia um slot
+    de `MAX_CHECKPOINTS_POR_OPERACAO` a cada reenvio e podia fazer o
+    descarte FIFO derrubar checkpoints antigos genuinamente distintos só
+    para abrir espaço para duplicatas do mais recente -- o oposto do que a
+    retenção deveria proteger. Só o ÚLTIMO checkpoint é comparado (não o
+    histórico inteiro): um checkpoint igual a um anterior mas diferente do
+    mais recente representa progresso que regrediu, não uma reentrega, e é
+    acrescentado normalmente.
+
     Uma operação com resultado já registrado é terminal para efeito de
     checkpoint -- levanta `ValueError` (checkpoint existe para permitir
     retomada de trabalho EM CURSO; depois de concluída, não há mais o que
@@ -283,6 +359,8 @@ def adicionar_checkpoint(
         )
     if agora is not None:
         _exigir_tz_aware(agora, "agora")
+    if entrada.checkpoints and _mesmo_valor_canonico(entrada.checkpoints[-1].dados, dados):
+        return entrada
     agora_resolvido = (agora or datetime.now(timezone.utc)).astimezone(timezone.utc)
     proxima_sequencia = entrada.checkpoints[-1].sequencia + 1 if entrada.checkpoints else 1
     novo_checkpoint = Checkpoint(sequencia=proxima_sequencia, dados=dados, criado_em=agora_resolvido)
@@ -301,23 +379,35 @@ def registrar_resultado(
     ledger (seção 4.5, item 9: é o que uma reentrega passa a devolver).
 
     Idempotente por natureza (não por acidente): chamar de novo com
-    EXATAMENTE o mesmo `resultado` é um no-op seguro e devolve `entrada` sem
-    alteração -- é exatamente o caso de um executor que reprocessa a própria
-    conclusão depois de uma reentrega (item 9). Chamar com um `resultado`
-    DIFERENTE depois de já registrado é erro de programação de quem chama
-    (duas conclusões diferentes para a mesma operação nunca deveriam
-    acontecer) -- levanta `ValueError`, nunca sobrescreve (mesmo espírito do
-    item 10, aplicado ao resultado em vez do payload de entrada)."""
+    EXATAMENTE o mesmo `resultado` (por `_mesmo_valor_canonico`, não `==` do
+    Python -- achado da 1a rodada de revisão adversarial, P04 sub-entrega
+    2/N: `==` faz `float("nan") != float("nan")`, então um resultado com
+    NaN reenviado IDÊNTICO seria tratado como conflito em vez do no-op que
+    este parágrafo promete; `==` também trata `True` e `1` como iguais,
+    inconsistente com `hash_canonico` tratando os dois como payloads
+    diferentes) é um no-op seguro e devolve `entrada` sem alteração -- é
+    exatamente o caso de um executor que reprocessa a própria conclusão
+    depois de uma reentrega (item 9). Chamar com um `resultado` DIFERENTE
+    depois de já registrado é erro de programação de quem chama (duas
+    conclusões diferentes para a mesma operação nunca deveriam acontecer) --
+    levanta `ValueError`, nunca sobrescreve (mesmo espírito do item 10,
+    aplicado ao resultado em vez do payload de entrada).
+
+    `agora`, se fornecido, é validado (tz-aware) mesmo no caminho de no-op
+    idempotente -- achado da mesma rodada: validar ANTES da checagem de
+    "já registrado" evita que o caminho de no-op mascare um `agora` naive
+    que teria sido rejeitado numa chamada equivalente para uma entrada
+    ainda não concluída."""
+    if agora is not None:
+        _exigir_tz_aware(agora, "agora")
     if entrada.resultado_registrado_em is not None:
-        if entrada.resultado == resultado:
+        if _mesmo_valor_canonico(entrada.resultado, resultado):
             return entrada
         raise ValueError(
             f"operação '{entrada.idempotency_key}' já tem resultado registrado "
             f"em {entrada.resultado_registrado_em.isoformat()}, diferente do "
             "resultado novo -- não sobrescreve."
         )
-    if agora is not None:
-        _exigir_tz_aware(agora, "agora")
     agora_resolvido = (agora or datetime.now(timezone.utc)).astimezone(timezone.utc)
     return dataclasses.replace(
         entrada,

@@ -61,6 +61,35 @@ class TestHashCanonico(unittest.TestCase):
         # colidir apesar de bool ser subclasse de int em Python.
         self.assertNotEqual(hash_canonico({"a": True}), hash_canonico({"a": 1}))
 
+    def test_dict_aninhado_com_chaves_de_tipos_mistos_nao_levanta_typeerror(self):
+        # Antes do fix (1a rodada de revisão adversarial): sort_keys=True
+        # tentava comparar chave int com chave str e levantava TypeError,
+        # mesmo o payload sendo perfeitamente serializável em JSON.
+        resultado = hash_canonico({"grupo": {1: "a", "b": "c"}})
+        self.assertIsInstance(resultado, str)
+
+    def test_chaves_mistas_e_deterministico(self):
+        self.assertEqual(
+            hash_canonico({"grupo": {1: "a", "b": "c"}}),
+            hash_canonico({"grupo": {1: "a", "b": "c"}}),
+        )
+
+    def test_chave_int_e_chave_str_equivalente_colidem_apos_normalizacao(self):
+        # Comportamento aceito: como toda chave é normalizada para str antes
+        # de serializar (JSON de verdade só tem chave string mesmo), a
+        # chave 1 (int) e a chave "1" (str) produzem o MESMO hash --
+        # documentado aqui para não ser uma surpresa silenciosa.
+        self.assertEqual(
+            hash_canonico({"grupo": {1: "a"}}),
+            hash_canonico({"grupo": {"1": "a"}}),
+        )
+
+    def test_int_e_float_equivalentes_produzem_hashes_diferentes(self):
+        # RISCO ACEITO documentado na docstring de hash_canonico: 1 (int) e
+        # 1.0 (float) são payloads DIFERENTES para este módulo, apesar de
+        # JSON não distinguir tipo numérico na leitura.
+        self.assertNotEqual(hash_canonico({"n": 1}), hash_canonico({"n": 1.0}))
+
 
 class TestCriarEntrada(unittest.TestCase):
     def test_cria_com_hash_do_payload(self):
@@ -175,6 +204,49 @@ class TestConsultarReentrega(unittest.TestCase):
         self.assertIsNone(resultado.resultado)
 
 
+class TestAdicionarCheckpointReentrega(unittest.TestCase):
+    """Achado da 1a rodada de revisão adversarial (P04 sub-entrega 2/N):
+    reenvio do MESMO checkpoint (retry/heartbeat defensivo) deve ser um
+    no-op, não consumir um slot de retenção nem disparar descarte FIFO de
+    checkpoints antigos distintos."""
+
+    def test_checkpoint_identico_ao_ultimo_e_no_op_idempotente(self):
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        entrada = adicionar_checkpoint(entrada, {"passo": 1}, agora=AGORA)
+        entrada2 = adicionar_checkpoint(entrada, {"passo": 1}, agora=AGORA + timedelta(minutes=1))
+        self.assertIs(entrada2, entrada)
+        self.assertEqual(len(entrada2.checkpoints), 1)
+
+    def test_checkpoint_diferente_do_ultimo_acrescenta_normalmente(self):
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        entrada = adicionar_checkpoint(entrada, {"passo": 1}, agora=AGORA)
+        entrada = adicionar_checkpoint(entrada, {"passo": 2}, agora=AGORA)
+        self.assertEqual(len(entrada.checkpoints), 2)
+
+    def test_reenvio_duplicado_nao_derruba_checkpoints_antigos_do_fifo(self):
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        for i in range(MAX_CHECKPOINTS_POR_OPERACAO):
+            entrada = adicionar_checkpoint(entrada, {"passo": i}, agora=AGORA)
+        checkpoints_antes = entrada.checkpoints
+        # Reenvio do último checkpoint várias vezes -- sem o fix, cada
+        # chamada empurraria o mais antigo para fora do FIFO.
+        for _ in range(3):
+            entrada = adicionar_checkpoint(
+                entrada, {"passo": MAX_CHECKPOINTS_POR_OPERACAO - 1}, agora=AGORA
+            )
+        self.assertEqual(entrada.checkpoints, checkpoints_antes)
+
+    def test_comparacao_e_so_com_o_ultimo_nao_com_o_historico_inteiro(self):
+        # {"passo": 1} repete um checkpoint ANTERIOR (não o último) --
+        # conta como progresso novo (ex.: voltou a um estado já visto), não
+        # como reentrega, e é acrescentado normalmente.
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        entrada = adicionar_checkpoint(entrada, {"passo": 1}, agora=AGORA)
+        entrada = adicionar_checkpoint(entrada, {"passo": 2}, agora=AGORA)
+        entrada = adicionar_checkpoint(entrada, {"passo": 1}, agora=AGORA)
+        self.assertEqual(len(entrada.checkpoints), 3)
+
+
 class TestAdicionarCheckpoint(unittest.TestCase):
     def test_primeiro_checkpoint_tem_sequencia_1(self):
         entrada = criar_entrada("k1", {}, agora=AGORA)
@@ -268,6 +340,38 @@ class TestRegistrarResultado(unittest.TestCase):
         except ValueError:
             pass
         self.assertEqual(entrada.resultado, {"ok": True})
+
+    def test_resultado_com_nan_reenviado_identico_e_no_op_idempotente(self):
+        # Achado da 1a rodada de revisão adversarial: float("nan") != NaN em
+        # Python (`==` sempre False para NaN), então comparar por `==` fazia
+        # uma reentrega IDÊNTICA (mesmo NaN) ser tratada como conflito.
+        # Comparação por serialização canônica resolve isso ("NaN" ==
+        # "NaN" como string).
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        entrada = registrar_resultado(entrada, {"valor": float("nan")}, agora=AGORA)
+        entrada2 = registrar_resultado(entrada, {"valor": float("nan")}, agora=AGORA)
+        self.assertIs(entrada2, entrada)
+
+    def test_resultado_bool_e_int_equivalente_sao_tratados_como_diferentes(self):
+        # Achado da 1a rodada de revisão adversarial: `True == 1` é True em
+        # Python, mas hash_canonico já trata bool e int como payloads
+        # diferentes -- usar `==` aqui criaria duas regras de "mesmo valor"
+        # incompatíveis no mesmo módulo.
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        entrada = registrar_resultado(entrada, True, agora=AGORA)
+        with self.assertRaises(ValueError):
+            registrar_resultado(entrada, 1, agora=AGORA)
+
+    def test_agora_naive_levanta_valueerror_mesmo_no_caminho_de_no_op(self):
+        # Achado da 1a rodada de revisão adversarial: a validação de
+        # tz-awareness rodava DEPOIS da checagem de "já registrado", então
+        # o caminho de no-op (mesmo resultado reenviado) mascarava um
+        # `agora` naive que seria rejeitado numa chamada equivalente contra
+        # uma entrada ainda não concluída.
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        entrada = registrar_resultado(entrada, {"ok": True}, agora=AGORA)
+        with self.assertRaises(ValueError):
+            registrar_resultado(entrada, {"ok": True}, agora=datetime(2026, 9, 25, 12, 0, 0))
 
     def test_resultado_none_e_um_resultado_valido_registravel(self):
         entrada = criar_entrada("k1", {}, agora=AGORA)
