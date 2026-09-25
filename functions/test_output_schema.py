@@ -230,16 +230,25 @@ campos sempre não-nulos do item. Ver comentário de `_OUTPUT_SCHEMAS` em
 
 `listar_conversas_whatsapp` (sub-entrega 32/N): décima sexta tool, e a
 ÚLTIMA candidata da lista original de 5 da sub-entrega 27/N (esgota essa
-lista). Forma única, sem `oneOf` -- `whatsapp_tools.listar_conversas` não
-levanta `WhatsAppNaoMonitorado` nem `ValueError` (as duas exceções que o
-handler `_whatsapp` intercepta), então não há ramo de erro alternativo
-para publicar. Diferente de `obter_fila_atencao`/`consultar_elevacoes_
-sugeridas`, aqui `total`/`monitoradas` são calculados sobre a lista
-COMPLETA de conversas (sem corte de query antes da contagem -- a própria
-função documenta a decisão de não usar `.limit()` antes de ordenar), e só
-`conversas` é cortado por `limite` na resposta. `chat_id`/`chat_name` são
-sempre string não-vazia (fallback em cadeia: `chat_id` cai no `snap.id`
-garantido pelo SDK; `chat_name` cai no próprio `chat_id` já garantido).
+lista). `oneOf` de 2 branches (sucesso/erro) -- CORRIGIDO de "forma
+única" após a 1ª rodada de revisão adversarial achar que a redação
+original estava errada: `limite = max(1, min(int(args.get("limite") or
+60), 200))` em `whatsapp_tools.py` não é protegido contra `limite`
+não-numérico, que levanta `ValueError` DENTRO de `listar_conversas` --
+propagado até o wrapper `_whatsapp`, cujo `except ValueError` o converte
+num dict real `{"erro": ...}`. `WhatsAppNaoMonitorado` (a outra exceção
+que o wrapper intercepta) continua nunca sendo levantada por
+`listar_conversas`, então o ramo de erro tem uma forma só (`{"erro":
+str}`). `total`/`monitoradas` são calculados sobre a lista JÁ FILTRADA
+por `apenas_monitoradas` (quando `True`, o padrão, um chat não monitorado
+nunca chega a entrar em `conversas`) -- mas, dentro dessa lista filtrada,
+não há corte de QUERY antes da contagem (a própria função documenta a
+decisão de não usar `.limit()` do Firestore antes de ordenar), e só
+`conversas` é cortado por `limite` na resposta. `chat_id` é sempre string
+não-vazia (`str(...)` explícito sobre o fallback no `snap.id` garantido
+pelo SDK); `chat_name` cai no próprio `chat_id` via `or`, mas SEM a mesma
+coerção `str(...)` -- risco aceito, documentado no comentário de
+`_OUTPUT_SCHEMAS`, não corrigido por ser mudança de comportamento.
 `grupo`/`monitorada`/`capturada` são sempre `bool`. `ultima_atividade` é
 o único campo nullable do item (`_iso(...)` devolve `None` explícito).
 `observacao` é sempre string (cadeia de ternários sem caminho `None`).
@@ -278,9 +287,12 @@ Cinco frentes:
    o `outputSchema` publicado campo a campo (para `consultar_historico_
    acoes`, `obter_acao`, `consultar_job`, `buscar_arquivos_acervo`,
    `consultar_contatos_prioritarios_secretario`,
-   `consultar_promocoes_autonomia_sugeridas` e `consultar_elevacoes_
-   sugeridas`, contra o branch `oneOf`
-   correspondente à forma retornada), e nunca aparece para
+   `consultar_promocoes_autonomia_sugeridas`, `consultar_elevacoes_
+   sugeridas` e `listar_conversas_whatsapp`, contra o branch `oneOf`
+   correspondente à forma retornada -- para esta última, o teste da
+   cadeia REAL, sem mockar `execute_tool`, ver `test_listar_conversas_
+   whatsapp_limite_invalido_na_cadeia_real_bate_com_o_ramo_de_erro`),
+   e nunca aparece para
    uma tool sem contrato publicado -- nem
    quando o resultado real também é um dict, nem quando o executor levanta
    uma exceção não tratada por ele mesmo, nem quando o handler devolve uma
@@ -1063,25 +1075,35 @@ class TestOutputSchema(unittest.TestCase):
         self.assertEqual(erro["properties"]["sugestoes"], {"type": "array", "maxItems": 0})
         self.assertEqual(erro["properties"]["total"], {"type": "integer"})
 
-    def test_listar_conversas_whatsapp_tem_schema_forma_unica(self):
+    def test_listar_conversas_whatsapp_tem_schema_oneof_sucesso_e_erro(self):
+        # oneOf, NÃO forma única -- correção da 1ª rodada de revisão
+        # adversarial desta sub-entrega: `limite = max(1, min(int(
+        # args.get("limite") or 60), 200))` em `whatsapp_tools.py` não é
+        # protegido contra `limite` não-numérico (`"abc"`), que levanta
+        # `ValueError` DENTRO de `listar_conversas` -- propagado até o
+        # wrapper `_whatsapp`, que o converte num dict real `{"erro":
+        # ...}`. Ver comentário de `_OUTPUT_SCHEMAS` em `tools/registry.py`
+        # para o levantamento completo.
         schema = registry.output_schema("listar_conversas_whatsapp")
         self.assertIsNotNone(schema)
-        self.assertNotIn("oneOf", schema)
+        self.assertIn("oneOf", schema)
+        self.assertEqual(len(schema["oneOf"]), 2)
+        sucesso, erro = schema["oneOf"]
 
         self.assertEqual(
-            set(schema["properties"].keys()),
+            set(sucesso["properties"].keys()),
             {"total", "monitoradas", "conversas", "observacao"},
         )
         self.assertEqual(
-            set(schema["required"]),
+            set(sucesso["required"]),
             {"total", "monitoradas", "conversas", "observacao"},
         )
-        self.assertFalse(schema["additionalProperties"])
-        self.assertEqual(schema["properties"]["total"], {"type": "integer"})
-        self.assertEqual(schema["properties"]["monitoradas"], {"type": "integer"})
-        self.assertEqual(schema["properties"]["observacao"], {"type": "string"})
+        self.assertFalse(sucesso["additionalProperties"])
+        self.assertEqual(sucesso["properties"]["total"], {"type": "integer"})
+        self.assertEqual(sucesso["properties"]["monitoradas"], {"type": "integer"})
+        self.assertEqual(sucesso["properties"]["observacao"], {"type": "string"})
 
-        item = schema["properties"]["conversas"]["items"]
+        item = sucesso["properties"]["conversas"]["items"]
         campos_item = {
             "chat_id", "chat_name", "grupo", "monitorada", "capturada", "ultima_atividade",
         }
@@ -1098,6 +1120,16 @@ class TestOutputSchema(unittest.TestCase):
         # Único campo nullable do item -- `_iso(None)` devolve `None`
         # explícito (`whatsapp_tools.py::_iso`).
         self.assertEqual(item["properties"]["ultima_atividade"], {"type": ["string", "null"]})
+
+        # Ramo de erro: só a chave `erro`, diferente da forma `{"erro":
+        # ..., "motivo": "chat_nao_monitorado"}` do outro `except` do
+        # wrapper -- `WhatsAppNaoMonitorado` nunca é levantada por
+        # `listar_conversas` (só por `_exigir_monitorado`, nunca chamada
+        # por ela), então só o `except ValueError` é alcançável aqui.
+        self.assertEqual(set(erro["properties"].keys()), {"erro"})
+        self.assertEqual(set(erro["required"]), {"erro"})
+        self.assertFalse(erro["additionalProperties"])
+        self.assertEqual(erro["properties"]["erro"], {"type": "string"})
 
     def test_paridade_dezesseis_tools_tem_output_schema_hoje(self):
         # Não por amostragem: para TODA tool do catálogo real (108 hoje --
@@ -1271,9 +1303,10 @@ class TestHandleToolsListOutputSchema(unittest.TestCase):
             self.catalogo["listar_conversas_whatsapp"]["outputSchema"],
             registry.output_schema("listar_conversas_whatsapp"),
         )
-        # Forma única, sem oneOf -- igual a `consultar_status_modo_secretario`/
-        # `obter_fila_atencao`.
-        self.assertNotIn("oneOf", self.catalogo["listar_conversas_whatsapp"]["outputSchema"])
+        # oneOf chega intacto no catálogo publicado, não achatado nem
+        # reduzido a uma das duas formas.
+        self.assertIn("oneOf", self.catalogo["listar_conversas_whatsapp"]["outputSchema"])
+        self.assertEqual(len(self.catalogo["listar_conversas_whatsapp"]["outputSchema"]["oneOf"]), 2)
 
     def test_nenhuma_outra_tool_publicada_tem_output_schema(self):
         esperadas = {
@@ -2943,7 +2976,13 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
         # `whatsapp_tools.listar_conversas` real depende de Firestore; o
         # executor é mockado aqui com uma forma real que a função produz
         # (ver `tools/whatsapp_tools.py::listar_conversas`), mesmo padrão
-        # das tools anteriores.
+        # das tools anteriores. `apenas_monitoradas=False` explícito nos
+        # argumentos -- achado da 1ª rodada de revisão adversarial: com o
+        # padrão (`apenas_monitoradas` omitido -> `True`), um chat NÃO
+        # monitorado nunca chega a entrar em `conversas` (o `continue` em
+        # `whatsapp_tools.py:153-154` acontece antes do `append`), então
+        # incluir aqui um item com `monitorada=False` só é uma forma real
+        # da tool quando `apenas_monitoradas` é `False` de verdade.
         esperado = {
             "total": 2,
             "monitoradas": 1,
@@ -2965,11 +3004,12 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
                     "ultima_atividade": None,
                 },
             ],
-            "observacao": "Só conversas monitoradas permitem ler mensagens ou consolidar.",
+            "observacao": "monitorada=false: aparece na lista, mas o conteúdo não é acessível.",
         }
         with patch.object(mcp_server, "execute_tool", return_value=esperado):
             resultado = mcp_server._handle_tools_call(
-                {"name": "listar_conversas_whatsapp", "arguments": {}}, ctx=_ctx()
+                {"name": "listar_conversas_whatsapp", "arguments": {"apenas_monitoradas": False}},
+                ctx=_ctx(),
             )
         self.assertFalse(resultado["isError"])
         self.assertIn("structuredContent", resultado)
@@ -2996,7 +3036,7 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
         # mesmo padrão do teste de item esparso das tools anteriores --
         # aqui não é um documento incompleto, é o caminho normal de uma
         # conversa sem `last_activity_ts` conhecido.
-        schema = registry.output_schema("listar_conversas_whatsapp")
+        schema = registry.output_schema("listar_conversas_whatsapp")["oneOf"][0]
         item_props = schema["properties"]["conversas"]["items"]["properties"]
 
         mock_resultado = {
@@ -3033,6 +3073,54 @@ class TestIntegracaoHandleToolsCallStructuredContent(unittest.TestCase):
             for campo in item:
                 self.assertIn(campo, item_props, f"campo '{campo}' fora do item declarado")
         self.assertIsNone(estruturado["conversas"][0]["ultima_atividade"])
+
+    def test_listar_conversas_whatsapp_erro_tambem_leva_structured_content(self):
+        # Ramo de erro publicado nesta sub-entrega após a 1ª rodada de
+        # revisão adversarial achar que a forma única original estava
+        # errada -- ver comentário de `_OUTPUT_SCHEMAS`. Forma mockada
+        # aqui é exatamente a que `tools/hermes_tools.py::_whatsapp`
+        # produz no `except ValueError as exc: return {"erro": str(exc)}`.
+        esperado = {"erro": "invalid literal for int() with base 10: 'abc'"}
+        with patch.object(mcp_server, "execute_tool", return_value=esperado):
+            resultado = mcp_server._handle_tools_call(
+                {"name": "listar_conversas_whatsapp", "arguments": {"limite": "abc"}},
+                ctx=_ctx(),
+            )
+        self.assertIn("structuredContent", resultado)
+        self.assertEqual(resultado["structuredContent"], esperado)
+        self.assertEqual(json.loads(resultado["content"][0]["text"]), esperado)
+
+    def test_listar_conversas_whatsapp_limite_invalido_na_cadeia_real_bate_com_o_ramo_de_erro(self):
+        # Regressão do achado real da 1ª rodada de revisão adversarial:
+        # diferente dos testes acima (que mockam `mcp_server.execute_tool`
+        # e por isso NUNCA exercitam `_whatsapp`/`listar_conversas` de
+        # verdade), este teste roda a cadeia REAL -- `_handle_tools_call`
+        # -> `hermes_tools.execute` -> `_whatsapp` -> `whatsapp_tools.
+        # listar_conversas` -- com um Firestore de mentira (reaproveitado
+        # de `test_whatsapp_tools.py`, mesmo padrão de import cruzado já
+        # usado por `test_email_nao_entregue.py`/`test_outbox_aprovacao.py`
+        # entre outros). `limite="abc"` não é protegido por nenhum
+        # try/except em `listar_conversas` (`int(args.get("limite") or
+        # 60)` levanta `ValueError` de verdade), e é exatamente esse
+        # `ValueError` que o wrapper `_whatsapp` intercepta e transforma
+        # no dict `{"erro": ...}` publicado como `structuredContent`.
+        from test_whatsapp_tools import _Ctx, _Db
+
+        ctx = _Ctx(_Db(allowlist=[]))
+        resultado = mcp_server._handle_tools_call(
+            {"name": "listar_conversas_whatsapp", "arguments": {"limite": "abc"}}, ctx=ctx
+        )
+        self.assertIn("structuredContent", resultado)
+        estruturado = resultado["structuredContent"]
+        self.assertEqual(set(estruturado.keys()), {"erro"})
+        self.assertIn("invalid literal for int", estruturado["erro"])
+
+        schema = registry.output_schema("listar_conversas_whatsapp")
+        erro_schema = schema["oneOf"][1]
+        for campo in erro_schema["required"]:
+            self.assertIn(campo, estruturado)
+        for campo in estruturado:
+            self.assertIn(campo, erro_schema["properties"])
 
     def test_tool_sem_output_schema_nunca_leva_structured_content_mesmo_com_dict(self):
         # `consultar_processo_sipac` não tem outputSchema publicado; mesmo

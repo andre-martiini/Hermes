@@ -2884,36 +2884,69 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     # da sub-entrega 27/N (as outras 4 ja resolvidas: `consultar_
     # contatos_prioritarios_secretario` 28/N, `consultar_promocoes_
     # autonomia_sugeridas` 29/N, `obter_fila_atencao` 30/N, `consultar_
-    # elevacoes_sugeridas` 31/N). Forma UNICA, sem oneOf --
-    # `whatsapp_tools.listar_conversas` nao tem nenhum `try/except` nem
-    # ramo de erro alternativo (o handler que a expoe,
-    # `tools/hermes_tools.py::_whatsapp`, so intercepta
-    # `WhatsAppNaoMonitorado`/`ValueError`, e nenhum dos dois e levantado
-    # por `listar_conversas` -- busca no corpo da funcao e das 3 helpers
-    # que ela chama, `_allowlist`/`_captura_total`/`_leitura_total`,
-    # confirma que so leem `system/settings.whatsapp_ingest` via
-    # `_config_ingest`, sem nenhum `raise`). Mesma categoria de
-    # `obter_fila_atencao`/`consultar_status_modo_secretario`.
+    # elevacoes_sugeridas` 31/N). `oneOf` de 2 branches (sucesso/erro) --
+    # CORRIGIDO de "forma unica" apos a 1a rodada de revisao adversarial
+    # desta sub-entrega achar que a redacao original estava ERRADA:
+    # `whatsapp_tools.listar_conversas` NAO tem `try/except` proprio, mas
+    # `limite = max(1, min(int(args.get("limite") or 60), 200))`
+    # (`whatsapp_tools.py:141`) nao e protegido -- um `limite` que nao
+    # parseia como inteiro (ex.: `"abc"`) levanta `ValueError` DENTRO de
+    # `listar_conversas`, que propaga para o wrapper que expoe a tool
+    # (`tools/hermes_tools.py::_whatsapp`), cujo `except ValueError as exc:
+    # return {"erro": str(exc)}` (linha 1898-1899) converte a excecao num
+    # dict REAL `{"erro": "..."}`, devolvido por `execute_tool` como
+    # sucesso de chamada (nao uma excecao no proprio `execute_tool`).
+    # `mcp_server._handle_tools_call` publica `structuredContent` sempre
+    # que o resultado e um dict E ha `outputSchema` publicado, sem
+    # distinguir erro reconhecido de sucesso -- entao esse dict `{"erro":
+    # ...}` seria publicado como `structuredContent`, violando a forma
+    # unica original (`additionalProperties: false` sem chave `erro`,
+    # `required` exigindo as 4 chaves da forma de sucesso). Nenhum dos 3
+    # testes de integracao originais capturava isso porque todos mockam
+    # `mcp_server.execute_tool` diretamente, pulando a cadeia real
+    # `_whatsapp` -> `listar_conversas`. `WhatsAppNaoMonitorado` continua
+    # NUNCA levantada por `listar_conversas` (so por `_exigir_monitorado`,
+    # nunca chamada por ela) -- confirmado de novo na correcao, entao o
+    # ramo de erro tem UMA forma so, so a chave `erro` (nao a forma
+    # `{"erro":..., "motivo": "chat_nao_monitorado"}` do outro `except`).
     #
     # `total` (`len(conversas)`) e `monitoradas` (`sum(1 for c in
-    # conversas if c["monitorada"])`) sao sempre inteiros, calculados
-    # sobre a lista COMPLETA de conversas -- ao contrario de
-    # `obter_fila_atencao`/`consultar_elevacoes_sugeridas`, aqui NAO ha
-    # corte por `.limit(N)` na query Firestore (`whatsapp_tools.py:144-148`
-    # documenta explicitamente a decisao de nao limitar a leitura antes de
-    # ordenar); `limite` so corta a lista `conversas` na resposta
-    # (`conversas[:limite]`), nunca `total`/`monitoradas`, que sempre
-    # refletem a contagem real. `observacao` e sempre string -- a cadeia
-    # de expressoes ternarias em `listar_conversas` (linhas 173-182)
-    # sempre resolve para um texto, nunca `None`.
+    # conversas if c["monitorada"])`) sao sempre inteiros, mas --
+    # CORRIGIDO na mesma rodada, redacao original tambem imprecisa aqui --
+    # calculados sobre a lista JA FILTRADA por `apenas_monitoradas`
+    # (`whatsapp_tools.py:153-154`: quando `apenas_monitoradas` e `True`,
+    # o padrao quando o argumento e omitido, um chat nao monitorado nunca
+    # chega a entrar em `conversas` -- o `continue` acontece ANTES do
+    # `append`). Na chamada padrao (sem `apenas_monitoradas` explicito),
+    # `total` conta so os chats monitorados, nunca o total real de
+    # `whatsapp_chats`, e `monitoradas` sempre EQUIVALE a `total` (todo
+    # item que sobrou tem `monitorada=True`) -- só com
+    # `apenas_monitoradas=false` explicito os dois podem divergir. Dito
+    # isso, permanece verdade que NAO ha corte por `.limit(N)` de QUERY do
+    # Firestore antes dessa contagem (`whatsapp_tools.py:144-148` documenta
+    # a decisao deliberada de nao limitar a leitura antes de ordenar) --
+    # `limite` so corta a lista `conversas` na resposta
+    # (`conversas[:limite]`), nunca afeta `total`/`monitoradas`.
+    # `observacao` e sempre string -- a cadeia de expressoes ternarias em
+    # `listar_conversas` (linhas 173-182) sempre resolve para um texto,
+    # nunca `None`.
     #
     # Cada item de `conversas` e RECONSTRUIDO campo a campo (nao
     # `snap.to_dict()` cru): `chat_id` e sempre `str(dados.get("chat_id")
     # or snap.id)` -- `snap.id` e garantido pelo SDK do Firestore, entao
-    # `chat_id` nunca e vazio nem `None`. `chat_name` e sempre
-    # `dados.get("chat_name") or chat_id` -- como `chat_id` ja e garantido
-    # nao-vazio, `chat_name` tambem e sempre string nao-vazia (nunca cai
-    # no `None`/string vazia do `dados.get`). `grupo`
+    # `chat_id` nunca e vazio nem `None`, e a coercao `str(...)` cobre
+    # qualquer tipo bruto que `dados.get("chat_id")` devolva. `chat_name`
+    # e `dados.get("chat_name") or chat_id`, SEM a mesma coercao `str(...)`
+    # -- RISCO ACEITO, achado da 1a rodada de revisao adversarial: se um
+    # documento tiver `chat_name` PRESENTE mas truthy-e-nao-string (ex.:
+    # um numero, lista ou dict), o fallback por `or` nao entra em acao e o
+    # valor cru passa direto, violando `{"type": "string"}`. Nenhum
+    # escritor real conhecido grava isso (`chat_name` e sempre string no
+    # worker Node de captura), mas a funcao de leitura nao normaliza esse
+    # caso -- mesma categoria de risco ja aceita para campos de forma
+    # variavel noutras tools deste catalogo (ex.: `evidencia` em
+    # `obter_fila_atencao`), nao corrigido aqui por ser mudanca de
+    # COMPORTAMENTO fora do escopo de uma fatia so-schema. `grupo`
     # (`bool(dados.get("is_group"))`), `monitorada` e `capturada` sao
     # sempre `bool`, nunca `None` (nenhum dos tres usa `dados.get` sem
     # `bool(...)`/expressao booleana em volta). `ultima_atividade` e o
@@ -2926,38 +2959,55 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     # `services/whatsapp-capture/`, nao o codigo Python deste repositorio)
     # -- mas nao importa QUEM escreve, porque `listar_conversas` nunca
     # confia em nenhum campo do documento sem passar por um `.get(chave)
-    # or default`/`bool(...)`/`_iso(...)` explicito antes de devolver.
-    # Igual ao padrao ja usado para `consultar_lista_compras`/
-    # `evidencia` em `obter_fila_atencao`: a garantia de forma vem da
-    # FUNCAO DE LEITURA, nao do(s) escritor(es).
+    # or default`/`bool(...)`/`_iso(...)` explicito antes de devolver
+    # (exceto `chat_name`, ver risco aceito acima). Igual ao padrao ja
+    # usado para `consultar_lista_compras`/`evidencia` em `obter_fila_
+    # atencao`: a garantia de forma vem da FUNCAO DE LEITURA, nao do(s)
+    # escritor(es).
+    #
+    # `erro` (ramo de erro) e sempre `str(exc)` sobre o `ValueError` real
+    # capturado pelo wrapper -- mesma garantia ja usada nas tools
+    # anteriores com ramo de erro.
     "listar_conversas_whatsapp": {
-        "type": "object",
-        "properties": {
-            "total": {"type": "integer"},
-            "monitoradas": {"type": "integer"},
-            "conversas": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "chat_id": {"type": "string"},
-                        "chat_name": {"type": "string"},
-                        "grupo": {"type": "boolean"},
-                        "monitorada": {"type": "boolean"},
-                        "capturada": {"type": "boolean"},
-                        "ultima_atividade": {"type": ["string", "null"]},
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "total": {"type": "integer"},
+                    "monitoradas": {"type": "integer"},
+                    "conversas": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "chat_id": {"type": "string"},
+                                "chat_name": {"type": "string"},
+                                "grupo": {"type": "boolean"},
+                                "monitorada": {"type": "boolean"},
+                                "capturada": {"type": "boolean"},
+                                "ultima_atividade": {"type": ["string", "null"]},
+                            },
+                            "required": [
+                                "chat_id", "chat_name", "grupo",
+                                "monitorada", "capturada", "ultima_atividade",
+                            ],
+                            "additionalProperties": False,
+                        },
                     },
-                    "required": [
-                        "chat_id", "chat_name", "grupo",
-                        "monitorada", "capturada", "ultima_atividade",
-                    ],
-                    "additionalProperties": False,
+                    "observacao": {"type": "string"},
                 },
+                "required": ["total", "monitoradas", "conversas", "observacao"],
+                "additionalProperties": False,
             },
-            "observacao": {"type": "string"},
-        },
-        "required": ["total", "monitoradas", "conversas", "observacao"],
-        "additionalProperties": False,
+            {
+                "type": "object",
+                "properties": {
+                    "erro": {"type": "string"},
+                },
+                "required": ["erro"],
+                "additionalProperties": False,
+            },
+        ],
     },
 }
 
