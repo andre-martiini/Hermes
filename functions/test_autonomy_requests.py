@@ -251,14 +251,27 @@ class TestNovaLease(unittest.TestCase):
     def test_expires_at_atravessa_avanco_de_dst_sem_erro_de_relogio_de_parede(self):
         # Mesmo cenário, mas no avanço de DST (março, "spring forward") --
         # direção oposta do erro (relógio de parede anda MENOS que o tempo
-        # real decorrido nessa transição).
+        # real decorrido). ACHADO DE QUALIDADE DE TESTE da 4a rodada de
+        # revisao adversarial (PR #326): a redacao original desta funcao
+        # usava duracao_segundos=300, mas 01:58 + 300s de relogio de parede
+        # (02:03) cai DENTRO do proprio buraco de DST (02:00-03:00 nao
+        # existe nesse dia) -- por PEP 495/fold=0, esse instante e resolvido
+        # com o MESMO offset (EST/UTC-5) de antes da transicao, entao o
+        # delta absoluto do codigo com bug e do codigo corrigido COINCIDEM
+        # (ambos 300s) -- o teste passava igual com ou sem o fix, sem
+        # discriminar nada. Trocado para duracao_segundos=65*60 (65 min),
+        # que ultrapassa o buraco de 1h: o resultado de relogio de parede
+        # (03:03) cai do lado EDT/UTC-4, entao o codigo com bug perde
+        # exatamente 1h (delta absoluto de so 5 min para uma lease pedida
+        # de 65 min) -- verificado empiricamente antes deste commit.
         from zoneinfo import ZoneInfo
 
         tz = ZoneInfo("America/New_York")
         agora_local = datetime(2026, 3, 8, 1, 58, tzinfo=tz)
-        lease = nova_lease("executor-j", generation_anterior=0, agora=agora_local, duracao_segundos=300)
+        duracao = 65 * 60
+        lease = nova_lease("executor-j", generation_anterior=0, agora=agora_local, duracao_segundos=duracao)
         delta_absoluto = lease.expires_at - agora_local.astimezone(timezone.utc)
-        self.assertEqual(delta_absoluto, timedelta(seconds=300))
+        self.assertEqual(delta_absoluto, timedelta(seconds=duracao))
 
 
 class TestLeaseExpirada(unittest.TestCase):
