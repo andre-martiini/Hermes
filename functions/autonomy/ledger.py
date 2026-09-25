@@ -54,6 +54,15 @@ MAX_CHECKPOINT_BYTES = 64 * 1024
 #: descartar os mais antigos é seguro.
 MAX_CHECKPOINTS_POR_OPERACAO = 20
 
+#: Orçamento CUMULATIVO de bytes para o conjunto de checkpoints retidos --
+#: achado do Codex (P2) na PR #328: `MAX_CHECKPOINTS_POR_OPERACAO *
+#: MAX_CHECKPOINT_BYTES` sozinho permite até 20 * 64KiB = 1.310.720 bytes,
+#: que sozinho já excede o limite de 1MiB (1.048.576 bytes) de um documento
+#: Firestore -- antes mesmo de contar lease, status e os outros campos que
+#: dividem o mesmo documento quando o wiring persistir isto. 512KiB dá folga
+#: generosa para o resto do documento. Ver `_aplicar_orcamento_cumulativo`.
+MAX_CHECKPOINTS_BYTES_TOTAL = 512 * 1024
+
 
 class ConflitoIdempotencia(Exception):
     """Mesmo `idempotency_key`, payload com hash diferente -- seção 4.5,
@@ -88,24 +97,63 @@ class CheckpointMuitoGrande(Exception):
         )
 
 
+def _chave_no_espirito_json(chave: Any) -> str:
+    """Stringifica uma chave de dict com a MESMA regra que o encoder padrão
+    do `json` usa internamente para chave não-string -- achado do Codex
+    (P2) na PR #328: `str(chave)` NÃO bate com essa regra para `bool` e
+    `None` (`str(True) == "True"`, mas `json.dumps({True: "x"})` produz
+    `{"true": "x"}`; `str(None) == "None"`, mas o round-trip real produz
+    `"null"`). Sem esta função, dois payloads que representam o MESMO
+    conteúdo antes e depois de um round-trip real por JSON (ex.: um
+    consumidor que serializa o pedido, manda pela rede, e o servidor
+    desserializa antes de repassar para este módulo) produziam hashes
+    DIFERENTES -- uma reentrega legítima virava `ConflitoIdempotencia` --, e
+    o inverso também: `{None: "a", "None": "b"}` (duas chaves de verdade
+    DIFERENTES em Python) era rejeitado como colisão quando, depois de um
+    round-trip JSON real, só `"None"` (string) sobrevive como chave (a chave
+    `None` vira `"null"`, não colide com a string `"None"`).
+
+    `bool` é verificado ANTES de `int` (`isinstance(True, int)` é `True` em
+    Python -- `bool` é subclasse de `int`). `float` usa `json.dumps` do
+    valor (não da chave) para reaproveitar a MESMA regra de serialização
+    numérica que o resto do módulo já usa para valores (inclusive
+    NaN/Infinity, que `json.dumps` aceita como extensão não-padrão por
+    default). `int` usa `repr` (equivalente ao que o encoder padrão do
+    `json` produz para chave inteira)."""
+    if isinstance(chave, str):
+        return chave
+    if isinstance(chave, bool):
+        return "true" if chave else "false"
+    if chave is None:
+        return "null"
+    if isinstance(chave, float):
+        return json.dumps(chave)
+    if isinstance(chave, int):
+        return repr(chave)
+    raise TypeError(
+        f"chave de tipo {type(chave).__name__} não tem uma representação "
+        f"JSON de chave definida: {chave!r}"
+    )
+
+
 def _canonicalizar_chaves(valor: Any) -> Any:
     """Converte toda chave de `dict` (em qualquer nível de aninhamento) para
-    `str` antes da serialização -- achado da 1a rodada de revisão
-    adversarial (P04 sub-entrega 2/N): `json.dumps(..., sort_keys=True)`
-    levanta `TypeError` ao tentar ORDENAR um dict com chaves de tipos
-    mistos (`{1: "a", "b": "c"}`), mesmo esse dict sendo perfeitamente
-    serializável em JSON sem `sort_keys` (`json.dumps` já converte chave
-    não-string para string silenciosamente nesse caso). Sem esta
-    normalização prévia, um payload aninhado plausível (ex.: agrupado por
-    ID numérico junto de uma chave-sentinela string) quebrava a
-    canonicalização mesmo sendo um payload legítimo -- não um caso de "quem
-    montou o payload errado". Converter ANTES de ordenar evita a colisão de
-    tipos na comparação; JSON de verdade só tem chave string mesmo, então
-    isto só antecipa uma normalização que já aconteceria no round-trip pela
-    rede.
+    a representação de chave JSON (`_chave_no_espirito_json`) antes da
+    serialização -- achado da 1a rodada de revisão adversarial (P04
+    sub-entrega 2/N): `json.dumps(..., sort_keys=True)` levanta `TypeError`
+    ao tentar ORDENAR um dict com chaves de tipos mistos (`{1: "a", "b":
+    "c"}`), mesmo esse dict sendo perfeitamente serializável em JSON sem
+    `sort_keys` (`json.dumps` já converte chave não-string para string
+    silenciosamente nesse caso). Sem esta normalização prévia, um payload
+    aninhado plausível (ex.: agrupado por ID numérico junto de uma
+    chave-sentinela string) quebrava a canonicalização mesmo sendo um
+    payload legítimo -- não um caso de "quem montou o payload errado".
+    Converter ANTES de ordenar evita a colisão de tipos na comparação; JSON
+    de verdade só tem chave string mesmo, então isto só antecipa uma
+    normalização que já aconteceria no round-trip pela rede.
 
     Levanta `ValueError` se DUAS chaves DISTINTAS do MESMO dict colidirem
-    depois de stringificadas (ex.: `{1: "x", "1": "y"}`) -- achado da 2a
+    depois de normalizadas (ex.: `{1: "x", "1": "y"}`) -- achado da 2a
     rodada de revisão adversarial (P04 sub-entrega 2/N): sem esta checagem,
     um dict comprehension simples faz "o último valor escrito vence" e
     descarta silenciosamente a outra entrada, encolhendo o payload sem
@@ -121,14 +169,14 @@ def _canonicalizar_chaves(valor: Any) -> Any:
     if isinstance(valor, dict):
         canonicalizado: dict[str, Any] = {}
         for chave, item in valor.items():
-            chave_str = str(chave)
+            chave_str = _chave_no_espirito_json(chave)
             if chave_str in canonicalizado:
                 raise ValueError(
                     f"payload tem chaves distintas que colidem após normalização "
-                    f"para string: {chave_str!r} (ex.: uma chave int e uma chave "
-                    "str equivalentes no mesmo dict) -- normalizar perderia dado "
-                    "silenciosamente; normalize as chaves antes de chamar este "
-                    "módulo."
+                    f"para a representação de chave JSON: {chave_str!r} (ex.: uma "
+                    "chave int e uma chave str equivalentes no mesmo dict) -- "
+                    "normalizar perderia dado silenciosamente; normalize as chaves "
+                    "antes de chamar este módulo."
                 )
             canonicalizado[chave_str] = _canonicalizar_chaves(item)
         return canonicalizado
@@ -192,6 +240,32 @@ def hash_canonico(payload: dict[str, Any]) -> str:
     return hashlib.sha256(_serializar_canonico(payload).encode("utf-8")).hexdigest()
 
 
+def _snapshot_json(valor: Any) -> Any:
+    """Devolve uma cópia independente de `valor`, livre de qualquer
+    referência ao objeto original -- achado do Codex (P2) na PR #328: sem
+    isto, `Checkpoint.dados`/`LedgerEntry.resultado` guardavam o objeto
+    MUTÁVEL do chamador por referência (ex.: um `dict`); mutar esse dict
+    original DEPOIS de guardado mudava o conteúdo do checkpoint/resultado
+    "imutável" sem passar por `adicionar_checkpoint`/`registrar_resultado`
+    nem por nenhuma validação -- quebra a garantia de nunca sobrescrever
+    (item 10) na prática, apesar do dataclass ser `frozen`. `frozen` só
+    impede reatribuir o ATRIBUTO; não protege o CONTEÚDO de um atributo
+    mutável.
+
+    Implementado como round-trip por `_serializar_canonico`/`json.loads`:
+    além de produzir uma cópia profunda genuína (sem nenhum objeto
+    compartilhado com `valor`), isto valida serializabilidade JSON e aplica
+    a MESMA canonicalização de chave (`_chave_no_espirito_json`) usada em
+    todo o resto do módulo -- consequência deliberada, não efeito colateral
+    acidental: também fecha o achado do Codex (P2) de que um `resultado`
+    não-serializável (ex.: `datetime`) era aceito silenciosamente na
+    PRIMEIRA chamada de `registrar_resultado` (que não serializava nada) e
+    só quebrava com `TypeError` numa REENTREGA (quando a comparação via
+    `_serializar_canonico` rodava pela primeira vez) -- agora falha
+    imediatamente na primeira chamada, consistente com o resto do módulo."""
+    return json.loads(_serializar_canonico(valor))
+
+
 def _normalizar_idempotency_key(idempotency_key: str) -> str:
     chave_limpa = str(idempotency_key or "").strip()
     if not chave_limpa:
@@ -219,8 +293,13 @@ class Checkpoint:
         _exigir_tz_aware(self.criado_em, "criado_em")
         if self.sequencia < 1:
             raise ValueError("sequencia de checkpoint deve ser >= 1 (1-indexada).")
+        # Snapshot ANTES de medir o tamanho -- assim o tamanho medido é o da
+        # forma canônica de verdade que fica retida (object.__setattr__
+        # porque a dataclass é frozen; ver docstring de `_snapshot_json`).
+        dados_snapshot = _snapshot_json(self.dados)
+        object.__setattr__(self, "dados", dados_snapshot)
         tamanho_bytes = len(
-            json.dumps(self.dados, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            json.dumps(dados_snapshot, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         )
         if tamanho_bytes > MAX_CHECKPOINT_BYTES:
             raise CheckpointMuitoGrande(tamanho_bytes, MAX_CHECKPOINT_BYTES)
@@ -251,6 +330,13 @@ class LedgerEntry:
         _exigir_tz_aware(self.criado_em, "criado_em")
         if self.resultado_registrado_em is not None:
             _exigir_tz_aware(self.resultado_registrado_em, "resultado_registrado_em")
+        # Snapshot de `resultado` -- ver docstring de `_snapshot_json`. Roda
+        # incondicionalmente (mesmo quando `resultado` é o default `None`,
+        # caso em que é um no-op) porque `dataclasses.replace` reconstrói a
+        # instância inteira, então este é o único ponto por onde TODO
+        # `resultado` novo passa, venha de `registrar_resultado` ou de uma
+        # construção direta de `LedgerEntry`.
+        object.__setattr__(self, "resultado", _snapshot_json(self.resultado))
 
 
 def criar_entrada(
@@ -405,7 +491,35 @@ def adicionar_checkpoint(
     checkpoints_atualizados = entrada.checkpoints + (novo_checkpoint,)
     if len(checkpoints_atualizados) > MAX_CHECKPOINTS_POR_OPERACAO:
         checkpoints_atualizados = checkpoints_atualizados[-MAX_CHECKPOINTS_POR_OPERACAO:]
+    checkpoints_atualizados = _aplicar_orcamento_cumulativo(checkpoints_atualizados)
     return dataclasses.replace(entrada, checkpoints=checkpoints_atualizados)
+
+
+def _tamanho_serializado_bytes(dados: dict[str, Any]) -> int:
+    return len(
+        json.dumps(dados, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    )
+
+
+def _aplicar_orcamento_cumulativo(
+    checkpoints: tuple[Checkpoint, ...],
+) -> tuple[Checkpoint, ...]:
+    """Descarta o(s) checkpoint(s) mais antigo(s) (FIFO) até que o total
+    somado caiba em `MAX_CHECKPOINTS_BYTES_TOTAL` -- achado do Codex (P2) na
+    PR #328: `MAX_CHECKPOINTS_POR_OPERACAO` (contagem) sozinho não impede
+    que os checkpoints retidos, somados, excedam o limite de 1MiB de um
+    documento Firestore (20 checkpoints de até 64KiB cada somam até
+    1.310.720 bytes). Mantém pelo menos 1 checkpoint (o mais recente) mesmo
+    que ele sozinho exceda o orçamento -- não pode acontecer na prática
+    (`MAX_CHECKPOINT_BYTES` já é bem menor que `MAX_CHECKPOINTS_BYTES_TOTAL`
+    e é aplicado por `Checkpoint.__post_init__` a cada checkpoint
+    individual), mas a função não assume essa invariante de fora."""
+    checkpoints_restantes = list(checkpoints)
+    total_bytes = sum(_tamanho_serializado_bytes(c.dados) for c in checkpoints_restantes)
+    while total_bytes > MAX_CHECKPOINTS_BYTES_TOTAL and len(checkpoints_restantes) > 1:
+        removido = checkpoints_restantes.pop(0)
+        total_bytes -= _tamanho_serializado_bytes(removido.dados)
+    return tuple(checkpoints_restantes)
 
 
 def registrar_resultado(

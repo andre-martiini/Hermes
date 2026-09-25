@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from autonomy.ledger import (
     MAX_CHECKPOINT_BYTES,
+    MAX_CHECKPOINTS_BYTES_TOTAL,
     MAX_CHECKPOINTS_POR_OPERACAO,
     Checkpoint,
     CheckpointMuitoGrande,
@@ -104,6 +105,36 @@ class TestHashCanonico(unittest.TestCase):
         # "sortudo" de valores iguais e deixar passar seria inconsistente.
         with self.assertRaises(ValueError):
             hash_canonico({"grupo": {1: "a", "1": "a"}})
+
+    def test_chave_bool_usa_a_mesma_grafia_que_um_round_trip_json_real(self):
+        # Achado do Codex (P2) na PR #328: str(True) == "True", mas um
+        # round-trip JSON real produz a chave "true" (minúsculo) -- sem
+        # isto, uma reentrega legítima (mesmo payload, depois de passar por
+        # serialização/desserialização JSON de verdade em algum ponto do
+        # transporte) virava ConflitoIdempotencia.
+        self.assertEqual(
+            hash_canonico({"a": {True: "x"}}),
+            hash_canonico({"a": {"true": "x"}}),
+        )
+        self.assertEqual(
+            hash_canonico({"a": {False: "x"}}),
+            hash_canonico({"a": {"false": "x"}}),
+        )
+
+    def test_chave_none_usa_a_mesma_grafia_que_um_round_trip_json_real(self):
+        # str(None) == "None", mas o round-trip real produz "null".
+        self.assertEqual(
+            hash_canonico({"a": {None: "x"}}),
+            hash_canonico({"a": {"null": "x"}}),
+        )
+
+    def test_chave_none_e_chave_string_none_nao_colidem_mais(self):
+        # Antes do fix (str(None) == "None"), {None: "a", "None": "b"} era
+        # rejeitado como colisão -- mas depois de um round-trip JSON real
+        # só "null" (a chave None) e "None" (a chave string) sobrevivem, e
+        # são DIFERENTES -- não deveria ser tratado como colisão.
+        resultado = hash_canonico({None: "a", "None": "b"})
+        self.assertIsInstance(resultado, str)
 
 
 class TestCriarEntrada(unittest.TestCase):
@@ -350,6 +381,46 @@ class TestAdicionarCheckpoint(unittest.TestCase):
         with self.assertRaises(ValueError):
             adicionar_checkpoint(entrada, {"passo": 1}, agora=datetime(2026, 9, 25, 12, 0, 0))
 
+    def test_orcamento_cumulativo_derruba_mais_antigos_alem_do_limite_de_contagem(self):
+        # Achado do Codex (P2) na PR #328: MAX_CHECKPOINTS_POR_OPERACAO (20)
+        # * MAX_CHECKPOINT_BYTES (64KiB) sozinho excede o limite de 1MiB de
+        # um documento Firestore. Cada checkpoint aqui é único (não sofre
+        # dedup pela reentrega) e quase no limite individual, então o
+        # orçamento cumulativo tem que agir ANTES do limite de contagem.
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        tamanho_por_checkpoint = MAX_CHECKPOINT_BYTES - 40
+        for i in range(MAX_CHECKPOINTS_POR_OPERACAO):
+            entrada = adicionar_checkpoint(
+                entrada, {"i": i, "blob": "x" * tamanho_por_checkpoint}, agora=AGORA
+            )
+        total_bytes = sum(
+            len(str(c.dados).encode("utf-8")) for c in entrada.checkpoints
+        )
+        self.assertLessEqual(total_bytes, MAX_CHECKPOINTS_BYTES_TOTAL)
+        self.assertLess(len(entrada.checkpoints), MAX_CHECKPOINTS_POR_OPERACAO)
+        # Mantém sempre o(s) mais RECENTE(s) -- o último índice adicionado
+        # tem que sobreviver.
+        self.assertEqual(entrada.checkpoints[-1].dados["i"], MAX_CHECKPOINTS_POR_OPERACAO - 1)
+
+    def test_orcamento_cumulativo_mantem_pelo_menos_um_checkpoint(self):
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        entrada = adicionar_checkpoint(
+            entrada, {"blob": "x" * (MAX_CHECKPOINT_BYTES - 20)}, agora=AGORA
+        )
+        self.assertEqual(len(entrada.checkpoints), 1)
+
+    def test_mutar_dict_original_depois_de_adicionar_nao_afeta_o_checkpoint(self):
+        # Achado do Codex (P2) na PR #328: o checkpoint guardava o dict do
+        # chamador por referência; mutar o dict original depois mudava o
+        # conteúdo do checkpoint "imutável" sem passar por nenhuma
+        # validação.
+        dados_originais = {"passo": 1, "detalhe": {"x": 1}}
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        entrada = adicionar_checkpoint(entrada, dados_originais, agora=AGORA)
+        dados_originais["passo"] = 999
+        dados_originais["detalhe"]["x"] = 999
+        self.assertEqual(entrada.checkpoints[0].dados, {"passo": 1, "detalhe": {"x": 1}})
+
 
 class TestRegistrarResultado(unittest.TestCase):
     def test_registra_resultado_e_marca_timestamp(self):
@@ -412,6 +483,38 @@ class TestRegistrarResultado(unittest.TestCase):
         entrada = registrar_resultado(entrada, {"ok": True}, agora=AGORA)
         with self.assertRaises(ValueError):
             registrar_resultado(entrada, {"ok": True}, agora=datetime(2026, 9, 25, 12, 0, 0))
+
+    def test_resultado_nao_serializavel_e_rejeitado_ja_na_primeira_chamada(self):
+        # Achado do Codex (P2) na PR #328: antes do fix, um resultado
+        # não-serializável (ex.: datetime) era aceito silenciosamente na
+        # PRIMEIRA chamada (dataclasses.replace não serializava nada) e só
+        # quebrava com TypeError numa REENTREGA (quando a comparação via
+        # serialização canônica rodava pela primeira vez) -- inconsistente
+        # com o resto do módulo, que falha cedo. Agora falha já na
+        # primeira chamada.
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        with self.assertRaises(TypeError):
+            registrar_resultado(entrada, AGORA, agora=AGORA)
+
+    def test_entrada_original_nao_e_alterada_quando_resultado_e_rejeitado(self):
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        try:
+            registrar_resultado(entrada, AGORA, agora=AGORA)
+        except TypeError:
+            pass
+        self.assertIsNone(entrada.resultado_registrado_em)
+
+    def test_mutar_dict_original_depois_de_registrar_nao_afeta_o_resultado(self):
+        # Achado do Codex (P2) na PR #328: o resultado guardava o dict do
+        # chamador por referência; mutar o dict original depois mudava o
+        # "resultado observado" sem passar por nenhuma validação --
+        # quebrava a garantia de nunca sobrescrever (item 10) na prática.
+        dados_originais = {"ok": True, "detalhe": {"x": 1}}
+        entrada = criar_entrada("k1", {}, agora=AGORA)
+        entrada = registrar_resultado(entrada, dados_originais, agora=AGORA)
+        dados_originais["ok"] = False
+        dados_originais["detalhe"]["x"] = 999
+        self.assertEqual(entrada.resultado, {"ok": True, "detalhe": {"x": 1}})
 
     def test_resultado_none_e_um_resultado_valido_registravel(self):
         entrada = criar_entrada("k1", {}, agora=AGORA)
