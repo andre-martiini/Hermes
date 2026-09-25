@@ -1,6 +1,6 @@
 {
   "name": "editar_plano_acao",
-  "description": "Atualiza o plano de ação de uma tarefa existente. Também é a forma de marcar o estado de uma etapa (em andamento, aguardando terceiro, feita) e de dar data própria a cada uma. Campos omitidos preservam o valor atual da etapa — não a apagam. ATENÇÃO: as etapas vão em novo_plano — enviar lista vazia é recusado, não apaga o plano.",
+  "description": "Atualiza o plano de ação de uma tarefa existente. Também é a forma de marcar o estado de uma etapa (em andamento, aguardando terceiro, feita) e de dar data própria a cada uma. Campos omitidos preservam o valor atual da etapa — não a apagam; para APAGAR data_prevista ou aguardando_de, envie null. Devolve 'OK|' seguido do que de fato mudou por etapa (ex.: {\"alteradas\": {\"id\": {\"data_prevista\": [\"2026-09-25\", null]}}}), ou 'OK|Nenhuma etapa mudou' quando nada mudou. ATENÇÃO: as etapas vão em novo_plano — enviar lista vazia é recusado, não apaga o plano.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -24,7 +24,8 @@
             },
             "data_prevista": {
               "type": "string",
-              "description": "YYYY-MM-DD — dia previsto para esta etapa. Sem ela, a etapa herda a data_limite da ação"
+              "nullable": true,
+              "description": "YYYY-MM-DD — dia previsto para esta etapa. Sem ela, a etapa herda a data_limite da ação. null (ou \"\") apaga a data que a etapa tinha; omitir preserva."
             },
             "estado": {
               "type": "string",
@@ -38,7 +39,8 @@
             },
             "aguardando_de": {
               "type": "string",
-              "description": "De quem se espera, quando estado='aguardando_terceiro'. Ex.: 'colegas do MAGO', 'Iris / Assuntos Estudantis'"
+              "nullable": true,
+              "description": "De quem se espera, quando estado='aguardando_terceiro'. Ex.: 'colegas do MAGO', 'Iris / Assuntos Estudantis'. null (ou \"\") apaga; omitir preserva."
             }
           },
           "required": [

@@ -423,10 +423,9 @@ def execute(tool_name: str, slots: dict, db) -> str:
                         "estado?}). Para apagar o plano de proposito, repita com "
                         "confirmar_esvaziar=true.")
 
-        # Inconsistência de data sinaliza, não bloqueia — e vai para o diário em
-        # vez do retorno: o valor de retorno é lido pelo modelo, que tem
-        # instrução casando com "OK" exato, e o diário é onde uma observação
-        # sobre prazo fica visível na interface e sobrevive à conversa.
+        # Inconsistência de data sinaliza, não bloqueia — e vai para o diário,
+        # onde uma observação sobre prazo fica visível na interface e sobrevive
+        # à conversa.
         nota = f"[Telegram Hermes] Plano de ação atualizado: {justificativa}"
         avisos = subtarefas.inconsistencias(plano_final, task_data.get("prazo_final"))
         if avisos:
@@ -438,7 +437,12 @@ def execute(tool_name: str, slots: dict, db) -> str:
             "data_atualizacao": now_iso,
             "acompanhamento": firestore.ArrayUnion([{"data": now_iso, "nota": nota}]),
         })
-        return "OK"
+        # Devolve o que mudou por etapa: sem isso, um campo que o merge ignorou
+        # respondia o mesmo "OK" de uma edição que gravou.
+        alteracoes = subtarefas.diferencas(plano_atual, plano_final)
+        if not alteracoes:
+            return "OK|Nenhuma etapa mudou: os valores enviados já eram os atuais."
+        return "OK|" + json.dumps(alteracoes, ensure_ascii=False)
 
     if tool_name == "agendar_lembrete_acao":
         task_id = str(slots.get("task_id") or slots.get("id_tarefa") or "").strip()

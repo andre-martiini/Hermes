@@ -9818,6 +9818,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "estado": "pendente" | "em_andamento" | "aguardando_terceiro" | "feito"
                 "aguardando_de": de quem se espera, quando o estado for "aguardando_terceiro"
               Omitir um campo preserva o valor que a etapa já tinha; não o apaga.
+              Para apagar data_prevista ou aguardando_de, envie null (ou "").
             - justificativa_diario: Texto gerado pela IA explicando o motivo da alteração (será gravado no diário da tarefa).
             Retorna 'OK' ou 'ERRO|{detalhe}'.
             """
