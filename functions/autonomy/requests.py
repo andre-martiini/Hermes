@@ -298,58 +298,39 @@ def lease_expirada(lease: Lease, agora: datetime | None = None) -> bool:
     return agora_resolvido >= lease.expires_at
 
 
-def lease_valida_para_acao(
+def lease_pertence_ao_apresentante(
     lease_atual: Lease | None,
     token_apresentado: str,
     generation_apresentada: int,
-    agora: datetime | None = None,
 ) -> tuple[bool, str]:
-    """Fencing -- seção 4.5, itens 4-5: "início, heartbeat, checkpoint e
-    conclusão exigem o mesmo token/geração ainda válidos."
+    """Confere só IDENTIDADE (token + geração) -- SEM checar expiração.
+    Extraído de `lease_valida_para_acao` (que continua fazendo as duas
+    checagens, identidade E expiração) para dar suporte a um caminho de
+    reentrega idempotente que não deve depender de uma lease ainda não
+    vencida: seção 4.5, item 9, "reentrega do mesmo pedido retorna ...
+    resultado já observado" -- um resultado JÁ REGISTRADO permanece válido
+    para leitura/replay mesmo depois que a lease que o produziu expirou; só
+    a produção de um EFEITO NOVO (`registrar_progresso`, uma reserva nova)
+    exige lease ainda dentro do prazo. Achado de revisão adversarial
+    (Codex, PR #330, P2): sem esta separação,
+    `registrar_resultado_observado` rejeitava com "lease expirada" uma
+    reentrega legítima do MESMO resultado já concluído, quando a resposta
+    original se perdeu e o consumidor tenta de novo depois do vencimento
+    natural da lease.
 
-    Compara o token com `secrets.compare_digest` (tempo constante -- mesmo
-    padrão já esperado de qualquer comparação de segredo/token neste
-    projeto, evita side-channel por tempo de resposta).
-
-    `token_apresentado`/`generation_apresentada` vêm de um CONSUMIDOR (seção
-    4.5, item 1: "capacidades declaradas" no pedido) -- entrada não confiável
-    por definição, então esta função nunca deve deixar escapar uma exceção
-    por causa de um valor malformado apresentado por ele; um valor
-    inválido/malformado é só mais um jeito de "não confere", nunca um erro
-    de programação do chamador (ao contrário de `agora`/`generation_anterior`
-    em `nova_lease`, que são responsabilidade de quem chama esta função, não
-    do consumidor externo, e por isso continuam levantando ValueError).
-    Achado da 1a rodada de revisão adversarial (P04 sub-entrega 1/N): sem
-    isto, `generation_apresentada` não-numérica levantava `ValueError` e
-    `token_apresentado` não-ASCII levantava `TypeError` de dentro de
-    `secrets.compare_digest`, em vez de reprovar a ação normalmente."""
+    Compara o token com `secrets.compare_digest` (tempo constante).
+    `token_apresentado`/`generation_apresentada` vêm de um CONSUMIDOR --
+    entrada não confiável por definição, então nunca deixa escapar uma
+    exceção por causa de um valor malformado (ver detalhe na docstring
+    histórica de `lease_valida_para_acao`, que continua se aplicando aqui:
+    achados da 1a/3a rodadas de revisão adversarial da P04 sub-entrega
+    1/N)."""
     if lease_atual is None:
         return False, "nenhuma reserva ativa para este pedido"
-    if agora is not None:
-        _exigir_tz_aware(agora, "agora")
-    if lease_expirada(lease_atual, agora=agora):
-        return False, "lease expirada"
     try:
         generation_normalizada = int(generation_apresentada)
     except (TypeError, ValueError, OverflowError):
-        # OverflowError (2a rodada de revisão adversarial, P04 sub-entrega
-        # 1/N): int() de um float/Decimal infinito (`float("inf")`,
-        # `Decimal("Infinity")`) levanta OverflowError, não ValueError --
-        # `json.loads` aceita "Infinity"/"-Infinity" como extensão por
-        # padrão, então um consumidor podia enviar isso num payload e
-        # crashar esta função exatamente do jeito que o fix anterior
-        # deveria ter fechado.
         return False, "geração apresentada não é um inteiro válido"
-    # RISCO ACEITO (3a rodada de revisão adversarial, P04 sub-entrega 1/N):
-    # int() trunca silenciosamente uma fração NUMÉRICA (int(3.9) == 3,
-    # int(Decimal("3.9")) == 3) mas rejeita uma fração em STRING ("3.5" ->
-    # ValueError, já coberto por teste). bool também é aceito como inteiro
-    # (int(True) == 1) por ser subclasse de int em Python. Nenhum dos dois
-    # enfraquece o fencing em si (quem já sabe a geração/token corretos não
-    # ganha nada enviando 3.9 em vez de 3), só aceita um formato levemente
-    # malformado como se fosse o inteiro exato -- não corrigido por ser
-    # mudança de comportamento (round-trip de igualdade) fora do escopo
-    # desta fatia só de fencing.
     if lease_atual.generation != generation_normalizada:
         return False, "geração não confere (reserva perdida para outro executor)"
     try:
@@ -357,14 +338,30 @@ def lease_valida_para_acao(
             lease_atual.lease_token, str(token_apresentado or "")
         )
     except TypeError:
-        # secrets.compare_digest recusa comparar strings não-ASCII -- um
-        # token de consumidor com esse formato nunca poderia mesmo assim
-        # coincidir com o token real (gerado por secrets.token_urlsafe,
-        # sempre ASCII), então é só mais um "não confere".
         token_confere = False
     if not token_confere:
         return False, "token de reserva não confere"
     return True, ""
+
+
+def lease_valida_para_acao(
+    lease_atual: Lease | None,
+    token_apresentado: str,
+    generation_apresentada: int,
+    agora: datetime | None = None,
+) -> tuple[bool, str]:
+    """Fencing completo -- seção 4.5, itens 4-5: "início, heartbeat,
+    checkpoint e conclusão exigem o mesmo token/geração ainda válidos."
+    Identidade (`lease_pertence_ao_apresentante`) MAIS expiração -- use
+    aquela função sozinha só no caso especial de reentrega de um resultado
+    JÁ registrado (ver sua docstring)."""
+    if lease_atual is None:
+        return False, "nenhuma reserva ativa para este pedido"
+    if agora is not None:
+        _exigir_tz_aware(agora, "agora")
+    if lease_expirada(lease_atual, agora=agora):
+        return False, "lease expirada"
+    return lease_pertence_ao_apresentante(lease_atual, token_apresentado, generation_apresentada)
 
 
 def calcular_backoff_segundos(tentativa: int, rng: object | None = None) -> float:

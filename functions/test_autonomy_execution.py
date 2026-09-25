@@ -141,6 +141,38 @@ class TestRenovarPedido(unittest.TestCase):
                 agora=T0 + timedelta(minutes=5),
             )
 
+    def test_renovar_em_retentativa_agendada_falha_mesmo_com_lease_ainda_valida(self):
+        # Achado de revisão adversarial (Codex, PR #330, P1): sem excluir
+        # RETENTATIVA_AGENDADA (além de ESTADOS_TERMINAIS), um executor
+        # "zumbi" podia renovar indefinidamente a lease de um pedido
+        # agendado para retentativa, impedindo QUALQUER outro executor de
+        # jamais reivindicá-lo (assumir_pedido corretamente recusa
+        # reassumir enquanto a lease anterior não expira).
+        pedido = assumir_pedido(_pedido_pendente(), "executor-a", agora=T0)
+        agendado_para_retentativa = PedidoDuravel(
+            request_id=pedido.request_id,
+            status=RequestStatus.RETENTATIVA_AGENDADA,
+            lease=pedido.lease,
+        )
+        with self.assertRaises(ValueError):
+            renovar_pedido(
+                agendado_para_retentativa, pedido.lease.lease_token, pedido.lease.generation,
+                agora=T0 + timedelta(minutes=1),
+            )
+
+    def test_renovar_em_resultado_desconhecido_falha(self):
+        pedido = assumir_pedido(_pedido_pendente(), "executor-a", agora=T0)
+        aguardando_reconciliacao = PedidoDuravel(
+            request_id=pedido.request_id,
+            status=RequestStatus.RESULTADO_DESCONHECIDO,
+            lease=pedido.lease,
+        )
+        with self.assertRaises(ValueError):
+            renovar_pedido(
+                aguardando_reconciliacao, pedido.lease.lease_token, pedido.lease.generation,
+                agora=T0 + timedelta(minutes=1),
+            )
+
     def test_renovar_pedido_terminal_falha_mesmo_com_lease_ainda_valida(self):
         # Achado de revisão adversarial: nenhuma função limpa `lease` ao
         # concluir um pedido -- sem checar `pedido_esta_ativo`, a lease
@@ -309,6 +341,56 @@ class TestRegistrarResultadoObservado(unittest.TestCase):
                 {"ok": True}, RequestStatus.CONCLUIDO, agora=T0,
             )
         self.assertIsNone(pedido.ledger_entry.resultado_registrado_em)
+
+    def test_reentrega_do_mesmo_resultado_e_idempotente_mesmo_com_lease_expirada(self):
+        # Achado de revisão adversarial (Codex, PR #330, P2): se a resposta
+        # da 1a chamada se perdeu, o consumidor retenta com o MESMO
+        # token/geração depois que a lease (5 minutos por padrão) já
+        # venceu -- essa reentrega precisa continuar valendo, porque o
+        # resultado já está definitivamente registrado (item 9: reentrega
+        # retorna o resultado já observado, não depende de lease viva).
+        pedido = self._pedido_em_andamento()
+        concluido = registrar_resultado_observado(
+            pedido, pedido.lease.lease_token, pedido.lease.generation,
+            {"ok": True}, RequestStatus.CONCLUIDO, agora=T0 + timedelta(seconds=5),
+        )
+        de_novo = registrar_resultado_observado(
+            concluido, pedido.lease.lease_token, pedido.lease.generation,
+            {"ok": True}, RequestStatus.CONCLUIDO, agora=T0 + timedelta(minutes=10),
+        )
+        self.assertEqual(de_novo.status, RequestStatus.CONCLUIDO)
+        self.assertEqual(de_novo.ledger_entry.resultado, {"ok": True})
+
+    def test_reentrega_apos_lease_expirada_ainda_exige_token_correto(self):
+        # O bypass de lease vencida (P2 acima) não abre mão de autenticar
+        # quem está lendo -- token/geração errados continuam rejeitados
+        # mesmo para um pedido já concluído.
+        pedido = self._pedido_em_andamento()
+        concluido = registrar_resultado_observado(
+            pedido, pedido.lease.lease_token, pedido.lease.generation,
+            {"ok": True}, RequestStatus.CONCLUIDO, agora=T0 + timedelta(seconds=5),
+        )
+        with self.assertRaises(LeaseInvalida):
+            registrar_resultado_observado(
+                concluido, "token-errado", pedido.lease.generation,
+                {"ok": True}, RequestStatus.CONCLUIDO, agora=T0 + timedelta(minutes=10),
+            )
+
+    def test_reentrega_apos_lease_expirada_com_resultado_diferente_ainda_falha(self):
+        # O bypass não enfraquece a garantia de nunca sobrescrever: mesmo
+        # com a lease vencida, um resultado DIFERENTE do já registrado
+        # continua levantando ValueError (autonomy.ledger.registrar_resultado
+        # é o árbitro final de "idêntico").
+        pedido = self._pedido_em_andamento()
+        concluido = registrar_resultado_observado(
+            pedido, pedido.lease.lease_token, pedido.lease.generation,
+            {"ok": True}, RequestStatus.CONCLUIDO, agora=T0 + timedelta(seconds=5),
+        )
+        with self.assertRaises(ValueError):
+            registrar_resultado_observado(
+                concluido, pedido.lease.lease_token, pedido.lease.generation,
+                {"ok": False}, RequestStatus.CONCLUIDO, agora=T0 + timedelta(minutes=10),
+            )
 
     def test_status_nao_terminal_e_rejeitado_sem_selar_o_ledger(self):
         # Achado de revisão adversarial (o mais grave desta sub-entrega):

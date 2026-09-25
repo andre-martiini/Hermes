@@ -45,11 +45,32 @@ from autonomy.requests import (
     Lease,
     RequestStatus,
     lease_expirada,
+    lease_pertence_ao_apresentante,
     lease_valida_para_acao,
     nova_lease,
     renovar_lease,
     validar_transicao,
 )
+
+#: Estados em que renovar a lease faz sentido -- o executor ainda está
+#: ativamente trabalhando (ou aguardando algo enquanto SEGURA a reserva)
+#: neste pedido. Deliberadamente MENOR que "não terminal"
+#: (`ESTADOS_TERMINAIS`): `RETENTATIVA_AGENDADA` e `RESULTADO_DESCONHECIDO`
+#: também não entram aqui, mesmo sendo não-terminais -- achado de revisão
+#: adversarial (Codex, PR #330, P1): ambos sinalizam que a posse ATUAL está
+#: sendo reconsiderada (agendar nova tentativa / reconciliar um efeito
+#: incerto), não que o mesmo executor continua com a reserva. Deixar
+#: renovar nesses dois estados permitiria a um executor "zumbi" continuar
+#: dando heartbeat indefinidamente e impedir para sempre que a retentativa
+#: fosse reivindicada (por `assumir_pedido`, que corretamente recusa
+#: reassumir enquanto a lease anterior ainda não expirou)."""
+_STATUS_PERMITE_RENOVACAO_DE_LEASE: frozenset[RequestStatus] = frozenset({
+    RequestStatus.RESERVADO,
+    RequestStatus.EM_ANDAMENTO,
+    RequestStatus.VERIFICANDO,
+    RequestStatus.AGUARDANDO_APROVACAO,
+    RequestStatus.AGUARDANDO_EXTERNO,
+})
 
 
 class LeaseInvalida(Exception):
@@ -202,20 +223,28 @@ def renovar_pedido(
     ("início, heartbeat, checkpoint e conclusão exigem o mesmo
     token/geração ainda válidos").
 
-    Rejeita renovar um pedido em estado TERMINAL (`ESTADOS_TERMINAIS`) --
-    achado de revisão adversarial (P04 sub-entrega 3/N): nenhuma função
-    deste módulo limpa `pedido.lease` ao transicionar para um terminal
-    (`registrar_resultado_observado` só troca `status`/`ledger_entry`), e
-    `_validar_fencing` sozinha não olha `status` -- sem esta checagem, uma
-    lease emitida antes de o pedido concluir continuava "renovável" até seu
-    próprio `expires_at` original, mesmo com o pedido já `CONCLUIDO`/
-    `FALHA_FINAL`/`CANCELADO`, produzindo um estado internamente
-    contraditório (terminal, mas com lease "ativa")."""
+    Só aceita renovar quando `pedido.status` está em
+    `_STATUS_PERMITE_RENOVACAO_DE_LEASE` -- ou seja, quando o mesmo
+    executor ainda está ativamente trabalhando (ou aguardando algo
+    enquanto segura a reserva) neste pedido. Isto exclui não só
+    `ESTADOS_TERMINAIS` (achado de revisão adversarial, P04 sub-entrega
+    3/N, 1a rodada: nenhuma função deste módulo limpa `pedido.lease` ao
+    transicionar para um terminal, e `_validar_fencing` sozinha não olha
+    `status` -- sem checar isso, uma lease emitida antes da conclusão
+    continuava "renovável" até seu próprio `expires_at` original mesmo com
+    o pedido já `CONCLUIDO`), como também `RETENTATIVA_AGENDADA` e
+    `RESULTADO_DESCONHECIDO` (achado de revisão adversarial, Codex, PR
+    #330, P1: ambos sinalizam que a posse atual está sendo reconsiderada,
+    não que o mesmo executor continua com a reserva -- permitir renovar
+    aqui deixaria um executor "zumbi" bloquear para sempre a reivindicação
+    da retentativa por `assumir_pedido`, que corretamente recusa reassumir
+    enquanto a lease anterior não expira)."""
     _validar_fencing(pedido, lease_token, generation, agora)
-    if not pedido_esta_ativo(pedido):
+    if pedido.status not in _STATUS_PERMITE_RENOVACAO_DE_LEASE:
         raise ValueError(
-            f"pedido '{pedido.request_id}' está em estado terminal "
-            f"('{pedido.status.value}') -- não há lease a renovar."
+            f"pedido '{pedido.request_id}' está em '{pedido.status.value}', que não "
+            "renova lease -- só pedidos ativamente trabalhados pelo mesmo executor "
+            f"({sorted(s.value for s in _STATUS_PERMITE_RENOVACAO_DE_LEASE)}) podem."
         )
     assert pedido.lease is not None  # garantido por _validar_fencing (motivo != "nenhuma reserva ativa")
     lease_renovada = renovar_lease(pedido.lease, agora=agora, duracao_segundos=duracao_segundos)
@@ -301,7 +330,32 @@ def registrar_resultado_observado(
 
     Reentrega do MESMO resultado é idempotente (herdado de
     `autonomy.ledger.registrar_resultado`); resultado DIFERENTE para uma
-    operação já concluída levanta `ValueError`, nunca sobrescreve."""
+    operação já concluída levanta `ValueError`, nunca sobrescreve. Essa
+    reentrega idempotente é aceita mesmo com a lease ORIGINAL já expirada
+    -- achado de revisão adversarial (Codex, PR #330, P2): se a resposta da
+    1a chamada se perdeu (ex.: timeout de rede) e o consumidor tenta de
+    novo depois do vencimento natural da lease (5 minutos por padrão), a
+    fatia normal desta função exigiria uma lease ainda válida para uma
+    operação cujo resultado JÁ está definitivamente registrado -- o que
+    contradiz a própria garantia de reentrega idempotente do item 9. Neste
+    caminho especial, ainda EXIGE identidade de token/geração
+    (`lease_pertence_ao_apresentante`, sem checar expiração) -- não abre
+    mão de autenticar quem está lendo, só da exigência de lease
+    NÃO-vencida; `autonomy.ledger.registrar_resultado` continua sendo o
+    árbitro final de "idêntico" (levanta `ValueError` para um resultado
+    diferente, mesmo aqui)."""
+    reentrega_de_terminal_ja_selado = (
+        pedido.status in ESTADOS_TERMINAIS
+        and novo_status == pedido.status
+        and pedido.ledger_entry is not None
+        and pedido.ledger_entry.resultado_registrado_em is not None
+    )
+    if reentrega_de_terminal_ja_selado:
+        ok, motivo = lease_pertence_ao_apresentante(pedido.lease, lease_token, generation)
+        if not ok:
+            raise LeaseInvalida(motivo)
+        entrada = _ledger_registrar_resultado(pedido.ledger_entry, resultado, agora=agora)
+        return dataclasses.replace(pedido, ledger_entry=entrada)
     _validar_fencing(pedido, lease_token, generation, agora)
     if pedido.ledger_entry is None:
         raise ValueError(
