@@ -207,7 +207,7 @@ sub-entrega P04 1/N em diante.
 plano: plano-hermes-autonomo-2026-09-06
 base_commit: 32971416f4d8abf230f87d1e8628836329edb376
 pacote: "P04 sub-entrega 1/N -- passo 1 do pacote (\"Implementar os estados, leases e geracoes da secao 4\"). PRIMEIRA fatia de P04 (docs/plano-hermes-autonomo-2026-09-06.md, secao 4.4 \"Pedido\" e secao 4.5 \"Reserva, retomada e idempotencia\"), apos a lista original de 5 candidatas de outputSchema (P03) se esgotar na sub-entrega 32/N -- recomendacao FORTE do proprio bloco 32/N para migrar para P04 como proximo compromisso de varias sub-entregas, ja que P04 e pre-requisito de quase todo o resto do plano (P05-P18). Confirmado no inicio desta execucao (mcp__github__list_pull_requests, estado aberto) que havia 1 PR pendente de uma execucao anterior desta MESMA rotina -- PR #325 (sub-entrega 32/N), aberta as 08:43 UTC e ainda nao mesclada quando esta execucao comecou (11:19 UTC, ~2h30 depois -- bem alem da janela de espera de 5-10 min do fluxo). Verificado: CI verde nos 3 checks, revisao do Codex concluida SEM achados (so o comentario-resumo de rastreamento, nenhum finding real), 0 threads de revisao nao resolvidos, mergeable_state=clean. Mesclada por esta execucao (squash, mesmo padrao dos merges anteriores) antes de iniciar trabalho novo -- retomada de trabalho pela metade de uma execucao anterior, em vez de duplicar. Em seguida, main atualizado localmente e nova branch criada a partir dele para a fatia de P04 abaixo. Mesmo padrao incremental ja usado em P02 sub-entrega 1/N (autonomy/contracts.py): so tipos e logica pura, SEM tocar em agent_requests.py/Firestore ainda -- wiring fica para uma sub-entrega seguinte."
-estado: pronto_para_revisao
+estado: validado
 inicio: "2026-09-25T11:24:00Z"
 fim: "2026-09-25T12:20:00Z"
 arquivos_alterados:
@@ -264,7 +264,7 @@ testes:
     - "Apos o fix do teste de avanco de DST da rodada 4 (contagem inalterada, so valores de um teste existente): 65/65 isolado; 2399/2399 na suite completa -- delta final de +65 sobre o baseline de 2334."
 evidencias:
   - "5 rodadas de revisao adversarial independentes (Agent tool, general-purpose, cada uma sem contexto de implementacao nem de rodada anterior alem do que foi passado no prompt) -- ver decisoes p04-sub1-rodada1/2/3/4/5 acima para o detalhe completo de cada achado e correcao. A rodada 4 verificou um achado do proprio Codex na PR (ver decisao p04-sub1-codex-pr326-dst-corrigido); a rodada 5 usou teste de MUTACAO (reintroduziu o bug de proposito, confirmou falha, restaurou o arquivo) para provar que o teste de regressao final discrimina buggy de corrigido de verdade."
-  - "PR #326 aberta por esta execucao (https://github.com/andre-martiini/Hermes/pull/326), mesclada apos CI verde nos 3 checks, revisao do Codex com 1 achado real (P2, DST -- corrigido e respondido no proprio thread, resolvido) e nenhum outro comentario/thread pendente."
+  - "PR #326 aberta por esta execucao (https://github.com/andre-martiini/Hermes/pull/326), mesclada apos CI verde nos 3 checks, revisao do Codex com 1 achado real (P2, DST -- corrigido e respondido no proprio thread, resolvido) e nenhum outro comentario/thread pendente. Merge (squash) confirmado no commit ad7aca90a178092cfa766fe047388bde5c321635, verificado via git fetch origin main -- estado deste bloco atualizado para validado NESTA MESMA execucao, antes de encerrar (licao da pendencia registrada no bloco da sub-entrega 32/N, ver docs/autonomia/execucao-archive-p03sub32.md)."
 migracao:
   dry_run: null
   executada: false
