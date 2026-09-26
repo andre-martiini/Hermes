@@ -2,22 +2,26 @@
 docs/plano-hermes-autonomo-2026-09-06.md, passo 4 do pacote: "Implementar
 assumir, renovar, registrar progresso e registrar resultado observado").
 
-Costura três peças já existentes, cada uma construída numa sub-entrega
+Costura quatro peças já existentes, cada uma construída numa sub-entrega
 anterior como lógica pura e sem I/O:
 
 - `autonomy.requests` (sub-entrega 1/N): estados (`RequestStatus`), lease e
   geração -- seção 4.4 "Pedido" e seção 4.5, itens 1-5.
 - `autonomy.ledger` (sub-entrega 2/N): idempotência por chave/hash,
   checkpoints e resultado observado -- seção 4.5, itens 6/9/10.
+- `autonomy.runs` (sub-entrega 4/N): ciclo verificado de UMA tentativa de
+  execução (`AgentRun`) -- seção 1.3, achado A02; costurado em
+  `PedidoDuravel` nesta sub-entrega (5/N), ver `run` abaixo.
 
-Nenhum destes dois módulos sabia do outro. `PedidoDuravel`, abaixo, é o
-agregado que representa "um pedido com sua reserva e seu ledger de operação"
--- o mesmo tipo de objeto que o wiring real (Firestore, `agent_requests.py`)
-vai precisar montar a partir de um documento, mas ainda sem nenhum I/O aqui:
-só o que as quatro operações do MCP propostas na seção 6.2
-(`assumir_pedido_agente`, `renovar_pedido_agente`,
-`registrar_progresso_agente`, `registrar_resultado_observado`) precisam
-decidir, dado o estado atual e uma ação de um consumidor.
+Nenhum destes três módulos sabia dos outros. `PedidoDuravel`, abaixo, é o
+agregado que representa "um pedido com sua reserva, seu ledger de operação e
+o registro verificado da tentativa de execução em curso" -- o mesmo tipo de
+objeto que o wiring real (Firestore, `agent_requests.py`) vai precisar
+montar a partir de um documento, mas ainda sem nenhum I/O aqui: só o que as
+quatro operações do MCP propostas na seção 6.2 (`assumir_pedido_agente`,
+`renovar_pedido_agente`, `registrar_progresso_agente`,
+`registrar_resultado_observado`) precisam decidir, dado o estado atual e uma
+ação de um consumidor.
 
 Mesmo padrão incremental das sub-entregas anteriores de P04: quem persiste
 o `PedidoDuravel` (lê o documento, monta o objeto, chama a função aqui,
@@ -30,7 +34,7 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from autonomy.ledger import (
@@ -51,6 +55,27 @@ from autonomy.requests import (
     renovar_lease,
     validar_transicao,
 )
+from autonomy.runs import AgentRun, AgentRunStatus
+from autonomy.runs import concluir_run as _run_concluir
+from autonomy.runs import criar_run as _run_criar
+from autonomy.runs import marcar_em_andamento as _run_marcar_em_andamento
+
+#: Para qual `AgentRunStatus` mapear cada `RequestStatus` TERMINAL aceito por
+#: `registrar_resultado_observado`. `autonomy.runs.AgentRun` só tem dois
+#: desfechos possíveis por `concluir_run` (`CONCLUIDO`/`FALHA` -- `TIMEOUT` é
+#: exclusivo de `expirar_por_timeout`, uma ação de sistema, ver docstring de
+#: `autonomy.runs`), então `CANCELADO` (cancelamento do PEDIDO, não uma
+#: escolha do executor) mapeia para `FALHA`: a tentativa em curso não produziu
+#: um resultado bem-sucedido, mesmo que o motivo seja cancelamento externo em
+#: vez de um erro. `ERRO_LEGADO` fica de fora deliberadamente -- nenhum
+#: caminho de `registrar_resultado_observado` consegue alcançá-lo (ver
+#: docstring de `autonomy.requests.RequestStatus`), então não precisa de
+#: mapeamento.
+_REQUEST_STATUS_PARA_AGENT_RUN_STATUS: dict[RequestStatus, AgentRunStatus] = {
+    RequestStatus.CONCLUIDO: AgentRunStatus.CONCLUIDO,
+    RequestStatus.FALHA_FINAL: AgentRunStatus.FALHA,
+    RequestStatus.CANCELADO: AgentRunStatus.FALHA,
+}
 
 #: Estados em que renovar a lease faz sentido -- o executor ainda está
 #: ativamente trabalhando (ou aguardando algo enquanto SEGURA a reserva)
@@ -96,12 +121,23 @@ class PedidoDuravel:
     nenhuma operação em curso. `registrar_progresso` é o primeiro ponto em
     que um ledger é aberto (via `criar_ou_reusar_entrada`) -- seção 4.5,
     item 6: "antes de qualquer efeito, criar/reusar operation_ledger".
-    """
+
+    `run` (sub-entrega 5/N) começa `None` pelo mesmo motivo -- só existe a
+    partir do primeiro `assumir_pedido`, que sempre cria um `AgentRun` novo
+    junto com a lease nova (seção 1.3, A02: "servidor cria agent_run ao
+    reservar"). Um `PedidoDuravel` construído diretamente (sem passar por
+    `assumir_pedido` -- ex.: um pedido legado ainda não migrado, ou um caso
+    de teste) pode legitimamente não ter `run`: `registrar_progresso` e
+    `registrar_resultado_observado` toleram isso e simplesmente não tocam o
+    ciclo do run nesse caso, sem erro -- só a peça de ledger/status do pedido
+    continua funcionando (mesmo espírito de tolerância a dados legados já
+    usado nos módulos irmãos)."""
 
     request_id: str
     status: RequestStatus
     lease: Lease | None = None
     ledger_entry: LedgerEntry | None = None
+    run: AgentRun | None = None
 
     def __post_init__(self) -> None:
         request_id_limpo = str(self.request_id or "").strip()
@@ -172,6 +208,7 @@ def _transicionar_para_resultado(pedido: PedidoDuravel, novo_status: RequestStat
 def assumir_pedido(
     pedido: PedidoDuravel,
     executor_id: str,
+    run_id: str,
     agora: datetime | None = None,
     duracao_segundos: float = DEFAULT_LEASE_SEGUNDOS,
 ) -> PedidoDuravel:
@@ -193,7 +230,28 @@ def assumir_pedido(
     antes de expirar -- exatamente o cenário que o fencing por geração
     (seção 4.5, item 5) existe para impedir. Esta função tem toda a
     informação necessária (`pedido.lease.expires_at`, `agora`) para
-    recusar isso sozinha, sem depender só do wiring de armazenamento."""
+    recusar isso sozinha, sem depender só do wiring de armazenamento.
+
+    `run_id` (sub-entrega 5/N) é OBRIGATÓRIO, sem valor padrão -- mesma
+    escolha deliberada de `autonomy.runs.concluir_run.lease_ainda_valida`:
+    omitir silenciosamente a criação do `AgentRun` reproduziria exatamente o
+    achado A02 que este módulo existe para corrigir ("uma execução que nunca
+    é registrada pode desaparecer das métricas"). Esta função não decide
+    COMO gerar esse identificador (Firestore auto-ID ou
+    `secrets.token_urlsafe`, à escolha de quem fizer o wiring real) -- só
+    que ele precisa existir a cada `assumir_pedido`, exatamente como
+    `autonomy.runs.criar_run` já documenta. Cada reassumir (nova geração de
+    lease) cria um `AgentRun` NOVO com o `lease_token`/`generation` recém-
+    emitidos -- nunca reaproveita `pedido.run` antigo, mesmo espírito de
+    "múltiplas tentativas do mesmo pedido produzem múltiplos `AgentRun`"
+    já descrito na docstring de `autonomy.runs`.
+
+    Resolve `agora` UMA vez (mesmo `datetime.now(timezone.utc)`, se não
+    informado) e passa o mesmo valor para `nova_lease` e `criar_run` -- sem
+    isso, cada função resolveria seu próprio "agora" independentemente,
+    deixando `lease.expires_at` e `run.iniciado_em` calculados a partir de
+    dois instantes reais ligeiramente diferentes (só relevante quando
+    `agora` não é informado; produção sempre informa)."""
     _transicionar(pedido, RequestStatus.RESERVADO)
     if pedido.lease is not None and not lease_expirada(pedido.lease, agora=agora):
         raise LeaseInvalida(
@@ -201,9 +259,20 @@ def assumir_pedido(
             f"(expira em {pedido.lease.expires_at.isoformat()}) -- não é possível "
             "reassumir antes de expirar."
         )
+    agora_resolvida = agora if agora is not None else datetime.now(timezone.utc)
     generation_anterior = pedido.lease.generation if pedido.lease is not None else 0
-    lease_nova = nova_lease(executor_id, generation_anterior, agora=agora, duracao_segundos=duracao_segundos)
-    return dataclasses.replace(pedido, status=RequestStatus.RESERVADO, lease=lease_nova)
+    lease_nova = nova_lease(
+        executor_id, generation_anterior, agora=agora_resolvida, duracao_segundos=duracao_segundos
+    )
+    run_novo = _run_criar(
+        run_id=run_id,
+        request_id=pedido.request_id,
+        executor_id=executor_id,
+        lease_token=lease_nova.lease_token,
+        generation=lease_nova.generation,
+        agora=agora_resolvida,
+    )
+    return dataclasses.replace(pedido, status=RequestStatus.RESERVADO, lease=lease_nova, run=run_novo)
 
 
 def renovar_pedido(
@@ -277,13 +346,28 @@ def registrar_progresso(
     estado -- `_transicionar` propositalmente NÃO trata
     `novo_status == pedido.status` como no-op genérico, ver sua docstring;
     aqui o no-op é decidido pelo chamador, restrito a este caso
-    específico)."""
+    específico).
+
+    Espelha a MESMA primeira transição em `pedido.run`, se houver
+    (`autonomy.runs.marcar_em_andamento` -- `INICIADO -> EM_ANDAMENTO`, sub-
+    entrega 5/N): o fencing já validado acima contra `pedido.lease` sempre
+    confere também contra `pedido.run` -- `assumir_pedido` cria os dois a
+    partir do MESMO `lease_token`/`generation` recém-emitidos, e nenhuma
+    outra função deste módulo muda um sem o outro. `pedido.run is None` é
+    tolerado (pedido construído sem passar por `assumir_pedido`, ver
+    docstring de `PedidoDuravel`) -- só a peça de ledger/status continua
+    funcionando nesse caso."""
     _validar_fencing(pedido, lease_token, generation, agora)
+    run_atualizado = pedido.run
     if pedido.status != RequestStatus.EM_ANDAMENTO:
         _transicionar(pedido, RequestStatus.EM_ANDAMENTO)
+        if run_atualizado is not None:
+            run_atualizado = _run_marcar_em_andamento(run_atualizado, lease_token, generation)
     entrada = criar_ou_reusar_entrada(idempotency_key, payload, pedido.ledger_entry, agora=agora)
     entrada = adicionar_checkpoint(entrada, checkpoint_dados, agora=agora)
-    return dataclasses.replace(pedido, status=RequestStatus.EM_ANDAMENTO, ledger_entry=entrada)
+    return dataclasses.replace(
+        pedido, status=RequestStatus.EM_ANDAMENTO, ledger_entry=entrada, run=run_atualizado
+    )
 
 
 def registrar_resultado_observado(
@@ -343,7 +427,22 @@ def registrar_resultado_observado(
     mão de autenticar quem está lendo, só da exigência de lease
     NÃO-vencida; `autonomy.ledger.registrar_resultado` continua sendo o
     árbitro final de "idêntico" (levanta `ValueError` para um resultado
-    diferente, mesmo aqui)."""
+    diferente, mesmo aqui).
+
+    Fecha `pedido.run` (se houver, sub-entrega 5/N) na MESMA chamada, via
+    `autonomy.runs.concluir_run` -- `CONCLUIDO`/`FALHA_FINAL` mapeiam
+    diretamente para `AgentRunStatus.CONCLUIDO`/`FALHA`; `CANCELADO` também
+    mapeia para `FALHA` (`AgentRun` não tem desfecho próprio de
+    cancelamento -- ver `_REQUEST_STATUS_PARA_AGENT_RUN_STATUS`, no topo do
+    módulo, para a justificativa completa). `lease_ainda_valida=True` é
+    sempre correto aqui: nos dois caminhos (nova conclusão E reentrega
+    idempotente) o fencing já foi conferido acima contra `pedido.lease`
+    ANTES de chegar a esta chamada -- e na reentrega, `concluir_run` ignora
+    esse parâmetro de qualquer forma (run já terminal, ver sua docstring).
+    Se `_ledger_registrar_resultado` levantar (resultado diferente do já
+    selado), a função inteira propaga a exceção SEM chegar a tocar
+    `pedido.run` -- mesma garantia de "nunca sobrescreve" que já vale para
+    o ledger, agora também para o run."""
     reentrega_de_terminal_ja_selado = (
         pedido.status in ESTADOS_TERMINAIS
         and novo_status == pedido.status
@@ -355,7 +454,10 @@ def registrar_resultado_observado(
         if not ok:
             raise LeaseInvalida(motivo)
         entrada = _ledger_registrar_resultado(pedido.ledger_entry, resultado, agora=agora)
-        return dataclasses.replace(pedido, ledger_entry=entrada)
+        run_atualizado = _fechar_run_se_houver(
+            pedido.run, lease_token, generation, novo_status, resultado, agora
+        )
+        return dataclasses.replace(pedido, ledger_entry=entrada, run=run_atualizado)
     _validar_fencing(pedido, lease_token, generation, agora)
     if pedido.ledger_entry is None:
         raise ValueError(
@@ -373,7 +475,39 @@ def registrar_resultado_observado(
         )
     _transicionar_para_resultado(pedido, novo_status)
     entrada = _ledger_registrar_resultado(pedido.ledger_entry, resultado, agora=agora)
-    return dataclasses.replace(pedido, status=novo_status, ledger_entry=entrada)
+    run_atualizado = _fechar_run_se_houver(
+        pedido.run, lease_token, generation, novo_status, resultado, agora
+    )
+    return dataclasses.replace(pedido, status=novo_status, ledger_entry=entrada, run=run_atualizado)
+
+
+def _fechar_run_se_houver(
+    run: AgentRun | None,
+    lease_token: str,
+    generation: int,
+    novo_status: RequestStatus,
+    resultado: Any,
+    agora: datetime | None,
+) -> AgentRun | None:
+    """Chamado só de dentro de `registrar_resultado_observado`, nos dois
+    caminhos (nova conclusão e reentrega idempotente) -- ver sua docstring
+    para a justificativa completa de `lease_ainda_valida=True` e do
+    mapeamento `_REQUEST_STATUS_PARA_AGENT_RUN_STATUS`. `run is None` (sem
+    `AgentRun` associado, ver docstring de `PedidoDuravel`) devolve `None`
+    sem erro."""
+    if run is None:
+        return None
+    status_run = _REQUEST_STATUS_PARA_AGENT_RUN_STATUS.get(novo_status)
+    if status_run is None:
+        raise ValueError(
+            f"'{novo_status.value}' não tem mapeamento para AgentRunStatus -- "
+            "só CONCLUIDO/FALHA_FINAL/CANCELADO são esperados aqui (os únicos "
+            "estados terminais alcançáveis por registrar_resultado_observado)."
+        )
+    return _run_concluir(
+        run, lease_token, generation, status_run,
+        lease_ainda_valida=True, resultado=resultado, agora=agora,
+    )
 
 
 def pedido_esta_ativo(pedido: PedidoDuravel) -> bool:
