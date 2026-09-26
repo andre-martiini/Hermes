@@ -1920,9 +1920,13 @@ _OUTPUT_SCHEMAS: dict[str, dict] = {
     # HOJE, mas e um contrato de SNAPSHOT, nao uma garantia estrutural como
     # o enum de `listar_rascunhos_pendentes` -- registrado explicitamente
     # para nao repetir o erro de redacao corrigido na sub-entrega 24/N.
-    # `_TOOLS_LONGAS` (`mcp_server.py`) tem hoje EXATAMENTE 3 tools:
-    # `gerar_relatorio`, `ler_documento_na_integra`, `buscar_e_analisar_
-    # email` -- as 3 unicas que podem produzir um job com `status == "done"`.
+    # `_TOOLS_LONGAS` (`mcp_server.py`) tinha EXATAMENTE 3 tools quando isto
+    # foi escrito: `gerar_relatorio`, `ler_documento_na_integra`, `buscar_e_
+    # analisar_email`. Revisado ao entrar o Hermes Vídeo (Fase 2, 26/09/2026):
+    # `video_gerar_previa` e `video_ajustar` devolvem, no sucesso, TEXTO JSON
+    # (`video/previa.py::resposta_tool`) justamente para manter `resultado`
+    # como string; na falha devolvem dict com `erro`, que vira job em erro e
+    # nunca chega a este ramo. Teste: test_video_previa.TestToolsPeloMcp.
     # Lidos os 3 handlers por completo (`tools/telegram_extended.py`, ramos
     # `gerar_relatorio`/`ler_documento_na_integra`; `tools/buscar_e_
     # analisar_email.py`): TODO `return` das 3 e uma `string` (Markdown/

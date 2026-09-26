@@ -68,8 +68,10 @@ class TestPreviaCompleta(Base):
             self.assertEqual(tamanho_png(self.srv.ler(q["gcs_uri"])), (1280, 720))
         refs = [n for _, n in self.srv.imagens]
         self.assertEqual(refs, [0, 1, 2, 2])  # K1 usa K0; K2 e K3 usam o anterior + K0
-        self.assertIn("Quadro final da cena 1", self.srv.imagens[1][0])
-        self.assertIn("também abre a cena seguinte", self.srv.imagens[1][0])
+        self.assertIn("Último instante da cena 1: servidora lendo", self.srv.imagens[1][0])
+        # Sem a descrição da cena seguinte no mesmo quadro (virava a personagem duas vezes).
+        self.assertNotIn("tela do sistema", self.srv.imagens[1][0])
+        self.assertIn("cada personagem aparece uma só vez", self.srv.imagens[1][0])
         self.assertIn("Evite: logotipos", self.srv.imagens[0][0])
 
     def test_vertical_sai_720x1280(self):
@@ -195,6 +197,135 @@ class TestTravasEFalhas(Base):
     def test_projeto_de_outro_usuario(self):
         self.assertEqual(previa.gerar_previa(self.db, self.pid, "outro", self.srv)["status"], "nao_encontrado")
         self.assertEqual(previa.ajustar(self.db, self.pid, "outro", self.srv)["status"], "nao_encontrado")
+
+
+class TestAchadosDaRevisaoFase2(Base):
+    """Achados da revisão adversária da Fase 2 (26/09/2026), um teste por achado."""
+
+    def test_narracao_recusada_nao_descarta_as_outras_nem_paga_de_novo(self):
+        self.srv._falhar_fala = {"passos"}  # recusa só a cena 2
+        r = self.previa()
+        self.assertEqual(r["status"], "ok")
+        self.assertTrue(any(f.startswith("cena 2") for f in r["falhas"]))
+        self.assertAlmostEqual(self.doc()["custo_real_usd"], 0.17)  # 1 narração + 4 quadros
+        self.assertFalse(r["renderizavel"])
+        self.srv._falhar_fala = set()
+        r2 = self.previa()
+        self.assertEqual(r2["narracoes_geradas"], 1)  # só a cena 2; a 1 não é paga de novo
+        self.assertAlmostEqual(self.doc()["custo_real_usd"], 0.18)
+
+    def test_mesma_instrucao_de_quadro_duas_vezes_nao_paga_de_novo(self):
+        self.previa()
+        previa.ajustar(self.db, self.pid, "uid", self.srv, quadros=[{"indice": 2, "instrucao": "mais aberta"}])
+        antes = len(self.srv.imagens)
+        r = previa.ajustar(self.db, self.pid, "uid", self.srv, quadros=[{"indice": 2, "instrucao": "mais aberta"}])
+        self.assertIn("Nada mudou", r["mensagem"])
+        self.assertEqual(len(self.srv.imagens), antes)
+
+    def test_instrucao_antiga_nao_volta_quando_a_descricao_muda(self):
+        self.previa()
+        previa.ajustar(self.db, self.pid, "uid", self.srv, quadros=[{"indice": 2, "instrucao": "mais aberta"}])
+        previa.ajustar(self.db, self.pid, "uid", self.srv, cenas=[{"ordem": 2, "descricao_visual": "gráfico"}])
+        self.assertNotIn("mais aberta", self.srv.imagens[-1][0])
+
+    def test_teto_acumulado_de_previas_do_projeto(self):
+        from video import estimativa
+
+        self.previa()  # 0,18
+        precos = estimativa.mesclar_precos({"teto_previa_projeto_usd": 0.2})
+        r = previa.ajustar(self.db, self.pid, "uid", self.srv, quadros=[{"indice": 1, "instrucao": "x"}],
+                           precos=precos)
+        self.assertEqual(r["status"], "recusado")
+        self.assertIn("Ajustes salvos", r["erro"])
+        self.assertIn("teto de US$ 0.20 em prévias por projeto", r["erro"])
+        # O ajuste ficou salvo: repetir, já com teto maior, gera (não responde "Nada mudou").
+        r2 = previa.ajustar(self.db, self.pid, "uid", self.srv, quadros=[{"indice": 1, "instrucao": "x"}])
+        self.assertEqual(r2["status"], "ok")
+        self.assertEqual(r2["quadros_gerados"], 1)
+
+    def test_narracao_removida_vira_silencio_e_clipe_de_4s(self):
+        self.previa()
+        r = previa.ajustar(self.db, self.pid, "uid", self.srv, cenas=[{"ordem": 2, "narracao": ""}])
+        self.assertEqual(r["cenas"][1]["duracao_s"], 4)
+        cena2 = self.doc("/cenas/02")
+        self.assertIsNone(cena2["audio_gcs"])
+        cenas = sorted((s.to_dict() for s in self.db.collection(f"video_projetos/{self.pid}/cenas").stream()),
+                       key=lambda c: c["ordem"])
+        pcm, taxa = previa._linha_do_tempo(cenas, self.srv)
+        trecho = pcm[4 * taxa * 2: 8 * taxa * 2]  # cena 2 ocupa 4 s depois da cena 1
+        self.assertEqual(trecho.count(b"\x00"), len(trecho))
+
+    def test_null_nao_apaga_texto(self):
+        self.previa()
+        r = previa.ajustar(self.db, self.pid, "uid", self.srv,
+                           cenas=[{"ordem": 2, "narracao": None, "descricao_visual": None, "prompt_video": "zoom"}])
+        self.assertEqual(r["status"], "ok")
+        self.assertTrue(self.doc("/cenas/02")["narracao"].startswith("Veja agora"))
+        self.assertEqual(self.doc("/cenas/02")["descricao_visual"], "tela do sistema")
+        self.assertEqual(r["quadros_gerados"], 0)
+
+    def test_custo_registrado_item_a_item_mesmo_quando_cai_no_meio(self):
+        original = self.srv.salvar
+
+        def salvar(caminho, dados, mime):
+            if "K02" in caminho:
+                raise RuntimeError("bucket fora")
+            return original(caminho, dados, mime)
+
+        with mock.patch.object(self.srv, "salvar", side_effect=salvar):
+            r = self.previa()
+        # K2 foi gerada (paga) mas não gravada: entra como falha, com custo.
+        self.assertTrue(any("K2" in f for f in r["falhas"]))
+        self.assertAlmostEqual(self.doc()["custo_real_usd"], 0.18)
+        self.assertAlmostEqual(self.doc()["custo_previa_usd"], 0.18)
+
+    def test_objeto_apagado_pelo_bucket_e_refeito(self):
+        self.previa()
+        for caminho in list(self.srv.arquivos):
+            if "K01" in caminho or "/audio/01" in caminho:
+                del self.srv.arquivos[caminho]
+        r = self.previa()
+        self.assertEqual(r["status"], "ok")
+        self.assertEqual((r["narracoes_geradas"], r["quadros_gerados"]), (1, 1))
+
+    def test_prazo_do_job_para_e_a_proxima_chamada_continua(self):
+        r = self.previa(prazo_s=0)
+        self.assertEqual(r["status"], "parcial")
+        self.assertEqual(self.doc()["status"], vp.ERRO)
+        self.assertAlmostEqual(self.doc()["custo_real_usd"], 0.02)  # as narrações saíram e foram cobradas
+        r2 = self.previa()
+        self.assertEqual(r2["status"], "ok")
+        self.assertEqual((r2["narracoes_geradas"], r2["quadros_gerados"]), (0, 4))
+
+    def test_cancelado_durante_a_previa_nao_vira_excecao(self):
+        original = previa._publicar
+
+        def cancela_e_publica(*a, **k):
+            vp.transicionar(self.db, self.pid, vp.CANCELADO)
+            return original(*a, **k)
+
+        with mock.patch.object(previa, "_publicar", side_effect=cancela_e_publica):
+            r = self.previa()
+        self.assertEqual(r["status"], "erro")
+        self.assertEqual(self.doc()["status"], vp.CANCELADO)
+
+    def test_indice_booleano_ou_fracionario_e_recusado(self):
+        self.previa()
+        r = previa.ajustar(self.db, self.pid, "uid", self.srv,
+                           quadros=[{"indice": True, "instrucao": "x"}, {"indice": 1.9, "instrucao": "y"}])
+        self.assertEqual(r["status"], "invalido")
+        self.assertEqual(len(r["erros"]), 2)
+
+    def test_estimativa_acima_do_teto_nao_rebaixa_o_orcamento(self):
+        from video import estimativa
+
+        orcamento = self.doc()["orcamento_usd"]
+        r = self.previa(precos=estimativa.mesclar_precos({"teto_projeto_usd": 0.5}))
+        self.assertFalse(r["renderizavel"])
+        self.assertEqual(self.doc()["orcamento_usd"], orcamento)
+
+    def test_pcm_de_tamanho_impar_nao_quebra(self):
+        self.assertEqual(midia.aparar_silencio(b"\x00\x00\x00", 24000), b"")
 
 
 class TestMidiaPura(unittest.TestCase):

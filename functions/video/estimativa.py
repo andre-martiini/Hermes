@@ -47,6 +47,9 @@ PRECOS_PADRAO: dict = {
     "teto_projeto_usd": 20.0,
     "teto_mensal_usd": 30.0,
     "teto_previa_usd": 1.0,
+    # Soma de todas as prévias e ajustes de um projeto: sem isso, ajustes repetidos
+    # gastariam sem limite (cada um respeita só o teto por prévia).
+    "teto_previa_projeto_usd": 3.0,
     "paralelismo": 1,
 }
 

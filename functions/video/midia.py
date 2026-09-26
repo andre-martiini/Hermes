@@ -39,6 +39,7 @@ def aparar_silencio(pcm: bytes, taxa: int) -> bytes:
     """Corta o silêncio das pontas (mantém 50 ms de margem). PCM 16 bits mono."""
     import numpy as np
 
+    pcm = pcm[: len(pcm) // 2 * 2]  # byte solto no fim quebraria o frombuffer de int16
     amostras = np.frombuffer(pcm, dtype=np.int16).astype(np.float32)
     if amostras.size == 0:
         return pcm
@@ -132,6 +133,10 @@ class Servicos:
     def ler(self, uri: str) -> bytes:
         raise NotImplementedError
 
+    def existe(self, uri: str) -> bool:
+        """O bucket apaga `tmp/` em 30 dias: um checkpoint pode apontar para um objeto que sumiu."""
+        raise NotImplementedError
+
     def publicar(self, nome: str, dados: bytes, mime: str) -> dict:
         """Publica um arquivo para o usuário ver (Drive) → {"id", "link"}."""
         raise NotImplementedError
@@ -196,11 +201,17 @@ class ServicosVertex(Servicos):
         self._bkt().blob(caminho).upload_from_string(dados, content_type=mime)
         return f"gs://{BUCKET}/{caminho}"
 
-    def ler(self, uri: str) -> bytes:
+    def _caminho(self, uri: str) -> str:
         bucket, _, caminho = uri.removeprefix("gs://").partition("/")
         if bucket != BUCKET:
             raise ValueError(f"URI fora do bucket do Hermes Vídeo: {uri}")
-        return self._bkt().blob(caminho).download_as_bytes()
+        return caminho
+
+    def ler(self, uri: str) -> bytes:
+        return self._bkt().blob(self._caminho(uri)).download_as_bytes()
+
+    def existe(self, uri: str) -> bool:
+        return self._bkt().blob(self._caminho(uri)).exists()
 
     def _servico_drive(self):
         if self._drive is None:
@@ -216,8 +227,11 @@ class ServicosVertex(Servicos):
         svc = self._servico_drive()
         cfg = self._db.collection("system").document("config").get()
         raiz = (cfg.to_dict() or {}).get("googleDriveFolderId") if cfg.exists else None
-        consulta = (f"name = '{PASTA_DRIVE}' and mimeType = 'application/vnd.google-apps.folder' "
-                    "and trashed = false" + (f" and '{raiz}' in parents" if raiz else ""))
+        def literal(valor: str) -> str:  # escape da linguagem de consulta do Drive
+            return str(valor).replace("\\", "\\\\").replace("'", "\\'")
+
+        consulta = (f"name = '{literal(PASTA_DRIVE)}' and mimeType = 'application/vnd.google-apps.folder' "
+                    "and trashed = false" + (f" and '{literal(raiz)}' in parents" if raiz else ""))
         achadas = svc.files().list(q=consulta, fields="files(id)", pageSize=1).execute().get("files", [])
         if achadas:
             self._pasta = achadas[0]["id"]
@@ -244,18 +258,22 @@ class ServicosVertex(Servicos):
 class ServicosFalsos(Servicos):
     """Sem rede: fala = tom de 440 Hz com a duração do ritmo de referência; imagem = PNG liso."""
 
-    def __init__(self, *, segundos_por_palavra: float = 0.5, falhar_imagem_em: set[int] | None = None):
+    def __init__(self, *, segundos_por_palavra: float = 0.5, falhar_imagem_em: set[int] | None = None,
+                 falhar_fala_com: set[str] | None = None):
         self.falas: list[str] = []
         self.imagens: list[tuple[str, int]] = []
         self.arquivos: dict[str, bytes] = {}
         self.publicados: list[str] = []
         self._spp = segundos_por_palavra
         self._falhar = falhar_imagem_em or set()
+        self._falhar_fala = falhar_fala_com or set()
         self._chamadas_imagem = 0
 
     def gerar_fala(self, texto, voz, modelo):
         import numpy as np
 
+        if any(t in texto for t in self._falhar_fala):
+            raise RuntimeError("TTS recusou (simulado)")
         self.falas.append(texto)
         taxa = 24000
         seg = max(len(texto.split()) * self._spp, 0.1)
@@ -282,6 +300,9 @@ class ServicosFalsos(Servicos):
 
     def ler(self, uri):
         return self.arquivos[uri.removeprefix(f"gs://{BUCKET}/")]
+
+    def existe(self, uri):
+        return uri.removeprefix(f"gs://{BUCKET}/") in self.arquivos
 
     def publicar(self, nome, dados, mime):
         self.publicados.append(nome)
