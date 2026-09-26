@@ -143,7 +143,7 @@ class TestConcluirRun(unittest.TestCase):
         run = _run(status=AgentRunStatus.EM_ANDAMENTO)
         concluido = concluir_run(
             run, LEASE_TOKEN, GENERATION, AgentRunStatus.CONCLUIDO,
-            resultado={"ok": True}, agora=T0 + timedelta(minutes=2),
+            lease_ainda_valida=True, resultado={"ok": True}, agora=T0 + timedelta(minutes=2),
         )
         self.assertEqual(concluido.status, AgentRunStatus.CONCLUIDO)
         self.assertEqual(concluido.resultado, {"ok": True})
@@ -152,7 +152,10 @@ class TestConcluirRun(unittest.TestCase):
     def test_falha_a_partir_de_iniciado_sem_checkpoint(self):
         # Uma tentativa pode falhar antes de qualquer marcar_em_andamento.
         run = _run(status=AgentRunStatus.INICIADO)
-        falho = concluir_run(run, LEASE_TOKEN, GENERATION, AgentRunStatus.FALHA, resultado="erro X")
+        falho = concluir_run(
+            run, LEASE_TOKEN, GENERATION, AgentRunStatus.FALHA,
+            lease_ainda_valida=True, resultado="erro X",
+        )
         self.assertEqual(falho.status, AgentRunStatus.FALHA)
 
     def test_conclui_a_partir_de_iniciado_sem_checkpoint(self):
@@ -160,33 +163,71 @@ class TestConcluirRun(unittest.TestCase):
         # também é uma aresta permitida em _TRANSICOES_PERMITIDAS e não
         # tinha teste cobrindo especificamente este destino.
         run = _run(status=AgentRunStatus.INICIADO)
-        concluido = concluir_run(run, LEASE_TOKEN, GENERATION, AgentRunStatus.CONCLUIDO, resultado="ok")
+        concluido = concluir_run(
+            run, LEASE_TOKEN, GENERATION, AgentRunStatus.CONCLUIDO,
+            lease_ainda_valida=True, resultado="ok",
+        )
         self.assertEqual(concluido.status, AgentRunStatus.CONCLUIDO)
 
     def test_novo_status_timeout_rejeitado(self):
         run = _run(status=AgentRunStatus.EM_ANDAMENTO)
         with self.assertRaises(ValueError):
-            concluir_run(run, LEASE_TOKEN, GENERATION, AgentRunStatus.TIMEOUT)
+            concluir_run(run, LEASE_TOKEN, GENERATION, AgentRunStatus.TIMEOUT, lease_ainda_valida=True)
 
     def test_token_errado_rejeitado(self):
         run = _run(status=AgentRunStatus.EM_ANDAMENTO)
         with self.assertRaises(RunLeaseInvalida):
-            concluir_run(run, "tok-errado", GENERATION, AgentRunStatus.CONCLUIDO)
+            concluir_run(run, "tok-errado", GENERATION, AgentRunStatus.CONCLUIDO, lease_ainda_valida=True)
+
+    def test_lease_do_pedido_nao_mais_atual_rejeitada(self):
+        # Achado de revisão adversarial (Codex, PR #336, P1): identidade do
+        # RUN (token/geração deste AgentRun especificamente) não é suficiente
+        # para uma conclusão NOVA -- o executor pode ter perdido a reserva do
+        # PEDIDO (lease expirada/substituída por geração mais nova) e ainda
+        # assim apresentar credenciais que batem com as deste run antigo.
+        run = _run(status=AgentRunStatus.EM_ANDAMENTO)
+        with self.assertRaises(RunLeaseInvalida):
+            concluir_run(
+                run, LEASE_TOKEN, GENERATION, AgentRunStatus.CONCLUIDO,
+                lease_ainda_valida=False, resultado="tarde demais",
+            )
 
     def test_reentrega_mesmo_resultado_e_idempotente(self):
         run = _run(status=AgentRunStatus.CONCLUIDO, resultado={"ok": True}, finalizado_em=T0)
-        de_novo = concluir_run(run, LEASE_TOKEN, GENERATION, AgentRunStatus.CONCLUIDO, resultado={"ok": True})
+        de_novo = concluir_run(
+            run, LEASE_TOKEN, GENERATION, AgentRunStatus.CONCLUIDO,
+            lease_ainda_valida=True, resultado={"ok": True},
+        )
+        self.assertEqual(de_novo, run)
+
+    def test_reentrega_nao_exige_lease_do_pedido_ainda_valida(self):
+        # Diferente de uma conclusão NOVA: reentrega do MESMO resultado já
+        # registrado é aceita mesmo com lease_ainda_valida=False -- mesma
+        # razão de autonomy.execution.registrar_resultado_observado (uma
+        # resposta perdida por timeout de rede pode chegar bem depois do
+        # pedido já ter sido reatribuído a outra geração).
+        run = _run(status=AgentRunStatus.CONCLUIDO, resultado={"ok": True}, finalizado_em=T0)
+        de_novo = concluir_run(
+            run, LEASE_TOKEN, GENERATION, AgentRunStatus.CONCLUIDO,
+            lease_ainda_valida=False, resultado={"ok": True},
+        )
         self.assertEqual(de_novo, run)
 
     def test_reentrega_resultado_diferente_rejeitada(self):
         run = _run(status=AgentRunStatus.CONCLUIDO, resultado={"ok": True}, finalizado_em=T0)
         with self.assertRaises(RunFinalizado):
-            concluir_run(run, LEASE_TOKEN, GENERATION, AgentRunStatus.CONCLUIDO, resultado={"ok": False})
+            concluir_run(
+                run, LEASE_TOKEN, GENERATION, AgentRunStatus.CONCLUIDO,
+                lease_ainda_valida=True, resultado={"ok": False},
+            )
 
     def test_reentrega_status_terminal_diferente_rejeitada(self):
         run = _run(status=AgentRunStatus.CONCLUIDO, resultado={"ok": True}, finalizado_em=T0)
         with self.assertRaises(RunFinalizado):
-            concluir_run(run, LEASE_TOKEN, GENERATION, AgentRunStatus.FALHA, resultado={"ok": True})
+            concluir_run(
+                run, LEASE_TOKEN, GENERATION, AgentRunStatus.FALHA,
+                lease_ainda_valida=True, resultado={"ok": True},
+            )
 
     def test_reentrega_terminal_ainda_exige_fencing(self):
         # Achado a evitar: reentrega idempotente não pode pular a checagem
@@ -194,12 +235,45 @@ class TestConcluirRun(unittest.TestCase):
         # mesmo que o resultado batesse.
         run = _run(status=AgentRunStatus.CONCLUIDO, resultado={"ok": True}, finalizado_em=T0)
         with self.assertRaises(RunLeaseInvalida):
-            concluir_run(run, "tok-errado", GENERATION, AgentRunStatus.CONCLUIDO, resultado={"ok": True})
+            concluir_run(
+                run, "tok-errado", GENERATION, AgentRunStatus.CONCLUIDO,
+                lease_ainda_valida=True, resultado={"ok": True},
+            )
 
     def test_timeout_para_terminal_diferente_rejeitado(self):
         run = _run(status=AgentRunStatus.TIMEOUT, finalizado_em=T0)
         with self.assertRaises(RunFinalizado):
-            concluir_run(run, LEASE_TOKEN, GENERATION, AgentRunStatus.CONCLUIDO, resultado=None)
+            concluir_run(
+                run, LEASE_TOKEN, GENERATION, AgentRunStatus.CONCLUIDO,
+                lease_ainda_valida=True, resultado=None,
+            )
+
+    def test_resultado_bool_e_int_nao_sao_o_mesmo_valor_na_reentrega(self):
+        # Achado de revisão adversarial (Codex, PR #336, P2): "==" trata
+        # True/1 como iguais, o que faria uma reentrega com o tipo trocado
+        # ser aceita como "mesmo resultado" -- _mesmo_valor_canonico (via
+        # serialização) distingue os dois, mesma regra de autonomy.ledger.
+        run = _run(status=AgentRunStatus.CONCLUIDO, resultado=True, finalizado_em=T0)
+        with self.assertRaises(RunFinalizado):
+            concluir_run(
+                run, LEASE_TOKEN, GENERATION, AgentRunStatus.CONCLUIDO,
+                lease_ainda_valida=True, resultado=1,
+            )
+
+    def test_resultado_dict_mutavel_do_chamador_nao_afeta_run_guardado(self):
+        # Achado de revisão adversarial (Codex, PR #336, P2): resultado
+        # guardado por referência permitia mutar o desfecho "terminal" sem
+        # nenhuma transição -- o snapshot em __post_init__ fecha essa porta.
+        resultado_original = {"contador": 1}
+        run = _run(status=AgentRunStatus.EM_ANDAMENTO)
+        concluido = concluir_run(
+            run, LEASE_TOKEN, GENERATION, AgentRunStatus.CONCLUIDO,
+            lease_ainda_valida=True, resultado=resultado_original,
+        )
+        resultado_original["contador"] = 999
+        self.assertEqual(concluido.resultado, {"contador": 1})
+        with self.assertRaises(TypeError):
+            concluido.resultado["contador"] = 2
 
 
 class TestExpirarPorTimeout(unittest.TestCase):

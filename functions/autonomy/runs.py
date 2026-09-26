@@ -25,13 +25,23 @@ pedido durável -- distinto do próprio pedido
 (`autonomy.execution.PedidoDuravel`), que pode atravessar VÁRIAS tentativas:
 cada `RETENTATIVA_AGENDADA` seguida de um novo `assumir_pedido` produz uma
 nova geração e, com o wiring futuro, um novo `AgentRun`. Por isso o
-`run_id` é próprio (não reusa `request_id`) e o fencing de ações sobre um
-`AgentRun` compara identidade (token + geração) contra os valores capturados
-na criação do próprio run, não contra uma `Lease` viva -- este módulo
-deliberadamente não importa `autonomy.requests.Lease` para não acoplar o
-ciclo do run à representação de reserva do pedido; só reaproveita o mesmo
-raciocínio de fencing (comparação em tempo constante do token, geração
-monotônica) já estabelecido lá.
+`run_id` é próprio (não reusa `request_id`) e a IDENTIDADE de ações sobre um
+`AgentRun` (token + geração) é sempre conferida contra os valores capturados
+na criação do próprio run -- este módulo deliberadamente não importa
+`autonomy.requests.Lease` para não acoplar o ciclo do run à representação de
+reserva do pedido; só reaproveita o mesmo raciocínio de fencing (comparação
+em tempo constante do token, geração monotônica) já estabelecido lá.
+
+Identidade sozinha, porém, NÃO basta para uma conclusão nova (`concluir_run`,
+fora do caminho de reentrega idempotente): um executor que perdeu a
+reserva do PEDIDO (lease expirada ou substituída por uma geração mais nova)
+continuaria apresentando um token/geração que batem com os deste `AgentRun`
+específico -- ele é dono legítimo DESTE run, só não é mais dono do pedido.
+Por isso `concluir_run` também exige um atestado explícito do chamador,
+`lease_ainda_valida`, sobre o estado ATUAL da lease do pedido (achado de
+revisão adversarial, Codex, PR #336, P1) -- mesmo padrão de
+`expirar_por_timeout`/`lease_expirada`: este módulo não importa `Lease` para
+checar isso sozinho, mas também não aceita a alegação por omissão.
 """
 
 from __future__ import annotations
@@ -42,6 +52,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
+
+from autonomy.ledger import _mesmo_valor_canonico, _snapshot_json
 
 
 class AgentRunStatus(str, Enum):
@@ -148,6 +160,17 @@ class AgentRun:
     status: AgentRunStatus
     iniciado_em: datetime
     finalizado_em: datetime | None = None
+    #: Se `dict`/`list`, `__post_init__` substitui por uma versão
+    #: RECURSIVAMENTE imutável (`MappingProxyType`/`tuple`, via
+    #: `autonomy.ledger._snapshot_json`) -- mesmo mecanismo de
+    #: `autonomy.ledger.LedgerEntry.resultado`/`Checkpoint.dados`. Sem isto,
+    #: um `resultado` mutável guardado por referência podia ser alterado pelo
+    #: chamador DEPOIS de já registrado, mudando silenciosamente o desfecho
+    #: de um run supostamente terminal e imutável sem passar por nenhuma
+    #: transição (achado de revisão adversarial, Codex, PR #336, P2).
+    #: Continua comparando igual a um `dict`/`list` equivalente
+    #: (`MappingProxyType`/`tuple` implementam `__eq__` contra o tipo
+    #: mutável correspondente).
     resultado: Any = None
 
     def __post_init__(self) -> None:
@@ -187,6 +210,12 @@ class AgentRun:
         object.__setattr__(self, "executor_id", executor_id_limpo)
         object.__setattr__(self, "lease_token", lease_token_limpo)
         object.__setattr__(self, "generation", generation_normalizada)
+        # Roda incondicionalmente (mesmo com `resultado=None`, um no-op) --
+        # `dataclasses.replace` reconstrói a instância inteira a cada
+        # transição, então este é o único ponto por onde TODO `resultado`
+        # novo passa, venha de `concluir_run` ou de uma construção direta de
+        # `AgentRun` (mesma justificativa de `LedgerEntry.__post_init__`).
+        object.__setattr__(self, "resultado", _snapshot_json(self.resultado))
 
 
 def _fencing_run(run: AgentRun, lease_token: str, generation: int) -> None:
@@ -269,6 +298,7 @@ def concluir_run(
     lease_token: str,
     generation: int,
     novo_status: AgentRunStatus,
+    lease_ainda_valida: bool,
     resultado: Any = None,
     agora: datetime | None = None,
 ) -> AgentRun:
@@ -278,14 +308,33 @@ def concluir_run(
     `expirar_por_timeout`, uma ação de sistema, nunca pelo próprio executor
     se autodeclarando "deu timeout".
 
-    Reentrega do MESMO resultado para um run já terminal é idempotente e
-    ainda exige identidade (token/geração), mas SEM exigir que uma lease
-    ainda esteja "viva" -- mesma razão de
-    `autonomy.execution.registrar_resultado_observado`: uma resposta
-    perdida por timeout de rede pode ser reapresentada bem depois do
-    vencimento natural da lease original. Resultado DIFERENTE para o mesmo
-    run terminal, ou tentar concluir um run já terminal com um status
-    diferente, levanta erro -- nunca sobrescreve."""
+    `lease_ainda_valida` é obrigatório e SÓ importa para uma conclusão NOVA
+    (run ainda ativo): identidade (token/geração deste `AgentRun`) prova que
+    o apresentante é quem criou ESTE run, mas não prova que ele ainda é o
+    dono do PEDIDO -- uma lease pode ter expirado ou sido reatribuída a uma
+    geração mais nova enquanto este executor ainda segurava credenciais
+    válidas do run antigo (achado de revisão adversarial, Codex, PR #336,
+    P1: sem esta checagem, um executor que já perdeu a reserva do pedido
+    ainda conseguia "concluir" seu run antigo). Quem chama precisa ter
+    conferido a lease ATUAL do pedido (ex.:
+    `autonomy.requests.lease_valida_para_acao` contra `pedido.lease`) e
+    passar o resultado aqui -- mesmo padrão de `expirar_por_timeout`/
+    `lease_expirada`: este módulo não importa `Lease` para checar isso
+    sozinho, mas também não aceita a alegação por omissão (parâmetro sem
+    default).
+
+    Reentrega do MESMO resultado para um run já terminal é idempotente,
+    ainda exige identidade (token/geração), mas IGNORA `lease_ainda_valida`
+    -- mesma razão de `autonomy.execution.registrar_resultado_observado`:
+    uma resposta perdida por timeout de rede pode ser reapresentada bem
+    depois do vencimento natural da lease original, e o resultado já está
+    definitivamente registrado de qualquer forma. Resultado DIFERENTE
+    (comparado por `autonomy.ledger._mesmo_valor_canonico`, não por `==` --
+    achado de revisão adversarial, Codex, PR #336, P2: `==` trata `True` e
+    `1` como iguais e dois `NaN` como diferentes, nenhum dos dois compatível
+    com a semântica de "mesmo valor observável" que uma reentrega promete)
+    para o mesmo run terminal, ou tentar concluir um run já terminal com um
+    status diferente, levanta erro -- nunca sobrescreve."""
     # Fencing primeiro, sempre -- mesma ordem de
     # `autonomy.execution.registrar_resultado_observado`: identidade é
     # verificada antes de qualquer decisão de negócio, inclusive antes de
@@ -301,12 +350,20 @@ def concluir_run(
             "timeout é decidido por expirar_por_timeout, não por esta função."
         )
     if run.status in ESTADOS_TERMINAIS:
-        if run.status == novo_status and run.resultado == resultado:
+        if run.status == novo_status and _mesmo_valor_canonico(run.resultado, resultado):
             return run
         raise RunFinalizado(
             f"run '{run.run_id}' já está em estado terminal '{run.status.value}' -- "
             "não pode transicionar de novo (nem para o mesmo status com "
             "resultado diferente, nem para outro status)."
+        )
+    if not lease_ainda_valida:
+        raise RunLeaseInvalida(
+            f"run '{run.run_id}' não pode ser concluído -- a lease do pedido que "
+            "originou este run não é mais a atual (expirada ou substituída por "
+            "uma geração mais nova); confira a lease ATUAL do pedido antes de "
+            "chamar. Só uma reentrega do MESMO resultado já registrado (run já "
+            "terminal) dispensa esta checagem."
         )
     ok, motivo = _validar_transicao(run.status, novo_status)
     if not ok:
