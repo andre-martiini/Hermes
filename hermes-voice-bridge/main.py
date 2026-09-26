@@ -270,6 +270,8 @@ def _allowed_browser_origins() -> set[str]:
             "http://127.0.0.1:8765",
             "https://gestao-hermes.web.app",
             "https://gestao-hermes.firebaseapp.com",
+            "https://gaspar-assistente.web.app",
+            "https://gaspar-assistente.firebaseapp.com",
         }
     )
     return origins
