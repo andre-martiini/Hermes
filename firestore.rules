@@ -48,7 +48,10 @@ service cloud.firestore {
         'system', 'automations',
         'idempotency', 'mcp_audit_log', 'agent_requests', 'agent_runs',
         'mcp_jobs', 'promocoes_autonomia_sugeridas', 'telegram_sessions',
-        'whitelist'
+        'whitelist',
+        // Fila interna da transcrição longa (Storage -> Firestore -> worker
+        // de 4 GB); só o despachante on_long_transcription_uploaded grava.
+        'long_transcription_jobs'
       ];
     }
 

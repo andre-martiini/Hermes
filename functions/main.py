@@ -1722,6 +1722,11 @@ def sync_google_calendar(service, sync_ref, logs, tarefas_docs=None):
         log_to_firestore(sync_ref, logs, f"ERRO CAL: {e}")
         return None
 
+# Campo de system/processed_emails com os e-mails da busca de Pix que nunca viram lançamento
+# (sem valor em R$, XP). Separado de `ids` porque `ids` também é lido por sync_boletos_gmail.
+PIX_IGNORADOS_FIELD = 'pix_ignorados_ids'
+
+
 def sync_pix_emails(service, sync_ref, logs):
     """
     Busca emails de Pix e registra no Financeiro (Versão Cloud Function)
@@ -1736,26 +1741,66 @@ def sync_pix_emails(service, sync_ref, logs):
         log_to_firestore(sync_ref, logs, "Buscando emails de Pix a partir de 01/02/2026...")
 
         # Query ampliada para capturar e-mails transacionais de qualquer instituição (Pix, Google Pay, PicPay, etc)
-        query = 'after:2026/02/01 (subject:(Pix OR "Google Pay" OR "PicPay" OR "Pagamento" OR "Transferência" OR "Comprovante") OR "Pix" OR "Google Pay" OR "PicPay")'
+        base_query = 'after:2026/02/01 (subject:(Pix OR "Google Pay" OR "PicPay" OR "Pagamento" OR "Transferência" OR "Comprovante") OR "Pix" OR "Google Pay" OR "PicPay")'
+
+        # Candidatos (custo): antes a busca não tinha `in:inbox` e cada rodada listava até 500
+        # e-mails desde fev/2026, rearquivando um por um os já processados. Agora são duas buscas:
+        # o que ainda está no INBOX (o que o Hermes ainda não absorveu) + os últimos 3 dias
+        # (pega Pix que o André arquivou à mão antes de o sync passar).
+        def _listar(q):
+            encontrados = []
+            page_token = None
+            while True:
+                results = service.users().messages().list(
+                    userId='me', q=q, maxResults=100, pageToken=page_token
+                ).execute()
+                batch = results.get('messages', [])
+                if batch:
+                    encontrados.extend(batch)
+                page_token = results.get('nextPageToken')
+                if not page_token or len(encontrados) >= 500:
+                    break
+            return encontrados
 
         messages = []
-        page_token = None
-        while True:
-            results = service.users().messages().list(
-                userId='me', q=query, maxResults=100, pageToken=page_token
-            ).execute()
-            batch = results.get('messages', [])
-            if batch:
-                messages.extend(batch)
-            page_token = results.get('nextPageToken')
-            if not page_token or len(messages) >= 500:
-                break
+        vistos = set()
+        inbox_ids = set()
+        for origem, q in (('inbox', f'in:inbox {base_query}'), ('recentes', f'newer_than:3d {base_query}')):
+            for m in _listar(q):
+                if origem == 'inbox':
+                    inbox_ids.add(m['id'])
+                if m['id'] not in vistos:
+                    vistos.add(m['id'])
+                    messages.append(m)
 
         if not messages:
             log_to_firestore(sync_ref, logs, "Nenhum Pix/Pagamento encontrado para os critérios de busca.")
             return
 
-        log_to_firestore(sync_ref, logs, f"Encontrados {len(messages)} e-mails potenciais de Pix/Pagamento. Analisando...")
+        # Lê os ids já processados ANTES de varrer as coleções financeiras (1 leitura): se nenhum
+        # candidato for novo, não há o que lançar e a rodada termina aqui.
+        processed_emails_doc = db.collection('system').document('processed_emails').get()
+        processed_data = (processed_emails_doc.to_dict() or {}) if processed_emails_doc.exists else {}
+        processed_ids_list = list(processed_data.get('ids') or [])
+        processed_ids = set(processed_ids_list)
+        # E-mails que casam com a busca mas não viram lançamento (sem valor em R$ no
+        # assunto/trecho, ou da XP): a decisão depende só de assunto+trecho, que não mudam.
+        # Ficam numa lista própria (não em `ids`, que também é lida por sync_boletos_gmail).
+        ignorados_list = list(processed_data.get(PIX_IGNORADOS_FIELD) or [])
+        ignorados_ids = set(ignorados_list)
+
+        pendentes = [m for m in messages if m['id'] not in processed_ids and m['id'] not in ignorados_ids]
+        if not pendentes:
+            for m in messages:
+                if m['id'] in processed_ids and m['id'] in inbox_ids:
+                    archive_gmail_message(service, m['id'], sync_ref, logs, "pix-ja-processado")
+            log_to_firestore(
+                sync_ref, logs,
+                f"Pix: {len(messages)} candidato(s), nenhum novo; coleções financeiras não consultadas."
+            )
+            return
+
+        log_to_firestore(sync_ref, logs, f"Encontrados {len(messages)} e-mails potenciais de Pix/Pagamento ({len(pendentes)} não processados). Analisando...")
 
         # Cache de transações existentes para evitar duplicatas (Bloqueio de duplicidade financeira)
         existing_transactions = []
@@ -1797,10 +1842,10 @@ def sync_pix_emails(service, sync_ref, logs):
             })
             if data.get('google_message_id'): existing_google_ids.add(data['google_message_id'])
 
-        processed_emails_doc = db.collection('system').document('processed_emails').get()
-        processed_ids = set(processed_emails_doc.to_dict().get('ids', [])) if processed_emails_doc.exists else set()
         new_processed_ids = []
-        
+        new_ignorados_ids = []
+        inseridos_ou_alterados = 0
+
         # Cache de rubricas de renda e rubricas de contas (saídas)
         income_rubrics_cache = []
         for r in db.collection('income_rubrics').stream():
@@ -1832,7 +1877,16 @@ def sync_pix_emails(service, sync_ref, logs):
             msg_id = msg['id']
 
             if msg_id in processed_ids or msg_id in existing_google_ids:
-                archive_gmail_message(service, msg_id, sync_ref, logs, "pix-ja-processado")
+                # Arquivar um e-mail que já está fora do INBOX é no-op na API: só chama para
+                # quem ainda está lá.
+                if msg_id in inbox_ids:
+                    archive_gmail_message(service, msg_id, sync_ref, logs, "pix-ja-processado")
+                if msg_id not in processed_ids:
+                    # Já lançado (google_message_id no financeiro) mas fora da lista de
+                    # processados: registra, senão ele força o caminho caro em toda rodada.
+                    new_processed_ids.append(msg_id)
+                continue
+            if msg_id in ignorados_ids:
                 continue
 
             details = service.users().messages().get(userId='me', id=msg_id).execute()
@@ -1855,12 +1909,19 @@ def sync_pix_emails(service, sync_ref, logs):
             if 'xpi.com.br' in sender.lower() or 'xp investimentos' in sender.lower() or 'xpinvestimentos' in sender.lower() or 'xp inc' in sender.lower() or 'xp ' in subject.lower():
                 log_to_firestore(sync_ref, logs, f"[GMAIL-PIX] Ignorando e-mail da XP no extrato da conta PicPay (msg_id: {msg_id})")
                 archive_gmail_message(service, msg_id, sync_ref, logs, "pix-xp-ignorado")
+                new_ignorados_ids.append(msg_id)
                 continue
 
             content = f"{subject} {snippet}"
             value_match = re.search(r'R\$\s*([\d\.,]+)', content)
             pix_id_match = re.search(r'\b(E[A-Z0-9]{31})\b', content)
             pix_id = pix_id_match.group(1) if pix_id_match else None
+
+            if not value_match:
+                # Sem valor em R$ no assunto/trecho: nunca vira lançamento (e não é arquivado,
+                # como antes). Guardado para não ser rebaixado e reavaliado a cada rodada.
+                new_ignorados_ids.append(msg_id)
+                continue
 
             if value_match:
                 val_raw = value_match.group(1).rstrip('.').rstrip(',')
@@ -1884,9 +1945,11 @@ def sync_pix_emails(service, sync_ref, logs):
                 try:
                     amount = float(val_str)
                 except ValueError:
+                    new_ignorados_ids.append(msg_id)
                     continue
 
                 if amount <= 0:
+                    new_ignorados_ids.append(msg_id)
                     continue
 
                 is_income = any(word in content.lower() for word in ['recebido', 'recebeu', 'recebida', 'recebimento', 'creditado', 'entrada'])
@@ -1966,6 +2029,7 @@ def sync_pix_emails(service, sync_ref, logs):
                                 collection_name = 'finance_income' if is_income else 'finance_transactions'
                                 db.collection(collection_name).document(item['doc_id']).update(update_fields)
                                 item['description'] = description
+                                inseridos_ou_alterados += 1
                                 log_to_firestore(sync_ref, logs, f"[PIX] Atualizada descrição do lançamento existente para: '{description}'")
                             break
 
@@ -1991,6 +2055,7 @@ def sync_pix_emails(service, sync_ref, logs):
                         'rubricId': matched_rubric_id
                     }
                     doc_ref = db.collection('finance_income').add(new_record)[1]
+                    inseridos_ou_alterados += 1
                     existing_income.append({'doc_id': doc_ref.id, 'amount': amount, 'date': dt, 'pix_id': pix_id, 'description': description, 'google_message_id': msg_id})
                 else:
                     sprint = 1 if dt.day < 8 else 2 if dt.day < 15 else 3 if dt.day < 22 else 4
@@ -2000,6 +2065,7 @@ def sync_pix_emails(service, sync_ref, logs):
                         'google_message_id': msg_id, 'pix_id': pix_id
                     }
                     doc_ref = db.collection('finance_transactions').add(new_record)[1]
+                    inseridos_ou_alterados += 1
                     existing_transactions.append({'doc_id': doc_ref.id, 'amount': amount, 'date': dt, 'pix_id': pix_id, 'description': description, 'google_message_id': msg_id, 'status': None})
 
                     if dt.year == now_utc.year and dt.month == now_utc.month:
@@ -2015,14 +2081,25 @@ def sync_pix_emails(service, sync_ref, logs):
                 log_to_firestore(sync_ref, logs, f"[PIX] Processado: {description} (R$ {amount:.2f})")
                 archive_gmail_message(service, msg_id, sync_ref, logs, "pix-lancado")
 
+        # Dedupe preservando a ordem (antes `list(set)[-1000:]` descartava ids ao acaso).
+        payload_processados = {}
         if new_processed_ids:
-            updated_ids = list(processed_ids.union(new_processed_ids))[-1000:]
-            db.collection('system').document('processed_emails').set({'ids': updated_ids}, merge=True)
+            payload_processados['ids'] = list(dict.fromkeys(processed_ids_list + new_processed_ids))[-1000:]
+        if new_ignorados_ids:
+            payload_processados[PIX_IGNORADOS_FIELD] = list(dict.fromkeys(ignorados_list + new_ignorados_ids))[-1000:]
+        if payload_processados:
+            db.collection('system').document('processed_emails').set(payload_processados, merge=True)
 
-        cleanup_retroactive_pix_duplicates(db, sync_ref, logs)
+        # A limpeza retroativa relê as duas coleções financeiras inteiras; só vale a pena quando
+        # esta rodada inseriu (ou renomeou para "Google Pay") algum lançamento.
+        if inseridos_ou_alterados > 0:
+            cleanup_retroactive_pix_duplicates(db, sync_ref, logs)
 
     except Exception as e:
         log_to_firestore(sync_ref, logs, f"ERRO PIX: {e}")
+        # Sinaliza a falha ao chamador (sync_gmail_work): o webhook não pode avançar o
+        # history_id do Gmail por cima de um e-mail que não foi processado.
+        return False
 
 
 def cleanup_retroactive_pix_duplicates(db, sync_ref=None, logs=None):
@@ -2178,12 +2255,23 @@ def sync_boletos_gmail(service, sync_ref, logs):
             log_to_firestore(sync_ref, logs, "Nenhum boleto recente encontrado no Gmail.")
             return
 
+        processed_emails_doc = db.collection('system').document('processed_emails').get()
+        processed_ids = processed_emails_doc.to_dict().get('ids', []) if processed_emails_doc.exists else []
+
+        # Custo: se todos os candidatos já estão em processed_ids, o laço abaixo só faria
+        # `continue` em cada um (os que viraram boleto já foram arquivados ao serem lançados) --
+        # não vale ler a chave do Gemini nem varrer fixed_bills/bill_rubrics inteiros.
+        processed_set = set(processed_ids)
+        if all(m_info['id'] in processed_set for m_info in messages):
+            log_to_firestore(sync_ref, logs, f"Boletos: {len(messages)} candidato(s), nenhum novo.")
+            return
+
         # Configurar Gemini
         keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
         if not api_key:
             log_to_firestore(sync_ref, logs, "ERRO: Gemini API Key não encontrada (em system/api_keys).")
-            return
+            return False
         
         from google.genai import types
 
@@ -2222,8 +2310,6 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 'label': d.get('description', '').strip()
             })
 
-        processed_emails_doc = db.collection('system').document('processed_emails').get()
-        processed_ids = processed_emails_doc.to_dict().get('ids', []) if processed_emails_doc.exists else []
         new_processed_ids = []
 
         for m_info in messages:
@@ -2231,7 +2317,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
             if msg_id in existing_bill_google_ids:
                 archive_gmail_message(service, msg_id, sync_ref, logs, "boleto-ja-lancado")
                 continue
-            if msg_id in processed_ids: continue
+            if msg_id in processed_set: continue
             
             msg = service.users().messages().get(userId='me', id=msg_id).execute(num_retries=3)
             snippet = msg.get('snippet', '')
@@ -2551,7 +2637,8 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 # do parser precisam poder ser recuperados na próxima sincronização.
 
         if new_processed_ids:
-            updated_ids = list(set(processed_ids + new_processed_ids))[-500:]
+            # Dedupe preservando a ordem (antes `list(set)[-500:]` descartava ids ao acaso).
+            updated_ids = list(dict.fromkeys(processed_ids + new_processed_ids))[-500:]
             db.collection('system').document('processed_emails').set({'ids': updated_ids}, merge=True)
 
         if processed_count > 0:
@@ -2565,6 +2652,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
     
     except Exception as e:
         log_to_firestore(sync_ref, logs, f"ERRO na busca de boletos: {e}")
+        return False  # ver sync_pix_emails: falha sinalizada ao chamador
 
 
 def sync_allcare_portal_bills(service, sync_ref, logs) -> int:
@@ -3034,14 +3122,22 @@ def sync_gmail_work(db, gs, sync_ref, logs):
     Gmail. Extraído de run_full_sync em 24/09/2026 (ação e7fe01f4-6b7b-4789-8) para poder ser
     disparado tanto pelo webhook (on_gmail_watch_notification) quanto pela rede de segurança de
     baixa frequência (gmail_sync_safety_net), sem precisar rodar Calendar/Tasks/Contacts/Drive/
-    Allcare junto a cada e-mail novo."""
-    sync_pix_emails(gs, sync_ref, logs)
-    sync_boletos_gmail(gs, sync_ref, logs)
+    Allcare junto a cada e-mail novo.
+
+    Devolve a lista de etapas que falharam. sync_pix_emails/sync_boletos_gmail engolem as
+    próprias exceções (só logam) e sinalizam a falha devolvendo False; None/True = ok."""
+    falhas = []
+    if sync_pix_emails(gs, sync_ref, logs) is False:
+        falhas.append('pix')
+    if sync_boletos_gmail(gs, sync_ref, logs) is False:
+        falhas.append('boletos')
     try:
         from email_action_linker import link_emails_to_actions
         link_emails_to_actions(db, gs, sync_ref, logs)
     except Exception as e_link:
         log_to_firestore(sync_ref, logs, f"[EMAIL-LINK][ERRO] Falha inesperada no vínculo e-mail-ação: {e_link}", True)
+        falhas.append('email_link')
+    return falhas
 
 
 def gmail_watch_habilitado(db) -> bool:
@@ -3075,7 +3171,11 @@ def renovar_gmail_watch(db, gs) -> dict:
         }).execute()
         watch_ref.set({
             'topic_name': topic_name,
-            'history_id': str(resultado.get('historyId') or ''),
+            # Campo próprio da renovação. `history_id` é o cursor do filtro de delta do webhook
+            # e só avança depois de um sync bem-sucedido (on_gmail_watch_notification): se a
+            # renovação diária o sobrescrevesse com o id atual da caixa, pularia e-mails que
+            # chegaram mas ainda não foram processados (lock ocupado, sync com erro).
+            'watch_history_id': str(resultado.get('historyId') or ''),
             'expiration': resultado.get('expiration'),
             'watch_active': True,
             'last_renewed_at': agora.isoformat(),
@@ -3112,16 +3212,31 @@ def _executar_sync_gmail_com_lock(db, gs, trigger: str) -> dict:
             'started_at': datetime.now(timezone.utc).isoformat(),
             'logs': logs,
         }, merge=True)
-        sync_gmail_work(db, gs, sync_ref, logs)
-        sync_ref.set({
-            'status': 'completed',
-            'last_success': datetime.now(timezone.utc).isoformat(),
-            'logs': logs,
-        }, merge=True)
+        falhas = sync_gmail_work(db, gs, sync_ref, logs)
+        falhas = list(falhas) if isinstance(falhas, (list, tuple)) else []
+        agora_iso = datetime.now(timezone.utc).isoformat()
+        if falhas:
+            # Rodou até o fim, mas alguma etapa falhou por dentro (e só logou). Não conta como
+            # sucesso: last_success fica onde estava e o webhook não avança o history_id.
+            sync_ref.set({
+                'status': 'partial',
+                'etapas_com_erro': falhas,
+                'finished_at': agora_iso,
+                'logs': logs,
+            }, merge=True)
+        else:
+            sync_ref.set({
+                'status': 'completed',
+                'etapas_com_erro': [],
+                'last_success': agora_iso,
+                'logs': logs,
+            }, merge=True)
         if trigger == 'webhook':
             db.collection('system').document(GMAIL_WATCH_DOC_ID).set(
-                {'last_notification_at': datetime.now(timezone.utc).isoformat()}, merge=True
+                {'last_notification_at': agora_iso}, merge=True
             )
+        if falhas:
+            return {"executado": True, "parcial": falhas}
         return {"executado": True}
     except Exception as exc:
         error_msg = _mensagem_erro_sync(db, exc)
@@ -3157,7 +3272,115 @@ def on_gmail_watch_notification(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePub
     except Exception as exc:
         print(f"[GMAIL-WATCH] {_mensagem_erro_sync(db, exc)}")
         return
-    _executar_sync_gmail_com_lock(db, gs, trigger='webhook')
+
+    # Filtro de delta (custo): o watch notifica QUALQUER mudança no INBOX -- inclusive as que
+    # o próprio sync causa ao arquivar e-mails financeiros (removeLabelIds INBOX), o que
+    # redisparava o sync de ~3 min a 1 GB em cascata. Só roda o sync se entrou mensagem nova
+    # no INBOX desde o último history_id conhecido. Na dúvida (sem history_id salvo, 404 de
+    # history_id expirado, payload ilegível, erro da API) roda o sync como antes.
+    notificacao_history_id = _history_id_da_notificacao(event)
+    watch_ref = db.collection('system').document(GMAIL_WATCH_DOC_ID)
+    try:
+        watch_doc = watch_ref.get()
+        history_id_salvo = (watch_doc.to_dict() or {}).get('history_id') if watch_doc.exists else None
+    except Exception as exc:
+        print(f"[GMAIL-WATCH] Falha ao ler history_id salvo: {exc}")
+        history_id_salvo = None
+
+    delta = _gmail_delta_inbox(gs, history_id_salvo)
+    if delta is not None and not delta['mensagens_novas']:
+        _avancar_gmail_history_id(db, delta.get('history_id') or notificacao_history_id)
+        print(
+            f"[GMAIL-WATCH] Nenhuma mensagem nova no INBOX desde {history_id_salvo} "
+            f"(notificação {notificacao_history_id}); sync pulado."
+        )
+        return
+
+    resultado = _executar_sync_gmail_com_lock(db, gs, trigger='webhook')
+    # Só avança o history_id se o sync realmente rodou sem erro (nem parcial, isto é, alguma
+    # etapa que engoliu a própria exceção): com lock ocupado ou erro, a
+    # próxima notificação recalcula o delta a partir do id antigo e ainda enxerga a mensagem.
+    if (isinstance(resultado, dict) and resultado.get('executado')
+            and not resultado.get('erro') and not resultado.get('parcial')):
+        novo = (delta or {}).get('history_id') or notificacao_history_id
+        _avancar_gmail_history_id(db, novo)
+
+
+def _history_id_da_notificacao(event) -> str | None:
+    """Extrai o historyId do payload do Gmail (base64 de {"emailAddress", "historyId"})."""
+    try:
+        mensagem = event.data.message
+        payload = getattr(mensagem, 'json', None)
+        if not isinstance(payload, dict):
+            bruto = getattr(mensagem, 'data', None)
+            if isinstance(bruto, str):
+                bruto = base64.b64decode(bruto)
+            payload = json.loads(bruto.decode('utf-8') if isinstance(bruto, (bytes, bytearray)) else bruto)
+        valor = (payload or {}).get('historyId')
+        return str(int(valor)) if valor is not None else None
+    except Exception:
+        return None
+
+
+def _gmail_delta_inbox(gs, history_id_salvo) -> dict | None:
+    """Consulta users.history.list a partir do history_id salvo, só messageAdded no INBOX.
+    Devolve {'mensagens_novas': bool, 'history_id': str|None} ou None quando o delta não pode
+    ser calculado (sem id salvo, id inválido/expirado -> 404, qualquer erro) -- nesse caso o
+    chamador roda o sync completo, como antes."""
+    try:
+        inicio = int(str(history_id_salvo).strip())
+    except (TypeError, ValueError):
+        return None
+    try:
+        page_token = None
+        history_id_atual = None
+        while True:
+            kwargs = {
+                'userId': 'me',
+                'startHistoryId': str(inicio),
+                'historyTypes': ['messageAdded'],
+                'labelId': 'INBOX',
+            }
+            if page_token:
+                kwargs['pageToken'] = page_token
+            resposta = gs.users().history().list(**kwargs).execute(num_retries=3)
+            history_id_atual = resposta.get('historyId') or history_id_atual
+            for item in resposta.get('history') or []:
+                if item.get('messagesAdded'):
+                    return {'mensagens_novas': True, 'history_id': str(history_id_atual) if history_id_atual else None}
+            page_token = resposta.get('nextPageToken')
+            if not page_token:
+                break
+        return {'mensagens_novas': False, 'history_id': str(history_id_atual) if history_id_atual else None}
+    except Exception as exc:
+        print(f"[GMAIL-WATCH] history.list falhou a partir de {inicio} ({exc}); rodando sync completo.")
+        return None
+
+
+def _avancar_gmail_history_id(db, novo_history_id) -> bool:
+    """Grava system/{GMAIL_WATCH_DOC_ID}.history_id só se o novo for MAIOR (comparação
+    numérica). Sem transação: uma corrida entre duas notificações, no pior caso, deixa gravado
+    um id menor que o máximo -- o que só faz o próximo delta olhar mais para trás (sync a mais),
+    nunca perder mensagem."""
+    try:
+        novo = int(str(novo_history_id).strip())
+    except (TypeError, ValueError):
+        return False
+    ref = db.collection('system').document(GMAIL_WATCH_DOC_ID)
+    try:
+        doc = ref.get()
+        atual_bruto = (doc.to_dict() or {}).get('history_id') if doc.exists else None
+        try:
+            atual = int(str(atual_bruto).strip())
+        except (TypeError, ValueError):
+            atual = None
+        if atual is not None and novo <= atual:
+            return False
+        ref.set({'history_id': str(novo)}, merge=True)
+        return True
+    except Exception as exc:
+        print(f"[GMAIL-WATCH] Falha ao avançar history_id: {exc}")
+        return False
 
 
 @scheduler_fn.on_schedule(schedule="every 4 hours", timeout_sec=540, memory=options.MemoryOption.GB_1)
@@ -15166,14 +15389,107 @@ def linkWhatsappContacts(req: https_fn.CallableRequest) -> dict:
     }
 
 
+LONG_TRANSCRIPTION_PREFIX = "long_transcriptions/"
+LONG_TRANSCRIPTION_JOBS_COLLECTION = "long_transcription_jobs"
+
+
+def _long_transcription_job_id(bucket_name: str, object_path: str, generation) -> str:
+    """Id determinístico do job: o mesmo objeto (mesma geração) sempre cai no mesmo doc.
+    Storage triggers são at-least-once; a reentrega do mesmo evento esbarra no `create()`
+    (AlreadyExists) e não gera um segundo job."""
+    chave = f"{bucket_name}/{object_path}#{generation or ''}"
+    return hashlib.sha256(chave.encode("utf-8")).hexdigest()[:40]
+
+
+# AlreadyExists é subclasse de Conflict (HTTP 409); é o que o create() do Firestore levanta.
+from google.api_core.exceptions import AlreadyExists  # noqa: E402
+
+
+def enfileirar_transcricao_longa(db, bucket_name: str, object_path: str, content_type=None, generation=None) -> bool:
+    """Grava o job em `long_transcription_jobs`, que dispara o processamento pesado
+    (on_long_transcription_job_created). Devolve False se o job já existia (reentrega)."""
+    job_id = _long_transcription_job_id(bucket_name, object_path, generation)
+    try:
+        db.collection(LONG_TRANSCRIPTION_JOBS_COLLECTION).document(job_id).create({
+            "bucket": bucket_name,
+            "objectPath": object_path,
+            "contentType": content_type,
+            "generation": str(generation) if generation is not None else None,
+            "status": "Enfileirado",
+            "createdAt": firestore.SERVER_TIMESTAMP,
+        })
+        return True
+    except AlreadyExists as exc:
+        # Reentrega do mesmo evento (Storage triggers são at-least-once): job já enfileirado.
+        print(f"[long_transcription] job {job_id} já existia para {object_path} (reentrega): {exc}")
+        return False
+    except Exception as exc:
+        # Qualquer outra falha NÃO é "já enfileirado": relança para a execução falhar de forma
+        # visível. O despachante não tem `retry` ligado (mesma configuração de antes), então a
+        # plataforma não reentrega sozinha -- o marcador abaixo é o que aparece nos logs.
+        print(f"[long_transcription][ERRO] falha ao enfileirar job {job_id} para {object_path}: {exc}")
+        raise
+
+
+# Despachante fino. Antes esta função era o processamento inteiro (4 GB / 2 vCPU / 540 s) e,
+# por escutar o bucket padrão inteiro, pagava cold start de uma instância de 4 GB a cada objeto
+# gravado em QUALQUER pasta -- inclusive cada mídia que o worker de WhatsApp sobe
+# (services/whatsapp-capture) -- só para sair no filtro de prefixo. Agora só filtra o caminho e
+# enfileira um doc no Firestore; o trabalho pesado roda em on_long_transcription_job_created.
+# Sem infraestrutura nova de GCP (nada de bucket ou tópico Pub/Sub novo: a conta de deploy do
+# CI não cria tópicos, ver memória ci-deploy-sa-sem-pubsub-create).
 @storage_fn.on_object_finalized(
     bucket="gestao-hermes.firebasestorage.app",
     region="us-east1",
+    timeout_sec=60,
+    memory=options.MemoryOption.MB_256,
+    cpu="gcf_gen1",
+)
+def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
+    """Enfileira a transcrição de `long_transcriptions/{uid}/{id}.{ext}`; ignora o resto do bucket."""
+    data = event.data
+    object_path = (getattr(data, "name", None) or "")
+    if not object_path.startswith(LONG_TRANSCRIPTION_PREFIX):
+        return  # ignora uploads de outras pastas no mesmo bucket
+    if len(object_path.split("/")) != 3:
+        print(f"[long_transcription] caminho inesperado, ignorando: {object_path}")
+        return
+    enfileirar_transcricao_longa(
+        get_db(),
+        getattr(data, "bucket", None),
+        object_path,
+        content_type=getattr(data, "content_type", None),
+        generation=getattr(data, "generation", None),
+    )
+
+
+@firestore_fn.on_document_created(
+    document=f"{LONG_TRANSCRIPTION_JOBS_COLLECTION}/{{jobId}}",
     timeout_sec=540,
     memory=options.MemoryOption.GB_4,
     cpu=2,
 )
-def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
+def on_long_transcription_job_created(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]) -> None:
+    """Processa um job enfileirado por on_long_transcription_uploaded (recursos originais)."""
+    snap = event.data
+    if snap is None or not snap.exists:
+        return
+    job = snap.to_dict() or {}
+    bucket_name = job.get("bucket")
+    object_path = job.get("objectPath") or ""
+    if not bucket_name or not object_path:
+        print(f"[long_transcription] job {getattr(snap, 'id', '?')} sem bucket/objectPath, ignorando.")
+        return
+    try:
+        processar_transcricao_longa(bucket_name, object_path)
+    finally:
+        try:
+            snap.reference.update({"status": "Processado", "processedAt": firestore.SERVER_TIMESTAMP})
+        except Exception as exc:
+            print(f"[long_transcription] falha ao marcar job como processado: {exc}")
+
+
+def processar_transcricao_longa(bucket_name: str, object_path: str) -> None:
     """Transcreve arquivos pesados de áudio/vídeo enviados para `long_transcriptions/{uid}/{id}.{ext}`.
 
     Fluxo: normaliza qualquer mídia para AAC via ffmpeg -> Files API do Gemini ->
@@ -15185,8 +15501,8 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
     import subprocess as _subprocess
     from firebase_admin import storage as admin_storage
 
-    object_path = (event.data.name or "")
-    if not object_path.startswith("long_transcriptions/"):
+    object_path = object_path or ""
+    if not object_path.startswith(LONG_TRANSCRIPTION_PREFIX):
         return  # ignora uploads de outras pastas no mesmo bucket
 
     # Esperado: long_transcriptions/{userId}/{transcriptionId}.{ext}
@@ -15220,7 +15536,6 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
     from google.genai import types
     from groq import Groq
 
-    bucket_name = event.data.bucket
     local_media_path = None
     local_chunk_dir = None
     gemini_file = None
