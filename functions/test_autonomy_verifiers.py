@@ -79,6 +79,36 @@ class TestVerificarAtualizacaoTarefa(unittest.TestCase):
         resultado = verificar_atualizacao_tarefa(evidencia)
         self.assertEqual(resultado.resultado, ResultadoVerificacao.ACEITO)
 
+    def test_versao_zero_e_zero_nao_e_tratada_como_ausente(self):
+        # 0 e falsy em Python, mas as checagens usam `is None`, nao
+        # truthiness -- versao_esperada=0 e versao_releitura=0 devem ser
+        # tratadas como "as duas presentes e iguais", nao como ausencia.
+        evidencia = EvidenciaAtualizacaoTarefa(
+            campos_alterados_esperados={"status": "feito"},
+            campos_preservados_esperados={},
+            campos_releitura={"status": "feito"},
+            versao_esperada=0,
+            versao_releitura=0,
+        )
+        resultado = verificar_atualizacao_tarefa(evidencia)
+        self.assertEqual(resultado.resultado, ResultadoVerificacao.ACEITO)
+
+    def test_pendente_quando_versao_maior_mas_campo_alterado_ausente(self):
+        # Versao MAIOR que a esperada nao contradiz nada por si só -- um
+        # campo alterado simplesmente AUSENTE da releitura (nao contradito,
+        # so sem evidencia) ainda deve cair em PENDENTE por ausencia, nunca
+        # ACEITO nem REFUTADO.
+        evidencia = EvidenciaAtualizacaoTarefa(
+            campos_alterados_esperados={"status": "feito"},
+            campos_preservados_esperados={},
+            campos_releitura={},
+            versao_esperada=2,
+            versao_releitura=5,
+        )
+        resultado = verificar_atualizacao_tarefa(evidencia)
+        self.assertEqual(resultado.resultado, ResultadoVerificacao.PENDENTE)
+        self.assertIn("status", resultado.detalhes["campos_alterados_ausentes"])
+
     def test_refutado_quando_versao_da_releitura_e_maior_mas_campo_contradiz(self):
         # Achado de revisao adversarial (Codex, PR #353, P2): sob versao
         # monotonica, uma releitura MAIS NOVA que a esperada nao e um
