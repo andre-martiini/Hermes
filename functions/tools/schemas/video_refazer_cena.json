@@ -1,0 +1,14 @@
+{
+  "name": "video_refazer_cena",
+  "description": "Refaz o clipe de uma cena de um vídeo já concluído do Hermes Vídeo (ex.: 'refaz a cena 3 com a câmera mais aberta') e remonta o vídeo. Pago: faz parte do piso de confirmação obrigatória — a primeira chamada devolve o custo e um confirmation_id; só chame confirmar_acao depois do 'sim' do usuário. Por padrão refaz só aquela cena; como cada cena começa onde a anterior termina, pode sobrar um salto pequeno na emenda com a seguinte — refazer_seguintes=true refaz também as seguintes (emenda perfeita, custo maior). Para mudar narração ou descrição, prefira ajustar o storyboard num projeto novo.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "projeto_id": {"type": "string", "description": "ID do projeto (estado concluido)."},
+      "ordem": {"type": "integer", "description": "Número da cena a refazer (1 = primeira)."},
+      "instrucao": {"type": "string", "description": "O que mudar no movimento da cena (ex.: 'câmera mais aberta', 'movimento mais lento')."},
+      "refazer_seguintes": {"type": "boolean", "description": "Refazer também todas as cenas depois desta (padrão false)."}
+    },
+    "required": ["projeto_id", "ordem"]
+  }
+}

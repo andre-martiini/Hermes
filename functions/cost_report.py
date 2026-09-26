@@ -259,9 +259,11 @@ def format_ai_block(
     openai: dict[str, Any] | None,
     usd_brl: float,
     day: date,
+    video: dict[str, Any] | None = None,
 ) -> list[str]:
     """Bloco de telemetria própria de IA. ``day`` é o dia corrente (rótulo próprio,
-    distinto do dia do bloco GCP — ver nota no topo do módulo)."""
+    distinto do dia do bloco GCP — ver nota no topo do módulo). ``video`` é o uso
+    do Hermes Vídeo (`system_usage/video/daily`): sem tokens, em itens gerados."""
     lines = [f"🤖 <b>IA — {day.strftime('%d/%m')} (parcial, até agora)</b>"]
 
     def _line(label: str, data: dict[str, Any] | None, missing: str) -> str:
@@ -278,6 +280,12 @@ def format_ai_block(
 
     lines.append(_line("Gemini", gemini, "sem uso registrado"))
     lines.append(_line("OpenAI", openai, "sem uso registrado"))
+    if video:
+        usd = float(video.get("estimated_usd") or 0.0)
+        itens = video.get("itens") or {}
+        rotulos = {"narracao": "narrações", "quadro": "quadros", "clipe": "clipes"}
+        partes = [f"{int(n)} {rotulos.get(nome, nome)}" for nome, n in sorted(itens.items()) if n]
+        lines.append(f"  • Vídeo: US$ {usd:.2f} (~{brl(usd * usd_brl)})" + (f" | {', '.join(partes)}" if partes else ""))
     return lines
 
 
@@ -292,6 +300,7 @@ def build_message(
     gcp_error: str | None = None,
     *,
     today: date,
+    video: dict[str, Any] | None = None,
 ) -> str:
     """Monta a mensagem final. ``day`` é o dia do bloco GCP (sempre o dia anterior,
     pelo atraso do export do Billing); ``today`` é o dia corrente, usado para
@@ -314,7 +323,7 @@ def build_message(
     else:
         lines.append(f"☁️ GCP: sem dados do export para {day.strftime('%d/%m')}" + (f" ({gcp_error})" if gcp_error else ""))
     lines.append("")
-    lines.extend(format_ai_block(gemini, openai, usd_brl, today))
+    lines.extend(format_ai_block(gemini, openai, usd_brl, today, video=video))
     if firestore_lines:
         lines.append("")
         lines.append(f"🗄️ <b>Firestore por function — {today.strftime('%d/%m')} (parcial, até agora)</b>")
@@ -397,6 +406,7 @@ def gerar_relatorio_custos(db, now: datetime | None = None, bq: BigQueryRest | N
     day_key = today.isoformat()
     gemini = _usage_doc(db, "gemini", day_key)
     openai = _usage_doc(db, "openai", day_key)
+    video = _usage_doc(db, "video", day_key)
 
     firestore_lines = None
     try:
@@ -413,7 +423,8 @@ def gerar_relatorio_custos(db, now: datetime | None = None, bq: BigQueryRest | N
     except Exception:
         usd_brl = 5.30
 
-    return build_message(yesterday, gcp_summary, cpu_rows, gemini, openai, firestore_lines, usd_brl, gcp_error, today=today)
+    return build_message(yesterday, gcp_summary, cpu_rows, gemini, openai, firestore_lines, usd_brl, gcp_error,
+                         today=today, video=video)
 
 
 @scheduler_fn.on_schedule(

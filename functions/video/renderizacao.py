@@ -47,6 +47,13 @@ ENVIO_ORFAO_APOS = timedelta(minutes=20)
 MAX_ERROS_POR_EXECUCAO = 2
 TOLERANCIA_DURACAO_S = 0.15
 
+# Versão do contrato entre as functions e o worker. O worker roda numa imagem que
+# a CI NÃO reconstrói (deploy_video_worker.bat): quando as functions passam a
+# depender de algo novo no worker, sobem este número e gravam
+# `worker_min_versao` no projeto; um worker mais velho recusa em vez de fazer a
+# coisa errada em silêncio. 4 = Fase 4 (refação por cena e uso diário).
+VERSAO_WORKER = 4
+
 
 class Interrompido(Exception):
     """Parada limpa: cancelamento ou perda do lease."""
@@ -82,6 +89,8 @@ def prompt_clipe(projeto: dict, cena: dict) -> str:
     partes = []
     if cena.get("prompt_video"):
         partes.append(cena["prompt_video"])
+    if cena.get("instrucao_video"):
+        partes.append(f"Ajuste pedido: {cena['instrucao_video']}")
     partes.append(f"Cena: {cena.get('descricao_visual')}")
     partes.append(f"Estilo: {b.get('estilo')}.")
     partes.append("Movimento suave e natural do quadro inicial até o quadro final. Mantenha a personagem, a "
@@ -92,13 +101,41 @@ def prompt_clipe(projeto: dict, cena: dict) -> str:
     return "\n".join(partes)
 
 
-def assinatura(projeto: dict, cena: dict, quadros: dict, anterior_uri: str | None) -> str:
+def _hash(valores) -> str:
+    return hashlib.sha1(json.dumps(valores, ensure_ascii=False, default=str).encode()).hexdigest()[:10]
+
+
+def cadeia(projeto: dict, cena: dict, quadros: dict, cadeia_anterior: str | None) -> str:
+    """O CONTEÚDO de que a cena depende (e que muda o quadro inicial da cena seguinte).
+
+    Refazer uma cena com `video_refazer_cena` NÃO muda a cadeia: a cena seguinte
+    continua com o seu clipe (e pode sobrar um salto pequeno na emenda — por isso
+    a tool oferece `refazer_seguintes`). Mudar narração, duração, descrição ou
+    quadros muda a cadeia, e a partir daí todas as cenas seguintes são outras.
+    """
     k = cena["ordem"]
-    base = [projeto.get("modelo_video"), projeto.get("formato"), projeto.get("resolucao"),
-            (projeto.get("biblia") or {}).get("estilo"), cena.get("versao"), cena.get("duracao_s"),
-            cena.get("descricao_visual"), cena.get("prompt_video"),
-            (quadros.get(k) or {}).get("gcs_uri"), (quadros.get(0) or {}).get("gcs_uri") if k == 1 else anterior_uri]
-    return hashlib.sha1(json.dumps(base, ensure_ascii=False, default=str).encode()).hexdigest()[:10]
+    return _hash([projeto.get("modelo_video"), projeto.get("formato"), projeto.get("resolucao"),
+                  (projeto.get("biblia") or {}).get("estilo"), cena.get("versao"), cena.get("duracao_s"),
+                  cena.get("descricao_visual"), cena.get("prompt_video"), (quadros.get(k) or {}).get("gcs_uri"),
+                  (quadros.get(0) or {}).get("gcs_uri") if k == 1 else cadeia_anterior])
+
+
+def assinatura(projeto: dict, cena: dict, quadros: dict, cadeia_anterior: str | None) -> str:
+    """Identidade do clipe: a cadeia mais as refações pedidas para esta cena."""
+    return _hash([cadeia(projeto, cena, quadros, cadeia_anterior), int(cena.get("refacao") or 0),
+                  cena.get("instrucao_video")])
+
+
+def clipes_pendentes(ref, projeto: dict, cenas: list[dict], quadros: dict) -> list[dict]:
+    """Cenas cujo clipe ATUAL (pela assinatura) ainda não está pronto — o que o worker vai pagar."""
+    faltam, cadeia_anterior = [], None
+    for cena in cenas:
+        cid = f"{vp.id_cena(cena['ordem'])}_{assinatura(projeto, cena, quadros, cadeia_anterior)}"
+        cadeia_anterior = cadeia(projeto, cena, quadros, cadeia_anterior)
+        snap = ref.collection("clipes").document(cid).get()
+        if not (snap.exists and (snap.to_dict() or {}).get("status") == "done"):
+            faltam.append(cena)
+    return faltam
 
 
 def pendencias(cenas: list[dict], quadros: dict) -> list[str]:
@@ -134,6 +171,11 @@ def renderizar(db, projeto_id: str, execucao_id: str, *, veo: VeoProvider, servi
         return {"status": "nao_encontrado", "erro": f"Projeto {projeto_id!r} não encontrado."}
     if projeto.get("status") not in (vp.RENDERIZANDO, vp.MONTANDO):
         return {"status": "recusado", "erro": f"Projeto em {projeto.get('status')!r}, não em renderização."}
+    if int(projeto.get("worker_min_versao") or 0) > VERSAO_WORKER:
+        motivo = (f"Worker desatualizado (versão {VERSAO_WORKER}; o projeto exige "
+                  f"{projeto.get('worker_min_versao')}): rode deploy_video_worker.bat e dispare de novo.")
+        avisos.avisar(f"⚠️ Hermes Vídeo: {motivo}")
+        return {"status": "recusado", "erro": motivo}
     cenas = sorted((c.to_dict() or {} for c in ref.collection("cenas").stream()), key=lambda c: c["ordem"])
     quadros = {int(q.get("indice")): q for q in (s.to_dict() or {} for s in ref.collection("keyframes").stream())}
     faltas = pendencias(cenas, quadros)
@@ -192,10 +234,11 @@ def _gerar_clipes(ctx: _Contexto, projeto, cenas, quadros, precos, apos_clipe) -
     modelo = projeto.get("modelo_video") or estimativa.modelo_do_modo(projeto.get("modo") or "padrao", precos)
     preco_s = estimativa.preco_segundo(modelo, projeto.get("resolucao") or "720p", precos)
     formato = projeto.get("formato") or "16:9"
-    anterior_uri, anterior = None, None
+    anterior_uri, anterior, cadeia_anterior = None, None, None
     atuais = {}
     for cena in cenas:
-        cid = f"{vp.id_cena(cena['ordem'])}_{assinatura(projeto, cena, quadros, anterior_uri)}"
+        cid = f"{vp.id_cena(cena['ordem'])}_{assinatura(projeto, cena, quadros, cadeia_anterior)}"
+        cadeia_anterior = cadeia(projeto, cena, quadros, cadeia_anterior)
         doc = ctx.ref.collection("clipes").document(cid)
         snap = doc.get()
         clipe = (snap.to_dict() or {}) if snap.exists else {}
@@ -318,7 +361,12 @@ def _concluir(ctx: _Contexto, doc, uri: str, custo: float, tentativa: int, opera
                      "concluido_em": firestore.SERVER_TIMESTAMP, "erro": None}, merge=True)
         tx.update(ctx.ref, {"custo_real_usd": firestore.Increment(round(custo, 4)),
                             "custo_render_usd": firestore.Increment(round(custo, 4))})
+        tx.set(dia_ref, uso.campos(custo, "clipe", dia), merge=True)
         return True
+
+    from video import uso
+
+    dia_ref, dia = uso.ref_dia(ctx.db, ctx.agora())
 
     _txn(transaction)
     return uri

@@ -10,6 +10,25 @@ from __future__ import annotations
 import copy
 
 
+def _valor(novo, antigo):
+    """`firestore.Increment` soma ao valor atual, como no Firestore real."""
+    if type(novo).__name__ == "Increment":
+        return (antigo or 0) + novo.value
+    return copy.deepcopy(novo)
+
+
+def _mesclar(atual: dict, dados: dict) -> None:
+    """set(merge=True): mapas aninhados são mesclados campo a campo."""
+    for chave, valor in dados.items():
+        if isinstance(valor, dict) and isinstance(atual.get(chave), dict):
+            _mesclar(atual[chave], valor)
+        elif isinstance(valor, dict):
+            atual[chave] = {}
+            _mesclar(atual[chave], valor)
+        else:
+            atual[chave] = _valor(valor, atual.get(chave))
+
+
 class Snap:
     def __init__(self, ref, data):
         self.reference = ref
@@ -31,10 +50,11 @@ class DocRef:
         return Snap(self, self._db.docs.get(self.path))
 
     def set(self, data, merge=False):
-        if merge and self.path in self._db.docs:
-            self._db.docs[self.path].update(copy.deepcopy(data))
+        if merge:
+            atual = self._db.docs.setdefault(self.path, {})
+            _mesclar(atual, data)
         else:
-            self._db.docs[self.path] = copy.deepcopy(data)
+            self._db.docs[self.path] = {k: _valor(v, None) for k, v in data.items()}
         self._db.escritas += 1
 
     def update(self, data):
@@ -48,6 +68,12 @@ class DocRef:
             else:
                 atual[chave] = copy.deepcopy(valor)
         self._db.escritas += 1
+
+    def create(self, data):
+        """Como no Firestore: falha se o documento já existe (usado pelo claim das confirmações)."""
+        if self.path in self._db.docs:
+            raise RuntimeError(f"{self.path} já existe")
+        self.set(data)
 
     def collection(self, nome):
         return Colecao(self._db, f"{self.path}/{nome}")
@@ -70,6 +96,19 @@ class Colecao:
             resto = caminho[len(prefixo):] if caminho.startswith(prefixo) else None
             if resto and "/" not in resto:
                 yield Snap(DocRef(self._db, caminho), self._db.docs[caminho])
+
+    def where(self, campo, op, valor):
+        if op != "==":
+            raise NotImplementedError(op)
+        return _Consulta([s for s in self.stream() if (s.to_dict() or {}).get(campo) == valor])
+
+
+class _Consulta:
+    def __init__(self, snaps):
+        self._snaps = snaps
+
+    def stream(self):
+        return iter(self._snaps)
 
 
 class Batch:

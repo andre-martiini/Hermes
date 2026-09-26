@@ -303,7 +303,8 @@ class TestAchadosDaRevisaoFase3(Base):
         self.render()
         antes = self.doc()["custo_real_usd"]
         ctx = renderizacao._Contexto(self.db, self.db.collection("video_projetos").document(self.pid), self.pid,
-                                     "exec-1", self.veo, self.srv, lambda s: None, Relogio(), None)
+                                     "exec-1", self.veo, self.srv, lambda s: None, Relogio(),
+                                     lambda: __import__("datetime").datetime.now(__import__("datetime").timezone.utc))
         doc = self.db.collection(f"video_projetos/{self.pid}/clipes").document(
             next(k.rsplit("/", 1)[-1] for k in self.db.docs if "/clipes/01_" in k))
         renderizacao._concluir(ctx, doc, "gs://x", 0.2, 1, None)

@@ -59,9 +59,17 @@ from autonomy.contracts import (
 # ESTE CONJUNTO NÃO CRESCE POR HÁBITO (condição do dono, 02/09/2026, herdada
 # de mcp_server.py) — uma candidata nova exige decisão explícita, registrada
 # aqui e em mcp_server.py, não "parece do mesmo tipo".
+#
+# Decisão explícita (26/09/2026, plano "Hermes Vídeo", aprovado pelo dono):
+# `video_renderizar` e `video_refazer_cena` entram no piso como efeito pago —
+# gastam dólares no Veo (até dezenas por vídeo) sem nenhum desfazer. Mesmo
+# critério das escritas de investimento: efeito financeiro sem estorno. As
+# demais tools de vídeo (prévia, ajuste, status, cancelar) ficam fora: custam
+# centavos com teto próprio, ou nada.
 FLOOR_CONFIRMACAO_OBRIGATORIA: frozenset[str] = frozenset({
     "schedule_whatsapp_message", "pausar_conversa", "criar_rascunho_email",
     "registrar_aporte_investimento", "registrar_execucao_investimento",
+    "video_renderizar", "video_refazer_cena",
 })
 
 # Classificação por convenção das ferramentas do piso, na matriz de efeito da
@@ -75,6 +83,8 @@ CLASSE_EFEITO_PISO: dict[str, ClasseEfeito] = {
     "pausar_conversa": ClasseEfeito.COMPROMISSO_TERCEIROS,
     "registrar_aporte_investimento": ClasseEfeito.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
     "registrar_execucao_investimento": ClasseEfeito.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
+    "video_renderizar": ClasseEfeito.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
+    "video_refazer_cena": ClasseEfeito.EFEITO_FINANCEIRO_DESTRUTIVO_INSTITUCIONAL,
 }
 
 def _validar_piso_consistente(
