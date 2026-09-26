@@ -20,6 +20,8 @@ from llm_providers import openai_images as oi
 from tools.tool_context import ToolContext
 from video_fakes import FakeDb
 
+import downloads_mcp
+
 
 def _png(largura=64, altura=64, modo="RGB") -> bytes:
     saida = io.BytesIO()
@@ -206,8 +208,14 @@ class TestGerarImagem(_Base):
         self.assertEqual(self.drive.criados[2], ({"name": img["nome"], "parents": ["drive2"]}, True))
         self.assertRegex(pasta_mes["name"], r"^\d{4}-\d{2}$")
         self.assertEqual(img["drive_file_id"], "drive3")
-        self.assertTrue(img["link_download"].startswith("https://storage.test/imagens_geradas/"))
-        self.assertIn(img["link_download"], img["markdown"])
+        # MCP: download pela origem do MCP (o Storage pode estar bloqueado no cliente).
+        self.assertTrue(img["link_download"].startswith("https://gestao-hermes.firebaseapp.com/mcp/download/"))
+        self.assertTrue(img["link_storage"].startswith("https://storage.test/imagens_geradas/"))
+        self.assertIn(img["link_storage"], img["markdown"])
+        token = img["link_download"].rsplit("/", 1)[-1]
+        corpo, status, cab = downloads_mcp.servir(self.db, self.bucket, token)
+        self.assertEqual((status, cab["Content-Type"]), (200, "image/png"))
+        self.assertEqual(Image.open(io.BytesIO(corpo)).size, (1536, 864))
         self.assertEqual(img["prompt_revisado"], "um farol")
         self.assertIn(img["previa_path"], self.bucket.arquivos)
         previa = Image.open(io.BytesIO(self.bucket.arquivos[img["previa_path"]][0]))
@@ -417,6 +425,50 @@ class TestPreviaNoMcp(_Base):
         self.assertEqual(json.loads(resp["content"][0]["text"])["resultado"], resultado)
         self.assertEqual(resp["content"][1], {"type": "image", "mimeType": "image/jpeg",
                                               "data": base64.b64encode(b"jpg").decode()})
+
+
+class TestDownloadPelaOrigemDoMcp(unittest.TestCase):
+    def setUp(self):
+        self.db, self.bucket = FakeDb(), FakeBucket()
+        self.bucket.arquivos["imagens_geradas/2026-09/a.png"] = (b"png-bytes", "image/png")
+
+    def _token(self, **kw):
+        url = downloads_mcp.criar_link(self.db, uid="dono", caminho="imagens_geradas/2026-09/a.png",
+                                       nome=kw.get("nome", "capa.png"), mime="image/png", agora=kw.get("agora"))
+        self.assertTrue(url.startswith("https://gestao-hermes.firebaseapp.com/mcp/download/"))
+        return url.rsplit("/", 1)[-1]
+
+    def test_token_valido_devolve_o_arquivo_sem_cache(self):
+        corpo, status, cab = downloads_mcp.servir(self.db, self.bucket, self._token())
+        self.assertEqual((corpo, status), (b"png-bytes", 200))
+        self.assertIn('filename="capa.png"', cab["Content-Disposition"])
+        self.assertIn("no-store", cab["Cache-Control"])
+
+    def test_nome_com_acento_nao_quebra_o_cabecalho(self):
+        _, _, cab = downloads_mcp.servir(self.db, self.bucket, self._token(nome="reunião.png"))
+        cab["Content-Disposition"].encode("latin-1")
+        self.assertIn("filename*=UTF-8''reuni%C3%A3o.png", cab["Content-Disposition"])
+
+    def test_token_expirado_da_410_e_desconhecido_404(self):
+        from datetime import datetime, timedelta, timezone
+
+        velho = self._token(agora=datetime.now(timezone.utc) - timedelta(hours=25))
+        self.assertEqual(downloads_mcp.servir(self.db, self.bucket, velho)[1], 410)
+        self.assertEqual(downloads_mcp.servir(self.db, self.bucket, "nao-existe")[1], 404)
+        self.assertEqual(downloads_mcp.servir(self.db, self.bucket, "")[1], 404)
+
+    def test_caminho_fora_do_prefixo_nao_ganha_link_nem_e_servido(self):
+        with self.assertRaises(ValueError):
+            downloads_mcp.criar_link(self.db, uid="u", caminho="uploads/segredo.pdf", nome="x", mime="x")
+        self.db.docs["downloads_mcp/forjado"] = {"caminho": "uploads/segredo.pdf", "expira_em": "9999"}
+        self.assertEqual(downloads_mcp.servir(self.db, self.bucket, "forjado")[1], 404)
+
+
+class TestVersaoDoServidor(unittest.TestCase):
+    def test_versao_leva_impressao_do_catalogo(self):
+        import mcp_server
+
+        self.assertRegex(mcp_server.SERVER_VERSION, r"^0\.2\.0\+[0-9a-f]{8}$")
 
 
 class TestRelatorio(unittest.TestCase):

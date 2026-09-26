@@ -84,7 +84,27 @@ _SUPPORTED_PROTOCOL_VERSIONS = {
     "2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28",
 }
 SERVER_NAME = "hermes-mcp"
-SERVER_VERSION = "0.2.0"
+def _impressao_do_catalogo() -> str:
+    """8 hex do conteúdo de `tools/schemas/*.json`.
+
+    Vai no `serverInfo.version`: cliente que guarda o catálogo por versão do
+    servidor passa a ver uma versão nova a cada deploy que muda uma tool. Com a
+    versão fixa em "0.2.0" desde a fase 1, nada no handshake mudava quando um
+    schema mudava (26/09/2026: sessões seguiam com o gerar_imagem antigo)."""
+    h = hashlib.sha256()
+    pasta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools", "schemas")
+    try:
+        for nome in sorted(os.listdir(pasta)):
+            if nome.endswith(".json"):
+                with open(os.path.join(pasta, nome), "rb") as f:
+                    h.update(nome.encode())
+                    h.update(f.read().replace(b"\r\n", b"\n"))
+    except OSError:
+        return "0"
+    return h.hexdigest()[:8]
+
+
+SERVER_VERSION = f"0.2.0+{_impressao_do_catalogo()}"
 
 _RESOURCE_VOICE_CONTEXT = "hermes://voice-context"
 
@@ -327,6 +347,17 @@ def mcpServer(req: https_fn.Request) -> https_fn.Response:
             print(f"[mcp_server] Falha no upload de {token}: {exc}")
             resultado = {"erro": "Falha ao gravar o arquivo.", "status": 500}
         return _json_response(resultado, status=resultado.pop("status", 200))
+
+    # Download pela propria origem do MCP (par do upload acima): ha cliente que
+    # nao alcanca o host do Storage. Mesmo motivo para ficar antes de
+    # `_authenticate`: o token de download E a credencial (ver downloads_mcp).
+    if "/download/" in caminho and req.method == "GET":
+        import downloads_mcp
+        from hermes_core_logic import _get_hermes_storage_bucket
+
+        corpo, status, cabecalhos = downloads_mcp.servir(
+            firestore.client(), _get_hermes_storage_bucket(), caminho.rsplit("/", 1)[-1])
+        return https_fn.Response(corpo, status=status, headers=cabecalhos)
 
     if req.method == "GET":
         # Health-check num path proprio. O GET na raiz NAO pode devolver 200:

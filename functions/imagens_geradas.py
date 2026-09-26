@@ -4,8 +4,9 @@ Fluxo de uma chamada: valida os parâmetros, confere o teto diário em dólar,
 chama o provedor (OpenAI por padrão; Google como opção e plano B quando a OpenAI
 cai), e para cada imagem grava:
 
-- o original no Cloud Storage (`imagens_geradas/AAAA-MM/`), com URL pública de
-  download — é o `link_download`, que o Claude baixa para slides e páginas;
+- o original no Cloud Storage (`imagens_geradas/AAAA-MM/`), com URL pública
+  permanente (`link_storage`) e, no MCP, um `link_download` de 24 h servido pela
+  origem do MCP (`downloads_mcp.py`) — há cliente que não alcança o Storage;
 - uma prévia JPEG pequena ao lado, que o servidor MCP anexa como bloco de imagem
   ao resultado de `consultar_job`, para o Claude VER a imagem sem baixar nada;
 - uma cópia no Drive (`Imagens geradas/AAAA-MM`, sob a raiz do Hermes), com
@@ -500,7 +501,19 @@ def _entregar(ctx, p: dict, resultado: oi.Resultado, agora: datetime, avisos: li
         caminho = f"{PREFIXO_STORAGE}{mes}/{img_id}.{'jpg' if fmt == 'jpeg' else fmt}"
         blob = bucket.blob(caminho)
         blob.upload_from_string(dados, content_type=mime)
-        link_download = _url_publica(blob)
+        # URL permanente do Storage: vai para a ação, o Markdown e o Telegram.
+        link_storage = _url_publica(blob)
+        # O cliente MCP pode estar atrás de um proxy que bloqueia o host do
+        # Storage; para ele o download sai pela origem do MCP (downloads_mcp).
+        link_download = link_storage
+        if getattr(ctx, "canal", "") == "mcp":
+            try:
+                import downloads_mcp
+
+                link_download = downloads_mcp.criar_link(ctx.db, uid=getattr(ctx, "user_uid", None),
+                                                         caminho=caminho, nome=nome, mime=mime)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[imagens] Falha ao criar link de download de {img_id}: {exc}")
 
         caminho_previa = f"{PREFIXO_STORAGE}{mes}/{img_id}_previa.jpg"
         link_previa = None
@@ -525,7 +538,7 @@ def _entregar(ctx, p: dict, resultado: oi.Resultado, agora: datetime, avisos: li
         if p["task_id"]:
             try:
                 pool_item_id = _anexar_na_acao(ctx.db, p["task_id"], nome=nome,
-                                               link=link_drive or link_download, drive_id=drive_id, prompt=p["prompt"])
+                                               link=link_drive or link_storage, drive_id=drive_id, prompt=p["prompt"])
             except Exception as exc:  # noqa: BLE001
                 print(f"[imagens] Falha ao anexar {nome} na ação {p['task_id']}: {exc}")
                 avisos.append(f"'{nome}' não foi anexada à ação ({exc}).")
@@ -552,6 +565,7 @@ def _entregar(ctx, p: dict, resultado: oi.Resultado, agora: datetime, avisos: li
             "previa_path": caminho_previa,
             "link_previa": link_previa,
             "link_download": link_download,
+            "link_storage": link_storage,
             "drive_file_id": drive_id,
             "link_visualizacao": link_drive,
             "task_id": p["task_id"],
@@ -597,11 +611,11 @@ def _resposta(ctx, p: dict, resultado: oi.Resultado, entregues: list[dict], avis
         extra = "".join(f"\n\n⚠️ {a}" for a in avisos)
         return f"{markdown}\n\n*(Gerada via {resultado.modelo}. Resolução cheia: {originais})*{extra}"
 
-    campos = ("id", "nome", "drive_file_id", "link_visualizacao", "link_download", "tamanho", "formato",
+    campos = ("id", "nome", "drive_file_id", "link_visualizacao", "link_download", "link_storage", "tamanho", "formato",
               "prompt_revisado", "custo_estimado_usd", "task_id", "pool_item_id", "previa_path")
     return json.dumps({
         "status": "ok",
-        "imagens": [{**{c: e.get(c) for c in campos}, "markdown": f"![{_alt(p['prompt'])}]({e['link_download']})"}
+        "imagens": [{**{c: e.get(c) for c in campos}, "markdown": f"![{_alt(p['prompt'])}]({e['link_storage']})"}
                     for e in entregues],
         "provedor": p["provedor"],
         "modelo": resultado.modelo,
@@ -611,8 +625,10 @@ def _resposta(ctx, p: dict, resultado: oi.Resultado, entregues: list[dict], avis
         "avisos": avisos,
         "como_usar": (
             "As prévias vêm anexadas a este resultado como imagem: olhe-as antes de responder. "
-            "O arquivo original em resolução cheia está em link_download (URL pública, baixa direto) — "
-            "use-o em slides, páginas e documentos; link_visualizacao abre no Drive."
+            "Para baixar o original em resolução cheia use link_download (ex.: curl -sS -o img.png "
+            "\"<link_download>\"): sai pela origem do MCP, vale 24 h e é o caminho para slides, páginas e "
+            "documentos. link_storage é a URL permanente do Storage (para Markdown e para quem alcança esse host); "
+            "link_visualizacao abre no Drive."
         ),
     }, ensure_ascii=False)
 
