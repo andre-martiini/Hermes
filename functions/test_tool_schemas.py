@@ -258,6 +258,43 @@ class TestSecretarioTelegramExecucao(unittest.TestCase):
         self.assertEqual(estados, [True, True, False])
 
 
+class TestCancelamentoWhatsappTelegram(unittest.TestCase):
+    """Até 25/09/2026 o agente do Telegram só sabia agendar: um pedido em texto
+    livre para cancelar um envio agendado não tinha ferramenta nenhuma."""
+
+    NOMES = {"consultar_envio_whatsapp", "cancelar_envio_whatsapp"}
+
+    def setUp(self):
+        arvore = ast.parse(inspect.getsource(telegram_message_tools.build_telegram_tool_closures))
+        nos = [n for n in arvore.body[0].body if isinstance(n, ast.FunctionDef) and n.name in self.NOMES]
+        self.assertEqual({n.name for n in nos}, self.NOMES)
+        self.db = mock.Mock()
+        self.tools = {"db": self.db, "json": json}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=nos, type_ignores=[])),
+                     "<closures-whatsapp-reais>", "exec"), self.tools)
+
+    def test_ferramentas_estao_na_lista_enviada_ao_gemini(self):
+        nomes = _nomes_das_ferramentas(ast.parse(inspect.getsource(telegram_message_tools)))
+        self.assertTrue(self.NOMES <= set(nomes))
+
+    def test_cancelar_usa_o_caminho_transacional_marcando_telegram(self):
+        with mock.patch("outbox_aprovacao.cancelar_envio",
+                        return_value={"status": "nao_cancelavel", "status_atual": "sent"}) as cancelar:
+            resultado = json.loads(self.tools["cancelar_envio_whatsapp"]("job-1", "não enviar"))
+        cancelar.assert_called_once_with(self.db, "job-1", motivo="não enviar", cancelado_via="telegram")
+        self.assertEqual(resultado["status_atual"], "sent")
+
+    def test_consultar_sem_job_id_lista_os_recentes(self):
+        with mock.patch("tools.hermes_tools.execute", return_value={"envios": []}) as execute:
+            json.loads(self.tools["consultar_envio_whatsapp"]())
+        self.assertEqual(execute.call_args.args[:2], ("consultar_envio_whatsapp", {"limite": 5}))
+
+    def test_consultar_com_job_id_busca_o_envio(self):
+        with mock.patch("tools.hermes_tools.execute", return_value={"status": "pending"}) as execute:
+            json.loads(self.tools["consultar_envio_whatsapp"]("job-1"))
+        self.assertEqual(execute.call_args.args[:2], ("consultar_envio_whatsapp", {"job_id": "job-1"}))
+
+
 class TestThinkingConfig(unittest.TestCase):
     def test_familia_3_usa_thinking_level(self):
         cfg = core._thinking_config_for_model(types, "gemini-3.5-flash-lite")
