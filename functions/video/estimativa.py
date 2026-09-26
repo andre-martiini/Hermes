@@ -18,7 +18,10 @@ import re
 
 DURACOES_CLIPE = (4, 6, 8)
 FOLGA_AUDIO_S = 0.3
-PALAVRAS_POR_SEGUNDO = 2.5
+# Medido na Fase 2 (26/09/2026): gemini-2.5-flash-tts, voz Kore, "calmo e didático",
+# 16 palavras = 8,08 s de fala (sem os silêncios das pontas) ≈ 2,0 palavras/s. O
+# plano supunha 2,5, que prometeria cenas que não cabem no clipe de 8 s.
+PALAVRAS_POR_SEGUNDO = 2.0
 
 # Fase 0: clipe de 4 s levou ~52 s nos dois modelos. Serve para prever o tempo de
 # renderização, que é sequencial (cada clipe parte do último quadro real do
@@ -73,7 +76,7 @@ def contar_palavras(texto: str) -> int:
 
 
 def duracao_fala_estimada(texto: str) -> float:
-    """Segundos de narração previstos pelo ritmo de referência (~2,5 palavras/s em pt-BR)."""
+    """Segundos de narração previstos pelo ritmo de referência (~2,0 palavras/s em pt-BR)."""
     return contar_palavras(texto) / PALAVRAS_POR_SEGUNDO
 
 

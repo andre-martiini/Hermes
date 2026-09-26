@@ -13,8 +13,8 @@ def roteiro(**extra):
         "formato": "9:16",
         "biblia": {"estilo": "flat 2D, azul-petróleo e laranja", "personagens": ["servidora de óculos"]},
         "cenas": [
-            {"narracao": "O RSC reconhece o que você já sabe fazer.", "descricao_visual": "servidora lendo"},
-            # 11 palavras ≈ 4,4 s de fala → clipe de 6 s
+            {"narracao": "O RSC reconhece o que você sabe.", "descricao_visual": "servidora lendo"},
+            # 11 palavras ≈ 5,5 s de fala → clipe de 6 s
             {"narracao": "Veja agora como pedir o reconhecimento em três passos bem simples.",
              "descricao_visual": "tela do sistema"},
             {"narracao": "", "descricao_visual": "logotipo do Ifes"},
@@ -43,7 +43,7 @@ class TestValidarRoteiro(unittest.TestCase):
         self.assertTrue(any("descricao_visual" in e for e in erros))
 
     def test_narracao_que_nao_cabe_em_8s_pede_divisao(self):
-        longa = " ".join(["palavra"] * 25)  # ~10 s
+        longa = " ".join(["palavra"] * 16)  # ~8 s de fala
         r, erros, _ = vp.validar_roteiro(roteiro(cenas=[{"narracao": longa, "descricao_visual": "x"}]))
         self.assertIsNone(r)
         self.assertTrue(any("divida em duas cenas" in e for e in erros))
@@ -53,7 +53,7 @@ class TestValidarRoteiro(unittest.TestCase):
         self.assertEqual(len([e for e in erros if "formato" in e or "modo" in e]), 2)
 
     def test_duracao_total_acima_do_limite_da_v1(self):
-        cenas = [{"narracao": " ".join(["p"] * 18), "descricao_visual": "x"}] * 16  # 16 × 8 s = 128 s
+        cenas = [{"narracao": " ".join(["p"] * 15), "descricao_visual": "x"}] * 16  # 16 × 8 s = 128 s
         _, erros, _ = vp.validar_roteiro(roteiro(cenas=cenas))
         self.assertTrue(any("120 s" in e for e in erros))
 
@@ -99,13 +99,13 @@ class TestAchadosDaRevisao(unittest.TestCase):
 
     def test_estimativa_acima_do_teto_do_projeto_e_recusada(self):
         # Modo final, 15 × 8 s: ~US$ 24 > teto de US$ 20 — o worker pararia no meio.
-        res = vp.criar_projeto(self.db, "uid", roteiro(modo="final", cenas=cenas_de(15, 18)))
+        res = vp.criar_projeto(self.db, "uid", roteiro(modo="final", cenas=cenas_de(15, 15)))
         self.assertEqual(res["status"], "invalido")
         self.assertTrue(any("teto por projeto" in e and "modo padrão" in e for e in res["erros"]))
         self.assertEqual(self.db.docs, {})
 
     def test_teto_que_corta_a_folga_de_refacao_gera_aviso(self):
-        res = vp.criar_projeto(self.db, "uid", roteiro(modo="final", cenas=cenas_de(10, 18)))
+        res = vp.criar_projeto(self.db, "uid", roteiro(modo="final", cenas=cenas_de(10, 15)))
         self.assertEqual(res["status"], "ok")
         self.assertTrue(res["estimativa"]["folga_teto_reduzida"])
         self.assertTrue(any("folga" in a for a in res["avisos"]))

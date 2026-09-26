@@ -289,7 +289,47 @@ def etapa_emendas(cli, args, rel):
     rel["etapas"]["emendas"] = {"em": agora(), "metrica": "diferença média absoluta por pixel, 0–255", **saida}
 
 
-ETAPAS = {"listar": etapa_listar, "quadros": etapa_quadros, "clipes": etapa_clipes, "emendas": etapa_emendas}
+# --- tts (Fase 2) ---------------------------------------------------------------------
+
+def etapa_tts(cli, args, rel):
+    """Uma narração curta: formato devolvido (mime, taxa), duração e latência."""
+    from google.genai import types
+
+    texto = "O reconhecimento de saberes e competências valoriza o que você já sabe fazer no seu trabalho."
+    t0 = time.monotonic()
+    resp = cli.models.generate_content(
+        model=args.modelo_tts,
+        contents=f"Leia em português do Brasil, em tom calmo e didático: {texto}",
+        config=types.GenerateContentConfig(
+            response_modalities=["AUDIO"],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kore"))
+            ),
+        ),
+    )
+    lat = time.monotonic() - t0
+    parte = resp.candidates[0].content.parts[0].inline_data
+    dados, mime = parte.data, parte.mime_type
+    taxa = int(re.search(r"rate=(\d+)", mime or "").group(1)) if re.search(r"rate=(\d+)", mime or "") else 24000
+    duracao = len(dados) / (taxa * 2)  # PCM 16 bits mono
+    import wave
+
+    arq = args.saida / "tts_teste.wav"
+    with wave.open(str(arq), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(taxa)
+        w.writeframes(dados)
+    uso = getattr(resp, "usage_metadata", None)
+    rel["etapas"]["tts"] = {"em": agora(), "modelo": args.modelo_tts, "mime": mime, "bytes": len(dados),
+                            "duracao_s": round(duracao, 2), "palavras": len(texto.split()),
+                            "latencia_s": round(lat, 1), "uso": str(uso)[:300]}
+    rel["custo_estimado_usd"] = round(rel.get("custo_estimado_usd", 0.0) + 0.01, 3)
+    print(rel["etapas"]["tts"])
+
+
+ETAPAS = {"listar": etapa_listar, "quadros": etapa_quadros, "clipes": etapa_clipes, "emendas": etapa_emendas,
+          "tts": etapa_tts}
 
 
 def main():
@@ -299,6 +339,7 @@ def main():
     ap.add_argument("--modelo", choices=["lite", "fast"], default="lite")
     ap.add_argument("--id", help="ID exato do modelo Veo (sobrepõe o que estiver no relatório)")
     ap.add_argument("--modelo-imagem", default=MODELO_IMAGEM_PADRAO)
+    ap.add_argument("--modelo-tts", default="gemini-2.5-flash-tts")
     ap.add_argument("--duracao", type=int, default=4, choices=[4, 6, 8])
     ap.add_argument("--teto-usd", type=float, default=5.0)
     ap.add_argument("--saida", type=Path, default=Path("video_spike_out"))

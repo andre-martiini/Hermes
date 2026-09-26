@@ -1,6 +1,6 @@
 {
   "name": "video_criar_projeto",
-  "description": "Cria um projeto de vídeo do Hermes Vídeo a partir do roteiro JÁ APROVADO pelo usuário (aprovação 1) e devolve projeto_id, a duração provisória de cada clipe (4, 6 ou 8 s, pelo ritmo de ~2,5 palavras/s) e a estimativa de custo e de tempo. Custo zero: não gera narração, imagem nem vídeo. Uma cena cuja narração não cabe em 8 s é recusada com erro pedindo para dividi-la. Chamar de novo cria OUTRO projeto — use video_status para consultar um que já existe.",
+  "description": "Cria um projeto de vídeo do Hermes Vídeo a partir do roteiro JÁ APROVADO pelo usuário (aprovação 1) e devolve projeto_id, a duração provisória de cada clipe (4, 6 ou 8 s, pelo ritmo de ~2,0 palavras/s) e a estimativa de custo e de tempo. Custo zero: não gera narração, imagem nem vídeo. Uma cena cuja narração não cabe em 8 s é recusada com erro pedindo para dividi-la. Chamar de novo cria OUTRO projeto — use video_status para consultar um que já existe.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -59,7 +59,7 @@
         "items": {
           "type": "object",
           "properties": {
-            "narracao": {"type": "string", "description": "Texto falado na cena (até ~19 palavras para caber em 8 s). Pode ser vazio."},
+            "narracao": {"type": "string", "description": "Texto falado na cena (até ~15 palavras para caber em 8 s). Pode ser vazio."},
             "descricao_visual": {"type": "string", "description": "O que aparece na tela. Obrigatório."},
             "prompt_video": {"type": "string", "description": "Opcional: prompt de movimento para o Veo (câmera, ação, luz)."}
           },

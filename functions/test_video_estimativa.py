@@ -18,7 +18,7 @@ class TestDuracaoClipe(unittest.TestCase):
         self.assertEqual(est.duracao_clipe(0), 4)
 
     def test_fala_estimada_por_ritmo_de_referencia(self):
-        self.assertAlmostEqual(est.duracao_fala_estimada("um dois três quatro cinco"), 2.0)
+        self.assertAlmostEqual(est.duracao_fala_estimada("um dois três quatro cinco"), 2.5)
         self.assertEqual(est.contar_palavras("Não mudou, Gabriela — a folha só grava."), 7)
 
 

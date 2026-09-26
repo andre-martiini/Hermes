@@ -100,7 +100,7 @@ def validar_roteiro(dados: dict, precos: dict | None = None) -> tuple[dict | Non
     """Normaliza o roteiro vindo do Claude. Devolve (roteiro, erros, avisos).
 
     Com erro, `roteiro` é `None` e nada deve ser gravado. A duração de cada clipe
-    aqui é PROVISÓRIA (ritmo de ~2,5 palavras/s); a prévia (Fase 2) mede o áudio
+    aqui é PROVISÓRIA (ritmo de ~2,0 palavras/s); a prévia (Fase 2) mede o áudio
     real e recalcula.
     """
     precos = precos or estimativa.PRECOS_PADRAO
