@@ -51,6 +51,50 @@ class TestVerificarAtualizacaoTarefa(unittest.TestCase):
         resultado = verificar_atualizacao_tarefa(evidencia)
         self.assertEqual(resultado.resultado, ResultadoVerificacao.PENDENTE)
 
+    def test_pendente_quando_versao_declarada_so_de_um_lado(self):
+        # Achado de revisao adversarial (Codex, PR #353, P1): versao
+        # esperada declarada mas releitura nao trouxe nenhuma -- evidencia
+        # de versao incompleta, nao pode virar ACEITO so porque os campos
+        # (por acaso) conferem.
+        evidencia = EvidenciaAtualizacaoTarefa(
+            campos_alterados_esperados={"status": "feito"},
+            campos_preservados_esperados={},
+            campos_releitura={"status": "feito"},
+            versao_esperada=2,
+            versao_releitura=None,
+        )
+        resultado = verificar_atualizacao_tarefa(evidencia)
+        self.assertEqual(resultado.resultado, ResultadoVerificacao.PENDENTE)
+
+    def test_aceito_quando_versao_da_releitura_e_maior_e_campos_corretos(self):
+        # Versao MAIOR que a esperada (avanco concorrente) nao e
+        # curto-circuitada -- com os campos corretos, ainda chega a ACEITO.
+        evidencia = EvidenciaAtualizacaoTarefa(
+            campos_alterados_esperados={"status": "feito"},
+            campos_preservados_esperados={},
+            campos_releitura={"status": "feito"},
+            versao_esperada=2,
+            versao_releitura=5,
+        )
+        resultado = verificar_atualizacao_tarefa(evidencia)
+        self.assertEqual(resultado.resultado, ResultadoVerificacao.ACEITO)
+
+    def test_refutado_quando_versao_da_releitura_e_maior_mas_campo_contradiz(self):
+        # Achado de revisao adversarial (Codex, PR #353, P2): sob versao
+        # monotonica, uma releitura MAIS NOVA que a esperada nao e um
+        # snapshot velho -- se ela tambem contradiz um campo esperado, isso
+        # e uma refutacao real (sobrescrita por outra operacao), nao deve
+        # ficar escondida atras de "versao nao confere" -> PENDENTE.
+        evidencia = EvidenciaAtualizacaoTarefa(
+            campos_alterados_esperados={"status": "feito"},
+            campos_preservados_esperados={},
+            campos_releitura={"status": "outra-coisa"},
+            versao_esperada=2,
+            versao_releitura=5,
+        )
+        resultado = verificar_atualizacao_tarefa(evidencia)
+        self.assertEqual(resultado.resultado, ResultadoVerificacao.REFUTADO)
+
     def test_refutado_quando_campo_preservado_mudou(self):
         evidencia = EvidenciaAtualizacaoTarefa(
             campos_alterados_esperados={"status": "feito"},
@@ -183,7 +227,13 @@ class TestVerificarConsolidacaoAudio(unittest.TestCase):
         resultado = verificar_consolidacao_audio(evidencia)
         self.assertEqual(resultado.resultado, ResultadoVerificacao.REFUTADO)
 
-    def test_pendente_quando_cobertura_parcial(self):
+    def test_refutado_quando_cobertura_parcial_com_job_concluido(self):
+        # Achado de revisao adversarial (Codex, PR #353): o produtor real
+        # (whatsapp_consolidation.py) so grava status="completed" DEPOIS de
+        # marcar toda cobertura -- um job concluido com IDs faltantes nunca
+        # vai ganhar cobertura nova depois. PENDENTE faria um pedido esperar
+        # para sempre; o desfecho certo e REFUTADO (definitivamente
+        # incompleto), nao uma lacuna temporaria.
         evidencia = EvidenciaConsolidacaoAudio(
             job_concluido=True,
             referencia_consolidacao="consolidacao-42",
@@ -191,7 +241,7 @@ class TestVerificarConsolidacaoAudio(unittest.TestCase):
             ids_cobertos=frozenset({"audio-1"}),
         )
         resultado = verificar_consolidacao_audio(evidencia)
-        self.assertEqual(resultado.resultado, ResultadoVerificacao.PENDENTE)
+        self.assertEqual(resultado.resultado, ResultadoVerificacao.REFUTADO)
         self.assertEqual(resultado.detalhes["ids_faltantes"], ["audio-2"])
 
     def test_aceito_quando_cobertura_completa(self):

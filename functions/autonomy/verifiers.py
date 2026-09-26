@@ -147,11 +147,27 @@ def verificar_atualizacao_tarefa(evidencia: EvidenciaAtualizacaoTarefa) -> Verif
     releitura importa. Três checagens, na ordem em que uma falha é mais
     informativa:
 
-    1. Versão: se ambas foram informadas e não conferem, a releitura pode
-       ser de ANTES da escrita (replicação/cache atrasado) ou a escrita
-       pode ter sido sobrescrita por outra concorrente -- `PENDENTE`, não
-       `REFUTADO`: não há evidência de que o efeito não ocorreu, só de que
-       esta releitura específica não o capturou ainda.
+    1. Versão: `PENDENTE` só quando a evidência de versão está genuinamente
+       incompleta -- exatamente um dos dois campos informado (achado de
+       revisão adversarial, Codex/PR #353, P1: uma versão anterior desta
+       função só comparava quando os DOIS estavam presentes, então
+       `versao_esperada=2` com `versao_releitura=None` pulava a checagem
+       inteira e podia terminar em `ACEITO` com evidência de versão
+       simplesmente ausente -- o mesmo "aceito por omissão" do item 3,
+       agora fechado também para este campo), OU a releitura tem versão
+       MENOR que a esperada (mais antiga que a escrita -- replicação/cache
+       atrasado, `PENDENTE`: não há evidência de que o efeito não ocorreu,
+       só de que esta releitura específica não o capturou ainda). Uma
+       releitura com versão MAIOR ou IGUAL à esperada NÃO é curto-
+       -circuitada aqui -- segue para os itens 2/3 abaixo, que decidem a
+       partir dos campos reais. Achado de revisão adversarial (Codex,
+       PR #353, P2): uma versão anterior tratava qualquer versão
+       DIFERENTE (maior ou menor) como `PENDENTE`, o que escondia uma
+       contradição real de campo atrás de "a releitura está adiantada" --
+       sob um contrato de versão monotônica, uma releitura MAIS NOVA não é
+       um snapshot velho; se ela também contradiz um campo esperado, isso é
+       uma refutação genuína (a escrita foi sobrescrita por outra
+       operação), não uma versão que "ainda vai chegar".
     2. Contradição definitiva (qualquer campo -- alterado OU preservado --
        PRESENTE na releitura com valor diferente do esperado): `REFUTADO`.
        Um campo preservado que mudou é efeito colateral real; um campo
@@ -174,17 +190,29 @@ def verificar_atualizacao_tarefa(evidencia: EvidenciaAtualizacaoTarefa) -> Verif
     4. Só chega a `ACEITO` quando NENHUM campo (alterado ou preservado)
        está ausente e NENHUM está presente com valor divergente.
     """
+    if (evidencia.versao_esperada is None) != (evidencia.versao_releitura is None):
+        return VerificacaoResultado(
+            ResultadoVerificacao.PENDENTE,
+            motivo=(
+                "versão declarada só de um lado (esperada ou releitura), não dos dois -- "
+                "evidência de versão incompleta, não confirma nem contradiz o efeito."
+            ),
+            detalhes={
+                "versao_esperada": evidencia.versao_esperada,
+                "versao_releitura": evidencia.versao_releitura,
+            },
+        )
     if (
         evidencia.versao_esperada is not None
         and evidencia.versao_releitura is not None
-        and evidencia.versao_releitura != evidencia.versao_esperada
+        and evidencia.versao_releitura < evidencia.versao_esperada
     ):
         return VerificacaoResultado(
             ResultadoVerificacao.PENDENTE,
             motivo=(
-                f"versão da releitura ({evidencia.versao_releitura}) não confere com a "
+                f"versão da releitura ({evidencia.versao_releitura}) é MENOR que a "
                 f"versão esperada após a escrita ({evidencia.versao_esperada}) -- releitura "
-                "pode estar desatualizada."
+                "mais antiga que a escrita, ainda não a capturou."
             ),
             detalhes={
                 "versao_esperada": evidencia.versao_esperada,
@@ -274,9 +302,21 @@ def verificar_consolidacao_audio(evidencia: EvidenciaConsolidacaoAudio) -> Verif
     criado" é exatamente o estado insuficiente citado na seção 4.6, não um
     erro. Job concluído sem referência é `REFUTADO` -- terminou e não
     produziu o artefato esperado, um desfecho definitivo, não uma lacuna
-    temporária. Cobertura parcial (faltam IDs solicitados) é `PENDENTE`,
-    nunca `ACEITO` -- aceite de F04: "resultado parcial não é reportado
-    como completo"."""
+    temporária.
+
+    Cobertura parcial (faltam IDs solicitados) COM job ainda não concluído
+    seria `PENDENTE` -- mas `job_concluido=True` já garante que não é esse
+    caso (o primeiro `if` acima já retornou). Com o job CONCLUÍDO, cobertura
+    parcial é `REFUTADO`, não `PENDENTE` -- achado de revisão adversarial
+    (Codex, PR #353, P2): o produtor real deste job
+    (`functions/whatsapp_consolidation.py`) marca `consolidation_ids` em
+    cada mensagem encontrada ANTES de gravar `status="completed"` -- uma vez
+    terminal, nenhuma fase seguinte adiciona cobertura nova. Tratar isso
+    como `PENDENTE` faria um pedido esperar por uma cobertura que nunca vai
+    chegar (o mesmo risco de "esperar para sempre" que a seção 4.5 do plano
+    pede para evitar). "Resultado parcial não é reportado como completo"
+    (aceite de F04) continua valendo -- só que o desfecho certo para
+    "definitivamente incompleto" é uma refutação, não uma lacuna."""
     if not evidencia.job_concluido:
         return VerificacaoResultado(
             ResultadoVerificacao.PENDENTE,
@@ -290,10 +330,10 @@ def verificar_consolidacao_audio(evidencia: EvidenciaConsolidacaoAudio) -> Verif
     ids_faltantes = evidencia.ids_solicitados - evidencia.ids_cobertos
     if ids_faltantes:
         return VerificacaoResultado(
-            ResultadoVerificacao.PENDENTE,
+            ResultadoVerificacao.REFUTADO,
             motivo=(
-                f"cobertura parcial -- {len(ids_faltantes)} de {len(evidencia.ids_solicitados)} "
-                "ID(s) solicitado(s) ainda não aparecem na consolidação."
+                f"job concluído com cobertura parcial e definitiva -- {len(ids_faltantes)} de "
+                f"{len(evidencia.ids_solicitados)} ID(s) solicitado(s) nunca foram cobertos."
             ),
             detalhes={"ids_faltantes": sorted(ids_faltantes)},
         )
