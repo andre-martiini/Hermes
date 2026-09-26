@@ -305,10 +305,11 @@ _VOICE_EXCLUDED: set[str] = {
     # A prévia se avalia olhando a folha de contato; o ajuste é por cena/quadro.
     "video_gerar_previa",
     "video_ajustar",
-    # Gasto de dólares não se aprova falando (mesmo motivo das escritas de investimento).
-    # Cancelar continua liberado por voz.
+    # Gasto de dólares não se aprova falando (mesmo motivo das escritas de investimento),
+    # e cancelar é final (perde o trabalho pago): um "cancela" mal ouvido não pode custar isso.
     "video_renderizar",
     "video_refazer_cena",
+    "video_cancelar",
 }
 
 _schema_cache: dict[str, dict] = {}

@@ -97,6 +97,19 @@ class Colecao:
             if resto and "/" not in resto:
                 yield Snap(DocRef(self._db, caminho), self._db.docs[caminho])
 
+    def where(self, campo, op, valor):
+        if op != "==":
+            raise NotImplementedError(op)
+        return _Consulta([s for s in self.stream() if (s.to_dict() or {}).get(campo) == valor])
+
+
+class _Consulta:
+    def __init__(self, snaps):
+        self._snaps = snaps
+
+    def stream(self):
+        return iter(self._snaps)
+
 
 class Batch:
     def __init__(self, db):

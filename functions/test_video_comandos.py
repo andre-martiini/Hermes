@@ -41,7 +41,7 @@ class TestRenderizar(Base):
         p = comandos.avaliar_renderizacao(self.db, "uid", self.pid, agora=AGORA)
         self.assertEqual(p["status"], "confirmation_required")
         self.assertEqual(p["segundos_video"], 14)
-        self.assertAlmostEqual(p["custo_clipes_usd"], 0.7)
+        self.assertAlmostEqual(p["custo_clipes_a_gerar_usd"], 0.7)
         self.assertGreater(p["custo_maximo_desta_renderizacao_usd"], 0.7)
         self.assertEqual(p["teto_mensal_usd"], 30.0)
         self.assertEqual(self.doc()["status"], vp.AGUARDANDO_STORYBOARD)
@@ -179,6 +179,88 @@ class TestUsoNoRelatorio(Base):
         self.assertFalse(any("Vídeo" in l for l in cost_report.format_ai_block(None, None, 5.0, date(2026, 9, 26))))
 
 
+class TestAchadosDaRevisaoFase4(Base):
+    """Achados da revisão adversária da Fase 4 (26/09/2026), um teste por achado."""
+
+    def test_teto_mensal_reserva_renderizacoes_em_andamento(self):
+        from video import estimativa
+
+        outro = vp.criar_projeto(self.db, "uid", roteiro())["projeto_id"]
+        previa.gerar_previa(self.db, outro, "uid", self.srv)
+        comandos.renderizar(self.db, "uid", outro, self.disparar, agora=AGORA)  # ainda rodando: nada gravado
+        reservado = comandos.reservado_em_andamento(self.db, "uid", exceto=self.pid)
+        self.assertGreater(reservado, 0.7)
+        gasto = comandos.gasto_do_mes(self.db, AGORA)
+        meu_max = self.doc()["orcamento_usd"] - self.doc()["custo_real_usd"]
+        precos = estimativa.mesclar_precos({"teto_mensal_usd": gasto + meu_max + reservado / 2})
+        with self.assertRaises(comandos.Recusado) as ctx:
+            comandos.avaliar_renderizacao(self.db, "uid", self.pid, precos=precos, agora=AGORA)
+        self.assertIn("em andamento", str(ctx.exception))
+
+    def test_sim_para_uma_previa_que_mudou_e_recusado(self):
+        aprovado = comandos.avaliar_renderizacao(self.db, "uid", self.pid, agora=AGORA)
+        previa.ajustar(self.db, self.pid, "uid", self.srv, cenas=[
+            {"ordem": 1, "narracao": "Uma frase bem mais longa que a anterior para mudar a duração da cena."}])
+        r = comandos.renderizar(self.db, "uid", self.pid, self.disparar, aprovado=aprovado, agora=AGORA)
+        self.assertEqual(r["status"], "recusado")
+        self.assertIn("mudou desde a prévia", r["erro"])
+        self.assertEqual(self.disparos, [])
+
+    def test_erro_vindo_da_previa_nao_deixa_renderizar(self):
+        with mock.patch.object(self.srv, "publicar", side_effect=RuntimeError("Drive 500")):
+            previa.ajustar(self.db, self.pid, "uid", self.srv, quadros=[{"indice": 1, "instrucao": "mais luz"}])
+        self.assertEqual(self.doc()["status"], vp.ERRO)
+        with self.assertRaises(comandos.Recusado) as ctx:
+            comandos.avaliar_renderizacao(self.db, "uid", self.pid, agora=AGORA)
+        self.assertIn("storyboard aprovável", str(ctx.exception))
+
+    def test_worker_desatualizado_recusa_com_instrucao_de_deploy(self):
+        comandos.renderizar(self.db, "uid", self.pid, self.disparar, agora=AGORA)
+        self.doc()["worker_min_versao"] = renderizacao.VERSAO_WORKER + 1
+        r = self.worker()
+        self.assertEqual(r["status"], "recusado")
+        self.assertIn("deploy_video_worker.bat", r["erro"])
+
+    def test_worker_parado_pode_ser_retomado_e_ativo_nao(self):
+        from datetime import timedelta
+
+        comandos.renderizar(self.db, "uid", self.pid, self.disparar, agora=AGORA)
+        with self.assertRaises(comandos.Recusado):  # acabou de ser pedido
+            comandos.avaliar_renderizacao(self.db, "uid", self.pid, agora=AGORA + timedelta(minutes=5))
+        depois = AGORA + timedelta(minutes=20)  # nenhum worker pegou o projeto
+        p = comandos.avaliar_renderizacao(self.db, "uid", self.pid, agora=depois)
+        self.assertTrue(p["retomada"])
+        r = comandos.renderizar(self.db, "uid", self.pid, self.disparar, aprovado=p, agora=depois)
+        self.assertEqual(r["status"], "ok", r)
+        self.assertEqual(len(self.disparos), 2)
+        self.assertEqual(self.doc()["status"], vp.RENDERIZANDO)
+
+    def test_timeout_no_disparo_e_incerto_nao_erro(self):
+        class Timeout(Exception):
+            pass
+
+        def lento(pid):
+            raise Timeout("Read timed out")
+
+        r = comandos.renderizar(self.db, "uid", self.pid, lento, agora=AGORA)
+        self.assertEqual(r["status"], "incerto")
+        self.assertEqual(self.doc()["status"], vp.RENDERIZANDO)
+
+    def test_retomada_so_cobra_os_clipes_que_faltam(self):
+        comandos.renderizar(self.db, "uid", self.pid, self.disparar, agora=AGORA)
+        self.veo = FakeVeoProvider(gerar_mp4=mp4_de, falhar={"logotipo do Ifes"})
+        self.worker()  # cenas 1 e 2 prontas, 3 falhou
+        p = comandos.avaliar_renderizacao(self.db, "uid", self.pid, agora=AGORA)
+        self.assertEqual(p["clipes_a_gerar"], [3])
+        self.assertAlmostEqual(p["custo_clipes_a_gerar_usd"], 0.2)
+
+    def test_cancelar_e_irreversivel_e_fora_da_voz(self):
+        from tools import registry
+
+        self.assertTrue(registry.mcp_annotations("video_cancelar")["destructiveHint"])
+        self.assertFalse(registry.is_voice_enabled("video_cancelar"))
+
+
 class TestPisoDeConfirmacaoPeloMcp(Base):
     """video_renderizar pelo MCP: 1ª chamada = prévia com custo + confirmation_id; nada dispara sem o sim."""
 
@@ -212,7 +294,7 @@ class TestPisoDeConfirmacaoPeloMcp(Base):
         _, corpo = self.chamar("video_renderizar", {"projeto_id": self.pid})
         self.assertEqual(corpo["status"], "confirmation_required", corpo)
         self.assertIn("confirmation_id", corpo)
-        self.assertAlmostEqual(corpo["preview"]["custo_clipes_usd"], 0.7)
+        self.assertAlmostEqual(corpo["preview"]["custo_clipes_a_gerar_usd"], 0.7)
         self.assertEqual(self.disparos, [])
         self.assertEqual(self.doc()["status"], vp.AGUARDANDO_STORYBOARD)
         res, feito = self.chamar("confirmar_acao", {"confirmation_id": corpo["confirmation_id"]})
@@ -222,6 +304,13 @@ class TestPisoDeConfirmacaoPeloMcp(Base):
         _, de_novo = self.chamar("confirmar_acao", {"confirmation_id": corpo["confirmation_id"]})
         self.assertEqual(de_novo.get("status"), "ja_executada")
         self.assertEqual(len(self.disparos), 1)
+
+    def test_confirmacao_de_uma_previa_que_mudou_nao_executa(self):
+        _, corpo = self.chamar("video_renderizar", {"projeto_id": self.pid})
+        previa.ajustar(self.db, self.pid, "uid", self.srv, cenas=[{"ordem": 2, "narracao": "Curto."}])
+        _, feito = self.chamar("confirmar_acao", {"confirmation_id": corpo["confirmation_id"]})
+        self.assertIn("mudou desde a prévia", json.dumps(feito, ensure_ascii=False))
+        self.assertEqual(self.disparos, [])
 
     def test_previa_recusada_nao_cria_confirmacao(self):
         self.doc()["status"] = vp.ROTEIRO

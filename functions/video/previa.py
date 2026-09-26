@@ -148,8 +148,10 @@ def _entrar(db, projeto_id: str, agora: datetime):
                 raise vp.TransicaoInvalida("Já há uma prévia sendo gerada para este projeto.")
         elif estado not in ESTADOS_DE_ENTRADA:
             raise vp.TransicaoInvalida(f"Prévia não pode começar no estado {estado!r}.")
+        # `renderizavel` só volta a True quando a folha de contato e o MP3 forem publicados:
+        # uma prévia que falha no meio nunca deixa o projeto parecendo aprovado (revisão da Fase 4).
         tx.update(ref, {"status": vp.PREVIA_GERANDO, "previa_iniciada_em": agora, "erro": None,
-                        "atualizado_em": firestore.SERVER_TIMESTAMP})
+                        "renderizavel": False, "atualizado_em": firestore.SERVER_TIMESTAMP})
 
     _txn(transaction)
 

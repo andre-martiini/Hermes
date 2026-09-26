@@ -47,6 +47,13 @@ ENVIO_ORFAO_APOS = timedelta(minutes=20)
 MAX_ERROS_POR_EXECUCAO = 2
 TOLERANCIA_DURACAO_S = 0.15
 
+# Versão do contrato entre as functions e o worker. O worker roda numa imagem que
+# a CI NÃO reconstrói (deploy_video_worker.bat): quando as functions passam a
+# depender de algo novo no worker, sobem este número e gravam
+# `worker_min_versao` no projeto; um worker mais velho recusa em vez de fazer a
+# coisa errada em silêncio. 4 = Fase 4 (refação por cena e uso diário).
+VERSAO_WORKER = 4
+
 
 class Interrompido(Exception):
     """Parada limpa: cancelamento ou perda do lease."""
@@ -119,6 +126,18 @@ def assinatura(projeto: dict, cena: dict, quadros: dict, cadeia_anterior: str | 
                   cena.get("instrucao_video")])
 
 
+def clipes_pendentes(ref, projeto: dict, cenas: list[dict], quadros: dict) -> list[dict]:
+    """Cenas cujo clipe ATUAL (pela assinatura) ainda não está pronto — o que o worker vai pagar."""
+    faltam, cadeia_anterior = [], None
+    for cena in cenas:
+        cid = f"{vp.id_cena(cena['ordem'])}_{assinatura(projeto, cena, quadros, cadeia_anterior)}"
+        cadeia_anterior = cadeia(projeto, cena, quadros, cadeia_anterior)
+        snap = ref.collection("clipes").document(cid).get()
+        if not (snap.exists and (snap.to_dict() or {}).get("status") == "done"):
+            faltam.append(cena)
+    return faltam
+
+
 def pendencias(cenas: list[dict], quadros: dict) -> list[str]:
     """O que impede renderizar: tudo isso a prévia precisa resolver antes."""
     from video.previa import audio_valido
@@ -152,6 +171,11 @@ def renderizar(db, projeto_id: str, execucao_id: str, *, veo: VeoProvider, servi
         return {"status": "nao_encontrado", "erro": f"Projeto {projeto_id!r} não encontrado."}
     if projeto.get("status") not in (vp.RENDERIZANDO, vp.MONTANDO):
         return {"status": "recusado", "erro": f"Projeto em {projeto.get('status')!r}, não em renderização."}
+    if int(projeto.get("worker_min_versao") or 0) > VERSAO_WORKER:
+        motivo = (f"Worker desatualizado (versão {VERSAO_WORKER}; o projeto exige "
+                  f"{projeto.get('worker_min_versao')}): rode deploy_video_worker.bat e dispare de novo.")
+        avisos.avisar(f"⚠️ Hermes Vídeo: {motivo}")
+        return {"status": "recusado", "erro": motivo}
     cenas = sorted((c.to_dict() or {} for c in ref.collection("cenas").stream()), key=lambda c: c["ordem"])
     quadros = {int(q.get("indice")): q for q in (s.to_dict() or {} for s in ref.collection("keyframes").stream())}
     faltas = pendencias(cenas, quadros)

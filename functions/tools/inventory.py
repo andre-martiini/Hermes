@@ -1300,12 +1300,13 @@ _INVENTORY: dict[str, ToolInventoryEntry] = {
         "uma vez só, e a transição concluido→renderizando recusa um segundo pedido enquanto renderiza.",
     ),
     "video_cancelar": ToolInventoryEntry(
-        "video", _L.ESCRITA, _R.REVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
+        "video", _L.ESCRITA, _R.IRREVERSIVEL, False, False, _C.ESCRITA_INTERNA_REVERSIVEL,
         "video_status mostra o estado cancelado; o worker confere o estado antes de cada envio ao Veo",
         idempotencia=_I.IDEMPOTENTE,
-        nota="Idempotente: cancelar um projeto já cancelado responde 'Já estava cancelado' sem escrever. "
-        "Reversível no sentido prático — nada é apagado (cenas, quadros e clipes ficam) e o roteiro pode "
-        "virar outro projeto —, embora o estado `cancelado` em si seja final.",
+        nota="Irreversível (revisão da Fase 4): `cancelado` é final — o projeto não volta, e recomeçar em "
+        "outro projeto paga todos os clipes de novo; por isso fica fora da voz. Idempotente: cancelar um "
+        "projeto já cancelado responde 'Já estava cancelado' sem escrever. A classe continua de escrita "
+        "interna: nada sai do Hermes e nada gasta dinheiro.",
     ),
 }
 

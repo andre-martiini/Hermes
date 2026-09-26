@@ -2414,7 +2414,9 @@ def _video_ajustar(ctx: ToolContext, args: dict):
 def _video_renderizar(ctx: ToolContext, args: dict):
     from video import comandos, disparo
 
-    return comandos.renderizar(ctx.db, ctx.user_uid, str(args.get("projeto_id") or ""), disparo.disparar_worker)
+    # `aprovado` = a prévia congelada na confirmação: o "sim" só vale para o que foi mostrado.
+    return comandos.renderizar(ctx.db, ctx.user_uid, str(args.get("projeto_id") or ""), disparo.disparar_worker,
+                               aprovado=getattr(ctx, "mcp_confirmation_preview", None))
 
 
 def _video_refazer_cena(ctx: ToolContext, args: dict):
@@ -2422,7 +2424,8 @@ def _video_refazer_cena(ctx: ToolContext, args: dict):
 
     return comandos.refazer_cena(ctx.db, ctx.user_uid, str(args.get("projeto_id") or ""), args.get("ordem"),
                                  disparo.disparar_worker, refazer_seguintes=bool(args.get("refazer_seguintes")),
-                                 instrucao=args.get("instrucao"))
+                                 instrucao=args.get("instrucao"),
+                                 aprovado=getattr(ctx, "mcp_confirmation_preview", None))
 
 
 def _video_cancelar(ctx: ToolContext, args: dict):
