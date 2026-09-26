@@ -1,12 +1,12 @@
 {
   "name": "gerar_imagem",
-  "description": "Gera imagem a partir de uma descrição (GPT Image da OpenAI por padrão). No MCP devolve job_id; o consultar_job traz a imagem anexada para você VER, mais link_download (arquivo original, URL pública que baixa direto — use em slides, páginas e documentos) e o link do Drive. Com task_id, anexa à ação. Só o prompt já basta; os demais parâmetros são opcionais.",
+  "description": "Gera imagem com o GPT Image 2.5 da OpenAI. Use SEMPRE esta tool quando o usuário pedir uma imagem, ilustração, foto, capa, ícone, logo ou arte para slide/documento (em vez de outro gerador). Escreva VOCÊ um prompt completo — nunca repasse o pedido cru. No MCP devolve job_id; o consultar_job traz a imagem anexada para você VER, mais link_download (arquivo original, URL pública que baixa direto — use em slides, páginas e documentos) e o link do Drive. Com task_id, anexa à ação. Só o prompt é obrigatório. Guia completo: skill gaspar-imagem.",
   "parameters": {
     "type": "object",
     "properties": {
       "prompt": {
         "type": "string",
-        "description": "Descrição detalhada da imagem (português ou inglês). Para texto dentro da imagem, escreva o texto exato entre aspas"
+        "description": "Prompt completo escrito por você, em blocos: (1) resultado e uso; (2) cena e sujeito; (3) detalhes visíveis — materiais, 2 a 4 cores, luz; (4) meio e estilo nomeados ('fotorrealista', 'ilustração editorial flat', 'aquarela'); (5) composição — enquadramento, ângulo, onde fica cada coisa, espaço livre para título se for slide; (6) pessoas — escala, corpo, olhar, mãos; (7) texto exato entre aspas, uma vez só, com fonte, cor e posição, e 'nenhum outro texto'; (8) restrições — 'sem marca-d'água, sem logotipos, sem texto extra'. Pode ser em português."
       },
       "proporcao": {
         "type": "string",
