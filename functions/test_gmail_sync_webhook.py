@@ -383,7 +383,8 @@ class TestRunFullSyncNaoTocaGmail(unittest.TestCase):
         m_tasks_push.assert_called_once()
         m_tasks_pull.assert_called_once()
         m_contacts.assert_called_once()
-        m_acervo.assert_called_once()
+        # Acervo saiu do run_full_sync em 26/09/2026: fica só no cron monitorar_acervo_global.
+        m_acervo.assert_not_called()
         m_cal_link.assert_called_once()
         m_atencao.assert_called_once()
         m_resp.assert_called_once()

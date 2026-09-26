@@ -98,6 +98,15 @@
       ]
     },
     {
+      "collectionGroup": "whatsapp_messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "chat_id", "order": "ASCENDING" },
+        { "fieldPath": "from_me", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "whatsapp_consolidacoes",
       "queryScope": "COLLECTION",
       "fields": [

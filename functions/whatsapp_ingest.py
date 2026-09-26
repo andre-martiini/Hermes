@@ -406,7 +406,7 @@ def _alert_pending_media_window(db, telegram_chat_id, wa_chat_id: str, chat_name
         print(f"[WA-INGEST] Falha ao enviar alerta de mídia pendente ({chat_name}): {exc}")
 
 
-def triage_whatsapp_messages(db, sync_ref, logs) -> None:
+def triage_whatsapp_messages(db, sync_ref, logs, tarefas_docs=None) -> None:
     """
     Chamada no fim de `run_full_sync` (main.py). Consome mensagens novas de
     `whatsapp_messages` (cursor em `system/whatsapp_ingest.last_processed_at`),
@@ -481,7 +481,9 @@ def triage_whatsapp_messages(db, sync_ref, logs) -> None:
         cursor_ref.set({"last_processed_at": latest_ingested_at}, merge=True)
         return
 
-    candidates = _load_candidate_tasks(db)
+    # `tarefas_docs`: leitura de 'tarefas' já feita pelo run_full_sync neste passo (evita
+    # uma segunda leitura completa da coleção no mesmo ciclo).
+    candidates = _load_candidate_tasks(db, tarefas_docs)
     candidates_text = _format_candidates_for_prompt(candidates)
     candidates_by_id = {c["id"]: c for c in candidates}
 
