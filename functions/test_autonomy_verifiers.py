@@ -90,6 +90,20 @@ class TestVerificarAtualizacaoTarefa(unittest.TestCase):
         self.assertEqual(resultado.resultado, ResultadoVerificacao.REFUTADO)
         self.assertIn("titulo", resultado.detalhes["campos_preservados_violados"])
 
+    def test_refutado_reporta_preservado_violado_e_alterado_divergente_juntos(self):
+        # Um campo preservado violado E um campo alterado divergente ao
+        # mesmo tempo (nenhum dos dois ausente) -- ambos devem aparecer no
+        # mesmo resultado REFUTADO, não só o primeiro encontrado.
+        evidencia = EvidenciaAtualizacaoTarefa(
+            campos_alterados_esperados={"status": "feito"},
+            campos_preservados_esperados={"titulo": "Preparar reunião"},
+            campos_releitura={"status": "pendente", "titulo": "TÍTULO ALTERADO SEM QUERER"},
+        )
+        resultado = verificar_atualizacao_tarefa(evidencia)
+        self.assertEqual(resultado.resultado, ResultadoVerificacao.REFUTADO)
+        self.assertIn("titulo", resultado.detalhes["campos_preservados_violados"])
+        self.assertIn("status", resultado.detalhes["campos_divergentes"])
+
     def test_pendente_quando_campo_alterado_ausente_na_releitura(self):
         evidencia = EvidenciaAtualizacaoTarefa(
             campos_alterados_esperados={"status": "feito"},
