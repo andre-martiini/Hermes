@@ -792,6 +792,40 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
         )
         return f"Proposta de WhatsApp gerada. Draft: {draft}\n\n[SISTEMA: Os botões de confirmação serão anexados automaticamente a esta resposta.]"
 
+    def consultar_envio_whatsapp(job_id: str = None, limite: int = None) -> str:
+        """Estado real de uma mensagem de WhatsApp já enfileirada (pending, sent, failed, canceled).
+
+        Args:
+            job_id: ID do envio. Omitir lista os envios mais recentes, para achar o job_id
+                de uma mensagem que o usuário descreve por destinatário, horário ou texto.
+            limite: Quantos envios recentes listar quando job_id é omitido (padrão 5, teto 20).
+        """
+        from tools.hermes_tools import execute
+        from tools.tool_context import ToolContext
+
+        args = {"job_id": job_id} if job_id else {"limite": limite or 5}
+        resultado = execute("consultar_envio_whatsapp", args, ToolContext(_db=db, canal="telegram"))
+        return json.dumps(resultado, ensure_ascii=False, default=str)
+
+    def cancelar_envio_whatsapp(job_id: str, motivo: str) -> str:
+        """Cancela uma mensagem de WhatsApp já agendada/aprovada, antes de o worker entregá-la.
+
+        Só funciona enquanto o envio está 'pending' ou 'notified'; um envio já 'sent' não
+        tem volta. Um rascunho ainda aguardando aprovação não é cancelado por aqui (ele
+        tem os botões do próprio card). Se o usuário não der o job_id, ache-o antes com
+        consultar_envio_whatsapp sem job_id.
+
+        Args:
+            job_id: ID do envio em whatsapp_outbox.
+            motivo: Motivo do cancelamento, nas palavras do usuário.
+        """
+        from outbox_aprovacao import cancelar_envio
+
+        # Mesmo caminho transacional do botão wa_cancel: disputa o documento com
+        # o worker e perde a corrida de forma segura se ele já reivindicou o envio.
+        resultado = cancelar_envio(db, str(job_id or ""), motivo=motivo, cancelado_via="telegram")
+        return json.dumps(resultado, ensure_ascii=False, default=str)
+
     # O Telegram usa closures próprias (inclusive confirmações por botões),
     # não o catálogo MCP. Reutilizar os handlers mantém a regra de negócio única.
     def ativar_modo_secretario(
@@ -877,6 +911,8 @@ def build_telegram_tool_closures(db, session, contexto_ativo, acao_snapshot, req
         propor_acao_para_confirmacao,
         propor_lancamento_financeiro,
         schedule_whatsapp_message,
+        consultar_envio_whatsapp,
+        cancelar_envio_whatsapp,
         agendar_lembrete_acao,
         ativar_modo_secretario,
         desativar_modo_secretario,

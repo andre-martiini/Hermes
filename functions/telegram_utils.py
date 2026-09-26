@@ -2331,7 +2331,7 @@ def _build_system_instruction_guarded_v2(
         "11. PESQUISA DE ACOES: se o usuario pedir para pesquisar/localizar uma acao ou tarefa, use consultar_historico_acoes primeiro. Nao substitua resultado ausente por acervo, email ou internet, salvo se o usuario pedir explicitamente essa ampliacao.\n"
         "12. ACESSO FINANCEIRO: para qualquer dado sobre rendas, contas, metas ou balanco interno, use consultar_financas_v2. Para novos registros, use obrigatoriamente propor_lancamento_financeiro para que o usuário receba os botões de confirmação. Detalhe os valores com precisao absoluta conforme retornado pelo sistema.\n"
         "13. EFICIENCIA: quando precisar de varias consultas independentes, solicite todas na mesma rodada de ferramentas. Evite rodadas sequenciais se uma unica rodada paralela resolver. Nunca chame mais de uma ferramenta de escrita/registro no mesmo turno; proponha uma confirmacao por vez.\n"
-        "14. WHATSAPP: para enviar ou agendar mensagem de WhatsApp, use schedule_whatsapp_message. A ferramenta deve apenas preparar a proposta; o envio real depende de confirmacao por botao.\n"
+        "14. WHATSAPP: para enviar ou agendar mensagem de WhatsApp, use schedule_whatsapp_message. A ferramenta deve apenas preparar a proposta; o envio real depende de confirmacao por botao. Para cancelar um envio ja agendado, use cancelar_envio_whatsapp (se faltar o job_id, ache-o com consultar_envio_whatsapp sem job_id) e informe o resultado real: se o envio ja estiver 'sent', diga que a mensagem ja saiu.\n"
     )
 
     if not acao_snapshot:

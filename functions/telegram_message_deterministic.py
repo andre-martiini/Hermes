@@ -75,6 +75,7 @@ def try_deterministic_reply(db, token, chat_id, text, session, gemini_key, respo
         from outbox_aprovacao import aplicar_edicao_rascunho
         session.pop("pending_outbox_edit", None)
         _save_session(db, chat_id, session)
+        outbox_reply = None
         try:
             res_edit = aplicar_edicao_rascunho(
                 db,
@@ -83,16 +84,31 @@ def try_deterministic_reply(db, token, chat_id, text, session, gemini_key, respo
                 telegram_token=token,
                 chat_id=chat_id,
             )
-            if res_edit.get("status") == "ok":
+            status_edit = res_edit.get("status")
+            if status_edit == "ok":
                 outbox_reply = "✍️ Texto do rascunho atualizado com sucesso! Um novo card de aprovação foi enviado acima."
+            elif status_edit in ("already_decided", "not_found"):
+                # Marcador obsoleto: o dono tocou em "✏️ Editar" e depois o
+                # rascunho foi decidido por outro caminho (descartado, aprovado,
+                # enviado) sem que o marcador fosse limpo. Esta mensagem, então,
+                # não era o texto novo do rascunho — era um pedido qualquer. Em
+                # 25/09/2026 foi o "cancele o envio ... job_id ..." do dono, que
+                # morreu aqui com "Rascunho já decidido" e nunca chegou ao
+                # agente. O marcador já saiu da sessão acima; a mensagem segue
+                # para o fluxo normal.
+                print(
+                    f"[OutboxAprovacao] Marcador de edição obsoleto ({pending_outbox_id}, "
+                    f"{status_edit}); mensagem segue para o fluxo normal."
+                )
             else:
                 outbox_reply = f"⚠️ Não consegui atualizar o rascunho: {res_edit.get('erro', 'erro desconhecido')}"
         except Exception as exc:
             print(f"[OutboxAprovacao] Falha ao aplicar edição de rascunho: {exc}")
             outbox_reply = "⚠️ Ocorreu um erro ao atualizar o rascunho."
-        _persist_turn_to_copilot(text, outbox_reply)
-        _send_telegram_session_message(db, token, chat_id, outbox_reply, session=session)
-        return True
+        if outbox_reply is not None:
+            _persist_turn_to_copilot(text, outbox_reply)
+            _send_telegram_session_message(db, token, chat_id, outbox_reply, session=session)
+            return True
 
     # --- /entrar command — busca semântica de ações para travamento de contexto ---
     if re.match(r"^/entrar(\s|$)", text, re.IGNORECASE):
