@@ -2097,6 +2097,9 @@ def sync_pix_emails(service, sync_ref, logs):
 
     except Exception as e:
         log_to_firestore(sync_ref, logs, f"ERRO PIX: {e}")
+        # Sinaliza a falha ao chamador (sync_gmail_work): o webhook não pode avançar o
+        # history_id do Gmail por cima de um e-mail que não foi processado.
+        return False
 
 
 def cleanup_retroactive_pix_duplicates(db, sync_ref=None, logs=None):
@@ -2268,7 +2271,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
         api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
         if not api_key:
             log_to_firestore(sync_ref, logs, "ERRO: Gemini API Key não encontrada (em system/api_keys).")
-            return
+            return False
         
         from google.genai import types
 
@@ -2649,6 +2652,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
     
     except Exception as e:
         log_to_firestore(sync_ref, logs, f"ERRO na busca de boletos: {e}")
+        return False  # ver sync_pix_emails: falha sinalizada ao chamador
 
 
 def sync_allcare_portal_bills(service, sync_ref, logs) -> int:
@@ -3118,14 +3122,22 @@ def sync_gmail_work(db, gs, sync_ref, logs):
     Gmail. Extraído de run_full_sync em 24/09/2026 (ação e7fe01f4-6b7b-4789-8) para poder ser
     disparado tanto pelo webhook (on_gmail_watch_notification) quanto pela rede de segurança de
     baixa frequência (gmail_sync_safety_net), sem precisar rodar Calendar/Tasks/Contacts/Drive/
-    Allcare junto a cada e-mail novo."""
-    sync_pix_emails(gs, sync_ref, logs)
-    sync_boletos_gmail(gs, sync_ref, logs)
+    Allcare junto a cada e-mail novo.
+
+    Devolve a lista de etapas que falharam. sync_pix_emails/sync_boletos_gmail engolem as
+    próprias exceções (só logam) e sinalizam a falha devolvendo False; None/True = ok."""
+    falhas = []
+    if sync_pix_emails(gs, sync_ref, logs) is False:
+        falhas.append('pix')
+    if sync_boletos_gmail(gs, sync_ref, logs) is False:
+        falhas.append('boletos')
     try:
         from email_action_linker import link_emails_to_actions
         link_emails_to_actions(db, gs, sync_ref, logs)
     except Exception as e_link:
         log_to_firestore(sync_ref, logs, f"[EMAIL-LINK][ERRO] Falha inesperada no vínculo e-mail-ação: {e_link}", True)
+        falhas.append('email_link')
+    return falhas
 
 
 def gmail_watch_habilitado(db) -> bool:
@@ -3159,7 +3171,11 @@ def renovar_gmail_watch(db, gs) -> dict:
         }).execute()
         watch_ref.set({
             'topic_name': topic_name,
-            'history_id': str(resultado.get('historyId') or ''),
+            # Campo próprio da renovação. `history_id` é o cursor do filtro de delta do webhook
+            # e só avança depois de um sync bem-sucedido (on_gmail_watch_notification): se a
+            # renovação diária o sobrescrevesse com o id atual da caixa, pularia e-mails que
+            # chegaram mas ainda não foram processados (lock ocupado, sync com erro).
+            'watch_history_id': str(resultado.get('historyId') or ''),
             'expiration': resultado.get('expiration'),
             'watch_active': True,
             'last_renewed_at': agora.isoformat(),
@@ -3196,16 +3212,31 @@ def _executar_sync_gmail_com_lock(db, gs, trigger: str) -> dict:
             'started_at': datetime.now(timezone.utc).isoformat(),
             'logs': logs,
         }, merge=True)
-        sync_gmail_work(db, gs, sync_ref, logs)
-        sync_ref.set({
-            'status': 'completed',
-            'last_success': datetime.now(timezone.utc).isoformat(),
-            'logs': logs,
-        }, merge=True)
+        falhas = sync_gmail_work(db, gs, sync_ref, logs)
+        falhas = list(falhas) if isinstance(falhas, (list, tuple)) else []
+        agora_iso = datetime.now(timezone.utc).isoformat()
+        if falhas:
+            # Rodou até o fim, mas alguma etapa falhou por dentro (e só logou). Não conta como
+            # sucesso: last_success fica onde estava e o webhook não avança o history_id.
+            sync_ref.set({
+                'status': 'partial',
+                'etapas_com_erro': falhas,
+                'finished_at': agora_iso,
+                'logs': logs,
+            }, merge=True)
+        else:
+            sync_ref.set({
+                'status': 'completed',
+                'etapas_com_erro': [],
+                'last_success': agora_iso,
+                'logs': logs,
+            }, merge=True)
         if trigger == 'webhook':
             db.collection('system').document(GMAIL_WATCH_DOC_ID).set(
-                {'last_notification_at': datetime.now(timezone.utc).isoformat()}, merge=True
+                {'last_notification_at': agora_iso}, merge=True
             )
+        if falhas:
+            return {"executado": True, "parcial": falhas}
         return {"executado": True}
     except Exception as exc:
         error_msg = _mensagem_erro_sync(db, exc)
@@ -3266,9 +3297,11 @@ def on_gmail_watch_notification(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePub
         return
 
     resultado = _executar_sync_gmail_com_lock(db, gs, trigger='webhook')
-    # Só avança o history_id se o sync realmente rodou sem erro: com lock ocupado ou erro, a
+    # Só avança o history_id se o sync realmente rodou sem erro (nem parcial, isto é, alguma
+    # etapa que engoliu a própria exceção): com lock ocupado ou erro, a
     # próxima notificação recalcula o delta a partir do id antigo e ainda enxerga a mensagem.
-    if isinstance(resultado, dict) and resultado.get('executado') and not resultado.get('erro'):
+    if (isinstance(resultado, dict) and resultado.get('executado')
+            and not resultado.get('erro') and not resultado.get('parcial')):
         novo = (delta or {}).get('history_id') or notificacao_history_id
         _avancar_gmail_history_id(db, novo)
 
@@ -15368,6 +15401,10 @@ def _long_transcription_job_id(bucket_name: str, object_path: str, generation) -
     return hashlib.sha256(chave.encode("utf-8")).hexdigest()[:40]
 
 
+# AlreadyExists é subclasse de Conflict (HTTP 409); é o que o create() do Firestore levanta.
+from google.api_core.exceptions import AlreadyExists  # noqa: E402
+
+
 def enfileirar_transcricao_longa(db, bucket_name: str, object_path: str, content_type=None, generation=None) -> bool:
     """Grava o job em `long_transcription_jobs`, que dispara o processamento pesado
     (on_long_transcription_job_created). Devolve False se o job já existia (reentrega)."""
@@ -15382,11 +15419,16 @@ def enfileirar_transcricao_longa(db, bucket_name: str, object_path: str, content
             "createdAt": firestore.SERVER_TIMESTAMP,
         })
         return True
-    except Exception as exc:
-        # AlreadyExists (reentrega do mesmo evento) é o caso esperado; qualquer outra falha
-        # também é só registrada -- relançar faria a plataforma reentregar e esbarrar no mesmo doc.
-        print(f"[long_transcription] job {job_id} não criado para {object_path} (provável reentrega): {exc}")
+    except AlreadyExists as exc:
+        # Reentrega do mesmo evento (Storage triggers são at-least-once): job já enfileirado.
+        print(f"[long_transcription] job {job_id} já existia para {object_path} (reentrega): {exc}")
         return False
+    except Exception as exc:
+        # Qualquer outra falha NÃO é "já enfileirado": relança para a execução falhar de forma
+        # visível. O despachante não tem `retry` ligado (mesma configuração de antes), então a
+        # plataforma não reentrega sozinha -- o marcador abaixo é o que aparece nos logs.
+        print(f"[long_transcription][ERRO] falha ao enfileirar job {job_id} para {object_path}: {exc}")
+        raise
 
 
 # Despachante fino. Antes esta função era o processamento inteiro (4 GB / 2 vCPU / 540 s) e,

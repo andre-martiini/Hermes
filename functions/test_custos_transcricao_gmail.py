@@ -20,6 +20,8 @@ import inspect
 import unittest
 from unittest import mock
 
+from google.api_core.exceptions import AlreadyExists
+
 import main
 
 
@@ -51,7 +53,7 @@ class _DocRef:
 
     def create(self, data):
         if self._key in self._store:
-            raise RuntimeError("409 already exists")
+            raise AlreadyExists("409 already exists")
         self._store[self._key] = dict(data)
 
     def get(self, transaction=None):
@@ -67,6 +69,9 @@ class _DocRef:
     def update(self, data):
         self._store.setdefault(self._key, {}).update(data)
         self._db.writes.append((self._collection, self._key, dict(data)))
+
+    def delete(self):
+        self._store.pop(self._key, None)
 
 
 class _Query:
@@ -150,6 +155,19 @@ class TestDespachanteTranscricaoLonga(unittest.TestCase):
             fn(_storage_event("long_transcriptions/uid1/tr1.m4a"))
             fn(_storage_event("long_transcriptions/uid1/tr1.m4a"))  # não deve levantar
         self.assertEqual(len(db.stores[main.LONG_TRANSCRIPTION_JOBS_COLLECTION]), 1)
+
+    def test_so_already_exists_conta_como_ja_enfileirado(self):
+        db = mock.Mock()
+        doc = db.collection.return_value.document.return_value
+        doc.create.side_effect = AlreadyExists("409")
+        self.assertFalse(main.enfileirar_transcricao_longa(db, "b", "long_transcriptions/u/t.m4a", generation=1))
+
+    def test_outra_falha_ao_enfileirar_e_relancada(self):
+        db = mock.Mock()
+        doc = db.collection.return_value.document.return_value
+        doc.create.side_effect = RuntimeError("503 Firestore indisponível")
+        with self.assertRaises(RuntimeError):
+            main.enfileirar_transcricao_longa(db, "b", "long_transcriptions/u/t.m4a", generation=1)
 
     def test_caminho_malformado_nao_enfileira(self):
         db = _Db()
@@ -280,6 +298,28 @@ class TestWebhookGmailDelta(unittest.TestCase):
         self._rodar(db, gs, _pubsub_event("150"),
                     resultado_exec={"executado": True, "erro": "boom"})
         self.assertEqual(db.doc_data("system", main.GMAIL_WATCH_DOC_ID)["history_id"], "100")
+
+    def test_sync_parcial_nao_avanca_history_id(self):
+        """sync_pix_emails/sync_boletos_gmail engolem a própria exceção; o webhook não pode
+        tratar isso como sucesso e pular o e-mail não processado."""
+        db = self._db("100")
+        gs = _gmail_com_history([
+            {"historyId": "150", "history": [{"messagesAdded": [{"message": {"id": "m1"}}]}]},
+        ])
+        self._rodar(db, gs, _pubsub_event("150"),
+                    resultado_exec={"executado": True, "parcial": ["pix"]})
+        self.assertEqual(db.doc_data("system", main.GMAIL_WATCH_DOC_ID)["history_id"], "100")
+
+    def test_renovacao_do_watch_nao_mexe_no_cursor_do_webhook(self):
+        db = self._db("100")
+        gs = mock.Mock()
+        gs.users.return_value.watch.return_value.execute.return_value = {
+            "historyId": "999", "expiration": "1999999999000",
+        }
+        self.assertTrue(main.renovar_gmail_watch(db, gs)["renovado"])
+        estado = db.doc_data("system", main.GMAIL_WATCH_DOC_ID)
+        self.assertEqual(estado["history_id"], "100")
+        self.assertEqual(estado["watch_history_id"], "999")
 
     def test_history_id_so_avanca_nunca_recua(self):
         db = self._db("300")
@@ -421,6 +461,49 @@ class TestSyncPixSaidaCedo(unittest.TestCase):
         self.assertAlmostEqual(lancados[0]["amount"], 51.86)
         self.assertEqual(db.doc_data("system", "processed_emails")["ids"], ["velho", "p1"])
         self.assertEqual(_arquivados(gs), ["p1"])
+
+
+class TestFalhaDeEtapaSinalizada(unittest.TestCase):
+    """Falha engolida dentro de sync_pix_emails/sync_boletos_gmail precisa chegar ao webhook."""
+
+    def test_sync_pix_devolve_false_quando_engole_excecao(self):
+        db = _Db()
+        gs = mock.Mock()
+        gs.users.return_value.messages.return_value.list.side_effect = RuntimeError("gmail fora")
+        with mock.patch("main.get_db", return_value=db), mock.patch("main.log_to_firestore"):
+            self.assertIs(main.sync_pix_emails(gs, mock.Mock(), []), False)
+
+    def test_sync_boletos_devolve_false_quando_engole_excecao(self):
+        db = _Db()
+        gs = mock.Mock()
+        gs.users.return_value.messages.return_value.list.side_effect = RuntimeError("gmail fora")
+        with mock.patch("main.get_db", return_value=db), mock.patch("main.log_to_firestore"):
+            self.assertIs(main.sync_boletos_gmail(gs, mock.Mock(), []), False)
+
+    def test_sync_gmail_work_lista_as_etapas_que_falharam(self):
+        with mock.patch("main.sync_pix_emails", return_value=False), \
+             mock.patch("main.sync_boletos_gmail", return_value=None), \
+             mock.patch("email_action_linker.link_emails_to_actions"):
+            falhas = main.sync_gmail_work(object(), object(), object(), [])
+        self.assertEqual(falhas, ["pix"])
+
+    def test_executar_com_lock_marca_parcial_sem_last_success(self):
+        db = _Db()
+        with mock.patch("main.sync_gmail_work", return_value=["boletos"]):
+            res = main._executar_sync_gmail_com_lock(db, object(), trigger="webhook")
+        self.assertEqual(res, {"executado": True, "parcial": ["boletos"]})
+        estado = db.doc_data("system", "gmail_sync")
+        self.assertEqual(estado["status"], "partial")
+        self.assertEqual(estado["etapas_com_erro"], ["boletos"])
+        self.assertNotIn("last_success", estado)
+        self.assertIsNone(db.doc_data("system", main.GMAIL_SYNC_LOCK_DOC_ID))
+
+    def test_executar_com_lock_sem_falhas_segue_completed(self):
+        db = _Db()
+        with mock.patch("main.sync_gmail_work", return_value=[]):
+            res = main._executar_sync_gmail_com_lock(db, object(), trigger="safety_net")
+        self.assertEqual(res, {"executado": True})
+        self.assertEqual(db.doc_data("system", "gmail_sync")["status"], "completed")
 
 
 class TestSyncBoletosSaidaCedo(unittest.TestCase):
