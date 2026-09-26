@@ -1,77 +1,29 @@
 """
-Planejador proativo de notificações — módulo aditivo, independente do
-Copiloto. Uma vez por dia, um agente sobre Gemini (`llm_providers/gemini_provider.py`)
-varre tarefas ativas e metas
-estratégicas pessoais e decide, com um teto diário rígido, se algum insight
-cruzando esses domínios merece virar notificação no Telegram — sem duplicar
-os lembretes determinísticos que o Hermes já dispara (prazo de tarefa
-configurado, pesagem, rotina de saúde).
+Resto do antigo planejador proativo de notificações por IA.
 
-Cada proposta aceita é gravada em `scheduled_notifications` (status
-'pending'). O envio de fato acontece depois, em `dispatch_pending_ai_notifications`,
-chamado a partir de `check_and_send_reminders` (main.py) — o mesmo motor de
-1 em 1 minuto que já despacha os demais lembretes. Essa separação mantém o
-custo de LLM concentrado numa única chamada diária e o caminho de envio
-determinístico e barato.
+O job diário `ai_notification_planner_daily` (agente Gemini que propunha até 3
+notificações por dia) foi removido em 26/09/2026 por não ser usado (ver
+docs/okf/operacoes/custos.md). Ficam aqui as peças ainda vivas:
 
-Financeiro e saúde são cobertos de forma determinística via detectores da fila
-unificada `atencao` (ver `atencao.py`). Aqui no planejador diário com LLM o foco
-permanece restrito a tarefas e estratégia pessoal.
+- `_reserve_and_create_notification` e a janela `AI_PLANNER_WINDOW_*`, usados
+  pelos detectores da fila `atencao` (ver `atencao.py`) para gravar em
+  `scheduled_notifications` respeitando o teto diário;
+- `dispatch_pending_ai_notifications` e `dispatch_scheduled_whatsapp_messages`,
+  chamados a partir de `check_and_send_reminders` (main.py) — o motor de 1 em
+  1 minuto que despacha os lembretes.
 """
 
 import datetime
 import os
-import re
-
-try:
-    import zoneinfo
-except ImportError:
-    from backports import zoneinfo
 
 from firebase_admin import firestore
-from firebase_functions import scheduler_fn, options
 
-from gemini_cost_controls import GEMINI_AGENT_FALLBACK_MODEL, GEMINI_AGENT_MODEL
-from llm_providers import gemini_provider
-
-AI_PLANNER_MODEL = os.environ.get("AI_PLANNER_MODEL", GEMINI_AGENT_MODEL)
-AI_PLANNER_FALLBACK_MODEL = os.environ.get("AI_PLANNER_FALLBACK_MODEL", GEMINI_AGENT_FALLBACK_MODEL)
-AI_PLANNER_MAX_TOKENS = int(os.environ.get("AI_PLANNER_MAX_TOKENS", "2048"))
 AI_PLANNER_MAX_DAILY_NOTIFICATIONS = int(os.environ.get("AI_PLANNER_MAX_DAILY_NOTIFICATIONS", "3"))
 AI_PLANNER_WINDOW_START = os.environ.get("AI_PLANNER_WINDOW_START", "07:00")
 AI_PLANNER_WINDOW_END = os.environ.get("AI_PLANNER_WINDOW_END", "22:00")
 AI_PLANNER_STALE_HOURS = 2
 
 _CATEGORY_ICONS = {"acoes": "🗒️", "estrategia": "🎯", "geral": "🤖"}
-
-AI_PLANNER_PERSONA = (
-    "Você é o planejador proativo do Gaspar: um processo que roda uma vez por dia, sem "
-    "interação com o usuário, e decide se vale a pena interromper o dia dele com alguma "
-    "notificação no Telegram.\n\n"
-    "Escopo desta rodada: apenas tarefas/ações (`tarefas`) e metas estratégicas pessoais "
-    "(`estrategia_pessoal`). Financeiro e saúde são atendidos por detectores determinísticos na "
-    "fila de atenção — não invente dados desses domínios nem tente compensar a ausência deles.\n\n"
-    "Regra de ouro: silêncio é o resultado padrão e correto na maioria dos dias. O sistema já "
-    "dispara lembretes determinísticos e confiáveis para prazo de tarefa configurado, pesagem "
-    "e rotina de saúde — NUNCA duplique esses avisos. Seu valor está em cruzar dados que "
-    "nenhuma regra fixa cruza: uma meta estratégica sem nenhuma tarefa ativa vinculada há "
-    "semanas, um padrão de degradação (degradation_count subindo) numa área que sustenta uma "
-    "meta, um marco de meta cuja métrica não é atualizada há muito tempo, uma tarefa com prazo "
-    "próximo sem plano de ação definido. Só proponha algo com um motivo concreto, ancorado em "
-    "dado real obtido via ferramenta — nunca por especulação.\n\n"
-    f"Limite rígido: no máximo {AI_PLANNER_MAX_DAILY_NOTIFICATIONS} notificações por dia, "
-    "espaçadas ao longo do dia (não todas no mesmo horário, dentro da janela permitida). Antes "
-    "de propor qualquer coisa, consulte o histórico recente com consultar_notificacoes_recentes "
-    "— se um tipo de alerta foi dispensado (feedback 'dismissed') recentemente, não repita a "
-    "mesma sugestão.\n\n"
-    "Toda proposta real de notificação deve ser feita SOMENTE via a ferramenta "
-    "propor_notificacao — nunca escreva a lista de sugestões como texto livre na resposta "
-    "final. O texto de 'mensagem' passado para a ferramenta é o que o usuário vai ler direto "
-    "no Telegram: curto (1 a 3 frases), direto, sem markdown ou HTML.\n\n"
-    "Ao final da rodada, escreva 1-2 frases resumindo o que foi decidido (inclusive se a "
-    "decisão foi não propor nada e por quê) — esse texto é só para log interno, o usuário não "
-    "vê essa resposta."
-)
 
 
 def _ai_planner_counter_ref(db, today_str: str):
@@ -86,10 +38,9 @@ def _ai_planner_counter_ref(db, today_str: str):
 def _reserve_and_create_notification(db, today_str: str, doc_ref, doc_payload: dict) -> bool:
     """
     Reserva atomicamente uma vaga no teto diario e cria o documento da notificacao na
-    MESMA transacao Firestore. Necessario porque gemini_provider.run_tool_loop executa as
-    tool calls de uma mesma rodada em paralelo (ThreadPoolExecutor) — um contador em
-    memória (nonlocal) permitiria duas threads lerem a mesma contagem antes de qualquer
-    uma incrementar, estourando o teto. A transacao do Firestore serializa essa leitura+
+    MESMA transacao Firestore. Nasceu porque o antigo planejador (removido) executava
+    tool calls em paralelo — um contador em memória permitiria duas threads lerem a
+    mesma contagem antes de qualquer uma incrementar, estourando o teto. A transacao do Firestore serializa essa leitura+
     escrita mesmo entre threads e entre execucoes sobrepostas do scheduler, porque todas
     disputam o mesmo documento contador (chave = data de hoje).
     """
@@ -110,270 +61,6 @@ def _reserve_and_create_notification(db, today_str: str, doc_ref, doc_payload: d
     except Exception as exc:
         print(f"[AIPlanner] Falha ao reservar vaga de notificacao: {exc}")
         return False
-
-
-def _build_tools(db, now_sp: "datetime.datetime", today_str: str):
-    """Registro de ferramentas do planejador: 3 de leitura + 1 de escrita (propor_notificacao)."""
-
-    def consultar_tarefas_ativas(area_tematica: str = "") -> dict:
-        # Filtra por status ("em andamento"/"stand-by") diretamente no Firestore, antes do
-        # limit — se o filtro fosse aplicado só em memória depois de um limit(N), tarefas
-        # concluidas poderiam ocupar as N vagas e esconder tarefas ativas reais do LLM.
-        query = db.collection("tarefas").where("status", "in", ["em andamento", "stand-by"])
-        if area_tematica:
-            query = query.where("area_tematica", "==", area_tematica)
-        tarefas = []
-        for d in query.limit(150).stream():
-            data = d.to_dict() or {}
-            plano = data.get("plano_acao") or []
-            pendentes = [
-                str(item.get("text") or "").strip()
-                for item in plano
-                if isinstance(item, dict) and item.get("text") and not item.get("completed")
-            ][:3]
-            tarefas.append({
-                "id": d.id,
-                "titulo": data.get("titulo"),
-                "status": data.get("status"),
-                "area_tematica": data.get("area_tematica"),
-                "projeto": data.get("projeto"),
-                "data_limite": data.get("data_limite"),
-                "prazo_final": data.get("prazo_final"),
-                "execution_lane": data.get("execution_lane"),
-                "degradation_count": data.get("degradation_count"),
-                "proximos_passos_pendentes": pendentes,
-                "estrategia_objetivo_id": data.get("estrategia_objetivo_id"),
-            })
-        return {"tarefas": tarefas}
-
-    def consultar_metas_estrategicas() -> dict:
-        metas = []
-        for d in db.collection("estrategia_pessoal").limit(80).stream():
-            data = d.to_dict() or {}
-            status = str(data.get("status", "")).lower()
-            if status in ("concluido", "concluído", "cancelado", "arquivado"):
-                continue
-            metas.append({
-                "id": d.id,
-                "pilar": data.get("pilar"),
-                "objetivoMacro": data.get("objetivoMacro"),
-                "tipoMeta": data.get("tipoMeta"),
-                "metricaAlvo": data.get("metricaAlvo"),
-                "marcos": data.get("marcos"),
-                "status": data.get("status"),
-            })
-        return {"metas": metas}
-
-    def consultar_notificacoes_recentes(dias: int = 7) -> dict:
-        dias = max(1, min(int(dias or 7), 30))
-        cutoff = now_sp - datetime.timedelta(days=dias)
-        recentes = []
-        try:
-            query = db.collection("scheduled_notifications").where("created_at", ">=", cutoff).limit(60)
-            for d in query.stream():
-                data = d.to_dict() or {}
-                if data.get("source") != "ai_planner":
-                    continue
-                recentes.append({
-                    "titulo": data.get("title"),
-                    "categoria": data.get("category"),
-                    "status": data.get("status"),
-                    "feedback": data.get("feedback"),
-                    "motivo": data.get("motivo"),
-                })
-        except Exception as exc:
-            return {"erro": f"Falha ao consultar historico: {exc}"}
-        return {"notificacoes_recentes": recentes}
-
-    def propor_notificacao(titulo: str, mensagem: str, horario: str, categoria: str = "geral", motivo: str = "") -> dict:
-        titulo = str(titulo or "").strip()
-        mensagem = str(mensagem or "").strip()
-        horario = str(horario or "").strip()
-        categoria = str(categoria or "geral").strip().lower()
-        motivo = str(motivo or "").strip()
-        if categoria not in ("acoes", "estrategia", "geral"):
-            categoria = "geral"
-        if not titulo or not mensagem:
-            return {"erro": "titulo e mensagem sao obrigatorios."}
-        if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", horario):
-            return {"erro": "horario deve estar no formato HH:MM (24h)."}
-        if horario < AI_PLANNER_WINDOW_START or horario > AI_PLANNER_WINDOW_END:
-            return {"erro": f"horario fora da janela permitida ({AI_PLANNER_WINDOW_START}-{AI_PLANNER_WINDOW_END})."}
-
-        hh, mm = horario.split(":")
-        send_dt = now_sp.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
-        if send_dt <= now_sp + datetime.timedelta(minutes=1):
-            return {"erro": "horario ja passou ou esta a menos de 1 minuto de distancia — escolha um horario mais tarde hoje."}
-
-        doc_ref = db.collection("scheduled_notifications").document()
-        reserved = _reserve_and_create_notification(db, today_str, doc_ref, {
-            "title": titulo[:120],
-            "message": mensagem[:600],
-            "category": categoria,
-            "send_at": send_dt,
-            "status": "pending",
-            "source": "ai_planner",
-            "motivo": motivo[:300] if motivo else None,
-            "created_at": firestore.SERVER_TIMESTAMP,
-            "planner_run_date": today_str,
-            "feedback": None,
-        })
-        if not reserved:
-            return {"erro": f"Limite diario de {AI_PLANNER_MAX_DAILY_NOTIFICATIONS} notificacoes ja atingido."}
-        return {"ok": True, "id": doc_ref.id, "agendado_para": horario}
-
-    function_map = {
-        "consultar_tarefas_ativas": consultar_tarefas_ativas,
-        "consultar_metas_estrategicas": consultar_metas_estrategicas,
-        "consultar_notificacoes_recentes": consultar_notificacoes_recentes,
-        "propor_notificacao": propor_notificacao,
-    }
-
-    tools_schema = [
-        {
-            "name": "consultar_tarefas_ativas",
-            "description": (
-                "Lista tarefas/ações com status 'em andamento' ou 'stand-by' (nunca concluídas), "
-                "com prazos, execution_lane, degradation_count, próximos passos pendentes do "
-                "plano de ação e o vínculo com meta estratégica (estrategia_objetivo_id), se houver."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "area_tematica": {
-                        "type": "string",
-                        "description": "Filtra por área temática exata, se conhecida. Deixe vazio para todas.",
-                    },
-                },
-            },
-        },
-        {
-            "name": "consultar_metas_estrategicas",
-            "description": (
-                "Lista os objetivos/metas estratégicas pessoais ativos (oculta concluídos, "
-                "cancelados e arquivados), com pilar, métrica alvo/atual e marcos."
-            ),
-            "input_schema": {"type": "object", "properties": {}},
-        },
-        {
-            "name": "consultar_notificacoes_recentes",
-            "description": (
-                "Lista as notificações que este mesmo planejador já propôs nos últimos N dias, "
-                "com o feedback do usuário (útil/dispensada), para evitar repetir sugestões já "
-                "recusadas. Consulte sempre antes de propor algo novo."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "dias": {"type": "integer", "description": "Janela em dias (padrão 7, máximo 30)."},
-                },
-            },
-        },
-        {
-            "name": "propor_notificacao",
-            "description": (
-                "Agenda uma notificação real para ser enviada ao usuário no Telegram hoje, no "
-                "horário indicado. É a ÚNICA forma válida de propor algo — sujeita a validação "
-                "server-side de horário e ao teto diário de notificações."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "titulo": {"type": "string", "description": "Título curto da notificação."},
-                    "mensagem": {
-                        "type": "string",
-                        "description": "Corpo da mensagem, 1 a 3 frases, texto puro (sem markdown/HTML).",
-                    },
-                    "horario": {
-                        "type": "string",
-                        "description": f"Horário de envio hoje, formato HH:MM (24h), dentro de {AI_PLANNER_WINDOW_START}-{AI_PLANNER_WINDOW_END}.",
-                    },
-                    "categoria": {
-                        "type": "string",
-                        "enum": ["acoes", "estrategia", "geral"],
-                        "description": "Domínio principal que motivou a notificação.",
-                    },
-                    "motivo": {
-                        "type": "string",
-                        "description": "Justificativa curta (dado concreto que embasou a proposta) — fica só no log interno.",
-                    },
-                },
-                "required": ["titulo", "mensagem", "horario"],
-            },
-        },
-    ]
-
-    return tools_schema, function_map
-
-
-@scheduler_fn.on_schedule(
-    schedule="30 6 * * *",  # Todos os dias às 6:30 (após o briefing matinal das 5h)
-    timezone="America/Sao_Paulo",
-    memory=options.MemoryOption.MB_512,
-    timeout_sec=180,
-)
-def ai_notification_planner_daily(event: scheduler_fn.ScheduledEvent):
-    """Roda o planejador de IA 1x/dia; grava propostas em scheduled_notifications (status pending)."""
-    from main import get_db, _cached_doc_get
-
-    from google import genai
-
-    db = get_db()
-    keys_doc = _cached_doc_get(db, "system", "api_keys")
-    gemini_key = (keys_doc.to_dict() or {}).get("gemini_api_key") if keys_doc.exists else None
-    if not gemini_key:
-        print("[AIPlanner] gemini_api_key não configurada em system/api_keys; abortando.")
-        return
-
-    sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
-    now_sp = datetime.datetime.now(sp_tz)
-    today_str = now_sp.strftime("%Y-%m-%d")
-
-    # Leitura só para decidir se vale a pena chamar o modelo (economia de custo) — não é o
-    # mecanismo de enforcement do teto, que é feito atomicamente dentro de propor_notificacao
-    # via _reserve_and_create_notification (transação Firestore).
-    existing_today = 0
-    try:
-        counter_snap = _ai_planner_counter_ref(db, today_str).get()
-        existing_today = (counter_snap.to_dict() or {}).get("count", 0) if counter_snap.exists else 0
-    except Exception as exc:
-        print(f"[AIPlanner] Falha ao ler contador de notificações de hoje: {exc}")
-
-    if existing_today >= AI_PLANNER_MAX_DAILY_NOTIFICATIONS:
-        print(f"[AIPlanner] Teto diário ({AI_PLANNER_MAX_DAILY_NOTIFICATIONS}) já atingido hoje; não há necessidade de rodar.")
-        return
-
-    tools, function_map = _build_tools(db, now_sp, today_str)
-    client = genai.Client(api_key=gemini_key)
-    user_message = (
-        f"Hoje é {today_str}. Analise o estado atual do sistema e proponha, via a ferramenta "
-        "propor_notificacao, apenas os lembretes/insights que realmente merecem interromper o "
-        "dia do usuário agora. Se nada for suficientemente relevante, não chame a ferramenta e "
-        "apenas explique brevemente por que não há nada a propor hoje."
-    )
-
-    try:
-        result = gemini_provider.run_tool_loop(
-            client=client,
-            model=AI_PLANNER_MODEL,
-            system_instruction=AI_PLANNER_PERSONA,
-            tools=tools,
-            function_map=function_map,
-            history=[],
-            user_message=user_message,
-            max_tokens=AI_PLANNER_MAX_TOKENS,
-            fallback_model=AI_PLANNER_FALLBACK_MODEL,
-            feature="ai_notification_planner",
-            db=db,
-        )
-    except Exception as exc:
-        print(f"[AIPlanner] Falha na chamada ao modelo: {exc}")
-        return
-
-    print(
-        f"[AIPlanner] Rodada concluída. tools_used={result['tools_used']} "
-        f"modelo={result['model_used']} resumo={result['text'][:300]!r}"
-    )
 
 
 def dispatch_pending_ai_notifications(db, now) -> None:

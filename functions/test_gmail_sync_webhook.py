@@ -183,7 +183,9 @@ class TestRenovarGmailWatch(unittest.TestCase):
             "projects/gestao-hermes-teste/topics/gmail-push-hermes",
         )
         estado = db.doc_data("system", main.GMAIL_WATCH_DOC_ID)
-        self.assertEqual(estado["history_id"], "12345")
+        # A renovação grava em campo próprio; `history_id` é o cursor do webhook (PR #355).
+        self.assertEqual(estado["watch_history_id"], "12345")
+        self.assertNotIn("history_id", estado)
         self.assertTrue(estado["watch_active"])
 
     def test_falha_na_api_marca_watch_active_false_sem_levantar(self):
