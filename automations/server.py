@@ -39,6 +39,8 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "https://gestao-hermes.web.app",
         "https://gestao-hermes.firebaseapp.com",
+        "https://gaspar-assistente.web.app",
+        "https://gaspar-assistente.firebaseapp.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],

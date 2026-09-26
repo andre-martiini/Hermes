@@ -31,78 +31,156 @@
     "storage": {
         "rules": "storage.rules"
     },
-    "hosting": {
-        "public": "dist",
-        "ignore": [
-            "firebase.json",
-            "**/.*",
-            "**/node_modules/**"
-        ],
-        "headers": [
-            {
-                "source": "**",
-                "headers": [
-                    {
-                        "key": "Cross-Origin-Opener-Policy",
-                        "value": "same-origin-allow-popups"
+    "hosting": [
+        {
+            "site": "gestao-hermes",
+            "public": "dist",
+            "ignore": [
+                "firebase.json",
+                "**/.*",
+                "**/node_modules/**"
+            ],
+            "headers": [
+                {
+                    "source": "**",
+                    "headers": [
+                        {
+                            "key": "Cross-Origin-Opener-Policy",
+                            "value": "same-origin-allow-popups"
+                        }
+                    ]
+                }
+            ],
+            "rewrites": [
+                {
+                    "source": "/mcp",
+                    "function": {
+                        "functionId": "mcpServer",
+                        "region": "us-central1"
                     }
-                ]
-            }
-        ],
-        "rewrites": [
-            {
-                "source": "/mcp",
-                "function": {
-                    "functionId": "mcpServer",
-                    "region": "us-central1"
+                },
+                {
+                    "source": "/mcp/**",
+                    "function": {
+                        "functionId": "mcpServer",
+                        "region": "us-central1"
+                    }
+                },
+                {
+                    "source": "/.well-known/oauth-protected-resource/**",
+                    "function": {
+                        "functionId": "mcpOAuth",
+                        "region": "us-central1"
+                    }
+                },
+                {
+                    "source": "/.well-known/oauth-protected-resource",
+                    "function": {
+                        "functionId": "mcpOAuth",
+                        "region": "us-central1"
+                    }
+                },
+                {
+                    "source": "/.well-known/oauth-authorization-server/**",
+                    "function": {
+                        "functionId": "mcpOAuth",
+                        "region": "us-central1"
+                    }
+                },
+                {
+                    "source": "/.well-known/oauth-authorization-server",
+                    "function": {
+                        "functionId": "mcpOAuth",
+                        "region": "us-central1"
+                    }
+                },
+                {
+                    "source": "/oauth/**",
+                    "function": {
+                        "functionId": "mcpOAuth",
+                        "region": "us-central1"
+                    }
+                },
+                {
+                    "source": "**",
+                    "destination": "/index.html"
                 }
-            },
-            {
-                "source": "/mcp/**",
-                "function": {
-                    "functionId": "mcpServer",
-                    "region": "us-central1"
+            ]
+        },
+        {
+            "site": "gaspar-assistente",
+            "public": "dist",
+            "ignore": [
+                "firebase.json",
+                "**/.*",
+                "**/node_modules/**"
+            ],
+            "headers": [
+                {
+                    "source": "**",
+                    "headers": [
+                        {
+                            "key": "Cross-Origin-Opener-Policy",
+                            "value": "same-origin-allow-popups"
+                        }
+                    ]
                 }
-            },
-            {
-                "source": "/.well-known/oauth-protected-resource/**",
-                "function": {
-                    "functionId": "mcpOAuth",
-                    "region": "us-central1"
+            ],
+            "rewrites": [
+                {
+                    "source": "/mcp",
+                    "function": {
+                        "functionId": "mcpServer",
+                        "region": "us-central1"
+                    }
+                },
+                {
+                    "source": "/mcp/**",
+                    "function": {
+                        "functionId": "mcpServer",
+                        "region": "us-central1"
+                    }
+                },
+                {
+                    "source": "/.well-known/oauth-protected-resource/**",
+                    "function": {
+                        "functionId": "mcpOAuth",
+                        "region": "us-central1"
+                    }
+                },
+                {
+                    "source": "/.well-known/oauth-protected-resource",
+                    "function": {
+                        "functionId": "mcpOAuth",
+                        "region": "us-central1"
+                    }
+                },
+                {
+                    "source": "/.well-known/oauth-authorization-server/**",
+                    "function": {
+                        "functionId": "mcpOAuth",
+                        "region": "us-central1"
+                    }
+                },
+                {
+                    "source": "/.well-known/oauth-authorization-server",
+                    "function": {
+                        "functionId": "mcpOAuth",
+                        "region": "us-central1"
+                    }
+                },
+                {
+                    "source": "/oauth/**",
+                    "function": {
+                        "functionId": "mcpOAuth",
+                        "region": "us-central1"
+                    }
+                },
+                {
+                    "source": "**",
+                    "destination": "/index.html"
                 }
-            },
-            {
-                "source": "/.well-known/oauth-protected-resource",
-                "function": {
-                    "functionId": "mcpOAuth",
-                    "region": "us-central1"
-                }
-            },
-            {
-                "source": "/.well-known/oauth-authorization-server/**",
-                "function": {
-                    "functionId": "mcpOAuth",
-                    "region": "us-central1"
-                }
-            },
-            {
-                "source": "/.well-known/oauth-authorization-server",
-                "function": {
-                    "functionId": "mcpOAuth",
-                    "region": "us-central1"
-                }
-            },
-            {
-                "source": "/oauth/**",
-                "function": {
-                    "functionId": "mcpOAuth",
-                    "region": "us-central1"
-                }
-            },
-            {
-                "source": "**",
-                "destination": "/index.html"
-            }
-        ]
-    }
+            ]
+        }
+    ]
 }

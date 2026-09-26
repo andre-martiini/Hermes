@@ -1,6 +1,8 @@
 # Gaspar - Sistema de Gestão de Tarefas
 
 > Gaspar (anteriormente Hermes). Os identificadores técnicos mantêm o nome `hermes`.
+>
+> Endereço do app: https://gaspar-assistente.web.app. O antigo, https://gestao-hermes.web.app, continua no ar com o mesmo app e não pode sair: o servidor MCP e o OAuth do conector do Claude estão presos a ele (`functions/mcp_oauth.py`).
 
 Sistema integrado de gestão de tarefas com sincronização automática com Google Tasks.
 

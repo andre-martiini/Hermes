@@ -61,6 +61,8 @@ def _allowed_ws_origins() -> set[str]:
         "http://127.0.0.1:5175",
         "https://gestao-hermes.web.app",
         "https://gestao-hermes.firebaseapp.com",
+        "https://gaspar-assistente.web.app",
+        "https://gaspar-assistente.firebaseapp.com",
     }
     extra_origins = os.environ.get("ALLOWED_ORIGINS", "")
     if extra_origins:
